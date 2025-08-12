@@ -9,10 +9,10 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator, Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from django.conf import settings
-from django.urls import URLPattern, URLResolver, include, path
+from django.urls import URLPattern, URLResolver, path
 
 
 class RouterBackend(ABC):
@@ -74,7 +74,8 @@ class FileRouterBackend(RouterBackend):
 
         for app_name in self._get_installed_apps():
             if patterns := self._generate_urls_for_app(app_name):
-                urls.append(self._create_app_include(app_name, patterns))
+                # add patterns directly instead of wrapping in include()
+                urls.extend(patterns)
 
         return urls
 
@@ -167,9 +168,16 @@ class FileRouterBackend(RouterBackend):
                 kwargs["args"] = kwargs["args"].split("/")
             return render_func(request, **kwargs)
 
-        return path(
-            django_pattern, view_wrapper, name=f"page_{url_path.replace('/', '_')}"
-        )
+        # create a clean name for the URL pattern
+        clean_name = url_path.replace("/", "_")
+        # remove square brackets and replace with underscores
+        clean_name = re.sub(r"[\[\]]", "_", clean_name)
+        # replace multiple underscores with single underscore
+        clean_name = re.sub(r"_+", "_", clean_name)
+        # remove leading/trailing underscores
+        clean_name = clean_name.strip("_")
+
+        return path(django_pattern, view_wrapper, name=f"page_{clean_name}")
 
     def _parse_url_pattern(self, url_path: str) -> tuple[str, dict[str, str]]:
         """Parse URL path and extract parameters."""
@@ -226,14 +234,6 @@ class FileRouterBackend(RouterBackend):
         except Exception as e:
             print(f"Error loading page function from {file_path}: {e}")
             return None
-
-    def _create_app_include(
-        self, app_name: str, patterns: list[URLPattern | URLResolver]
-    ) -> URLResolver:
-        """Create include() for app pages."""
-        return cast(
-            URLResolver, include((patterns, app_name), namespace=f"{app_name}_pages")
-        )
 
 
 class RouterFactory:
@@ -355,16 +355,17 @@ def get_configured_routers() -> list[RouterBackend]:
     return list(router_manager._routers)
 
 
-def include_pages(app_name: str) -> URLResolver:
+def include_pages(app_name: str) -> list[URLPattern | URLResolver]:
     """Include pages for a Django app."""
     # create a temporary router for this specific app
     router = FileRouterBackend(app_dirs=True)
 
     if patterns := router._generate_urls_for_app(app_name):
-        return router._create_app_include(app_name, patterns)
+        # return patterns directly instead of wrapping in include()
+        return patterns
 
-    # return empty include with proper namespace
-    return cast(URLResolver, include(([], app_name), namespace=f"{app_name}_pages"))
+    # return empty list if no patterns found
+    return []
 
 
 def auto_include_all_pages() -> list[URLPattern | URLResolver]:
@@ -372,5 +373,7 @@ def auto_include_all_pages() -> list[URLPattern | URLResolver]:
     return router_manager.generate_all_urls()
 
 
-# empty urlpatterns - will be generated on demand
-urlpatterns: list[URLPattern | URLResolver] = []
+app_name = "next"
+
+# generate URL patterns on module import
+urlpatterns: list[URLPattern | URLResolver] = auto_include_all_pages()

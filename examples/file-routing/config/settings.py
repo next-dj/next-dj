@@ -92,18 +92,17 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 NEXT_PAGES = [
     {
         'BACKEND': 'next.urls.FileRouterBackend',
-        'APP_DIRS': True,
+        'APP_DIRS': False,
         'OPTIONS': {
             # You can customize the pages directory name
             # 'PAGES_DIR_NAME': 'views',
         },
     },
-    # Example of root-only pages (like static, media)
-    {
-        'BACKEND': 'next.urls.FileRouterBackend',
-        'APP_DIRS': False,
-        'OPTIONS': {
-            'PAGES_DIR_NAME': 'root_pages',
-        },
-    },
-] 
+    # {
+    #     'BACKEND': 'next.urls.FileRouterBackend',
+    #     'APP_DIRS': False,
+    #     'OPTIONS': {
+    #         'PAGES_DIR_NAME': 'root_pages',
+    #     },
+    # },
+]

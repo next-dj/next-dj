@@ -1,8 +1,9 @@
+import re
 from pathlib import Path
 from typing import Any
 
 from django.conf import settings
-from django.core.checks import WARNING, CheckMessage, Error, Tags, register
+from django.core.checks import CheckMessage, Error, Tags, register
 
 from .urls import RouterFactory, RouterManager
 
@@ -63,7 +64,7 @@ def check_next_pages_configuration(
             )
 
         # check APP_DIRS
-        if (app_dirs := config.get("APP_DIRS", True)) is not isinstance(app_dirs, bool):
+        if not isinstance((config.get("APP_DIRS", True)), bool):
             errors.append(
                 Error(
                     f"NEXT_PAGES[{i}].APP_DIRS must be a boolean.",
@@ -73,7 +74,7 @@ def check_next_pages_configuration(
             )
 
         # check OPTIONS
-        if (options := config.get("OPTIONS", {})) is not isinstance(options, dict):
+        if not isinstance((config.get("OPTIONS", {})), dict):
             errors.append(
                 Error(
                     f"NEXT_PAGES[{i}].OPTIONS must be a dictionary.",
@@ -220,18 +221,6 @@ def _check_pages_directory(
         parent_dir = item.parent
         if parent_dir.name.startswith("[") or parent_dir.name.startswith("[["):
             continue  # this is expected
-
-        # check if parent directory has other files (potential issue)
-        if [f for f in parent_dir.iterdir() if f.name != "page.py"]:
-            warnings.append(
-                CheckMessage(
-                    WARNING,
-                    f'{context} pages: Directory "{parent_dir.relative_to(pages_path)}" contains page.py and other files. '
-                    f"Consider organizing your pages better.",
-                    obj=settings,
-                    id="next.W001",
-                )
-            )
 
     return errors, warnings
 
@@ -450,9 +439,6 @@ def _convert_to_django_pattern(url_path: str) -> str | None:
     """Convert file path to Django URL pattern."""
     if not url_path:
         return ""
-
-    # simple conversion - replace [param] with <str:param> and [[args]] with <path:args>
-    import re
 
     # handle [[args]] first
     args_pattern = re.compile(r"\[\[([^\[\]]+)\]\]")

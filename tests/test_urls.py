@@ -503,18 +503,6 @@ class TestFileRouterBackend:
                 
                 result = router._load_page_function(Path('/tmp/page.py'))
                 assert result is None
-    
-    def test_create_app_include(self):
-        """Test creating app include."""
-        router = FileRouterBackend()
-        patterns = ['pattern1', 'pattern2']
-        
-        with patch('next.urls.include') as mock_include:
-            mock_include.return_value = Mock(url_patterns=['pattern1', 'pattern2'])
-            
-            result = router._create_app_include('myapp', patterns)
-            assert result is not None
-            assert hasattr(result, 'url_patterns')
 
     def test_get_app_pages_path_attribute_error(self):
         """Test getting app pages path with AttributeError."""
@@ -916,11 +904,10 @@ class TestIntegrationFunctions:
         with patch('next.urls.FileRouterBackend') as mock_router_class:
             mock_router = Mock()
             mock_router._generate_urls_for_app.return_value = ['pattern1']
-            mock_router._create_app_include.return_value = 'include_result'
             mock_router_class.return_value = mock_router
             
             result = include_pages('testapp')
-            assert result == 'include_result'
+            assert result == ['pattern1']
     
     def test_include_pages_no_patterns(self):
         """Test include_pages function when no patterns are found."""
@@ -929,11 +916,8 @@ class TestIntegrationFunctions:
             mock_router._generate_urls_for_app.return_value = []
             mock_router_class.return_value = mock_router
             
-            with patch('next.urls.include') as mock_include:
-                mock_include.return_value = 'empty_include'
-                
-                result = include_pages('testapp')
-                assert result == 'empty_include'
+            result = include_pages('testapp')
+            assert result == []
     
     def test_auto_include_all_pages(self):
         """Test auto_include_all_pages function."""
