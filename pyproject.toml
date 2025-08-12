@@ -1,0 +1,129 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "next.dj"
+version = "0.1.0"
+description = "Low-code framework for frontend developers powered by Django"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.12"
+keywords = ["django", "framework", "low-code", "frontend"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Framework :: Django",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "django>=5.2.4",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest==8.4.0",
+    "pytest-cov==6.1.1",
+    "pytest-django==4.11.1",
+    "django-stubs[compatible-mypy]==5.2.0",
+    "ruff==0.11.13",
+    "mypy==1.15.0",
+    "pre-commit==4.2.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["next"]
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py", "*_test.py"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=next",
+    "--cov-report=term-missing",
+    "--cov-fail-under=90",
+]
+
+[tool.coverage.run]
+source = ["next"]
+omit = [
+    "*/tests/*",
+    "*/migrations/*",
+    "*/settings.py",
+    "*/manage.py",
+    "*/wsgi.py",
+    "*/asgi.py",
+    # core
+    "next/checks.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+unsafe-fixes = true
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["next"]
+
+[tool.ruff.format]
+line-ending = "auto"
+
+[tool.django-stubs]
+django_settings_module = "django.conf.global_settings"
+
+[tool.mypy]
+plugins = ["mypy_django_plugin.main"]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+show_error_codes = true
+
+# only check next folder
+packages = ["next"]
