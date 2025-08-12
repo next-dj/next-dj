@@ -86,4 +86,24 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 # Default primary key field type
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField' 
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Next Framework Configuration
+NEXT_PAGES = [
+    {
+        'BACKEND': 'next.urls.FileRouterBackend',
+        'APP_DIRS': True,
+        'OPTIONS': {
+            # You can customize the pages directory name
+            # 'PAGES_DIR_NAME': 'views',
+        },
+    },
+    # Example of root-only pages (like static, media)
+    {
+        'BACKEND': 'next.urls.FileRouterBackend',
+        'APP_DIRS': False,
+        'OPTIONS': {
+            'PAGES_DIR_NAME': 'root_pages',
+        },
+    },
+] 

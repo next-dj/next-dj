@@ -57,6 +57,8 @@ omit = [
     "*/manage.py",
     "*/wsgi.py",
     "*/asgi.py",
+    # core
+    "next/checks.py",
 ]
 
 [tool.coverage.report]
@@ -77,6 +79,8 @@ exclude_lines = [
 target-version = "py312"
 line-length = 88
 unsafe-fixes = true
+
+[tool.ruff.lint]
 select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
@@ -92,11 +96,14 @@ ignore = [
     "C901",  # too complex
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["next"]
+
+[tool.ruff.format]
+line-ending = "auto"
 
 [tool.django-stubs]
 django_settings_module = "django.conf.global_settings"
