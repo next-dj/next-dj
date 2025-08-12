@@ -92,7 +92,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 NEXT_PAGES = [
     {
         'BACKEND': 'next.urls.FileRouterBackend',
-        'APP_DIRS': False,
+        'APP_DIRS': True,
         'OPTIONS': {
             # You can customize the pages directory name
             # 'PAGES_DIR_NAME': 'views',
