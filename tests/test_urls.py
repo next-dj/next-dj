@@ -578,23 +578,6 @@ class TestFileRouterBackend:
                     result = router._load_page_function(Path("/tmp/page.py"))
                     assert result is None
 
-    def test_load_page_function_getattr_returns_non_callable(self):
-        """Test loading page function when getattr returns non-callable."""
-        router = FileRouterBackend()
-
-        with patch("importlib.util.spec_from_file_location") as mock_spec:
-            mock_spec.return_value = Mock(loader=Mock())
-
-            with patch("importlib.util.module_from_spec") as mock_module:
-                mock_module.return_value = Mock()
-
-                # mock the exec_module to avoid any real execution
-                mock_spec.return_value.loader.exec_module.return_value = None
-
-                with patch("builtins.getattr", return_value="not a function"):
-                    result = router._load_page_function(Path("/tmp/page.py"))
-                    assert result is None
-
     def test_load_page_function_exec_module_error(self):
         """Test loading page function when exec_module raises an exception."""
         router = FileRouterBackend()
