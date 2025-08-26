@@ -500,6 +500,9 @@ class TestFileRouterBackend:
                 mock_module.return_value = Mock()
                 mock_module.return_value.render = "not a function"
 
+                # mock the exec_module to avoid any real execution
+                mock_spec.return_value.loader.exec_module.return_value = None
+
                 result = router._load_page_function(Path("/tmp/page.py"))
                 assert result is None
 
@@ -568,6 +571,9 @@ class TestFileRouterBackend:
             with patch("importlib.util.module_from_spec") as mock_module:
                 mock_module.return_value = Mock()
 
+                # mock the exec_module to avoid any real execution
+                mock_spec.return_value.loader.exec_module.return_value = None
+
                 with patch("builtins.getattr", return_value=None):
                     result = router._load_page_function(Path("/tmp/page.py"))
                     assert result is None
@@ -581,6 +587,9 @@ class TestFileRouterBackend:
 
             with patch("importlib.util.module_from_spec") as mock_module:
                 mock_module.return_value = Mock()
+
+                # mock the exec_module to avoid any real execution
+                mock_spec.return_value.loader.exec_module.return_value = None
 
                 with patch("builtins.getattr", return_value="not a function"):
                     result = router._load_page_function(Path("/tmp/page.py"))

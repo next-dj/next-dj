@@ -82,7 +82,8 @@ htmlcov/
 nosetests.xml 
 coverage.xml 
 *.cover 
-.hypothesis/ 
+.hypothesis/
+junit.xml
 
 # jupyter Notebook 
 .ipynb_checkpoints 

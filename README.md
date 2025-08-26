@@ -1,5 +1,7 @@
 # next.dj
 
+[![codecov](https://codecov.io/gh/next-dj/next-dj/graph/badge.svg?token=6RY9344W4E)](https://codecov.io/gh/next-dj/next-dj)
+
 A low-code framework for frontend developers powered by Django.
 
 ## What is `next.dj`?
