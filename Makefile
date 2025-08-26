@@ -1,9 +1,5 @@
 .PHONY: help install install-dev test lint format type-check clean build publish
 
-help: # show this help message
-	@echo "Available commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
-
 install: # install the package
 	uv pip install -e .
 
@@ -11,21 +7,21 @@ install-dev: # install development dependencies
 	uv sync --dev
 
 test: # run tests
-	pytest tests/ -v --cov=next --cov-report=html --cov-report=term-missing
+	uv run pytest tests/ -v --cov=next --cov-report=html --cov-report=term-missing
 
 test-fast: # run tests without coverage
-	pytest tests/ -v
+	uv run pytest tests/ -v
 
 lint: # run linting with ruff
-	ruff check next/
-	ruff format --check next/
+	uv run ruff check next/ tests/ --fix
+	uv run ruff format --check next/ tests/
 
 format: # format code with ruff
-	ruff check next/ --fix
-	ruff format next/
+	uv run ruff check next/ tests/ --fix
+	uv run ruff format next/ tests/
 
 type-check: # run type checking with mypy
-	mypy next/
+	uv run mypy next/
 
 clean: # clean build artifacts
 	rm -rf build/
@@ -38,19 +34,19 @@ clean: # clean build artifacts
 	find . -type f -name "*.pyc" -delete
 
 build: # build the package
-	python -m build
+	uv run python -m build
 
 publish: # publish to PyPI (dry run)
-	python -m twine upload --repository testpypi dist/*
+	uv run python -m twine upload --repository testpypi dist/*
 
 publish-prod: # publish to PyPI
-	python -m twine upload dist/*
+	uv run python -m twine upload dist/*
 
 pre-commit-install: # install pre-commit hooks
-	pre-commit install
+	uv run pre-commit install
 
 pre-commit-run: # run pre-commit on all files
-	pre-commit run --all-files
+	uv run pre-commit run --all-files
 
 ci: # run all CI checks locally
 	make lint

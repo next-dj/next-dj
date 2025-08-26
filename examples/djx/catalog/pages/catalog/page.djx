@@ -1,0 +1,21 @@
+from next.templates import djx
+
+from django.http import HttpRequest
+
+from .models import Product
+
+
+djx % """
+<h1>Catalog</h1>
+
+<ul>
+    {% for product in products %}
+        <li><a href="/catalog/{{ product.id }}/">{{ product.name }}</a></li>
+    {% endfor %}
+</ul>
+"""
+
+
+@djx.context("products")
+def prepare_products(request: HttpRequest):
+    return Product.objects.all()

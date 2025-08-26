@@ -5,6 +5,7 @@ Automatically generates URL patterns from page.py files in pages/ directories
 of Django applications with Django-style configuration support.
 """
 
+import importlib.util
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator, Iterator
@@ -217,11 +218,8 @@ class FileRouterBackend(RouterBackend):
     def _load_page_function(self, file_path: Path) -> Callable[..., Any] | None:
         """Load render function from page.py file."""
         try:
-            import importlib.util
-
-            if (
-                spec := importlib.util.spec_from_file_location("page_module", file_path)
-            ) is None or spec.loader is None:
+            spec = importlib.util.spec_from_file_location("page_module", file_path)
+            if spec is None or spec.loader is None:
                 return None
 
             module = importlib.util.module_from_spec(spec)
