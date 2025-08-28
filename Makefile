@@ -13,12 +13,12 @@ test-fast: # run tests without coverage
 	uv run pytest tests/ -v
 
 lint: # run linting with ruff
-	uv run ruff check next/ tests/ --fix
-	uv run ruff format --check next/ tests/
+	uv run ruff check next/ tests/ examples/ --fix
+	uv run ruff format --check next/ tests/ examples/
 
 format: # format code with ruff
-	uv run ruff check next/ tests/ --fix
-	uv run ruff format next/ tests/
+	uv run ruff check next/ tests/ examples/ --fix
+	uv run ruff format next/ tests/ examples/
 
 type-check: # run type checking with mypy
 	uv run mypy next/

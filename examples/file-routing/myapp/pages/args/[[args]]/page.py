@@ -53,9 +53,10 @@ html = """
     </html>
 """
 
+
 def render(request, args=None, **kwargs):
     """Render page with variable arguments."""
-    args_str = ', '.join(args) if args else '(none)'
+    args_str = ", ".join(args) if args else "(none)"
     args_count = len(args) if args else 0
 
     return HttpResponse(html.format(args_str=args_str, args_count=args_count))

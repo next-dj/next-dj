@@ -94,7 +94,7 @@ def check_pages_structure(app_configs: Any, **kwargs: Any) -> list[CheckMessage]
 
     try:
         router_manager = RouterManager()
-        router_manager.reload_config()
+        router_manager._reload_config()
 
         for router in router_manager:
             # type check to ensure we're working with FileRouterBackend
@@ -260,7 +260,7 @@ def check_page_functions(app_configs: Any, **kwargs: Any) -> list[CheckMessage]:
 
     try:
         router_manager = RouterManager()
-        router_manager.reload_config()
+        router_manager._reload_config()
 
         for router in router_manager:
             if hasattr(router, "app_dirs") and router.app_dirs:
@@ -360,7 +360,7 @@ def check_url_patterns(app_configs: Any, **kwargs: Any) -> list[CheckMessage]:
 
     try:
         router_manager = RouterManager()
-        router_manager.reload_config()
+        router_manager._reload_config()
 
         # collect all URL patterns
         all_patterns: list[tuple[str, str]] = []  # (pattern, source)

@@ -6,14 +6,18 @@ of Django applications with Django-style configuration support.
 """
 
 import importlib.util
+import logging
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
 from django.conf import settings
 from django.urls import URLPattern, URLResolver, path
+
+# setup logger
+logger = logging.getLogger(__name__)
 
 
 class RouterBackend(ABC):
@@ -230,7 +234,7 @@ class FileRouterBackend(RouterBackend):
             return None
 
         except Exception as e:
-            print(f"Error loading page function from {file_path}: {e}")
+            logger.error(f"error loading page function from {file_path}: {e}")
             return None
 
 
@@ -282,15 +286,19 @@ class RouterManager:
         """Number of configured routers."""
         return len(self._routers)
 
-    def __iter__(self) -> Iterator[RouterBackend]:
-        """Iterate over configured routers."""
-        return iter(self._routers)
+    def __iter__(self) -> Generator[URLPattern | URLResolver, None, None]:
+        """Generate URLs from all configured routers."""
+        if not self._routers:
+            self._reload_config()
+
+        for router in self._routers:
+            yield from router.generate_urls()
 
     def __getitem__(self, index: int) -> RouterBackend:
         """Get router by index."""
         return self._routers[index]
 
-    def reload_config(self) -> None:
+    def _reload_config(self) -> None:
         """Reload configuration from Django settings."""
         self._config_cache = None
         self._routers.clear()
@@ -301,7 +309,7 @@ class RouterManager:
                 if router := RouterFactory.create_backend(config):
                     self._routers.append(router)
             except Exception as e:
-                print(f"Error creating router from config {config}: {e}")
+                logger.error(f"error creating router from config {config}: {e}")
 
     def _get_next_pages_config(self) -> list[dict[str, Any]]:
         """Get NEXT_PAGES configuration from Django settings."""
@@ -319,59 +327,10 @@ class RouterManager:
         self._config_cache = getattr(settings, "NEXT_PAGES", default_config)
         return self._config_cache
 
-    def generate_all_urls(self) -> list[URLPattern | URLResolver]:
-        """Generate URLs from all configured routers."""
-        if not self._routers:
-            self.reload_config()
-
-        urls: list[URLPattern | URLResolver] = []
-        for router in self._routers:
-            urls.extend(router.generate_urls())
-
-        return urls
-
 
 # global router manager instance
 router_manager = RouterManager()
 
 
-# public API functions
-def get_next_pages_config() -> list[dict[str, Any]]:
-    """Get NEXT_PAGES configuration from Django settings."""
-    return router_manager._get_next_pages_config()
-
-
-def create_router_from_config(config: dict[str, Any]) -> RouterBackend:
-    """Create router from configuration dictionary."""
-    return RouterFactory.create_backend(config)
-
-
-def get_configured_routers() -> list[RouterBackend]:
-    """Get list of configured routers from NEXT_PAGES setting."""
-    if not router_manager._routers:
-        router_manager.reload_config()
-    return list(router_manager._routers)
-
-
-def include_pages(app_name: str) -> list[URLPattern | URLResolver]:
-    """Include pages for a Django app."""
-    # create a temporary router for this specific app
-    router = FileRouterBackend(app_dirs=True)
-
-    if patterns := router._generate_urls_for_app(app_name):
-        # return patterns directly instead of wrapping in include()
-        return patterns
-
-    # return empty list if no patterns found
-    return []
-
-
-def auto_include_all_pages() -> list[URLPattern | URLResolver]:
-    """Automatically include pages for all configured routers."""
-    return router_manager.generate_all_urls()
-
-
 app_name = "next"
-
-# generate URL patterns on module import
-urlpatterns: list[URLPattern | URLResolver] = auto_include_all_pages()
+urlpatterns: RouterManager = router_manager

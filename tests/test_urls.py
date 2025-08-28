@@ -1,4 +1,5 @@
 import tempfile
+import types
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -9,26 +10,22 @@ from next.urls import (
     RouterBackend,
     RouterFactory,
     RouterManager,
-    auto_include_all_pages,
-    create_router_from_config,
-    get_configured_routers,
-    get_next_pages_config,
-    include_pages,
     router_manager,
+    urlpatterns,
 )
 
 
 class TestRouterBackend:
-    """Test the abstract RouterBackend class."""
+    """Test the abstract routerbackend class."""
 
     def test_router_backend_is_abstract(self):
-        """Test that RouterBackend cannot be instantiated directly."""
+        """Test that routerbackend cannot be instantiated directly."""
         with pytest.raises(TypeError):
             RouterBackend()
 
 
 class TestFileRouterBackend:
-    """Test the FileRouterBackend implementation."""
+    """Test the filerouterbackend implementation."""
 
     @pytest.fixture
     def router(self):
@@ -702,15 +699,59 @@ class TestRouterManager:
         manager._routers.append(Mock())
         assert len(manager) == 1
 
-    def test_iter(self):
-        """Test iteration."""
+    def test_iter_returns_url_patterns(self):
+        """Test that __iter__ returns URL patterns from all routers."""
         manager = RouterManager()
-        router1 = Mock()
-        router2 = Mock()
-        manager._routers = [router1, router2]
 
-        routers = list(manager)
-        assert routers == [router1, router2]
+        # mock routers that return url patterns
+        mock_router1 = Mock()
+        mock_router1.generate_urls.return_value = ["url1", "url2"]
+        mock_router2 = Mock()
+        mock_router2.generate_urls.return_value = ["url3"]
+
+        manager._routers = [mock_router1, mock_router2]
+
+        # __iter__ should return all url patterns combined
+        url_patterns = list(manager)
+        assert url_patterns == ["url1", "url2", "url3"]
+
+    def test_iter_triggers_reload_when_empty(self):
+        """Test that __iter__ calls _reload_config when routers list is empty."""
+        manager = RouterManager()
+
+        with patch.object(manager, "_reload_config") as mock_reload:
+            # ensure empty routers to hit the branch
+            manager._routers = []
+            # iteration should call _reload_config()
+            list(manager)
+            mock_reload.assert_called_once()
+
+    def test_iter_reloads_config_when_empty(self):
+        """Test that __iter__ reloads config when no routers are configured."""
+        manager = RouterManager()
+
+        # mock the reload process to avoid actual reloading
+        with patch.object(manager, "_reload_config"):
+            # mock the config and router creation
+            with patch.object(manager, "_get_next_pages_config") as mock_get_config:
+                mock_get_config.return_value = [
+                    {"BACKEND": "next.urls.FileRouterBackend"}
+                ]
+
+                # mock router creation
+                with patch("next.urls.RouterFactory.create_backend") as mock_create:
+                    mock_router = Mock()
+                    mock_router.generate_urls.return_value = ["url1"]
+                    mock_create.return_value = mock_router
+
+                    # manually add the router to simulate what _reload_config would do
+                    manager._routers = [mock_router]
+
+                    # trigger iteration
+                    url_patterns = list(manager)
+
+                    # should return the url patterns from the router
+                    assert url_patterns == ["url1"]
 
     def test_getitem(self):
         """Test getting router by index."""
@@ -727,7 +768,7 @@ class TestRouterManager:
 
         # don't mock _get_next_pages_config, let it run normally
         # this will set _config_cache to the default config
-        manager.reload_config()
+        manager._reload_config()
         # cache should be refilled with the default config from _get_next_pages_config
         assert manager._config_cache is not None
         assert len(manager._config_cache) == 1
@@ -745,7 +786,7 @@ class TestRouterManager:
             "next.urls.RouterFactory.create_backend",
             side_effect=Exception("Test error"),
         ):
-            manager.reload_config()
+            manager._reload_config()
             # should handle exception gracefully and not add router
             assert len(manager._routers) == 0
             # cache should be refilled even if router creation fails
@@ -776,97 +817,6 @@ class TestRouterManager:
             assert len(result) == 1
             assert result[0]["BACKEND"] == "next.urls.FileRouterBackend"
 
-    def test_generate_all_urls_empty(self):
-        """Test generate_all_urls when no routers are configured."""
-        manager = RouterManager()
-        result = manager.generate_all_urls()
-        assert result == []
-
-    def test_generate_all_urls_with_routers(self):
-        """Test generate_all_urls when routers are configured."""
-        manager = RouterManager()
-
-        # mock router that returns URL patterns
-        mock_router = Mock()
-        mock_router.generate_urls.return_value = ["url1", "url2"]
-        manager._routers = [mock_router]
-
-        result = manager.generate_all_urls()
-        assert result == ["url1", "url2"]
-
-
-class TestConfigurationFunctions:
-    """Test the public configuration functions."""
-
-    def test_get_next_pages_config(self):
-        """Test get_next_pages_config function."""
-        with patch("next.urls.router_manager") as mock_manager:
-            mock_manager._get_next_pages_config.return_value = ["config1"]
-
-            result = get_next_pages_config()
-            assert result == ["config1"]
-
-    def test_create_router_from_config(self):
-        """Test create_router_from_config function."""
-        config = {"BACKEND": "next.urls.FileRouterBackend"}
-
-        with patch("next.urls.RouterFactory.create_backend") as mock_create:
-            mock_router = Mock()
-            mock_create.return_value = mock_router
-
-            result = create_router_from_config(config)
-            assert result == mock_router
-
-    def test_get_configured_routers(self):
-        """Test get_configured_routers function."""
-        with patch("next.urls.router_manager") as mock_manager:
-            mock_manager._routers = ["router1", "router2"]
-
-            result = get_configured_routers()
-            assert result == ["router1", "router2"]
-
-    def test_get_configured_routers_reload(self):
-        """Test get_configured_routers function with reload."""
-        with patch("next.urls.router_manager") as mock_manager:
-            mock_manager._routers = []
-            mock_manager.reload_config = Mock()
-
-            result = get_configured_routers()
-            assert result == []
-            mock_manager.reload_config.assert_called_once()
-
-
-class TestIntegrationFunctions:
-    """Test the integration functions."""
-
-    def test_include_pages_success(self):
-        """Test include_pages function with successful router creation."""
-        with patch("next.urls.FileRouterBackend") as mock_router_class:
-            mock_router = Mock()
-            mock_router._generate_urls_for_app.return_value = ["pattern1"]
-            mock_router_class.return_value = mock_router
-
-            result = include_pages("testapp")
-            assert result == ["pattern1"]
-
-    def test_include_pages_no_patterns(self):
-        """Test include_pages function when no patterns are found."""
-        with patch("next.urls.FileRouterBackend") as mock_router_class:
-            mock_router = Mock()
-            mock_router._generate_urls_for_app.return_value = []
-            mock_router_class.return_value = mock_router
-
-            result = include_pages("testapp")
-            assert result == []
-
-    def test_auto_include_all_pages(self):
-        """Test auto_include_all_pages function."""
-        with patch("next.urls.router_manager") as mock_manager:
-            mock_manager.generate_all_urls.return_value = ["url1", "url2"]
-
-            result = auto_include_all_pages()
-            assert result == ["url1", "url2"]
-
 
 class TestGlobalInstances:
     """Test global instances and their behavior."""
@@ -880,18 +830,26 @@ class TestGlobalInstances:
         """Test that global router_manager reload_config works correctly."""
         # test that the global instance works
         len(router_manager._routers)
-        router_manager.reload_config()
+        router_manager._reload_config()
         # should clear and reload
         assert router_manager._config_cache is not None
 
-    def test_urlpatterns_empty(self):
-        """Test that urlpatterns is properly initialized."""
-        from next.urls import urlpatterns
+    def test_urlpatterns_dynamic(self):
+        """Test that urlpatterns is dynamically generated through router_manager."""
+        # urlpatterns should be the same object as router_manager
+        assert urlpatterns is router_manager
 
-        assert urlpatterns == []
+        # test that urlpatterns is iterable and returns url patterns
+        # we need to patch the method that generates the actual patterns
+        with patch.object(router_manager, "_routers", [Mock()]):
+            mock_router = router_manager._routers[0]
+            mock_router.generate_urls.return_value = ["url1", "url2"]
+
+            patterns = list(urlpatterns)
+            assert patterns == ["url1", "url2"]
 
     def test_generate_urls_for_app_returns_empty_list(self):
-        """Test _generate_urls_for_app when it returns empty list (line 79)."""
+        """Test _generate_urls_for_app when it returns empty list."""
         router = FileRouterBackend()
 
         with patch.object(router, "_generate_urls_for_app", return_value=[]):
@@ -899,7 +857,7 @@ class TestGlobalInstances:
             assert urls == []
 
     def test_generate_root_urls_no_pages_path(self):
-        """Test _generate_root_urls when _get_root_pages_path returns None (lines 85-87)."""
+        """Test _generate_root_urls when _get_root_pages_path returns None."""
         router = FileRouterBackend()
 
         with patch.object(router, "_get_root_pages_path", return_value=None):
@@ -907,7 +865,7 @@ class TestGlobalInstances:
             assert urls == []
 
     def test_create_url_pattern_view_wrapper_no_args_parameter(self):
-        """Test view_wrapper when args parameter is not passed (lines 151-156)."""
+        """Test view_wrapper when args parameter is not passed."""
         router = FileRouterBackend()
 
         with patch.object(
@@ -924,7 +882,7 @@ class TestGlobalInstances:
                 assert result == "response"
 
     def test_generate_urls_with_empty_patterns_from_apps(self):
-        """Test generate_urls when _generate_urls_for_app returns empty list (line 79)."""
+        """Test generate_urls when _generate_urls_for_app returns empty list."""
         router = FileRouterBackend()
 
         # mock _get_installed_apps to return a list of apps
@@ -935,7 +893,7 @@ class TestGlobalInstances:
                 assert urls == []
 
     def test_generate_root_urls_with_none_pages_path(self):
-        """Test _generate_root_urls when _get_root_pages_path returns None (line 86)."""
+        """Test _generate_root_urls when _get_root_pages_path returns none."""
         router = FileRouterBackend()
 
         with patch.object(router, "_get_root_pages_path", return_value=None):
@@ -943,7 +901,7 @@ class TestGlobalInstances:
             assert urls == []
 
     def test_view_wrapper_without_args_parameter(self):
-        """Test view_wrapper when args parameter is not in kwargs (lines 151-156)."""
+        """Test view_wrapper when args parameter is not in kwargs."""
         router = FileRouterBackend()
 
         # create a mock render function that returns kwargs to verify they weren't modified
@@ -961,7 +919,7 @@ class TestGlobalInstances:
                 assert result == "success"
 
     def test_generate_urls_direct_coverage(self):
-        """Test generate_urls method directly to cover line 79 with walrus operator."""
+        """Test generate_urls method directly with walrus operator."""
         router = FileRouterBackend()
 
         # mock the entire method chain to ensure we hit the walrus operator
@@ -972,7 +930,7 @@ class TestGlobalInstances:
                     assert urls == []
 
     def test_generate_root_urls_direct_coverage(self):
-        """Test _generate_root_urls method directly to cover line 86."""
+        """Test _generate_root_urls method."""
         router = FileRouterBackend()
 
         # mock _get_root_pages_path to return None to hit the return [] path
@@ -981,7 +939,7 @@ class TestGlobalInstances:
             assert urls == []
 
     def test_view_wrapper_args_parameter_not_in_kwargs(self):
-        """Test view_wrapper when args parameter is not in kwargs (lines 151-156)."""
+        """Test view_wrapper when args parameter is not in kwargs."""
         router = FileRouterBackend()
 
         # create a mock render function that returns kwargs to verify they weren't modified
@@ -1003,7 +961,7 @@ class TestGlobalInstances:
                 assert call_args[1] == {"other_param": "value"}
 
     def test_generate_urls_real_execution(self):
-        """Test generate_urls method with real execution to cover line 79."""
+        """Test generate_urls method with real execution."""
         router = FileRouterBackend()
 
         # create a real test environment that will execute the walrus operator
@@ -1016,7 +974,7 @@ class TestGlobalInstances:
                 assert urls == []
 
     def test_generate_root_urls_real_execution(self):
-        """Test _generate_root_urls method with real execution to cover line 86."""
+        """Test _generate_root_urls method with real execution."""
         router = FileRouterBackend()
 
         # mock settings to return None for BASE_DIR
@@ -1027,11 +985,10 @@ class TestGlobalInstances:
             assert urls == []
 
     def test_view_wrapper_real_execution(self):
-        """Test view_wrapper with real execution to cover lines 151-156."""
+        """Test view_wrapper with real execution."""
         router = FileRouterBackend()
 
         # create a real template that will be parsed
-
         with patch.object(
             router, "_load_page_function", return_value=lambda req, **kwargs: kwargs
         ):
@@ -1046,7 +1003,7 @@ class TestGlobalInstances:
                 assert result == {"other_param": "value"}
 
     def test_create_backend_real_execution(self):
-        """Test create_backend with real execution to cover line 230."""
+        """Test create_backend with real execution."""
 
         # create a custom backend that's not FileRouterBackend
         class CustomBackend(RouterBackend):
@@ -1090,7 +1047,7 @@ class TestGlobalInstances:
                         assert urls == ["pattern1", "pattern2"]
 
     def test_generate_root_urls_comprehensive_coverage(self):
-        """Test _generate_root_urls method comprehensively to cover line 86."""
+        """Test _generate_root_urls method comprehensively."""
         router = FileRouterBackend()
 
         # test with BASE_DIR = None to hit the return [] path
@@ -1100,8 +1057,23 @@ class TestGlobalInstances:
             urls = router._generate_root_urls()
             assert urls == []
 
+    def test_generate_root_urls_with_patterns(self):
+        """Test _generate_root_urls returns patterns when pages path exists."""
+        router = FileRouterBackend()
+
+        with patch.object(
+            router, "_get_root_pages_path", return_value=Path("/tmp/pages")
+        ):
+            with patch.object(
+                router,
+                "_generate_patterns_from_directory",
+                return_value=iter(["p1", "p2"]),  # generator-like
+            ):
+                urls = router._generate_root_urls()
+                assert urls == ["p1", "p2"]
+
     def test_create_url_pattern_comprehensive_coverage(self):
-        """Test _create_url_pattern method comprehensively to cover lines 151-156."""
+        """Test _create_url_pattern method comprehensively."""
         router = FileRouterBackend()
 
         # create a pattern with args parameter
@@ -1118,8 +1090,16 @@ class TestGlobalInstances:
                 result = view_func(Mock(), other_param="value")
                 assert result == {"other_param": "value"}
 
+    def test_create_url_pattern_returns_none_when_no_render(self):
+        """Test _create_url_pattern returns None when render function is missing."""
+        router = FileRouterBackend()
+
+        with patch.object(router, "_load_page_function", return_value=None):
+            pattern = router._create_url_pattern("test/path", Path("/tmp/test.py"))
+            assert pattern is None
+
     def test_create_backend_comprehensive_coverage(self):
-        """Test create_backend method comprehensively to cover line 230."""
+        """Test create_backend method comprehensively."""
 
         # create a custom backend that's not FileRouterBackend
         class CustomBackend(RouterBackend):
@@ -1134,3 +1114,51 @@ class TestGlobalInstances:
         assert isinstance(backend, CustomBackend)
         # verify that the else branch was executed by checking that no FileRouterBackend-specific args were passed
         assert not hasattr(backend, "pages_dir_name")
+
+    def test_load_page_function_missing_render_attribute(self):
+        """Test _load_page_function when module lacks 'render' attribute."""
+        router = FileRouterBackend()
+
+        # mock import machinery to return a simple module without 'render'
+        with patch("importlib.util.spec_from_file_location") as mock_spec:
+            spec = Mock()
+            spec.loader = Mock()
+            # exec_module should be a no-op
+            spec.loader.exec_module.return_value = None
+            mock_spec.return_value = spec
+
+            with patch(
+                "importlib.util.module_from_spec", return_value=types.SimpleNamespace()
+            ):
+                result = router._load_page_function(Path("/tmp/page.py"))
+                assert result is None
+
+    def test_scan_pages_directory_real_filesystem(self, tmp_path):
+        """Test _scan_pages_directory recursion on a real filesystem."""
+        router = FileRouterBackend()
+
+        pages_dir = tmp_path / "testapp" / "pages"
+        pages_dir.mkdir(parents=True, exist_ok=True)
+
+        # create nested directories and page.py files
+        (pages_dir / "home").mkdir(parents=True, exist_ok=True)
+        (pages_dir / "home" / "page.py").write_text(
+            "def render(request):\n    return 'home'\n"
+        )
+
+        (pages_dir / "items" / "[int:id]").mkdir(parents=True, exist_ok=True)
+        (pages_dir / "items" / "[int:id]" / "page.py").write_text(
+            "def render(request, id):\n    return id\n"
+        )
+
+        (pages_dir / "blog" / "post").mkdir(parents=True, exist_ok=True)
+        (pages_dir / "blog" / "post" / "page.py").write_text(
+            "def render(request):\n    return 'post'\n"
+        )
+
+        results = list(router._scan_pages_directory(pages_dir))
+        url_paths = {u for (u, _f) in results}
+
+        assert "home" in url_paths
+        assert "items/[int:id]" in url_paths
+        assert "blog/post" in url_paths

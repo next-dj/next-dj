@@ -57,6 +57,7 @@ html = """
     </html>
 """
 
+
 def render(request, post_id=None, **kwargs):
     """Render page with typed parameter."""
     return HttpResponse(html.format(post_id=post_id))

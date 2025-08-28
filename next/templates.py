@@ -7,8 +7,8 @@ from typing import Any
 from django.template import Template
 
 
-class DJXCompiler:
-    """DJXCompiler collects Django template blocks from code and stores them for later processing."""
+class DJXtension:
+    """DJXtension collects Django template blocks from code and stores them for later processing."""
 
     def __init__(self) -> None:
         """Initialize with empty caches and setup automatic memory cleanup."""
@@ -29,7 +29,7 @@ class DJXCompiler:
         content_hash = self._generate_content_hash(template)
         return content_hash in self._templates
 
-    def __mod__(self, template: str) -> "DJXCompiler":
+    def __mod__(self, template: str) -> "DJXtension":
         """
         % operator for adding template blocks.
 
@@ -113,7 +113,7 @@ class DJXCompiler:
                     del self._file_blocks[file_path]
             del self._file_paths[content_hash]
 
-    def get_nodes(self, file_path: str | Path) -> list[Template]:
+    def get_templates(self, file_path: str | Path) -> list[Template]:
         """Get all Django Template objects from the specified file."""
         file_path_str = str(file_path)
 
@@ -134,4 +134,4 @@ class DJXCompiler:
 
 
 # global instance for use throughout the project
-djx = DJXCompiler()
+djx = DJXtension()

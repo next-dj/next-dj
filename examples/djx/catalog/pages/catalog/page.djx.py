@@ -1,16 +1,14 @@
-from next.templates import djx
-
+from catalog.models import Product
 from django.http import HttpRequest
 
-from .models import Product
-
+from next.templates import djx
 
 djx % """
 <h1>Catalog</h1>
 
 <ul>
     {% for product in products %}
-        <li><a href="/catalog/{{ product.id }}/">{{ product.name }}</a></li>
+        <li><a href="/catalog/{{ product.id }}/">{{ product.title }}</a></li>
     {% endfor %}
 </ul>
 """

@@ -4,13 +4,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django.template import Context
 
-from next.templates import DJXCompiler, djx
+from next.templates import DJXtension, djx
 
 
 @pytest.fixture
 def compiler():
-    """Provide a fresh DJXCompiler instance for each test."""
-    return DJXCompiler()
+    """Provide a fresh djxtension instance for each test."""
+    return DJXtension()
 
 
 @pytest.fixture
@@ -30,11 +30,11 @@ def mock_currentframe():
     return frame
 
 
-class TestDJXCompiler:
-    """Test cases for DJXCompiler class."""
+class TestDJXtension:
+    """Test cases for DJXtension class."""
 
     def test_init(self, compiler):
-        """Test DJXCompiler initialization."""
+        """Test DJXtension initialization."""
         assert compiler._templates == {}
         assert compiler._content_hashes == {}
         assert compiler._file_paths == {}
@@ -178,12 +178,12 @@ class TestTemplateCollection:
     """Test cases for template collection functionality."""
 
     @patch("next.templates.Template")
-    def test_get_nodes_single_file(self, mock_template_class, compiler):
-        """Test getting template nodes from a single file."""
+    def test_get_templates_single_file(self, mock_template_class, compiler):
+        """Test getting template templates from a single file."""
         mock_template = MagicMock()
         mock_template_class.return_value = mock_template
 
-        # Create a proper mock for the frame chain
+        # create a proper mock for the frame chain
         mock_frame = MagicMock()
         mock_frame.f_code.co_filename = "/test/file.py"
 
@@ -195,20 +195,20 @@ class TestTemplateCollection:
             compiler % "Template 1"
             compiler % "Template 2"
 
-            # get nodes
-            nodes = compiler.get_nodes("/test/file.py")
+            # get templates
+            templates = compiler.get_templates("/test/file.py")
 
-            assert len(nodes) == 2
-            assert all(node == mock_template for node in nodes)
+            assert len(templates) == 2
+            assert all(template == mock_template for template in templates)
 
-    def test_get_nodes_empty_file(self, compiler):
-        """Test getting nodes from a file with no templates."""
-        nodes = compiler.get_nodes("/nonexistent/file.py")
-        assert nodes == []
+    def test_get_templates_empty_file(self, compiler):
+        """Test getting templates from a file with no templates."""
+        templates = compiler.get_templates("/nonexistent/file.py")
+        assert templates == []
 
     @patch("next.templates.Template")
-    def test_get_nodes_multiple_files(self, mock_template_class, compiler):
-        """Test getting nodes from specific file when multiple files have templates."""
+    def test_get_templates_multiple_files(self, mock_template_class, compiler):
+        """Test getting templates from specific file when multiple files have templates."""
         mock_template = MagicMock()
         mock_template_class.return_value = mock_template
 
@@ -232,12 +232,12 @@ class TestTemplateCollection:
             with patch("inspect.currentframe", return_value=mock_currentframe2):
                 compiler % "Template from file2"
 
-                # get nodes from file1 only
-                nodes1 = compiler.get_nodes("/file1.py")
-                nodes2 = compiler.get_nodes("/file2.py")
+                # get templates from file1 only
+                templates1 = compiler.get_templates("/file1.py")
+                templates2 = compiler.get_templates("/file2.py")
 
-                assert len(nodes1) == 1
-                assert len(nodes2) == 1
+                assert len(templates1) == 1
+                assert len(templates2) == 1
 
 
 class TestDjangoTemplateIntegration:
@@ -260,10 +260,10 @@ class TestDjangoTemplateIntegration:
             template_string = "Hello {{ name }}"
             compiler % template_string
 
-            nodes = compiler.get_nodes("/test/file.py")
-            assert len(nodes) == 1
+            templates = compiler.get_templates("/test/file.py")
+            assert len(templates) == 1
 
-            template = nodes[0]
+            template = templates[0]
             assert template == mock_template
 
     @patch("next.templates.Template")
@@ -284,8 +284,8 @@ class TestDjangoTemplateIntegration:
             template_string = "Hello {{ name }}, you have {{ count }} items"
             compiler % template_string
 
-            nodes = compiler.get_nodes("/test/file.py")
-            template = nodes[0]
+            templates = compiler.get_templates("/test/file.py")
+            template = templates[0]
 
             context = Context({"name": "John", "count": 5})
             rendered = template.render(context)
@@ -313,8 +313,8 @@ class TestDjangoTemplateIntegration:
 {% endfor %}"""
             compiler % template_string
 
-            nodes = compiler.get_nodes("/test/file.py")
-            template = nodes[0]
+            templates = compiler.get_templates("/test/file.py")
+            template = templates[0]
 
             context = Context({"range": range(3)})
             rendered = template.render(context)
@@ -343,8 +343,8 @@ class TestDjangoTemplateIntegration:
 {% endif %}"""
             compiler % template_string
 
-            nodes = compiler.get_nodes("/test/file.py")
-            template = nodes[0]
+            templates = compiler.get_templates("/test/file.py")
+            template = templates[0]
 
             # test true condition
             mock_template.render.return_value = "    <div>True</div>"
@@ -378,8 +378,8 @@ class TestDjangoTemplateIntegration:
 {% static 'path/to/file.png' %}"""
             compiler % template_string
 
-            nodes = compiler.get_nodes("/test/file.py")
-            template = nodes[0]
+            templates = compiler.get_templates("/test/file.py")
+            template = templates[0]
 
             assert template == mock_template
 
@@ -391,7 +391,7 @@ class TestGlobalDJX:
         """Clear the global djx cache before each test."""
         # manually clear the cache by creating a new instance
         global djx
-        djx = DJXCompiler()
+        djx = DJXtension()
 
     @patch("next.templates.Template")
     def test_global_djx_operator(self, mock_template_class):
@@ -453,7 +453,7 @@ class TestGlobalDJX:
             template_string = "Hello {{ name }}"
             djx % template_string
 
-            templates = djx.get_nodes("/test/file.py")
+            templates = djx.get_templates("/test/file.py")
             assert len(templates) == 1
 
             template = templates[0]
@@ -473,7 +473,7 @@ class TestGarbageCollection:
         initial_callback_count = len(gc.callbacks)
 
         # create a new compiler instance to trigger callback setup
-        DJXCompiler()
+        DJXtension()
 
         # check that a new callback was added
         new_callback_count = len(gc.callbacks)
