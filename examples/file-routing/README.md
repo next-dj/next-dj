@@ -1,217 +1,131 @@
-# File Routing Example
+# File-based Routing Example
 
-This example demonstrates how to use the Next framework's file-based routing system in a Django application.
+This example demonstrates the core file-based routing functionality of next-dj, showing how to create dynamic URL patterns from file system structure without writing traditional Django URL configurations.
 
-## Features
+## What This Example Demonstrates
 
-- **Automatic URL generation** from `page.py` files in `pages/` directories
-- **Dynamic parameter support** with `[param]` and `[type:param]` syntax
-- **Args support** with `[[args]]` syntax for catch-all routes
-- **Django-style configuration** with `NEXT_PAGES` setting
-- **Customizable pages directory** names
-- **App-level and root-level** pages support
+This example showcases the fundamental concept of next-dj: automatic URL pattern generation from file system structure. It demonstrates:
 
-## Configuration
+- **Automatic URL pattern generation** from directory structure
+- **Parameterized routes** with type hints and wildcard arguments
+- **Template rendering** with context management
+- **Multiple routing strategies** (app-specific and root-level pages)
 
-### NEXT_PAGES Setting
+The example includes various page types to illustrate different routing scenarios and parameter handling approaches.
 
-The `NEXT_PAGES` setting in `config/settings.py` allows you to configure how the file router works:
-
-```python
-NEXT_PAGES = [
-    {
-        'BACKEND': 'next.urls.FileRouterBackend',
-        'APP_DIRS': True,  # Look in Django apps
-        'OPTIONS': {
-            'PAGES_DIR_NAME': 'pages',  # Custom pages directory name
-        },
-    },
-    {
-        'BACKEND': 'next.urls.FileRouterBackend',
-        'APP_DIRS': False,  # Only look in root directory
-        'OPTIONS': {
-            'PAGES_DIR_NAME': 'root_pages',
-        },
-    },
-]
-```
-
-#### Configuration Options
-
-- **BACKEND**: Currently only supports `'next.urls.FileRouterBackend'`
-- **APP_DIRS**: 
-  - `True`: Look for pages in Django apps (default)
-  - `False`: Only look for pages in root directory (like static/media)
-- **OPTIONS**: 
-  - **PAGES_DIR_NAME**: Custom name for pages directory (default: `'pages'`)
-
-### Default Configuration
-
-If `NEXT_PAGES` is not specified, the framework uses this default:
-
-```python
-NEXT_PAGES = [
-    {
-        'BACKEND': 'next.urls.FileRouterBackend',
-        'APP_DIRS': True,
-        'OPTIONS': {},
-    },
-]
-```
-
-## URL Patterns
-
-### Simple Pages
+## Example Structure
 
 ```
-myapp/pages/home/page.py → /home/
-myapp/pages/about/page.py → /about/
+file-routing/
+├── config/               # Django project configuration
+│   ├── settings.py       # Project settings with next-dj configuration
+│   └── urls.py           # Main URL configuration
+├── myapp/                # Django application
+│   └── pages/            # Pages directory (app-specific routing)
+│       ├── simple/       # Basic page without parameters
+│       │   └── page.py
+│       ├── kwargs/       # Page with typed parameters
+│       │   └── [int:post-id]/
+│       │       └── page.py
+│       └── args/         # Page with wildcard arguments
+│           └── [[args]]/
+│               └── page.py
+└── root_pages/           # Root-level pages directory
+    └── home/
+        └── page.py
 ```
 
-### Dynamic Parameters
+### Page Examples
 
-```
-myapp/pages/profile/[id]/page.py → /profile/<str:id>/
-myapp/pages/posts/[int:post-id]/page.py → /posts/<int:post_id>/
-myapp/pages/users/[uuid:user-id]/page.py → /users/<uuid:user_id>/
-```
+**Simple Page** (`myapp/pages/simple/page.py`):
+- Creates URL: `/simple/`
+- No parameters, basic template rendering
 
-### Args (Catch-all)
+**Parameterized Page** (`myapp/pages/kwargs/[int:post-id]/page.py`):
+- Creates URL: `/kwargs/<int:post_id>/`
+- Demonstrates typed parameter handling
+- Shows how to access parameters in templates
 
-```
-myapp/pages/blog/[[args]]/page.py → /blog/<path:args>/
-```
+**Wildcard Page** (`myapp/pages/args/[[args]]/page.py`):
+- Creates URL: `/args/<path:args>/`
+- Demonstrates wildcard argument handling
+- Shows flexible routing for dynamic content
 
-### Mixed Patterns
+**Root Page** (`root_pages/home/page.py`):
+- Creates URL: `/home/`
+- Demonstrates root-level page routing
+- Shows configuration for non-app-specific pages
 
-```
-myapp/pages/user/[user-id]/posts/[[args]]/page.py → /user/<str:user_id>/posts/<path:args>/
-```
+## How It Works
 
-## Page Structure
+The example uses next-dj's file-based routing system:
 
-Each `page.py` file must contain a `render` function:
-
-```python
-# myapp/pages/home/page.py
-def render(request):
-    return {"message": "Hello from home page"}
-
-# myapp/pages/profile/[id]/page.py
-def render(request, id=None, **kwargs):
-    return {"user_id": id, "message": f"Profile for user {id}"}
-
-# myapp/pages/blog/[[args]]/page.py
-def render(request, args=None, **kwargs):
-    return {"path": args, "message": f"Blog post at {args}"}
-```
-
-## Directory Structure
-
-```
-myapp/
-├── __init__.py
-├── pages/
-│   ├── home/
-│   │   └── page.py
-│   ├── profile/
-│   │   └── [id]/
-│   │       └── page.py
-│   └── blog/
-│       └── [[args]]/
-│           └── page.py
-```
-
-## Usage
-
-### Include All Pages
-
-```python
-# config/urls.py
-from django.urls import path, include
-
-urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('', include('next.urls')),  # Auto-includes all configured pages
-]
-```
-
-### Include Specific App Pages
-
-```python
-from next.urls import include_pages
-
-urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('', include_pages('myapp')),
-]
-```
-
-## Examples
-
-This example includes several page types:
-
-- **Simple page**: `/simple/` - Basic page without parameters
-- **Dynamic page**: `/kwargs/[int:post-id]/` - Page with typed parameter  
-- **Args page**: `/args/[[args]]/` - Page with catch-all route
-- **Root page**: `/home/` - Page from root-level pages directory
-
-The example demonstrates both app-level pages (from `myapp/pages/`) and root-level pages (from `root_pages/`).
+1. **Directory Scanning**: The system scans configured directories for `page.py` files
+2. **URL Pattern Generation**: File paths are converted to Django URL patterns using special syntax:
+   - `[param]` → `<str:param>` (string parameter)
+   - `[int:param]` → `<int:param>` (typed parameter)
+   - `[[args]]` → `<path:args>` (wildcard arguments)
+3. **Template Loading**: Each page can define templates via:
+   - `template` attribute in `page.py`
+   - `template.djx` file in the same directory
+4. **Context Management**: Pages can register context functions for template data
+5. **View Generation**: Automatic view functions handle parameter passing and template rendering
 
 ## Running the Example
 
-1. Install dependencies:
+### Prerequisites
+
+- Python 3.8+
+- Django 4.0+
+- next-dj package installed
+
+### Setup
+
+1. Navigate to the example directory:
    ```bash
-   pip install django
+   cd examples/file-routing
    ```
 
-2. Run migrations:
+2. Install dependencies:
+   ```bash
+   pip install django next-dj
+   ```
+
+3. Run migrations (if needed):
    ```bash
    python manage.py migrate
    ```
 
-3. Start the development server:
-   ```bash
-   python manage.py runserver
-   ```
+### Running the Server
 
-4. Visit the pages:
-   - http://localhost:8000/simple/
-   - http://localhost:8000/kwargs/123/
-   - http://localhost:8000/args/any/nested/path/
-
-## Customization
-
-### Custom Pages Directory Name
-
-To use a different directory name than `pages`:
-
-```python
-NEXT_PAGES = [
-    {
-        'BACKEND': 'next.urls.FileRouterBackend',
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'PAGES_DIR_NAME': 'views',  # Use 'views' instead of 'pages'
-        },
-    },
-]
+Start the Django development server:
+```bash
+python manage.py runserver
 ```
 
-### Root-Only Pages
+### Testing the Routes
 
-To only look for pages in the project root (like static files):
+Visit the following URLs to see the file-based routing in action:
 
-```python
-NEXT_PAGES = [
-    {
-        'BACKEND': 'next.urls.FileRouterBackend',
-        'APP_DIRS': False,  # Don't look in Django apps
-        'OPTIONS': {
-            'PAGES_DIR_NAME': 'root_pages',
-        },
-    },
-]
-```
+- **Simple page**: http://127.0.0.1:8000/simple/
+- **Parameterized page**: http://127.0.0.1:8000/kwargs/123/
+- **Wildcard page**: http://127.0.0.1:8000/args/any/path/here/
+- **Root page**: http://127.0.0.1:8000/home/
 
-This would look for pages in `BASE_DIR/root_pages/` instead of app directories.
+### Verification
+
+1. **Check URL patterns**: Run `python manage.py show_urls` to see generated URL patterns (You need to install an extra package `django-extensions`)
+2. **Test parameter handling**: Visit parameterized URLs with different values
+3. **Verify template rendering**: Check that templates render correctly with context data
+4. **Test error handling**: Try invalid URLs to see error handling
+
+## Contributing
+
+This example is part of the next-dj project. If you find issues or have suggestions for improvement, please:
+
+1. Check the main project repository for existing issues
+2. Create a new issue with detailed description
+3. Follow the project's contribution guidelines
+4. Ensure any changes maintain backward compatibility
+
+For more information about next-dj, visit the main project documentation.

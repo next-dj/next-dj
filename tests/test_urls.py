@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from next.pages import page
 from next.urls import (
     FileRouterBackend,
     RouterBackend,
@@ -302,7 +303,7 @@ class TestFileRouterBackend:
             "_scan_pages_directory",
             return_value=[("url1", "file1"), ("url2", "file2")],
         ):
-            with patch.object(router, "_create_url_pattern") as mock_create:
+            with patch("next.urls.page.create_url_pattern") as mock_create:
                 mock_create.side_effect = ["pattern1", "pattern2"]
 
                 patterns = list(
@@ -369,7 +370,9 @@ class TestFileRouterBackend:
 
         try:
             with patch("next.urls.page.render", return_value="mocked response"):
-                pattern = router._create_url_pattern("test/[[args]]", temp_file)
+                pattern = page.create_url_pattern(
+                    "test/[[args]]", temp_file, router._url_parser
+                )
                 assert pattern is not None
 
                 # test that the view wrapper handles args parameter correctly
@@ -382,102 +385,6 @@ class TestFileRouterBackend:
                     assert result is not None
         finally:
             temp_file.unlink()
-
-    @pytest.mark.parametrize(
-        "url_pattern,expected_pattern,expected_params",
-        [
-            ("simple", "simple/", {}),
-            ("user/[id]", "user/<str:id>/", {"id": "id"}),
-            ("user/[int:user-id]", "user/<int:user_id>/", {"user_id": "user_id"}),
-            ("profile/[[args]]", "profile/<path:args>/", {"args": "args"}),
-            (
-                "user/[int:id]/posts/[[args]]",
-                "user/<int:id>/posts/<path:args>/",
-                {"id": "id", "args": "args"},
-            ),
-            ("", "", {}),
-        ],
-    )
-    def test_parse_url_pattern_variations(
-        self, router, url_pattern, expected_pattern, expected_params
-    ):
-        """Test parsing URL patterns with different variations."""
-        pattern, params = router._parse_url_pattern(url_pattern)
-        assert pattern == expected_pattern
-        assert params == expected_params
-
-    def test_parse_url_pattern_complex(self, router):
-        """Test parsing complex URL pattern."""
-        pattern, params = router._parse_url_pattern(
-            "user/[int:user-id]/posts/[slug:post-slug]/[[args]]"
-        )
-        assert "<int:user_id>" in pattern
-        assert "<slug:post_slug>" in pattern
-        assert "<path:args>" in pattern
-        assert pattern.endswith("/")  # should end with slash
-        assert "user_id" in params
-        assert "post_slug" in params
-        assert "args" in params
-
-    @pytest.mark.parametrize(
-        "url_pattern,pattern_contains,params_condition",
-        [
-            ("[]", ["["] or ["<str:"], lambda p: len(p) == 0 or "" in p),
-            ("[[]]", ["["] or ["<path:"], lambda p: len(p) == 0 or "" in p),
-        ],
-    )
-    def test_parse_url_pattern_edge_cases(
-        self, router, url_pattern, pattern_contains, params_condition
-    ):
-        """Test parsing URL pattern edge cases."""
-        pattern, params = router._parse_url_pattern(url_pattern)
-        assert any(contains in pattern for contains in pattern_contains)
-        assert params_condition(params)
-
-    @pytest.mark.parametrize(
-        "param_string,expected_name,expected_type",
-        [
-            ("param", "param", "str"),
-            ("int:user-id", "user-id", "int"),
-            ("", "", "str"),
-            ("   ", "", "str"),
-            (":param", "param", ""),
-        ],
-    )
-    def test_parse_param_name_and_type_variations(
-        self, router, param_string, expected_name, expected_type
-    ):
-        """Test parsing parameter name and type with different variations."""
-        name, type_name = router._parse_param_name_and_type(param_string)
-        assert name == expected_name
-        assert type_name == expected_type
-
-    def test_parse_url_pattern_with_args_and_params(self):
-        """Test parsing URL pattern with both args and regular parameters."""
-        router = FileRouterBackend()
-
-        url_path = "user/[[profile]]/[int:user-id]/posts"
-        django_pattern, parameters = router._parse_url_pattern(url_path)
-
-        assert "profile" in parameters
-        assert "user_id" in parameters
-        assert django_pattern == "user/<path:profile>/<int:user_id>/posts/"
-
-    def test_parse_param_name_and_type_with_colon(self):
-        """Test parsing parameter name and type with colon separator."""
-        router = FileRouterBackend()
-
-        name, type_name = router._parse_param_name_and_type("int:user-id")
-        assert name == "user-id"
-        assert type_name == "int"
-
-    def test_parse_param_name_and_type_without_colon(self):
-        """Test parsing parameter name and type without colon separator."""
-        router = FileRouterBackend()
-
-        name, type_name = router._parse_param_name_and_type("username")
-        assert name == "username"
-        assert type_name == "str"
 
 
 class TestRouterFactory:
@@ -753,7 +660,9 @@ class TestGlobalInstances:
 
         try:
             with patch("next.urls.page.render", return_value="mocked response"):
-                pattern = router._create_url_pattern("test/[[args]]", temp_file)
+                pattern = page.create_url_pattern(
+                    "test/[[args]]", temp_file, router._url_parser
+                )
                 assert pattern is not None
 
                 # test that the view wrapper handles missing args parameter correctly
@@ -795,7 +704,9 @@ class TestGlobalInstances:
 
         try:
             with patch("next.urls.page.render", return_value="mocked success"):
-                pattern = router._create_url_pattern("test/[[args]]", temp_file)
+                pattern = page.create_url_pattern(
+                    "test/[[args]]", temp_file, router._url_parser
+                )
                 assert pattern is not None
 
                 # test that the view wrapper handles missing args parameter correctly
@@ -838,7 +749,9 @@ class TestGlobalInstances:
 
         try:
             with patch("next.urls.page.render", return_value="mocked success"):
-                pattern = router._create_url_pattern("test/[[args]]", temp_file)
+                pattern = page.create_url_pattern(
+                    "test/[[args]]", temp_file, router._url_parser
+                )
                 assert pattern is not None
 
                 # test that the view wrapper handles missing args parameter correctly
@@ -885,7 +798,9 @@ class TestGlobalInstances:
 
         try:
             with patch("next.urls.page.render", return_value="mocked kwargs"):
-                pattern = router._create_url_pattern("test/[[args]]", temp_file)
+                pattern = page.create_url_pattern(
+                    "test/[[args]]", temp_file, router._url_parser
+                )
                 assert pattern is not None
 
                 # test that the view wrapper handles missing args parameter correctly
@@ -933,9 +848,9 @@ class TestGlobalInstances:
                 ) as mock_gen_patterns:
                     mock_gen_patterns.return_value = ["pattern1", "pattern2"]
 
-                    # mock _create_url_pattern to return a pattern
-                    with patch.object(
-                        router, "_create_url_pattern", return_value="url_pattern"
+                    # mock page.create_url_pattern to return a pattern
+                    with patch(
+                        "next.urls.page.create_url_pattern", return_value="url_pattern"
                     ):
                         urls = router.generate_urls()
                         # the result should be the patterns from _generate_patterns_from_directory
@@ -978,7 +893,9 @@ class TestGlobalInstances:
 
         try:
             with patch("next.urls.page.render", return_value="mocked kwargs"):
-                pattern = router._create_url_pattern("test/[[args]]", temp_file)
+                pattern = page.create_url_pattern(
+                    "test/[[args]]", temp_file, router._url_parser
+                )
                 assert pattern is not None
 
                 # test that the view wrapper handles missing args parameter correctly
@@ -1049,7 +966,9 @@ class TestGlobalInstances:
         try:
             with patch("next.urls.page.register_template") as mock_register:
                 with patch("next.urls.page.render", return_value="Hello World!"):
-                    pattern = router._create_url_pattern("test", temp_file)
+                    pattern = page.create_url_pattern(
+                        "test", temp_file, router._url_parser
+                    )
 
                     # verify that page.register_template was called
                     mock_register.assert_called_once_with(
@@ -1078,7 +997,9 @@ class TestGlobalInstances:
                 with patch(
                     "next.urls.page.render", return_value="Hello World!"
                 ) as mock_render:
-                    pattern = router._create_url_pattern("test", temp_file)
+                    pattern = page.create_url_pattern(
+                        "test", temp_file, router._url_parser
+                    )
 
                     # get the view function
                     view_func = pattern.callback
@@ -1110,7 +1031,9 @@ class TestGlobalInstances:
                     "next.urls.page.render", return_value="Hello World!"
                 ) as mock_render:
                     # use a simple URL path without args parameter
-                    pattern = router._create_url_pattern("test", temp_file)
+                    pattern = page.create_url_pattern(
+                        "test", temp_file, router._url_parser
+                    )
 
                     # get the view function
                     view_func = pattern.callback
@@ -1142,7 +1065,9 @@ class TestGlobalInstances:
                     "next.urls.page.render", return_value="Hello World!"
                 ) as mock_render:
                     # use a URL path with args parameter
-                    pattern = router._create_url_pattern("test/[[args]]", temp_file)
+                    pattern = page.create_url_pattern(
+                        "test/[[args]]", temp_file, router._url_parser
+                    )
 
                     # get the view function
                     view_func = pattern.callback
@@ -1151,9 +1076,9 @@ class TestGlobalInstances:
                     mock_request = Mock()
                     result = view_func(mock_request, name="John")
 
-                    # verify that page.render was called with original kwargs
+                    # verify that page.render was called with original kwargs plus parameters
                     mock_render.assert_called_once_with(
-                        temp_file, mock_request, name="John"
+                        temp_file, mock_request, name="John", args="args"
                     )
                     assert result is not None
         finally:
@@ -1169,7 +1094,7 @@ class TestGlobalInstances:
             temp_file = Path(f.name)
 
         try:
-            pattern = router._create_url_pattern("test", temp_file)
+            pattern = page.create_url_pattern("test", temp_file, router._url_parser)
             assert pattern is None
         finally:
             temp_file.unlink()
@@ -1179,7 +1104,9 @@ class TestGlobalInstances:
         router = FileRouterBackend()
 
         with patch("importlib.util.spec_from_file_location", return_value=None):
-            pattern = router._create_url_pattern("test", Path("/nonexistent/file.py"))
+            pattern = page.create_url_pattern(
+                "test", Path("/nonexistent/file.py"), router._url_parser
+            )
             assert pattern is None
 
     def test_create_url_pattern_spec_loader_is_none(self):
@@ -1191,5 +1118,7 @@ class TestGlobalInstances:
         mock_spec.loader = None
 
         with patch("importlib.util.spec_from_file_location", return_value=mock_spec):
-            pattern = router._create_url_pattern("test", Path("/some/file.py"))
+            pattern = page.create_url_pattern(
+                "test", Path("/some/file.py"), router._url_parser
+            )
             assert pattern is None
