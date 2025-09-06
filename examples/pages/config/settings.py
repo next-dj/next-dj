@@ -1,17 +1,15 @@
 from pathlib import Path
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-example-key-for-file-routing"
 
-# SECURITY WARNING: don't run with debug turned on in production!
+SECRET_KEY = "simple-key"
+
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["*"]
 
-# Application definition
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -19,8 +17,10 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "next",  # add next framework
-    "myapp",
+    # core
+    "next",
+    # apps
+    "catalog",
 ]
 
 MIDDLEWARE = [
@@ -52,7 +52,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# Database
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
@@ -60,7 +60,7 @@ DATABASES = {
     }
 }
 
-# Password validation
+
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
@@ -76,34 +76,16 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Internationalization
+
 LANGUAGE_CODE = "en-us"
+
 TIME_ZONE = "UTC"
+
 USE_I18N = True
+
 USE_TZ = True
 
-# Static files (CSS, JavaScript, Images)
+
 STATIC_URL = "static/"
 
-# Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-# Next Framework Configuration
-NEXT_PAGES = [
-    {
-        "BACKEND": "next.urls.FileRouterBackend",
-        "APP_DIRS": True,
-        "OPTIONS": {
-            # You can customize the pages directory name
-            # 'PAGES_DIR_NAME': 'views',
-        },
-    },
-    {
-        "BACKEND": "next.urls.FileRouterBackend",
-        "APP_DIRS": False,
-        "OPTIONS": {
-            "PAGES_DIR_NAME": "root_pages",
-            "PAGES_DIR": str(BASE_DIR / "root_pages"),
-        },
-    },
-]

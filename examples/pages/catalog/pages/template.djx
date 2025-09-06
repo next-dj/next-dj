@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ title }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f7fafc;
+            margin: 0;
+            padding: 0;
+        }
+        .landing-container {
+            max-width: 600px;
+            margin: 60px auto;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.07);
+            padding: 2.5rem 2rem 2rem 2rem;
+            text-align: center;
+        }
+        h1 {
+            color: #2d3748;
+            margin-bottom: 0.5em;
+        }
+        p {
+            color: #4a5568;
+            margin-bottom: 2em;
+        }
+        .cta-btn {
+            background: #3182ce;
+            color: #fff;
+            padding: 0.9em 2.2em;
+            border: none;
+            border-radius: 5px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: background 0.2s;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .cta-btn:hover {
+            background: #2563eb;
+        }
+        .features {
+            margin-top: 2.5em;
+            text-align: left;
+        }
+        .features li {
+            margin-bottom: 0.7em;
+            color: #2b6cb0;
+        }
+    </style>
+</head>
+<body>
+    <div class="landing-container">
+        <h1>{{ landing.title }}</h1>
+        <p>{{ landing.description }}</p>
+        <a href="/catalog/" class="cta-btn">Browse Products</a>
+        <ul class="features">
+            <li>Wide selection of items</li>
+            <li>Easy navigation</li>
+            <li>Secure checkout</li>
+            <li>Fast delivery</li>
+        </ul>
+    </div>
+</body>
+</html>

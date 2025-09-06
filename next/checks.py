@@ -1,3 +1,15 @@
+"""
+Django checks framework integration for next-dj file-based routing system.
+
+This module implements comprehensive validation checks for the next-dj routing
+system, ensuring proper configuration and file structure integrity. The checks
+validate router configurations, page file structures, template availability,
+and URL pattern generation to prevent runtime errors and configuration issues.
+
+All checks are integrated with Django's built-in checks framework, making them
+available through standard Django management commands like 'check' and 'runserver'.
+"""
+
 import re
 from pathlib import Path
 from typing import Any
@@ -12,7 +24,14 @@ from .urls import RouterFactory, RouterManager
 def check_next_pages_configuration(
     app_configs: Any, **kwargs: Any
 ) -> list[CheckMessage]:
-    """Check NEXT_PAGES configuration for errors."""
+    """
+    Validate NEXT_PAGES configuration settings for correctness and completeness.
+
+    Performs comprehensive validation of the NEXT_PAGES configuration dictionary,
+    checking for required fields, valid backend types, and proper option structures.
+    Validates that all configured backends can be instantiated successfully and
+    that the configuration follows the expected schema.
+    """
     errors: list[CheckMessage] = []
 
     # check if NEXT_PAGES is defined
@@ -88,13 +107,20 @@ def check_next_pages_configuration(
 
 @register(Tags.compatibility)
 def check_pages_structure(app_configs: Any, **kwargs: Any) -> list[CheckMessage]:
-    """Check pages directory structure for potential issues."""
+    """
+    Validate pages directory structure and file organization.
+
+    Scans all configured router backends to identify pages directories and
+    validates their structure. Checks for proper file organization, naming
+    conventions, and potential conflicts in URL pattern generation. Provides
+    warnings for structural issues that might cause problems during runtime.
+    """
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
     try:
         router_manager = RouterManager()
-        router_manager.reload_config()
+        router_manager._reload_config()
 
         for router in router_manager:
             # type check to ensure we're working with FileRouterBackend
@@ -255,12 +281,19 @@ def _is_valid_args_syntax(args_str: str) -> bool:
 
 @register(Tags.compatibility)
 def check_page_functions(app_configs: Any, **kwargs: Any) -> list[CheckMessage]:
-    """Check page.py files for valid render functions."""
+    """
+    Validate page.py files for proper function definitions and structure.
+
+    Scans all page.py files in configured pages directories to ensure they
+    contain valid render functions or proper template definitions. Validates
+    function signatures, return types, and argument handling to prevent
+    runtime errors during page rendering.
+    """
     errors: list[CheckMessage] = []
 
     try:
         router_manager = RouterManager()
-        router_manager.reload_config()
+        router_manager._reload_config()
 
         for router in router_manager:
             if hasattr(router, "app_dirs") and router.app_dirs:
@@ -297,7 +330,7 @@ def check_page_functions(app_configs: Any, **kwargs: Any) -> list[CheckMessage]:
 def _check_page_functions_in_directory(
     pages_path: Path, context: str
 ) -> list[CheckMessage]:
-    """Check page.py files in a directory for valid render functions."""
+    """Check page.py files in a directory for valid render functions or templates."""
     errors: list[CheckMessage] = []
 
     if not pages_path.exists():
@@ -305,15 +338,21 @@ def _check_page_functions_in_directory(
 
     for page_file in pages_path.rglob("page.py"):
         try:
-            if (render_func := _load_render_function(page_file)) is None:
+            # check if page has render function
+            render_func = _load_render_function(page_file)
+
+            # check if page has template or template.djx
+            has_template = _has_template_or_djx(page_file)
+
+            if render_func is None and not has_template:
                 errors.append(
                     Error(
-                        f"{context} pages: {page_file.relative_to(pages_path)} is missing a valid render function.",
+                        f"{context} pages: {page_file.relative_to(pages_path)} is missing a valid render function, template attribute, or template.djx file.",
                         obj=settings,
                         id="next.E012",
                     )
                 )
-            elif not callable(render_func):
+            elif render_func is not None and not callable(render_func):
                 errors.append(
                     Error(
                         f"{context} pages: {page_file.relative_to(pages_path)} render attribute is not callable.",
@@ -352,15 +391,129 @@ def _load_render_function(file_path: Path) -> Any | None:
         return None
 
 
+def _has_template_or_djx(file_path: Path) -> bool:
+    """Check if page.py has template attribute or template.djx file exists."""
+    try:
+        import importlib.util
+
+        if (
+            spec := importlib.util.spec_from_file_location("page_module", file_path)
+        ) is None or spec.loader is None:
+            return False
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        # check for template attribute
+        if hasattr(module, "template"):
+            return True
+
+        # check for template.djx file
+        djx_file = file_path.parent / "template.djx"
+        return djx_file.exists()
+
+    except Exception:
+        return False
+
+
+@register(Tags.compatibility)
+def check_missing_templates(app_configs: Any, **kwargs: Any) -> list[CheckMessage]:
+    """
+    Validate template availability for all page.py files.
+
+    Ensures that every page.py file has either a template attribute defined
+    or a corresponding template.djx file. This check prevents pages from
+    being created without proper template definitions, which would cause
+    rendering errors during runtime.
+    """
+    errors: list[CheckMessage] = []
+
+    try:
+        router_manager = RouterManager()
+        router_manager._reload_config()
+
+        for router in router_manager:
+            if hasattr(router, "app_dirs") and router.app_dirs:
+                # check app pages
+                if hasattr(router, "_get_installed_apps"):
+                    for app_name in router._get_installed_apps():
+                        if hasattr(router, "_get_app_pages_path"):
+                            if pages_path := router._get_app_pages_path(app_name):
+                                app_errors = _check_missing_templates_in_directory(
+                                    pages_path, f"App '{app_name}'"
+                                )
+                                errors.extend(app_errors)
+            else:
+                # check root pages
+                if hasattr(router, "_get_root_pages_path"):
+                    if pages_path := router._get_root_pages_path():
+                        root_errors = _check_missing_templates_in_directory(
+                            pages_path, "Root"
+                        )
+                        errors.extend(root_errors)
+
+    except Exception as e:
+        errors.append(
+            Error(
+                f"Error checking missing templates: {e}",
+                obj=settings,
+                id="next.E017",
+            )
+        )
+
+    return errors
+
+
+def _check_missing_templates_in_directory(
+    pages_path: Path, context: str
+) -> list[CheckMessage]:
+    """Check for missing templates in page.py files."""
+    errors: list[CheckMessage] = []
+
+    if not pages_path.exists():
+        return errors
+
+    for page_file in pages_path.rglob("page.py"):
+        try:
+            # check if page has template or template.djx
+            has_template = _has_template_or_djx(page_file)
+
+            if not has_template:
+                errors.append(
+                    Error(
+                        f"{context} pages: {page_file.relative_to(pages_path)} is missing a template attribute or template.djx file.",
+                        obj=settings,
+                        id="next.E018",
+                    )
+                )
+        except Exception as e:
+            errors.append(
+                Error(
+                    f"{context} pages: Error checking template for {page_file.relative_to(pages_path)}: {e}",
+                    obj=settings,
+                    id="next.E019",
+                )
+            )
+
+    return errors
+
+
 @register(Tags.compatibility)
 def check_url_patterns(app_configs: Any, **kwargs: Any) -> list[CheckMessage]:
-    """Check for potential URL pattern conflicts."""
+    """
+    Validate URL pattern generation and identify potential conflicts.
+
+    Generates URL patterns from all configured router backends and validates
+    them for naming conflicts, parameter consistency, and Django compatibility.
+    Checks for duplicate URL names, invalid parameter types, and potential
+    routing conflicts that could cause unexpected behavior.
+    """
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
     try:
         router_manager = RouterManager()
-        router_manager.reload_config()
+        router_manager._reload_config()
 
         # collect all URL patterns
         all_patterns: list[tuple[str, str]] = []  # (pattern, source)

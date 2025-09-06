@@ -36,6 +36,7 @@ html = """
     </html>
 """
 
+
 def render(request):
     """Render root page."""
     return HttpResponse(html)
