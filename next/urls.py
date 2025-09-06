@@ -9,14 +9,16 @@ import importlib.util
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
 from django.conf import settings
+from django.http import HttpResponse
 from django.urls import URLPattern, URLResolver, path
 
-# setup logger
+from .pages import page
+
 logger = logging.getLogger(__name__)
 
 
@@ -161,19 +163,8 @@ class FileRouterBackend(RouterBackend):
 
         yield from scan_recursive(pages_path)
 
-    def _create_url_pattern(self, url_path: str, file_path: Path) -> URLPattern | None:
-        """Create Django URL pattern from page.py file."""
-        django_pattern, parameters = self._parse_url_pattern(url_path)
-        if not (render_func := self._load_page_function(file_path)):
-            return None
-
-        def view_wrapper(request: Any, **kwargs: Any) -> Any:
-            """Wrapper to handle parameter passing to render function."""
-            if "args" in parameters and "args" in kwargs:
-                kwargs["args"] = kwargs["args"].split("/")
-            return render_func(request, **kwargs)
-
-        # create a clean name for the URL pattern
+    def _prepare_url_name(self, url_path: str) -> str:
+        """Prepare URL name for Django URL pattern."""
         clean_name = url_path.replace("/", "_")
         # remove square brackets and replace with underscores
         clean_name = re.sub(r"[\[\]]", "_", clean_name)
@@ -181,8 +172,35 @@ class FileRouterBackend(RouterBackend):
         clean_name = re.sub(r"_+", "_", clean_name)
         # remove leading/trailing underscores
         clean_name = clean_name.strip("_")
+        return clean_name
 
-        return path(django_pattern, view_wrapper, name=f"page_{clean_name}")
+    def _create_url_pattern(self, url_path: str, file_path: Path) -> URLPattern | None:
+        """Create Django URL pattern from page.py file."""
+        django_pattern, parameters = self._parse_url_pattern(url_path)
+
+        # create a clean name for the URL pattern
+        clean_name = self._prepare_url_name(url_path)
+
+        # load module and execute it
+        spec = importlib.util.spec_from_file_location("page_module", file_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        # virtual view function for the template
+        def view(request: Any, **kwargs: Any) -> HttpResponse:
+            return HttpResponse(page.render(file_path, request, **kwargs))
+
+        # low-code page file
+        if hasattr(module, "template"):
+            page.register_template(file_path, module.template)
+            return path(django_pattern, view, name=f"page_{clean_name}")
+        # more complex page file with manual view function
+        elif (render := getattr(module, "render", None)) and callable(render):
+            return path(django_pattern, render, name=f"page_{clean_name}")  # type: ignore[no-any-return]
+
+        return None
 
     def _parse_url_pattern(self, url_path: str) -> tuple[str, dict[str, str]]:
         """Parse URL path and extract parameters."""
@@ -210,6 +228,10 @@ class FileRouterBackend(RouterBackend):
             )
             parameters[django_param_name] = django_param_name
 
+        # always add trailing slash to work with Django's APPEND_SLASH setting
+        if django_pattern and not django_pattern.endswith("/"):
+            django_pattern = f"{django_pattern}/"
+
         return django_pattern, parameters
 
     def _parse_param_name_and_type(self, param_str: str) -> tuple[str, str]:
@@ -218,24 +240,6 @@ class FileRouterBackend(RouterBackend):
             type_name, param_name = param_str.split(":", 1)
             return param_name.strip(), type_name.strip()
         return param_str.strip(), "str"
-
-    def _load_page_function(self, file_path: Path) -> Callable[..., Any] | None:
-        """Load render function from page.py file."""
-        try:
-            spec = importlib.util.spec_from_file_location("page_module", file_path)
-            if spec is None or spec.loader is None:
-                return None
-
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-
-            if render_func := getattr(module, "render", None):
-                return render_func if callable(render_func) else None
-            return None
-
-        except Exception as e:
-            logger.error(f"error loading page function from {file_path}: {e}")
-            return None
 
 
 class RouterFactory:
@@ -333,4 +337,4 @@ router_manager = RouterManager()
 
 
 app_name = "next"
-urlpatterns: RouterManager = router_manager
+urlpatterns = list(router_manager)

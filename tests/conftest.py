@@ -18,6 +18,16 @@ if not settings.configured:
                 "NAME": ":memory:",
             }
         },
+        TEMPLATES=[
+            {
+                "BACKEND": "django.template.backends.django.DjangoTemplates",
+                "DIRS": [],
+                "APP_DIRS": True,
+                "OPTIONS": {
+                    "context_processors": [],
+                },
+            },
+        ],
         INSTALLED_APPS=[
             "django.contrib.auth",
             "django.contrib.contenttypes",

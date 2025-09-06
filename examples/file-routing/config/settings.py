@@ -98,11 +98,12 @@ NEXT_PAGES = [
             # 'PAGES_DIR_NAME': 'views',
         },
     },
-    # {
-    #     'BACKEND': 'next.urls.FileRouterBackend',
-    #     'APP_DIRS': False,
-    #     'OPTIONS': {
-    #         'PAGES_DIR_NAME': 'root_pages',
-    #     },
-    # },
+    {
+        "BACKEND": "next.urls.FileRouterBackend",
+        "APP_DIRS": False,
+        "OPTIONS": {
+            "PAGES_DIR_NAME": "root_pages",
+            "PAGES_DIR": str(BASE_DIR / "root_pages"),
+        },
+    },
 ]

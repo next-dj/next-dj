@@ -48,10 +48,10 @@ html = """
             <div class="type-info">
                 <strong>Type:</strong> int
                 <br>
-                <strong>URL Pattern:</strong> /posts/[int:post-id]/
+                <strong>URL Pattern:</strong> /kwargs/[int:post-id]/
             </div>
-            <p>URL: /posts/{post_id}</p>
-            <p>Try different integer values like /posts/123, /posts/456, etc.</p>
+            <p>URL: /kwargs/{post_id}</p>
+            <p>Try different integer values like /kwargs/123, /kwargs/456, etc.</p>
         </div>
     </body>
     </html>
