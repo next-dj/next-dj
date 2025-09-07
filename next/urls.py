@@ -295,12 +295,13 @@ class FileRouterBackend(RouterBackend):
         self, pages_path: Path
     ) -> Generator[tuple[str, Path], None, None]:
         """
-        Recursively scan pages directory for page.py files.
+        Recursively scan pages directory for page.py files and virtual views.
 
-        Walks through the directory tree and identifies page.py files,
-        constructing URL paths based on the directory structure. Each
-        directory level becomes a URL segment, creating a hierarchical
-        URL structure that mirrors the file system.
+        Walks through the directory tree and identifies page.py files and
+        directories with template.djx files (virtual views), constructing
+        URL paths based on the directory structure. Each directory level
+        becomes a URL segment, creating a hierarchical URL structure that
+        mirrors the file system.
         """
 
         def scan_recursive(
@@ -313,6 +314,16 @@ class FileRouterBackend(RouterBackend):
                     yield from scan_recursive(item, new_url_path)
                 elif item.name == "page.py":
                     yield url_path, item
+
+            # check for virtual views: directories with template.djx but no page.py
+            if current_path.is_dir():
+                page_file = current_path / "page.py"
+                template_file = current_path / "template.djx"
+
+                if not page_file.exists() and template_file.exists():
+                    # create a virtual page.py path for the virtual view
+                    virtual_page_path = current_path / "page.py"
+                    yield url_path, virtual_page_path
 
         yield from scan_recursive(pages_path)
 

@@ -1,0 +1,38 @@
+<div class="card">
+    <div class="card-body">
+        <h5 class="card-title">Contributing Guide</h5>
+        <p class="card-text">Learn how to contribute to Bootstrap development and help improve the framework.</p>
+        
+        <h6>Getting Started</h6>
+        <p>Before contributing, please read our contributing guidelines and code of conduct.</p>
+        
+        <h6>Development Setup</h6>
+        <p>Clone the repository and install dependencies:</p>
+        <pre><code>git clone https://github.com/twbs/bootstrap.git
+cd bootstrap
+npm install</code></pre>
+        
+        <h6>Build Tools</h6>
+        <p>Bootstrap uses several build tools for development:</p>
+        <ul>
+            <li><strong>Sass</strong> - CSS preprocessing</li>
+            <li><strong>Autoprefixer</strong> - CSS vendor prefixes</li>
+            <li><strong>PostCSS</strong> - CSS transformations</li>
+            <li><strong>Rollup</strong> - JavaScript bundling</li>
+        </ul>
+        
+        <h6>Running Tests</h6>
+        <p>Run the test suite to ensure everything works:</p>
+        <pre><code>npm test</code></pre>
+        
+        <h6>Submitting Changes</h6>
+        <p>When you're ready to submit your changes:</p>
+        <ol>
+            <li>Create a new branch for your feature</li>
+            <li>Make your changes and test them</li>
+            <li>Submit a pull request with a clear description</li>
+        </ol>
+        
+        <a href="/docs/5.0/getting-started/build-tools/" class="btn btn-primary">Read Full Documentation</a>
+    </div>
+</div>

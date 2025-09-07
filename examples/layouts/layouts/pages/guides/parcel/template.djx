@@ -1,0 +1,35 @@
+<div class="card">
+    <div class="card-body">
+        <h5 class="card-title">Parcel Guide</h5>
+        <p class="card-text">Set up Bootstrap with Parcel bundler for zero-configuration development.</p>
+        
+        <h6>Installation</h6>
+        <p>Install Bootstrap and Parcel using npm:</p>
+        <pre><code>npm install bootstrap @popperjs/core
+npm install --save-dev parcel</code></pre>
+        
+        <h6>Project Structure</h6>
+        <p>Create a simple project structure:</p>
+        <pre><code>project/
+├── index.html
+├── src/
+│   ├── main.js
+│   └── main.scss
+└── package.json</code></pre>
+        
+        <h6>Import Bootstrap</h6>
+        <p>Import Bootstrap in your main.scss file:</p>
+        <pre><code>@import "bootstrap/scss/bootstrap";</code></pre>
+        
+        <h6>Build and Serve</h6>
+        <p>Add scripts to your package.json:</p>
+        <pre><code>{
+  "scripts": {
+    "dev": "parcel index.html",
+    "build": "parcel build index.html"
+  }
+}</code></pre>
+        
+        <a href="/docs/5.0/getting-started/parcel/" class="btn btn-primary">Read Full Documentation</a>
+    </div>
+</div>

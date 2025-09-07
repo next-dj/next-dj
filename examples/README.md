@@ -27,6 +27,17 @@ A complete Django application example demonstrating real-world usage with databa
 
 **Best for:** Learning how to build production-ready applications with next-dj
 
+### layouts
+An advanced template inheritance example showcasing sophisticated layout management, context processors, and nested template structures.
+
+**Key Features:**
+- Template inheritance with nested layouts
+- Context processors for site-wide variables
+- Multi-level template composition
+- Section-specific layouts
+
+**Best for:** Understanding advanced template patterns and building complex web applications
+
 ## Getting Started
 
 Each example includes its own README with detailed setup and running instructions. To get started:
@@ -44,11 +55,17 @@ Start with the `file-routing` example to understand basic concepts and routing p
 **If you're building a real application:**
 Use the `pages` example as a reference for integrating next-dj with Django's full feature set.
 
+**If you're building complex layouts:**
+Use the `layouts` example to understand advanced template inheritance and layout management patterns.
+
 **If you're exploring specific features:**
 - Parameter handling: `file-routing` example
 - Database integration: `pages` example
 - Template management: `pages` example
 - Admin integration: `pages` example
+- Template inheritance: `layouts` example
+- Context processors: `layouts` example
+- UI frameworks integration: `layouts` example
 
 ## Common Patterns
 
@@ -59,6 +76,9 @@ All examples demonstrate these common next-dj patterns:
 - **Template loading**: Both Python string templates and template.djx files
 - **Context management**: Registering context functions for template data
 - **Error handling**: Graceful handling of missing templates and invalid parameters
+- **Template inheritance**: Nested layout structures with Django's template system
+- **Context processors**: Site-wide template variables and configuration
+- **Active navigation**: Dynamic UI states based on current URL path
 
 ## Troubleshooting
 
