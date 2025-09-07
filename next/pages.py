@@ -175,19 +175,57 @@ class ContextManager:
         self, file_path: Path, *args: Any, **kwargs: Any
     ) -> dict[str, Any]:
         """
-        Execute all registered context functions for a file and merge results.
-
-        Runs all context functions associated with the file, passing through
-        any provided arguments. Keyed functions contribute single values,
-        while unkeyed functions contribute entire dictionaries that get merged.
-        Returns the combined context data for template rendering.
+        Collects and merges context data for a template.
+        Wraps each registered context function with dependency injection,
+        automatically supplying common objects (request, session, user) as needed.
+        Returns the combined context for rendering.
         """
+        from .dependency_resolver import dependency_resolver
         context_data = {}
+        # Lazy dependency cache for efficiency
+        dep_cache = {}
+        def get_dep(name, request=None):
+            if name not in dep_cache:
+                if name == "request":
+                    dep_cache[name] = request
+                elif name == "session":
+                    dep_cache[name] = getattr(request, "session", None) if request else None
+                elif name == "user":
+                    dep_cache[name] = getattr(request, "user", None) if request else None
+                else:
+                    dep_cache[name] = None
+            return dep_cache[name]
+        # Detect request object in args/kwargs
+        request = kwargs.get("request")
+        if not request and args:
+            for arg in args:
+                if hasattr(arg, "session") and hasattr(arg, "user"):
+                    request = arg
+                    break
+        # Dependency injection setup: inject request, session, and user (as request.user)
+        # This ensures context functions get the actual user value, not the whole request object.
+        available_deps = {
+            "request": lambda: get_dep("request", request),
+            "session": lambda: get_dep("session", request),
+            "user": lambda: getattr(request, "user", None) if request else None,
+        }
+        import inspect
         for key, func in self._context_registry.get(file_path, {}).items():
+            wrapped_func = dependency_resolver(func, available_deps)
+            sig = inspect.signature(func)
+            param_list = list(sig.parameters.values())
+            # If the context function expects 'user' and the positional arg is a request, inject request.user
+            new_args = list(args)
+            for idx, param in enumerate(param_list[:len(args)]):
+                if param.name == "user" and hasattr(args[idx], "user"):
+                    # Replace the positional request with its .user attribute
+                    new_args[idx] = getattr(args[idx], "user", None)
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters and k not in [p.name for p in param_list[:len(new_args)]]}
+            # This logic ensures that context functions get the actual user value, not the whole request object, when 'user' is expected.
             if key is None:
-                context_data.update(func(*args, **kwargs))
+                context_data.update(wrapped_func(*new_args, **filtered_kwargs))
             else:
-                context_data[key] = func(*args, **kwargs)
+                context_data[key] = wrapped_func(*new_args, **filtered_kwargs)
         return context_data
 
 
@@ -272,14 +310,44 @@ class Page:
 
     def render(self, file_path: Path, *args: Any, **kwargs: Any) -> str:
         """
-        Render a template with context data and return the final HTML.
-
-        Combines template content with context data from registered functions
-        and any additional variables passed as kwargs. Template variables
-        take precedence over context function results. Uses Django's
-        template engine for rendering with full tag and filter support.
+        Renders a template with context and supports DI for user render functions.
+        Collects context, merges kwargs, and injects dependencies (request, session, user)
+        for user-defined render functions if present. Returns the rendered HTML.
         """
+        from .dependency_resolver import dependency_resolver
         template_str = self._template_registry[file_path]
+        # Dependency cache for user-facing render DI
+        dep_cache = {}
+        def get_dep(name, request=None):
+            if name not in dep_cache:
+                if name == "request":
+                    dep_cache[name] = request
+                elif name == "session":
+                    dep_cache[name] = getattr(request, "session", None) if request else None
+                elif name == "user":
+                    dep_cache[name] = getattr(request, "user", None) if request else None
+                else:
+                    dep_cache[name] = None
+            return dep_cache[name]
+        request = kwargs.get("request")
+        if not request and args:
+            for arg in args:
+                if hasattr(arg, "session") and hasattr(arg, "user"):
+                    request = arg
+                    break
+        available_deps = {
+            "request": lambda: get_dep("request", request),
+            "session": lambda: get_dep("session", request),
+            "user": lambda: get_dep("user", request),
+        }
+        # Inject DI for user-provided render function
+        if "render" in kwargs and callable(kwargs["render"]):
+            user_render = dependency_resolver(kwargs["render"], available_deps)
+            kwargs["render"] = user_render
+        # Ensure request is always passed as a kwarg if found in args
+        if request and "request" not in kwargs:
+            kwargs = dict(kwargs)
+            kwargs["request"] = request
         context_data = self._context_manager.collect_context(file_path, *args, **kwargs)
         context_data.update(kwargs)  # kwargs override context functions
         return Template(template_str).render(Context(context_data))
@@ -308,8 +376,10 @@ class Page:
 
         # create view function that handles URL parameters
         def view(request: Any, **kwargs: Any) -> HttpResponse:
-            kwargs.update(parameters)
-            return HttpResponse(self.render(file_path, request, **kwargs))
+            # Merge parameters from URL parser, but don't overwrite explicit kwargs
+            merged_kwargs = dict(parameters)
+            merged_kwargs.update(kwargs)
+            return HttpResponse(self.render(file_path, request, **merged_kwargs))
 
         # try to load template using available loaders
         for loader in self._template_loaders:
@@ -325,9 +395,13 @@ class Page:
 
         # fall back to custom render function if available
         if (render_func := getattr(module, "render", None)) and callable(render_func):
+            def fallback_view(request: Any, **kwargs: Any) -> HttpResponse:
+                merged_kwargs = dict(parameters)
+                merged_kwargs.update(kwargs)
+                return render_func(request, **merged_kwargs)
             return path(  # type: ignore[no-any-return]
                 django_pattern,
-                render_func,
+                fallback_view,
                 name=URL_NAME_TEMPLATE.format(name=clean_name),
             )
 
