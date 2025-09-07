@@ -471,7 +471,7 @@ class Page:
 
     def _create_view_function(
         self, file_path: Path, parameters: dict[str, str]
-    ) -> Callable[[Any, ...], HttpResponse]:
+    ) -> Callable[..., HttpResponse]:
         """Create a view function that handles URL parameters and template rendering."""
 
         def view(request: Any, **kwargs: Any) -> HttpResponse:

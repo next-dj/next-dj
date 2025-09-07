@@ -659,46 +659,49 @@ class TestDjxTemplateLoader:
 
         assert result == expected_result
 
-    def test_create_url_pattern_with_djx_template(self, page_instance, temp_dir):
-        """Test create_url_pattern with template.djx template."""
-        # create page.py file without template attribute
+    @pytest.mark.parametrize(
+        "test_case,page_content,create_djx,djx_content,expected_template",
+        [
+            (
+                "djx_template_only",
+                'print("test")',
+                True,
+                "<h1>{{ title }}</h1><p>Hello {{ name }}!</p>",
+                "<h1>{{ title }}</h1><p>Hello {{ name }}!</p>",
+            ),
+            (
+                "template_priority",
+                'template = "Python template: {{ name }}"',
+                True,
+                "<h1>DJX template: {{ name }}</h1>",
+                "Python template: {{ name }}",
+            ),
+        ],
+    )
+    def test_create_url_pattern_template_scenarios(
+        self,
+        page_instance,
+        temp_dir,
+        url_parser,
+        test_case,
+        page_content,
+        create_djx,
+        djx_content,
+        expected_template,
+    ):
+        """Test create_url_pattern with different template scenarios."""
         page_file = temp_dir / "page.py"
-        page_file.write_text('print("test")')
+        page_file.write_text(page_content)
 
-        # create template.djx file
-        djx_file = temp_dir / "template.djx"
-        djx_content = "<h1>{{ title }}</h1><p>Hello {{ name }}!</p>"
-        djx_file.write_text(djx_content)
+        if create_djx:
+            djx_file = temp_dir / "template.djx"
+            djx_file.write_text(djx_content)
 
-        # test create_url_pattern
-        url_parser = URLPatternParser()
         pattern = page_instance.create_url_pattern("test", page_file, url_parser)
 
         assert pattern is not None
         assert page_file in page_instance._template_registry
-        assert page_instance._template_registry[page_file] == djx_content
-
-    def test_create_url_pattern_priority_template_over_djx(
-        self, page_instance, temp_dir
-    ):
-        """Test that template attribute takes priority over template.djx file."""
-        # create page.py file with template attribute
-        page_file = temp_dir / "page.py"
-        page_file.write_text('template = "Python template: {{ name }}"')
-
-        # create template.djx file
-        djx_file = temp_dir / "template.djx"
-        djx_content = "<h1>DJX template: {{ name }}</h1>"
-        djx_file.write_text(djx_content)
-
-        # test create_url_pattern
-        url_parser = URLPatternParser()
-        pattern = page_instance.create_url_pattern("test", page_file, url_parser)
-
-        assert pattern is not None
-        assert (
-            page_instance._template_registry[page_file] == "Python template: {{ name }}"
-        )
+        assert page_instance._template_registry[page_file] == expected_template
 
     def test_render_djx_template_with_context(self, page_instance, temp_dir):
         """Test rendering template.djx template with context."""
