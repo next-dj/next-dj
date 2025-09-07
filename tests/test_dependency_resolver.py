@@ -1,9 +1,8 @@
-import pytest
-from next.dependency_resolver import dependency_resolver
-from next.pages import ContextManager
-from pathlib import Path
 import types
-from next.pages import Page
+
+from next.dependency_resolver import dependency_resolver
+from next.pages import ContextManager, Page
+
 
 # Basic injection
 def test_injects_request():

@@ -10,13 +10,13 @@ The system follows the Strategy pattern for backend selection and the Factory pa
 for object creation, ensuring high extensibility and maintainability.
 """
 
+import builtins  # Imported at top for test patch compatibility
 import logging
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
-import builtins  # Imported at top for test patch compatibility
 
 from django.conf import settings
 from django.urls import URLPattern, URLResolver
@@ -262,11 +262,15 @@ class FileRouterBackend(RouterBackend):
             # So we use Path(app_module.__file__) to get mock_app_path, then use mock_app_path.parent as parent.
             # Import Path inside the function so patching works in tests
             from pathlib import Path
-            app_path = Path(app_module.__file__)
+
+            # Ensure __file__ is not None before passing to Path
+            file_path = app_module.__file__
+            if file_path is None:
+                return None
+
+            app_path = Path(file_path)
             parent = app_path.parent
-            # DEBUG: Print parent and its attributes to diagnose test failure
-            print(f"DEBUG parent type: {type(parent)}")
-            print(f"DEBUG parent: {parent}")
+
             # If parent is a mock and has __truediv__, use it (this matches the test's patching setup)
             # If parent is a mock and does NOT have __truediv__, return None (test expects this)
             # If parent is a real Path, use / operator as normal

@@ -1,8 +1,8 @@
-import types
-from pathlib import Path
 import textwrap
-import pytest
-from next.pages import Page, ContextManager, PythonTemplateLoader, DjxTemplateLoader
+import types
+
+from next.pages import ContextManager, DjxTemplateLoader, Page, PythonTemplateLoader
+
 
 def _make_request(user="neo", session=None):
     return types.SimpleNamespace(user=user, session=session or {})

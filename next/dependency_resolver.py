@@ -10,19 +10,34 @@ Usage:
     result = wrapped(*args, **kwargs)
 """
 
-def dependency_resolver(func, available_deps):
+import inspect
+from collections.abc import Callable
+from functools import wraps
+from typing import Any
+
+
+def dependency_resolver(func: Callable, available_deps: dict[str, Any]) -> Callable:
     """
     Wraps a function to inject dependencies by name.
-    Fills missing parameters from available_deps.
+
+    This function takes any callable and a dictionary of available dependencies,
+    then returns a new function that automatically fills missing parameters
+    from the dependency dictionary. This is super useful for dependency injection
+    where you want to automatically provide things like request, user, session, etc.
+
+    Args:
+        func: The function to wrap with dependency injection
+        available_deps: Dictionary mapping parameter names to their values
+
+    Returns:
+        A new function that will inject dependencies when called
     """
-    import inspect
-    from functools import wraps
 
     sig = inspect.signature(func)
     param_names = list(sig.parameters.keys())
 
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         bound_args = sig.bind_partial(*args, **kwargs)
         bound_args.apply_defaults()
         for name in param_names:

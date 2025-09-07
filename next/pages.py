@@ -184,7 +184,7 @@ class ContextManager:
         context_data = {}
         # Lazy dependency cache for efficiency
         dep_cache = {}
-        def get_dep(name, request=None):
+        def get_dep(name: str, request: Any = None) -> Any:
             if name not in dep_cache:
                 if name == "request":
                     dep_cache[name] = request
@@ -318,7 +318,7 @@ class Page:
         template_str = self._template_registry[file_path]
         # Dependency cache for user-facing render DI
         dep_cache = {}
-        def get_dep(name, request=None):
+        def get_dep(name: str, request: Any = None) -> Any:
             if name not in dep_cache:
                 if name == "request":
                     dep_cache[name] = request
@@ -395,11 +395,11 @@ class Page:
 
         # fall back to custom render function if available
         if (render_func := getattr(module, "render", None)) and callable(render_func):
-            def fallback_view(request: Any, **kwargs: Any) -> HttpResponse:
+            def fallback_view(request: Any, **kwargs: Any) -> Any:
                 merged_kwargs = dict(parameters)
                 merged_kwargs.update(kwargs)
                 return render_func(request, **merged_kwargs)
-            return path(  # type: ignore[no-any-return]
+            return path(
                 django_pattern,
                 fallback_view,
                 name=URL_NAME_TEMPLATE.format(name=clean_name),
