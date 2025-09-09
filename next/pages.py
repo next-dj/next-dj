@@ -305,13 +305,23 @@ class ContextManager:
     allowing each page to have its own set of context providers. Supports
     two registration patterns: keyed functions (returning single values)
     and unkeyed functions (returning dictionaries that get merged).
+
+    Also supports context inheritance from layout directories where
+    context functions marked with inherit_context=True will be available
+    to child pages using layout.djx files.
     """
 
     def __init__(self) -> None:
-        self._context_registry: dict[Path, dict[str | None, Callable[..., Any]]] = {}
+        self._context_registry: dict[
+            Path, dict[str | None, tuple[Callable[..., Any], bool]]
+        ] = {}
 
     def register_context(
-        self, file_path: Path, key: str | None, func: Callable[..., Any]
+        self,
+        file_path: Path,
+        key: str | None,
+        func: Callable[..., Any],
+        inherit_context: bool = False,
     ) -> None:
         """
         Register a context function for a specific file.
@@ -320,7 +330,7 @@ class ContextManager:
         are stored under their key name, while unkeyed functions (key=None) are
         expected to return dictionaries that will be merged into the context.
         """
-        self._context_registry.setdefault(file_path, {})[key] = func
+        self._context_registry.setdefault(file_path, {})[key] = (func, inherit_context)
 
     def collect_context(
         self, file_path: Path, *args: Any, **kwargs: Any
@@ -334,12 +344,52 @@ class ContextManager:
         Returns the combined context data for template rendering.
         """
         context_data = {}
-        for key, func in self._context_registry.get(file_path, {}).items():
+
+        # collect inherited context from layout directories first (lower priority)
+        inherited_context = self._collect_inherited_context(file_path, *args, **kwargs)
+        context_data.update(inherited_context)
+
+        # collect context from the current file (higher priority - can override inherited)
+        for key, (func, _) in self._context_registry.get(file_path, {}).items():
             if key is None:
                 context_data.update(func(*args, **kwargs))
             else:
                 context_data[key] = func(*args, **kwargs)
+
         return context_data
+
+    def _collect_inherited_context(
+        self, file_path: Path, *args: Any, **kwargs: Any
+    ) -> dict[str, Any]:
+        """
+        Collect context from layout directories that should be inherited.
+
+        Walks up the directory tree from the template's location to find
+        layout.djx files and collects context from their corresponding
+        page.py files if they have inherit_context=True functions.
+        """
+        inherited_context = {}
+        current_dir = file_path.parent
+
+        # walk up the directory tree to find layout directories
+        while current_dir != current_dir.parent:  # not at root
+            layout_file = current_dir / "layout.djx"
+            page_file = current_dir / "page.py"
+
+            # if layout.djx exists, check for page.py with inheritable context
+            if layout_file.exists() and page_file.exists():
+                for key, (func, inherit_context) in self._context_registry.get(
+                    page_file, {}
+                ).items():
+                    if inherit_context:
+                        if key is None:
+                            inherited_context.update(func(*args, **kwargs))
+                        else:
+                            inherited_context[key] = func(*args, **kwargs)
+
+            current_dir = current_dir.parent
+
+        return inherited_context
 
 
 class Page:
@@ -399,7 +449,7 @@ class Page:
         raise RuntimeError("Could not determine caller file path")
 
     def context(
-        self, func_or_key: Any = None
+        self, func_or_key: Any = None, *, inherit_context: bool = False
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         Decorator for registering context functions that provide template variables.
@@ -417,11 +467,15 @@ class Page:
             if callable(func_or_key):
                 # @context usage - function returns dict
                 caller_path = self._get_caller_path(2)
-                self._context_manager.register_context(caller_path, None, func_or_key)
+                self._context_manager.register_context(
+                    caller_path, None, func_or_key, inherit_context
+                )
             else:
                 # @context("key") usage - function result stored under key
                 caller_path = self._get_caller_path(1)
-                self._context_manager.register_context(caller_path, func_or_key, func)
+                self._context_manager.register_context(
+                    caller_path, func_or_key, func, inherit_context
+                )
             return func
 
         return decorator(func_or_key) if callable(func_or_key) else decorator

@@ -75,9 +75,10 @@ class URLPatternParser:
             param_name, param_type = self._parse_param_name_and_type(param_str)
             django_param_name = param_name.replace("-", "_")
 
-            # replace only the first occurrence to avoid conflicts
+            # replace all occurrences of this parameter
             django_pattern = django_pattern.replace(
-                f"[{param_str}]", f"<{param_type}:{django_param_name}>", 1
+                f"[{param_str}]",
+                f"<{param_type}:{django_param_name}>",
             )
             parameters[django_param_name] = django_param_name
 

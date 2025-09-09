@@ -167,12 +167,56 @@ class TestPage:
             expected_key
             in page_instance._context_manager._context_registry[context_temp_file]
         )
+        func_registered, inherit = page_instance._context_manager._context_registry[
+            context_temp_file
+        ][expected_key]
+        assert func_registered == func
+        assert inherit is False
+
+    def test_context_decorator_with_inherit_context(
+        self, page_instance, context_temp_file, mock_frame
+    ):
+        """Test context decorator with inherit_context=True."""
+        mock_frame.return_value.f_back.f_globals = {"__file__": str(context_temp_file)}
+
+        @page_instance.context("inherited_key", inherit_context=True)
+        def get_inherited_value():
+            return "inherited_value"
+
+        # verify context function was registered with inherit_context=True
+        assert context_temp_file in page_instance._context_manager._context_registry
         assert (
-            page_instance._context_manager._context_registry[context_temp_file][
-                expected_key
-            ]
-            == func
+            "inherited_key"
+            in page_instance._context_manager._context_registry[context_temp_file]
         )
+        func, inherit = page_instance._context_manager._context_registry[
+            context_temp_file
+        ]["inherited_key"]
+        assert func == get_inherited_value
+        assert inherit is True
+
+    def test_context_decorator_without_key_inherit_context(
+        self, page_instance, context_temp_file, mock_frame
+    ):
+        """Test context decorator without key but with inherit_context=True."""
+        mock_frame.return_value.f_back.f_back.f_globals = {
+            "__file__": str(context_temp_file)
+        }
+
+        @page_instance.context(inherit_context=True)
+        def get_context_data():
+            return {"key1": "value1", "key2": "value2"}
+
+        # verify context function was registered with inherit_context=True
+        assert context_temp_file in page_instance._context_manager._context_registry
+        assert (
+            None in page_instance._context_manager._context_registry[context_temp_file]
+        )
+        func, inherit = page_instance._context_manager._context_registry[
+            context_temp_file
+        ][None]
+        assert func == get_context_data
+        assert inherit is True
 
     @pytest.mark.parametrize(
         "test_case,template_str,context_setup,render_kwargs,expected",
@@ -270,6 +314,85 @@ class TestPage:
         assert result1 == "Page 1: First Page"
         assert result2 == "Page 2: Second Page"
 
+    def test_render_with_inherited_context(self, page_instance, temp_dir):
+        """Test render method with inherited context from layout directories."""
+        # create layout structure
+        layout_dir = temp_dir / "layout_dir"
+        layout_dir.mkdir()
+        layout_file = layout_dir / "layout.djx"
+        layout_file.write_text(
+            "<html>{% block template %}{% endblock template %}</html>"
+        )
+
+        page_file = layout_dir / "page.py"
+        page_file.write_text("")
+
+        # create child directory
+        child_dir = layout_dir / "child"
+        child_dir.mkdir()
+        child_page_file = child_dir / "page.py"
+
+        # register template for child page
+        template_str = "Child page: {{ inherited_var }}"
+        page_instance.register_template(child_page_file, template_str)
+
+        # register context in layout page.py with inherit_context=True
+        def layout_func():
+            return "inherited_value"
+
+        page_instance._context_manager.register_context(
+            page_file, "inherited_var", layout_func, inherit_context=True
+        )
+
+        # render child page
+        result = page_instance.render(child_page_file)
+
+        assert "Child page: inherited_value" in result
+
+    def test_render_with_inherited_context_override(self, page_instance, temp_dir):
+        """Test that child page context overrides inherited context."""
+        # create layout structure
+        layout_dir = temp_dir / "layout_dir"
+        layout_dir.mkdir()
+        layout_file = layout_dir / "layout.djx"
+        layout_file.write_text(
+            "<html>{% block template %}{% endblock template %}</html>"
+        )
+
+        page_file = layout_dir / "page.py"
+        page_file.write_text("")
+
+        # create child directory
+        child_dir = layout_dir / "child"
+        child_dir.mkdir()
+        child_page_file = child_dir / "page.py"
+
+        # register template for child page
+        template_str = "Child page: {{ var }}"
+        page_instance.register_template(child_page_file, template_str)
+
+        # register context in layout page.py with inherit_context=True
+        def layout_func():
+            return "layout_value"
+
+        page_instance._context_manager.register_context(
+            page_file, "var", layout_func, inherit_context=True
+        )
+
+        # register context in child page.py (should override inherited)
+        def child_func():
+            return "child_value"
+
+        page_instance._context_manager.register_context(
+            child_page_file, "var", child_func, inherit_context=False
+        )
+
+        # render child page
+        result = page_instance.render(child_page_file)
+
+        # child context should override inherited context
+        assert "Child page: child_value" in result
+
     def test_context_registry_defaultdict_behavior(self, page_instance, test_file_path):
         """Test that context registry uses defaultdict-like behavior."""
         # register context function - should create the file entry
@@ -348,10 +471,11 @@ class TestGlobalPageInstance:
 
         assert global_file_path in page._context_manager._context_registry
         assert "test_key" in page._context_manager._context_registry[global_file_path]
-        assert (
-            page._context_manager._context_registry[global_file_path]["test_key"]
-            == test_function
-        )
+        func, inherit = page._context_manager._context_registry[global_file_path][
+            "test_key"
+        ]
+        assert func == test_function
+        assert inherit is False
 
     @pytest.mark.parametrize(
         "test_case,frame_setup",
@@ -594,7 +718,10 @@ class TestContextManager:
 
         assert test_file_path in context_manager._context_registry
         assert key in context_manager._context_registry[test_file_path]
-        assert context_manager._context_registry[test_file_path][key] == func_return
+        assert context_manager._context_registry[test_file_path][key] == (
+            func_return,
+            False,
+        )
 
         result = context_manager.collect_context(test_file_path)
         assert result == expected_result
@@ -620,6 +747,190 @@ class TestContextManager:
         result = context_manager.collect_context(test_file_path)
 
         assert result == {}
+
+    def test_register_context_with_inherit_context(
+        self, context_manager, test_file_path
+    ):
+        """Test registering context with inherit_context=True."""
+
+        def test_func():
+            return "inherited_value"
+
+        context_manager.register_context(
+            test_file_path, "inherited_key", test_func, inherit_context=True
+        )
+
+        assert test_file_path in context_manager._context_registry
+        assert "inherited_key" in context_manager._context_registry[test_file_path]
+        func, inherit = context_manager._context_registry[test_file_path][
+            "inherited_key"
+        ]
+        assert func == test_func
+        assert inherit is True
+
+    def test_collect_inherited_context(self, context_manager, temp_dir):
+        """Test collecting inherited context from layout directories."""
+        # create layout structure
+        layout_dir = temp_dir / "layout_dir"
+        layout_dir.mkdir()
+        layout_file = layout_dir / "layout.djx"
+        layout_file.write_text(
+            "<html>{% block template %}{% endblock template %}</html>"
+        )
+
+        page_file = layout_dir / "page.py"
+        page_file.write_text("")
+
+        # create child directory
+        child_dir = layout_dir / "child"
+        child_dir.mkdir()
+        child_page_file = child_dir / "page.py"
+
+        # register context in layout page.py with inherit_context=True
+        def layout_func():
+            return "layout_value"
+
+        context_manager.register_context(
+            page_file, "layout_var", layout_func, inherit_context=True
+        )
+
+        # collect context for child page
+        result = context_manager.collect_context(child_page_file)
+
+        assert "layout_var" in result
+        assert result["layout_var"] == "layout_value"
+
+    def test_collect_inherited_context_multiple_levels(self, context_manager, temp_dir):
+        """Test collecting inherited context from multiple layout levels."""
+        # create nested layout structure
+        root_dir = temp_dir / "root"
+        root_dir.mkdir()
+        root_layout = root_dir / "layout.djx"
+        root_layout.write_text(
+            "<html>{% block template %}{% endblock template %}</html>"
+        )
+        root_page = root_dir / "page.py"
+        root_page.write_text("")  # create empty page.py
+
+        sub_dir = root_dir / "sub"
+        sub_dir.mkdir()
+        sub_layout = sub_dir / "layout.djx"
+        sub_layout.write_text("<div>{% block template %}{% endblock template %}</div>")
+        sub_page = sub_dir / "page.py"
+        sub_page.write_text("")  # create empty page.py
+
+        child_dir = sub_dir / "child"
+        child_dir.mkdir()
+        child_page = child_dir / "page.py"
+
+        # register context in both layout levels
+        def root_func():
+            return "root_value"
+
+        def sub_func():
+            return "sub_value"
+
+        context_manager.register_context(
+            root_page, "root_var", root_func, inherit_context=True
+        )
+        context_manager.register_context(
+            sub_page, "sub_var", sub_func, inherit_context=True
+        )
+
+        # collect context for child page
+        result = context_manager.collect_context(child_page)
+
+        assert "root_var" in result
+        assert "sub_var" in result
+        assert result["root_var"] == "root_value"
+        assert result["sub_var"] == "sub_value"
+
+    def test_collect_inherited_context_no_layout(self, context_manager, temp_dir):
+        """Test collecting context when no layout files exist."""
+        page_file = temp_dir / "page.py"
+        result = context_manager.collect_context(page_file)
+        assert result == {}
+
+    def test_collect_inherited_context_no_page_py(self, context_manager, temp_dir):
+        """Test collecting context when layout.djx exists but no page.py."""
+        layout_dir = temp_dir / "layout_dir"
+        layout_dir.mkdir()
+        layout_file = layout_dir / "layout.djx"
+        layout_file.write_text(
+            "<html>{% block template %}{% endblock template %}</html>"
+        )
+
+        child_dir = layout_dir / "child"
+        child_dir.mkdir()
+        child_page_file = child_dir / "page.py"
+
+        result = context_manager.collect_context(child_page_file)
+        assert result == {}
+
+    def test_collect_inherited_context_inherit_false(self, context_manager, temp_dir):
+        """Test that context with inherit_context=False is not inherited."""
+        # create layout structure
+        layout_dir = temp_dir / "layout_dir"
+        layout_dir.mkdir()
+        layout_file = layout_dir / "layout.djx"
+        layout_file.write_text(
+            "<html>{% block template %}{% endblock template %}</html>"
+        )
+
+        page_file = layout_dir / "page.py"
+        page_file.write_text("")
+
+        # create child directory
+        child_dir = layout_dir / "child"
+        child_dir.mkdir()
+        child_page_file = child_dir / "page.py"
+
+        # register context with inherit_context=False
+        def layout_func():
+            return "layout_value"
+
+        context_manager.register_context(
+            page_file, "layout_var", layout_func, inherit_context=False
+        )
+
+        # collect context for child page
+        result = context_manager.collect_context(child_page_file)
+
+        assert "layout_var" not in result
+
+    def test_collect_inherited_context_dict_return(self, context_manager, temp_dir):
+        """Test collecting inherited context with dict return (key=None)."""
+        # create layout structure
+        layout_dir = temp_dir / "layout_dir"
+        layout_dir.mkdir()
+        layout_file = layout_dir / "layout.djx"
+        layout_file.write_text(
+            "<html>{% block template %}{% endblock template %}</html>"
+        )
+
+        page_file = layout_dir / "page.py"
+        page_file.write_text("")
+
+        # create child directory
+        child_dir = layout_dir / "child"
+        child_dir.mkdir()
+        child_page_file = child_dir / "page.py"
+
+        # register context function that returns dict with inherit_context=True
+        def layout_dict_func():
+            return {"inherited_key1": "value1", "inherited_key2": "value2"}
+
+        context_manager.register_context(
+            page_file, None, layout_dict_func, inherit_context=True
+        )
+
+        # collect context for child page
+        result = context_manager.collect_context(child_page_file)
+
+        assert "inherited_key1" in result
+        assert "inherited_key2" in result
+        assert result["inherited_key1"] == "value1"
+        assert result["inherited_key2"] == "value2"
 
 
 class TestDjxTemplateLoader:
@@ -999,6 +1310,443 @@ def render(request, **kwargs):
 
         result = _has_template_or_djx(page_file)
         assert result is expected_result
+
+
+class TestLayoutChecks:
+    """Test cases for layout checks functionality."""
+
+    def test_check_layout_templates_with_block(self, temp_dir):
+        """Test check_layout_templates with proper template block."""
+        from unittest.mock import patch
+
+        from next.checks import check_layout_templates
+
+        # create layout file with proper block
+        layout_file = temp_dir / "layout.djx"
+        layout_file.write_text(
+            "<html>{% block template %}{% endblock template %}</html>"
+        )
+
+        # create page file
+        page_file = temp_dir / "page.py"
+        page_file.write_text("")
+
+        with (
+            patch("next.checks.RouterManager") as mock_router_manager,
+            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        ):
+            mock_router = mock_router_manager.return_value
+            mock_router._reload_config.return_value = None
+            mock_router._routers = [mock_router]
+            mock_router.pages_dir_name = "pages"
+            mock_router.app_dirs = True
+            mock_router._scan_pages_directory.return_value = [("test", page_file)]
+            mock_get_pages_dir.return_value = temp_dir
+
+            warnings = check_layout_templates(None)
+            assert len(warnings) == 0
+
+    def test_check_layout_templates_without_block(self, temp_dir):
+        """Test check_layout_templates without template block."""
+        from unittest.mock import patch
+
+        from next.checks import check_layout_templates
+
+        # create layout file without proper block
+        layout_file = temp_dir / "layout.djx"
+        layout_file.write_text("<html><body>No template block</body></html>")
+
+        # create page file
+        page_file = temp_dir / "page.py"
+        page_file.write_text("")
+
+        with (
+            patch("next.checks.RouterManager") as mock_router_manager,
+            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        ):
+            mock_router = mock_router_manager.return_value
+            mock_router._reload_config.return_value = None
+            mock_router._routers = [mock_router]
+            mock_router.pages_dir_name = "pages"
+            mock_router.app_dirs = True
+            mock_router._scan_pages_directory.return_value = [("test", page_file)]
+            mock_get_pages_dir.return_value = temp_dir
+
+            warnings = check_layout_templates(None)
+            assert len(warnings) == 1
+            assert "does not contain required {% block template %}" in warnings[0].msg
+
+    def test_check_layout_templates_disabled(self, temp_dir):
+        """Test check_layout_templates when disabled in settings."""
+        from unittest.mock import patch
+
+        from next.checks import check_layout_templates
+
+        with patch("next.checks.getattr") as mock_getattr:
+            mock_getattr.side_effect = (
+                lambda obj, attr, default: {"check_layout_template_blocks": False}
+                if attr == "NEXT_PAGES_OPTIONS"
+                else default
+            )
+            warnings = check_layout_templates(None)
+            assert len(warnings) == 0
+
+
+class TestMissingPageContentChecks:
+    """Test cases for missing page content checks."""
+
+    def test_check_missing_page_content_with_template(self, temp_dir):
+        """Test check_missing_page_content with template variable."""
+        from unittest.mock import patch
+
+        from next.checks import check_missing_page_content
+
+        # create page file with template
+        page_file = temp_dir / "page.py"
+        page_file.write_text('template = "Hello World"')
+
+        with (
+            patch("next.checks.RouterManager") as mock_router_manager,
+            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        ):
+            mock_router = mock_router_manager.return_value
+            mock_router._reload_config.return_value = None
+            mock_router._routers = [mock_router]
+            mock_router.pages_dir_name = "pages"
+            mock_router.app_dirs = True
+            mock_router._scan_pages_directory.return_value = [("test", page_file)]
+            mock_get_pages_dir.return_value = temp_dir
+
+            warnings = check_missing_page_content(None)
+            assert len(warnings) == 0
+
+    def test_check_missing_page_content_with_render(self, temp_dir):
+        """Test check_missing_page_content with render function."""
+        from unittest.mock import patch
+
+        from next.checks import check_missing_page_content
+
+        # create page file with render function
+        page_file = temp_dir / "page.py"
+        page_file.write_text("""
+def render(request, **kwargs):
+    return "Hello World"
+        """)
+
+        with (
+            patch("next.checks.RouterManager") as mock_router_manager,
+            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        ):
+            mock_router = mock_router_manager.return_value
+            mock_router._reload_config.return_value = None
+            mock_router._routers = [mock_router]
+            mock_router.pages_dir_name = "pages"
+            mock_router.app_dirs = True
+            mock_router._scan_pages_directory.return_value = [("test", page_file)]
+            mock_get_pages_dir.return_value = temp_dir
+
+            warnings = check_missing_page_content(None)
+            assert len(warnings) == 0
+
+    def test_check_missing_page_content_with_template_djx(self, temp_dir):
+        """Test check_missing_page_content with template.djx."""
+        from unittest.mock import patch
+
+        from next.checks import check_missing_page_content
+
+        # create page file without content
+        page_file = temp_dir / "page.py"
+        page_file.write_text("")
+
+        # create template.djx
+        template_djx = temp_dir / "template.djx"
+        template_djx.write_text("<h1>Hello World</h1>")
+
+        with (
+            patch("next.checks.RouterManager") as mock_router_manager,
+            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        ):
+            mock_router = mock_router_manager.return_value
+            mock_router._reload_config.return_value = None
+            mock_router._routers = [mock_router]
+            mock_router.pages_dir_name = "pages"
+            mock_router.app_dirs = True
+            mock_router._scan_pages_directory.return_value = [("test", page_file)]
+            mock_get_pages_dir.return_value = temp_dir
+
+            warnings = check_missing_page_content(None)
+            assert len(warnings) == 0
+
+    def test_check_missing_page_content_with_layout_djx(self, temp_dir):
+        """Test check_missing_page_content with layout.djx."""
+        from unittest.mock import patch
+
+        from next.checks import check_missing_page_content
+
+        # create page file without content
+        page_file = temp_dir / "page.py"
+        page_file.write_text("")
+
+        # create layout.djx
+        layout_djx = temp_dir / "layout.djx"
+        layout_djx.write_text(
+            "<html>{% block template %}{% endblock template %}</html>"
+        )
+
+        with (
+            patch("next.checks.RouterManager") as mock_router_manager,
+            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        ):
+            mock_router = mock_router_manager.return_value
+            mock_router._reload_config.return_value = None
+            mock_router._routers = [mock_router]
+            mock_router.pages_dir_name = "pages"
+            mock_router.app_dirs = True
+            mock_router._scan_pages_directory.return_value = [("test", page_file)]
+            mock_get_pages_dir.return_value = temp_dir
+
+            warnings = check_missing_page_content(None)
+            assert len(warnings) == 0
+
+    def test_check_missing_page_content_no_content(self, temp_dir):
+        """Test check_missing_page_content with no content."""
+        from unittest.mock import patch
+
+        from next.checks import check_missing_page_content
+
+        # create page file without any content
+        page_file = temp_dir / "page.py"
+        page_file.write_text("")
+
+        with (
+            patch("next.checks.RouterManager") as mock_router_manager,
+            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        ):
+            mock_router = mock_router_manager.return_value
+            mock_router._reload_config.return_value = None
+            mock_router._routers = [mock_router]
+            mock_router.pages_dir_name = "pages"
+            mock_router.app_dirs = True
+            mock_router._scan_pages_directory.return_value = [("test", page_file)]
+            mock_get_pages_dir.return_value = temp_dir
+
+            warnings = check_missing_page_content(None)
+            assert len(warnings) == 1
+            assert "has no content" in warnings[0].msg
+
+    def test_check_missing_page_content_disabled(self, temp_dir):
+        """Test check_missing_page_content when disabled in settings."""
+        from unittest.mock import patch
+
+        from next.checks import check_missing_page_content
+
+        with patch("next.checks.getattr") as mock_getattr:
+            mock_getattr.side_effect = (
+                lambda obj, attr, default: {"check_missing_page_content": False}
+                if attr == "NEXT_PAGES_OPTIONS"
+                else default
+            )
+            warnings = check_missing_page_content(None)
+            assert len(warnings) == 0
+
+
+class TestDuplicateUrlParametersChecks:
+    """Test cases for duplicate URL parameters checks."""
+
+    def test_check_duplicate_url_parameters_no_duplicates(self, temp_dir):
+        """Test check_duplicate_url_parameters with no duplicates."""
+        from unittest.mock import patch
+
+        from next.checks import check_duplicate_url_parameters
+
+        # create page file
+        page_file = temp_dir / "page.py"
+        page_file.write_text("")
+
+        with patch("next.checks.RouterManager") as mock_router_manager:
+            mock_router = mock_router_manager.return_value
+            mock_router._reload_config.return_value = None
+            mock_router._routers = [mock_router]
+            mock_router.pages_dir_name = "pages"
+            mock_router.app_dirs = True
+            mock_router._scan_pages_directory.return_value = [
+                ("user/[id]/post/[slug]", page_file)
+            ]
+
+            errors = check_duplicate_url_parameters(None)
+            assert len(errors) == 0
+
+    def test_check_duplicate_url_parameters_with_duplicates(self, temp_dir):
+        """Test check_duplicate_url_parameters with duplicates."""
+        from unittest.mock import patch
+
+        from next.checks import check_duplicate_url_parameters
+
+        # create page file
+        page_file = temp_dir / "page.py"
+        page_file.write_text("")
+
+        with (
+            patch("next.checks.RouterManager") as mock_router_manager,
+            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        ):
+            mock_router = mock_router_manager.return_value
+            mock_router._reload_config.return_value = None
+            mock_router._routers = [mock_router]
+            mock_router.pages_dir_name = "pages"
+            mock_router.app_dirs = True
+            mock_router._scan_pages_directory.return_value = [
+                ("user/[id]/[id]", page_file)
+            ]
+            mock_get_pages_dir.return_value = temp_dir
+
+            errors = check_duplicate_url_parameters(None)
+            assert len(errors) == 1
+            assert "duplicate parameter names" in errors[0].msg
+            assert "id" in errors[0].msg
+
+    def test_check_duplicate_url_parameters_disabled(self, temp_dir):
+        """Test check_duplicate_url_parameters when disabled in settings."""
+        from unittest.mock import patch
+
+        from next.checks import check_duplicate_url_parameters
+
+        with patch("next.checks.getattr") as mock_getattr:
+            mock_getattr.side_effect = (
+                lambda obj, attr, default: {"check_duplicate_url_parameters": False}
+                if attr == "NEXT_PAGES_OPTIONS"
+                else default
+            )
+            errors = check_duplicate_url_parameters(None)
+            assert len(errors) == 0
+
+
+class TestContextFunctionsChecks:
+    """Test cases for context functions checks."""
+
+    def test_check_context_functions_valid_dict_return(self, temp_dir):
+        """Test check_context_functions with valid dict return."""
+        from unittest.mock import MagicMock, patch
+
+        from next.checks import check_context_functions
+
+        # create page file with valid context function
+        page_file = temp_dir / "page.py"
+        page_file.write_text("""
+from next.pages import context
+
+@context
+def get_context_data():
+    return {"key": "value"}
+        """)
+
+        with (
+            patch("next.checks.RouterManager") as mock_router_manager,
+            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        ):
+            mock_router = mock_router_manager.return_value
+            mock_router._reload_config.return_value = None
+            mock_router._routers = [mock_router]
+            mock_router.pages_dir_name = "pages"
+            mock_router.app_dirs = True
+            mock_router._scan_pages_directory.return_value = [("test", page_file)]
+            mock_get_pages_dir.return_value = temp_dir
+
+            # mock context manager
+            mock_context_manager = MagicMock()
+            mock_context_manager._context_registry = {
+                page_file: {None: (lambda: {"key": "value"}, False)}
+            }
+            mock_router._context_manager = mock_context_manager
+
+            errors = check_context_functions(None)
+            assert len(errors) == 0
+
+    def test_check_context_functions_invalid_return_type(self, temp_dir):
+        """Test check_context_functions with invalid return type."""
+        from unittest.mock import patch
+
+        from next.checks import check_context_functions
+
+        # create page file with invalid context function
+        page_file = temp_dir / "page.py"
+        page_file.write_text("""
+from next.pages import context
+
+@context
+def get_context_data():
+    return "not a dict"
+        """)
+
+        with (
+            patch("next.checks.RouterManager") as mock_router_manager,
+            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        ):
+            mock_router = mock_router_manager.return_value
+            mock_router._reload_config.return_value = None
+            mock_router._routers = [mock_router]
+            mock_router.pages_dir_name = "pages"
+            mock_router.app_dirs = True
+            mock_router._scan_pages_directory.return_value = [("test", page_file)]
+            mock_get_pages_dir.return_value = temp_dir
+
+            errors = check_context_functions(None)
+            assert len(errors) == 1
+            assert "must return a dictionary" in errors[0].msg
+            assert "str" in errors[0].msg
+
+    def test_check_context_functions_with_key_not_checked(self, temp_dir):
+        """Test check_context_functions ignores functions with key."""
+        from unittest.mock import MagicMock, patch
+
+        from next.checks import check_context_functions
+
+        # create page file with context function with key
+        page_file = temp_dir / "page.py"
+        page_file.write_text("""
+from next.pages import context
+
+@context("my_key")
+def get_context_data():
+    return "not a dict but with key"
+        """)
+
+        with (
+            patch("next.checks.RouterManager") as mock_router_manager,
+            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        ):
+            mock_router = mock_router_manager.return_value
+            mock_router._reload_config.return_value = None
+            mock_router._routers = [mock_router]
+            mock_router.pages_dir_name = "pages"
+            mock_router.app_dirs = True
+            mock_router._scan_pages_directory.return_value = [("test", page_file)]
+            mock_get_pages_dir.return_value = temp_dir
+
+            # mock context manager
+            mock_context_manager = MagicMock()
+            mock_context_manager._context_registry = {
+                page_file: {"my_key": (lambda: "not a dict but with key", False)}
+            }
+            mock_router._context_manager = mock_context_manager
+
+            errors = check_context_functions(None)
+            assert len(errors) == 0
+
+    def test_check_context_functions_disabled(self, temp_dir):
+        """Test check_context_functions when disabled in settings."""
+        from unittest.mock import patch
+
+        from next.checks import check_context_functions
+
+        with patch("next.checks.getattr") as mock_getattr:
+            mock_getattr.side_effect = (
+                lambda obj, attr, default: {"check_context_return_types": False}
+                if attr == "NEXT_PAGES_OPTIONS"
+                else default
+            )
+            errors = check_context_functions(None)
+            assert len(errors) == 0
 
 
 class TestLayoutTemplateLoader:

@@ -39,7 +39,7 @@ dev-dependencies = [
 packages = ["next"]
 
 [tool.pytest.ini_options]
-python_files = ["test_*.py", "*_test.py"]
+python_files = ["test_*.py", "*_test.py", "tests.py"]
 addopts = [
     "--strict-markers",
     "--strict-config",
