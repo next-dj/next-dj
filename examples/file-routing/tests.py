@@ -3,7 +3,6 @@ from pathlib import Path
 
 import django
 import pytest
-import root_pages.home.page as home_page
 from django.conf import settings
 from django.test import Client, RequestFactory
 
@@ -531,6 +530,8 @@ def test_example_app_files():
 
 def test_example_root_pages():
     """test that root pages are covered."""
+    import root_pages.home.page as home_page
+
     # test that home page functions exist
     assert hasattr(home_page, "render")
     assert callable(home_page.render)

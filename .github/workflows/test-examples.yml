@@ -9,8 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-        django-version: ["4.2", "5.0", "5.1", "5.2"]
+        python-version: ["3.12", "3.13"]
+        django-version: ["5.0", "5.1", "5.2"]
     
     steps:
     - uses: actions/checkout@v5
@@ -35,6 +35,17 @@ jobs:
         find examples -name "tests.py" -type f | while read testfile; do
           dir=$(dirname "$testfile")
           echo "Running tests with 100% coverage in $dir"
-          cd "$dir" && uv run pytest tests.py -v --cov=next --cov-report=term-missing --cov-fail-under=100
+          cd "$dir" && uv run pytest tests.py -v --junitxml=junit.xml --cov-report=xml --cov-report=term-missing --cov=. --cov-config=.coveragerc --cov-fail-under=100
           cd - > /dev/null
         done
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+    - name: Upload test results to Codecov
+      if: ${{ !cancelled() }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}

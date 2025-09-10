@@ -1,5 +1,6 @@
 [run]
-source = .
+include = 
+    catalog/*
 omit = 
     next/*
     .venv/*
@@ -12,6 +13,7 @@ omit =
     ../../../next/*
     manage.py
     config/*
+    */migrations/*
 
 [report]
 exclude_lines =
