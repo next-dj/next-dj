@@ -12,6 +12,7 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
+        django-version: ["4.2", "5.0", "5.1", "5.2"]
 
     steps:
     - uses: actions/checkout@v5
@@ -32,13 +33,18 @@ jobs:
         path: |
           .venv
           .uv_cache
-        key: ${{ runner.os }}-uv-${{ hashFiles('**/uv.lock') }}
+        key: ${{ runner.os }}-uv-${{ hashFiles('**/uv.lock') }}-django-${{ matrix.django-version }}
         restore-keys: |
           ${{ runner.os }}-uv-
 
     - name: Install dependencies
       run: |
         uv sync --dev
+        uv add "django==${{ matrix.django-version }}"
+
+    - name: Verify Django version
+      run: |
+        uv run python -c "import django; print(f'Django version: {django.get_version()}')"
 
     - name: Run tests with coverage
       run: |
@@ -139,7 +145,7 @@ jobs:
   dependency-review:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-    
+
     steps:
     - name: "Checkout code"
       uses: actions/checkout@v5

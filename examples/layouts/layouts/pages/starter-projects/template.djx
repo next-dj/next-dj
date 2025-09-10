@@ -1,0 +1,32 @@
+<main>
+    <h1>Starter Projects</h1>
+    <p class="fs-5 col-md-8">Ready to beyond the starter template? Check out these open source projects that you can quickly duplicate to a new GitHub repository.</p>
+
+    <div class="mb-5">
+        <a href="/" class="btn btn-outline-secondary">← Back to Home</a>
+    </div>
+
+    <hr class="col-3 col-md-2 mb-5">
+
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Bootstrap npm starter</h5>
+                    <p class="card-text">A simple npm-based starter template for Bootstrap projects with Webpack and Sass support.</p>
+                    <a href="https://github.com/twbs/bootstrap-npm-starter" class="btn btn-primary" rel="noopener" target="_blank">View on GitHub</a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Bootstrap Parcel starter</h5>
+                    <p class="card-text">A modern starter template using Parcel bundler for fast development and easy deployment.</p>
+                    <a href="#" class="btn btn-secondary disabled" aria-disabled="true">Coming Soon</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>

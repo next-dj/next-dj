@@ -1,0 +1,51 @@
+name: Test Examples
+
+on:
+  pull_request:
+    branches: [ "*" ]
+
+jobs:
+  test-examples:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+        django-version: ["5.0", "5.1", "5.2"]
+    
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        version: "latest"
+    
+    - name: Install dependencies
+      run: |
+        uv sync
+        uv add "django==${{ matrix.django-version }}"
+
+    - name: Run all example tests with 100% coverage
+      run: |
+        find examples -name "tests.py" -type f | while read testfile; do
+          dir=$(dirname "$testfile")
+          echo "Running tests with 100% coverage in $dir"
+          cd "$dir" && uv run pytest tests.py -v --junitxml=junit.xml --cov-report=xml --cov-report=term-missing --cov=. --cov-config=.coveragerc --cov-fail-under=100
+          cd - > /dev/null
+        done
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+    - name: Upload test results to Codecov
+      if: ${{ !cancelled() }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}

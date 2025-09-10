@@ -1,0 +1,29 @@
+<main>
+    <h1>Bootstrap Guides</h1>
+    <p class="fs-5 col-md-8">Read more detailed instructions and documentation on using or contributing to Bootstrap.</p>
+
+    <div class="mb-5">
+        <a href="/" class="btn btn-outline-secondary">← Back to Home</a>
+    </div>
+
+    <hr class="col-3 col-md-2 mb-5">
+
+    <!-- Navigation links -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <a href="/guides/" class="btn w-100 {% if request.path == '/guides/' %}btn-primary{% else %}btn-outline-primary{% endif %}">Quick Start</a>
+        </div>
+        <div class="col-md-3">
+            <a href="/guides/webpack/" class="btn w-100 {% if request.path == '/guides/webpack/' %}btn-primary{% else %}btn-outline-primary{% endif %}">Webpack</a>
+        </div>
+        <div class="col-md-3">
+            <a href="/guides/parcel/" class="btn w-100 {% if request.path == '/guides/parcel/' %}btn-primary{% else %}btn-outline-primary{% endif %}">Parcel</a>
+        </div>
+        <div class="col-md-3">
+            <a href="/guides/contributing/" class="btn w-100 {% if request.path == '/guides/contributing/' %}btn-primary{% else %}btn-outline-primary{% endif %}">Contributing</a>
+        </div>
+    </div>
+
+    <!-- Content area -->
+    {% block template %}{% endblock template %}
+</main>

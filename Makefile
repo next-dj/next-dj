@@ -12,6 +12,18 @@ test: # run tests
 test-fast: # run tests without coverage
 	uv run pytest tests/ -v
 
+test-examples: # run tests for examples with 100% coverage
+	find examples -name "tests.py" -type f | while read testfile; do \
+		dir=$$(dirname "$$testfile"); \
+		echo "Running tests with 100% coverage in $$dir"; \
+		cd "$$dir" && uv run pytest tests.py -v --cov-report=term-missing --cov-fail-under=100 --cov-config=.coveragerc --cov=.; \
+		cd - > /dev/null; \
+	done
+
+test-all: # run all tests including examples
+	make test
+	make test-examples
+
 lint: # run linting with ruff
 	uv run ruff check next/ tests/ examples/ --fix
 	uv run ruff format --check next/ tests/ examples/

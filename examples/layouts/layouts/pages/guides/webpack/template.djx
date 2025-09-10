@@ -1,0 +1,30 @@
+<div class="card">
+    <div class="card-body">
+        <h5 class="card-title">Webpack Guide</h5>
+        <p class="card-text">Learn how to integrate Bootstrap with Webpack for modern JavaScript development.</p>
+        
+        <h6>Installation</h6>
+        <p>Install Bootstrap and its dependencies using npm:</p>
+        <pre><code>npm install bootstrap @popperjs/core</code></pre>
+        
+        <h6>Webpack Configuration</h6>
+        <p>Configure Webpack to process Bootstrap's Sass files:</p>
+        <pre><code>module.exports = {
+  module: {
+    rules: [
+      {
+        test: /\.scss$/,
+        use: ['style-loader', 'css-loader', 'sass-loader']
+      }
+    ]
+  }
+}</code></pre>
+        
+        <h6>Import Bootstrap</h6>
+        <p>Import Bootstrap in your main JavaScript file:</p>
+        <pre><code>import 'bootstrap/dist/css/bootstrap.min.css'
+import 'bootstrap/dist/js/bootstrap.bundle.min.js'</code></pre>
+        
+        <a href="/docs/5.0/getting-started/webpack/" class="btn btn-primary">Read Full Documentation</a>
+    </div>
+</div>

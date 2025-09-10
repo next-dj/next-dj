@@ -5,5 +5,8 @@ class Product(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField()
 
+    class Meta:
+        app_label = "catalog"
+
     def __str__(self):
         return self.title

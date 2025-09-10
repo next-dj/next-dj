@@ -1,0 +1,39 @@
+<main>
+    <h1>Get started with Bootstrap</h1>
+    <h2>Custom variable in template {{ custom_variable }}</h2>
+    <p class="fs-5 col-md-8">Quickly and easily get started with Bootstrap's compiled, production-ready files with this barebones example featuring some basic HTML and helpful links. Download all our examples to get started.</p>
+    
+    <!-- Context processors example -->
+    <div class="alert alert-info" role="alert">
+        <h4 class="alert-heading">Context Processors Demo</h4>
+        <p>This page demonstrates the use of context_processors in NEXT_PAGES:</p>
+        <ul>
+            <li><strong>Site Name:</strong> {{ site_name }}</li>
+            <li><strong>Version:</strong> {{ site_version }}</li>
+            <li><strong>Debug Mode:</strong> {{ debug_mode|yesno:"Yes,No" }}</li>
+            <li><strong>Current Year:</strong> {{ current_year }}</li>
+            <li><strong>Request Path:</strong> {{ request.path }}</li>
+            <li><strong>User:</strong> {{ user.is_authenticated|yesno:"Logged in,Not logged in" }}</li>
+        </ul>
+    </div>
+
+    <div class="mb-5">
+    <a href="/docs/5.0/examples/" class="btn btn-primary btn-lg px-4">Download examples</a>
+    </div>
+
+    <hr class="col-3 col-md-2 mb-5">
+
+    <div class="row g-5">
+    <div class="col-md-6">
+        <h2>Starter projects</h2>
+        <p>Ready to beyond the starter template? Check out these open source projects that you can quickly duplicate to a new GitHub repository.</p>
+        <a href="/starter-projects/" class="btn btn-outline-primary">View Starter Projects →</a>
+    </div>
+
+    <div class="col-md-6">
+        <h2>Guides</h2>
+        <p>Read more detailed instructions and documentation on using or contributing to Bootstrap.</p>
+        <a href="/guides/" class="btn btn-outline-primary">View Guides →</a>
+    </div>
+    </div>
+</main>

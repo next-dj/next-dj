@@ -10,14 +10,20 @@ All checks are integrated with Django's built-in checks framework, making them
 available through standard Django management commands like 'check' and 'runserver'.
 """
 
+import ast
+import importlib.util
+import inspect
 import re
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
+from django.apps import apps
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Tags, register
+from django.core.checks import CheckMessage, Error, Tags, Warning, register
 
-from .urls import RouterFactory, RouterManager
+from .pages import _load_python_module
+from .urls import RouterFactory, RouterManager, URLPatternParser
 
 
 @register(Tags.compatibility)
@@ -121,46 +127,74 @@ def check_pages_structure(app_configs: Any, **kwargs: Any) -> list[CheckMessage]
     try:
         router_manager = RouterManager()
         router_manager._reload_config()
-
-        for router in router_manager:
-            # type check to ensure we're working with FileRouterBackend
-            if hasattr(router, "app_dirs") and router.app_dirs:
-                # check app pages
-                if hasattr(router, "_get_installed_apps"):
-                    for app_name in router._get_installed_apps():
-                        if hasattr(router, "_get_app_pages_path"):
-                            if (
-                                pages_path := router._get_app_pages_path(app_name)
-                            ) and hasattr(router, "pages_dir_name"):
-                                app_errors, app_warnings = _check_pages_directory(
-                                    pages_path,
-                                    f"App '{app_name}'",
-                                    router.pages_dir_name,
-                                )
-                                errors.extend(app_errors)
-                                warnings.extend(app_warnings)
-            else:
-                # check root pages
-                if hasattr(router, "_get_root_pages_path"):
-                    if (pages_path := router._get_root_pages_path()) and hasattr(
-                        router, "pages_dir_name"
-                    ):
-                        root_errors, root_warnings = _check_pages_directory(
-                            pages_path, "Root", router.pages_dir_name
-                        )
-                        errors.extend(root_errors)
-                        warnings.extend(root_warnings)
-
-    except Exception as e:
+    except (ImportError, AttributeError) as e:
         errors.append(
             Error(
-                f"Error checking pages structure: {e}",
+                f"Error initializing router manager: {e}",
                 obj=settings,
                 id="next.E007",
             )
         )
+        return errors + warnings
+
+    for router in router_manager:
+        try:
+            if hasattr(router, "app_dirs") and router.app_dirs:
+                _check_app_pages(router, errors, warnings)
+            else:
+                _check_root_pages(router, errors, warnings)
+        except (AttributeError, OSError) as e:
+            errors.append(
+                Error(
+                    f"Error checking router pages: {e}",
+                    obj=settings,
+                    id="next.E007",
+                )
+            )
 
     return errors + warnings
+
+
+def _check_app_pages(
+    router: Any, errors: list[CheckMessage], warnings: list[CheckMessage]
+) -> None:
+    """Check app pages for router."""
+    if not hasattr(router, "_get_installed_apps"):
+        return
+
+    for app_name in router._get_installed_apps():
+        if not hasattr(router, "_get_app_pages_path"):
+            continue
+
+        pages_path = router._get_app_pages_path(app_name)
+        if not pages_path or not hasattr(router, "pages_dir_name"):
+            continue
+
+        app_errors, app_warnings = _check_pages_directory(
+            pages_path,
+            f"App '{app_name}'",
+            router.pages_dir_name,
+        )
+        errors.extend(app_errors)
+        warnings.extend(app_warnings)
+
+
+def _check_root_pages(
+    router: Any, errors: list[CheckMessage], warnings: list[CheckMessage]
+) -> None:
+    """Check root pages for router."""
+    if not hasattr(router, "_get_root_pages_path"):
+        return
+
+    pages_path = router._get_root_pages_path()
+    if not pages_path or not hasattr(router, "pages_dir_name"):
+        return
+
+    root_errors, root_warnings = _check_pages_directory(
+        pages_path, "Root", router.pages_dir_name
+    )
+    errors.extend(root_errors)
+    warnings.extend(root_warnings)
 
 
 def _check_pages_directory(
@@ -294,37 +328,62 @@ def check_page_functions(app_configs: Any, **kwargs: Any) -> list[CheckMessage]:
     try:
         router_manager = RouterManager()
         router_manager._reload_config()
-
-        for router in router_manager:
-            if hasattr(router, "app_dirs") and router.app_dirs:
-                # check app pages
-                if hasattr(router, "_get_installed_apps"):
-                    for app_name in router._get_installed_apps():
-                        if hasattr(router, "_get_app_pages_path"):
-                            if pages_path := router._get_app_pages_path(app_name):
-                                app_errors = _check_page_functions_in_directory(
-                                    pages_path, f"App '{app_name}'"
-                                )
-                                errors.extend(app_errors)
-            else:
-                # check root pages
-                if hasattr(router, "_get_root_pages_path"):
-                    if pages_path := router._get_root_pages_path():
-                        root_errors = _check_page_functions_in_directory(
-                            pages_path, "Root"
-                        )
-                        errors.extend(root_errors)
-
-    except Exception as e:
+    except (ImportError, AttributeError) as e:
         errors.append(
             Error(
-                f"Error checking page functions: {e}",
+                f"Error initializing router manager: {e}",
                 obj=settings,
                 id="next.E011",
             )
         )
+        return errors
+
+    for router in router_manager:
+        try:
+            if hasattr(router, "app_dirs") and router.app_dirs:
+                _check_app_page_functions(router, errors)
+            else:
+                _check_root_page_functions(router, errors)
+        except (AttributeError, OSError) as e:
+            errors.append(
+                Error(
+                    f"Error checking page functions: {e}",
+                    obj=settings,
+                    id="next.E011",
+                )
+            )
 
     return errors
+
+
+def _check_app_page_functions(router: Any, errors: list[CheckMessage]) -> None:
+    """Check app page functions for router."""
+    if not hasattr(router, "_get_installed_apps"):
+        return
+
+    for app_name in router._get_installed_apps():
+        if not hasattr(router, "_get_app_pages_path"):
+            continue
+
+        pages_path = router._get_app_pages_path(app_name)
+        if not pages_path:
+            continue
+
+        app_errors = _check_page_functions_in_directory(pages_path, f"App '{app_name}'")
+        errors.extend(app_errors)
+
+
+def _check_root_page_functions(router: Any, errors: list[CheckMessage]) -> None:
+    """Check root page functions for router."""
+    if not hasattr(router, "_get_root_pages_path"):
+        return
+
+    pages_path = router._get_root_pages_path()
+    if not pages_path:
+        return
+
+    root_errors = _check_page_functions_in_directory(pages_path, "Root")
+    errors.extend(root_errors)
 
 
 def _check_page_functions_in_directory(
@@ -337,35 +396,26 @@ def _check_page_functions_in_directory(
         return errors
 
     for page_file in pages_path.rglob("page.py"):
-        try:
-            # check if page has render function
-            render_func = _load_render_function(page_file)
+        # check if page has render function
+        render_func = _load_render_function(page_file)
 
-            # check if page has template or template.djx
-            has_template = _has_template_or_djx(page_file)
+        # check if page has template or template.djx
+        has_template = _has_template_or_djx(page_file)
 
-            if render_func is None and not has_template:
-                errors.append(
-                    Error(
-                        f"{context} pages: {page_file.relative_to(pages_path)} is missing a valid render function, template attribute, or template.djx file.",
-                        obj=settings,
-                        id="next.E012",
-                    )
-                )
-            elif render_func is not None and not callable(render_func):
-                errors.append(
-                    Error(
-                        f"{context} pages: {page_file.relative_to(pages_path)} render attribute is not callable.",
-                        obj=settings,
-                        id="next.E013",
-                    )
-                )
-        except Exception as e:
+        if render_func is None and not has_template:
             errors.append(
                 Error(
-                    f"{context} pages: Error loading {page_file.relative_to(pages_path)}: {e}",
+                    f"{context} pages: {page_file.relative_to(pages_path)} is missing a valid render function, template attribute, or template.djx file.",
                     obj=settings,
-                    id="next.E014",
+                    id="next.E012",
+                )
+            )
+        elif render_func is not None and not callable(render_func):
+            errors.append(
+                Error(
+                    f"{context} pages: {page_file.relative_to(pages_path)} render attribute is not callable.",
+                    obj=settings,
+                    id="next.E013",
                 )
             )
 
@@ -375,8 +425,6 @@ def _check_page_functions_in_directory(
 def _load_render_function(file_path: Path) -> Any | None:
     """Load render function from page.py file."""
     try:
-        import importlib.util
-
         if (
             spec := importlib.util.spec_from_file_location("page_module", file_path)
         ) is None or spec.loader is None:
@@ -386,16 +434,13 @@ def _load_render_function(file_path: Path) -> Any | None:
         spec.loader.exec_module(module)
 
         return getattr(module, "render", None)
-
-    except Exception:
+    except (ImportError, AttributeError, OSError, SyntaxError):
         return None
 
 
 def _has_template_or_djx(file_path: Path) -> bool:
     """Check if page.py has template attribute or template.djx file exists."""
     try:
-        import importlib.util
-
         if (
             spec := importlib.util.spec_from_file_location("page_module", file_path)
         ) is None or spec.loader is None:
@@ -412,7 +457,7 @@ def _has_template_or_djx(file_path: Path) -> bool:
         djx_file = file_path.parent / "template.djx"
         return djx_file.exists()
 
-    except Exception:
+    except (ImportError, AttributeError, OSError, SyntaxError):
         return False
 
 
@@ -431,37 +476,62 @@ def check_missing_templates(app_configs: Any, **kwargs: Any) -> list[CheckMessag
     try:
         router_manager = RouterManager()
         router_manager._reload_config()
-
-        for router in router_manager:
-            if hasattr(router, "app_dirs") and router.app_dirs:
-                # check app pages
-                if hasattr(router, "_get_installed_apps"):
-                    for app_name in router._get_installed_apps():
-                        if hasattr(router, "_get_app_pages_path"):
-                            if pages_path := router._get_app_pages_path(app_name):
-                                app_errors = _check_missing_templates_in_directory(
-                                    pages_path, f"App '{app_name}'"
-                                )
-                                errors.extend(app_errors)
-            else:
-                # check root pages
-                if hasattr(router, "_get_root_pages_path"):
-                    if pages_path := router._get_root_pages_path():
-                        root_errors = _check_missing_templates_in_directory(
-                            pages_path, "Root"
-                        )
-                        errors.extend(root_errors)
-
-    except Exception as e:
+    except (ImportError, AttributeError) as e:
         errors.append(
             Error(
-                f"Error checking missing templates: {e}",
-                obj=settings,
-                id="next.E017",
+                f"Error initializing router manager: {e}", obj=settings, id="next.E017"
             )
         )
+        return errors
+
+    for router in router_manager:
+        try:
+            if hasattr(router, "app_dirs") and router.app_dirs:
+                _check_app_missing_templates(router, errors)
+            else:
+                _check_root_missing_templates(router, errors)
+        except (AttributeError, OSError) as e:
+            errors.append(
+                Error(
+                    f"Error checking missing templates: {e}",
+                    obj=settings,
+                    id="next.E017",
+                )
+            )
 
     return errors
+
+
+def _check_app_missing_templates(router: Any, errors: list[CheckMessage]) -> None:
+    """Check app missing templates for router."""
+    if not hasattr(router, "_get_installed_apps"):
+        return
+
+    for app_name in router._get_installed_apps():
+        if not hasattr(router, "_get_app_pages_path"):
+            continue
+
+        pages_path = router._get_app_pages_path(app_name)
+        if not pages_path:
+            continue
+
+        app_errors = _check_missing_templates_in_directory(
+            pages_path, f"App '{app_name}'"
+        )
+        errors.extend(app_errors)
+
+
+def _check_root_missing_templates(router: Any, errors: list[CheckMessage]) -> None:
+    """Check root missing templates for router."""
+    if not hasattr(router, "_get_root_pages_path"):
+        return
+
+    pages_path = router._get_root_pages_path()
+    if not pages_path:
+        return
+
+    root_errors = _check_missing_templates_in_directory(pages_path, "Root")
+    errors.extend(root_errors)
 
 
 def _check_missing_templates_in_directory(
@@ -474,26 +544,325 @@ def _check_missing_templates_in_directory(
         return errors
 
     for page_file in pages_path.rglob("page.py"):
-        try:
-            # check if page has template or template.djx
-            has_template = _has_template_or_djx(page_file)
+        # check if page has template or template.djx
+        has_template = _has_template_or_djx(page_file)
 
-            if not has_template:
-                errors.append(
-                    Error(
-                        f"{context} pages: {page_file.relative_to(pages_path)} is missing a template attribute or template.djx file.",
-                        obj=settings,
-                        id="next.E018",
-                    )
-                )
-        except Exception as e:
+        if not has_template:
             errors.append(
                 Error(
-                    f"{context} pages: Error checking template for {page_file.relative_to(pages_path)}: {e}",
+                    f"{context} pages: {page_file.relative_to(pages_path)} is missing a template attribute or template.djx file.",
                     obj=settings,
-                    id="next.E019",
+                    id="next.E018",
                 )
             )
+
+    return errors
+
+
+def _check_layout_file(layout_file: Path) -> CheckMessage | None:
+    """Check if layout file has required template block."""
+    try:
+        content = layout_file.read_text(encoding="utf-8")
+        if "{% block template %}" not in content:
+            return Warning(
+                f"Layout file {layout_file} does not contain required {{% block template %}} block. "
+                "This may cause template inheritance issues.",
+                obj=str(layout_file),
+                id="next.W001",
+            )
+    except (OSError, UnicodeDecodeError):
+        pass
+    return None
+
+
+@register(Tags.compatibility)
+def check_layout_templates(app_configs: Any, **kwargs: Any) -> list[CheckMessage]:
+    """
+    Check layout.djx files for proper template block structure.
+
+    Validates that layout.djx files contain the required {% block template %}
+    structure for proper inheritance. This check can be disabled by setting
+    NEXT_PAGES_OPTIONS.check_layout_template_blocks = False.
+    """
+    warnings: list[CheckMessage] = []
+
+    # check if this check is disabled
+    next_pages_options = getattr(settings, "NEXT_PAGES_OPTIONS", {})
+    if not next_pages_options.get("check_layout_template_blocks", True):
+        return warnings
+
+    try:
+        router_manager = RouterManager()
+        router_manager._reload_config()
+    except (ImportError, AttributeError):
+        return warnings
+
+    for router in router_manager._routers:
+        if not hasattr(router, "_scan_pages_directory"):
+            continue
+
+        pages_dir = _get_pages_directory(router)
+        if not pages_dir:
+            continue
+
+        for _url_path, page_path in router._scan_pages_directory(pages_dir):
+            layout_file = page_path.parent / "layout.djx"
+            if not layout_file.exists():
+                continue
+
+            warning = _check_layout_file(layout_file)
+            if warning:
+                warnings.append(warning)
+
+    return warnings
+
+
+def _has_page_content(page_path: Path) -> bool:
+    """Check if page has any content (template, render, template.djx, layout.djx)."""
+    # check if page.py has content
+    module = _load_python_module(page_path)
+    has_template = False
+    has_render = False
+
+    if module:
+        has_template = hasattr(module, "template")
+        has_render = hasattr(module, "render") and callable(module.render)
+
+    # check for template.djx
+    template_djx = page_path.parent / "template.djx"
+    has_template_djx = template_djx.exists()
+
+    # check for layout.djx
+    layout_djx = page_path.parent / "layout.djx"
+    has_layout_djx = layout_djx.exists()
+
+    return any([has_template, has_render, has_template_djx, has_layout_djx])
+
+
+@register(Tags.compatibility)
+def check_missing_page_content(app_configs: Any, **kwargs: Any) -> list[CheckMessage]:
+    """
+    Check for page.py files that have no content (no template, no render function).
+
+    Validates that page.py files have either a template variable, template.djx file,
+    layout.djx file, or a render function. This check can be disabled by setting
+    NEXT_PAGES_OPTIONS.check_missing_page_content = False.
+    """
+    warnings: list[CheckMessage] = []
+
+    # check if this check is disabled
+    next_pages_options = getattr(settings, "NEXT_PAGES_OPTIONS", {})
+    if not next_pages_options.get("check_missing_page_content", True):
+        return warnings
+
+    try:
+        router_manager = RouterManager()
+        router_manager._reload_config()
+    except (ImportError, AttributeError):
+        return warnings
+
+    for router in router_manager._routers:
+        if not hasattr(router, "_scan_pages_directory"):
+            continue
+
+        pages_dir = _get_pages_directory(router)
+        if not pages_dir:
+            continue
+
+        for _url_path, page_path in router._scan_pages_directory(pages_dir):
+            if not page_path.exists():
+                continue
+
+            if not _has_page_content(page_path):
+                warnings.append(
+                    Warning(
+                        f"Page file {page_path} has no content: no template variable, "
+                        "no render function, no template.djx, and no layout.djx found. "
+                        "This page will not render anything.",
+                        obj=str(page_path),
+                        id="next.W002",
+                    )
+                )
+
+    return warnings
+
+
+def _get_duplicate_parameters(url_path: str, parser: URLPatternParser) -> list[str]:
+    """Get list of duplicate parameter names in URL path."""
+    param_matches = parser._param_pattern.findall(url_path)
+    param_names = []
+    for param_str in param_matches:
+        param_name, _ = parser._parse_param_name_and_type(param_str)
+        param_names.append(param_name)
+
+    if len(param_names) == len(set(param_names)):
+        return []
+
+    return [name for name in set(param_names) if param_names.count(name) > 1]
+
+
+@register(Tags.compatibility)
+def check_duplicate_url_parameters(
+    app_configs: Any, **kwargs: Any
+) -> list[CheckMessage]:
+    """
+    Check for duplicate parameter names in URL patterns.
+
+    Validates that URL patterns don't have duplicate parameter names like
+    /page/[id]/[id]/ which would cause conflicts. This check can be disabled by setting
+    NEXT_PAGES_OPTIONS.check_duplicate_url_parameters = False.
+    """
+    errors: list[CheckMessage] = []
+
+    # check if this check is disabled
+    next_pages_options = getattr(settings, "NEXT_PAGES_OPTIONS", {})
+    if not next_pages_options.get("check_duplicate_url_parameters", True):
+        return errors
+
+    try:
+        router_manager = RouterManager()
+        router_manager._reload_config()
+    except (ImportError, AttributeError):
+        return errors
+
+    parser = URLPatternParser()
+
+    for router in router_manager._routers:
+        if not hasattr(router, "_scan_pages_directory"):
+            continue
+
+        pages_dir = _get_pages_directory(router)
+        if not pages_dir:
+            continue
+
+        for url_path, page_path in router._scan_pages_directory(pages_dir):
+            if not page_path.exists():
+                continue
+
+            try:
+                django_pattern, parameters = parser.parse_url_pattern(url_path)
+                duplicates = _get_duplicate_parameters(url_path, parser)
+
+                if duplicates:
+                    errors.append(
+                        Error(
+                            f"URL pattern '{url_path}' has duplicate parameter names: {duplicates}. "
+                            "Each parameter must have a unique name.",
+                            obj=str(page_path),
+                            id="next.E002",
+                        )
+                    )
+            except (ValueError, TypeError, AttributeError):
+                continue
+
+    return errors
+
+
+def _has_context_decorator_without_key(func: Any) -> bool:
+    """Check if function has @context decorator without key."""
+    try:
+        source = inspect.getsource(func)
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                for decorator in node.decorator_list:
+                    if isinstance(decorator, ast.Name) and decorator.id == "context":
+                        return True
+    except (SyntaxError, OSError, UnicodeDecodeError):
+        pass
+    return False
+
+
+def _get_function_result(func: Any) -> Any:
+    """Get function result, handling arguments if needed."""
+    try:
+        return func()
+    except TypeError:
+        return func(MagicMock())
+
+
+def _get_pages_directory(router: Any) -> Path | None:
+    """Get pages directory path for router."""
+    if not hasattr(router, "pages_dir_name"):
+        return None
+
+    if router.app_dirs:
+        for app_config in apps.get_app_configs():
+            app_path = Path(app_config.path)
+            potential_pages_dir = app_path / str(router.pages_dir_name)
+            if potential_pages_dir.exists():
+                return potential_pages_dir
+    else:
+        pages_dir = Path(str(router.pages_dir_name))
+        if pages_dir.exists():
+            return pages_dir
+    return None
+
+
+def _check_context_function(
+    func_name: str, func: Any, page_path: Path
+) -> CheckMessage | None:
+    """Check if context function returns dictionary."""
+    try:
+        result = _get_function_result(func)
+        if not isinstance(result, dict):
+            return Error(
+                f"Context function '{func_name}' in {page_path} must return a dictionary "
+                f"when used with @context decorator (without key). "
+                f"Got {type(result).__name__} instead.",
+                obj=str(page_path),
+                id="next.E003",
+            )
+    except (TypeError, AttributeError, OSError):
+        pass
+    return None
+
+
+@register(Tags.compatibility)
+def check_context_functions(app_configs: Any, **kwargs: Any) -> list[CheckMessage]:
+    """
+    Check context functions for proper return types.
+
+    Validates that context functions decorated with @context (without key)
+    always return a dictionary. This check can be disabled by setting
+    NEXT_PAGES_OPTIONS.check_context_return_types = False.
+    """
+    errors: list[CheckMessage] = []
+
+    # check if this check is disabled
+    next_pages_options = getattr(settings, "NEXT_PAGES_OPTIONS", {})
+    if not next_pages_options.get("check_context_return_types", True):
+        return errors
+
+    try:
+        router_manager = RouterManager()
+        router_manager._reload_config()
+    except (ImportError, AttributeError):
+        return errors
+
+    for router in router_manager._routers:
+        if not hasattr(router, "_scan_pages_directory"):
+            continue
+
+        pages_dir = _get_pages_directory(router)
+        if not pages_dir:
+            continue
+
+        for _url_path, page_path in router._scan_pages_directory(pages_dir):
+            if not page_path.exists():
+                continue
+
+            module = _load_python_module(page_path)
+            if not module:
+                continue
+
+            for name, obj in inspect.getmembers(module, inspect.isfunction):
+                if not _has_context_decorator_without_key(obj):
+                    continue
+
+                error = _check_context_function(name, obj, page_path)
+                if error:
+                    errors.append(error)
 
     return errors
 
@@ -514,55 +883,102 @@ def check_url_patterns(app_configs: Any, **kwargs: Any) -> list[CheckMessage]:
     try:
         router_manager = RouterManager()
         router_manager._reload_config()
-
-        # collect all URL patterns
-        all_patterns: list[tuple[str, str]] = []  # (pattern, source)
-
-        for router in router_manager:
-            if hasattr(router, "app_dirs") and router.app_dirs:
-                if hasattr(router, "_get_installed_apps"):
-                    for app_name in router._get_installed_apps():
-                        if hasattr(router, "_get_app_pages_path"):
-                            if pages_path := router._get_app_pages_path(app_name):
-                                patterns = _collect_url_patterns(
-                                    pages_path, f"App '{app_name}'"
-                                )
-                                all_patterns.extend(patterns)
-            else:
-                if hasattr(router, "_get_root_pages_path"):
-                    if pages_path := router._get_root_pages_path():
-                        patterns = _collect_url_patterns(pages_path, "Root")
-                        all_patterns.extend(patterns)
-
-        # check for conflicts
-        pattern_dict: dict[str, list[str]] = {}
-        for pattern, source in all_patterns:
-            if pattern in pattern_dict:
-                pattern_dict[pattern].append(source)
-            else:
-                pattern_dict[pattern] = [source]
-
-        # report conflicts
-        for pattern, sources in pattern_dict.items():
-            if len(sources) > 1:
-                errors.append(
-                    Error(
-                        f'URL pattern conflict: "{pattern}" is defined in multiple locations: {", ".join(sources)}',
-                        obj=settings,
-                        id="next.E015",
-                    )
-                )
-
-    except Exception as e:
+    except (ImportError, AttributeError) as e:
         errors.append(
             Error(
-                f"Error checking URL patterns: {e}",
+                f"Error initializing router manager: {e}",
+                obj=settings,
+                id="next.E016",
+            )
+        )
+        return errors + warnings
+
+    # collect all URL patterns
+    all_patterns: list[tuple[str, str]] = []  # (pattern, source)
+
+    for router in router_manager:
+        try:
+            if hasattr(router, "app_dirs") and router.app_dirs:
+                _collect_app_patterns(router, all_patterns)
+            else:
+                _collect_root_patterns(router, all_patterns)
+        except (AttributeError, OSError) as e:
+            errors.append(
+                Error(
+                    f"Error collecting patterns from router: {e}",
+                    obj=settings,
+                    id="next.E016",
+                )
+            )
+
+    # check for conflicts
+    try:
+        _check_url_conflicts(all_patterns, errors, warnings)
+    except (ValueError, TypeError) as e:
+        errors.append(
+            Error(
+                f"Error checking URL conflicts: {e}",
                 obj=settings,
                 id="next.E016",
             )
         )
 
     return errors + warnings
+
+
+def _collect_app_patterns(router: Any, all_patterns: list[tuple[str, str]]) -> None:
+    """Collect URL patterns from app pages."""
+    if not hasattr(router, "_get_installed_apps"):
+        return
+
+    for app_name in router._get_installed_apps():
+        if not hasattr(router, "_get_app_pages_path"):
+            continue
+
+        pages_path = router._get_app_pages_path(app_name)
+        if not pages_path:
+            continue
+
+        patterns = _collect_url_patterns(pages_path, f"App '{app_name}'")
+        all_patterns.extend(patterns)
+
+
+def _collect_root_patterns(router: Any, all_patterns: list[tuple[str, str]]) -> None:
+    """Collect URL patterns from root pages."""
+    if not hasattr(router, "_get_root_pages_path"):
+        return
+
+    pages_path = router._get_root_pages_path()
+    if not pages_path:
+        return
+
+    patterns = _collect_url_patterns(pages_path, "Root")
+    all_patterns.extend(patterns)
+
+
+def _check_url_conflicts(
+    all_patterns: list[tuple[str, str]],
+    errors: list[CheckMessage],
+    warnings: list[CheckMessage],
+) -> None:
+    """Check for URL pattern conflicts."""
+    pattern_dict: dict[str, list[str]] = {}
+    for pattern, source in all_patterns:
+        if pattern in pattern_dict:
+            pattern_dict[pattern].append(source)
+        else:
+            pattern_dict[pattern] = [source]
+
+    # report conflicts
+    for pattern, sources in pattern_dict.items():
+        if len(sources) > 1:
+            errors.append(
+                Error(
+                    f'URL pattern conflict: "{pattern}" is defined in multiple locations: {", ".join(sources)}',
+                    obj=settings,
+                    id="next.E015",
+                )
+            )
 
 
 def _collect_url_patterns(pages_path: Path, context: str) -> list[tuple[str, str]]:
@@ -582,7 +998,8 @@ def _collect_url_patterns(pages_path: Path, context: str) -> list[tuple[str, str
             if django_pattern := _convert_to_django_pattern(url_path):
                 patterns.append((django_pattern, f"{context}: {relative_path}"))
 
-        except Exception:
+        except (OSError, ValueError):
+            # skip files that can't be processed
             continue
 
     return patterns
