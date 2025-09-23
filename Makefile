@@ -13,11 +13,34 @@ test-fast: # run tests without coverage
 	uv run pytest tests/ -v
 
 test-examples: # run tests for examples with 100% coverage
+	@set -e; \
+	missing_tests=0; \
+	for example_dir in examples/*/; do \
+		if [ -d "$$example_dir" ]; then \
+			example_name=$$(basename "$$example_dir"); \
+			if find "$$example_dir" -name "*.py" -not -name "tests.py" -not -name "__init__.py" | grep -q .; then \
+				if [ ! -f "$$example_dir/tests.py" ]; then \
+					echo "ERROR: Missing tests.py in examples/$$example_name/ (has Python code)"; \
+					missing_tests=1; \
+				fi; \
+			fi; \
+		fi; \
+	done; \
+	if [ $$missing_tests -eq 1 ]; then \
+		echo "Some examples with Python code are missing tests.py files!"; \
+		exit 1; \
+	fi; \
 	find examples -name "tests.py" -type f | while read testfile; do \
 		dir=$$(dirname "$$testfile"); \
-		echo "Running tests with 100% coverage in $$dir"; \
-		cd "$$dir" && uv run pytest tests.py -v --cov-report=term-missing --cov-fail-under=100 --cov-config=.coveragerc --cov=.; \
-		cd - > /dev/null; \
+		if grep -q "^def test_" "$$testfile" || grep -q "^class Test" "$$testfile"; then \
+			echo "Running tests with 100% coverage in $$dir"; \
+			cd "$$dir" && uv run pytest tests.py -v --cov=. --cov-report=term-missing --cov-fail-under=100 --cov-config=../../examples/.coveragerc; \
+			cd - > /dev/null; \
+		else \
+			echo "ERROR: No test functions found in $$dir but tests.py exists"; \
+			echo "Either add tests or remove tests.py file"; \
+			exit 1; \
+		fi; \
 	done
 
 test-all: # run all tests including examples

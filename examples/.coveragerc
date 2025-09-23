@@ -1,19 +1,18 @@
 [run]
-include = 
-    catalog/*
+source = .
 omit = 
-    next/*
-    .venv/*
-    __pycache__/*
-    *.pyc
-    tests.py
-    htmlcov/*
-    ../next/*
-    ../../next/*
-    ../../../next/*
-    manage.py
-    config/*
+    */tests.py
+    */conftest.py
     */migrations/*
+    */settings.py
+    */manage.py
+    */wsgi.py
+    */asgi.py
+    */__pycache__/*
+    */venv/*
+    */env/*
+    ../../next/*
+    ../../tests/*
 
 [report]
 exclude_lines =

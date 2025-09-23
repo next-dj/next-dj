@@ -2,11 +2,14 @@
 
 [![codecov](https://codecov.io/gh/next-dj/next-dj/graph/badge.svg?token=6RY9344W4E)](https://codecov.io/gh/next-dj/next-dj)
 
-A low-code framework for frontend developers powered by Django.
+A next-gen framework based on Django for cool engineers who love to do complex things!
+
+> [!WARNING]
+> This project is currently under active development. The code may be unstable and breaking changes may occur between versions. Many features are still in progress. Please use with caution in production environments.
 
 ## What is `next.dj`?
 
-`next.dj` is a modern framework that simplifies Django development for frontend developers by providing intuitive APIs and automatic code generation. It bridges the gap between frontend and backend development by offering a file-based routing system similar to Next.js, but built on top of Django's robust ecosystem.
+`next.dj` is a modern framework based on Django that provides a unique opportunity - you can build full-stack applications on Django! Now you don't need frontend developers on React or other frameworks. It simplifies Django development by providing intuitive APIs and automatic code generation, offering a file-based routing system similar to Next.js, but built on top of Django's robust ecosystem.
 
 ## Contributing
 

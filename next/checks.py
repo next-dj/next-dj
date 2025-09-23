@@ -167,13 +167,13 @@ def _check_app_pages(
             continue
 
         pages_path = router._get_app_pages_path(app_name)
-        if not pages_path or not hasattr(router, "pages_dir_name"):
+        if not pages_path or not hasattr(router, "pages_dir"):
             continue
 
         app_errors, app_warnings = _check_pages_directory(
             pages_path,
             f"App '{app_name}'",
-            router.pages_dir_name,
+            router.pages_dir,
         )
         errors.extend(app_errors)
         warnings.extend(app_warnings)
@@ -187,11 +187,11 @@ def _check_root_pages(
         return
 
     pages_path = router._get_root_pages_path()
-    if not pages_path or not hasattr(router, "pages_dir_name"):
+    if not pages_path or not hasattr(router, "pages_dir"):
         return
 
     root_errors, root_warnings = _check_pages_directory(
-        pages_path, "Root", router.pages_dir_name
+        pages_path, "Root", router.pages_dir
     )
     errors.extend(root_errors)
     warnings.extend(root_warnings)
@@ -783,17 +783,17 @@ def _get_function_result(func: Any) -> Any:
 
 def _get_pages_directory(router: Any) -> Path | None:
     """Get pages directory path for router."""
-    if not hasattr(router, "pages_dir_name"):
+    if not hasattr(router, "pages_dir"):
         return None
 
     if router.app_dirs:
         for app_config in apps.get_app_configs():
             app_path = Path(app_config.path)
-            potential_pages_dir = app_path / str(router.pages_dir_name)
+            potential_pages_dir = app_path / str(router.pages_dir)
             if potential_pages_dir.exists():
                 return potential_pages_dir
     else:
-        pages_dir = Path(str(router.pages_dir_name))
+        pages_dir = Path(str(router.pages_dir))
         if pages_dir.exists():
             return pages_dir
     return None

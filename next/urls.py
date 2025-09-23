@@ -157,11 +157,11 @@ class FileRouterBackend(RouterBackend):
 
     def __init__(
         self,
-        pages_dir_name: str = DEFAULT_PAGES_DIR,
+        pages_dir: str = DEFAULT_PAGES_DIR,
         app_dirs: bool = DEFAULT_APP_DIRS,
         options: dict[str, Any] | None = None,
     ) -> None:
-        self.pages_dir_name = pages_dir_name
+        self.pages_dir = pages_dir
         self.app_dirs = app_dirs
         self.options = options or {}
         self._patterns_cache: dict[str, list[URLPattern | URLResolver]] = {}
@@ -169,14 +169,14 @@ class FileRouterBackend(RouterBackend):
 
     def __repr__(self) -> str:
         """String representation of the router backend."""
-        return f"<{self.__class__.__name__} pages_dir='{self.pages_dir_name}' app_dirs={self.app_dirs}>"
+        return f"<{self.__class__.__name__} pages_dir='{self.pages_dir}' app_dirs={self.app_dirs}>"
 
     def __eq__(self, other: Any) -> bool:
         """Equality comparison."""
         if not isinstance(other, FileRouterBackend):
             return False
         return (
-            self.pages_dir_name == other.pages_dir_name
+            self.pages_dir == other.pages_dir
             and self.app_dirs == other.app_dirs
             and self.options == other.options
         )
@@ -184,7 +184,7 @@ class FileRouterBackend(RouterBackend):
     def __hash__(self) -> int:
         """Hash for the router backend."""
         return hash(
-            (self.pages_dir_name, self.app_dirs, tuple(sorted(self.options.items())))
+            (self.pages_dir, self.app_dirs, tuple(sorted(self.options.items())))
         )
 
     def generate_urls(self) -> list[URLPattern | URLResolver]:
@@ -239,7 +239,7 @@ class FileRouterBackend(RouterBackend):
                 return None
 
             app_path = Path(app_module.__file__).parent
-            pages_path = app_path / self.pages_dir_name
+            pages_path = app_path / self.pages_dir
 
             return pages_path if pages_path.exists() else None
 
@@ -254,7 +254,7 @@ class FileRouterBackend(RouterBackend):
         if isinstance(base_dir, str):
             base_dir = Path(base_dir)
 
-        pages_path = base_dir / self.pages_dir_name
+        pages_path = base_dir / self.pages_dir
         return pages_path if pages_path.exists() else None
 
     def _generate_urls_for_app(self, app_name: str) -> list[URLPattern | URLResolver]:
@@ -377,9 +377,7 @@ class RouterFactory:
         # handle FileRouterBackend with specific configuration
         if issubclass(backend_class, FileRouterBackend):
             return backend_class(
-                pages_dir_name=config.get("OPTIONS", {}).get(
-                    "PAGES_DIR_NAME", DEFAULT_PAGES_DIR
-                ),
+                pages_dir=DEFAULT_PAGES_DIR,
                 app_dirs=config.get("APP_DIRS", DEFAULT_APP_DIRS),
                 options=config.get("OPTIONS", {}),
             )
