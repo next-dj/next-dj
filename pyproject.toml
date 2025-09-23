@@ -45,7 +45,7 @@ addopts = [
     "--strict-config",
     "--cov=next",
     "--cov-report=term-missing",
-    "--cov-fail-under=90",
+    "--cov-fail-under=100",
 ]
 
 [tool.coverage.run]

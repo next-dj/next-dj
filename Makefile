@@ -6,8 +6,8 @@ install: # install the package
 install-dev: # install development dependencies
 	uv sync --dev
 
-test: # run tests
-	uv run pytest tests/ -v --cov=next --cov-report=html --cov-report=term-missing
+test: # run tests with 100% coverage requirement
+	uv run pytest tests/ -v --cov=next --cov-report=html --cov-report=term-missing --cov-fail-under=100
 
 test-fast: # run tests without coverage
 	uv run pytest tests/ -v
@@ -83,10 +83,11 @@ pre-commit-install: # install pre-commit hooks
 pre-commit-run: # run pre-commit on all files
 	uv run pre-commit run --all-files
 
-ci: # run all CI checks locally
+ci: # run all CI checks locally with 100% coverage
 	make lint
 	make type-check
 	make test
+	make test-examples
 
 dev-setup: # setup development environment
 	uv sync --dev
