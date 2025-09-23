@@ -68,7 +68,6 @@ if not settings.configured:
                 "BACKEND": "next.urls.FileRouterBackend",
                 "APP_DIRS": False,
                 "OPTIONS": {
-                    "PAGES_DIR_NAME": "root_pages",
                     "PAGES_DIR": str(
                         project_root / "examples" / "file-routing" / "root_pages"
                     ),

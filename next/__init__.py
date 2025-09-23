@@ -9,7 +9,7 @@ r"""
                                          \ \____/
                                           \/___/
 
-Django frontend without the tears: tweak UI, bind data, and animate in 2 lines.
+Django next generation framework without the tears: tweak UI, bind data, and animate in 2 lines.
 Ditch tons of JS — grab ready-made and roll!
 """
 

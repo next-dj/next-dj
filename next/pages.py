@@ -63,8 +63,6 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
                         context_processors.append(processor)
                     except (ImportError, AttributeError) as e:
                         # log error but continue with other processors
-                        import logging
-
                         logger = logging.getLogger(__name__)
                         logger.warning(
                             f"Could not import context processor {processor_path}: {e}"
@@ -216,7 +214,53 @@ class LayoutTemplateLoader(TemplateLoader):
                 layout_files.append(layout_file)
             current_dir = current_dir.parent
 
+        # also add additional layouts from other NEXT_PAGES directories
+        # but only if they're not already in the local hierarchy
+        if additional_layouts := self._get_additional_layout_files():
+            for additional_layout in additional_layouts:
+                if additional_layout not in layout_files:
+                    layout_files.append(additional_layout)
+
         return layout_files or None
+
+    def _get_additional_layout_files(self) -> list[Path]:
+        """
+        Get layout.djx files from other NEXT_PAGES directories.
+
+        Scans all configured NEXT_PAGES directories for layout.djx files
+        that should be available for inheritance across different apps.
+        """
+        additional_layouts = []
+        next_pages_config = getattr(settings, "NEXT_PAGES", [])
+
+        for config in next_pages_config:
+            if not isinstance(config, dict):
+                continue
+
+            pages_dir = self._get_pages_dir_for_config(config)
+            if not pages_dir or not pages_dir.exists():
+                continue
+
+            layout_file = pages_dir / "layout.djx"
+            if layout_file.exists() and layout_file not in additional_layouts:
+                additional_layouts.append(layout_file)
+
+        return additional_layouts
+
+    def _get_pages_dir_for_config(self, config: dict) -> Path | None:
+        """
+        Get the pages directory path for a NEXT_PAGES configuration.
+        """
+        if config.get("APP_DIRS", True):
+            # for app directories, we can't easily determine the path here
+            # this will be handled by the individual app scanning
+            return None
+
+        options = config.get("OPTIONS", {})
+        if "PAGES_DIR" in options:
+            return Path(options["PAGES_DIR"])
+
+        return None
 
     def _wrap_in_template_block(self, file_path: Path) -> str:
         """
@@ -224,20 +268,35 @@ class LayoutTemplateLoader(TemplateLoader):
 
         Reads the template file and wraps its content in Django's
         template block syntax to enable proper inheritance from
-        layout templates.
+        layout templates. If there's a layout.djx file in the same
+        directory as the template, the template is returned as-is
+        since it's already wrapped in the layout.
         """
         template_file = file_path.parent / "template.djx"
         if template_file.exists():
             with contextlib.suppress(OSError, UnicodeDecodeError):
                 content = template_file.read_text(encoding="utf-8")
+                # check if there's a layout file in the same directory
+                layout_file = file_path.parent / "layout.djx"
+                if layout_file.exists():
+                    # template is already wrapped in layout, return as-is
+                    return content
                 return f"{{% block template %}}{content}{{% endblock template %}}"
         return "{% block template %}{% endblock template %}"
 
     def _compose_layout_hierarchy(
         self, template_content: str, layout_files: list[Path]
     ) -> str:
-        """Compose layout hierarchy by nesting layouts and inserting content."""
+        """
+        Compose layout hierarchy by nesting layouts and inserting content.
+
+        Processes layout files in order, with local layouts taking precedence
+        over additional layouts from other NEXT_PAGES directories.
+        """
         result = template_content
+
+        # process all layout files in order (local layouts come first due to
+        # how _find_layout_files builds the list)
         for layout_file in layout_files:
             with contextlib.suppress(OSError, UnicodeDecodeError):
                 layout_content = layout_file.read_text(encoding="utf-8")

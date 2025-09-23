@@ -1,9 +1,18 @@
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+from django.http import HttpRequest
 
+from next.checks import (
+    _has_template_or_djx,
+    _load_python_module,
+    check_context_functions,
+    check_duplicate_url_parameters,
+    check_layout_templates,
+    check_missing_page_content,
+)
 from next.pages import (
     ContextManager,
     DjxTemplateLoader,
@@ -11,10 +20,14 @@ from next.pages import (
     LayoutTemplateLoader,
     Page,
     PythonTemplateLoader,
+    _get_context_processors,
     context,
     page,
 )
-from next.urls import URLPatternParser
+from next.urls import (
+    FileRouterBackend,
+    URLPatternParser,
+)
 
 
 # shared fixtures
@@ -641,8 +654,6 @@ class TestURLPatternParser:
 
     def test_scan_pages_directory_virtual_view_detection(self, temp_dir):
         """Test _scan_pages_directory detects virtual views (template.djx without page.py)."""
-        from next.urls import FileRouterBackend
-
         # create a FileRouterBackend instance
         backend = FileRouterBackend()
 
@@ -1299,8 +1310,6 @@ def render(request, **kwargs):
         self, temp_dir, page_content, create_djx, djx_content, expected_result
     ):
         """Test _has_template_or_djx with different scenarios."""
-        from next.checks import _has_template_or_djx
-
         page_file = temp_dir / "page.py"
         page_file.write_text(page_content)
 
@@ -1317,10 +1326,6 @@ class TestLayoutChecks:
 
     def test_check_layout_templates_with_block(self, temp_dir):
         """Test check_layout_templates with proper template block."""
-        from unittest.mock import patch
-
-        from next.checks import check_layout_templates
-
         # create layout file with proper block
         layout_file = temp_dir / "layout.djx"
         layout_file.write_text(
@@ -1338,7 +1343,7 @@ class TestLayoutChecks:
             mock_router = mock_router_manager.return_value
             mock_router._reload_config.return_value = None
             mock_router._routers = [mock_router]
-            mock_router.pages_dir_name = "pages"
+            mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
             mock_get_pages_dir.return_value = temp_dir
@@ -1348,10 +1353,6 @@ class TestLayoutChecks:
 
     def test_check_layout_templates_without_block(self, temp_dir):
         """Test check_layout_templates without template block."""
-        from unittest.mock import patch
-
-        from next.checks import check_layout_templates
-
         # create layout file without proper block
         layout_file = temp_dir / "layout.djx"
         layout_file.write_text("<html><body>No template block</body></html>")
@@ -1367,7 +1368,7 @@ class TestLayoutChecks:
             mock_router = mock_router_manager.return_value
             mock_router._reload_config.return_value = None
             mock_router._routers = [mock_router]
-            mock_router.pages_dir_name = "pages"
+            mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
             mock_get_pages_dir.return_value = temp_dir
@@ -1378,10 +1379,6 @@ class TestLayoutChecks:
 
     def test_check_layout_templates_disabled(self, temp_dir):
         """Test check_layout_templates when disabled in settings."""
-        from unittest.mock import patch
-
-        from next.checks import check_layout_templates
-
         with patch("next.checks.getattr") as mock_getattr:
             mock_getattr.side_effect = (
                 lambda obj, attr, default: {"check_layout_template_blocks": False}
@@ -1397,10 +1394,6 @@ class TestMissingPageContentChecks:
 
     def test_check_missing_page_content_with_template(self, temp_dir):
         """Test check_missing_page_content with template variable."""
-        from unittest.mock import patch
-
-        from next.checks import check_missing_page_content
-
         # create page file with template
         page_file = temp_dir / "page.py"
         page_file.write_text('template = "Hello World"')
@@ -1412,7 +1405,7 @@ class TestMissingPageContentChecks:
             mock_router = mock_router_manager.return_value
             mock_router._reload_config.return_value = None
             mock_router._routers = [mock_router]
-            mock_router.pages_dir_name = "pages"
+            mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
             mock_get_pages_dir.return_value = temp_dir
@@ -1422,10 +1415,6 @@ class TestMissingPageContentChecks:
 
     def test_check_missing_page_content_with_render(self, temp_dir):
         """Test check_missing_page_content with render function."""
-        from unittest.mock import patch
-
-        from next.checks import check_missing_page_content
-
         # create page file with render function
         page_file = temp_dir / "page.py"
         page_file.write_text("""
@@ -1440,7 +1429,7 @@ def render(request, **kwargs):
             mock_router = mock_router_manager.return_value
             mock_router._reload_config.return_value = None
             mock_router._routers = [mock_router]
-            mock_router.pages_dir_name = "pages"
+            mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
             mock_get_pages_dir.return_value = temp_dir
@@ -1450,10 +1439,6 @@ def render(request, **kwargs):
 
     def test_check_missing_page_content_with_template_djx(self, temp_dir):
         """Test check_missing_page_content with template.djx."""
-        from unittest.mock import patch
-
-        from next.checks import check_missing_page_content
-
         # create page file without content
         page_file = temp_dir / "page.py"
         page_file.write_text("")
@@ -1469,7 +1454,7 @@ def render(request, **kwargs):
             mock_router = mock_router_manager.return_value
             mock_router._reload_config.return_value = None
             mock_router._routers = [mock_router]
-            mock_router.pages_dir_name = "pages"
+            mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
             mock_get_pages_dir.return_value = temp_dir
@@ -1479,10 +1464,6 @@ def render(request, **kwargs):
 
     def test_check_missing_page_content_with_layout_djx(self, temp_dir):
         """Test check_missing_page_content with layout.djx."""
-        from unittest.mock import patch
-
-        from next.checks import check_missing_page_content
-
         # create page file without content
         page_file = temp_dir / "page.py"
         page_file.write_text("")
@@ -1500,7 +1481,7 @@ def render(request, **kwargs):
             mock_router = mock_router_manager.return_value
             mock_router._reload_config.return_value = None
             mock_router._routers = [mock_router]
-            mock_router.pages_dir_name = "pages"
+            mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
             mock_get_pages_dir.return_value = temp_dir
@@ -1510,10 +1491,6 @@ def render(request, **kwargs):
 
     def test_check_missing_page_content_no_content(self, temp_dir):
         """Test check_missing_page_content with no content."""
-        from unittest.mock import patch
-
-        from next.checks import check_missing_page_content
-
         # create page file without any content
         page_file = temp_dir / "page.py"
         page_file.write_text("")
@@ -1525,7 +1502,7 @@ def render(request, **kwargs):
             mock_router = mock_router_manager.return_value
             mock_router._reload_config.return_value = None
             mock_router._routers = [mock_router]
-            mock_router.pages_dir_name = "pages"
+            mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
             mock_get_pages_dir.return_value = temp_dir
@@ -1536,10 +1513,6 @@ def render(request, **kwargs):
 
     def test_check_missing_page_content_disabled(self, temp_dir):
         """Test check_missing_page_content when disabled in settings."""
-        from unittest.mock import patch
-
-        from next.checks import check_missing_page_content
-
         with patch("next.checks.getattr") as mock_getattr:
             mock_getattr.side_effect = (
                 lambda obj, attr, default: {"check_missing_page_content": False}
@@ -1555,10 +1528,6 @@ class TestDuplicateUrlParametersChecks:
 
     def test_check_duplicate_url_parameters_no_duplicates(self, temp_dir):
         """Test check_duplicate_url_parameters with no duplicates."""
-        from unittest.mock import patch
-
-        from next.checks import check_duplicate_url_parameters
-
         # create page file
         page_file = temp_dir / "page.py"
         page_file.write_text("")
@@ -1567,7 +1536,7 @@ class TestDuplicateUrlParametersChecks:
             mock_router = mock_router_manager.return_value
             mock_router._reload_config.return_value = None
             mock_router._routers = [mock_router]
-            mock_router.pages_dir_name = "pages"
+            mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [
                 ("user/[id]/post/[slug]", page_file)
@@ -1578,10 +1547,6 @@ class TestDuplicateUrlParametersChecks:
 
     def test_check_duplicate_url_parameters_with_duplicates(self, temp_dir):
         """Test check_duplicate_url_parameters with duplicates."""
-        from unittest.mock import patch
-
-        from next.checks import check_duplicate_url_parameters
-
         # create page file
         page_file = temp_dir / "page.py"
         page_file.write_text("")
@@ -1593,7 +1558,7 @@ class TestDuplicateUrlParametersChecks:
             mock_router = mock_router_manager.return_value
             mock_router._reload_config.return_value = None
             mock_router._routers = [mock_router]
-            mock_router.pages_dir_name = "pages"
+            mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [
                 ("user/[id]/[id]", page_file)
@@ -1607,10 +1572,6 @@ class TestDuplicateUrlParametersChecks:
 
     def test_check_duplicate_url_parameters_disabled(self, temp_dir):
         """Test check_duplicate_url_parameters when disabled in settings."""
-        from unittest.mock import patch
-
-        from next.checks import check_duplicate_url_parameters
-
         with patch("next.checks.getattr") as mock_getattr:
             mock_getattr.side_effect = (
                 lambda obj, attr, default: {"check_duplicate_url_parameters": False}
@@ -1626,10 +1587,6 @@ class TestContextFunctionsChecks:
 
     def test_check_context_functions_valid_dict_return(self, temp_dir):
         """Test check_context_functions with valid dict return."""
-        from unittest.mock import MagicMock, patch
-
-        from next.checks import check_context_functions
-
         # create page file with valid context function
         page_file = temp_dir / "page.py"
         page_file.write_text("""
@@ -1647,7 +1604,7 @@ def get_context_data():
             mock_router = mock_router_manager.return_value
             mock_router._reload_config.return_value = None
             mock_router._routers = [mock_router]
-            mock_router.pages_dir_name = "pages"
+            mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
             mock_get_pages_dir.return_value = temp_dir
@@ -1664,10 +1621,6 @@ def get_context_data():
 
     def test_check_context_functions_invalid_return_type(self, temp_dir):
         """Test check_context_functions with invalid return type."""
-        from unittest.mock import patch
-
-        from next.checks import check_context_functions
-
         # create page file with invalid context function
         page_file = temp_dir / "page.py"
         page_file.write_text("""
@@ -1685,7 +1638,7 @@ def get_context_data():
             mock_router = mock_router_manager.return_value
             mock_router._reload_config.return_value = None
             mock_router._routers = [mock_router]
-            mock_router.pages_dir_name = "pages"
+            mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
             mock_get_pages_dir.return_value = temp_dir
@@ -1697,9 +1650,6 @@ def get_context_data():
 
     def test_check_context_functions_with_key_not_checked(self, temp_dir):
         """Test check_context_functions ignores functions with key."""
-        from unittest.mock import MagicMock, patch
-
-        from next.checks import check_context_functions
 
         # create page file with context function with key
         page_file = temp_dir / "page.py"
@@ -1718,7 +1668,7 @@ def get_context_data():
             mock_router = mock_router_manager.return_value
             mock_router._reload_config.return_value = None
             mock_router._routers = [mock_router]
-            mock_router.pages_dir_name = "pages"
+            mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
             mock_get_pages_dir.return_value = temp_dir
@@ -1735,10 +1685,6 @@ def get_context_data():
 
     def test_check_context_functions_disabled(self, temp_dir):
         """Test check_context_functions when disabled in settings."""
-        from unittest.mock import patch
-
-        from next.checks import check_context_functions
-
         with patch("next.checks.getattr") as mock_getattr:
             mock_getattr.side_effect = (
                 lambda obj, attr, default: {"check_context_return_types": False}
@@ -1788,6 +1734,294 @@ class TestLayoutTemplateLoader:
 
         result = loader.can_load(page_file)
         assert result is expected_can_load
+
+    def test_get_additional_layout_files_with_next_pages_config(self, temp_dir):
+        """Test _get_additional_layout_files with NEXT_PAGES configuration."""
+        loader = LayoutTemplateLoader()
+
+        # create layout file
+        layout_file = temp_dir / "layout.djx"
+        layout_file.write_text("layout content")
+
+        # mock NEXT_PAGES configuration
+        config = [
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "APP_DIRS": False,
+                "OPTIONS": {
+                    "PAGES_DIR": str(temp_dir),
+                },
+            },
+        ]
+
+        with patch("next.pages.settings.NEXT_PAGES", config, create=True):
+            result = loader._get_additional_layout_files()
+
+        assert len(result) == 1
+        assert layout_file in result
+
+    def test_get_additional_layout_files_with_invalid_config(self, temp_dir):
+        """Test _get_additional_layout_files with invalid configuration."""
+        loader = LayoutTemplateLoader()
+
+        # mock invalid NEXT_PAGES configuration
+        config = [
+            "invalid_config",  # not a dict
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "APP_DIRS": False,
+                "OPTIONS": {
+                    "PAGES_DIR": "/nonexistent/path",
+                },
+            },
+        ]
+
+        with patch("next.pages.settings.NEXT_PAGES", config, create=True):
+            result = loader._get_additional_layout_files()
+
+        assert result == []
+
+    def test_get_additional_layout_files_with_app_dirs(self, temp_dir):
+        """Test _get_additional_layout_files with APP_DIRS=True."""
+        loader = LayoutTemplateLoader()
+
+        # mock NEXT_PAGES configuration with APP_DIRS=True
+        config = [
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "APP_DIRS": True,
+            },
+        ]
+
+        with patch("next.pages.settings.NEXT_PAGES", config, create=True):
+            result = loader._get_additional_layout_files()
+
+        assert result == []
+
+    def test_get_pages_dir_for_config_with_pages_dir(self, temp_dir):
+        """Test _get_pages_dir_for_config with PAGES_DIR option."""
+        loader = LayoutTemplateLoader()
+
+        config = {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": False,
+            "OPTIONS": {
+                "PAGES_DIR": str(temp_dir),
+            },
+        }
+
+        result = loader._get_pages_dir_for_config(config)
+        assert result == temp_dir
+
+    def test_get_pages_dir_for_config_with_app_dirs(self, temp_dir):
+        """Test _get_pages_dir_for_config with APP_DIRS=True."""
+        loader = LayoutTemplateLoader()
+
+        config = {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": True,
+        }
+
+        result = loader._get_pages_dir_for_config(config)
+        assert result is None
+
+    def test_get_pages_dir_for_config_no_options(self, temp_dir):
+        """Test _get_pages_dir_for_config with no options."""
+        loader = LayoutTemplateLoader()
+
+        config = {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": False,
+        }
+
+        result = loader._get_pages_dir_for_config(config)
+        assert result is None
+
+    def test_wrap_in_template_block_with_local_layout(self, temp_dir):
+        """Test _wrap_in_template_block when local layout exists."""
+        loader = LayoutTemplateLoader()
+
+        # create template and layout files
+        template_file = temp_dir / "template.djx"
+        template_file.write_text("<h1>Test Content</h1>")
+
+        layout_file = temp_dir / "layout.djx"
+        layout_file.write_text("layout content")
+
+        page_file = temp_dir / "page.py"
+        result = loader._wrap_in_template_block(page_file)
+
+        # should return template content as-is when local layout exists
+        assert result == "<h1>Test Content</h1>"
+
+    def test_wrap_in_template_block_without_local_layout(self, temp_dir):
+        """Test _wrap_in_template_block when no local layout exists."""
+        loader = LayoutTemplateLoader()
+
+        # create template file only
+        template_file = temp_dir / "template.djx"
+        template_file.write_text("<h1>Test Content</h1>")
+
+        page_file = temp_dir / "page.py"
+        result = loader._wrap_in_template_block(page_file)
+
+        # should wrap content in template block
+        assert (
+            result == "{% block template %}<h1>Test Content</h1>{% endblock template %}"
+        )
+
+    def test_wrap_in_template_block_no_template_file(self, temp_dir):
+        """Test _wrap_in_template_block when template.djx doesn't exist."""
+        loader = LayoutTemplateLoader()
+
+        page_file = temp_dir / "page.py"
+        result = loader._wrap_in_template_block(page_file)
+
+        # should return empty template block
+        assert result == "{% block template %}{% endblock template %}"
+
+    def test_find_layout_files_with_duplicate_additional_layouts(self, temp_dir):
+        """Test _find_layout_files when additional layouts are already in local hierarchy."""
+        loader = LayoutTemplateLoader()
+
+        # create layout file
+        layout_file = temp_dir / "layout.djx"
+        layout_file.write_text("layout content")
+
+        # create template file
+        template_file = temp_dir / "template.djx"
+        template_file.write_text("template content")
+
+        page_file = temp_dir / "page.py"
+
+        # mock NEXT_PAGES configuration pointing to the same directory
+        config = [
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "APP_DIRS": False,
+                "OPTIONS": {
+                    "PAGES_DIR": str(temp_dir),
+                },
+            },
+        ]
+
+        with patch("next.pages.settings.NEXT_PAGES", config, create=True):
+            result = loader._find_layout_files(page_file)
+
+        # should not duplicate the layout file
+        assert result is not None
+        assert len(result) == 1
+        assert layout_file in result
+
+    def test_get_additional_layout_files_with_duplicate_layouts(self, temp_dir):
+        """Test _get_additional_layout_files with duplicate layout files."""
+        loader = LayoutTemplateLoader()
+
+        # create layout file
+        layout_file = temp_dir / "layout.djx"
+        layout_file.write_text("layout content")
+
+        # mock NEXT_PAGES configuration with same directory twice
+        config = [
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "APP_DIRS": False,
+                "OPTIONS": {
+                    "PAGES_DIR": str(temp_dir),
+                },
+            },
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "APP_DIRS": False,
+                "OPTIONS": {
+                    "PAGES_DIR": str(temp_dir),
+                },
+            },
+        ]
+
+        with patch("next.pages.settings.NEXT_PAGES", config, create=True):
+            result = loader._get_additional_layout_files()
+
+        # should not duplicate the layout file
+        assert len(result) == 1
+        assert layout_file in result
+
+    def test_find_layout_files_with_additional_layouts_already_present(self, temp_dir):
+        """Test _find_layout_files when additional layouts are already in layout_files."""
+        loader = LayoutTemplateLoader()
+
+        # create layout file in parent directory (local hierarchy)
+        parent_dir = temp_dir / "parent"
+        parent_dir.mkdir()
+        local_layout = parent_dir / "layout.djx"
+        local_layout.write_text("local layout")
+
+        # create template file in child directory
+        child_dir = parent_dir / "child"
+        child_dir.mkdir()
+        template_file = child_dir / "template.djx"
+        template_file.write_text("template content")
+
+        page_file = child_dir / "page.py"
+
+        # mock NEXT_PAGES configuration pointing to parent directory
+        config = [
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "APP_DIRS": False,
+                "OPTIONS": {
+                    "PAGES_DIR": str(parent_dir),
+                },
+            },
+        ]
+
+        with patch("next.pages.settings.NEXT_PAGES", config, create=True):
+            result = loader._find_layout_files(page_file)
+
+        # should not duplicate the layout file (it's already in local hierarchy)
+        assert result is not None
+        assert len(result) == 1
+        assert local_layout in result
+
+    def test_find_layout_files_with_different_additional_layouts(self, temp_dir):
+        """Test _find_layout_files when additional layouts are different from local ones."""
+        loader = LayoutTemplateLoader()
+
+        # create local layout file
+        local_layout = temp_dir / "layout.djx"
+        local_layout.write_text("local layout")
+
+        # create template file
+        template_file = temp_dir / "template.djx"
+        template_file.write_text("template content")
+
+        page_file = temp_dir / "page.py"
+
+        # create additional layout in different directory
+        additional_dir = temp_dir / "additional"
+        additional_dir.mkdir()
+        additional_layout = additional_dir / "layout.djx"
+        additional_layout.write_text("additional layout")
+
+        # mock NEXT_PAGES configuration pointing to additional directory
+        config = [
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "APP_DIRS": False,
+                "OPTIONS": {
+                    "PAGES_DIR": str(additional_dir),
+                },
+            },
+        ]
+
+        with patch("next.pages.settings.NEXT_PAGES", config, create=True):
+            result = loader._find_layout_files(page_file)
+
+        # should include both local and additional layouts
+        assert result is not None
+        assert len(result) == 2
+        assert local_layout in result
+        assert additional_layout in result
 
     def test_load_template_with_single_layout(self, temp_dir):
         """Test load_template with single layout file."""
@@ -1901,8 +2135,6 @@ class TestLayoutTemplateLoader:
 
     def test_compose_layout_hierarchy_exception_handling(self, temp_dir):
         """Test _compose_layout_hierarchy handles exceptions gracefully."""
-        from unittest.mock import patch
-
         loader = LayoutTemplateLoader()
 
         # create a layout file that will cause an exception when read
@@ -1931,17 +2163,6 @@ class TestLayoutTemplateLoader:
 
         result = loader.load_template(page_file)
         assert result is None
-
-    def test_wrap_in_template_block_no_template_file(self, temp_dir):
-        """Test _wrap_in_template_block when template.djx doesn't exist."""
-        loader = LayoutTemplateLoader()
-
-        # create a page file without template.djx
-        page_file = temp_dir / "page.py"
-        page_file.write_text("template = 'test'")
-
-        result = loader._wrap_in_template_block(page_file)
-        assert result == "{% block template %}{% endblock template %}"
 
 
 class TestLayoutManager:
@@ -2126,16 +2347,12 @@ class TestContextProcessors:
 
     def test_get_context_processors_empty_config(self, page_instance):
         """Test _get_context_processors with empty NEXT_PAGES config."""
-        from next.pages import _get_context_processors
-
         with patch("django.conf.settings.NEXT_PAGES", [], create=True):
             processors = _get_context_processors()
             assert processors == []
 
     def test_get_context_processors_no_context_processors(self, page_instance):
         """Test _get_context_processors with NEXT_PAGES config but no context_processors."""
-        from next.pages import _get_context_processors
-
         config = [{"BACKEND": "next.urls.FileRouterBackend", "OPTIONS": {}}]
         with patch("django.conf.settings.NEXT_PAGES", config, create=True):
             processors = _get_context_processors()
@@ -2143,7 +2360,6 @@ class TestContextProcessors:
 
     def test_get_context_processors_with_valid_processors(self, page_instance):
         """Test _get_context_processors with valid context processors."""
-        from next.pages import _get_context_processors
 
         def test_processor(request):
             return {"test_var": "test_value"}
@@ -2175,8 +2391,6 @@ class TestContextProcessors:
 
     def test_get_context_processors_with_invalid_processor(self, page_instance):
         """Test _get_context_processors with invalid processor path."""
-        from next.pages import _get_context_processors
-
         config = [
             {
                 "BACKEND": "next.urls.FileRouterBackend",
@@ -2209,9 +2423,6 @@ class TestContextProcessors:
         page_file = temp_dir / "page.py"
         template_str = "<h1>{{ title }}</h1><p>{{ request_var }}</p>"
         page_instance.register_template(page_file, template_str)
-
-        # create a mock request that is an instance of HttpRequest
-        from django.http import HttpRequest
 
         mock_request = HttpRequest()
         mock_request.META = {}
@@ -2253,9 +2464,6 @@ class TestContextProcessors:
         template_str = "<h1>{{ title }}</h1>"
         page_instance.register_template(page_file, template_str)
 
-        # create a mock request that is an instance of HttpRequest
-        from django.http import HttpRequest
-
         mock_request = HttpRequest()
         mock_request.META = {}
 
@@ -2268,8 +2476,6 @@ class TestContextProcessors:
 
     def test_render_with_context_processor_error(self, page_instance, temp_dir):
         """Test render method with context processor that raises an exception."""
-        from django.http import HttpRequest
-
         # create a test template
         page_file = temp_dir / "page.py"
         template_str = "<h1>{{ title }}</h1><p>{{ good_var }}</p>"
@@ -2305,8 +2511,6 @@ class TestContextProcessors:
         self, page_instance, temp_dir
     ):
         """Test render method with context processor that returns non-dict."""
-        from django.http import HttpRequest
-
         # create a test template
         page_file = temp_dir / "page.py"
         template_str = "<h1>{{ title }}</h1><p>{{ good_var }}</p>"
@@ -2339,8 +2543,6 @@ class TestLoadPythonModule:
 
     def test_load_python_module_invalid_file(self, temp_dir):
         """Test _load_python_module with invalid Python file."""
-        from next.pages import _load_python_module
-
         # create an invalid Python file
         invalid_file = temp_dir / "invalid.py"
         invalid_file.write_text("invalid python syntax {")
@@ -2350,8 +2552,6 @@ class TestLoadPythonModule:
 
     def test_load_python_module_nonexistent_file(self, temp_dir):
         """Test _load_python_module with nonexistent file."""
-        from next.pages import _load_python_module
-
         nonexistent_file = temp_dir / "nonexistent.py"
 
         result = _load_python_module(nonexistent_file)
@@ -2363,8 +2563,6 @@ class TestPageCreateUrlPattern:
 
     def test_create_regular_page_pattern_no_module(self, page_instance, temp_dir):
         """Test _create_regular_page_pattern when module cannot be loaded."""
-        from next.urls import URLPatternParser
-
         # create an invalid page file
         page_file = temp_dir / "page.py"
         page_file.write_text("invalid python syntax {")
@@ -2382,8 +2580,6 @@ class TestPageCreateUrlPattern:
         self, page_instance, temp_dir
     ):
         """Test _create_regular_page_pattern when no template and no render function."""
-        from next.urls import URLPatternParser
-
         # create a page file without template or render function
         page_file = temp_dir / "page.py"
         page_file.write_text("def other_function(): pass")

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "next.dj"
 version = "0.1.0"
-description = "Low-code framework for frontend developers powered by Django"
+description = "Next-gen framework for Django developers"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"
@@ -24,8 +24,8 @@ dependencies = [
     "django>=4.2,<5.3",
 ]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest==8.4.0",
     "pytest-cov==6.1.1",
     "pytest-django==4.11.1",

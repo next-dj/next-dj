@@ -64,8 +64,9 @@ if not settings.configured:
         NEXT_PAGES={
             "BACKEND": "next.pages.FileRouterBackend",
             "APP_DIRS": True,
-            "PAGES_DIR_NAME": "pages",
-            "PAGES_DIR": "catalog/pages",
+            "OPTIONS": {
+                "PAGES_DIR": "catalog/pages",
+            },
         },
     )
 

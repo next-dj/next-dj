@@ -95,14 +95,13 @@ NEXT_PAGES = [
         "APP_DIRS": True,
         "OPTIONS": {
             # You can customize the pages directory name
-            # 'PAGES_DIR_NAME': 'views',
+            # "PAGES_DIR": str(BASE_DIR / "views"),
         },
     },
     {
         "BACKEND": "next.urls.FileRouterBackend",
         "APP_DIRS": False,
         "OPTIONS": {
-            "PAGES_DIR_NAME": "root_pages",
             "PAGES_DIR": str(BASE_DIR / "root_pages"),
         },
     },

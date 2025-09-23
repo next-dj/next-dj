@@ -1,3 +1,4 @@
+import shutil
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -37,8 +38,6 @@ class TestFileRouterBackend:
         """Create a temporary directory for tests."""
         temp_dir = tempfile.mkdtemp()
         yield temp_dir
-        import shutil
-
         shutil.rmtree(temp_dir)
 
     @pytest.fixture
@@ -64,7 +63,7 @@ class TestFileRouterBackend:
         temp_file.unlink()
 
     @pytest.mark.parametrize(
-        "test_case,pages_dir_name,app_dirs,options,expected_pages_dir,expected_app_dirs,expected_options",
+        "test_case,pages_dir,app_dirs,options,expected_pages_dir,expected_app_dirs,expected_options",
         [
             ("defaults", None, None, None, "pages", True, {}),
             (
@@ -81,7 +80,7 @@ class TestFileRouterBackend:
     def test_init_variations(
         self,
         test_case,
-        pages_dir_name,
+        pages_dir,
         app_dirs,
         options,
         expected_pages_dir,
@@ -90,29 +89,29 @@ class TestFileRouterBackend:
     ):
         """Test router initialization with different parameters."""
         kwargs = {}
-        if pages_dir_name is not None:
-            kwargs["pages_dir_name"] = pages_dir_name
+        if pages_dir is not None:
+            kwargs["pages_dir"] = pages_dir
         if app_dirs is not None:
             kwargs["app_dirs"] = app_dirs
         if options is not None:
             kwargs["options"] = options
 
         router = FileRouterBackend(**kwargs)
-        assert router.pages_dir_name == expected_pages_dir
+        assert router.pages_dir == expected_pages_dir
         assert router.app_dirs == expected_app_dirs
         assert router.options == expected_options
         assert router._patterns_cache == {}
 
     @pytest.mark.parametrize(
-        "pages_dir_name,app_dirs,expected_repr",
+        "pages_dir,app_dirs,expected_repr",
         [
             ("views", False, "<FileRouterBackend pages_dir='views' app_dirs=False>"),
             ("pages", True, "<FileRouterBackend pages_dir='pages' app_dirs=True>"),
         ],
     )
-    def test_repr_variations(self, pages_dir_name, app_dirs, expected_repr):
+    def test_repr_variations(self, pages_dir, app_dirs, expected_repr):
         """Test string representation with different parameters."""
-        router = FileRouterBackend(pages_dir_name, app_dirs)
+        router = FileRouterBackend(pages_dir, app_dirs)
         assert repr(router) == expected_repr
 
     @pytest.mark.parametrize(
@@ -414,16 +413,16 @@ class TestRouterFactory:
                 {
                     "BACKEND": "next.urls.FileRouterBackend",
                     "APP_DIRS": True,
-                    "OPTIONS": {"PAGES_DIR_NAME": "views"},
+                    "OPTIONS": {},
                 },
                 FileRouterBackend,
-                {"pages_dir_name": "views", "app_dirs": True},
+                {"pages_dir": "pages", "app_dirs": True},
             ),
             (
                 "defaults",
                 {"BACKEND": "next.urls.FileRouterBackend"},
                 FileRouterBackend,
-                {"pages_dir_name": "pages", "app_dirs": True, "options": {}},
+                {"pages_dir": "pages", "app_dirs": True, "options": {}},
             ),
             ("missing_backend", {}, FileRouterBackend, {}),
         ],
@@ -463,7 +462,7 @@ class TestRouterFactory:
         backend = RouterFactory.create_backend({"BACKEND": "custom"})
         assert isinstance(backend, custom_backend_class)
         # verify that the else branch was executed by checking that no FileRouterBackend-specific args were passed
-        assert not hasattr(backend, "pages_dir_name")
+        assert not hasattr(backend, "pages_dir")
 
 
 class TestRouterManager:
@@ -827,7 +826,7 @@ class TestGlobalInstances:
         backend = RouterFactory.create_backend({"BACKEND": "custom"})
         assert isinstance(backend, CustomBackend)
         # verify that the else branch was executed by checking that no FileRouterBackend-specific args were passed
-        assert not hasattr(backend, "pages_dir_name")
+        assert not hasattr(backend, "pages_dir")
 
     def test_generate_urls_comprehensive_coverage(self):
         """Test generate_urls method comprehensively to cover all uncovered lines."""
@@ -922,7 +921,7 @@ class TestGlobalInstances:
         backend = RouterFactory.create_backend({"BACKEND": "custom"})
         assert isinstance(backend, CustomBackend)
         # verify that the else branch was executed by checking that no FileRouterBackend-specific args were passed
-        assert not hasattr(backend, "pages_dir_name")
+        assert not hasattr(backend, "pages_dir")
 
     def test_scan_pages_directory_real_filesystem(self, tmp_path):
         """Test _scan_pages_directory recursion on a real filesystem."""

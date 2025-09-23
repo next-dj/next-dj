@@ -63,7 +63,6 @@ if not settings.configured:
         NEXT_PAGES={
             "BACKEND": "next.pages.FileRouterBackend",
             "APP_DIRS": True,
-            "PAGES_DIR_NAME": "pages",
             "PAGES_DIR": "layouts/pages",
             "context_processors": [
                 "layouts.context_processors.site_info",
