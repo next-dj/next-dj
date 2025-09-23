@@ -20,9 +20,6 @@ if not settings.configured:
             "default": {
                 "ENGINE": "django.db.backends.sqlite3",
                 "NAME": ":memory:",
-                "OPTIONS": {
-                    "init_command": "PRAGMA foreign_keys=OFF;",
-                },
             }
         },
         INSTALLED_APPS=[
