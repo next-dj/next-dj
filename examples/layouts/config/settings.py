@@ -114,7 +114,6 @@ NEXT_PAGES = [
         "BACKEND": "next.urls.FileRouterBackend",
         "APP_DIRS": True,
         "OPTIONS": {
-            "PAGES_DIR": str(BASE_DIR / "layouts" / "pages"),
             "context_processors": [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",

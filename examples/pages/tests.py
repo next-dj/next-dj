@@ -1,171 +1,36 @@
-import sys
-from pathlib import Path
+import importlib.util
+import os
 
 import pytest
-from django.conf import settings
-from django.test import Client
+from django.apps import apps
 
-# add project root to python path
-project_root = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(project_root))
-# add examples/pages to python path for catalog app
-sys.path.insert(0, str(project_root / "examples" / "pages"))
-
-# configure django settings for pages example
-
-if not settings.configured:
-    settings.configure(
-        DEBUG=True,
-        DATABASES={
-            "default": {
-                "ENGINE": "django.db.backends.sqlite3",
-                "NAME": ":memory:",
-            }
-        },
-        TEMPLATES=[
-            {
-                "BACKEND": "django.template.backends.django.DjangoTemplates",
-                "DIRS": [],
-                "APP_DIRS": True,
-                "OPTIONS": {
-                    "context_processors": [
-                        "django.template.context_processors.request",
-                        "django.contrib.auth.context_processors.auth",
-                        "django.contrib.messages.context_processors.messages",
-                    ],
-                },
-            },
-        ],
-        INSTALLED_APPS=[
-            "django.contrib.admin",
-            "django.contrib.auth",
-            "django.contrib.contenttypes",
-            "django.contrib.sessions",
-            "django.contrib.messages",
-            "django.contrib.staticfiles",
-            "next",
-            "catalog",
-        ],
-        DEFAULT_AUTO_FIELD="django.db.models.BigAutoField",
-        MIDDLEWARE=[
-            "django.middleware.security.SecurityMiddleware",
-            "django.contrib.sessions.middleware.SessionMiddleware",
-            "django.middleware.common.CommonMiddleware",
-            "django.middleware.csrf.CsrfViewMiddleware",
-            "django.contrib.auth.middleware.AuthenticationMiddleware",
-            "django.contrib.messages.middleware.MessageMiddleware",
-            "django.middleware.clickjacking.XFrameOptionsMiddleware",
-        ],
-        ROOT_URLCONF="config.urls",
-        SECRET_KEY="simple-key",
-        USE_TZ=True,
-        TIME_ZONE="UTC",
-        # next-dj configuration for pages example
-        NEXT_PAGES={
-            "BACKEND": "next.pages.FileRouterBackend",
-            "APP_DIRS": True,
-            "OPTIONS": {
-                "PAGES_DIR": "catalog/pages",
-            },
-        },
-    )
-
-    # setup django
-    import django
-
-    django.setup()
-
-
-@pytest.fixture
-def client():
-    """django test client fixture."""
-    return Client()
-
-
-@pytest.fixture
-def request_factory():
-    """django request factory fixture."""
-    from django.test import RequestFactory
-
-    return RequestFactory()
-
-
-@pytest.fixture
-def sample_request(request_factory):
-    """sample request fixture."""
-    return request_factory.get("/")
-
-
-@pytest.fixture
-def sample_products():
-    """fixture that returns sample products."""
-    from catalog.models import Product
-
-    return Product.objects.all()[:3]
-
-
-@pytest.fixture(autouse=True)
-def setup_database():
-    """setup database for all tests."""
-    from catalog.models import Product
-    from django.core.management import call_command
-
-    # run migrations
-    call_command("migrate", "--run-syncdb")
-
-    # clear existing products
-    Product.objects.all().delete()
-
-    # create sample products
-    product1 = Product.objects.create(title="Product 1", description="Description 1")
-    product2 = Product.objects.create(title="Product 2", description="Description 2")
-    product3 = Product.objects.create(title="Product 3", description="Description 3")
-
-    return {
-        "product1": product1,
-        "product2": product2,
-        "product3": product3,
-    }
+pytestmark = pytest.mark.django_db
 
 
 @pytest.mark.parametrize(
-    "url",
+    "url,expected_content",
     [
-        "/",
-        "/catalog/",
-    ],
-)
-def test_all_pages_accessible(client, url):
-    """test that all expected pages are accessible."""
-    response = client.get(url)
-    # pages example may not work in test environment, just check response
-    assert response.status_code in [200, 404], f"url {url} should return 200 or 404"
-
-
-@pytest.mark.parametrize(
-    "url,test_name",
-    [
-        ("/", "landing_page"),
         ("/catalog/", "catalog_listing"),
+        ("/catalog/1/", "product_detail"),
     ],
 )
-def test_pages_renders_correctly(client, url, test_name):
-    """test that pages render correctly."""
+def test_pages_accessible_and_renders_correctly(client, url, expected_content):
+    """test that pages are accessible and render correctly."""
     response = client.get(url)
+    assert response.status_code == 200
+    content = response.content.decode()
+    if expected_content == "catalog_listing":
+        assert "Show products context variable" in content
+    elif expected_content == "product_detail":
+        assert "Product details" in content
+
+
+@pytest.mark.parametrize("product_id", [0, 1, 2])
+def test_product_detail_pages_accessible(client, product_id):
+    """test that product detail pages are accessible."""
+    response = client.get(f"/catalog/{product_id}/")
     # pages example may not work in test environment
     assert response.status_code in [200, 404]
-
-
-@pytest.mark.parametrize("product_index", [0, 1, 2])
-def test_product_detail_pages_accessible(client, sample_products, product_index):
-    """test that product detail pages are accessible."""
-    if product_index < len(sample_products):
-        product = sample_products[product_index]
-        response = client.get(f"/catalog/{product.id}/")
-        # pages example may not work in test environment
-        assert response.status_code in [200, 404], (
-            f"url /catalog/{product.id}/ should return 200 or 404"
-        )
 
 
 def test_product_detail_with_nonexistent_product(client):
@@ -219,7 +84,6 @@ def test_page_content_matches_expected(client):
     assert response.status_code in [200, 404]
 
 
-# checks tests
 @pytest.mark.parametrize(
     "check_function",
     [
@@ -229,9 +93,11 @@ def test_page_content_matches_expected(client):
 )
 def test_checks(check_function):
     """test next-dj checks."""
-    from django.apps import apps
+    import importlib
 
-    from next.checks import check_duplicate_url_parameters, check_missing_page_content
+    checks_module = importlib.import_module("next.checks")
+    check_duplicate_url_parameters = checks_module.check_duplicate_url_parameters
+    check_missing_page_content = checks_module.check_missing_page_content
 
     check_funcs = {
         "check_duplicate_url_parameters": check_duplicate_url_parameters,
@@ -262,13 +128,10 @@ def test_example_app_files():
     assert hasattr(catalog.admin, "Product")
 
 
-def test_example_pages_coverage():
+def test_example_pages_coverage(page_modules):
     """test that all page files are covered."""
     # test that page files exist and are importable
     # use importlib for modules with special characters
-    import importlib.util
-    import os
-
     import catalog.pages.catalog.page as catalog_page
     import catalog.pages.page as main_page
 
@@ -342,4 +205,4 @@ def test_example_pages_coverage():
         catalog_detail_page.common_context_with_custom_name(request, id="id")
         raise AssertionError("Expected Http404 exception")
     except Http404:
-        pass  # expected behavior
+        pass  # expected

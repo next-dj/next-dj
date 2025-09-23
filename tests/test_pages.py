@@ -1392,12 +1392,83 @@ class TestLayoutChecks:
 class TestMissingPageContentChecks:
     """Test cases for missing page content checks."""
 
-    def test_check_missing_page_content_with_template(self, temp_dir):
-        """Test check_missing_page_content with template variable."""
-        # create page file with template
+    @pytest.mark.parametrize(
+        "test_case,page_content,create_template_djx,template_djx_content,create_layout_djx,layout_djx_content,expected_warnings",
+        [
+            (
+                "with_template",
+                'template = "Hello World"',
+                False,
+                None,
+                False,
+                None,
+                0,
+            ),
+            (
+                "with_render",
+                'def render(request, **kwargs):\n    return "Hello World"',
+                False,
+                None,
+                False,
+                None,
+                0,
+            ),
+            (
+                "with_template_djx",
+                "",
+                True,
+                "<h1>Hello World</h1>",
+                False,
+                None,
+                0,
+            ),
+            (
+                "with_layout_djx",
+                "",
+                False,
+                None,
+                True,
+                "<html>{% block template %}{% endblock template %}</html>",
+                0,
+            ),
+            (
+                "no_content",
+                "",
+                False,
+                None,
+                False,
+                None,
+                1,
+            ),
+        ],
+    )
+    def test_check_missing_page_content_scenarios(
+        self,
+        temp_dir,
+        test_case,
+        page_content,
+        create_template_djx,
+        template_djx_content,
+        create_layout_djx,
+        layout_djx_content,
+        expected_warnings,
+    ):
+        """Test check_missing_page_content with different content scenarios."""
+        # create page file with specified content
         page_file = temp_dir / "page.py"
-        page_file.write_text('template = "Hello World"')
+        page_file.write_text(page_content)
 
+        # create template.djx file if needed for this test case
+        if create_template_djx:
+            template_djx = temp_dir / "template.djx"
+            template_djx.write_text(template_djx_content)
+
+        # create layout.djx file if needed for this test case
+        if create_layout_djx:
+            layout_djx = temp_dir / "layout.djx"
+            layout_djx.write_text(layout_djx_content)
+
+        # mock the router manager and pages directory for testing
         with (
             patch("next.checks.RouterManager") as mock_router_manager,
             patch("next.checks._get_pages_directory") as mock_get_pages_dir,
@@ -1410,106 +1481,13 @@ class TestMissingPageContentChecks:
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
             mock_get_pages_dir.return_value = temp_dir
 
+            # run the check and verify the expected number of warnings
             warnings = check_missing_page_content(None)
-            assert len(warnings) == 0
+            assert len(warnings) == expected_warnings
 
-    def test_check_missing_page_content_with_render(self, temp_dir):
-        """Test check_missing_page_content with render function."""
-        # create page file with render function
-        page_file = temp_dir / "page.py"
-        page_file.write_text("""
-def render(request, **kwargs):
-    return "Hello World"
-        """)
-
-        with (
-            patch("next.checks.RouterManager") as mock_router_manager,
-            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
-        ):
-            mock_router = mock_router_manager.return_value
-            mock_router._reload_config.return_value = None
-            mock_router._routers = [mock_router]
-            mock_router.pages_dir = "pages"
-            mock_router.app_dirs = True
-            mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = temp_dir
-
-            warnings = check_missing_page_content(None)
-            assert len(warnings) == 0
-
-    def test_check_missing_page_content_with_template_djx(self, temp_dir):
-        """Test check_missing_page_content with template.djx."""
-        # create page file without content
-        page_file = temp_dir / "page.py"
-        page_file.write_text("")
-
-        # create template.djx
-        template_djx = temp_dir / "template.djx"
-        template_djx.write_text("<h1>Hello World</h1>")
-
-        with (
-            patch("next.checks.RouterManager") as mock_router_manager,
-            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
-        ):
-            mock_router = mock_router_manager.return_value
-            mock_router._reload_config.return_value = None
-            mock_router._routers = [mock_router]
-            mock_router.pages_dir = "pages"
-            mock_router.app_dirs = True
-            mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = temp_dir
-
-            warnings = check_missing_page_content(None)
-            assert len(warnings) == 0
-
-    def test_check_missing_page_content_with_layout_djx(self, temp_dir):
-        """Test check_missing_page_content with layout.djx."""
-        # create page file without content
-        page_file = temp_dir / "page.py"
-        page_file.write_text("")
-
-        # create layout.djx
-        layout_djx = temp_dir / "layout.djx"
-        layout_djx.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
-        )
-
-        with (
-            patch("next.checks.RouterManager") as mock_router_manager,
-            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
-        ):
-            mock_router = mock_router_manager.return_value
-            mock_router._reload_config.return_value = None
-            mock_router._routers = [mock_router]
-            mock_router.pages_dir = "pages"
-            mock_router.app_dirs = True
-            mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = temp_dir
-
-            warnings = check_missing_page_content(None)
-            assert len(warnings) == 0
-
-    def test_check_missing_page_content_no_content(self, temp_dir):
-        """Test check_missing_page_content with no content."""
-        # create page file without any content
-        page_file = temp_dir / "page.py"
-        page_file.write_text("")
-
-        with (
-            patch("next.checks.RouterManager") as mock_router_manager,
-            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
-        ):
-            mock_router = mock_router_manager.return_value
-            mock_router._reload_config.return_value = None
-            mock_router._routers = [mock_router]
-            mock_router.pages_dir = "pages"
-            mock_router.app_dirs = True
-            mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = temp_dir
-
-            warnings = check_missing_page_content(None)
-            assert len(warnings) == 1
-            assert "has no content" in warnings[0].msg
+            # verify warning message content if warnings are expected
+            if expected_warnings > 0:
+                assert "has no content" in warnings[0].msg
 
     def test_check_missing_page_content_disabled(self, temp_dir):
         """Test check_missing_page_content when disabled in settings."""
@@ -1526,27 +1504,27 @@ def render(request, **kwargs):
 class TestDuplicateUrlParametersChecks:
     """Test cases for duplicate URL parameters checks."""
 
-    def test_check_duplicate_url_parameters_no_duplicates(self, temp_dir):
-        """Test check_duplicate_url_parameters with no duplicates."""
-        # create page file
-        page_file = temp_dir / "page.py"
-        page_file.write_text("")
-
-        with patch("next.checks.RouterManager") as mock_router_manager:
-            mock_router = mock_router_manager.return_value
-            mock_router._reload_config.return_value = None
-            mock_router._routers = [mock_router]
-            mock_router.pages_dir = "pages"
-            mock_router.app_dirs = True
-            mock_router._scan_pages_directory.return_value = [
-                ("user/[id]/post/[slug]", page_file)
-            ]
-
-            errors = check_duplicate_url_parameters(None)
-            assert len(errors) == 0
-
-    def test_check_duplicate_url_parameters_with_duplicates(self, temp_dir):
-        """Test check_duplicate_url_parameters with duplicates."""
+    @pytest.mark.parametrize(
+        "test_case,url_patterns,expected_errors,expected_error_msg",
+        [
+            (
+                "no_duplicates",
+                [("user/[id]/post/[slug]", "page_file")],
+                0,
+                None,
+            ),
+            (
+                "with_duplicates",
+                [("user/[id]/[id]", "page_file")],
+                1,
+                "duplicate parameter names",
+            ),
+        ],
+    )
+    def test_check_duplicate_url_parameters_scenarios(
+        self, temp_dir, test_case, url_patterns, expected_errors, expected_error_msg
+    ):
+        """Test check_duplicate_url_parameters with different URL pattern scenarios."""
         # create page file
         page_file = temp_dir / "page.py"
         page_file.write_text("")
@@ -1561,14 +1539,17 @@ class TestDuplicateUrlParametersChecks:
             mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [
-                ("user/[id]/[id]", page_file)
+                (pattern, page_file) for pattern, _ in url_patterns
             ]
             mock_get_pages_dir.return_value = temp_dir
 
             errors = check_duplicate_url_parameters(None)
-            assert len(errors) == 1
-            assert "duplicate parameter names" in errors[0].msg
-            assert "id" in errors[0].msg
+            assert len(errors) == expected_errors
+
+            if expected_errors > 0 and expected_error_msg:
+                assert expected_error_msg in errors[0].msg
+                if "duplicate parameter names" in expected_error_msg:
+                    assert "id" in errors[0].msg
 
     def test_check_duplicate_url_parameters_disabled(self, temp_dir):
         """Test check_duplicate_url_parameters when disabled in settings."""
@@ -1760,125 +1741,144 @@ class TestLayoutTemplateLoader:
         assert len(result) == 1
         assert layout_file in result
 
-    def test_get_additional_layout_files_with_invalid_config(self, temp_dir):
-        """Test _get_additional_layout_files with invalid configuration."""
+    @pytest.mark.parametrize(
+        "test_case,config,expected_result",
+        [
+            (
+                "invalid_config",
+                [
+                    "invalid_config",  # not a dict
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "APP_DIRS": False,
+                        "OPTIONS": {
+                            "PAGES_DIR": "/nonexistent/path",
+                        },
+                    },
+                ],
+                [],
+            ),
+            (
+                "app_dirs_true",
+                [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "APP_DIRS": True,
+                    },
+                ],
+                [],
+            ),
+        ],
+    )
+    def test_get_additional_layout_files_scenarios(
+        self, temp_dir, test_case, config, expected_result
+    ):
+        """Test _get_additional_layout_files with different configuration scenarios."""
         loader = LayoutTemplateLoader()
 
-        # mock invalid NEXT_PAGES configuration
-        config = [
-            "invalid_config",  # not a dict
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "APP_DIRS": False,
-                "OPTIONS": {
-                    "PAGES_DIR": "/nonexistent/path",
+        with patch("next.pages.settings.NEXT_PAGES", config, create=True):
+            result = loader._get_additional_layout_files()
+
+        assert result == expected_result
+
+    @pytest.mark.parametrize(
+        "test_case,config,expected_result",
+        [
+            (
+                "with_pages_dir",
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "APP_DIRS": False,
+                    "OPTIONS": {
+                        "PAGES_DIR": "test_dir",
+                    },
                 },
-            },
-        ]
-
-        with patch("next.pages.settings.NEXT_PAGES", config, create=True):
-            result = loader._get_additional_layout_files()
-
-        assert result == []
-
-    def test_get_additional_layout_files_with_app_dirs(self, temp_dir):
-        """Test _get_additional_layout_files with APP_DIRS=True."""
+                "test_dir",
+            ),
+            (
+                "with_app_dirs",
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "APP_DIRS": True,
+                },
+                None,
+            ),
+            (
+                "no_options",
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "APP_DIRS": False,
+                },
+                None,
+            ),
+        ],
+    )
+    def test_get_pages_dir_for_config_scenarios(
+        self, temp_dir, test_case, config, expected_result
+    ):
+        """Test _get_pages_dir_for_config with different configuration scenarios."""
         loader = LayoutTemplateLoader()
 
-        # mock NEXT_PAGES configuration with APP_DIRS=True
-        config = [
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "APP_DIRS": True,
-            },
-        ]
-
-        with patch("next.pages.settings.NEXT_PAGES", config, create=True):
-            result = loader._get_additional_layout_files()
-
-        assert result == []
-
-    def test_get_pages_dir_for_config_with_pages_dir(self, temp_dir):
-        """Test _get_pages_dir_for_config with PAGES_DIR option."""
-        loader = LayoutTemplateLoader()
-
-        config = {
-            "BACKEND": "next.urls.FileRouterBackend",
-            "APP_DIRS": False,
-            "OPTIONS": {
-                "PAGES_DIR": str(temp_dir),
-            },
-        }
+        # replace test_dir with actual temp_dir for the first test case
+        if test_case == "with_pages_dir":
+            config["OPTIONS"]["PAGES_DIR"] = str(temp_dir)
+            expected_result = temp_dir
 
         result = loader._get_pages_dir_for_config(config)
-        assert result == temp_dir
+        assert result == expected_result
 
-    def test_get_pages_dir_for_config_with_app_dirs(self, temp_dir):
-        """Test _get_pages_dir_for_config with APP_DIRS=True."""
+    @pytest.mark.parametrize(
+        "test_case,create_layout,create_template,template_content,expected_result",
+        [
+            (
+                "with_local_layout",
+                True,
+                True,
+                "<h1>Test Content</h1>",
+                "<h1>Test Content</h1>",
+            ),
+            (
+                "without_local_layout",
+                False,
+                True,
+                "<h1>Test Content</h1>",
+                "{% block template %}<h1>Test Content</h1>{% endblock template %}",
+            ),
+            (
+                "no_template_file",
+                False,
+                False,
+                None,
+                "{% block template %}{% endblock template %}",
+            ),
+        ],
+    )
+    def test_wrap_in_template_block_scenarios(
+        self,
+        temp_dir,
+        test_case,
+        create_layout,
+        create_template,
+        template_content,
+        expected_result,
+    ):
+        """Test _wrap_in_template_block with different file scenarios."""
         loader = LayoutTemplateLoader()
 
-        config = {
-            "BACKEND": "next.urls.FileRouterBackend",
-            "APP_DIRS": True,
-        }
+        # create layout file if needed
+        if create_layout:
+            layout_file = temp_dir / "layout.djx"
+            layout_file.write_text("layout content")
 
-        result = loader._get_pages_dir_for_config(config)
-        assert result is None
-
-    def test_get_pages_dir_for_config_no_options(self, temp_dir):
-        """Test _get_pages_dir_for_config with no options."""
-        loader = LayoutTemplateLoader()
-
-        config = {
-            "BACKEND": "next.urls.FileRouterBackend",
-            "APP_DIRS": False,
-        }
-
-        result = loader._get_pages_dir_for_config(config)
-        assert result is None
-
-    def test_wrap_in_template_block_with_local_layout(self, temp_dir):
-        """Test _wrap_in_template_block when local layout exists."""
-        loader = LayoutTemplateLoader()
-
-        # create template and layout files
-        template_file = temp_dir / "template.djx"
-        template_file.write_text("<h1>Test Content</h1>")
-
-        layout_file = temp_dir / "layout.djx"
-        layout_file.write_text("layout content")
+        # create template file if needed
+        if create_template:
+            template_file = temp_dir / "template.djx"
+            template_file.write_text(template_content)
 
         page_file = temp_dir / "page.py"
         result = loader._wrap_in_template_block(page_file)
 
-        # should return template content as-is when local layout exists
-        assert result == "<h1>Test Content</h1>"
-
-    def test_wrap_in_template_block_without_local_layout(self, temp_dir):
-        """Test _wrap_in_template_block when no local layout exists."""
-        loader = LayoutTemplateLoader()
-
-        # create template file only
-        template_file = temp_dir / "template.djx"
-        template_file.write_text("<h1>Test Content</h1>")
-
-        page_file = temp_dir / "page.py"
-        result = loader._wrap_in_template_block(page_file)
-
-        # should wrap content in template block
-        assert (
-            result == "{% block template %}<h1>Test Content</h1>{% endblock template %}"
-        )
-
-    def test_wrap_in_template_block_no_template_file(self, temp_dir):
-        """Test _wrap_in_template_block when template.djx doesn't exist."""
-        loader = LayoutTemplateLoader()
-
-        page_file = temp_dir / "page.py"
-        result = loader._wrap_in_template_block(page_file)
-
-        # should return empty template block
-        assert result == "{% block template %}{% endblock template %}"
+        assert result == expected_result
 
     def test_find_layout_files_with_duplicate_additional_layouts(self, temp_dir):
         """Test _find_layout_files when additional layouts are already in local hierarchy."""

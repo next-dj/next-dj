@@ -2,6 +2,7 @@
 source = .
 omit = 
     */tests.py
+    */conftest.py
     */migrations/*
     */settings.py
     */manage.py

@@ -640,13 +640,21 @@ class TestGlobalInstances:
             urls = router.generate_urls()
             assert urls == []
 
-    def test_generate_root_urls_no_pages_path(self):
-        """Test _generate_root_urls when _get_root_pages_path returns None."""
+    @pytest.mark.parametrize(
+        "test_case,expected_result",
+        [
+            ("no_pages_path", []),
+            ("with_none_pages_path", []),
+        ],
+    )
+    def test_generate_root_urls_scenarios(self, test_case, expected_result):
+        """Test _generate_root_urls with different scenarios."""
         router = FileRouterBackend()
 
+        # mock the pages path to return None to test empty result scenarios
         with patch.object(router, "_get_root_pages_path", return_value=None):
             urls = router._generate_root_urls()
-            assert urls == []
+            assert urls == expected_result
 
     def test_create_url_pattern_view_wrapper_no_args_parameter(self):
         """Test view_wrapper when args parameter is not passed."""
@@ -684,25 +692,32 @@ class TestGlobalInstances:
                 urls = router.generate_urls()
                 assert urls == []
 
-    def test_generate_root_urls_with_none_pages_path(self):
-        """Test _generate_root_urls when _get_root_pages_path returns none."""
-        router = FileRouterBackend()
-
-        with patch.object(router, "_get_root_pages_path", return_value=None):
-            urls = router._generate_root_urls()
-            assert urls == []
-
-    def test_view_wrapper_without_args_parameter(self):
-        """Test view_wrapper when args parameter is not in kwargs."""
+    @pytest.mark.parametrize(
+        "test_case,file_content,expected_result",
+        [
+            (
+                "without_args_parameter",
+                "def render(request, **kwargs):\n    return 'success'",
+                "mocked success",
+            ),
+            (
+                "args_parameter_not_in_kwargs",
+                "def render(request, **kwargs):\n    return 'success'",
+                "mocked success",
+            ),
+        ],
+    )
+    def test_view_wrapper_scenarios(self, test_case, file_content, expected_result):
+        """Test view_wrapper with different scenarios."""
         router = FileRouterBackend()
 
         # create a temporary file for testing
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-            f.write("def render(request, **kwargs):\n    return 'success'")
+            f.write(file_content)
             temp_file = Path(f.name)
 
         try:
-            with patch("next.urls.page.render", return_value="mocked success"):
+            with patch("next.urls.page.render", return_value=expected_result):
                 pattern = page.create_url_pattern(
                     "test/[[args]]", temp_file, router._url_parser
                 )
@@ -736,31 +751,6 @@ class TestGlobalInstances:
         with patch.object(router, "_get_root_pages_path", return_value=None):
             urls = router._generate_root_urls()
             assert urls == []
-
-    def test_view_wrapper_args_parameter_not_in_kwargs(self):
-        """Test view_wrapper when args parameter is not in kwargs."""
-        router = FileRouterBackend()
-
-        # create a temporary file for testing
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-            f.write("def render(request, **kwargs):\n    return 'success'")
-            temp_file = Path(f.name)
-
-        try:
-            with patch("next.urls.page.render", return_value="mocked success"):
-                pattern = page.create_url_pattern(
-                    "test/[[args]]", temp_file, router._url_parser
-                )
-                assert pattern is not None
-
-                # test that the view wrapper handles missing args parameter correctly
-                if hasattr(pattern, "callback"):
-                    view_func = pattern.callback
-                    # test without args parameter - should not crash and should not modify kwargs
-                    result = view_func(Mock(), other_param="value")
-                    assert result is not None
-        finally:
-            temp_file.unlink()
 
     def test_generate_urls_real_execution(self):
         """Test generate_urls method with real execution."""
