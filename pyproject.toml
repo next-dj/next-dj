@@ -78,32 +78,96 @@ exclude_lines = [
 [tool.ruff]
 target-version = "py312"
 line-length = 88
-unsafe-fixes = true
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "*.egg-info",
+    "migrations",
+
+    # Project annotation file
+    "next/__init__.py"
+]
 
 [tool.ruff.lint]
-select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "B",  # flake8-bugbear
-    "C4", # flake8-comprehensions
-    "UP", # pyupgrade
-]
+select = ["ALL"]
 ignore = [
-    "E501",  # line too long, handled by black
-    "B008",  # do not perform function calls in argument defaults
-    "C901",  # too complex
+    "ANN002", "ANN003",
+    "B008",   # do not perform function calls in argument defaults (Django settings)
+
+    # Framework-specific ignores
+    "SLF001", # private member access (framework code needs this)
+
+    # Docstring rule conflicts - choose one of each conflicting pair
+    "D203",   # incorrect-blank-line-before-class (conflicts with D211)
+    "D213",   # multi-line-summary-second-line (conflicts with D212)
+
+    # Formatter conflicts
+    "COM812", # trailing-comma-missing (conflicts with formatter)
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+"examples/*" = [    
+    "D100", "D101", "D103", "D104", "D105", "D106", "D401",
+    "E501", "EXE001",
+    "INP001",
+    "S105", "S106"
+]
+"**/{test*,conftest}.py" = [
+    "ANN001",  # missing type annotation for function argument
+    "ANN201",  # missing return type annotation for public function
+    "ANN202",  # missing return type annotation for private function
+    "ARG001",  # unused function argument
+    "ARG002",  # unused method argument
+    "ARG005",  # unused lambda argument (tests use lambdas)
+    "S101",    # use of assert detected (tests need this)
+    "D100",    # undocumented public module (tests don't need docs)
+    "PLR2004", # magic value used in comparison
+    "PLR0913", # too many arguments (tests often have many params)
+    "S108",    # hardcoded temp file (tests use temp paths)
+    "E501",    # line too long (tests can be verbose)
+    "FBT003",  # boolean positional value in call (tests use bool args)
+]
+"**/migrations/**/*.py" = ["F401", "PLR0913"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["next"]
+force-single-line = false
+lines-after-imports = 2
+combine-as-imports = true
+split-on-trailing-comma = true
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-branches = 12
+max-returns = 6
+max-statements = 50
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
+inline-quotes = "double"
+multiline-quotes = "double"
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = false
+ignore-fully-untyped = false
+
+[tool.ruff.lint.flake8-pytest-style]
+mark-parentheses = true
+fixture-parentheses = true
 
 [tool.ruff.format]
-line-ending = "auto"
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
 
 [tool.django-stubs]
 django_settings_module = "django.conf.global_settings"
@@ -127,3 +191,6 @@ show_error_codes = true
 
 # only check next folder
 packages = ["next"]
+
+# ignore type checking for *args, **kwargs parameters
+disable_error_code = ["no-untyped-def"]

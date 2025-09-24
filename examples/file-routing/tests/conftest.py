@@ -4,15 +4,14 @@ from pathlib import Path
 import django
 import pytest
 from django.conf import settings
-from django.test import Client, RequestFactory
+from django.test import Client
+
 
 # add project root to python path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
-# add examples/pages to python path for catalog app
-sys.path.insert(0, str(project_root / "examples" / "pages"))
 
-# configure django settings for pages example
+# configure django settings for file-routing example
 if not settings.configured:
     settings.configure(
         DEBUG=True,
@@ -20,7 +19,7 @@ if not settings.configured:
             "default": {
                 "ENGINE": "django.db.backends.sqlite3",
                 "NAME": ":memory:",
-            }
+            },
         },
         INSTALLED_APPS=[
             "django.contrib.admin",
@@ -30,7 +29,7 @@ if not settings.configured:
             "django.contrib.messages",
             "django.contrib.staticfiles",
             "next",
-            "catalog",
+            "myapp",
         ],
         ROOT_URLCONF="config.urls",
         TEMPLATES=[
@@ -52,8 +51,14 @@ if not settings.configured:
             {
                 "BACKEND": "next.urls.FileRouterBackend",
                 "APP_DIRS": True,
+            },
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "APP_DIRS": False,
                 "OPTIONS": {
-                    "PAGES_DIR": "catalog/pages",
+                    "PAGES_DIR": str(
+                        project_root / "examples" / "file-routing" / "root_pages",
+                    ),
                 },
             },
         ],
@@ -66,55 +71,7 @@ if not settings.configured:
     django.setup()
 
 
-@pytest.fixture
+@pytest.fixture()
 def client():
-    """django test client fixture."""
+    """Django test client fixture."""
     return Client()
-
-
-@pytest.fixture
-def request_factory():
-    """django request factory fixture."""
-    return RequestFactory()
-
-
-@pytest.fixture
-def sample_request(request_factory):
-    """sample request fixture."""
-    return request_factory.get("/")
-
-
-@pytest.fixture
-def sample_products():
-    """fixture that returns sample products."""
-    from catalog.models import Product
-
-    return Product.objects.all()[:3]
-
-
-@pytest.fixture(autouse=True)
-def setup_database():
-    """setup database for all tests."""
-    from catalog.models import Product
-
-    # no migrations needed for tests
-
-    # clear existing products
-    Product.objects.all().delete()
-
-    # create sample products
-    Product.objects.create(title="Product 1", description="Description 1")
-    Product.objects.create(title="Product 2", description="Description 2")
-    Product.objects.create(title="Product 3", description="Description 3")
-
-
-@pytest.fixture
-def page_modules():
-    """fixture that imports all page modules."""
-    import catalog.pages.catalog.page as catalog_page
-    import catalog.pages.page as main_page
-
-    return {
-        "catalog_page": catalog_page,
-        "main_page": main_page,
-    }

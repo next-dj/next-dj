@@ -1,12 +1,12 @@
 import importlib.util
-import os
+from pathlib import Path
 
 import pytest
 from django.apps import apps
 
 
 @pytest.mark.parametrize(
-    "url,expected_status",
+    ("url", "expected_status"),
     [
         ("/simple/", 200),
         ("/kwargs/123/", 200),
@@ -15,8 +15,8 @@ from django.apps import apps
         ("/nonexistent/", 404),
     ],
 )
-def test_pages_accessible(client, url, expected_status):
-    """test that pages are accessible with expected status codes."""
+def test_pages_accessible(client, url, expected_status) -> None:
+    """Test that pages are accessible with expected status codes."""
     response = client.get(url)
     assert response.status_code == expected_status, (
         f"url {url} should return {expected_status}"
@@ -24,7 +24,7 @@ def test_pages_accessible(client, url, expected_status):
 
 
 @pytest.mark.parametrize(
-    "url,expected_content",
+    ("url", "expected_content"),
     [
         (
             "/home/",
@@ -42,8 +42,8 @@ def test_pages_accessible(client, url, expected_status):
         ("/kwargs/456/", ["post_id = 456"]),
     ],
 )
-def test_pages_renders_correctly(client, url, expected_content):
-    """test that pages render correctly with expected content."""
+def test_pages_renders_correctly(client, url, expected_content) -> None:
+    """Test that pages render correctly with expected content."""
     response = client.get(url)
     if response.status_code == 200:
         content = response.content.decode()
@@ -62,14 +62,14 @@ def test_pages_renders_correctly(client, url, expected_content):
         "/nonexistent/",
     ],
 )
-def test_invalid_pages_return_404(client, url):
-    """test that invalid pages return 404."""
+def test_invalid_pages_return_404(client, url) -> None:
+    """Test that invalid pages return 404."""
     response = client.get(url)
     assert response.status_code == 404
 
 
 @pytest.mark.parametrize(
-    "url,expected_content",
+    ("url", "expected_content"),
     [
         (
             "/args/test/path/",
@@ -81,8 +81,8 @@ def test_invalid_pages_return_404(client, url):
         ),
     ],
 )
-def test_args_pages_renders_correctly(client, url, expected_content):
-    """test that args pages render correctly with expected content."""
+def test_args_pages_renders_correctly(client, url, expected_content) -> None:
+    """Test that args pages render correctly with expected content."""
     response = client.get(url)
     assert response.status_code == 200
     content = response.content.decode()
@@ -91,8 +91,8 @@ def test_args_pages_renders_correctly(client, url, expected_content):
         assert expected in content, f"Expected '{expected}' not found in content"
 
 
-def test_root_page_renders(client):
-    """test that root page renders correctly."""
+def test_root_page_renders(client) -> None:
+    """Test that root page renders correctly."""
     response = client.get("/home/")
     # root-pages might not work in test environment, so we check if it's accessible or 404
     if response.status_code == 200:
@@ -105,8 +105,8 @@ def test_root_page_renders(client):
         assert response.status_code == 404
 
 
-def test_page_content_matches_expected(client):
-    """test that page content matches expected values."""
+def test_page_content_matches_expected(client) -> None:
+    """Test that page content matches expected values."""
     response = client.get("/simple/")
     assert response.status_code == 200
     content = response.content.decode()
@@ -116,8 +116,8 @@ def test_page_content_matches_expected(client):
 
 
 # checks tests
-def test_check_duplicate_url_parameters():
-    """test check_duplicate_url_parameters check."""
+def test_check_duplicate_url_parameters() -> None:
+    """Test check_duplicate_url_parameters check."""
     import importlib
 
     checks_module = importlib.import_module("next.checks")
@@ -128,8 +128,8 @@ def test_check_duplicate_url_parameters():
     assert errors == []
 
 
-def test_check_missing_page_content():
-    """test check_missing_page_content check."""
+def test_check_missing_page_content() -> None:
+    """Test check_missing_page_content check."""
     import importlib
 
     checks_module = importlib.import_module("next.checks")
@@ -140,8 +140,8 @@ def test_check_missing_page_content():
     assert errors == []
 
 
-def test_example_pages_comprehensive(client):
-    """test comprehensive page functionality."""
+def test_example_pages_comprehensive(client) -> None:
+    """Test comprehensive page functionality."""
     # test simple page
     response = client.get("/simple/")
     assert response.status_code == 200
@@ -163,8 +163,8 @@ def test_example_pages_comprehensive(client):
         assert "Variable Arguments Page" in content
 
 
-def test_example_error_scenarios(client):
-    """test error scenarios."""
+def test_example_error_scenarios(client) -> None:
+    """Test error scenarios."""
     # test invalid kwargs parameter
     response = client.get("/kwargs/invalid/")
     assert response.status_code == 404
@@ -178,22 +178,21 @@ def test_example_error_scenarios(client):
     assert response.status_code == 404
 
 
-def test_example_context_functions_comprehensive():
-    """test comprehensive context function functionality."""
+def test_example_context_functions_comprehensive() -> None:
+    """Test comprehensive context function functionality."""
     import importlib.util
-    import os
 
     import myapp.pages.simple.page as simple_page
     import root_pages.home.page as home_page
 
     # import kwargs page using importlib
-    kwargs_path = os.path.join("myapp", "pages", "kwargs", "[int:post-id]", "page.py")
+    kwargs_path = Path("myapp") / "pages" / "kwargs" / "[int:post-id]" / "page.py"
     spec = importlib.util.spec_from_file_location("kwargs_page", kwargs_path)
     kwargs_page = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(kwargs_page)
 
     # import args page using importlib
-    args_path = os.path.join("myapp", "pages", "args", "[[args]]", "page.py")
+    args_path = Path("myapp") / "pages" / "args" / "[[args]]" / "page.py"
     spec = importlib.util.spec_from_file_location("args_page", args_path)
     args_page = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(args_page)
@@ -211,8 +210,8 @@ def test_example_context_functions_comprehensive():
     assert callable(home_page.render)
 
 
-def test_example_template_rendering_comprehensive(client):
-    """test comprehensive template rendering."""
+def test_example_template_rendering_comprehensive(client) -> None:
+    """Test comprehensive template rendering."""
     # test simple page rendering
     response = client.get("/simple/")
     assert response.status_code == 200
@@ -234,8 +233,8 @@ def test_example_template_rendering_comprehensive(client):
     assert "Variable Arguments Page" in content
 
 
-def test_example_url_patterns_comprehensive(client):
-    """test comprehensive URL pattern functionality."""
+def test_example_url_patterns_comprehensive(client) -> None:
+    """Test comprehensive URL pattern functionality."""
     # test all valid URL patterns
     valid_urls = [
         "/simple/",
@@ -262,21 +261,20 @@ def test_example_url_patterns_comprehensive(client):
         assert response.status_code == 404, f"URL {url} should return 404"
 
 
-def test_example_integration_comprehensive(client):
-    """test comprehensive integration functionality."""
+def test_example_integration_comprehensive(client) -> None:
+    """Test comprehensive integration functionality."""
     import importlib.util
-    import os
 
     import myapp.pages.simple.page as simple_page
 
     # import kwargs page using importlib
-    kwargs_path = os.path.join("myapp", "pages", "kwargs", "[int:post-id]", "page.py")
+    kwargs_path = Path("myapp") / "pages" / "kwargs" / "[int:post-id]" / "page.py"
     spec = importlib.util.spec_from_file_location("kwargs_page", kwargs_path)
     kwargs_page = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(kwargs_page)
 
     # import args page using importlib
-    args_path = os.path.join("myapp", "pages", "args", "[[args]]", "page.py")
+    args_path = Path("myapp") / "pages" / "args" / "[[args]]" / "page.py"
     spec = importlib.util.spec_from_file_location("args_page", args_path)
     args_page = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(args_page)
@@ -304,20 +302,20 @@ def test_example_integration_comprehensive(client):
     assert response.status_code == 200
 
 
-def test_example_files_coverage():
-    """test that all example files are covered."""
+def test_example_files_coverage() -> None:
+    """Test that all example files are covered."""
     # test that all page files exist and are importable
     # use importlib for modules with special characters
     import myapp.pages.simple.page as simple_page
 
     # import kwargs page using importlib
-    kwargs_path = os.path.join("myapp", "pages", "kwargs", "[int:post-id]", "page.py")
+    kwargs_path = Path("myapp") / "pages" / "kwargs" / "[int:post-id]" / "page.py"
     spec = importlib.util.spec_from_file_location("kwargs_page", kwargs_path)
     kwargs_page = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(kwargs_page)
 
     # import args page using importlib
-    args_path = os.path.join("myapp", "pages", "args", "[[args]]", "page.py")
+    args_path = Path("myapp") / "pages" / "args" / "[[args]]" / "page.py"
     spec = importlib.util.spec_from_file_location("args_page", args_path)
     args_page = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(args_page)
@@ -351,8 +349,8 @@ def test_example_files_coverage():
     assert response.status_code == 200
 
 
-def test_example_app_files():
-    """test that all app files are covered."""
+def test_example_app_files() -> None:
+    """Test that all app files are covered."""
     # test that app files exist and are importable
     import myapp.apps
 
@@ -360,8 +358,8 @@ def test_example_app_files():
     assert hasattr(myapp.apps, "MyappConfig")
 
 
-def test_example_root_pages():
-    """test that root pages are covered."""
+def test_example_root_pages() -> None:
+    """Test that root pages are covered."""
     import root_pages.home.page as home_page
     from django.test import RequestFactory
 

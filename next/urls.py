@@ -1,5 +1,4 @@
-"""
-File-based URL routing system for Django applications.
+"""File-based URL routing system for Django applications.
 
 This module implements a sophisticated URL pattern generation system that automatically
 creates Django URL patterns from page.py files located in application directories.
@@ -15,12 +14,13 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from django.conf import settings
 from django.urls import URLPattern, URLResolver
 
 from .pages import page
+
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,7 @@ DEFAULT_APP_DIRS = True
 
 
 class URLPatternParser:
-    """
-    Converts file-based URL paths to Django URL patterns with parameter extraction.
+    """Converts file-based URL paths to Django URL patterns with parameter extraction.
 
     This parser implements a custom URL syntax that maps file system structures
     to Django URL patterns. It supports parameterized routes with type hints
@@ -41,13 +40,13 @@ class URLPatternParser:
     """
 
     def __init__(self) -> None:
+        """Initialize URL pattern parser with regex patterns."""
         # regex patterns for different parameter types
         self._param_pattern = re.compile(r"\[([^\[\]]+)\]")  # [param] or [int:param]
         self._args_pattern = re.compile(r"\[\[([^\[\]]+)\]\]")  # [[args]]
 
     def parse_url_pattern(self, url_path: str) -> tuple[str, dict[str, str]]:
-        """
-        Convert file-based URL path to Django URL pattern with parameter extraction.
+        """Convert file-based URL path to Django URL pattern with parameter extraction.
 
         Processes the URL path to identify parameterized segments and converts them
         to Django's URL pattern syntax. Handles both typed parameters and wildcard
@@ -65,7 +64,8 @@ class URLPatternParser:
             args_name = args_match.group(1)
             django_args_name = args_name.replace("-", "_")
             django_pattern = self._args_pattern.sub(
-                f"<path:{django_args_name}>", django_pattern
+                f"<path:{django_args_name}>",
+                django_pattern,
             )
             parameters[django_args_name] = django_args_name
 
@@ -89,8 +89,7 @@ class URLPatternParser:
         return django_pattern, parameters
 
     def _parse_param_name_and_type(self, param_str: str) -> tuple[str, str]:
-        """
-        Extract parameter name and type from parameter string.
+        """Extract parameter name and type from parameter string.
 
         Parses parameter strings in the format "type:name" or just "name".
         Returns a tuple of (name, type) where type defaults to "str" if not specified.
@@ -101,8 +100,7 @@ class URLPatternParser:
         return param_str.strip(), "str"
 
     def prepare_url_name(self, url_path: str) -> str:
-        """
-        Convert URL path to a valid Django URL pattern name.
+        """Convert URL path to a valid Django URL pattern name.
 
         Sanitizes the URL path by replacing special characters with underscores
         and normalizing the resulting string to create a valid Python identifier
@@ -118,13 +116,11 @@ class URLPatternParser:
         # collapse multiple underscores into single underscore
         clean_name = re.sub(r"_+", "_", clean_name)
         # remove leading/trailing underscores
-        clean_name = clean_name.strip("_")
-        return clean_name
+        return clean_name.strip("_")
 
 
 class RouterBackend(ABC):
-    """
-    Abstract interface for URL pattern generation backends.
+    """Abstract interface for URL pattern generation backends.
 
     Defines the contract that all routing backends must implement. This abstraction
     allows for different URL generation strategies (file-based, database-driven,
@@ -136,19 +132,16 @@ class RouterBackend(ABC):
 
     @abstractmethod
     def generate_urls(self) -> list[URLPattern | URLResolver]:
-        """
-        Generate URL patterns for this backend.
+        """Generate URL patterns for this backend.
 
         Returns a list of Django URL patterns and resolvers that will be
         included in the main URL configuration. Each backend is responsible
         for implementing its own URL discovery and pattern generation logic.
         """
-        pass
 
 
 class FileRouterBackend(RouterBackend):
-    """
-    File-based URL pattern generation backend.
+    """File-based URL pattern generation backend.
 
     Scans the file system for page.py files and generates Django URL patterns
     based on the directory structure. Supports both application-specific
@@ -158,9 +151,11 @@ class FileRouterBackend(RouterBackend):
     def __init__(
         self,
         pages_dir: str = DEFAULT_PAGES_DIR,
+        *,
         app_dirs: bool = DEFAULT_APP_DIRS,
         options: dict[str, Any] | None = None,
     ) -> None:
+        """Initialize router backend with configuration options."""
         self.pages_dir = pages_dir
         self.app_dirs = app_dirs
         self.options = options or {}
@@ -168,10 +163,13 @@ class FileRouterBackend(RouterBackend):
         self._url_parser = URLPatternParser()
 
     def __repr__(self) -> str:
-        """String representation of the router backend."""
-        return f"<{self.__class__.__name__} pages_dir='{self.pages_dir}' app_dirs={self.app_dirs}>"
+        """Return string representation of the router backend."""
+        return (
+            f"<{self.__class__.__name__} pages_dir='{self.pages_dir}' "
+            f"app_dirs={self.app_dirs}>"
+        )
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         """Equality comparison."""
         if not isinstance(other, FileRouterBackend):
             return False
@@ -184,12 +182,11 @@ class FileRouterBackend(RouterBackend):
     def __hash__(self) -> int:
         """Hash for the router backend."""
         return hash(
-            (self.pages_dir, self.app_dirs, tuple(sorted(self.options.items())))
+            (self.pages_dir, self.app_dirs, tuple(sorted(self.options.items()))),
         )
 
     def generate_urls(self) -> list[URLPattern | URLResolver]:
-        """
-        Generate URL patterns based on backend configuration.
+        """Generate URL patterns based on backend configuration.
 
         Delegates to either app-specific or root-level URL generation
         based on the app_dirs configuration setting.
@@ -199,8 +196,7 @@ class FileRouterBackend(RouterBackend):
         )
 
     def _generate_app_urls(self) -> list[URLPattern | URLResolver]:
-        """
-        Generate URL patterns from Django application directories.
+        """Generate URL patterns from Django application directories.
 
         Scans all installed Django applications for pages directories
         and generates URL patterns from each one. Patterns are added
@@ -215,8 +211,7 @@ class FileRouterBackend(RouterBackend):
         return urls
 
     def _generate_root_urls(self) -> list[URLPattern | URLResolver]:
-        """
-        Generate URL patterns from root-level pages directory.
+        """Generate URL patterns from root-level pages directory.
 
         Scans the project root for a pages directory and generates
         URL patterns from page.py files found within it.
@@ -258,8 +253,7 @@ class FileRouterBackend(RouterBackend):
         return pages_path if pages_path.exists() else None
 
     def _generate_urls_for_app(self, app_name: str) -> list[URLPattern | URLResolver]:
-        """
-        Generate URL patterns for a specific Django application.
+        """Generate URL patterns for a specific Django application.
 
         Implements caching to avoid repeated directory scanning for the same
         application. Returns cached patterns if available, otherwise scans
@@ -270,17 +264,17 @@ class FileRouterBackend(RouterBackend):
 
         if pages_path := self._get_app_pages_path(app_name):
             patterns: list[URLPattern | URLResolver] = list(
-                self._generate_patterns_from_directory(pages_path)
+                self._generate_patterns_from_directory(pages_path),
             )
             self._patterns_cache[app_name] = patterns
             return patterns
         return []
 
     def _generate_patterns_from_directory(
-        self, pages_path: Path
+        self,
+        pages_path: Path,
     ) -> Generator[URLPattern, None, None]:
-        """
-        Generate URL patterns from a pages directory.
+        """Generate URL patterns from a pages directory.
 
         Scans the directory for page.py files and creates Django URL patterns
         for each one. Uses the Page class to handle template loading and
@@ -288,15 +282,17 @@ class FileRouterBackend(RouterBackend):
         """
         for url_path, file_path in self._scan_pages_directory(pages_path):
             if pattern := page.create_url_pattern(
-                url_path, file_path, self._url_parser
+                url_path,
+                file_path,
+                self._url_parser,
             ):
                 yield pattern
 
     def _scan_pages_directory(
-        self, pages_path: Path
+        self,
+        pages_path: Path,
     ) -> Generator[tuple[str, Path], None, None]:
-        """
-        Recursively scan pages directory for page.py files and virtual views.
+        """Recursively scan pages directory for page.py files and virtual views.
 
         Walks through the directory tree and identifies page.py files and
         directories with template.djx files (virtual views), constructing
@@ -306,7 +302,8 @@ class FileRouterBackend(RouterBackend):
         """
 
         def scan_recursive(
-            current_path: Path, url_path: str = ""
+            current_path: Path,
+            url_path: str = "",
         ) -> Generator[tuple[str, Path], None, None]:
             for item in current_path.iterdir():
                 if item.is_dir():
@@ -330,8 +327,7 @@ class FileRouterBackend(RouterBackend):
 
 
 class RouterFactory:
-    """
-    Factory for creating router backend instances from configuration.
+    """Factory for creating router backend instances from configuration.
 
     Implements the Factory pattern to create appropriate backend instances
     based on configuration data. Supports dynamic backend registration
@@ -342,14 +338,13 @@ class RouterFactory:
     extended at runtime by registering new backend types.
     """
 
-    _backends: dict[str, type[RouterBackend]] = {
+    _backends: ClassVar[dict[str, type[RouterBackend]]] = {
         "next.urls.FileRouterBackend": FileRouterBackend,
     }
 
     @classmethod
     def register_backend(cls, name: str, backend_class: type[RouterBackend]) -> None:
-        """
-        Register a new router backend type.
+        """Register a new router backend type.
 
         Allows dynamic registration of new backend types at runtime,
         enabling plugin-like extensibility for the routing system.
@@ -358,8 +353,7 @@ class RouterFactory:
 
     @classmethod
     def create_backend(cls, config: dict[str, Any]) -> RouterBackend:
-        """
-        Create a router backend instance from configuration.
+        """Create a router backend instance from configuration.
 
         Parses the configuration dictionary to determine the backend type
         and creates an appropriately configured instance. Handles different
@@ -370,7 +364,8 @@ class RouterFactory:
         backend_name = config.get("BACKEND", "next.urls.FileRouterBackend")
 
         if backend_name not in cls._backends:
-            raise ValueError(f"Unsupported backend: {backend_name}")
+            msg = f"Unsupported backend: {backend_name}"
+            raise ValueError(msg)
 
         backend_class = cls._backends[backend_name]
 
@@ -381,14 +376,12 @@ class RouterFactory:
                 app_dirs=config.get("APP_DIRS", DEFAULT_APP_DIRS),
                 options=config.get("OPTIONS", {}),
             )
-        else:
-            # for other backend types, create with default initialization
-            return backend_class()
+        # for other backend types, create with default initialization
+        return backend_class()
 
 
 class RouterManager:
-    """
-    Centralized manager for multiple router backends and their configurations.
+    """Centralized manager for multiple router backends and their configurations.
 
     Orchestrates multiple router backends, manages their lifecycle, and provides
     a unified interface for URL pattern generation. Implements lazy loading
@@ -399,20 +392,20 @@ class RouterManager:
     """
 
     def __init__(self) -> None:
+        """Initialize router manager with empty router list."""
         self._routers: list[RouterBackend] = []
         self._config_cache: list[dict[str, Any]] | None = None
 
     def __repr__(self) -> str:
-        """String representation of the router manager."""
+        """Return string representation of the router manager."""
         return f"<{self.__class__.__name__} routers={len(self._routers)}>"
 
     def __len__(self) -> int:
-        """Number of configured routers."""
+        """Return the number of configured routers."""
         return len(self._routers)
 
     def __iter__(self) -> Generator[URLPattern | URLResolver, None, None]:
-        """
-        Generate URLs from all configured routers.
+        """Generate URLs from all configured routers.
 
         Implements lazy loading of router configurations and yields
         URL patterns from all registered backends in sequence.
@@ -428,8 +421,7 @@ class RouterManager:
         return self._routers[index]
 
     def _reload_config(self) -> None:
-        """
-        Reload router configurations from Django settings.
+        """Reload router configurations from Django settings.
 
         Clears the current router cache and reloads configurations
         from Django settings. Handles configuration errors gracefully
@@ -443,12 +435,11 @@ class RouterManager:
             try:
                 if router := RouterFactory.create_backend(config):
                     self._routers.append(router)
-            except Exception as e:
-                logger.error(f"error creating router from config {config}: {e}")
+            except Exception:
+                logger.exception("error creating router from config %s", config)
 
     def _get_next_pages_config(self) -> list[dict[str, Any]]:
-        """
-        Get NEXT_PAGES configuration from Django settings.
+        """Get NEXT_PAGES configuration from Django settings.
 
         Retrieves the router configuration from Django settings with
         caching to avoid repeated settings access. Returns a default
@@ -462,7 +453,7 @@ class RouterManager:
                 "BACKEND": "next.urls.FileRouterBackend",
                 "APP_DIRS": DEFAULT_APP_DIRS,
                 "OPTIONS": {},
-            }
+            },
         ]
 
         self._config_cache = getattr(settings, "NEXT_PAGES", default_config)

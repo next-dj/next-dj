@@ -1,4 +1,5 @@
-from django.http import HttpResponse
+from django.http import HttpRequest, HttpResponse
+
 
 html = """
     <!DOCTYPE html>
@@ -37,6 +38,6 @@ html = """
 """
 
 
-def render(request):
+def render(_request: HttpRequest) -> HttpResponse:
     """Render simple page."""
     return HttpResponse(html)

@@ -291,12 +291,15 @@ def process_data(data: str) -> Dict:
 - **Comments**: Write in English using lowercase letters, except for proper names
 - **Docstrings**: Provide technical descriptions without argument details
 - **File headers**: Include general file description docstring at the top
+- **No argument descriptions**: Do not describe function arguments in docstrings (temporary rule, will be relaxed later)
 
 **Why this style matters:**
 - **Consistency**: Uniform comment style makes code easier to read and maintain
 - **Professional appearance**: Proper documentation shows attention to detail
 - **Maintainability**: Clear comments help future developers understand the code
 - **PEP 257 compliance**: Follows Python's docstring conventions
+- **Type hints provide parameter info**: Since we use type hints, describing arguments in docstrings is redundant
+- **Focus on behavior**: Docstrings should explain what the function does, not what parameters it takes
 
 **✅ Good - Clear, professional documentation:**
 Comments and docstrings follow consistent style guidelines, making code self-documenting and professional.
@@ -373,6 +376,38 @@ def calculate_total(items):
     @return: float total
     """  # wrong format, describes parameters
     return sum(items)
+```
+
+**✅ Good - No argument descriptions:**
+Docstrings focus on what the function does, not what parameters it takes. Type hints provide parameter information.
+
+```python
+def process_user_data(user_id: int, include_profile: bool = True) -> dict:
+    """
+    Process user data and return formatted result.
+    
+    Combines user information with optional profile data,
+    applying business logic and validation rules.
+    """
+    # implementation
+```
+
+**❌ Bad - Describing arguments in docstrings:**
+Avoid describing function arguments in docstrings as this information is already available through type hints. This rule will be relaxed in the future to allow more comprehensive documentation.
+
+```python
+def process_user_data(user_id: int, include_profile: bool = True) -> dict:
+    """
+    Process user data and return formatted result.
+    
+    Args:
+        user_id: The unique identifier for the user
+        include_profile: Whether to include profile data in the result
+    
+    Returns:
+        dict: Formatted user data dictionary
+    """
+    # implementation
 ```
 
 **✅ Good - Self-documenting code:**

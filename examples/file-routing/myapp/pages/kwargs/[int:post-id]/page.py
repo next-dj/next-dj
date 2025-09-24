@@ -1,4 +1,5 @@
-from django.http import HttpResponse
+from django.http import HttpRequest, HttpResponse
+
 
 html = """
     <!DOCTYPE html>
@@ -58,6 +59,6 @@ html = """
 """
 
 
-def render(request, post_id=None, **kwargs):
+def render(_request: HttpRequest, post_id: int, **_kwargs) -> HttpResponse:
     """Render page with typed parameter."""
     return HttpResponse(html.format(post_id=post_id))
