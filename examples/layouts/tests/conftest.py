@@ -6,6 +6,7 @@ import pytest
 from django.conf import settings
 from django.test import Client, RequestFactory
 
+
 # add project root to python path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -18,7 +19,7 @@ if not settings.configured:
             "default": {
                 "ENGINE": "django.db.backends.sqlite3",
                 "NAME": ":memory:",
-            }
+            },
         },
         INSTALLED_APPS=[
             "django.contrib.admin",
@@ -53,7 +54,7 @@ if not settings.configured:
                 "APP_DIRS": True,
                 "OPTIONS": {
                     "PAGES_DIR": str(
-                        project_root / "examples" / "layouts" / "layouts" / "pages"
+                        project_root / "examples" / "layouts" / "layouts" / "pages",
                     ),
                     "context_processors": [
                         "django.template.context_processors.request",
@@ -73,27 +74,27 @@ if not settings.configured:
     django.setup()
 
 
-@pytest.fixture
+@pytest.fixture()
 def client():
-    """django test client fixture."""
+    """Django test client fixture."""
     return Client()
 
 
-@pytest.fixture
+@pytest.fixture()
 def request_factory():
-    """django request factory fixture."""
+    """Django request factory fixture."""
     return RequestFactory()
 
 
-@pytest.fixture
+@pytest.fixture()
 def sample_request(request_factory):
-    """sample request fixture."""
+    """Sample request fixture."""
     return request_factory.get("/")
 
 
-@pytest.fixture
+@pytest.fixture()
 def page_modules():
-    """fixture that imports all page modules."""
+    """Fixture that imports all page modules."""
     import layouts.pages.page as main_page
 
     return {

@@ -1,4 +1,5 @@
-from django.http import HttpResponse
+from django.http import HttpRequest, HttpResponse
+
 
 html = """
     <!DOCTYPE html>
@@ -54,7 +55,7 @@ html = """
 """
 
 
-def render(request, args=None, **kwargs):
+def render(_request: HttpRequest, *args, **_kwargs) -> HttpResponse:
     """Render page with variable arguments."""
     args_str = ", ".join(args) if args else "(none)"
     args_count = len(args) if args else 0

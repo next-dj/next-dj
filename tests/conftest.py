@@ -4,6 +4,7 @@ from pathlib import Path
 import django
 from django.conf import settings
 
+
 # add project root to python path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -16,7 +17,7 @@ if not settings.configured:
             "default": {
                 "ENGINE": "django.db.backends.sqlite3",
                 "NAME": ":memory:",
-            }
+            },
         },
         TEMPLATES=[
             {
@@ -46,7 +47,7 @@ if not settings.configured:
             "django.middleware.clickjacking.XFrameOptionsMiddleware",
         ],
         ROOT_URLCONF="tests.urls",
-        SECRET_KEY="test-secret-key",
+        SECRET_KEY="test-secret-key",  # noqa: S106
         USE_TZ=True,
         TIME_ZONE="UTC",
     )

@@ -1,5 +1,4 @@
-"""
-File-based page rendering system for Django applications.
+"""File-based page rendering system for Django applications.
 
 This module implements a sophisticated page rendering system that automatically
 generates Django views and URL patterns from page.py files located in application
@@ -21,16 +20,22 @@ import contextlib
 import importlib.util
 import inspect
 import logging
+import types
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 from django.template import Context, Template
 from django.urls import URLPattern, path
 from django.utils.module_loading import import_string
+
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .urls import URLPatternParser
+
 
 # URL pattern naming template
 URL_NAME_TEMPLATE = "page_{name}"
@@ -39,39 +44,64 @@ URL_NAME_TEMPLATE = "page_{name}"
 logger = logging.getLogger(__name__)
 
 
-def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
+def _import_context_processor(
+    processor_path: str,
+) -> Callable[[Any], dict[str, Any]] | None:
+    """Import a single context processor by path."""
+    try:
+        processor = import_string(processor_path)
+        # type check to ensure it's a callable
+        if callable(processor):
+            return processor  # type: ignore[no-any-return]
+    except (ImportError, AttributeError) as e:
+        logger.warning("Could not import context processor %s: %s", processor_path, e)
+    return None
+
+
+def _extract_processor_paths(configs: list[dict]) -> list[str]:
+    """Extract context processor paths from NEXT_PAGES configurations.
+
+    Scans all configurations for context_processors in OPTIONS and returns a flat list
+    of processor paths.
     """
-    Load context processors from NEXT_PAGES configuration.
+    processor_paths = []
+
+    for config in configs:
+        if not isinstance(config, dict) or "OPTIONS" not in config:
+            continue
+
+        options = config["OPTIONS"]
+        if "context_processors" in options and isinstance(
+            options["context_processors"],
+            list,
+        ):
+            processor_paths.extend(options["context_processors"])
+
+    return processor_paths
+
+
+def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
+    """Load context processors from NEXT_PAGES configuration.
 
     Retrieves context processors from NEXT_PAGES.OPTIONS.context_processors
     setting, similar to how Django handles TEMPLATES context_processors.
     Returns a list of callable context processors.
     """
-    context_processors = []
-
     # get NEXT_PAGES configuration
     next_pages_config = getattr(settings, "NEXT_PAGES", [])
 
-    # find context_processors in OPTIONS
-    for config in next_pages_config:
-        if isinstance(config, dict) and "OPTIONS" in config:
-            options = config["OPTIONS"]
-            if "context_processors" in options:
-                for processor_path in options["context_processors"]:
-                    try:
-                        processor = import_string(processor_path)
-                        context_processors.append(processor)
-                    except (ImportError, AttributeError) as e:
-                        # log error but continue with other processors
-                        logger = logging.getLogger(__name__)
-                        logger.warning(
-                            f"Could not import context processor {processor_path}: {e}"
-                        )
+    # extract all processor paths
+    processor_paths = _extract_processor_paths(next_pages_config)
 
-    return context_processors
+    # import processors and filter out failed imports
+    return [
+        processor
+        for processor_path in processor_paths
+        if (processor := _import_context_processor(processor_path))
+    ]
 
 
-def _load_python_module(file_path: Path) -> Any | None:
+def _load_python_module(file_path: Path) -> types.ModuleType | None:
     """Load Python module from file path, returning None on failure."""
     try:
         spec = importlib.util.spec_from_file_location("page_module", file_path)
@@ -79,14 +109,14 @@ def _load_python_module(file_path: Path) -> Any | None:
             return None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        return module
-    except Exception:
+    except (ImportError, AttributeError, OSError, SyntaxError):
         return None
+    else:
+        return module
 
 
 class TemplateLoader(ABC):
-    """
-    Abstract interface for loading page templates from various sources.
+    """Abstract interface for loading page templates from various sources.
 
     Implements the Strategy pattern to allow different template loading mechanisms
     (Python modules, .djx files, etc.) to be used interchangeably. Each loader
@@ -96,28 +126,23 @@ class TemplateLoader(ABC):
 
     @abstractmethod
     def can_load(self, file_path: Path) -> bool:
-        """
-        Determine if this loader can extract a template from the given file.
+        """Determine if this loader can extract a template from the given file.
 
         Performs lightweight checks (file existence, basic validation) without
         expensive operations like full module loading or file reading.
         """
-        pass
 
     @abstractmethod
     def load_template(self, file_path: Path) -> str | None:
-        """
-        Extract template content from the file, returning None on failure.
+        """Extract template content from the file, returning None on failure.
 
         Performs the actual template extraction. Should handle errors gracefully
         and return None rather than raising exceptions for recoverable failures.
         """
-        pass
 
 
 class PythonTemplateLoader(TemplateLoader):
-    """
-    Loads templates from Python modules that define a 'template' attribute.
+    """Loads templates from Python modules that define a 'template' attribute.
 
     This loader handles the traditional approach where page.py files contain
     a module-level 'template' string variable. It dynamically imports the
@@ -137,8 +162,7 @@ class PythonTemplateLoader(TemplateLoader):
 
 
 class DjxTemplateLoader(TemplateLoader):
-    """
-    Loads templates from .djx files located alongside page.py files.
+    """Loads templates from .djx files located alongside page.py files.
 
     This loader implements the alternative template approach where page.py
     files without a 'template' attribute are paired with a corresponding
@@ -160,8 +184,7 @@ class DjxTemplateLoader(TemplateLoader):
 
 
 class LayoutTemplateLoader(TemplateLoader):
-    """
-    Loads layout templates from layout.djx files in parent directories.
+    """Loads layout templates from layout.djx files in parent directories.
 
     This loader implements the layout inheritance system by scanning
     parent directories for layout.djx files. It supports hierarchical
@@ -170,8 +193,7 @@ class LayoutTemplateLoader(TemplateLoader):
     """
 
     def can_load(self, file_path: Path) -> bool:
-        """
-        Check if any layout.djx file exists in the directory hierarchy.
+        """Check if any layout.djx file exists in the directory hierarchy.
 
         Walks up the directory tree from the template's location to
         find layout.djx files. Returns True if at least one layout
@@ -180,8 +202,7 @@ class LayoutTemplateLoader(TemplateLoader):
         return self._find_layout_files(file_path) is not None
 
     def load_template(self, file_path: Path) -> str | None:
-        """
-        Load and compose layout templates from the directory hierarchy.
+        """Load and compose layout templates from the directory hierarchy.
 
         Discovers all layout.djx files in the parent directories and
         composes them into a single template using manual string replacement.
@@ -197,8 +218,7 @@ class LayoutTemplateLoader(TemplateLoader):
         return self._compose_layout_hierarchy(template_content, layout_files)
 
     def _find_layout_files(self, file_path: Path) -> list[Path] | None:
-        """
-        Find all layout.djx files in the directory hierarchy.
+        """Find all layout.djx files in the directory hierarchy.
 
         Walks up the directory tree from the template's location
         and collects all layout.djx files found. Returns them in
@@ -224,8 +244,7 @@ class LayoutTemplateLoader(TemplateLoader):
         return layout_files or None
 
     def _get_additional_layout_files(self) -> list[Path]:
-        """
-        Get layout.djx files from other NEXT_PAGES directories.
+        """Get layout.djx files from other NEXT_PAGES directories.
 
         Scans all configured NEXT_PAGES directories for layout.djx files
         that should be available for inheritance across different apps.
@@ -248,9 +267,7 @@ class LayoutTemplateLoader(TemplateLoader):
         return additional_layouts
 
     def _get_pages_dir_for_config(self, config: dict) -> Path | None:
-        """
-        Get the pages directory path for a NEXT_PAGES configuration.
-        """
+        """Get the pages directory path for a NEXT_PAGES configuration."""
         if config.get("APP_DIRS", True):
             # for app directories, we can't easily determine the path here
             # this will be handled by the individual app scanning
@@ -263,8 +280,7 @@ class LayoutTemplateLoader(TemplateLoader):
         return None
 
     def _wrap_in_template_block(self, file_path: Path) -> str:
-        """
-        Wrap template content in a template block for inheritance.
+        """Wrap template content in a template block for inheritance.
 
         Reads the template file and wraps its content in Django's
         template block syntax to enable proper inheritance from
@@ -285,10 +301,11 @@ class LayoutTemplateLoader(TemplateLoader):
         return "{% block template %}{% endblock template %}"
 
     def _compose_layout_hierarchy(
-        self, template_content: str, layout_files: list[Path]
+        self,
+        template_content: str,
+        layout_files: list[Path],
     ) -> str:
-        """
-        Compose layout hierarchy by nesting layouts and inserting content.
+        """Compose layout hierarchy by nesting layouts and inserting content.
 
         Processes layout files in order, with local layouts taking precedence
         over additional layouts from other NEXT_PAGES directories.
@@ -301,14 +318,14 @@ class LayoutTemplateLoader(TemplateLoader):
             with contextlib.suppress(OSError, UnicodeDecodeError):
                 layout_content = layout_file.read_text(encoding="utf-8")
                 result = layout_content.replace(
-                    "{% block template %}{% endblock template %}", result
+                    "{% block template %}{% endblock template %}",
+                    result,
                 )
         return result
 
 
 class LayoutManager:
-    """
-    Manages layout template discovery and inheritance for page templates.
+    """Manages layout template discovery and inheritance for page templates.
 
     This class implements a sophisticated layout inheritance system that
     automatically discovers layout.djx files in the directory hierarchy
@@ -322,12 +339,12 @@ class LayoutManager:
     """
 
     def __init__(self) -> None:
+        """Initialize the layout manager with empty registry."""
         self._layout_registry: dict[Path, str] = {}
         self._layout_loader = LayoutTemplateLoader()
 
     def discover_layouts_for_template(self, template_path: Path) -> str | None:
-        """
-        Discover and compose layout hierarchy for a template.
+        """Discover and compose layout hierarchy for a template.
 
         Scans the directory hierarchy for layout.djx files and composes
         them into a single template using Django's extends mechanism.
@@ -343,8 +360,7 @@ class LayoutManager:
         return composed_template
 
     def get_layout_template(self, template_path: Path) -> str | None:
-        """
-        Get the composed layout template for a given template path.
+        """Get the composed layout template for a given template path.
 
         Returns the previously discovered and composed layout template
         or None if no layout has been discovered for this path.
@@ -357,8 +373,7 @@ class LayoutManager:
 
 
 class ContextManager:
-    """
-    Manages context functions and their execution for page templates.
+    """Manages context functions and their execution for page templates.
 
     Implements a registry system that maps file paths to context functions,
     allowing each page to have its own set of context providers. Supports
@@ -371,8 +386,10 @@ class ContextManager:
     """
 
     def __init__(self) -> None:
+        """Initialize the context manager with empty registry."""
         self._context_registry: dict[
-            Path, dict[str | None, tuple[Callable[..., Any], bool]]
+            Path,
+            dict[str | None, tuple[Callable[..., Any], bool]],
         ] = {}
 
     def register_context(
@@ -380,10 +397,10 @@ class ContextManager:
         file_path: Path,
         key: str | None,
         func: Callable[..., Any],
+        *,
         inherit_context: bool = False,
     ) -> None:
-        """
-        Register a context function for a specific file.
+        """Register a context function for a specific file.
 
         Associates a callable with a file path and optional key. Keyed functions
         are stored under their key name, while unkeyed functions (key=None) are
@@ -392,10 +409,12 @@ class ContextManager:
         self._context_registry.setdefault(file_path, {})[key] = (func, inherit_context)
 
     def collect_context(
-        self, file_path: Path, *args: Any, **kwargs: Any
+        self,
+        file_path: Path,
+        *args: object,
+        **kwargs: object,
     ) -> dict[str, Any]:
-        """
-        Execute all registered context functions for a file and merge results.
+        """Execute all registered context functions for a file and merge results.
 
         Runs all context functions associated with the file, passing through
         any provided arguments. Keyed functions contribute single values,
@@ -408,7 +427,8 @@ class ContextManager:
         inherited_context = self._collect_inherited_context(file_path, *args, **kwargs)
         context_data.update(inherited_context)
 
-        # collect context from the current file (higher priority - can override inherited)
+        # collect context from the current file
+        # (higher priority - can override inherited)
         for key, (func, _) in self._context_registry.get(file_path, {}).items():
             if key is None:
                 context_data.update(func(*args, **kwargs))
@@ -418,10 +438,12 @@ class ContextManager:
         return context_data
 
     def _collect_inherited_context(
-        self, file_path: Path, *args: Any, **kwargs: Any
+        self,
+        file_path: Path,
+        *args: object,
+        **kwargs: object,
     ) -> dict[str, Any]:
-        """
-        Collect context from layout directories that should be inherited.
+        """Collect context from layout directories that should be inherited.
 
         Walks up the directory tree from the template's location to find
         layout.djx files and collects context from their corresponding
@@ -438,7 +460,8 @@ class ContextManager:
             # if layout.djx exists, check for page.py with inheritable context
             if layout_file.exists() and page_file.exists():
                 for key, (func, inherit_context) in self._context_registry.get(
-                    page_file, {}
+                    page_file,
+                    {},
                 ).items():
                     if inherit_context:
                         if key is None:
@@ -452,8 +475,7 @@ class ContextManager:
 
 
 class Page:
-    """
-    Central coordinator for page-based template rendering and URL pattern generation.
+    """Central coordinator for page-based template rendering and URL pattern generation.
 
     Acts as the main facade that orchestrates template loading, context management,
     and URL pattern creation. Implements a plugin architecture where different
@@ -462,6 +484,7 @@ class Page:
     """
 
     def __init__(self) -> None:
+        """Initialize the page manager with empty registries."""
         self._template_registry: dict[Path, str] = {}
         self._context_manager = ContextManager()
         self._layout_manager = LayoutManager()
@@ -472,8 +495,7 @@ class Page:
         ]
 
     def register_template(self, file_path: Path, template_str: str) -> None:
-        """
-        Manually register a template string for a specific file path.
+        """Manually register a template string for a specific file path.
 
         This method is typically called internally by template loaders after
         successful template extraction. Stores the template content for later
@@ -482,8 +504,7 @@ class Page:
         self._template_registry[file_path] = template_str
 
     def _get_caller_path(self, back_count: int = 1) -> Path:
-        """
-        Extract the file path of the calling code using stack frame inspection.
+        """Extract the file path of the calling code using stack frame inspection.
 
         Walks up the call stack to find the actual module file that contains
         the calling code, skipping over this module itself. Used primarily
@@ -493,7 +514,8 @@ class Page:
         frame = inspect.currentframe()
         for _ in range(back_count):
             if not frame or not frame.f_back:
-                raise RuntimeError("Could not determine caller file path")
+                msg = "Could not determine caller file path"
+                raise RuntimeError(msg)
             frame = frame.f_back
 
         # skip over this module to find the actual caller
@@ -505,13 +527,16 @@ class Page:
                 return Path(file_path)
             frame = frame.f_back
 
-        raise RuntimeError("Could not determine caller file path")
+        msg = "Could not determine caller file path"
+        raise RuntimeError(msg)
 
     def context(
-        self, func_or_key: Any = None, *, inherit_context: bool = False
+        self,
+        func_or_key: Callable[..., Any] | str | None = None,
+        *,
+        inherit_context: bool = False,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """
-        Decorator for registering context functions that provide template variables.
+        """Register context functions that provide template variables.
 
         Supports two usage patterns:
         1. @context("key") - function result stored under the specified key
@@ -527,21 +552,26 @@ class Page:
                 # @context usage - function returns dict
                 caller_path = self._get_caller_path(2)
                 self._context_manager.register_context(
-                    caller_path, None, func_or_key, inherit_context
+                    caller_path,
+                    None,
+                    func_or_key,
+                    inherit_context=inherit_context,
                 )
             else:
                 # @context("key") usage - function result stored under key
                 caller_path = self._get_caller_path(1)
                 self._context_manager.register_context(
-                    caller_path, func_or_key, func, inherit_context
+                    caller_path,
+                    func_or_key,
+                    func,
+                    inherit_context=inherit_context,
                 )
             return func
 
         return decorator(func_or_key) if callable(func_or_key) else decorator
 
-    def render(self, file_path: Path, *args: Any, **kwargs: Any) -> str:
-        """
-        Render a template with context data and return the final HTML.
+    def render(self, file_path: Path, *args: object, **kwargs: object) -> str:
+        """Render a template with context data and return the final HTML.
 
         Combines template content with context data from registered functions
         and any additional variables passed as kwargs. Template variables
@@ -558,7 +588,7 @@ class Page:
         context_data.update(kwargs)
         # add context functions (higher priority - can override kwargs)
         context_data.update(
-            self._context_manager.collect_context(file_path, *args, **kwargs)
+            self._context_manager.collect_context(file_path, *args, **kwargs),
         )
 
         # check if we have a request object for context_processors
@@ -575,19 +605,23 @@ class Page:
                     processor_data = processor(request)
                     if isinstance(processor_data, dict):
                         context_data.update(processor_data)
-                except Exception as e:
+                except (TypeError, ValueError, AttributeError, KeyError) as e:
                     logger.warning(
-                        f"Error in context processor {processor.__name__}: {e}"
+                        "Error in context processor %s: %s",
+                        processor.__name__,
+                        e,
                     )
 
         return Template(template_str).render(Context(context_data))
 
     def _create_view_function(
-        self, file_path: Path, parameters: dict[str, str]
+        self,
+        file_path: Path,
+        parameters: dict[str, str],
     ) -> Callable[..., HttpResponse]:
         """Create a view function that handles URL parameters and template rendering."""
 
-        def view(request: Any, **kwargs: Any) -> HttpResponse:
+        def view(request: HttpRequest, **kwargs: object) -> HttpResponse:
             kwargs.update(parameters)
             return HttpResponse(self.render(file_path, request, **kwargs))
 
@@ -614,7 +648,10 @@ class Page:
         return False
 
     def _create_url_pattern_with_view(
-        self, django_pattern: str, view: Callable, clean_name: str
+        self,
+        django_pattern: str,
+        view: Callable,
+        clean_name: str,
     ) -> URLPattern:
         """Create a URL pattern with the given view function."""
         return path(
@@ -630,8 +667,7 @@ class Page:
         parameters: dict[str, str],
         clean_name: str,
     ) -> URLPattern | None:
-        """
-        Create URL pattern for a regular page with page.py file.
+        """Create URL pattern for a regular page with page.py file.
 
         Handles template loading and custom render function fallback.
         """
@@ -647,7 +683,9 @@ class Page:
         # fall back to custom render function
         if (render_func := getattr(module, "render", None)) and callable(render_func):
             return self._create_url_pattern_with_view(
-                django_pattern, render_func, clean_name
+                django_pattern,
+                render_func,
+                clean_name,
             )
 
         return None
@@ -659,8 +697,7 @@ class Page:
         parameters: dict[str, str],
         clean_name: str,
     ) -> URLPattern | None:
-        """
-        Create URL pattern for a virtual page with template.djx but no page.py.
+        """Create URL pattern for a virtual page with template.djx but no page.py.
 
         Handles template-only rendering for virtual views.
         """
@@ -670,10 +707,12 @@ class Page:
         return None
 
     def create_url_pattern(
-        self, url_path: str, file_path: Path, url_parser: Any
+        self,
+        url_path: str,
+        file_path: Path,
+        url_parser: "URLPatternParser",
     ) -> URLPattern | None:
-        """
-        Generate a Django URL pattern from a page file with automatic template detection.
+        """Generate a Django URL pattern from a page file with template detection.
 
         Processes the page file to create a complete Django URL pattern. First attempts
         to load a template using registered loaders, falling back to a custom render
@@ -688,12 +727,17 @@ class Page:
 
         if file_path.exists():
             return self._create_regular_page_pattern(
-                file_path, django_pattern, parameters, clean_name
+                file_path,
+                django_pattern,
+                parameters,
+                clean_name,
             )
-        else:
-            return self._create_virtual_page_pattern(
-                file_path, django_pattern, parameters, clean_name
-            )
+        return self._create_virtual_page_pattern(
+            file_path,
+            django_pattern,
+            parameters,
+            clean_name,
+        )
 
 
 # global singleton instance for application-wide page management

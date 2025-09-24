@@ -19,7 +19,7 @@ from next.urls import (
 class TestRouterBackend:
     """Test the abstract routerbackend class."""
 
-    def test_router_backend_is_abstract(self):
+    def test_router_backend_is_abstract(self) -> None:
         """Test that routerbackend cannot be instantiated directly."""
         with pytest.raises(TypeError):
             RouterBackend()
@@ -28,32 +28,32 @@ class TestRouterBackend:
 class TestFileRouterBackend:
     """Test the filerouterbackend implementation."""
 
-    @pytest.fixture
+    @pytest.fixture()
     def router(self):
         """Create a basic router instance for tests."""
         return FileRouterBackend()
 
-    @pytest.fixture
+    @pytest.fixture()
     def temp_dir(self):
         """Create a temporary directory for tests."""
         temp_dir = tempfile.mkdtemp()
         yield temp_dir
         shutil.rmtree(temp_dir)
 
-    @pytest.fixture
+    @pytest.fixture()
     def pages_dir(self, temp_dir):
         """Create a pages directory structure for tests."""
         pages_dir = Path(temp_dir) / "testapp" / "pages"
         pages_dir.mkdir(parents=True, exist_ok=True)
         return pages_dir
 
-    @pytest.fixture
+    @pytest.fixture()
     def mock_settings(self):
         """Mock Django settings for tests."""
         with patch("next.urls.settings") as mock_settings:
             yield mock_settings
 
-    @pytest.fixture
+    @pytest.fixture()
     def temp_file(self):
         """Create a temporary file for testing."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
@@ -63,7 +63,15 @@ class TestFileRouterBackend:
         temp_file.unlink()
 
     @pytest.mark.parametrize(
-        "test_case,pages_dir,app_dirs,options,expected_pages_dir,expected_app_dirs,expected_options",
+        (
+            "test_case",
+            "pages_dir",
+            "app_dirs",
+            "options",
+            "expected_pages_dir",
+            "expected_app_dirs",
+            "expected_options",
+        ),
         [
             ("defaults", None, None, None, "pages", True, {}),
             (
@@ -86,7 +94,7 @@ class TestFileRouterBackend:
         expected_pages_dir,
         expected_app_dirs,
         expected_options,
-    ):
+    ) -> None:
         """Test router initialization with different parameters."""
         kwargs = {}
         if pages_dir is not None:
@@ -103,19 +111,35 @@ class TestFileRouterBackend:
         assert router._patterns_cache == {}
 
     @pytest.mark.parametrize(
-        "pages_dir,app_dirs,expected_repr",
+        ("pages_dir", "app_dirs", "expected_repr"),
         [
             ("views", False, "<FileRouterBackend pages_dir='views' app_dirs=False>"),
             ("pages", True, "<FileRouterBackend pages_dir='pages' app_dirs=True>"),
         ],
     )
-    def test_repr_variations(self, pages_dir, app_dirs, expected_repr):
+    def test_repr_variations(self, pages_dir, app_dirs, expected_repr) -> None:
         """Test string representation with different parameters."""
-        router = FileRouterBackend(pages_dir, app_dirs)
+        router = FileRouterBackend(pages_dir, app_dirs=app_dirs)
         assert repr(router) == expected_repr
 
+    def _create_router_from_params(self, params):
+        """Create FileRouterBackend from parameters or return as-is."""
+        if isinstance(params, tuple):
+            if len(params) == 3:
+                return FileRouterBackend(
+                    params[0],
+                    app_dirs=params[1],
+                    options=params[2],
+                )
+            if len(params) == 2:
+                return FileRouterBackend(params[0], app_dirs=params[1])
+            if len(params) == 1:
+                return FileRouterBackend(params[0])
+            return params  # empty tuple case
+        return params
+
     @pytest.mark.parametrize(
-        "test_case,router1_params,router2_params,expected_equal",
+        ("test_case", "router1_params", "router2_params", "expected_equal"),
         [
             (
                 "same_instance",
@@ -124,50 +148,54 @@ class TestFileRouterBackend:
                 True,
             ),
             ("different_instance", ("pages", True), ("views", True), False),
-            ("wrong_type", (), "not a router", False),
+            ("wrong_type", "not a router", "also not a router", False),
         ],
     )
     def test_equality_variations(
-        self, test_case, router1_params, router2_params, expected_equal
-    ):
+        self,
+        test_case,
+        router1_params,
+        router2_params,
+        expected_equal,
+    ) -> None:
         """Test equality with different scenarios."""
-        router1 = (
-            FileRouterBackend(*router1_params)
-            if isinstance(router1_params, tuple)
-            else router1_params
-        )
-        router2 = (
-            FileRouterBackend(*router2_params)
-            if isinstance(router2_params, tuple)
-            else router2_params
-        )
+        router1 = self._create_router_from_params(router1_params)
+        router2 = self._create_router_from_params(router2_params)
 
         if expected_equal:
             assert router1 == router2
         else:
             assert router1 != router2
 
-    def test_hash(self):
+    def test_equality_with_different_type(self) -> None:
+        """Test equality comparison with different object type."""
+        router = FileRouterBackend("pages")
+        other = "not a router"
+        assert router != other
+
+    def test_hash(self) -> None:
         """Test hash function."""
-        router1 = FileRouterBackend("pages", True, {"opt": "val"})
-        router2 = FileRouterBackend("pages", True, {"opt": "val"})
+        router1 = FileRouterBackend("pages", app_dirs=True, options={"opt": "val"})
+        router2 = FileRouterBackend("pages", app_dirs=True, options={"opt": "val"})
         assert hash(router1) == hash(router2)
 
     @pytest.mark.parametrize(
-        "app_dirs,method_to_patch,expected_urls",
+        ("app_dirs", "method_to_patch", "expected_urls"),
         [
             (True, "_generate_app_urls", ["url1", "url2"]),
             (False, "_generate_root_urls", ["url1"]),
         ],
     )
-    def test_generate_urls_variations(self, app_dirs, method_to_patch, expected_urls):
+    def test_generate_urls_variations(
+        self, app_dirs, method_to_patch, expected_urls
+    ) -> None:
         """Test URL generation for different configurations."""
         router = FileRouterBackend(app_dirs=app_dirs)
         with patch.object(router, method_to_patch, return_value=expected_urls):
             urls = router.generate_urls()
             assert urls == expected_urls
 
-    def test_get_installed_apps(self, router, mock_settings):
+    def test_get_installed_apps(self, router, mock_settings) -> None:
         """Test getting installed Django apps."""
         mock_settings.INSTALLED_APPS = [
             "django.contrib.admin",
@@ -178,7 +206,7 @@ class TestFileRouterBackend:
         assert apps == ["myapp"]
 
     @pytest.mark.parametrize(
-        "test_case,import_side_effect,file_path,expected_result",
+        ("test_case", "import_side_effect", "file_path", "expected_result"),
         [
             ("success", None, "/path/to/app/__init__.py", "mock_pages_path"),
             ("import_error", ImportError, None, None),
@@ -186,8 +214,13 @@ class TestFileRouterBackend:
         ],
     )
     def test_get_app_pages_path_variations(
-        self, router, test_case, import_side_effect, file_path, expected_result
-    ):
+        self,
+        router,
+        test_case,
+        import_side_effect,
+        file_path,
+        expected_result,
+    ) -> None:
         """Test getting app pages path with different scenarios."""
         with patch("builtins.__import__") as mock_import:
             if import_side_effect:
@@ -207,7 +240,7 @@ class TestFileRouterBackend:
                         mock_pages_path.exists.return_value = True
                         mock_path_class.return_value = mock_app_path
                         mock_app_path.parent.__truediv__ = Mock(
-                            return_value=mock_pages_path
+                            return_value=mock_pages_path,
                         )
 
                         result = router._get_app_pages_path("testapp")
@@ -217,7 +250,7 @@ class TestFileRouterBackend:
                     assert result is None
 
     @pytest.mark.parametrize(
-        "test_case,base_dir,exists,expected_result",
+        ("test_case", "base_dir", "exists", "expected_result"),
         [
             ("with_base_dir", "/path/to/project", True, "mock_path_instance"),
             ("string_base_dir", "/path/to/project", True, "mock_path_instance"),
@@ -226,8 +259,14 @@ class TestFileRouterBackend:
         ],
     )
     def test_get_root_pages_path_variations(
-        self, router, mock_settings, test_case, base_dir, exists, expected_result
-    ):
+        self,
+        router,
+        mock_settings,
+        test_case,
+        base_dir,
+        exists,
+        expected_result,
+    ) -> None:
         """Test getting root pages path with different scenarios."""
         mock_settings.BASE_DIR = base_dir
 
@@ -248,7 +287,13 @@ class TestFileRouterBackend:
                     assert result is None
 
     @pytest.mark.parametrize(
-        "test_case,cache_value,pages_path_return,patterns_return,expected_result",
+        (
+            "test_case",
+            "cache_value",
+            "pages_path_return",
+            "patterns_return",
+            "expected_result",
+        ),
         [
             ("cached", ["cached_url"], None, None, ["cached_url"]),
             ("no_pages_path", None, None, None, []),
@@ -269,7 +314,7 @@ class TestFileRouterBackend:
         pages_path_return,
         patterns_return,
         expected_result,
-    ):
+    ) -> None:
         """Test generating URLs for app with different scenarios."""
         if cache_value:
             router._patterns_cache["testapp"] = cache_value
@@ -277,7 +322,9 @@ class TestFileRouterBackend:
             assert result == expected_result
         else:
             with patch.object(
-                router, "_get_app_pages_path", return_value=pages_path_return
+                router,
+                "_get_app_pages_path",
+                return_value=pages_path_return,
             ):
                 if pages_path_return:
                     with patch.object(
@@ -292,25 +339,27 @@ class TestFileRouterBackend:
                     result = router._generate_urls_for_app("testapp")
                     assert result == expected_result
 
-    def test_generate_patterns_from_directory(self):
+    def test_generate_patterns_from_directory(self) -> None:
         """Test generating patterns from directory."""
         router = FileRouterBackend()
         mock_pages_path = Mock()
 
-        with patch.object(
-            router,
-            "_scan_pages_directory",
-            return_value=[("url1", "file1"), ("url2", "file2")],
+        with (
+            patch.object(
+                router,
+                "_scan_pages_directory",
+                return_value=[("url1", "file1"), ("url2", "file2")],
+            ),
+            patch("next.urls.page.create_url_pattern") as mock_create,
         ):
-            with patch("next.urls.page.create_url_pattern") as mock_create:
-                mock_create.side_effect = ["pattern1", "pattern2"]
+            mock_create.side_effect = ["pattern1", "pattern2"]
 
-                patterns = list(
-                    router._generate_patterns_from_directory(mock_pages_path)
-                )
-                assert patterns == ["pattern1", "pattern2"]
+            patterns = list(
+                router._generate_patterns_from_directory(mock_pages_path),
+            )
+            assert patterns == ["pattern1", "pattern2"]
 
-    def test_scan_pages_directory_empty(self):
+    def test_scan_pages_directory_empty(self) -> None:
         """Test scanning empty pages directory."""
         router = FileRouterBackend()
 
@@ -318,7 +367,7 @@ class TestFileRouterBackend:
             pages = list(router._scan_pages_directory(Path("/tmp")))
             assert pages == []
 
-    def test_scan_pages_directory_with_files(self):
+    def test_scan_pages_directory_with_files(self) -> None:
         """Test scanning pages directory with files."""
         router = FileRouterBackend()
 
@@ -330,14 +379,16 @@ class TestFileRouterBackend:
         mock_file.name = "page.py"
         mock_file.is_dir.return_value = False
 
-        with patch("pathlib.Path.iterdir", return_value=[mock_dir, mock_file]):
-            with patch.object(router, "_scan_pages_directory") as mock_scan:
-                mock_scan.return_value = [("dir1", "file1")]
+        with (
+            patch("pathlib.Path.iterdir", return_value=[mock_dir, mock_file]),
+            patch.object(router, "_scan_pages_directory") as mock_scan,
+        ):
+            mock_scan.return_value = [("dir1", "file1")]
 
-                pages = list(router._scan_pages_directory(Path("/tmp")))
-                assert pages == [("dir1", "file1")]
+            pages = list(router._scan_pages_directory(Path("/tmp")))
+            assert pages == [("dir1", "file1")]
 
-    def test_scan_pages_directory_recursive(self):
+    def test_scan_pages_directory_recursive(self) -> None:
         """Test recursive scanning of pages directory."""
         router = FileRouterBackend()
 
@@ -358,7 +409,7 @@ class TestFileRouterBackend:
                 assert len(pages) == 2
                 assert any("home" in str(page[0]) for page in pages)
 
-    def test_create_url_pattern_with_args_parameter(self):
+    def test_create_url_pattern_with_args_parameter(self) -> None:
         """Test creating URL pattern with args parameter handling."""
         router = FileRouterBackend()
 
@@ -370,7 +421,9 @@ class TestFileRouterBackend:
         try:
             with patch("next.urls.page.render", return_value="mocked response"):
                 pattern = page.create_url_pattern(
-                    "test/[[args]]", temp_file, router._url_parser
+                    "test/[[args]]",
+                    temp_file,
+                    router._url_parser,
                 )
                 assert pattern is not None
 
@@ -389,7 +442,7 @@ class TestFileRouterBackend:
 class TestRouterFactory:
     """Test cases for RouterFactory class."""
 
-    @pytest.fixture
+    @pytest.fixture()
     def custom_backend_class(self):
         """Create a custom backend class for testing."""
 
@@ -399,14 +452,14 @@ class TestRouterFactory:
 
         return CustomBackend
 
-    def test_register_backend(self, custom_backend_class):
+    def test_register_backend(self, custom_backend_class) -> None:
         """Test registering a new backend."""
         RouterFactory.register_backend("custom", custom_backend_class)
         assert "custom" in RouterFactory._backends
         assert RouterFactory._backends["custom"] == custom_backend_class
 
     @pytest.mark.parametrize(
-        "test_case,config,expected_type,expected_attrs",
+        ("test_case", "config", "expected_type", "expected_attrs"),
         [
             (
                 "success",
@@ -428,8 +481,12 @@ class TestRouterFactory:
         ],
     )
     def test_create_backend_variations(
-        self, test_case, config, expected_type, expected_attrs
-    ):
+        self,
+        test_case,
+        config,
+        expected_type,
+        expected_attrs,
+    ) -> None:
         """Test creating backend with different configurations."""
         router = RouterFactory.create_backend(config)
         assert isinstance(router, expected_type)
@@ -437,14 +494,14 @@ class TestRouterFactory:
         for attr, expected_value in expected_attrs.items():
             assert getattr(router, attr) == expected_value
 
-    def test_create_backend_unsupported(self):
+    def test_create_backend_unsupported(self) -> None:
         """Test creating backend with unsupported backend name."""
         config = {"BACKEND": "unsupported.backend"}
 
         with pytest.raises(ValueError, match="Unsupported backend"):
             RouterFactory.create_backend(config)
 
-    def test_create_backend_non_file_router_backend(self, custom_backend_class):
+    def test_create_backend_non_file_router_backend(self, custom_backend_class) -> None:
         """Test creating backend with non-FileRouterBackend type."""
         RouterFactory.register_backend("custom.backend", custom_backend_class)
 
@@ -453,8 +510,9 @@ class TestRouterFactory:
         assert isinstance(router, custom_backend_class)
 
     def test_create_backend_non_file_router_backend_else_branch(
-        self, custom_backend_class
-    ):
+        self,
+        custom_backend_class,
+    ) -> None:
         """Test create_backend when backend is not FileRouterBackend (line 230)."""
         RouterFactory.register_backend("custom", custom_backend_class)
 
@@ -468,34 +526,34 @@ class TestRouterFactory:
 class TestRouterManager:
     """Test cases for RouterManager class."""
 
-    @pytest.fixture
+    @pytest.fixture()
     def manager(self):
         """Create a RouterManager instance for tests."""
         return RouterManager()
 
-    def test_init(self, manager):
+    def test_init(self, manager) -> None:
         """Test RouterManager initialization."""
         assert manager._routers == []
         assert manager._config_cache is None
 
-    def test_repr(self, manager):
+    def test_repr(self, manager) -> None:
         """Test string representation."""
         assert repr(manager) == "<RouterManager routers=0>"
 
     @pytest.mark.parametrize(
-        "router_count,expected_len",
+        ("router_count", "expected_len"),
         [
             (0, 0),
             (1, 1),
         ],
     )
-    def test_len_variations(self, manager, router_count, expected_len):
+    def test_len_variations(self, manager, router_count, expected_len) -> None:
         """Test length method with different router counts."""
         for _ in range(router_count):
             manager._routers.append(Mock())
         assert len(manager) == expected_len
 
-    def test_iter_returns_url_patterns(self, manager):
+    def test_iter_returns_url_patterns(self, manager) -> None:
         """Test that __iter__ returns URL patterns from all routers."""
         # mock routers that return url patterns
         mock_router1 = Mock()
@@ -509,7 +567,7 @@ class TestRouterManager:
         url_patterns = list(manager)
         assert url_patterns == ["url1", "url2", "url3"]
 
-    def test_iter_triggers_reload_when_empty(self, manager):
+    def test_iter_triggers_reload_when_empty(self, manager) -> None:
         """Test that __iter__ calls _reload_config when routers list is empty."""
         with patch.object(manager, "_reload_config") as mock_reload:
             # ensure empty routers to hit the branch
@@ -518,39 +576,38 @@ class TestRouterManager:
             list(manager)
             mock_reload.assert_called_once()
 
-    def test_iter_reloads_config_when_empty(self, manager):
+    def test_iter_reloads_config_when_empty(self, manager) -> None:
         """Test that __iter__ reloads config when no routers are configured."""
         # mock the reload process to avoid actual reloading
-        with patch.object(manager, "_reload_config"):
-            # mock the config and router creation
-            with patch.object(manager, "_get_next_pages_config") as mock_get_config:
-                mock_get_config.return_value = [
-                    {"BACKEND": "next.urls.FileRouterBackend"}
-                ]
+        with (
+            patch.object(manager, "_reload_config"),
+            patch.object(manager, "_get_next_pages_config") as mock_get_config,
+            patch("next.urls.RouterFactory.create_backend") as mock_create,
+        ):
+            mock_get_config.return_value = [
+                {"BACKEND": "next.urls.FileRouterBackend"},
+            ]
+            mock_router = Mock()
+            mock_router.generate_urls.return_value = ["url1"]
+            mock_create.return_value = mock_router
 
-                # mock router creation
-                with patch("next.urls.RouterFactory.create_backend") as mock_create:
-                    mock_router = Mock()
-                    mock_router.generate_urls.return_value = ["url1"]
-                    mock_create.return_value = mock_router
+            # manually add the router to simulate what _reload_config would do
+            manager._routers = [mock_router]
 
-                    # manually add the router to simulate what _reload_config would do
-                    manager._routers = [mock_router]
+            # trigger iteration
+            url_patterns = list(manager)
 
-                    # trigger iteration
-                    url_patterns = list(manager)
+            # should return the url patterns from the router
+            assert url_patterns == ["url1"]
 
-                    # should return the url patterns from the router
-                    assert url_patterns == ["url1"]
-
-    def test_getitem(self, manager):
+    def test_getitem(self, manager) -> None:
         """Test getting router by index."""
         router = Mock()
         manager._routers = [router]
 
         assert manager[0] == router
 
-    def test_reload_config_clears_cache(self, manager):
+    def test_reload_config_clears_cache(self, manager) -> None:
         """Test that reload_config clears the config cache initially but then refills it."""
         manager._config_cache = ["some", "cached", "config"]
 
@@ -565,7 +622,7 @@ class TestRouterManager:
         assert len(manager._routers) == 1
         assert isinstance(manager._routers[0], FileRouterBackend)
 
-    def test_reload_config_with_exception(self, manager):
+    def test_reload_config_with_exception(self, manager) -> None:
         """Test reload_config when creating backend raises exception."""
         # mock RouterFactory to raise an exception
         with patch(
@@ -580,7 +637,7 @@ class TestRouterManager:
             assert len(manager._config_cache) == 1
             assert manager._config_cache[0]["BACKEND"] == "next.urls.FileRouterBackend"
 
-    def test_get_next_pages_config_uses_cache(self, manager):
+    def test_get_next_pages_config_uses_cache(self, manager) -> None:
         """Test that _get_next_pages_config uses cached config."""
         cached_config = ["cached", "config"]
         manager._config_cache = cached_config
@@ -588,7 +645,7 @@ class TestRouterManager:
         result = manager._get_next_pages_config()
         assert result == cached_config
 
-    def test_get_next_pages_config_no_next_pages_setting(self, manager):
+    def test_get_next_pages_config_no_next_pages_setting(self, manager) -> None:
         """Test _get_next_pages_config when NEXT_PAGES setting is not configured."""
         with patch("next.urls.settings") as mock_settings:
             # remove NEXT_PAGES attribute to test default config
@@ -604,12 +661,12 @@ class TestRouterManager:
 class TestGlobalInstances:
     """Test global instances and their behavior."""
 
-    def test_router_manager_instance(self):
+    def test_router_manager_instance(self) -> None:
         """Test that router_manager is properly initialized."""
         assert router_manager is not None
         assert isinstance(router_manager, RouterManager)
 
-    def test_router_manager_reload_config_clears_cache(self):
+    def test_router_manager_reload_config_clears_cache(self) -> None:
         """Test that global router_manager reload_config works correctly."""
         # test that the global instance works
         len(router_manager._routers)
@@ -617,7 +674,7 @@ class TestGlobalInstances:
         # should clear and reload
         assert router_manager._config_cache is not None
 
-    def test_urlpatterns_dynamic(self):
+    def test_urlpatterns_dynamic(self) -> None:
         """Test that urlpatterns is dynamically generated through router_manager."""
         # urlpatterns should be a list generated from router_manager
         assert isinstance(urlpatterns, list)
@@ -632,7 +689,7 @@ class TestGlobalInstances:
             patterns = list(router_manager)
             assert patterns == ["url1", "url2"]
 
-    def test_generate_urls_for_app_returns_empty_list(self):
+    def test_generate_urls_for_app_returns_empty_list(self) -> None:
         """Test _generate_urls_for_app when it returns empty list."""
         router = FileRouterBackend()
 
@@ -641,13 +698,13 @@ class TestGlobalInstances:
             assert urls == []
 
     @pytest.mark.parametrize(
-        "test_case,expected_result",
+        ("test_case", "expected_result"),
         [
             ("no_pages_path", []),
             ("with_none_pages_path", []),
         ],
     )
-    def test_generate_root_urls_scenarios(self, test_case, expected_result):
+    def test_generate_root_urls_scenarios(self, test_case, expected_result) -> None:
         """Test _generate_root_urls with different scenarios."""
         router = FileRouterBackend()
 
@@ -656,7 +713,7 @@ class TestGlobalInstances:
             urls = router._generate_root_urls()
             assert urls == expected_result
 
-    def test_create_url_pattern_view_wrapper_no_args_parameter(self):
+    def test_create_url_pattern_view_wrapper_no_args_parameter(self) -> None:
         """Test view_wrapper when args parameter is not passed."""
         router = FileRouterBackend()
 
@@ -668,7 +725,9 @@ class TestGlobalInstances:
         try:
             with patch("next.urls.page.render", return_value="mocked response"):
                 pattern = page.create_url_pattern(
-                    "test/[[args]]", temp_file, router._url_parser
+                    "test/[[args]]",
+                    temp_file,
+                    router._url_parser,
                 )
                 assert pattern is not None
 
@@ -681,19 +740,20 @@ class TestGlobalInstances:
         finally:
             temp_file.unlink()
 
-    def test_generate_urls_with_empty_patterns_from_apps(self):
+    def test_generate_urls_with_empty_patterns_from_apps(self) -> None:
         """Test generate_urls when _generate_urls_for_app returns empty list."""
         router = FileRouterBackend()
 
         # mock _get_installed_apps to return a list of apps
-        with patch.object(router, "_get_installed_apps", return_value=["app1", "app2"]):
-            # mock _generate_urls_for_app to return empty list for each app
-            with patch.object(router, "_generate_urls_for_app", return_value=[]):
-                urls = router.generate_urls()
-                assert urls == []
+        with (
+            patch.object(router, "_get_installed_apps", return_value=["app1", "app2"]),
+            patch.object(router, "_generate_urls_for_app", return_value=[]),
+        ):
+            urls = router.generate_urls()
+            assert urls == []
 
     @pytest.mark.parametrize(
-        "test_case,file_content,expected_result",
+        ("test_case", "file_content", "expected_result"),
         [
             (
                 "without_args_parameter",
@@ -707,7 +767,9 @@ class TestGlobalInstances:
             ),
         ],
     )
-    def test_view_wrapper_scenarios(self, test_case, file_content, expected_result):
+    def test_view_wrapper_scenarios(
+        self, test_case, file_content, expected_result
+    ) -> None:
         """Test view_wrapper with different scenarios."""
         router = FileRouterBackend()
 
@@ -719,7 +781,9 @@ class TestGlobalInstances:
         try:
             with patch("next.urls.page.render", return_value=expected_result):
                 pattern = page.create_url_pattern(
-                    "test/[[args]]", temp_file, router._url_parser
+                    "test/[[args]]",
+                    temp_file,
+                    router._url_parser,
                 )
                 assert pattern is not None
 
@@ -732,18 +796,20 @@ class TestGlobalInstances:
         finally:
             temp_file.unlink()
 
-    def test_generate_urls_direct_coverage(self):
+    def test_generate_urls_direct_coverage(self) -> None:
         """Test generate_urls method directly with walrus operator."""
         router = FileRouterBackend()
 
         # mock the entire method chain to ensure we hit the walrus operator
-        with patch.object(router, "_get_installed_apps", return_value=["testapp"]):
-            with patch.object(router, "_generate_urls_for_app", return_value=[]):
-                with patch.object(router, "_generate_root_urls", return_value=[]):
-                    urls = router.generate_urls()
-                    assert urls == []
+        with (
+            patch.object(router, "_get_installed_apps", return_value=["testapp"]),
+            patch.object(router, "_generate_urls_for_app", return_value=[]),
+            patch.object(router, "_generate_root_urls", return_value=[]),
+        ):
+            urls = router.generate_urls()
+            assert urls == []
 
-    def test_generate_root_urls_direct_coverage(self):
+    def test_generate_root_urls_direct_coverage(self) -> None:
         """Test _generate_root_urls method."""
         router = FileRouterBackend()
 
@@ -752,7 +818,7 @@ class TestGlobalInstances:
             urls = router._generate_root_urls()
             assert urls == []
 
-    def test_generate_urls_real_execution(self):
+    def test_generate_urls_real_execution(self) -> None:
         """Test generate_urls method with real execution."""
         router = FileRouterBackend()
 
@@ -765,7 +831,7 @@ class TestGlobalInstances:
                 urls = router.generate_urls()
                 assert urls == []
 
-    def test_generate_root_urls_real_execution(self):
+    def test_generate_root_urls_real_execution(self) -> None:
         """Test _generate_root_urls method with real execution."""
         router = FileRouterBackend()
 
@@ -776,7 +842,7 @@ class TestGlobalInstances:
             urls = router._generate_root_urls()
             assert urls == []
 
-    def test_view_wrapper_real_execution(self):
+    def test_view_wrapper_real_execution(self) -> None:
         """Test view_wrapper with real execution."""
         router = FileRouterBackend()
 
@@ -788,7 +854,9 @@ class TestGlobalInstances:
         try:
             with patch("next.urls.page.render", return_value="mocked kwargs"):
                 pattern = page.create_url_pattern(
-                    "test/[[args]]", temp_file, router._url_parser
+                    "test/[[args]]",
+                    temp_file,
+                    router._url_parser,
                 )
                 assert pattern is not None
 
@@ -801,7 +869,7 @@ class TestGlobalInstances:
         finally:
             temp_file.unlink()
 
-    def test_create_backend_real_execution(self):
+    def test_create_backend_real_execution(self) -> None:
         """Test create_backend with real execution."""
 
         # create a custom backend that's not FileRouterBackend
@@ -818,7 +886,7 @@ class TestGlobalInstances:
         # verify that the else branch was executed by checking that no FileRouterBackend-specific args were passed
         assert not hasattr(backend, "pages_dir")
 
-    def test_generate_urls_comprehensive_coverage(self):
+    def test_generate_urls_comprehensive_coverage(self) -> None:
         """Test generate_urls method comprehensively to cover all uncovered lines."""
         router = FileRouterBackend()
 
@@ -833,19 +901,21 @@ class TestGlobalInstances:
 
                 # mock _generate_patterns_from_directory to return some patterns
                 with patch.object(
-                    router, "_generate_patterns_from_directory"
+                    router,
+                    "_generate_patterns_from_directory",
                 ) as mock_gen_patterns:
                     mock_gen_patterns.return_value = ["pattern1", "pattern2"]
 
                     # mock page.create_url_pattern to return a pattern
                     with patch(
-                        "next.urls.page.create_url_pattern", return_value="url_pattern"
+                        "next.urls.page.create_url_pattern",
+                        return_value="url_pattern",
                     ):
                         urls = router.generate_urls()
                         # the result should be the patterns from _generate_patterns_from_directory
                         assert urls == ["pattern1", "pattern2"]
 
-    def test_generate_root_urls_comprehensive_coverage(self):
+    def test_generate_root_urls_comprehensive_coverage(self) -> None:
         """Test _generate_root_urls method comprehensively."""
         router = FileRouterBackend()
 
@@ -856,22 +926,26 @@ class TestGlobalInstances:
             urls = router._generate_root_urls()
             assert urls == []
 
-    def test_generate_root_urls_with_patterns(self):
+    def test_generate_root_urls_with_patterns(self) -> None:
         """Test _generate_root_urls returns patterns when pages path exists."""
         router = FileRouterBackend()
 
-        with patch.object(
-            router, "_get_root_pages_path", return_value=Path("/tmp/pages")
-        ):
-            with patch.object(
+        with (
+            patch.object(
+                router,
+                "_get_root_pages_path",
+                return_value=Path("/tmp/pages"),
+            ),
+            patch.object(
                 router,
                 "_generate_patterns_from_directory",
                 return_value=iter(["p1", "p2"]),  # generator-like
-            ):
-                urls = router._generate_root_urls()
-                assert urls == ["p1", "p2"]
+            ),
+        ):
+            urls = router._generate_root_urls()
+            assert urls == ["p1", "p2"]
 
-    def test_create_url_pattern_comprehensive_coverage(self):
+    def test_create_url_pattern_comprehensive_coverage(self) -> None:
         """Test _create_url_pattern method comprehensively."""
         router = FileRouterBackend()
 
@@ -883,7 +957,9 @@ class TestGlobalInstances:
         try:
             with patch("next.urls.page.render", return_value="mocked kwargs"):
                 pattern = page.create_url_pattern(
-                    "test/[[args]]", temp_file, router._url_parser
+                    "test/[[args]]",
+                    temp_file,
+                    router._url_parser,
                 )
                 assert pattern is not None
 
@@ -896,7 +972,7 @@ class TestGlobalInstances:
         finally:
             temp_file.unlink()
 
-    def test_create_backend_comprehensive_coverage(self):
+    def test_create_backend_comprehensive_coverage(self) -> None:
         """Test create_backend method comprehensively."""
 
         # create a custom backend that's not FileRouterBackend
@@ -913,7 +989,7 @@ class TestGlobalInstances:
         # verify that the else branch was executed by checking that no FileRouterBackend-specific args were passed
         assert not hasattr(backend, "pages_dir")
 
-    def test_scan_pages_directory_real_filesystem(self, tmp_path):
+    def test_scan_pages_directory_real_filesystem(self, tmp_path) -> None:
         """Test _scan_pages_directory recursion on a real filesystem."""
         router = FileRouterBackend()
 
@@ -923,17 +999,17 @@ class TestGlobalInstances:
         # create nested directories and page.py files
         (pages_dir / "home").mkdir(parents=True, exist_ok=True)
         (pages_dir / "home" / "page.py").write_text(
-            "def render(request):\n    return 'home'\n"
+            "def render(request):\n    return 'home'\n",
         )
 
         (pages_dir / "items" / "[int:id]").mkdir(parents=True, exist_ok=True)
         (pages_dir / "items" / "[int:id]" / "page.py").write_text(
-            "def render(request, id):\n    return id\n"
+            "def render(request, id):\n    return id\n",
         )
 
         (pages_dir / "blog" / "post").mkdir(parents=True, exist_ok=True)
         (pages_dir / "blog" / "post" / "page.py").write_text(
-            "def render(request):\n    return 'post'\n"
+            "def render(request):\n    return 'post'\n",
         )
 
         results = list(router._scan_pages_directory(pages_dir))
@@ -943,7 +1019,7 @@ class TestGlobalInstances:
         assert "items/[int:id]" in url_paths
         assert "blog/post" in url_paths
 
-    def test_create_url_pattern_with_template_attribute(self):
+    def test_create_url_pattern_with_template_attribute(self) -> None:
         """Test _create_url_pattern when module has template attribute (lines 192-200)."""
         router = FileRouterBackend()
 
@@ -953,26 +1029,31 @@ class TestGlobalInstances:
             temp_file = Path(f.name)
 
         try:
-            with patch("next.urls.page.register_template") as mock_register:
-                with patch("next.urls.page.render", return_value="Hello World!"):
-                    pattern = page.create_url_pattern(
-                        "test", temp_file, router._url_parser
-                    )
+            with (
+                patch("next.urls.page.register_template") as mock_register,
+                patch("next.urls.page.render", return_value="Hello World!"),
+            ):
+                pattern = page.create_url_pattern(
+                    "test",
+                    temp_file,
+                    router._url_parser,
+                )
 
-                    # verify that page.register_template was called
-                    mock_register.assert_called_once_with(
-                        temp_file, "Hello {{ name }}!"
-                    )
+                # verify that page.register_template was called
+                mock_register.assert_called_once_with(
+                    temp_file,
+                    "Hello {{ name }}!",
+                )
 
-                    # verify that a URLPattern was returned
-                    assert pattern is not None
-                    assert hasattr(pattern, "callback")
-                    assert hasattr(pattern, "name")
-                    assert pattern.name == "page_test"
+                # verify that a URLPattern was returned
+                assert pattern is not None
+                assert hasattr(pattern, "callback")
+                assert hasattr(pattern, "name")
+                assert pattern.name == "page_test"
         finally:
             temp_file.unlink()
 
-    def test_create_url_pattern_template_view_function_without_args(self):
+    def test_create_url_pattern_template_view_function_without_args(self) -> None:
         """Test the view function created for template pages without args parameter."""
         router = FileRouterBackend()
 
@@ -982,30 +1063,39 @@ class TestGlobalInstances:
             temp_file = Path(f.name)
 
         try:
-            with patch("next.urls.page.register_template"):
-                with patch(
-                    "next.urls.page.render", return_value="Hello World!"
-                ) as mock_render:
-                    pattern = page.create_url_pattern(
-                        "test", temp_file, router._url_parser
-                    )
+            with (
+                patch("next.urls.page.register_template"),
+                patch(
+                    "next.urls.page.render",
+                    return_value="Hello World!",
+                ) as mock_render,
+            ):
+                pattern = page.create_url_pattern(
+                    "test",
+                    temp_file,
+                    router._url_parser,
+                )
 
-                    # get the view function
-                    view_func = pattern.callback
+                # get the view function
+                view_func = pattern.callback
 
-                    # test without args parameter - should not modify kwargs
-                    mock_request = Mock()
-                    result = view_func(mock_request, name="John")
+                # test without args parameter - should not modify kwargs
+                mock_request = Mock()
+                result = view_func(mock_request, name="John")
 
-                    # verify that page.render was called with original kwargs
-                    mock_render.assert_called_once_with(
-                        temp_file, mock_request, name="John"
-                    )
-                    assert result is not None
+                # verify that page.render was called with original kwargs
+                mock_render.assert_called_once_with(
+                    temp_file,
+                    mock_request,
+                    name="John",
+                )
+                assert result is not None
         finally:
             temp_file.unlink()
 
-    def test_create_url_pattern_template_view_function_args_not_in_parameters(self):
+    def test_create_url_pattern_template_view_function_args_not_in_parameters(
+        self,
+    ) -> None:
         """Test view function when args is in kwargs but not in parameters."""
         router = FileRouterBackend()
 
@@ -1015,31 +1105,38 @@ class TestGlobalInstances:
             temp_file = Path(f.name)
 
         try:
-            with patch("next.urls.page.register_template"):
-                with patch(
-                    "next.urls.page.render", return_value="Hello World!"
-                ) as mock_render:
-                    # use a simple URL path without args parameter
-                    pattern = page.create_url_pattern(
-                        "test", temp_file, router._url_parser
-                    )
+            with (
+                patch("next.urls.page.register_template"),
+                patch(
+                    "next.urls.page.render",
+                    return_value="Hello World!",
+                ) as mock_render,
+            ):
+                # use a simple URL path without args parameter
+                pattern = page.create_url_pattern(
+                    "test",
+                    temp_file,
+                    router._url_parser,
+                )
 
-                    # get the view function
-                    view_func = pattern.callback
+                # get the view function
+                view_func = pattern.callback
 
-                    # test with args in kwargs but not in parameters - should not split
-                    mock_request = Mock()
-                    result = view_func(mock_request, args="arg1/arg2/arg3")
+                # test with args in kwargs but not in parameters - should not split
+                mock_request = Mock()
+                result = view_func(mock_request, args="arg1/arg2/arg3")
 
-                    # verify that page.render was called with original args (not split)
-                    mock_render.assert_called_once_with(
-                        temp_file, mock_request, args="arg1/arg2/arg3"
-                    )
-                    assert result is not None
+                # verify that page.render was called with original args (not split)
+                mock_render.assert_called_once_with(
+                    temp_file,
+                    mock_request,
+                    args="arg1/arg2/arg3",
+                )
+                assert result is not None
         finally:
             temp_file.unlink()
 
-    def test_create_url_pattern_template_view_function_args_not_in_kwargs(self):
+    def test_create_url_pattern_template_view_function_args_not_in_kwargs(self) -> None:
         """Test view function when args is in parameters but not in kwargs."""
         router = FileRouterBackend()
 
@@ -1049,31 +1146,39 @@ class TestGlobalInstances:
             temp_file = Path(f.name)
 
         try:
-            with patch("next.urls.page.register_template"):
-                with patch(
-                    "next.urls.page.render", return_value="Hello World!"
-                ) as mock_render:
-                    # use a URL path with args parameter
-                    pattern = page.create_url_pattern(
-                        "test/[[args]]", temp_file, router._url_parser
-                    )
+            with (
+                patch("next.urls.page.register_template"),
+                patch(
+                    "next.urls.page.render",
+                    return_value="Hello World!",
+                ) as mock_render,
+            ):
+                # use a URL path with args parameter
+                pattern = page.create_url_pattern(
+                    "test/[[args]]",
+                    temp_file,
+                    router._url_parser,
+                )
 
-                    # get the view function
-                    view_func = pattern.callback
+                # get the view function
+                view_func = pattern.callback
 
-                    # test without args in kwargs - should not modify kwargs
-                    mock_request = Mock()
-                    result = view_func(mock_request, name="John")
+                # test without args in kwargs - should not modify kwargs
+                mock_request = Mock()
+                result = view_func(mock_request, name="John")
 
-                    # verify that page.render was called with original kwargs plus parameters
-                    mock_render.assert_called_once_with(
-                        temp_file, mock_request, name="John", args="args"
-                    )
-                    assert result is not None
+                # verify that page.render was called with original kwargs plus parameters
+                mock_render.assert_called_once_with(
+                    temp_file,
+                    mock_request,
+                    name="John",
+                    args="args",
+                )
+                assert result is not None
         finally:
             temp_file.unlink()
 
-    def test_create_url_pattern_no_template_no_render(self):
+    def test_create_url_pattern_no_template_no_render(self) -> None:
         """Test _create_url_pattern when module has neither template nor render function."""
         router = FileRouterBackend()
 
@@ -1088,17 +1193,19 @@ class TestGlobalInstances:
         finally:
             temp_file.unlink()
 
-    def test_create_url_pattern_spec_from_file_location_returns_none(self):
+    def test_create_url_pattern_spec_from_file_location_returns_none(self) -> None:
         """Test _create_url_pattern when spec_from_file_location returns None."""
         router = FileRouterBackend()
 
         with patch("importlib.util.spec_from_file_location", return_value=None):
             pattern = page.create_url_pattern(
-                "test", Path("/nonexistent/file.py"), router._url_parser
+                "test",
+                Path("/nonexistent/file.py"),
+                router._url_parser,
             )
             assert pattern is None
 
-    def test_create_url_pattern_spec_loader_is_none(self):
+    def test_create_url_pattern_spec_loader_is_none(self) -> None:
         """Test _create_url_pattern when spec.loader is None."""
         router = FileRouterBackend()
 
@@ -1108,6 +1215,8 @@ class TestGlobalInstances:
 
         with patch("importlib.util.spec_from_file_location", return_value=mock_spec):
             pattern = page.create_url_pattern(
-                "test", Path("/some/file.py"), router._url_parser
+                "test",
+                Path("/some/file.py"),
+                router._url_parser,
             )
             assert pattern is None

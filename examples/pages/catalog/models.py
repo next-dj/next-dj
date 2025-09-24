@@ -8,5 +8,5 @@ class Product(models.Model):
     class Meta:
         app_label = "catalog"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.title

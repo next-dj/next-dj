@@ -13,8 +13,8 @@ from django.apps import apps
         "/starter-projects/",
     ],
 )
-def test_pages_accessible_and_renders_correctly(client, url):
-    """test that pages are accessible and render correctly."""
+def test_pages_accessible_and_renders_correctly(client, url) -> None:
+    """Test that pages are accessible and render correctly."""
     response = client.get(url)
     assert response.status_code == 200
     content = response.content.decode()
@@ -22,7 +22,7 @@ def test_pages_accessible_and_renders_correctly(client, url):
 
 
 @pytest.mark.parametrize(
-    "url,expected_feature",
+    ("url", "expected_feature"),
     [
         ("/", "layout_inheritance"),
         ("/guides/", "navigation_active_states"),
@@ -30,8 +30,8 @@ def test_pages_accessible_and_renders_correctly(client, url):
         ("/", "context_processors_integration"),
     ],
 )
-def test_layout_features(client, url, expected_feature):
-    """test layout features."""
+def test_layout_features(client, url, expected_feature) -> None:
+    """Test layout features."""
     response = client.get(url)
     assert response.status_code == 200
     content = response.content.decode()
@@ -42,9 +42,10 @@ def test_layout_features(client, url, expected_feature):
     elif expected_feature == "navigation_active_states":
         assert "Guides" in content
         assert "active" in content or "current" in content
-    elif expected_feature == "custom_context_variables":
-        assert "Bootstrap" in content  # just check that page loads
-    elif expected_feature == "context_processors_integration":
+    elif expected_feature in {
+        "custom_context_variables",
+        "context_processors_integration",
+    }:
         assert "Bootstrap" in content  # just check that page loads
 
 
@@ -56,8 +57,8 @@ def test_layout_features(client, url, expected_feature):
         "check_layout_templates",
     ],
 )
-def test_checks(check_function):
-    """test next-dj checks."""
+def test_checks(check_function) -> None:
+    """Test next-dj checks."""
     import importlib
 
     checks_module = importlib.import_module("next.checks")
@@ -77,8 +78,8 @@ def test_checks(check_function):
     assert errors == []
 
 
-def test_example_app_files():
-    """test that all app files are covered."""
+def test_example_app_files() -> None:
+    """Test that all app files are covered."""
     # test that app files exist and are importable
     import layouts.apps
     import layouts.context_processors
@@ -102,12 +103,12 @@ def test_example_app_files():
     assert "site_version" in result
     assert "current_year" in result
     assert result["site_name"] == "next-dj layouts example"
-    assert result["site_version"] == "1.0.0"
-    assert result["current_year"] == 2024
+    assert result["site_version"] == "0.1.0"
+    assert result["current_year"] == 2025
 
 
-def test_example_pages_coverage(page_modules):
-    """test that all page files are covered."""
+def test_example_pages_coverage(page_modules) -> None:
+    """Test that all page files are covered."""
     # test that page files exist and are importable
     import layouts.pages.page as main_page
 

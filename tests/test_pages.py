@@ -1,5 +1,6 @@
 import tempfile
 from pathlib import Path
+from typing import Never
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,6 +22,7 @@ from next.pages import (
     Page,
     PythonTemplateLoader,
     _get_context_processors,
+    _import_context_processor,
     context,
     page,
 )
@@ -31,69 +33,69 @@ from next.urls import (
 
 
 # shared fixtures
-@pytest.fixture
+@pytest.fixture()
 def page_instance():
     """Create a fresh Page instance for each test."""
     return Page()
 
 
-@pytest.fixture
+@pytest.fixture()
 def url_parser():
     """Create a URLPatternParser instance for testing."""
     return URLPatternParser()
 
 
-@pytest.fixture
+@pytest.fixture()
 def python_template_loader():
     """Create a PythonTemplateLoader instance for testing."""
     return PythonTemplateLoader()
 
 
-@pytest.fixture
+@pytest.fixture()
 def djx_template_loader():
     """Create a DjxTemplateLoader instance for testing."""
     return DjxTemplateLoader()
 
 
-@pytest.fixture
+@pytest.fixture()
 def context_manager():
     """Create a ContextManager instance for testing."""
     return ContextManager()
 
 
-@pytest.fixture
+@pytest.fixture()
 def layout_manager():
     """Create a LayoutManager instance for testing."""
     return LayoutManager()
 
 
-@pytest.fixture
+@pytest.fixture()
 def temp_dir():
     """Create a temporary directory for testing."""
     with tempfile.TemporaryDirectory() as temp_dir:
         yield Path(temp_dir)
 
 
-@pytest.fixture
+@pytest.fixture()
 def mock_frame():
     """Mock inspect.currentframe for testing."""
     with patch("next.pages.inspect.currentframe") as mock_frame:
         yield mock_frame
 
 
-@pytest.fixture
+@pytest.fixture()
 def test_file_path():
     """Create a test file path for render tests."""
     return Path("/test/path/page.py")
 
 
-@pytest.fixture
+@pytest.fixture()
 def global_file_path():
     """Create a file path for global page tests."""
     return Path("/test/global/page.py")
 
 
-@pytest.fixture
+@pytest.fixture()
 def temp_python_file():
     """Create a temporary Python file for testing."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
@@ -103,7 +105,7 @@ def temp_python_file():
     temp_file.unlink()
 
 
-@pytest.fixture
+@pytest.fixture()
 def context_temp_file():
     """Create a temporary file for context decorator tests."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
@@ -114,7 +116,9 @@ def context_temp_file():
 
 
 class TestPage:
-    def test_init(self, page_instance):
+    """Test cases for Page class."""
+
+    def test_init(self, page_instance) -> None:
         """Test Page initialization."""
         assert page_instance._template_registry == {}
         assert isinstance(page_instance._context_manager, ContextManager)
@@ -125,7 +129,7 @@ class TestPage:
         assert DjxTemplateLoader in loader_types
         assert LayoutTemplateLoader in loader_types
 
-    def test_register_template_direct(self, page_instance):
+    def test_register_template_direct(self, page_instance) -> None:
         """Test register_template method with direct file path."""
         file_path = Path("/test/path/page.py")
         template_str = "Hello {{ name }}!"
@@ -136,7 +140,7 @@ class TestPage:
         assert page_instance._template_registry[file_path] == template_str
 
     @pytest.mark.parametrize(
-        "decorator_type,expected_key,frame_chain",
+        ("decorator_type", "expected_key", "frame_chain"),
         [
             ("with_key", "user_name", "f_back"),
             ("without_key", None, "f_back.f_back"),
@@ -151,7 +155,7 @@ class TestPage:
         decorator_type,
         expected_key,
         frame_chain,
-    ):
+    ) -> None:
         """Test context decorator with different variations."""
         # set up the frame chain based on the test case
         frame = mock_frame.return_value
@@ -162,7 +166,7 @@ class TestPage:
         if decorator_type == "with_key":
 
             @page_instance.context("user_name")
-            def get_user_name():
+            def get_user_name() -> str:
                 return "John Doe"
 
             func = get_user_name
@@ -187,13 +191,16 @@ class TestPage:
         assert inherit is False
 
     def test_context_decorator_with_inherit_context(
-        self, page_instance, context_temp_file, mock_frame
-    ):
+        self,
+        page_instance,
+        context_temp_file,
+        mock_frame,
+    ) -> None:
         """Test context decorator with inherit_context=True."""
         mock_frame.return_value.f_back.f_globals = {"__file__": str(context_temp_file)}
 
         @page_instance.context("inherited_key", inherit_context=True)
-        def get_inherited_value():
+        def get_inherited_value() -> str:
             return "inherited_value"
 
         # verify context function was registered with inherit_context=True
@@ -209,11 +216,14 @@ class TestPage:
         assert inherit is True
 
     def test_context_decorator_without_key_inherit_context(
-        self, page_instance, context_temp_file, mock_frame
-    ):
+        self,
+        page_instance,
+        context_temp_file,
+        mock_frame,
+    ) -> None:
         """Test context decorator without key but with inherit_context=True."""
         mock_frame.return_value.f_back.f_back.f_globals = {
-            "__file__": str(context_temp_file)
+            "__file__": str(context_temp_file),
         }
 
         @page_instance.context(inherit_context=True)
@@ -232,7 +242,7 @@ class TestPage:
         assert inherit is True
 
     @pytest.mark.parametrize(
-        "test_case,template_str,context_setup,render_kwargs,expected",
+        ("test_case", "template_str", "context_setup", "render_kwargs", "expected"),
         [
             (
                 "template_only",
@@ -285,7 +295,7 @@ class TestPage:
         context_setup,
         render_kwargs,
         expected,
-    ):
+    ) -> None:
         """Test various render scenarios with parametrized test cases."""
         # register template
         page_instance.register_template(test_file_path, template_str)
@@ -294,7 +304,9 @@ class TestPage:
         if context_setup:
             for key, func in context_setup.items():
                 page_instance._context_manager.register_context(
-                    test_file_path, key, func
+                    test_file_path,
+                    key,
+                    func,
                 )
 
         # render
@@ -302,14 +314,16 @@ class TestPage:
 
         assert result == expected
 
-    def test_render_with_multiple_files(self, page_instance):
+    def test_render_with_multiple_files(self, page_instance) -> None:
         """Test render method with multiple files having different templates and contexts."""
         # first file
         file1 = Path("/test/path/page1.py")
         template1 = "Page 1: {{ title }}"
         page_instance.register_template(file1, template1)
         page_instance._context_manager.register_context(
-            file1, "title", lambda: "First Page"
+            file1,
+            "title",
+            lambda: "First Page",
         )
 
         # second file
@@ -317,7 +331,9 @@ class TestPage:
         template2 = "Page 2: {{ title }}"
         page_instance.register_template(file2, template2)
         page_instance._context_manager.register_context(
-            file2, "title", lambda: "Second Page"
+            file2,
+            "title",
+            lambda: "Second Page",
         )
 
         # render both
@@ -327,14 +343,14 @@ class TestPage:
         assert result1 == "Page 1: First Page"
         assert result2 == "Page 2: Second Page"
 
-    def test_render_with_inherited_context(self, page_instance, temp_dir):
+    def test_render_with_inherited_context(self, page_instance, temp_dir) -> None:
         """Test render method with inherited context from layout directories."""
         # create layout structure
         layout_dir = temp_dir / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
+            "<html>{% block template %}{% endblock template %}</html>",
         )
 
         page_file = layout_dir / "page.py"
@@ -350,11 +366,14 @@ class TestPage:
         page_instance.register_template(child_page_file, template_str)
 
         # register context in layout page.py with inherit_context=True
-        def layout_func():
+        def layout_func() -> str:
             return "inherited_value"
 
         page_instance._context_manager.register_context(
-            page_file, "inherited_var", layout_func, inherit_context=True
+            page_file,
+            "inherited_var",
+            layout_func,
+            inherit_context=True,
         )
 
         # render child page
@@ -362,14 +381,16 @@ class TestPage:
 
         assert "Child page: inherited_value" in result
 
-    def test_render_with_inherited_context_override(self, page_instance, temp_dir):
+    def test_render_with_inherited_context_override(
+        self, page_instance, temp_dir
+    ) -> None:
         """Test that child page context overrides inherited context."""
         # create layout structure
         layout_dir = temp_dir / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
+            "<html>{% block template %}{% endblock template %}</html>",
         )
 
         page_file = layout_dir / "page.py"
@@ -385,19 +406,25 @@ class TestPage:
         page_instance.register_template(child_page_file, template_str)
 
         # register context in layout page.py with inherit_context=True
-        def layout_func():
+        def layout_func() -> str:
             return "layout_value"
 
         page_instance._context_manager.register_context(
-            page_file, "var", layout_func, inherit_context=True
+            page_file,
+            "var",
+            layout_func,
+            inherit_context=True,
         )
 
         # register context in child page.py (should override inherited)
-        def child_func():
+        def child_func() -> str:
             return "child_value"
 
         page_instance._context_manager.register_context(
-            child_page_file, "var", child_func, inherit_context=False
+            child_page_file,
+            "var",
+            child_func,
+            inherit_context=False,
         )
 
         # render child page
@@ -406,11 +433,15 @@ class TestPage:
         # child context should override inherited context
         assert "Child page: child_value" in result
 
-    def test_context_registry_defaultdict_behavior(self, page_instance, test_file_path):
+    def test_context_registry_defaultdict_behavior(
+        self, page_instance, test_file_path
+    ) -> None:
         """Test that context registry uses defaultdict-like behavior."""
         # register context function - should create the file entry
         page_instance._context_manager.register_context(
-            test_file_path, "test_key", lambda: "test_value"
+            test_file_path,
+            "test_key",
+            lambda: "test_value",
         )
 
         assert test_file_path in page_instance._context_manager._context_registry
@@ -421,6 +452,8 @@ class TestPage:
 
 
 class TestGlobalPageInstance:
+    """Test cases for global page instance."""
+
     @pytest.fixture(autouse=True)
     def clear_global_state(self):
         """Clear global page state before each test."""
@@ -430,18 +463,18 @@ class TestGlobalPageInstance:
         page._template_registry.clear()
         page._context_manager._context_registry.clear()
 
-    def test_global_page_instance(self):
+    def test_global_page_instance(self) -> None:
         """Test that global page instance is properly initialized."""
         assert page is not None
         assert isinstance(page, Page)
         assert page._template_registry == {}
         assert page._context_manager._context_registry == {}
 
-    def test_context_alias(self):
+    def test_context_alias(self) -> None:
         """Test that context alias points to page.context."""
         assert context == page.context
 
-    def test_global_page_template_registration(self, global_file_path):
+    def test_global_page_template_registration(self, global_file_path) -> None:
         """Test template registration using global page instance."""
         template_str = "Global template: {{ message }}"
         page.register_template(global_file_path, template_str)
@@ -449,18 +482,20 @@ class TestGlobalPageInstance:
         assert global_file_path in page._template_registry
         assert page._template_registry[global_file_path] == template_str
 
-    def test_global_page_context_registration(self, global_file_path, mock_frame):
+    def test_global_page_context_registration(
+        self, global_file_path, mock_frame
+    ) -> None:
         """Test context registration using global page instance."""
         mock_frame.return_value.f_back.f_globals = {"__file__": str(global_file_path)}
 
         @page.context("global_key")
-        def get_global_value():
+        def get_global_value() -> str:
             return "global_value"
 
         assert global_file_path in page._context_manager._context_registry
         assert "global_key" in page._context_manager._context_registry[global_file_path]
 
-    def test_global_page_render(self, global_file_path, mock_frame):
+    def test_global_page_render(self, global_file_path, mock_frame) -> None:
         """Test rendering using global page instance."""
         template_str = "Global: {{ key }}"
         page.register_template(global_file_path, template_str)
@@ -468,18 +503,20 @@ class TestGlobalPageInstance:
         mock_frame.return_value.f_back.f_globals = {"__file__": str(global_file_path)}
 
         @page.context("key")
-        def get_key():
+        def get_key() -> str:
             return "value"
 
         result = page.render(global_file_path)
         assert result == "Global: value"
 
-    def test_context_decorator_with_global_page(self, global_file_path, mock_frame):
+    def test_context_decorator_with_global_page(
+        self, global_file_path, mock_frame
+    ) -> None:
         """Test context decorator with global page instance."""
         mock_frame.return_value.f_back.f_globals = {"__file__": str(global_file_path)}
 
         @context("test_key")
-        def test_function():
+        def test_function() -> str:
             return "test_value"
 
         assert global_file_path in page._context_manager._context_registry
@@ -491,7 +528,7 @@ class TestGlobalPageInstance:
         assert inherit is False
 
     @pytest.mark.parametrize(
-        "test_case,frame_setup",
+        ("test_case", "frame_setup"),
         [
             (
                 "frame_none",
@@ -504,24 +541,31 @@ class TestGlobalPageInstance:
             (
                 "no_file",
                 lambda mock_frame: setattr(
-                    mock_frame.return_value.f_back, "f_globals", {"__file__": None}
+                    mock_frame.return_value.f_back,
+                    "f_globals",
+                    {"__file__": None},
                 ),
             ),
             (
                 "exhausted_frames",
                 lambda mock_frame: setattr(
-                    mock_frame.return_value.f_back, "f_back", None
+                    mock_frame.return_value.f_back,
+                    "f_back",
+                    None,
                 ),
             ),
         ],
     )
-    def test_get_caller_path_error_cases(self, page_instance, test_case, frame_setup):
+    def test_get_caller_path_error_cases(
+        self, page_instance, test_case, frame_setup
+    ) -> None:
         """Test _get_caller_path error cases with parametrized test cases."""
         with patch("next.pages.inspect.currentframe") as mock_frame:
             frame_setup(mock_frame)
 
             with pytest.raises(
-                RuntimeError, match="Could not determine caller file path"
+                RuntimeError,
+                match="Could not determine caller file path",
             ):
                 page_instance._get_caller_path(1)
 
@@ -530,7 +574,7 @@ class TestURLPatternParser:
     """Test cases for URL pattern parsing methods."""
 
     @pytest.mark.parametrize(
-        "url_pattern,expected_pattern,expected_params",
+        ("url_pattern", "expected_pattern", "expected_params"),
         [
             ("simple", "simple/", {}),
             ("user/[id]", "user/<str:id>/", {"id": "id"}),
@@ -545,15 +589,19 @@ class TestURLPatternParser:
         ],
     )
     def test_parse_url_pattern_variations(
-        self, url_parser, url_pattern, expected_pattern, expected_params
-    ):
+        self,
+        url_parser,
+        url_pattern,
+        expected_pattern,
+        expected_params,
+    ) -> None:
         """Test parsing URL patterns with different variations."""
         pattern, params = url_parser.parse_url_pattern(url_pattern)
         assert pattern == expected_pattern
         assert params == expected_params
 
     @pytest.mark.parametrize(
-        "url_pattern,expected_contains",
+        ("url_pattern", "expected_contains"),
         [
             (
                 "user/[int:user-id]/posts/[slug:post-slug]/[[args]]",
@@ -569,8 +617,11 @@ class TestURLPatternParser:
         ],
     )
     def test_parse_url_pattern_complex(
-        self, url_parser, url_pattern, expected_contains
-    ):
+        self,
+        url_parser,
+        url_pattern,
+        expected_contains,
+    ) -> None:
         """Test parsing complex URL pattern."""
         pattern, params = url_parser.parse_url_pattern(url_pattern)
 
@@ -583,22 +634,26 @@ class TestURLPatternParser:
         assert pattern.endswith("/")  # should end with slash
 
     @pytest.mark.parametrize(
-        "url_pattern,pattern_contains,params_condition",
+        ("url_pattern", "pattern_contains", "params_condition"),
         [
-            ("[]", ["["] or ["<str:"], lambda p: len(p) == 0 or "" in p),
-            ("[[]]", ["["] or ["<path:"], lambda p: len(p) == 0 or "" in p),
+            ("[]", ["["], lambda p: len(p) == 0 or "" in p),
+            ("[[]]", ["["], lambda p: len(p) == 0 or "" in p),
         ],
     )
     def test_parse_url_pattern_edge_cases(
-        self, url_parser, url_pattern, pattern_contains, params_condition
-    ):
+        self,
+        url_parser,
+        url_pattern,
+        pattern_contains,
+        params_condition,
+    ) -> None:
         """Test parsing URL pattern edge cases."""
         pattern, params = url_parser.parse_url_pattern(url_pattern)
         assert any(contains in pattern for contains in pattern_contains)
         assert params_condition(params)
 
     @pytest.mark.parametrize(
-        "param_string,expected_name,expected_type",
+        ("param_string", "expected_name", "expected_type"),
         [
             ("param", "param", "str"),
             ("int:user-id", "user-id", "int"),
@@ -608,15 +663,19 @@ class TestURLPatternParser:
         ],
     )
     def test_parse_param_name_and_type_variations(
-        self, url_parser, param_string, expected_name, expected_type
-    ):
+        self,
+        url_parser,
+        param_string,
+        expected_name,
+        expected_type,
+    ) -> None:
         """Test parsing parameter name and type with different variations."""
         name, type_name = url_parser._parse_param_name_and_type(param_string)
         assert name == expected_name
         assert type_name == expected_type
 
     @pytest.mark.parametrize(
-        "url_path,expected_params,expected_pattern",
+        ("url_path", "expected_params", "expected_pattern"),
         [
             (
                 "user/[[profile]]/[int:user-id]/posts",
@@ -626,8 +685,12 @@ class TestURLPatternParser:
         ],
     )
     def test_parse_url_pattern_with_args_and_params(
-        self, url_parser, url_path, expected_params, expected_pattern
-    ):
+        self,
+        url_parser,
+        url_path,
+        expected_params,
+        expected_pattern,
+    ) -> None:
         """Test parsing URL pattern with both args and regular parameters."""
         django_pattern, parameters = url_parser.parse_url_pattern(url_path)
 
@@ -636,7 +699,7 @@ class TestURLPatternParser:
         assert django_pattern == expected_pattern
 
     @pytest.mark.parametrize(
-        "url_path,expected_name",
+        ("url_path", "expected_name"),
         [
             ("user/[int:user-id]/posts", "user_int_user_id_posts"),
             ("profile/[[args]]", "profile_args"),
@@ -646,13 +709,15 @@ class TestURLPatternParser:
             ),
         ],
     )
-    def test_prepare_url_name_with_colons(self, url_parser, url_path, expected_name):
+    def test_prepare_url_name_with_colons(
+        self, url_parser, url_path, expected_name
+    ) -> None:
         """Test URL name preparation with colons in parameter syntax."""
         clean_name = url_parser.prepare_url_name(url_path)
         assert clean_name == expected_name
         assert ":" not in clean_name
 
-    def test_scan_pages_directory_virtual_view_detection(self, temp_dir):
+    def test_scan_pages_directory_virtual_view_detection(self, temp_dir) -> None:
         """Test _scan_pages_directory detects virtual views (template.djx without page.py)."""
         # create a FileRouterBackend instance
         backend = FileRouterBackend()
@@ -677,7 +742,7 @@ class TestPythonTemplateLoader:
     """Test cases for Python template loader."""
 
     @pytest.mark.parametrize(
-        "file_content,expected_can_load,expected_load_result",
+        ("file_content", "expected_can_load", "expected_load_result"),
         [
             ('template = "Hello {{ name }}!"', True, "Hello {{ name }}!"),
             ('print("test")', False, None),
@@ -691,7 +756,7 @@ class TestPythonTemplateLoader:
         file_content,
         expected_can_load,
         expected_load_result,
-    ):
+    ) -> None:
         """Test can_load and load_template with different file contents."""
         page_file = temp_dir / "page.py"
         page_file.write_text(file_content)
@@ -706,12 +771,12 @@ class TestPythonTemplateLoader:
 class TestContextManager:
     """Test cases for ContextManager."""
 
-    def test_init(self, context_manager):
+    def test_init(self, context_manager) -> None:
         """Test ContextManager initialization."""
         assert context_manager._context_registry == {}
 
     @pytest.mark.parametrize(
-        "key,func_return,expected_result",
+        ("key", "func_return", "expected_result"),
         [
             ("test_key", lambda: "test_value", {"test_key": "test_value"}),
             (
@@ -722,8 +787,13 @@ class TestContextManager:
         ],
     )
     def test_register_and_collect_context(
-        self, context_manager, test_file_path, key, func_return, expected_result
-    ):
+        self,
+        context_manager,
+        test_file_path,
+        key,
+        func_return,
+        expected_result,
+    ) -> None:
         """Test registering and collecting context with different key types."""
         context_manager.register_context(test_file_path, key, func_return)
 
@@ -737,10 +807,12 @@ class TestContextManager:
         result = context_manager.collect_context(test_file_path)
         assert result == expected_result
 
-    def test_collect_context_multiple_functions(self, context_manager, test_file_path):
+    def test_collect_context_multiple_functions(
+        self, context_manager, test_file_path
+    ) -> None:
         """Test collecting context with multiple functions."""
 
-        def func1():
+        def func1() -> str:
             return "value1"
 
         def func2():
@@ -753,22 +825,29 @@ class TestContextManager:
 
         assert result == {"key1": "value1", "key2": "value2", "key3": "value3"}
 
-    def test_collect_context_no_functions(self, context_manager, test_file_path):
+    def test_collect_context_no_functions(
+        self, context_manager, test_file_path
+    ) -> None:
         """Test collecting context when no functions are registered."""
         result = context_manager.collect_context(test_file_path)
 
         assert result == {}
 
     def test_register_context_with_inherit_context(
-        self, context_manager, test_file_path
-    ):
+        self,
+        context_manager,
+        test_file_path,
+    ) -> None:
         """Test registering context with inherit_context=True."""
 
-        def test_func():
+        def test_func() -> str:
             return "inherited_value"
 
         context_manager.register_context(
-            test_file_path, "inherited_key", test_func, inherit_context=True
+            test_file_path,
+            "inherited_key",
+            test_func,
+            inherit_context=True,
         )
 
         assert test_file_path in context_manager._context_registry
@@ -779,14 +858,14 @@ class TestContextManager:
         assert func == test_func
         assert inherit is True
 
-    def test_collect_inherited_context(self, context_manager, temp_dir):
+    def test_collect_inherited_context(self, context_manager, temp_dir) -> None:
         """Test collecting inherited context from layout directories."""
         # create layout structure
         layout_dir = temp_dir / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
+            "<html>{% block template %}{% endblock template %}</html>",
         )
 
         page_file = layout_dir / "page.py"
@@ -798,11 +877,14 @@ class TestContextManager:
         child_page_file = child_dir / "page.py"
 
         # register context in layout page.py with inherit_context=True
-        def layout_func():
+        def layout_func() -> str:
             return "layout_value"
 
         context_manager.register_context(
-            page_file, "layout_var", layout_func, inherit_context=True
+            page_file,
+            "layout_var",
+            layout_func,
+            inherit_context=True,
         )
 
         # collect context for child page
@@ -811,14 +893,16 @@ class TestContextManager:
         assert "layout_var" in result
         assert result["layout_var"] == "layout_value"
 
-    def test_collect_inherited_context_multiple_levels(self, context_manager, temp_dir):
+    def test_collect_inherited_context_multiple_levels(
+        self, context_manager, temp_dir
+    ) -> None:
         """Test collecting inherited context from multiple layout levels."""
         # create nested layout structure
         root_dir = temp_dir / "root"
         root_dir.mkdir()
         root_layout = root_dir / "layout.djx"
         root_layout.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
+            "<html>{% block template %}{% endblock template %}</html>",
         )
         root_page = root_dir / "page.py"
         root_page.write_text("")  # create empty page.py
@@ -835,17 +919,23 @@ class TestContextManager:
         child_page = child_dir / "page.py"
 
         # register context in both layout levels
-        def root_func():
+        def root_func() -> str:
             return "root_value"
 
-        def sub_func():
+        def sub_func() -> str:
             return "sub_value"
 
         context_manager.register_context(
-            root_page, "root_var", root_func, inherit_context=True
+            root_page,
+            "root_var",
+            root_func,
+            inherit_context=True,
         )
         context_manager.register_context(
-            sub_page, "sub_var", sub_func, inherit_context=True
+            sub_page,
+            "sub_var",
+            sub_func,
+            inherit_context=True,
         )
 
         # collect context for child page
@@ -856,19 +946,23 @@ class TestContextManager:
         assert result["root_var"] == "root_value"
         assert result["sub_var"] == "sub_value"
 
-    def test_collect_inherited_context_no_layout(self, context_manager, temp_dir):
+    def test_collect_inherited_context_no_layout(
+        self, context_manager, temp_dir
+    ) -> None:
         """Test collecting context when no layout files exist."""
         page_file = temp_dir / "page.py"
         result = context_manager.collect_context(page_file)
         assert result == {}
 
-    def test_collect_inherited_context_no_page_py(self, context_manager, temp_dir):
+    def test_collect_inherited_context_no_page_py(
+        self, context_manager, temp_dir
+    ) -> None:
         """Test collecting context when layout.djx exists but no page.py."""
         layout_dir = temp_dir / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
+            "<html>{% block template %}{% endblock template %}</html>",
         )
 
         child_dir = layout_dir / "child"
@@ -878,14 +972,16 @@ class TestContextManager:
         result = context_manager.collect_context(child_page_file)
         assert result == {}
 
-    def test_collect_inherited_context_inherit_false(self, context_manager, temp_dir):
+    def test_collect_inherited_context_inherit_false(
+        self, context_manager, temp_dir
+    ) -> None:
         """Test that context with inherit_context=False is not inherited."""
         # create layout structure
         layout_dir = temp_dir / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
+            "<html>{% block template %}{% endblock template %}</html>",
         )
 
         page_file = layout_dir / "page.py"
@@ -897,11 +993,14 @@ class TestContextManager:
         child_page_file = child_dir / "page.py"
 
         # register context with inherit_context=False
-        def layout_func():
+        def layout_func() -> str:
             return "layout_value"
 
         context_manager.register_context(
-            page_file, "layout_var", layout_func, inherit_context=False
+            page_file,
+            "layout_var",
+            layout_func,
+            inherit_context=False,
         )
 
         # collect context for child page
@@ -909,14 +1008,16 @@ class TestContextManager:
 
         assert "layout_var" not in result
 
-    def test_collect_inherited_context_dict_return(self, context_manager, temp_dir):
+    def test_collect_inherited_context_dict_return(
+        self, context_manager, temp_dir
+    ) -> None:
         """Test collecting inherited context with dict return (key=None)."""
         # create layout structure
         layout_dir = temp_dir / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
+            "<html>{% block template %}{% endblock template %}</html>",
         )
 
         page_file = layout_dir / "page.py"
@@ -932,7 +1033,10 @@ class TestContextManager:
             return {"inherited_key1": "value1", "inherited_key2": "value2"}
 
         context_manager.register_context(
-            page_file, None, layout_dict_func, inherit_context=True
+            page_file,
+            None,
+            layout_dict_func,
+            inherit_context=True,
         )
 
         # collect context for child page
@@ -948,7 +1052,7 @@ class TestDjxTemplateLoader:
     """Test cases for DJX template loader."""
 
     @pytest.mark.parametrize(
-        "create_djx_file,djx_content,expected_result",
+        ("create_djx_file", "djx_content", "expected_result"),
         [
             (
                 True,
@@ -965,7 +1069,7 @@ class TestDjxTemplateLoader:
         create_djx_file,
         djx_content,
         expected_result,
-    ):
+    ) -> None:
         """Test loading of template.djx template with different scenarios."""
         # create page.py file
         page_file = temp_dir / "page.py"
@@ -982,7 +1086,7 @@ class TestDjxTemplateLoader:
         assert result == expected_result
 
     @pytest.mark.parametrize(
-        "test_case,page_content,create_djx,djx_content,expected_template",
+        ("test_case", "page_content", "create_djx", "djx_content", "expected_template"),
         [
             (
                 "djx_template_only",
@@ -1010,7 +1114,7 @@ class TestDjxTemplateLoader:
         create_djx,
         djx_content,
         expected_template,
-    ):
+    ) -> None:
         """Test create_url_pattern with different template scenarios."""
         page_file = temp_dir / "page.py"
         page_file.write_text(page_content)
@@ -1025,7 +1129,7 @@ class TestDjxTemplateLoader:
         assert page_file in page_instance._template_registry
         assert page_instance._template_registry[page_file] == expected_template
 
-    def test_render_djx_template_with_context(self, page_instance, temp_dir):
+    def test_render_djx_template_with_context(self, page_instance, temp_dir) -> None:
         """Test rendering template.djx template with context."""
         # create page.py file
         page_file = temp_dir / "page.py"
@@ -1048,7 +1152,9 @@ class TestDjxTemplateLoader:
 
         assert result == "<h1>Welcome</h1><p>Hello World!</p>"
 
-    def test_render_djx_template_with_django_tags(self, page_instance, temp_dir):
+    def test_render_djx_template_with_django_tags(
+        self, page_instance, temp_dir
+    ) -> None:
         """Test rendering template.djx template with Django tags."""
         # create page.py file
         page_file = temp_dir / "page.py"
@@ -1079,7 +1185,9 @@ class TestDjxTemplateLoader:
 
         # render with context
         result = page_instance.render(
-            page_file, title="Items", items=["Apple", "Banana"]
+            page_file,
+            title="Items",
+            items=["Apple", "Banana"],
         )
 
         assert "Items" in result
@@ -1087,7 +1195,7 @@ class TestDjxTemplateLoader:
         assert "Banana" in result
         assert "<li>" in result
 
-    def test_djx_template_with_context_functions(self, page_instance, temp_dir):
+    def test_djx_template_with_context_functions(self, page_instance, temp_dir) -> None:
         """Test template.djx template with context functions."""
         # create page.py file with context function
         page_file = temp_dir / "page.py"
@@ -1135,7 +1243,15 @@ class TestCreateUrlPatternScenarios:
     """Test cases for different URL pattern creation scenarios."""
 
     @pytest.mark.parametrize(
-        "test_case,page_content,create_djx,djx_content,url_pattern,expected_pattern_name,expected_template",
+        (
+            "test_case",
+            "page_content",
+            "create_djx",
+            "djx_content",
+            "url_pattern",
+            "expected_pattern_name",
+            "expected_template",
+        ),
         [
             (
                 "render_function_only",
@@ -1201,7 +1317,7 @@ def render(request, **kwargs):
         url_pattern,
         expected_pattern_name,
         expected_template,
-    ):
+    ) -> None:
         """Test various create_url_pattern scenarios."""
         page_file = temp_dir / "page.py"
 
@@ -1226,8 +1342,11 @@ def render(request, **kwargs):
             assert pattern is None
 
     def test_create_url_pattern_render_function_fallback(
-        self, page_instance, temp_dir, url_parser
-    ):
+        self,
+        page_instance,
+        temp_dir,
+        url_parser,
+    ) -> None:
         """Test that render function is used as fallback when no template is found."""
         page_file = temp_dir / "page.py"
         page_file.write_text("""
@@ -1243,8 +1362,11 @@ def render(request, **kwargs):
         assert pattern.name == "page_test"
 
     def test_create_url_pattern_virtual_view_rendering(
-        self, page_instance, temp_dir, url_parser
-    ):
+        self,
+        page_instance,
+        temp_dir,
+        url_parser,
+    ) -> None:
         """Test that virtual view can be rendered with context."""
         page_file = temp_dir / "page.py"
         djx_file = temp_dir / "template.djx"
@@ -1260,8 +1382,11 @@ def render(request, **kwargs):
         assert result == "<h1>Welcome</h1><p>Hello World!</p>"
 
     def test_create_url_pattern_with_context_functions(
-        self, page_instance, temp_dir, url_parser
-    ):
+        self,
+        page_instance,
+        temp_dir,
+        url_parser,
+    ) -> None:
         """Test create_url_pattern with context functions for virtual view."""
         page_file = temp_dir / "page.py"
         djx_file = temp_dir / "template.djx"
@@ -1270,10 +1395,14 @@ def render(request, **kwargs):
 
         # register context function
         page_instance._context_manager.register_context(
-            page_file, "title", lambda: "Context Title"
+            page_file,
+            "title",
+            lambda: "Context Title",
         )
         page_instance._context_manager.register_context(
-            page_file, "description", lambda: "Context Description"
+            page_file,
+            "description",
+            lambda: "Context Description",
         )
 
         pattern = page_instance.create_url_pattern("test", page_file, url_parser)
@@ -1289,7 +1418,7 @@ class TestPageChecks:
     """Test cases for page checks functionality."""
 
     @pytest.mark.parametrize(
-        "page_content,create_djx,djx_content,expected_result",
+        ("page_content", "create_djx", "djx_content", "expected_result"),
         [
             ('template = "Hello {{ name }}!"', False, None, True),
             ('print("test")', True, "<h1>{{ title }}</h1>", True),
@@ -1307,8 +1436,13 @@ def render(request, **kwargs):
         ],
     )
     def test_has_template_or_djx(
-        self, temp_dir, page_content, create_djx, djx_content, expected_result
-    ):
+        self,
+        temp_dir,
+        page_content,
+        create_djx,
+        djx_content,
+        expected_result,
+    ) -> None:
         """Test _has_template_or_djx with different scenarios."""
         page_file = temp_dir / "page.py"
         page_file.write_text(page_content)
@@ -1324,12 +1458,12 @@ def render(request, **kwargs):
 class TestLayoutChecks:
     """Test cases for layout checks functionality."""
 
-    def test_check_layout_templates_with_block(self, temp_dir):
+    def test_check_layout_templates_with_block(self, temp_dir) -> None:
         """Test check_layout_templates with proper template block."""
         # create layout file with proper block
         layout_file = temp_dir / "layout.djx"
         layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>"
+            "<html>{% block template %}{% endblock template %}</html>",
         )
 
         # create page file
@@ -1351,7 +1485,7 @@ class TestLayoutChecks:
             warnings = check_layout_templates(None)
             assert len(warnings) == 0
 
-    def test_check_layout_templates_without_block(self, temp_dir):
+    def test_check_layout_templates_without_block(self, temp_dir) -> None:
         """Test check_layout_templates without template block."""
         # create layout file without proper block
         layout_file = temp_dir / "layout.djx"
@@ -1377,7 +1511,7 @@ class TestLayoutChecks:
             assert len(warnings) == 1
             assert "does not contain required {% block template %}" in warnings[0].msg
 
-    def test_check_layout_templates_disabled(self, temp_dir):
+    def test_check_layout_templates_disabled(self, temp_dir) -> None:
         """Test check_layout_templates when disabled in settings."""
         with patch("next.checks.getattr") as mock_getattr:
             mock_getattr.side_effect = (
@@ -1393,7 +1527,15 @@ class TestMissingPageContentChecks:
     """Test cases for missing page content checks."""
 
     @pytest.mark.parametrize(
-        "test_case,page_content,create_template_djx,template_djx_content,create_layout_djx,layout_djx_content,expected_warnings",
+        (
+            "test_case",
+            "page_content",
+            "create_template_djx",
+            "template_djx_content",
+            "create_layout_djx",
+            "layout_djx_content",
+            "expected_warnings",
+        ),
         [
             (
                 "with_template",
@@ -1452,7 +1594,7 @@ class TestMissingPageContentChecks:
         create_layout_djx,
         layout_djx_content,
         expected_warnings,
-    ):
+    ) -> None:
         """Test check_missing_page_content with different content scenarios."""
         # create page file with specified content
         page_file = temp_dir / "page.py"
@@ -1489,7 +1631,7 @@ class TestMissingPageContentChecks:
             if expected_warnings > 0:
                 assert "has no content" in warnings[0].msg
 
-    def test_check_missing_page_content_disabled(self, temp_dir):
+    def test_check_missing_page_content_disabled(self, temp_dir) -> None:
         """Test check_missing_page_content when disabled in settings."""
         with patch("next.checks.getattr") as mock_getattr:
             mock_getattr.side_effect = (
@@ -1505,7 +1647,7 @@ class TestDuplicateUrlParametersChecks:
     """Test cases for duplicate URL parameters checks."""
 
     @pytest.mark.parametrize(
-        "test_case,url_patterns,expected_errors,expected_error_msg",
+        ("test_case", "url_patterns", "expected_errors", "expected_error_msg"),
         [
             (
                 "no_duplicates",
@@ -1522,8 +1664,13 @@ class TestDuplicateUrlParametersChecks:
         ],
     )
     def test_check_duplicate_url_parameters_scenarios(
-        self, temp_dir, test_case, url_patterns, expected_errors, expected_error_msg
-    ):
+        self,
+        temp_dir,
+        test_case,
+        url_patterns,
+        expected_errors,
+        expected_error_msg,
+    ) -> None:
         """Test check_duplicate_url_parameters with different URL pattern scenarios."""
         # create page file
         page_file = temp_dir / "page.py"
@@ -1551,7 +1698,7 @@ class TestDuplicateUrlParametersChecks:
                 if "duplicate parameter names" in expected_error_msg:
                     assert "id" in errors[0].msg
 
-    def test_check_duplicate_url_parameters_disabled(self, temp_dir):
+    def test_check_duplicate_url_parameters_disabled(self, temp_dir) -> None:
         """Test check_duplicate_url_parameters when disabled in settings."""
         with patch("next.checks.getattr") as mock_getattr:
             mock_getattr.side_effect = (
@@ -1566,7 +1713,7 @@ class TestDuplicateUrlParametersChecks:
 class TestContextFunctionsChecks:
     """Test cases for context functions checks."""
 
-    def test_check_context_functions_valid_dict_return(self, temp_dir):
+    def test_check_context_functions_valid_dict_return(self, temp_dir) -> None:
         """Test check_context_functions with valid dict return."""
         # create page file with valid context function
         page_file = temp_dir / "page.py"
@@ -1593,14 +1740,14 @@ def get_context_data():
             # mock context manager
             mock_context_manager = MagicMock()
             mock_context_manager._context_registry = {
-                page_file: {None: (lambda: {"key": "value"}, False)}
+                page_file: {None: (lambda: {"key": "value"}, False)},
             }
             mock_router._context_manager = mock_context_manager
 
             errors = check_context_functions(None)
             assert len(errors) == 0
 
-    def test_check_context_functions_invalid_return_type(self, temp_dir):
+    def test_check_context_functions_invalid_return_type(self, temp_dir) -> None:
         """Test check_context_functions with invalid return type."""
         # create page file with invalid context function
         page_file = temp_dir / "page.py"
@@ -1629,9 +1776,8 @@ def get_context_data():
             assert "must return a dictionary" in errors[0].msg
             assert "str" in errors[0].msg
 
-    def test_check_context_functions_with_key_not_checked(self, temp_dir):
+    def test_check_context_functions_with_key_not_checked(self, temp_dir) -> None:
         """Test check_context_functions ignores functions with key."""
-
         # create page file with context function with key
         page_file = temp_dir / "page.py"
         page_file.write_text("""
@@ -1657,14 +1803,14 @@ def get_context_data():
             # mock context manager
             mock_context_manager = MagicMock()
             mock_context_manager._context_registry = {
-                page_file: {"my_key": (lambda: "not a dict but with key", False)}
+                page_file: {"my_key": (lambda: "not a dict but with key", False)},
             }
             mock_router._context_manager = mock_context_manager
 
             errors = check_context_functions(None)
             assert len(errors) == 0
 
-    def test_check_context_functions_disabled(self, temp_dir):
+    def test_check_context_functions_disabled(self, temp_dir) -> None:
         """Test check_context_functions when disabled in settings."""
         with patch("next.checks.getattr") as mock_getattr:
             mock_getattr.side_effect = (
@@ -1680,7 +1826,7 @@ class TestLayoutTemplateLoader:
     """Test cases for LayoutTemplateLoader."""
 
     @pytest.mark.parametrize(
-        "create_layout,create_template,expected_can_load",
+        ("create_layout", "create_template", "expected_can_load"),
         [
             (True, True, True),
             (False, True, False),
@@ -1689,8 +1835,12 @@ class TestLayoutTemplateLoader:
         ],
     )
     def test_can_load_with_layout_files(
-        self, temp_dir, create_layout, create_template, expected_can_load
-    ):
+        self,
+        temp_dir,
+        create_layout,
+        create_template,
+        expected_can_load,
+    ) -> None:
         """Test can_load with different layout and template combinations."""
         loader = LayoutTemplateLoader()
 
@@ -1702,7 +1852,7 @@ class TestLayoutTemplateLoader:
         if create_layout:
             layout_file = temp_dir / "layout.djx"
             layout_file.write_text(
-                "<html><body>{% block template %}{% endblock template %}</body></html>"
+                "<html><body>{% block template %}{% endblock template %}</body></html>",
             )
 
         # create template.djx in nested directory if needed
@@ -1716,7 +1866,7 @@ class TestLayoutTemplateLoader:
         result = loader.can_load(page_file)
         assert result is expected_can_load
 
-    def test_get_additional_layout_files_with_next_pages_config(self, temp_dir):
+    def test_get_additional_layout_files_with_next_pages_config(self, temp_dir) -> None:
         """Test _get_additional_layout_files with NEXT_PAGES configuration."""
         loader = LayoutTemplateLoader()
 
@@ -1742,7 +1892,7 @@ class TestLayoutTemplateLoader:
         assert layout_file in result
 
     @pytest.mark.parametrize(
-        "test_case,config,expected_result",
+        ("test_case", "config", "expected_result"),
         [
             (
                 "invalid_config",
@@ -1771,8 +1921,12 @@ class TestLayoutTemplateLoader:
         ],
     )
     def test_get_additional_layout_files_scenarios(
-        self, temp_dir, test_case, config, expected_result
-    ):
+        self,
+        temp_dir,
+        test_case,
+        config,
+        expected_result,
+    ) -> None:
         """Test _get_additional_layout_files with different configuration scenarios."""
         loader = LayoutTemplateLoader()
 
@@ -1782,7 +1936,7 @@ class TestLayoutTemplateLoader:
         assert result == expected_result
 
     @pytest.mark.parametrize(
-        "test_case,config,expected_result",
+        ("test_case", "config", "expected_result"),
         [
             (
                 "with_pages_dir",
@@ -1814,8 +1968,12 @@ class TestLayoutTemplateLoader:
         ],
     )
     def test_get_pages_dir_for_config_scenarios(
-        self, temp_dir, test_case, config, expected_result
-    ):
+        self,
+        temp_dir,
+        test_case,
+        config,
+        expected_result,
+    ) -> None:
         """Test _get_pages_dir_for_config with different configuration scenarios."""
         loader = LayoutTemplateLoader()
 
@@ -1828,7 +1986,13 @@ class TestLayoutTemplateLoader:
         assert result == expected_result
 
     @pytest.mark.parametrize(
-        "test_case,create_layout,create_template,template_content,expected_result",
+        (
+            "test_case",
+            "create_layout",
+            "create_template",
+            "template_content",
+            "expected_result",
+        ),
         [
             (
                 "with_local_layout",
@@ -1861,7 +2025,7 @@ class TestLayoutTemplateLoader:
         create_template,
         template_content,
         expected_result,
-    ):
+    ) -> None:
         """Test _wrap_in_template_block with different file scenarios."""
         loader = LayoutTemplateLoader()
 
@@ -1880,7 +2044,9 @@ class TestLayoutTemplateLoader:
 
         assert result == expected_result
 
-    def test_find_layout_files_with_duplicate_additional_layouts(self, temp_dir):
+    def test_find_layout_files_with_duplicate_additional_layouts(
+        self, temp_dir
+    ) -> None:
         """Test _find_layout_files when additional layouts are already in local hierarchy."""
         loader = LayoutTemplateLoader()
 
@@ -1913,7 +2079,7 @@ class TestLayoutTemplateLoader:
         assert len(result) == 1
         assert layout_file in result
 
-    def test_get_additional_layout_files_with_duplicate_layouts(self, temp_dir):
+    def test_get_additional_layout_files_with_duplicate_layouts(self, temp_dir) -> None:
         """Test _get_additional_layout_files with duplicate layout files."""
         loader = LayoutTemplateLoader()
 
@@ -1946,7 +2112,9 @@ class TestLayoutTemplateLoader:
         assert len(result) == 1
         assert layout_file in result
 
-    def test_find_layout_files_with_additional_layouts_already_present(self, temp_dir):
+    def test_find_layout_files_with_additional_layouts_already_present(
+        self, temp_dir
+    ) -> None:
         """Test _find_layout_files when additional layouts are already in layout_files."""
         loader = LayoutTemplateLoader()
 
@@ -1983,7 +2151,9 @@ class TestLayoutTemplateLoader:
         assert len(result) == 1
         assert local_layout in result
 
-    def test_find_layout_files_with_different_additional_layouts(self, temp_dir):
+    def test_find_layout_files_with_different_additional_layouts(
+        self, temp_dir
+    ) -> None:
         """Test _find_layout_files when additional layouts are different from local ones."""
         loader = LayoutTemplateLoader()
 
@@ -2023,7 +2193,7 @@ class TestLayoutTemplateLoader:
         assert local_layout in result
         assert additional_layout in result
 
-    def test_load_template_with_single_layout(self, temp_dir):
+    def test_load_template_with_single_layout(self, temp_dir) -> None:
         """Test load_template with single layout file."""
         loader = LayoutTemplateLoader()
 
@@ -2052,14 +2222,14 @@ class TestLayoutTemplateLoader:
         # should contain template block
         assert "{% block template %}" in result
 
-    def test_load_template_with_multiple_layouts(self, temp_dir):
+    def test_load_template_with_multiple_layouts(self, temp_dir) -> None:
         """Test load_template with multiple layout files in hierarchy."""
         loader = LayoutTemplateLoader()
 
         # create root layout
         root_layout = temp_dir / "layout.djx"
         root_layout.write_text(
-            "<html><head><title>Root</title></head><body>{% block template %}{% endblock template %}</body></html>"
+            "<html><head><title>Root</title></head><body>{% block template %}{% endblock template %}</body></html>",
         )
 
         # create sub layout
@@ -2067,7 +2237,7 @@ class TestLayoutTemplateLoader:
         sub_dir.mkdir()
         sub_layout = sub_dir / "layout.djx"
         sub_layout.write_text(
-            "<div class='sub-layout'>{% block template %}{% endblock template %}</div>"
+            "<div class='sub-layout'>{% block template %}{% endblock template %}</div>",
         )
 
         # create template
@@ -2088,14 +2258,14 @@ class TestLayoutTemplateLoader:
         # should contain template block
         assert "{% block template %}" in result
 
-    def test_load_template_without_template_djx(self, temp_dir):
+    def test_load_template_without_template_djx(self, temp_dir) -> None:
         """Test load_template when template.djx doesn't exist."""
         loader = LayoutTemplateLoader()
 
         # create layout.djx
         layout_file = temp_dir / "layout.djx"
         layout_file.write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
+            "<html><body>{% block template %}{% endblock template %}</body></html>",
         )
 
         # create page.py without template.djx
@@ -2110,7 +2280,7 @@ class TestLayoutTemplateLoader:
         # should contain empty template block
         assert "{% block template %}{% endblock template %}" in result
 
-    def test_find_layout_files(self, temp_dir):
+    def test_find_layout_files(self, temp_dir) -> None:
         """Test _find_layout_files method."""
         loader = LayoutTemplateLoader()
 
@@ -2133,7 +2303,7 @@ class TestLayoutTemplateLoader:
         assert sub_layout in layout_files  # closest first
         assert root_layout in layout_files
 
-    def test_compose_layout_hierarchy_exception_handling(self, temp_dir):
+    def test_compose_layout_hierarchy_exception_handling(self, temp_dir) -> None:
         """Test _compose_layout_hierarchy handles exceptions gracefully."""
         loader = LayoutTemplateLoader()
 
@@ -2153,7 +2323,7 @@ class TestLayoutTemplateLoader:
                 result == "test content"
             )  # should return original content when exception occurs
 
-    def test_load_template_no_layout_files(self, temp_dir):
+    def test_load_template_no_layout_files(self, temp_dir) -> None:
         """Test load_template when no layout files exist."""
         loader = LayoutTemplateLoader()
 
@@ -2168,20 +2338,20 @@ class TestLayoutTemplateLoader:
 class TestLayoutManager:
     """Test cases for LayoutManager."""
 
-    def test_init(self):
+    def test_init(self) -> None:
         """Test LayoutManager initialization."""
         manager = LayoutManager()
         assert manager._layout_registry == {}
         assert isinstance(manager._layout_loader, LayoutTemplateLoader)
 
-    def test_discover_layouts_for_template(self, temp_dir):
+    def test_discover_layouts_for_template(self, temp_dir) -> None:
         """Test discover_layouts_for_template method."""
         manager = LayoutManager()
 
         # create layout structure
         layout_file = temp_dir / "layout.djx"
         layout_file.write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
+            "<html><body>{% block template %}{% endblock template %}</body></html>",
         )
 
         sub_dir = temp_dir / "sub"
@@ -2195,7 +2365,7 @@ class TestLayoutManager:
         assert result is not None
         assert page_file in manager._layout_registry
 
-    def test_discover_layouts_no_layouts(self, temp_dir):
+    def test_discover_layouts_no_layouts(self, temp_dir) -> None:
         """Test discover_layouts_for_template when no layouts exist."""
         manager = LayoutManager()
 
@@ -2208,14 +2378,14 @@ class TestLayoutManager:
         assert result is None
         assert page_file not in manager._layout_registry
 
-    def test_get_layout_template(self, temp_dir):
+    def test_get_layout_template(self, temp_dir) -> None:
         """Test get_layout_template method."""
         manager = LayoutManager()
 
         # create layout structure
         layout_file = temp_dir / "layout.djx"
         layout_file.write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
+            "<html><body>{% block template %}{% endblock template %}</body></html>",
         )
 
         sub_dir = temp_dir / "sub"
@@ -2229,7 +2399,7 @@ class TestLayoutManager:
         result = manager.get_layout_template(page_file)
         assert result is not None
 
-    def test_get_layout_template_not_found(self, temp_dir):
+    def test_get_layout_template_not_found(self, temp_dir) -> None:
         """Test get_layout_template when template not found."""
         manager = LayoutManager()
 
@@ -2238,7 +2408,7 @@ class TestLayoutManager:
 
         assert result is None
 
-    def test_clear_registry(self):
+    def test_clear_registry(self) -> None:
         """Test clear_registry method."""
         layout_manager = LayoutManager()
 
@@ -2254,12 +2424,14 @@ class TestLayoutManager:
 class TestLayoutIntegration:
     """Test cases for layout integration with Page class."""
 
-    def test_page_with_layout_manager(self, page_instance):
+    def test_page_with_layout_manager(self, page_instance) -> None:
         """Test that Page class has LayoutManager."""
         assert hasattr(page_instance, "_layout_manager")
         assert isinstance(page_instance._layout_manager, LayoutManager)
 
-    def test_create_url_pattern_with_layout(self, page_instance, temp_dir, url_parser):
+    def test_create_url_pattern_with_layout(
+        self, page_instance, temp_dir, url_parser
+    ) -> None:
         """Test create_url_pattern with layout inheritance."""
         # create layout structure
         layout_file = temp_dir / "layout.djx"
@@ -2281,7 +2453,7 @@ class TestLayoutIntegration:
         assert pattern is not None
         assert page_file in page_instance._template_registry
 
-    def test_render_with_layout_inheritance(self, page_instance, temp_dir):
+    def test_render_with_layout_inheritance(self, page_instance, temp_dir) -> None:
         """Test rendering with layout inheritance."""
         # create layout structure
         layout_file = temp_dir / "layout.djx"
@@ -2309,12 +2481,14 @@ class TestLayoutIntegration:
         assert "</body></html>" in layout_template
         assert "{% block template %}" in layout_template
 
-    def test_load_template_for_file_layout_fallback(self, page_instance, temp_dir):
+    def test_load_template_for_file_layout_fallback(
+        self, page_instance, temp_dir
+    ) -> None:
         """Test _load_template_for_file with layout fallback."""
         # create layout structure
         layout_file = temp_dir / "layout.djx"
         layout_file.write_text(
-            "<html><body>{% block template %}{% endblock template %}</body></html>"
+            "<html><body>{% block template %}{% endblock template %}</body></html>",
         )
 
         # create template.djx
@@ -2329,7 +2503,9 @@ class TestLayoutIntegration:
         assert result is True
         assert page_file in page_instance._template_registry
 
-    def test_render_with_layout_template_detection(self, page_instance, temp_dir):
+    def test_render_with_layout_template_detection(
+        self, page_instance, temp_dir
+    ) -> None:
         """Test render method with layout template detection."""
         # create a template that looks like a layout template but doesn't use extends
         page_file = temp_dir / "page.py"
@@ -2345,20 +2521,20 @@ class TestLayoutIntegration:
 class TestContextProcessors:
     """Test context_processors functionality."""
 
-    def test_get_context_processors_empty_config(self, page_instance):
+    def test_get_context_processors_empty_config(self, page_instance) -> None:
         """Test _get_context_processors with empty NEXT_PAGES config."""
         with patch("django.conf.settings.NEXT_PAGES", [], create=True):
             processors = _get_context_processors()
             assert processors == []
 
-    def test_get_context_processors_no_context_processors(self, page_instance):
+    def test_get_context_processors_no_context_processors(self, page_instance) -> None:
         """Test _get_context_processors with NEXT_PAGES config but no context_processors."""
         config = [{"BACKEND": "next.urls.FileRouterBackend", "OPTIONS": {}}]
         with patch("django.conf.settings.NEXT_PAGES", config, create=True):
             processors = _get_context_processors()
             assert processors == []
 
-    def test_get_context_processors_with_valid_processors(self, page_instance):
+    def test_get_context_processors_with_valid_processors(self, page_instance) -> None:
         """Test _get_context_processors with valid context processors."""
 
         def test_processor(request):
@@ -2378,9 +2554,9 @@ class TestContextProcessors:
                         "context_processors": [
                             "test_app.context_processors.test_processor",
                             "test_app.context_processors.another_processor",
-                        ]
+                        ],
                     },
-                }
+                },
             ]
 
             with patch("django.conf.settings.NEXT_PAGES", config, create=True):
@@ -2389,7 +2565,7 @@ class TestContextProcessors:
                 assert processors[0] == test_processor
                 assert processors[1] == another_processor
 
-    def test_get_context_processors_with_invalid_processor(self, page_instance):
+    def test_get_context_processors_with_invalid_processor(self, page_instance) -> None:
         """Test _get_context_processors with invalid processor path."""
         config = [
             {
@@ -2398,27 +2574,60 @@ class TestContextProcessors:
                     "context_processors": [
                         "invalid.module.path",
                         "django.template.context_processors.request",
-                    ]
+                    ],
                 },
-            }
+            },
+        ]
+
+        with (
+            patch("django.conf.settings.NEXT_PAGES", config, create=True),
+            patch("next.pages.import_string") as mock_import,
+            patch("next.pages.logger.warning") as mock_warning,
+        ):
+            mock_import.side_effect = [
+                ImportError("No module named 'invalid'"),
+                lambda request: {"request": request},
+            ]
+            processors = _get_context_processors()
+            # filter out the mock logger from processors
+            real_processors = [
+                p for p in processors if callable(p) and not hasattr(p, "_mock_name")
+            ]
+            assert len(real_processors) == 1
+            # check that warning was logged
+            mock_warning.assert_called_once()
+
+    def test_extract_processor_paths_with_invalid_configs(self, page_instance) -> None:
+        """Test _extract_processor_paths with invalid configuration types."""
+        config = [
+            "invalid_string_config",  # not a dict
+            {"BACKEND": "next.urls.FileRouterBackend"},  # no OPTIONS
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "OPTIONS": {
+                    "context_processors": [
+                        "django.template.context_processors.request",
+                    ],
+                },
+            },
         ]
 
         with patch("django.conf.settings.NEXT_PAGES", config, create=True):
-            with patch("next.pages.import_string") as mock_import:
-                mock_import.side_effect = [
-                    ImportError("No module named 'invalid'"),
-                    lambda request: {"request": request},
-                ]
+            processors = _get_context_processors()
+            assert len(processors) == 1
 
-                with patch("logging.getLogger") as mock_logger:
-                    processors = _get_context_processors()
-                    assert len(processors) == 1
-                    # check that warning was logged
-                    mock_logger.return_value.warning.assert_called_once()
+    def test_import_context_processor_non_callable(self, page_instance) -> None:
+        """Test _import_context_processor with non-callable import."""
+        with patch("next.pages.import_string") as mock_import:
+            mock_import.return_value = (
+                "not a callable"  # return string instead of function
+            )
 
-    def test_render_with_context_processors(self, page_instance, temp_dir):
+            processor = _import_context_processor("some.module.path")
+            assert processor is None
+
+    def test_render_with_context_processors(self, page_instance, temp_dir) -> None:
         """Test render method with context_processors."""
-
         # create a test template
         page_file = temp_dir / "page.py"
         template_str = "<h1>{{ title }}</h1><p>{{ request_var }}</p>"
@@ -2438,9 +2647,8 @@ class TestContextProcessors:
             assert "Test Title" in result
             assert "from_processor" in result
 
-    def test_render_without_request_object(self, page_instance, temp_dir):
+    def test_render_without_request_object(self, page_instance, temp_dir) -> None:
         """Test render method without request object (should use regular Context)."""
-
         # create a test template
         page_file = temp_dir / "page.py"
         template_str = "<h1>{{ title }}</h1>"
@@ -2457,7 +2665,7 @@ class TestContextProcessors:
             assert result == "<h1>Test Title</h1>"
             assert "from_processor" not in result
 
-    def test_render_without_context_processors(self, page_instance, temp_dir):
+    def test_render_without_context_processors(self, page_instance, temp_dir) -> None:
         """Test render method without context_processors (should use regular Context)."""
         # create a test template
         page_file = temp_dir / "page.py"
@@ -2474,7 +2682,7 @@ class TestContextProcessors:
             # should use regular Context, not RequestContext
             assert result == "<h1>Test Title</h1>"
 
-    def test_render_with_context_processor_error(self, page_instance, temp_dir):
+    def test_render_with_context_processor_error(self, page_instance, temp_dir) -> None:
         """Test render method with context processor that raises an exception."""
         # create a test template
         page_file = temp_dir / "page.py"
@@ -2485,31 +2693,38 @@ class TestContextProcessors:
         mock_request = HttpRequest()
         mock_request.META = {}
 
-        def error_processor(request):
-            raise ValueError("Test error")
+        def error_processor(request) -> Never:
+            msg = "Test error"
+            raise ValueError(msg)
 
         def good_processor(request):
             return {"good_var": "good_value"}
 
         # mock _get_context_processors to return processors with one that errors
-        with patch(
-            "next.pages._get_context_processors",
-            return_value=[error_processor, good_processor],
+        with (
+            patch(
+                "next.pages._get_context_processors",
+                return_value=[error_processor, good_processor],
+            ),
+            patch("next.pages.logger") as mock_logger,
         ):
-            with patch("next.pages.logger") as mock_logger:
-                result = page_instance.render(
-                    page_file, mock_request, title="Test Title"
-                )
+            result = page_instance.render(
+                page_file,
+                mock_request,
+                title="Test Title",
+            )
 
-                # should include good processor data but not error_var
-                assert "Test Title" in result
-                assert "good_value" in result
-                # check that error was logged
-                mock_logger.warning.assert_called_once()
+            # should include good processor data but not error_var
+            assert "Test Title" in result
+            assert "good_value" in result
+            # check that error was logged
+            mock_logger.warning.assert_called_once()
 
     def test_render_with_context_processor_non_dict_return(
-        self, page_instance, temp_dir
-    ):
+        self,
+        page_instance,
+        temp_dir,
+    ) -> None:
         """Test render method with context processor that returns non-dict."""
         # create a test template
         page_file = temp_dir / "page.py"
@@ -2520,7 +2735,7 @@ class TestContextProcessors:
         mock_request = HttpRequest()
         mock_request.META = {}
 
-        def non_dict_processor(request):
+        def non_dict_processor(request) -> str:
             return "not a dict"
 
         def good_processor(request):
@@ -2541,7 +2756,7 @@ class TestContextProcessors:
 class TestLoadPythonModule:
     """Test _load_python_module functionality."""
 
-    def test_load_python_module_invalid_file(self, temp_dir):
+    def test_load_python_module_invalid_file(self, temp_dir) -> None:
         """Test _load_python_module with invalid Python file."""
         # create an invalid Python file
         invalid_file = temp_dir / "invalid.py"
@@ -2550,7 +2765,7 @@ class TestLoadPythonModule:
         result = _load_python_module(invalid_file)
         assert result is None
 
-    def test_load_python_module_nonexistent_file(self, temp_dir):
+    def test_load_python_module_nonexistent_file(self, temp_dir) -> None:
         """Test _load_python_module with nonexistent file."""
         nonexistent_file = temp_dir / "nonexistent.py"
 
@@ -2561,7 +2776,9 @@ class TestLoadPythonModule:
 class TestPageCreateUrlPattern:
     """Test Page create_url_pattern functionality."""
 
-    def test_create_regular_page_pattern_no_module(self, page_instance, temp_dir):
+    def test_create_regular_page_pattern_no_module(
+        self, page_instance, temp_dir
+    ) -> None:
         """Test _create_regular_page_pattern when module cannot be loaded."""
         # create an invalid page file
         page_file = temp_dir / "page.py"
@@ -2572,13 +2789,18 @@ class TestPageCreateUrlPattern:
         clean_name = url_parser.prepare_url_name("test")
 
         result = page_instance._create_regular_page_pattern(
-            page_file, django_pattern, parameters, clean_name
+            page_file,
+            django_pattern,
+            parameters,
+            clean_name,
         )
         assert result is None
 
     def test_create_regular_page_pattern_no_template_no_render(
-        self, page_instance, temp_dir
-    ):
+        self,
+        page_instance,
+        temp_dir,
+    ) -> None:
         """Test _create_regular_page_pattern when no template and no render function."""
         # create a page file without template or render function
         page_file = temp_dir / "page.py"
@@ -2589,6 +2811,9 @@ class TestPageCreateUrlPattern:
         clean_name = url_parser.prepare_url_name("test")
 
         result = page_instance._create_regular_page_pattern(
-            page_file, django_pattern, parameters, clean_name
+            page_file,
+            django_pattern,
+            parameters,
+            clean_name,
         )
         assert result is None
