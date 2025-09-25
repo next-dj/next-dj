@@ -5,6 +5,7 @@ Pages Module
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 Classes
 -------
@@ -13,36 +14,43 @@ Classes
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 .. autoclass:: next.pages.TemplateLoader
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 .. autoclass:: next.pages.PythonTemplateLoader
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 .. autoclass:: next.pages.DjxTemplateLoader
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 .. autoclass:: next.pages.LayoutTemplateLoader
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 .. autoclass:: next.pages.LayoutManager
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 .. autoclass:: next.pages.ContextManager
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 Functions
 ---------

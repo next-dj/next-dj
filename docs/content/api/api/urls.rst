@@ -5,6 +5,7 @@ URLs Module
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 Classes
 -------
@@ -13,26 +14,31 @@ Classes
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 .. autoclass:: next.urls.RouterBackend
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 .. autoclass:: next.urls.FileRouterBackend
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 .. autoclass:: next.urls.RouterFactory
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 .. autoclass:: next.urls.RouterManager
    :members:
    :undoc-members:
    :show-inheritance:
+   :no-index:
 
 Global Variables
 ----------------
