@@ -1,4 +1,29 @@
-.PHONY: help install install-dev test lint format type-check clean build publish
+.PHONY: help install install-dev test lint format type-check clean build publish docs docs-serve docs-clean docs-linkcheck docs-spelling
+
+help: # show this help message
+	@echo "Available commands:"
+	@echo "  install         - install the package"
+	@echo "  install-dev     - install development dependencies"
+	@echo "  test            - run tests with 100% coverage requirement"
+	@echo "  test-fast       - run tests without coverage"
+	@echo "  test-examples   - run tests for examples with coverage"
+	@echo "  test-all        - run all tests including examples"
+	@echo "  lint            - run linting with ruff"
+	@echo "  format          - format code with ruff"
+	@echo "  type-check      - run type checking with mypy"
+	@echo "  clean           - clean build artifacts"
+	@echo "  build           - build the package"
+	@echo "  publish         - publish to PyPI (dry run)"
+	@echo "  publish-prod    - publish to PyPI"
+	@echo "  pre-commit-install - install pre-commit hooks"
+	@echo "  pre-commit-run  - run pre-commit on all files"
+	@echo "  ci              - run all CI checks locally with 100% coverage"
+	@echo "  dev-setup       - setup development environment"
+	@echo "  docs            - build documentation"
+	@echo "  docs-serve      - build and serve documentation"
+	@echo "  docs-clean      - clean documentation build"
+	@echo "  docs-linkcheck  - check documentation links"
+	@echo "  docs-spelling   - check documentation spelling"
 
 install: # install the package
 	uv pip install -e .
@@ -88,3 +113,22 @@ ci: # run all CI checks locally with 100% coverage
 dev-setup: # setup development environment
 	uv sync --dev
 	make pre-commit-install
+
+docs: # build documentation
+	uv sync --group docs
+	uv run sphinx-build docs docs/_build
+
+docs-serve: docs # build and serve documentation
+	@echo "Opening documentation in browser..."
+	@open docs/_build/index.html
+
+docs-clean: # clean documentation build
+	rm -rf docs/_build/*
+
+docs-linkcheck: # check documentation links
+	uv sync --group docs
+	uv run sphinx-build -b linkcheck docs docs/_build
+
+docs-spelling: # check documentation spelling
+	uv sync --group docs
+	uv run sphinx-build -b spelling docs docs/_build
