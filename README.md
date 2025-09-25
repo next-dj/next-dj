@@ -11,6 +11,10 @@ A next-gen framework based on Django for cool engineers who love to do complex t
 
 `next.dj` is a modern framework based on Django that provides a unique opportunity - you can build full-stack applications on Django! Now you don't need frontend developers on React or other frameworks. It simplifies Django development by providing intuitive APIs and automatic code generation, offering a file-based routing system similar to Next.js, but built on top of Django's robust ecosystem.
 
+## Documentation
+
+Full documentation is available at: https://next-dj.readthedocs.io/
+
 ## Contributing
 
 We welcome contributions from the community! `next.dj` is designed to make Django development more accessible to frontend developers, and your input is invaluable.

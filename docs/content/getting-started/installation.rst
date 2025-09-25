@@ -14,13 +14,13 @@ Install next.dj using pip:
 
 .. code-block:: bash
 
-   pip install next-dj
+   pip install next.dj
 
 Or using uv (recommended for this project):
 
 .. code-block:: bash
 
-   uv add next-dj
+   uv add next.dj
 
 Install from source using pip:
 

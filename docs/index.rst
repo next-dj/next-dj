@@ -46,7 +46,7 @@ Installation
 
 .. code-block:: bash
 
-   pip install next-dj
+   pip install next.dj
 
 Basic Usage
 ~~~~~~~~~~~
