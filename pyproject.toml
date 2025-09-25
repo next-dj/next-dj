@@ -24,6 +24,12 @@ dependencies = [
     "django>=4.2,<5.3",
 ]
 
+[project.urls]
+Homepage = "https://github.com/next-dj/next-dj"
+Documentation = "https://next-dj.readthedocs.io/"
+Repository = "https://github.com/next-dj/next-dj"
+"Bug Tracker" = "https://github.com/next-dj/next-dj/issues"
+
 [dependency-groups]
 dev = [
     "pytest==8.4.0",
@@ -33,6 +39,8 @@ dev = [
     "ruff==0.11.13",
     "mypy==1.15.0",
     "pre-commit==4.2.0",
+    "build==1.3.0",
+    "twine==6.2.0",
 ]
 docs = [
     "sphinx==8.2.3",
@@ -44,6 +52,24 @@ docs = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["next"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "next/",
+    "README.md",
+    "LICENSE",
+    "CONTRIBUTING.md",
+    "pyproject.toml",
+]
+exclude = [
+    "examples/",
+    "docs/",
+    "tests/",
+    ".github/",
+    ".gitignore",
+    "Makefile",
+    "MANIFEST.in",
+]
 
 [tool.pytest.ini_options]
 python_files = ["test_*.py", "*_test.py", "tests.py"]

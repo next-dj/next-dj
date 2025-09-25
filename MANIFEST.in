@@ -1,0 +1,12 @@
+include README.md
+include LICENSE
+include CONTRIBUTING.md
+include pyproject.toml
+recursive-include next *.py
+exclude examples/
+exclude docs/
+exclude tests/
+exclude .github/
+exclude .gitignore
+exclude Makefile
+exclude MANIFEST.in
