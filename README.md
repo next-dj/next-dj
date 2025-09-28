@@ -1,5 +1,8 @@
 # next.dj
 
+[![PyPI version](https://img.shields.io/pypi/v/next.dj)](https://pypi.python.org/pypi/next.dj/)
+[![PyPI Supported Python Versions](https://img.shields.io/pypi/pyversions/next.dj.svg)](https://pypi.python.org/pypi/next.dj/)
+[![PyPI Supported Django Versions](https://img.shields.io/pypi/djversions/next.dj.svg)](https://pypi.python.org/pypi/next.dj/)
 [![codecov](https://codecov.io/gh/next-dj/next-dj/graph/badge.svg?token=6RY9344W4E)](https://codecov.io/gh/next-dj/next-dj)
 
 A next-gen framework based on Django for cool engineers who love to do complex things!
@@ -13,7 +16,7 @@ A next-gen framework based on Django for cool engineers who love to do complex t
 
 ## Documentation
 
-Full documentation is available at: https://next-dj.readthedocs.io/
+Full documentation is available at: https://next-dj.readthedocs.io/.
 
 ## Contributing
 
