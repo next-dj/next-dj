@@ -1,34 +1,24 @@
-"""
-File-based page rendering system for Django applications.
-
-This module implements a sophisticated page rendering system that automatically
-generates Django views and URL patterns from page.py files located in application
-directories. The system supports multiple template sources, context management,
-and seamless integration with Django's URL routing.
-
-The core concept is simple: place a page.py file in any directory within your
-Django app's pages/ folder, and the system will automatically create a corresponding
-URL pattern and view function. Pages can define templates either as Python string
-attributes or as separate .djx files, providing flexibility in template management.
-
-The system uses a plugin architecture with template loaders that can be extended
-to support different template sources. Context functions can be registered to
-provide data to templates, and the entire system is designed to be performant
-with caching and lazy loading throughout.
-"""
+from __future__ import annotations
 
 import importlib.util
 import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
+
+# standard library
 from typing import Any
 
+# third-party
 from django.http import HttpResponse
 from django.template import Context, Template
 from django.urls import URLPattern, path
 
-# URL pattern naming template
+# local
+from next.dependencies import DependencyResolver
+
+# file-based page rendering system for django applications
+# url pattern naming template
 URL_NAME_TEMPLATE = "page_{name}"
 
 
@@ -158,6 +148,7 @@ class ContextManager:
 
     def __init__(self) -> None:
         self._context_registry: dict[Path, dict[str | None, Callable[..., Any]]] = {}
+        self._resolver = DependencyResolver()
 
     def register_context(
         self, file_path: Path, key: str | None, func: Callable[..., Any]
@@ -172,23 +163,43 @@ class ContextManager:
         self._context_registry.setdefault(file_path, {})[key] = func
 
     def collect_context(
-        self, file_path: Path, *args: Any, **kwargs: Any
+        self, path: Path, deps: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """
-        Execute all registered context functions for a file and merge results.
+        Execute registered context functions and build context dictionary.
 
-        Runs all context functions associated with the file, passing through
-        any provided arguments. Keyed functions contribute single values,
-        while unkeyed functions contribute entire dictionaries that get merged.
-        Returns the combined context data for template rendering.
+        Iterates through all context functions registered for the given path.
+        Uses dependency injection to resolve function parameters. Keyed functions
+        store their result under the specified key, while unkeyed functions must
+        return dictionaries that get merged into the final context.
         """
-        context_data = {}
-        for key, func in self._context_registry.get(file_path, {}).items():
-            if key is None:
-                context_data.update(func(*args, **kwargs))
-            else:
-                context_data[key] = func(*args, **kwargs)
-        return context_data
+        if deps is None:
+            deps = {}
+
+        context: dict[str, Any] = {}
+
+        # no context functions registered for this path
+        if path not in self._context_registry:
+            return context
+
+        for key, func in self._context_registry[path].items():
+            try:
+                # resolve dependencies and call the function
+                kwargs = self._resolver.resolve(func, deps, {})
+                result = func(**kwargs)
+
+                if key is not None:
+                    # keyed function: store result under the key
+                    context[key] = result
+                elif isinstance(result, dict):
+                    # unkeyed function: merge dictionary into context
+                    context.update(result)
+
+            except Exception:
+                # skip failing functions silently
+                continue
+
+        return context
 
 
 class Page:
@@ -270,29 +281,49 @@ class Page:
 
         return decorator(func_or_key) if callable(func_or_key) else decorator
 
-    def render(self, file_path: Path, *args: Any, **kwargs: Any) -> str:
+    def render(
+        self,
+        file_path: Path,
+        request: Any = None,
+        **kwargs: Any,
+    ) -> str:
         """
-        Render a template with context data and return the final HTML.
+        render a template or call a user-defined render function with di.
 
-        Combines template content with context data from registered functions
-        and any additional variables passed as kwargs. Template variables
-        take precedence over context function results. Uses Django's
-        template engine for rendering with full tag and filter support.
+        injects request, session, user if type-annotated; explicit wins.
         """
+        # build deps dict for injection
+        deps: dict[str, Any] = {}
+        if request is not None:
+            deps["request"] = request
+            # add session and user if present on request
+            session = getattr(request, "session", None)
+            user = getattr(request, "user", None)
+            if session is not None:
+                deps["session"] = session
+            if user is not None:
+                deps["user"] = user
+
+        if hasattr(self, "render_func") and callable(self.render_func):
+            resolver = DependencyResolver()
+            resolved_args = resolver.resolve(self.render_func, deps, kwargs)
+            return self.render_func(**resolved_args)
+
+        # fallback: classic template rendering
         template_str = self._template_registry[file_path]
-        context_data = self._context_manager.collect_context(file_path, *args, **kwargs)
-        context_data.update(kwargs)  # kwargs override context functions
+        context_data = self._context_manager.collect_context(file_path, deps)
+        context_data.update(kwargs)
         return Template(template_str).render(Context(context_data))
 
     def create_url_pattern(
         self, url_path: str, file_path: Path, url_parser: Any
     ) -> URLPattern | None:
         """
-        Generate a Django URL pattern from a page file with automatic template detection.
+        generate django url pattern from page file with auto template detect.
 
-        Processes the page file to create a complete Django URL pattern. First attempts
+        processes page file to create complete django url pattern. first tries
         to load a template using registered loaders, falling back to a custom render
-        function if available. Creates a view function that handles URL parameters
+        function if available. creates a view function that handles url parameters
         and template rendering automatically.
         """
         django_pattern, parameters = url_parser.parse_url_pattern(url_path)
