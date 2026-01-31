@@ -7,6 +7,7 @@ and outputs a <form> with HTMX attributes when needed.
 import re
 
 from django import template
+from django.middleware.csrf import get_token
 from django.utils.html import escape, format_html
 
 from next.forms import form_action_manager
@@ -106,8 +107,6 @@ class FormNode(template.Node):
             args.append(escape(str(value)))
         fmt_parts.append(">\n{}\n{}\n</form>")
         content = self.nodelist.render(context)
-        from django.middleware.csrf import get_token
-
         req = context.get("request")
         token_val = context.get("csrf_token") if req else ""
         if not token_val and req:
