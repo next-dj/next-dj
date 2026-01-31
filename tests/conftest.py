@@ -46,7 +46,7 @@ if not settings.configured:
             "django.contrib.messages.middleware.MessageMiddleware",
             "django.middleware.clickjacking.XFrameOptionsMiddleware",
         ],
-        ROOT_URLCONF="tests.urls",
+        ROOT_URLCONF="next.urls",
         SECRET_KEY="test-secret-key",  # noqa: S106
         USE_TZ=True,
         TIME_ZONE="UTC",

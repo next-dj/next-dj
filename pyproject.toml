@@ -73,6 +73,7 @@ exclude = [
 
 [tool.pytest.ini_options]
 python_files = ["test_*.py", "*_test.py", "tests.py"]
+testpaths = ["tests"]
 addopts = [
     "--strict-markers",
     "--strict-config",
