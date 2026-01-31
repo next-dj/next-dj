@@ -1,9 +1,8 @@
-"""Form actions and HTMX integration for next-dj.
+"""Form actions for next-dj.
 
 Register handlers with @forms.action. Each action gets a unique UID endpoint.
 Handlers run only when the form is valid. Otherwise the form is re-rendered
-with errors. Options: refresh-self (hx-swap=outerHTML) or redirect (HX-Redirect).
-CSRF token is inserted in forms automatically.
+with errors. CSRF token is inserted in forms automatically.
 """
 
 import hashlib
@@ -25,6 +24,7 @@ from django.http import (
 )
 from django.template import Context, Template
 from django.urls import URLPattern, path, reverse
+from django.urls.exceptions import NoReverseMatch
 from django.views.decorators.http import require_http_methods
 
 from .pages import page
@@ -51,29 +51,28 @@ ModelForm = django_forms.ModelForm
 ValidationError = django_forms.ValidationError
 
 
-THEN_REFRESH_SELF = "refresh-self"
-THEN_REDIRECT = "redirect"
 URL_NAME_FORM_ACTION = "form_action"
+
+# When next.urls is included with app_name "next", reverse must use this.
+FORM_ACTION_REVERSE_NAME = "next:form_action"
 
 
 class ActionMeta(TypedDict, total=False):
-    """Per-action data: handler, form_class, file_path, initial, then, uid."""
+    """Per-action data."""
 
     handler: Callable[..., Any]
     form_class: type[django_forms.Form] | None
     file_path: Path
     initial: Callable[[HttpRequest], dict[str, Any]] | None
-    then: str
     uid: str
 
 
 @dataclass
 class FormActionOptions:
-    """form_class, initial, then, file_path for one action."""
+    """Options for @action decorator."""
 
     form_class: type[django_forms.Form] | None = None
     initial: Callable[[HttpRequest], dict[str, Any]] | None = None
-    then: str = THEN_REFRESH_SELF
     file_path: Path | None = None
 
 
@@ -159,7 +158,7 @@ class RegistryFormActionBackend(FormActionBackend):
         *,
         options: FormActionOptions | None = None,
     ) -> None:
-        """Store action and form/initial/then. Registers context when form set."""
+        """Store action and form/initial. Registers context when form set."""
         opts = options or FormActionOptions()
         fp = opts.file_path or _get_caller_path(2)
         uid = _make_uid(fp, name)
@@ -169,7 +168,6 @@ class RegistryFormActionBackend(FormActionBackend):
             "form_class": opts.form_class,
             "file_path": fp,
             "initial": opts.initial,
-            "then": opts.then,
             "uid": uid,
         }
         if opts.form_class is not None:
@@ -179,8 +177,6 @@ class RegistryFormActionBackend(FormActionBackend):
             def context_func(
                 request: HttpRequest, **_kwargs: object
             ) -> types.SimpleNamespace:
-                if request.method == "POST" and request.headers.get("HX-Request"):
-                    return types.SimpleNamespace(form=None)
                 initial_data = initial_fn(request) if initial_fn else {}
                 form_instance = form_class(initial=initial_data)
                 return types.SimpleNamespace(form=form_instance)
@@ -198,7 +194,11 @@ class RegistryFormActionBackend(FormActionBackend):
             msg = f"Unknown form action: {action_name}"
             raise KeyError(msg)
         uid = self._registry[action_name]["uid"]
-        return reverse(URL_NAME_FORM_ACTION, kwargs={"uid": uid})
+        kwargs = {"uid": uid}
+        try:
+            return reverse(FORM_ACTION_REVERSE_NAME, kwargs=kwargs)
+        except NoReverseMatch:
+            return reverse(URL_NAME_FORM_ACTION, kwargs=kwargs)
 
     def generate_urls(self) -> list[URLPattern]:
         """Single path that dispatches by uid."""
@@ -255,24 +255,17 @@ class _FormActionDispatch:
         action_name: str,
         meta: dict[str, Any],
     ) -> HttpResponse:
-        """Route by method and form_class. GET form, POST validate and run handler."""
+        """POST only. GET returns 405."""
         handler = meta["handler"]
         form_class = meta.get("form_class")
-        initial_callable = meta.get("initial")
-        then = meta.get("then", THEN_REFRESH_SELF)
+
+        if request.method != "POST":
+            return HttpResponseNotAllowed(["POST"])
 
         if form_class is None:
-            if request.method != "POST":
-                return HttpResponseNotAllowed(["POST"])
             return _FormActionDispatch.ensure_http_response(
-                _normalize_handler_response(handler(request))
-            )
-
-        if request.method == "GET":
-            initial_data = initial_callable(request) if initial_callable else {}
-            form = form_class(initial=initial_data)
-            return _FormActionDispatch.form_response(
-                backend, request, action_name, form, then, None
+                _normalize_handler_response(handler(request)),
+                request=request,
             )
 
         form = form_class(
@@ -281,13 +274,12 @@ class _FormActionDispatch:
         )
         if not form.is_valid():
             return _FormActionDispatch.form_response(
-                backend, request, action_name, form, then, None
+                backend, request, action_name, form, None
             )
 
         return _FormActionDispatch.ensure_http_response(
             _normalize_handler_response(handler(request, form)),
             request=request,
-            then=then,
             action_name=action_name,
             backend=backend,
         )
@@ -298,7 +290,6 @@ class _FormActionDispatch:
         request: HttpRequest,
         action_name: str,
         form: django_forms.Form | None,
-        _then: str,
         template_fragment: str | None,
     ) -> HttpResponse:
         """HTML from backend.render_form_fragment wrapped in HttpResponse."""
@@ -308,41 +299,25 @@ class _FormActionDispatch:
         return HttpResponse(html)
 
     @staticmethod
-    def _hx_redirect_response(url: str) -> HttpResponse:
-        """200 with HX-Redirect header for HTMX client-side redirect."""
-        out = HttpResponse(status=200)
-        out["HX-Redirect"] = url
-        return out
-
-    @staticmethod
     def ensure_http_response(
         response: HttpResponse | str | None,
         request: HttpRequest | None = None,
-        then: str = THEN_REFRESH_SELF,
         action_name: str | None = None,
         backend: FormActionBackend | None = None,
     ) -> HttpResponse:
-        """Normalize to HttpResponse. None/str/redirect handled. HTMX -> HX-Redirect."""
+        """Normalize handler response to HttpResponse."""
         response = _normalize_handler_response(response)
-        is_htmx = (
-            then == THEN_REDIRECT and request and request.headers.get("HX-Request")
-        )
-        result: HttpResponse
-        match response:
-            case None:
-                if request and action_name and backend:
-                    result = _FormActionDispatch.form_response(
-                        backend, request, action_name, None, then, None
-                    )
-                else:
-                    result = HttpResponse(status=204)
-            case HttpResponseRedirect() if is_htmx:
-                result = _FormActionDispatch._hx_redirect_response(response.url)
-            case HttpResponse():
-                result = response
-            case str():
-                result = HttpResponse(response)
-        return result
+
+        if response is None:
+            if request and action_name and backend:
+                return _FormActionDispatch.form_response(
+                    backend, request, action_name, None, None
+                )
+            return HttpResponse(status=204)
+        if isinstance(response, HttpResponse):
+            return response
+        # str
+        return HttpResponse(response)
 
     @staticmethod
     def render_form_fragment(
@@ -350,30 +325,28 @@ class _FormActionDispatch:
         request: HttpRequest,
         action_name: str,
         form: django_forms.Form | None,
-        template_fragment: str | None,
+        template_fragment: str | None,  # noqa: ARG004
     ) -> str:
-        """HTML from template_fragment, page template, or form.as_p."""
+        """Render full page with form errors for regular POST response."""
         meta = backend.get_meta(action_name)
         if not meta:
-            return ""
+            return form.as_p() if form else ""
+
         file_path = meta["file_path"]
 
-        if template_fragment:
-            ctx = Context({f"{action_name}_form": form, "form": form})
-            return Template(template_fragment).render(ctx)
-
+        # Load full template with layout
         if file_path not in page._template_registry:
             page._load_template_for_file(file_path)
         template_str = page._template_registry.get(file_path)
-        if not template_str and form is not None:
-            return Template("{{ form.as_p }}").render(Context({"form": form}))
         if not template_str:
-            return ""
+            return form.as_p() if form else ""
 
+        # Build context with form errors
         context_data = page._context_manager.collect_context(file_path, request)
+        context_data["request"] = request
         if form is not None:
             context_data[action_name] = types.SimpleNamespace(form=form)
-            context_data["form"] = form
+
         return Template(template_str).render(Context(context_data))
 
 
@@ -442,15 +415,13 @@ def action(
     *,
     form_class: type[django_forms.Form] | None = None,
     initial: Callable[[HttpRequest], dict[str, Any]] | None = None,
-    then: str = THEN_REFRESH_SELF,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Register handler. form_class for validation, then for HTMX."""
+    """Register form action handler."""
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         opts = FormActionOptions(
             form_class=form_class,
             initial=initial,
-            then=then,
             file_path=_get_caller_path(2),
         )
         form_action_manager.register_action(name, func, options=opts)

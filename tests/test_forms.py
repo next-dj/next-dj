@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django import forms
+from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.middleware.csrf import get_token
 from django.template import Context, TemplateSyntaxError
@@ -52,12 +53,12 @@ class SimpleForm(Form):
     email = forms.EmailField(required=False)
 
 
-@action("test_submit", form_class=SimpleForm, then="refresh-self")
+@action("test_submit", form_class=SimpleForm)
 def _test_handler(request: HttpRequest, form: SimpleForm) -> HttpResponse | None:
     return None
 
 
-@action("test_redirect", form_class=SimpleForm, then="redirect")
+@action("test_redirect", form_class=SimpleForm)
 def _test_redirect_handler(
     request: HttpRequest, form: SimpleForm
 ) -> HttpResponseRedirect:
@@ -164,14 +165,17 @@ class TestRenderFormFragment:
         meta = backend.get_meta("test_submit")
         assert meta is not None
         file_path = meta["file_path"]
-        with (
-            patch.object(page, "_template_registry", {file_path: "{{ form.name }}"}),
-            patch.object(page, "_load_template_for_file", return_value=True),
-        ):
+        # Pre-populate registry and skip _load_template_for_file
+        original_registry = page._template_registry.copy()
+        page._template_registry[file_path] = "{{ test_submit.form.name }}"
+        try:
             html = backend.render_form_fragment(
                 request, "test_submit", form, template_fragment=None
             )
-        assert "a" in html or "name" in html
+            assert "a" in html or "name" in html
+        finally:
+            page._template_registry.clear()
+            page._template_registry.update(original_registry)
 
 
 class TestFormActionBackendAbstract:
@@ -225,18 +229,6 @@ class TestFormActionDispatch:
         with pytest.raises(RuntimeError, match="Could not determine caller file path"):
             _get_caller_path(999)
 
-    def test_context_func_returns_form_none_on_post_htmx(self) -> None:
-        """Context func returns form=None on POST with HX-Request."""
-        req = HttpRequest()
-        req.method = "POST"
-        req.META["HTTP_HX_REQUEST"] = "true"
-        meta = form_action_manager.default_backend.get_meta("test_submit")
-        assert meta is not None
-        ctx = page._context_manager.collect_context(meta["file_path"], req)
-        ns = ctx.get("test_submit")
-        assert ns is not None
-        assert ns.form is None
-
     @pytest.mark.parametrize(
         ("response_val", "kwargs", "expected_status", "assert_extra"),
         [
@@ -244,7 +236,7 @@ class TestFormActionDispatch:
             ("hello", {}, 200, lambda r: r.content == b"hello"),
             (
                 type("R", (), {"url": "/target/"})(),
-                {"request": HttpRequest(), "then": "redirect"},
+                {"request": HttpRequest()},
                 302,
                 lambda r: r.url == "/target/",
             ),
@@ -260,22 +252,6 @@ class TestFormActionDispatch:
         assert resp.status_code == expected_status
         if assert_extra is not None:
             assert assert_extra(resp)
-
-    def test_ensure_http_response_redirect_like_with_htmx_returns_hx_redirect(
-        self,
-    ) -> None:
-        """Redirect-like with HTMX returns 200 and HX-Redirect header."""
-
-        class RedirectLike:
-            url = "/target/"
-
-        req = HttpRequest()
-        req.META["HTTP_HX_REQUEST"] = "true"
-        resp = _FormActionDispatch.ensure_http_response(
-            RedirectLike(), request=req, then="redirect"
-        )
-        assert resp.status_code == 200
-        assert resp.get("HX-Redirect") == "/target/"
 
     def test_get_caller_path_raises_when_frame_becomes_none(self) -> None:
         """_get_caller_path raises when frame chain ends early."""
@@ -316,13 +292,11 @@ class TestDispatchViaClient:
         resp = django_client.get("/_next/form/unknown_uid_12345/")
         assert resp.status_code == 404
 
-    def test_valid_uid_get_returns_form_html(self, django_client) -> None:
-        """GET valid form action URL returns form HTML."""
+    def test_valid_uid_get_returns_405(self, django_client) -> None:
+        """GET form action URL returns 405 Method Not Allowed."""
         url = form_action_manager.get_action_url("test_submit")
         resp = django_client.get(url)
-        assert resp.status_code == 200
-        content = resp.content.decode().lower()
-        assert "form" in content or "name" in content
+        assert resp.status_code == 405
 
     def test_invalid_form_returns_200_with_errors(self, django_client) -> None:
         """Invalid POST returns 200 with validation errors."""
@@ -340,17 +314,16 @@ class TestDispatchViaClient:
         )
         assert resp.status_code in (200, 204)
 
-    def test_redirect_action_returns_hx_redirect(self, django_client) -> None:
-        """Redirect action with HTMX returns HX-Redirect header."""
+    def test_redirect_action_returns_redirect(self, django_client) -> None:
+        """Redirect action returns 302 redirect."""
         url = form_action_manager.get_action_url("test_redirect")
         resp = django_client.post(
             url,
             data={"name": "Bob", "email": ""},
-            HTTP_HX_REQUEST="true",
             follow=False,
         )
-        assert resp.status_code == 200
-        assert resp.get("HX-Redirect") == "/done/"
+        assert resp.status_code == 302
+        assert resp.url == "/done/"
 
     def test_no_form_action_get_returns_405(self, django_client) -> None:
         """Action without form_class GET returns 405."""
@@ -371,11 +344,9 @@ class TestFormTagParse:
 
     def test_quoted_args(self) -> None:
         """Parse quoted key=value args from tag."""
-        args = _parse_form_tag_args(
-            '@action="submit_contact" @action.then="refresh-self"'
-        )
+        args = _parse_form_tag_args('@action="submit_contact" class="my-form"')
         assert args.get("@action") == "submit_contact"
-        assert args.get("@action.then") == "refresh-self"
+        assert args.get("class") == "my-form"
 
     def test_unquoted_value(self) -> None:
         """Parse unquoted key=value from tag."""
@@ -405,28 +376,15 @@ class TestFormTagRender:
     """{% form %} tag: attributes, CSRF, unknown action, no request."""
 
     def test_renders_attributes(self, form_engine, csrf_request) -> None:
-        """Form tag renders action, hx-post, hx-swap, form content."""
+        """Form tag renders action, method, form content."""
         t = form_engine.from_string(
-            '{% form @action="test_submit" @action.then="refresh-self" %}'
-            "{{ test_submit.form.as_p }}{% endform %}"
+            '{% form @action="test_submit" %}{{ test_submit.form.as_p }}{% endform %}'
         )
         html = t.render(Context({"request": csrf_request}))
         assert "<form" in html
         assert "action=" in html
-        assert "hx-post" in html
-        assert 'hx-swap="outerHTML"' in html or "hx-swap='outerHTML'" in html
+        assert 'method="post"' in html
         assert "</form>" in html
-
-    def test_renders_then_redirect_without_swap(
-        self, form_engine, csrf_request
-    ) -> None:
-        """then=redirect omits hx-swap in output."""
-        t = form_engine.from_string(
-            '{% form @action="test_submit" @action.then="redirect" %}x{% endform %}'
-        )
-        html = t.render(Context({"request": csrf_request}))
-        assert "hx-post=" in html
-        assert "hx-swap" not in html
 
     def test_renders_extra_html_attrs(self, form_engine, csrf_request) -> None:
         """Form tag passes through class, id and other HTML attrs."""
@@ -456,8 +414,8 @@ class TestFormTagRender:
         assert 'action=""' in html or "action=''" in html
         assert "<form" in html
 
-    def test_without_request_in_context_no_csrf(self, form_engine) -> None:
-        """Form without request in context has no CSRF token."""
+    def test_without_request_in_context_raises(self, form_engine) -> None:
+        """Form without request in context raises ImproperlyConfigured."""
         t = form_engine.from_string('{% form @action="test_submit" %}x{% endform %}')
-        html = t.render(Context({}))
-        assert "<form" in html
+        with pytest.raises(ImproperlyConfigured, match="request.*in template context"):
+            t.render(Context({}))

@@ -25,7 +25,9 @@ if not settings.configured:
                 "DIRS": [],
                 "APP_DIRS": True,
                 "OPTIONS": {
-                    "context_processors": [],
+                    "context_processors": [
+                        "django.template.context_processors.request",
+                    ],
                 },
             },
         ],

@@ -1,0 +1,6 @@
+<h1>Settings</h1>
+{% load forms %}
+{% form @action="settings" %}
+{{ settings.form.as_p }}
+<button type="submit">Save</button>
+{% endform %}

@@ -1,0 +1,9 @@
+<h1>Greeting {{ username }}!</h1>
+{% if messages %}
+<ul>
+    {% for message in messages %}
+    <li>{{ message }}</li>
+    {% endfor %}
+</ul>
+{% endif %}
+<p><a href="/settings/">Settings</a></p>

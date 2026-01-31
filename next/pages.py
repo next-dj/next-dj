@@ -596,6 +596,9 @@ class Page:
         if args and isinstance(args[0], HttpRequest):  # first arg is likely a request
             request = args[0]
 
+        if request is not None:
+            context_data["request"] = request
+
         # add context_processors data if we have a request and context_processors
         context_processors = _get_context_processors()
         if request and context_processors:
@@ -623,7 +626,8 @@ class Page:
 
         def view(request: HttpRequest, **kwargs: object) -> HttpResponse:
             kwargs.update(parameters)
-            return HttpResponse(self.render(file_path, request, **kwargs))
+            content = self.render(file_path, request, **kwargs)
+            return HttpResponse(content)
 
         return view
 
