@@ -17,7 +17,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "next",
-    "greet",
+    "todos",
 ]
 
 MIDDLEWARE = [
@@ -28,7 +28,6 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "greet.middleware.SessionAuthMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"

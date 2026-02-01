@@ -1,116 +1,165 @@
-"""Tests for examples/forms greet app: redirects, login, settings, messages."""
+"""Tests for examples/forms todos app: CRUD operations for todos."""
 
 import pytest
 from django.apps import apps
 from django.test import Client
+from todos.models import Todo
 
 from next.forms import form_action_manager
 
 
 @pytest.mark.django_db()
-def test_home_without_session_redirects_to_login(client: Client) -> None:
-    """Test that GET /home/ without session returns 302 to /login/."""
-    response = client.get("/home/")
-    assert response.status_code == 302
-    assert response.url == "/login/"
-
-
-@pytest.mark.django_db()
-def test_login_without_session_returns_200_with_form(client: Client) -> None:
-    """Test that GET /login/ without session returns 200 with login form."""
-    response = client.get("/login/")
+def test_home_page_returns_200(client: Client) -> None:
+    """Test that GET / returns 200 with todo list."""
+    response = client.get("/")
     assert response.status_code == 200
     content = response.content.decode()
-    assert "Login" in content
-    assert "username" in content.lower() or "Username" in content
-    assert "password" in content.lower() or "Password" in content
-    assert "form" in content.lower()
+    assert "Todo List" in content
+    assert "Create New Todo" in content
 
 
 @pytest.mark.django_db()
-def test_login_with_valid_credentials_redirects_to_home(client: Client) -> None:
-    """Test that POST login with valid credentials redirects to /home/."""
-    login_url = form_action_manager.get_action_url("login")
+def test_home_shows_empty_message_when_no_todos(client: Client) -> None:
+    """Test that home page shows empty message when no todos exist."""
+    response = client.get("/")
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert "No todos yet" in content
+
+
+@pytest.mark.django_db()
+def test_create_todo_creates_new_todo(client: Client) -> None:
+    """Test that POST create_todo creates a new todo."""
+    create_url = form_action_manager.get_action_url("create_todo")
     response = client.post(
-        login_url,
-        data={"username": "form", "password": "form"},
+        create_url,
+        data={
+            "title": "Test Todo",
+            "description": "Test description",
+            "is_completed": False,
+        },
         follow=False,
     )
     assert response.status_code == 302
-    assert response.url == "/home/"
+    assert response.url == "/"
+
+    # Check that todo was created
+    assert Todo.objects.count() == 1
+    todo = Todo.objects.first()
+    assert todo.title == "Test Todo"
+    assert todo.description == "Test description"
+    assert todo.is_completed is False
 
 
 @pytest.mark.django_db()
-def test_after_login_home_shows_greeting(client: Client) -> None:
-    """Test that after login GET /home/ returns 200 with greeting."""
-    login_url = form_action_manager.get_action_url("login")
-    client.post(login_url, data={"username": "form", "password": "form"})
-    response = client.get("/home/")
+def test_home_shows_todos_after_creation(client: Client) -> None:
+    """Test that home page shows todos after creation."""
+    Todo.objects.create(title="Test Todo", description="Test", is_completed=False)
+    response = client.get("/")
     assert response.status_code == 200
     content = response.content.decode()
-    assert "Greeting form!" in content
+    assert "Test Todo" in content
 
 
 @pytest.mark.django_db()
-def test_login_with_session_redirects_to_home(client: Client) -> None:
-    """Test that GET /login/ with session redirects to /home/."""
-    login_url = form_action_manager.get_action_url("login")
-    client.post(login_url, data={"username": "form", "password": "form"})
-    response = client.get("/login/")
-    assert response.status_code == 302
-    assert response.url == "/home/"
-
-
-@pytest.mark.django_db()
-def test_home_with_session_shows_greeting_and_settings_link(client: Client) -> None:
-    """Test that GET /home/ with session shows greeting and link to /settings/."""
-    login_url = form_action_manager.get_action_url("login")
-    client.post(login_url, data={"username": "form", "password": "form"})
-    response = client.get("/home/")
+def test_edit_page_returns_200(client: Client) -> None:
+    """Test that GET /edit/<id>/ returns 200 with edit form."""
+    todo = Todo.objects.create(
+        title="Test Todo", description="Test", is_completed=False
+    )
+    response = client.get(f"/edit/{todo.id}/")
     assert response.status_code == 200
     content = response.content.decode()
-    assert "Greeting form!" in content
-    assert "/settings/" in content
+    assert "Edit Todo" in content
+    assert "Test Todo" in content
 
 
 @pytest.mark.django_db()
-def test_settings_without_session_redirects_to_login(client: Client) -> None:
-    """Test that GET /settings/ without session redirects to /login/."""
-    response = client.get("/settings/")
-    assert response.status_code == 302
-    assert response.url == "/login/"
-
-
-@pytest.mark.django_db()
-def test_settings_with_session_returns_200_with_form(client: Client) -> None:
-    """Test that GET /settings/ with session returns 200 with settings form."""
-    login_url = form_action_manager.get_action_url("login")
-    client.post(login_url, data={"username": "form", "password": "form"})
-    response = client.get("/settings/")
+def test_edit_page_shows_initial_data(client: Client) -> None:
+    """Test that edit page shows initial data from todo."""
+    todo = Todo.objects.create(
+        title="Original Title",
+        description="Original Description",
+        is_completed=True,
+    )
+    response = client.get(f"/edit/{todo.id}/")
     assert response.status_code == 200
     content = response.content.decode()
-    assert "Settings" in content
-    assert "username" in content.lower() or "Username" in content
-    assert "password" in content.lower() or "Password" in content
+    assert "Original Title" in content
+    assert "Original Description" in content
 
 
 @pytest.mark.django_db()
-def test_settings_post_redirects_to_home_and_shows_message(client: Client) -> None:
-    """Test that POST settings redirects to /home/ and shows updated greeting."""
-    login_url = form_action_manager.get_action_url("login")
-    client.post(login_url, data={"username": "form", "password": "form"})
-    settings_url = form_action_manager.get_action_url("settings")
+def test_update_todo_updates_existing_todo(client: Client) -> None:
+    """Test that POST update_todo updates an existing todo."""
+    todo = Todo.objects.create(
+        title="Original", description="Original", is_completed=False
+    )
+    update_url = form_action_manager.get_action_url("update_todo")
+    # URL parameters are passed via hidden form fields (_url_param_*)
     response = client.post(
-        settings_url,
-        data={"username": "alice", "password": "newpass"},
+        update_url,
+        data={
+            "title": "Updated Title",
+            "description": "Updated Description",
+            "is_completed": True,
+            "_url_param_id": str(todo.id),  # Pass id parameter from URL
+        },
         follow=False,
     )
     assert response.status_code == 302
-    assert response.url == "/home/"
-    response_home = client.get("/home/")
-    assert response_home.status_code == 200
-    content = response_home.content.decode()
-    assert "Greeting alice!" in content
+    assert response.url == "/"
+
+    # Check that todo was updated
+    todo.refresh_from_db()
+    assert todo.title == "Updated Title"
+    assert todo.description == "Updated Description"
+    assert todo.is_completed is True
+
+
+@pytest.mark.django_db()
+def test_edit_page_404_for_nonexistent_todo(client: Client) -> None:
+    """Test that edit page returns 404 for nonexistent todo."""
+    response = client.get("/edit/999/")
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db()
+def test_todo_str_method(client: Client) -> None:
+    """Test that Todo.__str__ returns title."""
+    todo = Todo.objects.create(
+        title="Test Todo", description="Test", is_completed=False
+    )
+    assert str(todo) == "Test Todo"
+
+
+@pytest.mark.django_db()
+def test_get_initial_returns_empty_dict_for_nonexistent_todo(client: Client) -> None:
+    """Test that TodoEditForm.get_initial returns empty dict for nonexistent todo."""
+    import importlib.util
+    from pathlib import Path
+
+    from django.http import HttpRequest
+
+    # Dynamic import for edit page (has special characters in path)
+    edit_path = (
+        Path(__file__).resolve().parent.parent
+        / "todos"
+        / "pages"
+        / "edit"
+        / "[int:id]"
+        / "page.py"
+    )
+    spec = importlib.util.spec_from_file_location("edit_page", edit_path)
+    edit_page = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(edit_page)
+
+    request = HttpRequest()
+    request.method = "GET"
+
+    # Call get_initial with non-existent id
+    result = edit_page.TodoEditForm.get_initial(request, id=999)
+    assert result == {}
 
 
 def test_check_duplicate_url_parameters() -> None:
@@ -134,85 +183,39 @@ def test_check_missing_page_content() -> None:
 
 
 def test_home_page_module_has_context(client: Client) -> None:
-    """Test that home page module has get_username context."""
-    import greet.pages.home.page as home_page
+    """Test that home page module has get_todos context."""
+    import todos.pages.page as home_page
 
-    assert hasattr(home_page, "get_username")
-    assert callable(home_page.get_username)
-
-
-def test_login_page_module_has_action(client: Client) -> None:
-    """Test that login page module has login_handler and LoginForm."""
-    import greet.pages.login.page as login_page
-
-    assert hasattr(login_page, "login_handler")
-    assert callable(login_page.login_handler)
-    assert hasattr(login_page, "LoginForm")
+    assert hasattr(home_page, "get_todos")
+    assert callable(home_page.get_todos)
 
 
-def test_settings_page_module_has_action(client: Client) -> None:
-    """Test that settings page module has settings_handler and SettingsForm."""
-    import greet.pages.settings.page as settings_page
+def test_home_page_module_has_action(client: Client) -> None:
+    """Test that home page module has create_todo_handler and TodoForm."""
+    import todos.pages.page as home_page
 
-    assert hasattr(settings_page, "settings_handler")
-    assert callable(settings_page.settings_handler)
-    assert hasattr(settings_page, "SettingsForm")
-
-
-@pytest.mark.django_db()
-def test_root_redirects_to_home(client: Client) -> None:
-    """Test that GET / redirects to /home/."""
-    response = client.get("/")
-    assert response.status_code == 302
-    assert response.url == "/home/"
+    assert hasattr(home_page, "create_todo_handler")
+    assert callable(home_page.create_todo_handler)
+    assert hasattr(home_page, "TodoForm")
 
 
-@pytest.mark.django_db()
-def test_login_invalid_credentials_re_renders_form(client: Client) -> None:
-    """Test that POST login with invalid credentials re-renders form with errors."""
-    login_url = form_action_manager.get_action_url("login")
-    response = client.post(
-        login_url,
-        data={"username": "wrong", "password": "wrong"},
-        follow=False,
+def test_edit_page_module_has_action(client: Client) -> None:
+    """Test that edit page module has update_todo_handler and TodoEditForm."""
+    import importlib.util
+    from pathlib import Path
+
+    edit_path = (
+        Path(__file__).resolve().parent.parent
+        / "todos"
+        / "pages"
+        / "edit"
+        / "[int:id]"
+        / "page.py"
     )
-    assert response.status_code == 200
-    content = response.content.decode()
-    assert "Invalid" in content or "error" in content.lower()
+    spec = importlib.util.spec_from_file_location("edit_page", edit_path)
+    edit_page = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(edit_page)
 
-
-@pytest.mark.django_db()
-def test_logout_clears_session_and_redirects_to_login(client: Client) -> None:
-    """Test that POST logout clears session and redirects to /login/."""
-    login_url = form_action_manager.get_action_url("login")
-    client.post(login_url, data={"username": "form", "password": "form"})
-    response = client.get("/home/")
-    assert response.status_code == 200
-
-    logout_url = form_action_manager.get_action_url("logout")
-    response = client.post(logout_url, follow=False)
-    assert response.status_code == 302
-    assert response.url == "/login/"
-
-    response = client.get("/home/")
-    assert response.status_code == 302
-    assert response.url == "/login/"
-
-
-@pytest.mark.django_db()
-def test_home_page_shows_logout_button_when_logged_in(client: Client) -> None:
-    """Test that /home/ shows logout button when user is logged in."""
-    login_url = form_action_manager.get_action_url("login")
-    client.post(login_url, data={"username": "form", "password": "form"})
-    response = client.get("/home/")
-    assert response.status_code == 200
-    content = response.content.decode()
-    assert "Logout" in content
-
-
-def test_home_page_module_has_logout_action() -> None:
-    """Test that home page module has logout_handler action."""
-    import greet.pages.home.page as home_page
-
-    assert hasattr(home_page, "logout_handler")
-    assert callable(home_page.logout_handler)
+    assert hasattr(edit_page, "update_todo_handler")
+    assert callable(edit_page.update_todo_handler)
+    assert hasattr(edit_page, "TodoEditForm")

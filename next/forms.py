@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 
 from django import forms as django_forms
+from django.forms.forms import BaseForm as DjangoBaseForm, DeclarativeFieldsMetaclass
+from django.forms.models import BaseModelForm as DjangoBaseModelForm, ModelFormMetaclass
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -30,8 +32,66 @@ from django.views.decorators.http import require_http_methods
 from .pages import page
 
 
+# Custom BaseForm and BaseModelForm with get_initial support
+class BaseForm(DjangoBaseForm):
+    """Custom BaseForm that extends Django's BaseForm with get_initial support."""
+
+    @classmethod
+    def get_initial(
+        cls, _request: HttpRequest, *_args: object, **_kwargs: object
+    ) -> dict[str, Any]:
+        """Override this method to provide initial data from request.
+
+        This method is called automatically when creating form instances
+        for GET requests. Override it in subclasses to provide initial
+        data based on the request and URL parameters.
+
+        Returns a dictionary that will be used as the `initial` parameter
+        when creating the form instance.
+        """
+        return {}
+
+
+class BaseModelForm(DjangoBaseModelForm):
+    """Custom BaseModelForm with get_initial support."""
+
+    @classmethod
+    def get_initial(
+        cls, _request: HttpRequest, *_args: object, **_kwargs: object
+    ) -> dict[str, Any] | object:
+        """Override this method to provide initial data or instance from request.
+
+        This method is called automatically when creating form instances
+        for GET requests. Override it in subclasses to provide initial
+        data based on the request and URL parameters.
+
+        For ModelForm, you can return either:
+        - A dictionary: will be used as the `initial` parameter
+          (creates new instance on save)
+        - A model instance: will be used as the `instance` parameter
+          (updates existing instance on save)
+
+        Returns a dictionary (for initial) or a model instance (for instance).
+        """
+        return {}
+
+
+# Form and ModelForm classes with proper metaclasses
+class Form(BaseForm, metaclass=DeclarativeFieldsMetaclass):
+    """A collection of Fields, plus their associated data.
+
+    This extends Django's Form with get_initial support.
+    """
+
+
+class ModelForm(BaseModelForm, metaclass=ModelFormMetaclass):
+    """Form for editing a model instance.
+
+    This extends Django's ModelForm with get_initial support.
+    """
+
+
 # Re-export common Django form classes for convenience
-Form = django_forms.Form
 CharField = django_forms.CharField
 EmailField = django_forms.EmailField
 IntegerField = django_forms.IntegerField
@@ -47,8 +107,12 @@ URLField = django_forms.URLField
 RegexField = django_forms.RegexField
 FileField = django_forms.FileField
 ImageField = django_forms.ImageField
-ModelForm = django_forms.ModelForm
 ValidationError = django_forms.ValidationError
+PasswordInput = django_forms.PasswordInput
+TextInput = django_forms.TextInput
+Textarea = django_forms.Textarea
+Select = django_forms.Select
+CheckboxInput = django_forms.CheckboxInput
 
 
 URL_NAME_FORM_ACTION = "form_action"
@@ -63,7 +127,6 @@ class ActionMeta(TypedDict, total=False):
     handler: Callable[..., Any]
     form_class: type[django_forms.Form] | None
     file_path: Path
-    initial: Callable[[HttpRequest], dict[str, Any]] | None
     uid: str
 
 
@@ -72,7 +135,6 @@ class FormActionOptions:
     """Options for @action decorator."""
 
     form_class: type[django_forms.Form] | None = None
-    initial: Callable[[HttpRequest], dict[str, Any]] | None = None
     file_path: Path | None = None
 
 
@@ -167,18 +229,36 @@ class RegistryFormActionBackend(FormActionBackend):
             "handler": handler,
             "form_class": opts.form_class,
             "file_path": fp,
-            "initial": opts.initial,
             "uid": uid,
         }
         if opts.form_class is not None:
             form_class = opts.form_class
-            initial_fn = opts.initial
 
             def context_func(
-                request: HttpRequest, **_kwargs: object
+                request: HttpRequest, *args: object, **kwargs: object
             ) -> types.SimpleNamespace:
-                initial_data = initial_fn(request) if initial_fn else {}
-                form_instance = form_class(initial=initial_data)
+                # Pass URL parameters (args, kwargs) to get_initial, same as context
+                # functions form_class is guaranteed to have get_initial
+                # from BaseForm/BaseModelForm
+                if not hasattr(form_class, "get_initial"):
+                    msg = f"Form class {form_class} must have get_initial method"
+                    raise TypeError(msg)
+                initial_data = form_class.get_initial(request, *args, **kwargs)
+                # Check if initial_data is a model instance (for ModelForm)
+                # Django models have _meta attribute
+                has_meta = hasattr(initial_data, "_meta")
+                is_model_instance = has_meta and hasattr(initial_data._meta, "model")
+                if is_model_instance:
+                    # It's a model instance, use it as instance parameter
+                    # Only ModelForm supports instance parameter
+                    if issubclass(form_class, BaseModelForm):
+                        form_instance = form_class(instance=initial_data)
+                    else:
+                        msg = "instance parameter only supported for ModelForm"
+                        raise TypeError(msg)
+                else:
+                    # It's a dict or other data, use as initial parameter
+                    form_instance = form_class(initial=initial_data)  # type: ignore[assignment]
                 return types.SimpleNamespace(form=form_instance)
 
             page._context_manager.register_context(
@@ -249,7 +329,7 @@ class _FormActionDispatch:
     """Dispatch and response normalization. Used by backends only."""
 
     @staticmethod
-    def dispatch(
+    def dispatch(  # noqa: C901, PLR0912
         backend: FormActionBackend,
         request: HttpRequest,
         action_name: str,
@@ -262,23 +342,64 @@ class _FormActionDispatch:
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
 
+        # Extract URL parameters from hidden form fields (passed from file routing)
+        url_kwargs: dict[str, object] = {}
+        for key, value in request.POST.items():
+            if key.startswith("_url_param_"):
+                param_name = key.replace("_url_param_", "")
+                # Try to convert to int if it looks like a number
+                # POST values are always strings, but mypy sees str | list[object]
+                if isinstance(value, str):
+                    try:
+                        url_kwargs[param_name] = int(value)
+                    except ValueError:
+                        url_kwargs[param_name] = value
+                else:
+                    url_kwargs[param_name] = value
+
         if form_class is None:
             return _FormActionDispatch.ensure_http_response(
-                _normalize_handler_response(handler(request)),
+                _normalize_handler_response(handler(request, **url_kwargs)),
                 request=request,
             )
 
-        form = form_class(
-            request.POST,
-            request.FILES if hasattr(request, "FILES") else None,
-        )
+        # Get initial data or instance from form_class.get_initial
+        # This allows ModelForm to receive instance for updating existing objects
+        # form_class is guaranteed to have get_initial from BaseForm/BaseModelForm
+        if not hasattr(form_class, "get_initial"):
+            msg = f"Form class {form_class} must have get_initial method"
+            raise TypeError(msg)
+        initial_data = form_class.get_initial(request, **url_kwargs)
+
+        # Check if initial_data is a model instance (for ModelForm)
+        has_meta = hasattr(initial_data, "_meta")
+        is_model_instance = has_meta and hasattr(initial_data._meta, "model")
+        if is_model_instance:
+            # It's a model instance, use it as instance parameter
+            # Only ModelForm supports instance parameter
+            if issubclass(form_class, BaseModelForm):
+                form = form_class(
+                    request.POST,
+                    request.FILES if hasattr(request, "FILES") else None,
+                    instance=initial_data,
+                )
+            else:
+                msg = "instance parameter only supported for ModelForm"
+                raise TypeError(msg)
+        else:
+            # It's a dict or other data, use as initial parameter
+            form = form_class(
+                request.POST,
+                request.FILES if hasattr(request, "FILES") else None,
+                initial=initial_data if initial_data else None,
+            )
         if not form.is_valid():
             return _FormActionDispatch.form_response(
                 backend, request, action_name, form, None
             )
 
         return _FormActionDispatch.ensure_http_response(
-            _normalize_handler_response(handler(request, form)),
+            _normalize_handler_response(handler(request, form, **url_kwargs)),
             request=request,
             action_name=action_name,
             backend=backend,
@@ -341,11 +462,32 @@ class _FormActionDispatch:
         if not template_str:
             return form.as_p() if form else ""
 
+        # Extract URL parameters from POST data for context functions
+        url_kwargs: dict[str, object] = {}
+        if hasattr(request, "POST"):
+            for key, value in request.POST.items():
+                if key.startswith("_url_param_"):
+                    param_name = key.replace("_url_param_", "")
+                    # Try to convert to int if it looks like a number
+                    # POST values are always strings, but mypy sees str | list[object]
+                    if isinstance(value, str):
+                        try:
+                            url_kwargs[param_name] = int(value)
+                        except ValueError:
+                            url_kwargs[param_name] = value
+                    else:
+                        url_kwargs[param_name] = value
+
         # Build context with form errors
-        context_data = page._context_manager.collect_context(file_path, request)
+        # Pass URL kwargs to context functions, same as during normal page rendering
+        context_data = page._context_manager.collect_context(
+            file_path, request, **url_kwargs
+        )
         context_data["request"] = request
         if form is not None:
             context_data[action_name] = types.SimpleNamespace(form=form)
+            # Also add form as direct variable for template compatibility
+            context_data["form"] = form
 
         return Template(template_str).render(Context(context_data))
 
@@ -414,14 +556,12 @@ def action(
     name: str,
     *,
     form_class: type[django_forms.Form] | None = None,
-    initial: Callable[[HttpRequest], dict[str, Any]] | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Register form action handler."""
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         opts = FormActionOptions(
             form_class=form_class,
-            initial=initial,
             file_path=_get_caller_path(2),
         )
         form_action_manager.register_action(name, func, options=opts)

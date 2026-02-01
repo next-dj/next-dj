@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
 
-class GreetConfig(AppConfig):
+class TodosConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "greet"
+    name = "todos"

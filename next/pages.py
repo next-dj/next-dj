@@ -620,12 +620,17 @@ class Page:
     def _create_view_function(
         self,
         file_path: Path,
-        parameters: dict[str, str],
+        _parameters: dict[str, str],
     ) -> Callable[..., HttpResponse]:
-        """Create a view function that handles URL parameters and template rendering."""
+        """Create a view function that handles URL parameters and template rendering.
+
+        Django already passes URL parameter values via **kwargs, so we don't need
+        to update kwargs with the parameters mapping.
+        """
 
         def view(request: HttpRequest, **kwargs: object) -> HttpResponse:
-            kwargs.update(parameters)
+            # kwargs already contains real parameter values from URL (e.g., id=999)
+            # parameters dict is just a mapping and shouldn't overwrite real values
             content = self.render(file_path, request, **kwargs)
             return HttpResponse(content)
 

@@ -142,19 +142,47 @@ class FormNode(template.Node):
         return cast("HttpRequest", request)
 
     def _build_hidden_inputs(self, request: HttpRequest) -> str:
-        """Build CSRF hidden input."""
-        return format_html(
-            '<input type="hidden" name="csrfmiddlewaretoken" value="{}">',
-            get_token(request),
-        )
+        """Build CSRF hidden input and URL parameter inputs."""
+        inputs = [
+            format_html(
+                '<input type="hidden" name="csrfmiddlewaretoken" value="{}">',
+                get_token(request),
+            )
+        ]
+
+        # Add hidden inputs for URL parameters (from file routing)
+        # These will be passed to form handlers via POST data
+        if request.resolver_match and request.resolver_match.kwargs:
+            for key, value in request.resolver_match.kwargs.items():
+                # Skip uid parameter used by form action system
+                if key != "uid":
+                    inputs.append(
+                        format_html(
+                            '<input type="hidden" name="_url_param_{}" value="{}">',
+                            escape(key),
+                            escape(str(value)),
+                        )
+                    )
+
+        return "\n".join(inputs)
 
     def render(self, context: template.Context) -> str:
         """Render form tag with action URL, method=post, CSRF, and content."""
         request = self._get_request(context)
         builder = FormAttrsBuilder.from_config(self.config)
 
+        # Get form from context by action name
+        form_obj = context.get(self.config.action_name)
+        if form_obj and hasattr(form_obj, "form"):
+            form_instance = form_obj.form
+        else:
+            form_instance = None
+
         opening_tag = builder.build_opening_tag()
         hidden_inputs = self._build_hidden_inputs(request)
-        content = self.nodelist.render(context)
+
+        # Push form as local variable (only available inside {% form %} tag)
+        with context.push(form=form_instance):
+            content = self.nodelist.render(context)
 
         return f"{opening_tag}\n{hidden_inputs}\n{content}\n</form>"

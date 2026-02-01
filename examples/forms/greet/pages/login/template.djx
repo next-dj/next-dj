@@ -1,6 +1,0 @@
-<h1>Login</h1>
-{% load forms %}
-{% form @action="login" %}
-{{ login.form.as_p }}
-<button type="submit">Login</button>
-{% endform %}

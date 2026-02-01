@@ -7,7 +7,7 @@ from django.conf import settings
 from django.test import Client
 
 
-# Add example root and repo root to path so config, greet, and next are importable
+# Add example root and repo root to path so config, todos, and next are importable
 forms_example_root = Path(__file__).resolve().parent.parent
 repo_root = forms_example_root.parent.parent
 sys.path.insert(0, str(forms_example_root))
@@ -31,17 +31,15 @@ if not settings.configured:
             "django.contrib.messages",
             "django.contrib.staticfiles",
             "next",
-            "greet",
+            "todos",
         ],
         MIDDLEWARE=[
             "django.middleware.security.SecurityMiddleware",
             "django.contrib.sessions.middleware.SessionMiddleware",
             "django.middleware.common.CommonMiddleware",
             "django.middleware.csrf.CsrfViewMiddleware",
-            "django.contrib.auth.middleware.AuthenticationMiddleware",
             "django.contrib.messages.middleware.MessageMiddleware",
             "django.middleware.clickjacking.XFrameOptionsMiddleware",
-            "greet.middleware.SessionAuthMiddleware",
         ],
         ROOT_URLCONF="config.urls",
         TEMPLATES=[
@@ -69,6 +67,30 @@ if not settings.configured:
         ALLOWED_HOSTS=["testserver"],
     )
     django.setup()
+
+    # Import page modules to register form actions
+    # This ensures that @action decorators are executed and actions are registered
+    try:
+        # Import edit page using importlib due to special characters in path
+        import importlib.util
+        from pathlib import Path
+
+        import todos.pages.home.page  # noqa: F401
+
+        edit_path = (
+            Path(forms_example_root)
+            / "todos"
+            / "pages"
+            / "edit"
+            / "[id:int]"
+            / "page.py"
+        )
+        if edit_path.exists():
+            spec = importlib.util.spec_from_file_location("edit_page", edit_path)
+            edit_page = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(edit_page)
+    except ImportError:
+        pass  # Modules may not exist in all test environments
 
 
 @pytest.fixture()
