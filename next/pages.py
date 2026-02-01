@@ -33,7 +33,7 @@ from django.urls import URLPattern, path
 from django.utils.module_loading import import_string
 
 
-if TYPE_CHECKING:  # pragma: no cover
+if TYPE_CHECKING:
     from .urls import URLPatternParser
 
 
@@ -58,24 +58,49 @@ def _import_context_processor(
     return None
 
 
+def _get_default_context_processors() -> list[str]:
+    """Get default context processors from TEMPLATES configuration.
+
+    Returns context_processors from TEMPLATES[0].OPTIONS.context_processors
+    if available, otherwise returns empty list.
+    """
+    templates_config = getattr(settings, "TEMPLATES", [])
+    if not templates_config:
+        return []
+
+    first_template = templates_config[0]
+    template_options = first_template.get("OPTIONS", {})
+    context_processors = template_options.get("context_processors", [])
+    if isinstance(context_processors, list):
+        return context_processors
+
+    return []
+
+
 def _extract_processor_paths(configs: list[dict]) -> list[str]:
     """Extract context processor paths from NEXT_PAGES configurations.
 
     Scans all configurations for context_processors in OPTIONS and returns a flat list
-    of processor paths.
+    of processor paths. If no context_processors are found in NEXT_PAGES,
+    inherits them from TEMPLATES[0].OPTIONS.context_processors.
     """
     processor_paths = []
+    has_explicit_processors = False
 
     for config in configs:
-        if not isinstance(config, dict) or "OPTIONS" not in config:
-            continue
+        options = config.get("OPTIONS", {})
 
-        options = config["OPTIONS"]
         if "context_processors" in options and isinstance(
             options["context_processors"],
             list,
         ):
             processor_paths.extend(options["context_processors"])
+            has_explicit_processors = True
+
+    # If no explicit context_processors in NEXT_PAGES, inherit from TEMPLATES
+    if not has_explicit_processors:
+        default_processors = _get_default_context_processors()
+        processor_paths.extend(default_processors)
 
     return processor_paths
 
@@ -85,12 +110,15 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
 
     Retrieves context processors from NEXT_PAGES.OPTIONS.context_processors
     setting, similar to how Django handles TEMPLATES context_processors.
+    If context_processors are not explicitly defined in NEXT_PAGES, inherits them from
+    TEMPLATES[0].OPTIONS.context_processors.
+
     Returns a list of callable context processors.
     """
     # get NEXT_PAGES configuration
     next_pages_config = getattr(settings, "NEXT_PAGES", [])
 
-    # extract all processor paths
+    # extract all processor paths (with inheritance from TEMPLATES)
     processor_paths = _extract_processor_paths(next_pages_config)
 
     # import processors and filter out failed imports

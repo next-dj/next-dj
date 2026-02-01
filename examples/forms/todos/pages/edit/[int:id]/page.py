@@ -59,4 +59,4 @@ def update_todo_handler(
     """
     form.save()
     messages.success(request, "Todo updated successfully.")
-    return HttpResponseRedirect("/", preserve_request=request)
+    return HttpResponseRedirect("/")

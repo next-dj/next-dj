@@ -36,4 +36,4 @@ def create_todo_handler(request: HttpRequest, form: TodoForm) -> HttpResponseRed
     """Create a new todo and redirect to home."""
     form.save()
     messages.success(request, "Todo created successfully.")
-    return HttpResponseRedirect("/", preserve_request=request)
+    return HttpResponseRedirect("/")

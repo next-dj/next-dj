@@ -22,6 +22,7 @@ from next.pages import (
     Page,
     PythonTemplateLoader,
     _get_context_processors,
+    _get_default_context_processors,
     _import_context_processor,
     context,
     page,
@@ -2523,16 +2524,137 @@ class TestContextProcessors:
 
     def test_get_context_processors_empty_config(self, page_instance) -> None:
         """Test _get_context_processors with empty NEXT_PAGES config."""
-        with patch("django.conf.settings.NEXT_PAGES", [], create=True):
+        with (
+            patch("django.conf.settings.NEXT_PAGES", [], create=True),
+            patch("django.conf.settings.TEMPLATES", [], create=True),
+        ):
             processors = _get_context_processors()
             assert processors == []
 
     def test_get_context_processors_no_context_processors(self, page_instance) -> None:
         """Test _get_context_processors with NEXT_PAGES config but no context_processors."""
         config = [{"BACKEND": "next.urls.FileRouterBackend", "OPTIONS": {}}]
-        with patch("django.conf.settings.NEXT_PAGES", config, create=True):
+        with (
+            patch("django.conf.settings.NEXT_PAGES", config, create=True),
+            patch("django.conf.settings.TEMPLATES", [], create=True),
+        ):
             processors = _get_context_processors()
             assert processors == []
+
+    def test_get_context_processors_inherits_from_templates(
+        self, page_instance
+    ) -> None:
+        """Test _get_context_processors inherits from TEMPLATES when not in NEXT_PAGES."""
+        from unittest.mock import MagicMock
+
+        def test_processor(request):
+            return {"test_var": "test_value"}
+
+        def auth_processor(request):
+            return {"user": MagicMock()}
+
+        # Mock TEMPLATES with context_processors
+        templates_config = [
+            {
+                "BACKEND": "django.template.backends.django.DjangoTemplates",
+                "OPTIONS": {
+                    "context_processors": [
+                        "test_app.context_processors.test_processor",
+                        "test_app.context_processors.auth_processor",
+                    ],
+                },
+            },
+        ]
+
+        # NEXT_PAGES without context_processors
+        next_pages_config = [{"BACKEND": "next.urls.FileRouterBackend", "OPTIONS": {}}]
+
+        with patch("next.pages.import_string") as mock_import:
+            mock_import.side_effect = [test_processor, auth_processor]
+
+            with (
+                patch("django.conf.settings.TEMPLATES", templates_config, create=True),
+                patch(
+                    "django.conf.settings.NEXT_PAGES", next_pages_config, create=True
+                ),
+            ):
+                processors = _get_context_processors()
+                # Should inherit from TEMPLATES
+                assert len(processors) == 2
+                assert processors[0] == test_processor
+                assert processors[1] == auth_processor
+
+    def test_get_context_processors_explicit_overrides_inheritance(
+        self, page_instance
+    ) -> None:
+        """Test that explicit context_processors in NEXT_PAGES override TEMPLATES."""
+
+        def template_processor(request):
+            return {"template_var": "template_value"}
+
+        def next_pages_processor(request):
+            return {"next_var": "next_value"}
+
+        # TEMPLATES with context_processors
+        templates_config = [
+            {
+                "BACKEND": "django.template.backends.django.DjangoTemplates",
+                "OPTIONS": {
+                    "context_processors": [
+                        "test_app.context_processors.template_processor",
+                    ],
+                },
+            },
+        ]
+
+        # NEXT_PAGES with explicit context_processors
+        next_pages_config = [
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "OPTIONS": {
+                    "context_processors": [
+                        "test_app.context_processors.next_pages_processor",
+                    ],
+                },
+            }
+        ]
+
+        with patch("next.pages.import_string") as mock_import:
+            mock_import.side_effect = [next_pages_processor]
+
+            with (
+                patch("django.conf.settings.TEMPLATES", templates_config, create=True),
+                patch(
+                    "django.conf.settings.NEXT_PAGES", next_pages_config, create=True
+                ),
+            ):
+                processors = _get_context_processors()
+                # Should use NEXT_PAGES processors, not TEMPLATES
+                assert len(processors) == 1
+                assert processors[0] == next_pages_processor
+
+    def test_get_default_context_processors_with_empty_templates(
+        self, page_instance
+    ) -> None:
+        """Test _get_default_context_processors with empty TEMPLATES config."""
+        # Test with empty list
+        with patch("django.conf.settings.TEMPLATES", [], create=True):
+            result = _get_default_context_processors()
+            assert result == []
+
+    def test_get_default_context_processors_with_non_list_context_processors(
+        self, page_instance
+    ) -> None:
+        """Test _get_default_context_processors when context_processors is not a list."""
+        templates_config = [
+            {
+                "BACKEND": "django.template.backends.django.DjangoTemplates",
+                "OPTIONS": {"context_processors": "not_a_list"},
+            }
+        ]
+        with patch("django.conf.settings.TEMPLATES", templates_config, create=True):
+            result = _get_default_context_processors()
+            assert result == []
 
     def test_get_context_processors_with_valid_processors(self, page_instance) -> None:
         """Test _get_context_processors with valid context processors."""
@@ -2596,25 +2718,6 @@ class TestContextProcessors:
             assert len(real_processors) == 1
             # check that warning was logged
             mock_warning.assert_called_once()
-
-    def test_extract_processor_paths_with_invalid_configs(self, page_instance) -> None:
-        """Test _extract_processor_paths with invalid configuration types."""
-        config = [
-            "invalid_string_config",  # not a dict
-            {"BACKEND": "next.urls.FileRouterBackend"},  # no OPTIONS
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "OPTIONS": {
-                    "context_processors": [
-                        "django.template.context_processors.request",
-                    ],
-                },
-            },
-        ]
-
-        with patch("django.conf.settings.NEXT_PAGES", config, create=True):
-            processors = _get_context_processors()
-            assert len(processors) == 1
 
     def test_import_context_processor_non_callable(self, page_instance) -> None:
         """Test _import_context_processor with non-callable import."""

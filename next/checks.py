@@ -33,7 +33,7 @@ from .pages import _load_python_module
 from .urls import RouterBackend, RouterFactory, RouterManager, URLPatternParser
 
 
-if TYPE_CHECKING:  # pragma: no cover
+if TYPE_CHECKING:
     from .urls import FileRouterBackend
 
 
