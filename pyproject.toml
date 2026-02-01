@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "next.dj"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Next-gen framework for Django developers"
 readme = "README.md"
 license = {text = "MIT"}
@@ -49,6 +49,10 @@ docs = [
     "sphinx-autodoc-typehints==3.5.2",
     "sphinxcontrib-apidoc==0.6.0",
 ]
+
+[tool.hatch.version]
+source = "code"
+path = "next/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["next"]
