@@ -73,6 +73,7 @@ exclude = [
 
 [tool.pytest.ini_options]
 python_files = ["test_*.py", "*_test.py", "tests.py"]
+testpaths = ["tests"]
 addopts = [
     "--strict-markers",
     "--strict-config",
@@ -106,6 +107,7 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
+    "if TYPE_CHECKING:",
 ]
 
 [tool.ruff]

@@ -1163,16 +1163,16 @@ class TestGlobalInstances:
                 # get the view function
                 view_func = pattern.callback
 
-                # test without args in kwargs - should not modify kwargs
+                # test without args in kwargs - should not add parameters to kwargs
                 mock_request = Mock()
                 result = view_func(mock_request, name="John")
 
-                # verify that page.render was called with original kwargs plus parameters
+                # verify that page.render was called with only actual kwargs
+                # (parameters dict is not added to kwargs anymore)
                 mock_render.assert_called_once_with(
                     temp_file,
                     mock_request,
                     name="John",
-                    args="args",
                 )
                 assert result is not None
         finally:

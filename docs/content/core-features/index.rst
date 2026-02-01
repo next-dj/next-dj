@@ -7,5 +7,6 @@ Core Features
    file-router
    templates-layouts
    context-system
+   forms
 
 This section covers the core features of next.dj framework.

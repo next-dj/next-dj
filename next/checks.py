@@ -33,7 +33,7 @@ from .pages import _load_python_module
 from .urls import RouterBackend, RouterFactory, RouterManager, URLPatternParser
 
 
-if TYPE_CHECKING:  # pragma: no cover
+if TYPE_CHECKING:
     from .urls import FileRouterBackend
 
 
@@ -125,6 +125,40 @@ def _validate_config_fields(config: dict, index: int) -> list[CheckMessage]:
             ),
         )
 
+    return errors
+
+
+REQUEST_CONTEXT_PROCESSOR = "django.template.context_processors.request"
+
+
+@register(Tags.compatibility)
+def check_request_in_context(*_args, **_kwargs) -> list[CheckMessage]:
+    """Ensure request in template context (required for {% form %})."""
+    if "next" not in settings.INSTALLED_APPS:
+        return []
+
+    errors: list[CheckMessage] = []
+    templates = getattr(settings, "TEMPLATES", [])
+
+    for i, config in enumerate(templates):
+        if not isinstance(config, dict):
+            continue
+        options = config.get("OPTIONS", {})
+        processors = options.get("context_processors", [])
+        if REQUEST_CONTEXT_PROCESSOR not in processors:
+            msg = (
+                f"TEMPLATES[{i}]: 'request' must be in template context "
+                "when using next (required for {% form %} and CSRF). Add "
+                "'django.template.context_processors.request' to "
+                "OPTIONS.context_processors."
+            )
+            errors.append(
+                Error(
+                    msg,
+                    obj=settings,
+                    id="next.E019",
+                ),
+            )
     return errors
 
 

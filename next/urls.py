@@ -19,6 +19,7 @@ from typing import Any, ClassVar
 from django.conf import settings
 from django.urls import URLPattern, URLResolver
 
+from .forms import form_action_manager
 from .pages import page
 
 
@@ -465,4 +466,4 @@ router_manager = RouterManager()
 
 # django URL configuration
 app_name = "next"
-urlpatterns = list(router_manager)
+urlpatterns = [*list(router_manager), *list(form_action_manager)]

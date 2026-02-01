@@ -33,6 +33,15 @@ if not settings.configured:
                 'OPTIONS': {},
             },
         ],
+        TEMPLATES=[
+            {
+                'BACKEND': 'django.template.backends.django.DjangoTemplates',
+                'APP_DIRS': True,
+                'OPTIONS': {
+                    'builtins': ['next.templatetags.forms'],
+                },
+            },
+        ],
         USE_TZ=True,
         SECRET_KEY='dummy-key-for-docs',
     )

@@ -13,8 +13,6 @@ help: # show this help message
 	@echo "  type-check      - run type checking with mypy"
 	@echo "  clean           - clean build artifacts"
 	@echo "  build           - build the package"
-	@echo "  publish         - publish to PyPI (dry run)"
-	@echo "  publish-prod    - publish to PyPI"
 	@echo "  pre-commit-install - install pre-commit hooks"
 	@echo "  pre-commit-run  - run pre-commit on all files"
 	@echo "  ci              - run all CI checks locally with 100% coverage"
@@ -24,7 +22,6 @@ help: # show this help message
 	@echo "  docs-clean      - clean documentation build"
 	@echo "  docs-linkcheck  - check documentation links"
 	@echo "  docs-spelling   - check documentation spelling"
-	@echo "  bump-version    - bump version and create git tag (BUMP=patch|minor|major)"
 
 install: # install the package
 	uv pip install -e .
@@ -93,12 +90,6 @@ clean: # clean build artifacts
 build: # build the package
 	uv run python -m build
 
-publish: # publish to PyPI (dry run)
-	uv run python -m twine upload --repository testpypi dist/*
-
-publish-prod: # publish to PyPI
-	uv run python -m twine upload dist/*
-
 pre-commit-install: # install pre-commit hooks
 	uv run pre-commit install
 
@@ -133,10 +124,3 @@ docs-linkcheck: # check documentation links
 docs-spelling: # check documentation spelling
 	uv sync --group docs
 	uv run sphinx-build -b spelling docs docs/_build
-
-bump-version: # bump version (usage: make bump-version BUMP=patch|minor|major)
-	@if [ -z "$(BUMP)" ]; then \
-		echo "Usage: make bump-version BUMP=patch|minor|major"; \
-		exit 1; \
-	fi
-	python scripts/bump-version.py $(BUMP)

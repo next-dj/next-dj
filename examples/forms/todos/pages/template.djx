@@ -1,0 +1,30 @@
+<h1>Todo List</h1>
+
+{% load forms %}
+
+<h2>Create New Todo</h2>
+{% form @action="create_todo" %}
+    {{ form.as_p }}
+    <button type="submit">Create Todo</button>
+{% endform %}
+
+<h2>All Todos</h2>
+{% if todos %}
+    <ul>
+        {% for todo in todos %}
+            <li>
+                <a href="/edit/{{ todo.id }}/">{{ todo.title }}</a>
+                {% if todo.description %}
+                    <br><small>{{ todo.description }}</small>
+                {% endif %}
+                {% if todo.is_completed %}
+                    <strong>(Completed)</strong>
+                {% else %}
+                    <em>(Pending)</em>
+                {% endif %}
+            </li>
+        {% endfor %}
+    </ul>
+{% else %}
+    <p><em>No todos yet. Create your first todo above!</em></p>
+{% endif %}

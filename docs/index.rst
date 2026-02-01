@@ -16,6 +16,7 @@ next.dj is currently in active development. While the core features are stable a
 * File-based routing system
 * DJX template system with layout inheritance
 * Context management system
+* Forms system with action handlers
 * Comprehensive validation checks
 
 **Coming Soon:**
@@ -35,6 +36,7 @@ Key Features
 * **File-based Routing**: Create pages by simply adding ``page.py`` files to your project structure
 * **DJX Templates**: Custom template system with powerful layout inheritance
 * **Context Management**: Flexible context system for passing data to templates
+* **Forms System**: Powerful form handling with automatic CSRF protection and validation
 * **Multiple Configurations**: Support for multiple NEXT_PAGES configurations
 * **Comprehensive Validation**: Built-in checks for configuration and structure validation
 
@@ -99,6 +101,7 @@ See the ``examples/`` directory in the source code for complete working examples
 - **file-routing/**: Basic file-based routing examples
 - **pages/**: Page creation and template examples  
 - **layouts/**: Layout inheritance examples
+- **forms/**: Form handling examples with ModelForm
 
 Contents
 --------

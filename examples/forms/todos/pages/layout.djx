@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Todo App</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 0 auto; padding: 1rem; }
+        nav { display: flex; align-items: center; margin-bottom: 1.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid #ccc; }
+        nav a { margin-right: 1rem; text-decoration: none; color: #0066cc; }
+        nav a:hover { text-decoration: underline; }
+        nav a.active { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/" {% if request.path == '/' %}class="active"{% endif %}>Home</a>
+    </nav>
+
+    {% if messages %}
+    <ul>
+        {% for message in messages %}
+        <li>{{ message }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% block template %}{% endblock template %}
+</body>
+</html>

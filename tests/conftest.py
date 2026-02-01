@@ -25,7 +25,9 @@ if not settings.configured:
                 "DIRS": [],
                 "APP_DIRS": True,
                 "OPTIONS": {
-                    "context_processors": [],
+                    "context_processors": [
+                        "django.template.context_processors.request",
+                    ],
                 },
             },
         ],
@@ -46,7 +48,7 @@ if not settings.configured:
             "django.contrib.messages.middleware.MessageMiddleware",
             "django.middleware.clickjacking.XFrameOptionsMiddleware",
         ],
-        ROOT_URLCONF="tests.urls",
+        ROOT_URLCONF="next.urls",
         SECRET_KEY="test-secret-key",  # noqa: S106
         USE_TZ=True,
         TIME_ZONE="UTC",
