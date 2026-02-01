@@ -1074,7 +1074,7 @@ Common Issues
 **Handler not called:**
 
 - Form might be invalid (check ``form.is_valid()``)
-- Check handler signature matches (request, form, **kwargs)
+- Check handler signature matches (request, form, ``**kwargs``)
 - Verify action is registered correctly
 
 Debugging Tips
