@@ -8,12 +8,11 @@ r"""                  __           __
                                          \ \____/
                                           \/___/
 
-Django next generation framework without the tears: tweak UI, bind data, and animate in 2 lines.
-Ditch tons of JS — grab ready-made and roll!
+Django next generation framework without the tears.
 """
 
 __title__ = "Next Django Framework"
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "paqstd-dev"
 
 VERSION = __version__
