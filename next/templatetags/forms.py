@@ -12,11 +12,14 @@ from typing import TYPE_CHECKING, cast
 
 from django import template
 from django.core.exceptions import ImproperlyConfigured
-from django.http import HttpRequest
 from django.middleware.csrf import get_token
 from django.utils.html import escape, format_html
 
 from next.forms import form_action_manager
+
+
+if TYPE_CHECKING:
+    from django.http import HttpRequest
 
 
 register = template.Library()
@@ -136,7 +139,7 @@ class FormNode(template.Node):
                 "TEMPLATES[*].OPTIONS.context_processors."
             )
             raise ImproperlyConfigured(msg)
-        return cast(HttpRequest, request)
+        return cast("HttpRequest", request)
 
     def _build_hidden_inputs(self, request: HttpRequest) -> str:
         """Build CSRF hidden input."""
