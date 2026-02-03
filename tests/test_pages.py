@@ -2545,7 +2545,6 @@ class TestContextProcessors:
         self, page_instance
     ) -> None:
         """Test _get_context_processors inherits from TEMPLATES when not in NEXT_PAGES."""
-        from unittest.mock import MagicMock
 
         def test_processor(request):
             return {"test_var": "test_value"}

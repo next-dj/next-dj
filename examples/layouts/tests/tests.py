@@ -1,5 +1,11 @@
+import importlib
+
+import layouts.apps
+import layouts.context_processors
+import layouts.pages.page as main_page
 import pytest
 from django.apps import apps
+from django.test import RequestFactory
 
 
 @pytest.mark.parametrize(
@@ -46,7 +52,7 @@ def test_layout_features(client, url, expected_feature) -> None:
         "custom_context_variables",
         "context_processors_integration",
     }:
-        assert "Bootstrap" in content  # just check that page loads
+        assert "Bootstrap" in content
 
 
 @pytest.mark.parametrize(
@@ -59,8 +65,6 @@ def test_layout_features(client, url, expected_feature) -> None:
 )
 def test_checks(check_function) -> None:
     """Test next-dj checks."""
-    import importlib
-
     checks_module = importlib.import_module("next.checks")
     check_duplicate_url_parameters = checks_module.check_duplicate_url_parameters
     check_missing_page_content = checks_module.check_missing_page_content
@@ -80,19 +84,10 @@ def test_checks(check_function) -> None:
 
 def test_example_app_files() -> None:
     """Test that all app files are covered."""
-    # test that app files exist and are importable
-    import layouts.apps
-    import layouts.context_processors
-
-    # test that app config exists
     assert hasattr(layouts.apps, "LayoutsConfig")
 
-    # test that context processor exists
     assert hasattr(layouts.context_processors, "site_info")
     assert callable(layouts.context_processors.site_info)
-
-    # test that context processor can be called
-    from django.test import RequestFactory
 
     factory = RequestFactory()
     request = factory.get("/")
@@ -109,26 +104,18 @@ def test_example_app_files() -> None:
 
 def test_example_pages_coverage(page_modules) -> None:
     """Test that all page files are covered."""
-    # test that page files exist and are importable
-    import layouts.pages.page as main_page
-
-    # test that context functions exist
     assert hasattr(main_page, "custom_variable_context_with_inherit")
     assert hasattr(main_page, "custom_variable_2_context")
     assert callable(main_page.custom_variable_context_with_inherit)
     assert callable(main_page.custom_variable_2_context)
 
-    # test that context functions can be called with request
-    from django.test import RequestFactory
-
     factory = RequestFactory()
     request = factory.get("/")
 
-    # test context functions
     result1 = main_page.custom_variable_context_with_inherit(request)
-    assert isinstance(result1, str)  # returns string, not dict
+    assert isinstance(result1, str)
     assert "context with inherit_context=True" in result1
 
     result2 = main_page.custom_variable_2_context(request)
-    assert isinstance(result2, str)  # returns string, not dict
+    assert isinstance(result2, str)
     assert "context without inherit_context=True" in result2

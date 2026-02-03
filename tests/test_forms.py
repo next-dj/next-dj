@@ -423,7 +423,7 @@ class TestFormTagRender:
     def test_without_request_in_context_raises(self, form_engine) -> None:
         """Form without request in context raises ImproperlyConfigured."""
         t = form_engine.from_string('{% form @action="test_submit" %}x{% endform %}')
-        with pytest.raises(ImproperlyConfigured, match="request.*in template context"):
+        with pytest.raises(ImproperlyConfigured, match=r"request.*in template context"):
             t.render(Context({}))
 
     def test_form_variable_is_local(self, form_engine, csrf_request) -> None:

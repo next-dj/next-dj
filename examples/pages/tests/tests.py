@@ -1,8 +1,17 @@
+import importlib
 import importlib.util
 from pathlib import Path
 
+import catalog.admin
+import catalog.apps
+import catalog.models
+import catalog.pages.catalog.page as catalog_page
+import catalog.pages.page as main_page
 import pytest
+from catalog.models import Product
 from django.apps import apps
+from django.http import Http404
+from django.test import RequestFactory
 
 
 pytestmark = pytest.mark.django_db
@@ -30,7 +39,6 @@ def test_pages_accessible_and_renders_correctly(client, url, expected_content) -
 def test_product_detail_pages_accessible(client, product_id) -> None:
     """Test that product detail pages are accessible."""
     response = client.get(f"/catalog/{product_id}/")
-    # pages example may not work in test environment
     assert response.status_code in [200, 404]
 
 
@@ -42,46 +50,33 @@ def test_product_detail_with_nonexistent_product(client) -> None:
 
 def test_database_integration(client) -> None:
     """Test that database integration works correctly."""
-    from catalog.models import Product
-
-    # test that products exist in database
     assert Product.objects.count() >= 3
     assert Product.objects.filter(title="Product 1").exists()
     assert Product.objects.filter(title="Product 2").exists()
     assert Product.objects.filter(title="Product 3").exists()
 
-    # test that __str__ method works
     product = Product.objects.first()
     assert str(product) == product.title
 
 
 def test_context_functions_work(client) -> None:
     """Test that context functions work correctly."""
-    from catalog.models import Product
-
     product = Product.objects.first()
     response = client.get(f"/catalog/{product.id}/")
-    # pages example may not work in test environment
     assert response.status_code in [200, 404]
 
 
 def test_template_djx_usage(client) -> None:
     """Test that template.djx files are used correctly."""
-    from catalog.models import Product
-
     product = Product.objects.first()
     response = client.get(f"/catalog/{product.id}/")
-    # pages example may not work in test environment
     assert response.status_code in [200, 404]
 
 
 def test_page_content_matches_expected(client) -> None:
     """Test that page content matches expected values."""
-    from catalog.models import Product
-
     product = Product.objects.first()
     response = client.get(f"/catalog/{product.id}/")
-    # pages example may not work in test environment
     assert response.status_code in [200, 404]
 
 
@@ -94,8 +89,6 @@ def test_page_content_matches_expected(client) -> None:
 )
 def test_checks(check_function) -> None:
     """Test next-dj checks."""
-    import importlib
-
     checks_module = importlib.import_module("next.checks")
     check_duplicate_url_parameters = checks_module.check_duplicate_url_parameters
     check_missing_page_content = checks_module.check_missing_page_content
@@ -113,18 +106,10 @@ def test_checks(check_function) -> None:
 
 def test_example_app_files() -> None:
     """Test that all app files are covered."""
-    # test that app files exist and are importable
-    import catalog.admin
-    import catalog.apps
-    import catalog.models
-
-    # test that app config exists
     assert hasattr(catalog.apps, "CatalogConfig")
 
-    # test that model exists
     assert hasattr(catalog.models, "Product")
 
-    # test that admin module exists and can be imported
     assert hasattr(catalog.admin, "admin")
     assert hasattr(catalog.admin, "Product")
 
@@ -166,7 +151,7 @@ def _test_main_page_context_functions(main_page, request) -> None:
 def _test_catalog_page_context_functions(catalog_page, request) -> None:
     """Test catalog page context functions."""
     result3 = catalog_page.prepare_products(request)
-    assert hasattr(result3, "__iter__")  # QuerySet is iterable
+    assert hasattr(result3, "__iter__")
 
     result4 = catalog_page.custom_name_abcdefg(request)
     assert isinstance(result4, str)
@@ -181,8 +166,6 @@ def _test_catalog_page_context_functions(catalog_page, request) -> None:
 
 def _test_catalog_detail_page_context_functions(catalog_detail_page, request) -> None:
     """Test catalog detail page context functions."""
-    from catalog.models import Product
-
     product = Product.objects.first()
     result6 = catalog_detail_page.common_context_with_custom_name(
         request,
@@ -191,41 +174,27 @@ def _test_catalog_detail_page_context_functions(catalog_detail_page, request) ->
     assert isinstance(result6, dict)
     assert "product" in result6
 
-    # test with invalid id - should raise Http404
-    from django.http import Http404
-
     try:
         catalog_detail_page.common_context_with_custom_name(request, id="id")
         msg = "Expected Http404 exception"
         raise AssertionError(msg)
     except Http404:
-        pass  # expected
+        pass
 
 
 def test_example_pages_coverage(page_modules) -> None:
     """Test that all page files are covered."""
-    # test that page files exist and are importable
-    # use importlib for modules with special characters
-    import catalog.pages.catalog.page as catalog_page
-    import catalog.pages.page as main_page
-
-    # import catalog detail page using importlib
     detail_path = Path("catalog") / "pages" / "catalog" / "[int:id]" / "page.py"
     spec = importlib.util.spec_from_file_location("catalog_detail_page", detail_path)
     catalog_detail_page = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(catalog_detail_page)
 
-    # test that context functions exist and are callable
     _test_context_functions_exist(main_page, catalog_page, catalog_detail_page)
     _test_context_functions_callable(main_page, catalog_page, catalog_detail_page)
-
-    # test that context functions can be called
-    from django.test import RequestFactory
 
     factory = RequestFactory()
     request = factory.get("/")
 
-    # test context functions execution
     _test_main_page_context_functions(main_page, request)
     _test_catalog_page_context_functions(catalog_page, request)
     _test_catalog_detail_page_context_functions(catalog_detail_page, request)

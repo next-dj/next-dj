@@ -17,10 +17,8 @@ template = """
 def common_context_with_custom_name(
     request: HttpRequest, *_args, **kwargs
 ) -> dict[str, Product]:
-    # get the id from kwargs - it should be the actual value, not the string "id"
     product_id = kwargs.get("id")
     if product_id is None or product_id == "id":
-        # if no id in kwargs, try to get it from request.resolver_match.kwargs
         product_id = (
             request.resolver_match.kwargs.get("id") if request.resolver_match else None
         )

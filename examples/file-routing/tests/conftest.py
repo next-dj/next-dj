@@ -7,11 +7,9 @@ from django.conf import settings
 from django.test import Client
 
 
-# add project root to python path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-# configure django settings for file-routing example
 if not settings.configured:
     settings.configure(
         DEBUG=True,
@@ -67,7 +65,6 @@ if not settings.configured:
         ALLOWED_HOSTS=["testserver"],
     )
 
-    # setup django
     django.setup()
 
 
