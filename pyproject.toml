@@ -37,7 +37,7 @@ dev = [
     "pytest-django==4.11.1",
     "django-stubs[compatible-mypy]==5.2.8",
     "ruff==0.14.14",
-    "mypy==1.15.0",
+    "mypy==1.19.1",
     "pre-commit==4.5.0",
     "build==1.4.0",
     "twine==6.2.0",
