@@ -1,9 +1,14 @@
 """Tests for examples/forms todos app: CRUD operations for todos."""
 
+import importlib.util
+from pathlib import Path
+
 import pytest
 from django.apps import apps
+from django.http import HttpRequest
 from django.test import Client
 from todos.models import Todo
+from todos.pages import page as home_page
 
 from next.forms import form_action_manager
 
@@ -43,7 +48,6 @@ def test_create_todo_creates_new_todo(client: Client) -> None:
     assert response.status_code == 302
     assert response.url == "/"
 
-    # Check that todo was created
     assert Todo.objects.count() == 1
     todo = Todo.objects.first()
     assert todo.title == "Test Todo"
@@ -96,21 +100,19 @@ def test_update_todo_updates_existing_todo(client: Client) -> None:
         title="Original", description="Original", is_completed=False
     )
     update_url = form_action_manager.get_action_url("update_todo")
-    # URL parameters are passed via hidden form fields (_url_param_*)
     response = client.post(
         update_url,
         data={
             "title": "Updated Title",
             "description": "Updated Description",
             "is_completed": True,
-            "_url_param_id": str(todo.id),  # Pass id parameter from URL
+            "_url_param_id": str(todo.id),
         },
         follow=False,
     )
     assert response.status_code == 302
     assert response.url == "/"
 
-    # Check that todo was updated
     todo.refresh_from_db()
     assert todo.title == "Updated Title"
     assert todo.description == "Updated Description"
@@ -136,12 +138,6 @@ def test_todo_str_method(client: Client) -> None:
 @pytest.mark.django_db()
 def test_get_initial_returns_empty_dict_for_nonexistent_todo(client: Client) -> None:
     """Test that TodoEditForm.get_initial returns empty dict for nonexistent todo."""
-    import importlib.util
-    from pathlib import Path
-
-    from django.http import HttpRequest
-
-    # Dynamic import for edit page (has special characters in path)
     edit_path = (
         Path(__file__).resolve().parent.parent
         / "todos"
@@ -157,7 +153,6 @@ def test_get_initial_returns_empty_dict_for_nonexistent_todo(client: Client) -> 
     request = HttpRequest()
     request.method = "GET"
 
-    # Call get_initial with non-existent id
     result = edit_page.TodoEditForm.get_initial(request, id=999)
     assert result == {}
 
@@ -184,16 +179,12 @@ def test_check_missing_page_content() -> None:
 
 def test_home_page_module_has_context(client: Client) -> None:
     """Test that home page module has get_todos context."""
-    import todos.pages.page as home_page
-
     assert hasattr(home_page, "get_todos")
     assert callable(home_page.get_todos)
 
 
 def test_home_page_module_has_action(client: Client) -> None:
     """Test that home page module has create_todo_handler and TodoForm."""
-    import todos.pages.page as home_page
-
     assert hasattr(home_page, "create_todo_handler")
     assert callable(home_page.create_todo_handler)
     assert hasattr(home_page, "TodoForm")
@@ -201,9 +192,6 @@ def test_home_page_module_has_action(client: Client) -> None:
 
 def test_edit_page_module_has_action(client: Client) -> None:
     """Test that edit page module has update_todo_handler and TodoEditForm."""
-    import importlib.util
-    from pathlib import Path
-
     edit_path = (
         Path(__file__).resolve().parent.parent
         / "todos"

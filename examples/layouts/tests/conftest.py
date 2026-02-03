@@ -1,3 +1,4 @@
+import importlib
 import sys
 from pathlib import Path
 
@@ -7,11 +8,9 @@ from django.conf import settings
 from django.test import Client, RequestFactory
 
 
-# add project root to python path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-# configure django settings for layouts example
 if not settings.configured:
     settings.configure(
         DEBUG=True,
@@ -70,7 +69,6 @@ if not settings.configured:
         ALLOWED_HOSTS=["testserver"],
     )
 
-    # setup django
     django.setup()
 
 
@@ -94,9 +92,8 @@ def sample_request(request_factory):
 
 @pytest.fixture()
 def page_modules():
-    """Fixture that imports all page modules."""
-    import layouts.pages.page as main_page
-
+    """Fixture that imports all page modules (after django.setup())."""
+    main_page = importlib.import_module("layouts.pages.page")
     return {
         "main_page": main_page,
     }

@@ -842,7 +842,7 @@ def check_duplicate_url_parameters(*_args, **_kwargs) -> list[CheckMessage]:
                 continue
 
             try:
-                django_pattern, parameters = parser.parse_url_pattern(url_path)
+                _django_pattern, _parameters = parser.parse_url_pattern(url_path)
                 duplicates = _get_duplicate_parameters(url_path, parser)
 
                 if duplicates:

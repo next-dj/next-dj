@@ -1,3 +1,4 @@
+import importlib
 import sys
 from pathlib import Path
 
@@ -7,13 +8,10 @@ from django.conf import settings
 from django.test import Client, RequestFactory
 
 
-# add project root to python path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
-# add examples/pages to python path for catalog app
 sys.path.insert(0, str(project_root / "examples" / "pages"))
 
-# configure django settings for pages example
 if not settings.configured:
     settings.configure(
         DEBUG=True,
@@ -63,7 +61,6 @@ if not settings.configured:
         ALLOWED_HOSTS=["testserver"],
     )
 
-    # setup django
     django.setup()
 
 
@@ -87,31 +84,27 @@ def sample_request(request_factory):
 
 @pytest.fixture()
 def sample_products():
-    """Fixture that returns sample products."""
-    from catalog.models import Product
-
-    return Product.objects.all()[:3]
+    """Fixture that returns sample products (import after django.setup())."""
+    product_model = importlib.import_module("catalog.models").Product
+    return product_model.objects.all()[:3]
 
 
 @pytest.fixture(autouse=True)
 def setup_database() -> None:
-    from catalog.models import Product
+    """Setup database (import after django.setup())."""
+    product_model = importlib.import_module("catalog.models").Product
+    product_model.objects.all().delete()
 
-    # clear existing products
-    Product.objects.all().delete()
-
-    # create sample products
-    Product.objects.create(title="Product 1", description="Description 1")
-    Product.objects.create(title="Product 2", description="Description 2")
-    Product.objects.create(title="Product 3", description="Description 3")
+    product_model.objects.create(title="Product 1", description="Description 1")
+    product_model.objects.create(title="Product 2", description="Description 2")
+    product_model.objects.create(title="Product 3", description="Description 3")
 
 
 @pytest.fixture()
 def page_modules():
-    """Fixture that imports all page modules."""
-    import catalog.pages.catalog.page as catalog_page
-    import catalog.pages.page as main_page
-
+    """Fixture that imports all page modules (after django.setup())."""
+    catalog_page = importlib.import_module("catalog.pages.catalog.page")
+    main_page = importlib.import_module("catalog.pages.page")
     return {
         "catalog_page": catalog_page,
         "main_page": main_page,
