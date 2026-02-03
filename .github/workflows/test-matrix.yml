@@ -43,7 +43,8 @@ jobs:
         cache: "true"
         cache-key-suffix: django-${{ matrix.django-version }}-py-${{ matrix.python-version }}
     - name: Verify Django version
-      run: uv run python -c "import django; print(f'Django version: {django.get_version()}')"
+      run: |
+        uv run python -c 'import django; print(f"Django version: {django.get_version()}")'
     - name: Run tests
       run: ${{ inputs.test-command }}
     - name: Upload coverage to Codecov
