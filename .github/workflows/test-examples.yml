@@ -12,4 +12,4 @@ jobs:
   test-examples:
     uses: ./.github/workflows/test-matrix.yml
     with:
-      test-command: make test-examples
+      test-command: "make test-examples"
