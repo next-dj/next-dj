@@ -44,4 +44,4 @@ runs:
     - name: Install Django ${{ inputs.django-version }}
       if: inputs.django-version != ''
       shell: bash
-      run: uv add "django==${{ inputs.django-version }}" --python ${{ inputs.python-version }}
+      run: uv pip install "django==${{ inputs.django-version }}"

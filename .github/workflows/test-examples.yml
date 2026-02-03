@@ -10,22 +10,6 @@ permissions:
 
 jobs:
   test-examples:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-        django-version: ["4.2", "5.0", "5.1", "5.2", "6.0"]
-        exclude:
-          - python-version: "3.11"
-            django-version: "6.0"
-
-    steps:
-    - uses: actions/checkout@v5
-    - uses: ./.github/actions/setup-python-uv
-      with:
-        python-version: ${{ matrix.python-version }}
-        django-version: ${{ matrix.django-version }}
-        cache: "true"
-        cache-key-suffix: examples-django-${{ matrix.django-version }}-py-${{ matrix.python-version }}
-    - name: Run all example tests with 100% coverage
-      run: make test-examples
+    uses: ./.github/workflows/test-matrix.yml
+    with:
+      test-command: make test-examples
