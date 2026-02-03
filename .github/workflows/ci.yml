@@ -67,6 +67,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
+    - uses: actions/checkout@v5
     - uses: ./.github/actions/setup-python-uv
     - name: Lint with ruff
       run: |
@@ -83,6 +84,7 @@ jobs:
   type-check:
     runs-on: ubuntu-latest
     steps:
+    - uses: actions/checkout@v5
     - uses: ./.github/actions/setup-python-uv
     - name: Type check with mypy
       run: |
@@ -91,6 +93,7 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
+    - uses: actions/checkout@v5
     - uses: ./.github/actions/setup-python-uv
     - name: Check for typos
       run: |

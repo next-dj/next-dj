@@ -1,5 +1,4 @@
 name: Setup Python and uv
-description: Checkout, set up Python, install uv, sync dependencies
 inputs:
   python-version:
     description: Python version to use
@@ -8,7 +7,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v5
     - name: Set up Python ${{ inputs.python-version }}
       uses: actions/setup-python@v5
       with:
