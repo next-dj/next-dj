@@ -1,9 +1,22 @@
 name: Setup Python and uv
+description: Set up Python, install uv, sync dev dependencies. Run actions/checkout before this local action.
 inputs:
   python-version:
     description: Python version to use
     required: false
     default: "3.12"
+  django-version:
+    description: Django version to install (optional, skip if empty)
+    required: false
+    default: ""
+  cache:
+    description: Enable uv dependency caching
+    required: false
+    default: "false"
+  cache-key-suffix:
+    description: Suffix for cache key (e.g. django-5.2-py-3.12)
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -15,5 +28,20 @@ runs:
       uses: astral-sh/setup-uv@v6
       with:
         version: "latest"
+    - name: Cache uv dependencies
+      if: inputs.cache == 'true'
+      uses: actions/cache@v3
+      with:
+        path: |
+          .venv
+          .uv_cache
+        key: ${{ runner.os }}-uv-${{ hashFiles('**/uv.lock') }}-${{ inputs.cache-key-suffix }}
+        restore-keys: |
+          ${{ runner.os }}-uv-
     - name: Install dependencies
-      run: uv sync --dev
+      shell: bash
+      run: uv sync --dev --python ${{ inputs.python-version }}
+    - name: Install Django ${{ inputs.django-version }}
+      if: inputs.django-version != ''
+      shell: bash
+      run: uv add "django==${{ inputs.django-version }}" --python ${{ inputs.python-version }}

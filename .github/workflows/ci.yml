@@ -23,41 +23,20 @@ jobs:
 
     steps:
     - uses: actions/checkout@v5
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+    - uses: ./.github/actions/setup-python-uv
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Install uv
-      uses: astral-sh/setup-uv@v6
-      with:
-        version: "latest"
-    - name: Cache uv dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          .venv
-          .uv_cache
-        key: ${{ runner.os }}-uv-${{ hashFiles('**/uv.lock') }}-django-${{ matrix.django-version }}-py-${{ matrix.python-version }}
-        restore-keys: |
-          ${{ runner.os }}-uv-
-    - name: Install dependencies
-      run: |
-        uv sync --dev --python-version ${{ matrix.python-version }}
-        uv add "django==${{ matrix.django-version }}" --python-version ${{ matrix.python-version }}
-
+        django-version: ${{ matrix.django-version }}
+        cache: "true"
+        cache-key-suffix: django-${{ matrix.django-version }}-py-${{ matrix.python-version }}
     - name: Verify Django version
-      run: |
-        uv run python -c "import django; print(f'Django version: {django.get_version()}')"
-
+      run: uv run python -c "import django; print(f'Django version: {django.get_version()}')"
     - name: Run tests with coverage
-      run: |
-        uv run pytest tests/ -v --junitxml=junit.xml --cov=next --cov-report=xml --cov-report=term-missing --cov-fail-under=100
-
+      run: uv run pytest tests/ -v --junitxml=junit.xml --cov=next --cov-report=xml --cov-report=term-missing --cov-fail-under=100
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
-
     - name: Upload test results to Codecov
       if: ${{ !cancelled() }}
       uses: codecov/test-results-action@v1
@@ -70,16 +49,11 @@ jobs:
     - uses: actions/checkout@v5
     - uses: ./.github/actions/setup-python-uv
     - name: Lint with ruff
-      run: |
-        uv run ruff check next/
-
+      run: uv run ruff check next/
     - name: Check code formatting
-      run: |
-        uv run ruff format --check next/
-
+      run: uv run ruff format --check next/
     - name: Check import sorting
-      run: |
-        uv run ruff check next/ --select I
+      run: uv run ruff check next/ --select I
 
   type-check:
     runs-on: ubuntu-latest
@@ -87,8 +61,7 @@ jobs:
     - uses: actions/checkout@v5
     - uses: ./.github/actions/setup-python-uv
     - name: Type check with mypy
-      run: |
-        uv run mypy next/
+      run: uv run mypy next/
 
   security:
     runs-on: ubuntu-latest
@@ -96,22 +69,15 @@ jobs:
     - uses: actions/checkout@v5
     - uses: ./.github/actions/setup-python-uv
     - name: Check for typos
-      run: |
-        uv run pre-commit run typos --all-files
-
+      run: uv run pre-commit run typos --all-files
     - name: Check uv lock file
-      run: |
-        uv run pre-commit run uv-lock --all-files
+      run: uv run pre-commit run uv-lock --all-files
 
   dependency-review:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-
     steps:
-    - name: "Checkout code"
-      uses: actions/checkout@v5
-      
-    - name: "Dependency Review"
-      uses: actions/dependency-review-action@v4
+    - uses: actions/checkout@v5
+    - uses: actions/dependency-review-action@v4
       with:
         fail-on-severity: moderate

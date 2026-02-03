@@ -21,26 +21,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v5
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+    - uses: ./.github/actions/setup-python-uv
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Install uv
-      uses: astral-sh/setup-uv@v6
-      with:
-        version: "latest"
-    - name: Cache uv dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          .venv
-          .uv_cache
-        key: ${{ runner.os }}-uv-examples-${{ hashFiles('**/uv.lock') }}-django-${{ matrix.django-version }}-py-${{ matrix.python-version }}
-        restore-keys: |
-          ${{ runner.os }}-uv-examples-
-    - name: Install dependencies
-      run: |
-        uv sync --dev --python-version ${{ matrix.python-version }}
-        uv add "django==${{ matrix.django-version }}" --python-version ${{ matrix.python-version }}
+        django-version: ${{ matrix.django-version }}
+        cache: "true"
+        cache-key-suffix: examples-django-${{ matrix.django-version }}-py-${{ matrix.python-version }}
     - name: Run all example tests with 100% coverage
       run: make test-examples
