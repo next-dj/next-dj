@@ -12,149 +12,47 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-        django-version: ["4.2", "5.0", "5.1", "5.2"]
-
-    steps:
-    - uses: actions/checkout@v5
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v6
-      with:
-        version: "latest"
-
-    - name: Cache uv dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          .venv
-          .uv_cache
-        key: ${{ runner.os }}-uv-${{ hashFiles('**/uv.lock') }}-django-${{ matrix.django-version }}
-        restore-keys: |
-          ${{ runner.os }}-uv-
-
-    - name: Install dependencies
-      run: |
-        uv sync --dev
-        uv add "django==${{ matrix.django-version }}"
-
-    - name: Verify Django version
-      run: |
-        uv run python -c "import django; print(f'Django version: {django.get_version()}')"
-
-    - name: Run tests with coverage
-      run: |
-        uv run pytest tests/ -v --junitxml=junit.xml --cov=next --cov-report=xml --cov-report=term-missing --cov-fail-under=100
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-
-    - name: Upload test results to Codecov
-      if: ${{ !cancelled() }}
-      uses: codecov/test-results-action@v1
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
+    uses: ./.github/workflows/test-matrix.yml
+    with:
+      test-command: "uv run pytest tests/ -v --junitxml=junit.xml --cov=next --cov-report=xml --cov-report=term-missing --cov-fail-under=100"
+      upload-codecov: true
+    secrets: inherit
 
   lint:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v6
-      with:
-        version: "latest"
-
-    - name: Install dependencies
-      run: |
-        uv sync --dev
-
+    - uses: ./.github/actions/setup-python-uv
     - name: Lint with ruff
-      run: |
-        uv run ruff check next/
-
+      run: uv run ruff check next/
     - name: Check code formatting
-      run: |
-        uv run ruff format --check next/
-
+      run: uv run ruff format --check next/
     - name: Check import sorting
-      run: |
-        uv run ruff check next/ --select I
+      run: uv run ruff check next/ --select I
 
   type-check:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v6
-      with:
-        version: "latest"
-
-    - name: Install dependencies
-      run: |
-        uv sync --dev
-
+    - uses: ./.github/actions/setup-python-uv
     - name: Type check with mypy
-      run: |
-        uv run mypy next/
+      run: uv run mypy next/
 
   security:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v6
-      with:
-        version: "latest"
-
-    - name: Install dependencies
-      run: |
-        uv sync --dev
-
+    - uses: ./.github/actions/setup-python-uv
     - name: Check for typos
-      run: |
-        uv run pre-commit run typos --all-files
-
+      run: uv run pre-commit run typos --all-files
     - name: Check uv lock file
-      run: |
-        uv run pre-commit run uv-lock --all-files
+      run: uv run pre-commit run uv-lock --all-files
 
   dependency-review:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-
     steps:
-    - name: "Checkout code"
-      uses: actions/checkout@v5
-      
-    - name: "Dependency Review"
-      uses: actions/dependency-review-action@v4
+    - uses: actions/checkout@v5
+    - uses: actions/dependency-review-action@v4
       with:
         fail-on-severity: moderate
