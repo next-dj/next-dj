@@ -44,7 +44,7 @@ def test_layout_features(client, url, expected_feature) -> None:
 
     if expected_feature == "layout_inheritance":
         assert "Bootstrap" in content
-        assert "Starter Template" in content
+        assert "starter template" in content
     elif expected_feature == "navigation_active_states":
         assert "Guides" in content
         assert "active" in content or "current" in content

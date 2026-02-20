@@ -1,5 +1,3 @@
-"""Tests for next.forms and next.templatetags.forms."""
-
 import inspect
 import types
 from pathlib import Path

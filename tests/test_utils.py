@@ -1,5 +1,3 @@
-"""Tests for next.utils."""
-
 from pathlib import Path
 from unittest.mock import patch
 
@@ -130,6 +128,93 @@ class TestNextStatReloader:
         ):
             gen = reloader.tick()
             next(gen)
+
+    def test_check_layouts_notify_when_layout_used_by_route(self) -> None:
+        """_check_layouts notifies when layout in diff is under a route's dir."""
+        reloader = NextStatReloader()
+        reloader._previous_layouts = set()
+        layout_djx = Path("/app/pages/blog/layout.djx").resolve()
+        page_py = Path("/app/pages/blog/page.py").resolve()
+        routes = {("blog", page_py)}
+        with patch.object(reloader, "notify_file_changed") as mock_notify:
+            reloader._check_layouts({layout_djx}, routes)
+        mock_notify.assert_called_once_with(layout_djx)
+
+    def test_check_layouts_no_notify_when_layout_not_used_by_route(self) -> None:
+        """_check_layouts does not notify when no route is under the layout dir."""
+        reloader = NextStatReloader()
+        reloader._previous_layouts = set()
+        unused_layout = Path("/app/pages/other/layout.djx").resolve()
+        page_py = Path("/app/pages/blog/page.py").resolve()
+        routes = {("blog", page_py)}
+        with patch.object(reloader, "notify_file_changed") as mock_notify:
+            reloader._check_layouts({unused_layout}, routes)
+        mock_notify.assert_not_called()
+        assert reloader._previous_layouts == {unused_layout}
+
+    def test_check_layouts_skips_value_error_from_is_relative_to(self) -> None:
+        """_check_layouts continues when is_relative_to raises ValueError."""
+        reloader = NextStatReloader()
+        reloader._previous_layouts = set()
+        layout_djx = Path("/app/pages/blog/layout.djx").resolve()
+        route_path = Path("/app/pages/blog/page.py").resolve()
+        routes = {("blog", route_path)}
+
+        with (
+            patch.object(reloader, "notify_file_changed") as mock_notify,
+            patch.object(
+                Path,
+                "is_relative_to",
+                side_effect=ValueError("not relative"),
+            ),
+        ):
+            reloader._check_layouts({layout_djx}, routes)
+        mock_notify.assert_not_called()
+        assert reloader._previous_layouts == {layout_djx}
+
+    def test_check_templates_notify_when_set_changes(self) -> None:
+        """_check_templates notifies when template set changes."""
+        reloader = NextStatReloader()
+        reloader._previous_templates = set()
+        template_djx = Path("/app/pages/foo/template.djx").resolve()
+        with patch.object(reloader, "notify_file_changed") as mock_notify:
+            reloader._check_templates({template_djx})
+        mock_notify.assert_called_once_with(template_djx)
+
+    def test_tick_notify_when_template_set_changes(self) -> None:
+        """When template.djx set changes, notify_file_changed is called with that path."""
+        reloader = NextStatReloader()
+        fake_dir = Path("/fake")
+        fake_page = fake_dir / "page.py"
+        fake_template = Path("/fake/pages/foo/template.djx").resolve()
+        call_count = [0]
+
+        def templates_side_effect():
+            call_count[0] += 1
+            return set() if call_count[0] == 1 else {fake_template}
+
+        with (
+            patch(
+                "next.utils.get_pages_directories_for_watch",
+                return_value=[fake_dir],
+            ),
+            patch(
+                "next.utils._scan_pages_directory",
+                return_value=iter([("home", fake_page)]),
+            ),
+            patch("next.utils.get_layout_djx_paths_for_watch", return_value=set()),
+            patch(
+                "next.utils.get_template_djx_paths_for_watch",
+                side_effect=templates_side_effect,
+            ),
+            patch.object(reloader, "snapshot_files", return_value=iter([])),
+            patch.object(reloader, "notify_file_changed") as mock_notify,
+        ):
+            gen = reloader.tick()
+            next(gen)
+            next(gen)
+            calls = [c[0][0] for c in mock_notify.call_args_list]
+            assert fake_template in calls
 
     def test_tick_notify_when_file_mtime_changes(self) -> None:
         """When snapshot_files returns a file whose mtime increases, notify_file_changed is called."""

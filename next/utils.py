@@ -1,9 +1,8 @@
-"""Utilities for next-dj."""
+"""Store utils for next-dj framework."""
 
 import logging
-import time
 from collections.abc import Generator
-from pathlib import Path  # noqa: TC003
+from pathlib import Path
 
 from django.utils.autoreload import StatReloader
 
@@ -18,57 +17,74 @@ logger = logging.getLogger(__name__)
 
 
 class NextStatReloader(StatReloader):
-    """StatReloader that triggers reload when pages/layouts/templates set changes.
+    """StatReloader that also reacts to route/layout/template set changes."""
 
-    Reload on add or remove: page.py/virtual pages, layout.djx, template.djx
-    so that urlpatterns and render hierarchy are recalculated.
-    """
+    def __init__(self) -> None:
+        """Init previous-route/layout/template state for set comparison."""
+        super().__init__()
+        self._previous_routes: set[tuple[str, Path]] | None = None
+        self._previous_layouts: set[Path] | None = None
+        self._previous_templates: set[Path] | None = None
 
-    def _notify_if_set_changed(self, previous: set | None, current: set) -> None:
-        """If current != previous, call notify_file_changed with one path from diff."""
-        if previous is None or current == previous:
+    def _check_routes(self, current: set[tuple[str, Path]]) -> None:
+        """Notify once when the set of (url_path, file_path) routes changes."""
+        prev = self._previous_routes
+        if prev is None or current == prev:
+            self._previous_routes = current
             return
-        diff = (current - previous) or (previous - current)
+        diff = (current - prev) or (prev - current)
         if diff:
-            item = next(iter(diff))
-            path = item[1] if isinstance(item, tuple) else item
-            self.notify_file_changed(path)
+            self.notify_file_changed(next(iter(diff))[1])
+        self._previous_routes = current
+
+    def _check_layouts(
+        self, current: set[Path], current_routes: set[tuple[str, Path]]
+    ) -> None:
+        """Notify when the set of layout files changes."""
+        prev = self._previous_layouts
+        if prev is None or current == prev:
+            self._previous_layouts = current
+            return
+        layout_diff = (current - prev) or (prev - current)
+        for p in layout_diff:
+            layout_dir = p.parent
+            for _, file_path in current_routes:
+                try:
+                    if file_path.is_relative_to(layout_dir):
+                        self.notify_file_changed(p)
+                        self._previous_layouts = current
+                        return
+                except ValueError:
+                    continue
+        self._previous_layouts = current
+
+    def _check_templates(self, current: set[Path]) -> None:
+        """Notify once when the set of template files changes."""
+        prev = self._previous_templates
+        if prev is None or current == prev:
+            self._previous_templates = current
+            return
+        diff = (current - prev) or (prev - current)
+        if diff:
+            self.notify_file_changed(next(iter(diff)))
+        self._previous_templates = current
 
     def tick(self) -> Generator[None, None, None]:
-        """Parent mtime check and route/layout/template set change check, then yield."""
-        mtimes: dict = {}
-        previous_route_set: set[tuple[str, Path]] | None = None
-        previous_layout_set: set[Path] | None = None
-        previous_template_set: set[Path] | None = None
-
+        """Run next-dj set checks, then one parent tick step."""
+        parent_ticker = super().tick()
         while True:
             try:
-                current_route_set = {
+                routes = {
                     (url_path, file_path.resolve())
                     for pages_path in get_pages_directories_for_watch()
                     for url_path, file_path in _scan_pages_directory(pages_path)
                 }
-                current_layout_set = get_layout_djx_paths_for_watch()
-                current_template_set = get_template_djx_paths_for_watch()
-
-                self._notify_if_set_changed(previous_route_set, current_route_set)
-                self._notify_if_set_changed(previous_layout_set, current_layout_set)
-                self._notify_if_set_changed(previous_template_set, current_template_set)
-
-                previous_route_set = current_route_set
-                previous_layout_set = current_layout_set
-                previous_template_set = current_template_set
+                layouts = get_layout_djx_paths_for_watch()
+                templates = get_template_djx_paths_for_watch()
             except (OSError, ImportError, ValueError) as e:
                 logger.debug("next route/layout/template set check skipped: %s", e)
-
-            # Parent logic: mtime check for all watched files
-            for filepath, mtime in self.snapshot_files():
-                old_time = mtimes.get(filepath)
-                mtimes[filepath] = mtime
-                if old_time is None:
-                    continue
-                if mtime > old_time:
-                    self.notify_file_changed(filepath)
-
-            time.sleep(self.SLEEP_TIME)
-            yield
+            else:
+                self._check_routes(routes)
+                self._check_layouts(layouts, routes)
+                self._check_templates(templates)
+            yield next(parent_ticker)

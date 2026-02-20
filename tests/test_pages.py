@@ -3162,9 +3162,10 @@ class TestLayoutTemplateWatchReload:
     """Tests that NextStatReloader triggers reload when layout/template set changes."""
 
     def test_tick_notify_when_layout_set_grows(self) -> None:
-        """When a new layout.djx appears, notify_file_changed is called."""
+        """When a new layout.djx appears (and dir has a page), notify_file_changed."""
         reloader = NextStatReloader()
         new_layout = Path("/fake/pages/simple/layout.djx").resolve()
+        page_under_layout = Path("/fake/pages/simple/page.py").resolve()
         call_count = [0]
 
         def layout_side_effect():
@@ -3172,8 +3173,14 @@ class TestLayoutTemplateWatchReload:
             return set() if call_count[0] == 1 else {new_layout}
 
         with (
-            patch("next.utils.get_pages_directories_for_watch", return_value=[]),
-            patch("next.utils._scan_pages_directory", return_value=iter([])),
+            patch(
+                "next.utils.get_pages_directories_for_watch",
+                return_value=[Path("/fake/pages")],
+            ),
+            patch(
+                "next.utils._scan_pages_directory",
+                side_effect=lambda _: iter([("simple", page_under_layout)]),
+            ),
             patch(
                 "next.utils.get_layout_djx_paths_for_watch",
                 side_effect=layout_side_effect,
@@ -3188,9 +3195,10 @@ class TestLayoutTemplateWatchReload:
             mock_notify.assert_called_once_with(new_layout)
 
     def test_tick_notify_when_layout_set_shrinks(self) -> None:
-        """When a layout.djx is deleted, notify_file_changed is called."""
+        """When a layout.djx is deleted (and dir had a page), notify_file_changed."""
         reloader = NextStatReloader()
         deleted_layout = Path("/fake/pages/simple/layout.djx").resolve()
+        page_under_layout = Path("/fake/pages/simple/page.py").resolve()
         call_count = [0]
 
         def layout_side_effect():
@@ -3198,8 +3206,14 @@ class TestLayoutTemplateWatchReload:
             return {deleted_layout} if call_count[0] == 1 else set()
 
         with (
-            patch("next.utils.get_pages_directories_for_watch", return_value=[]),
-            patch("next.utils._scan_pages_directory", return_value=iter([])),
+            patch(
+                "next.utils.get_pages_directories_for_watch",
+                return_value=[Path("/fake/pages")],
+            ),
+            patch(
+                "next.utils._scan_pages_directory",
+                side_effect=lambda _: iter([("simple", page_under_layout)]),
+            ),
             patch(
                 "next.utils.get_layout_djx_paths_for_watch",
                 side_effect=layout_side_effect,

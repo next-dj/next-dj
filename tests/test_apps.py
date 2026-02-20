@@ -1,5 +1,3 @@
-"""Tests for next.apps (NextFrameworkConfig)."""
-
 from django.utils import autoreload
 from django.utils.autoreload import autoreload_started
 
