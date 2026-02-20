@@ -119,6 +119,35 @@ Configure the file router in your Django settings:
 **APP_DIRS**: Whether to scan Django app directories (default: True)
 **context_processors**: List of context processor paths for global template variables
 
+Root and App Pages (Like Staticfiles)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Resolution works like Django's static files:
+
+- **Project-level directories** — Use ``OPTIONS.PAGES_DIRS`` (list of paths) or ``OPTIONS.PAGES_DIR`` (single path). These are the same idea as ``STATICFILES_DIRS``: directories at the project root that contain ``page.py`` / ``template.djx`` and optionally ``layout.djx`` for a global layout.
+- **App directories** — With ``APP_DIRS: True``, each installed app's ``pages/`` directory is scanned (like each app's ``static/`` folder).
+
+You can use both in one backend: set ``APP_DIRS: True`` and add ``PAGES_DIRS`` or ``PAGES_DIR`` in ``OPTIONS``. URL patterns are then built in this order: first from app pages, then from root directories. If the same URL pattern is defined in both an app and a root directory, ``python manage.py check`` reports an error (``next.E015``).
+
+.. code-block:: python
+
+   from pathlib import Path
+   BASE_DIR = Path(__file__).resolve().parent.parent
+
+   NEXT_PAGES = [
+       {
+           'BACKEND': 'next.urls.FileRouterBackend',
+           'APP_DIRS': True,
+           'OPTIONS': {
+               'PAGES_DIRS': [str(BASE_DIR / "root_pages")],
+               'context_processors': [...],
+           },
+       },
+   ]
+
+**PAGES_DIRS**: List of absolute (or project-relative) paths to root-level pages directories.
+**PAGES_DIR**: Single path to one root-level pages directory (alternative to ``PAGES_DIRS``).
+
 Multiple Configurations
 ~~~~~~~~~~~~~~~~~~~~~~~
 

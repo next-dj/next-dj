@@ -66,10 +66,15 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+# Project-level static files (e.g. static/css/layout.css)
+STATICFILES_DIRS = [
+    BASE_DIR / "static",
+]
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-# next-dj pages configuration with context_processors
+# next-dj pages configuration (app pages + root_pages for global layout, like staticfiles)
 NEXT_PAGES = [
     {
         "BACKEND": "next.urls.FileRouterBackend",
@@ -81,6 +86,7 @@ NEXT_PAGES = [
                 "django.contrib.messages.context_processors.messages",
                 "layouts.context_processors.site_info",
             ],
+            "PAGES_DIRS": [str(BASE_DIR / "root_pages")],
         },
     },
 ]

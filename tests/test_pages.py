@@ -1937,7 +1937,7 @@ class TestLayoutTemplateLoader:
         assert result == expected_result
 
     @pytest.mark.parametrize(
-        ("test_case", "config", "expected_result"),
+        ("test_case", "config", "expected_list"),
         [
             (
                 "with_pages_dir",
@@ -1948,7 +1948,7 @@ class TestLayoutTemplateLoader:
                         "PAGES_DIR": "test_dir",
                     },
                 },
-                "test_dir",
+                ["test_dir"],
             ),
             (
                 "with_app_dirs",
@@ -1956,7 +1956,7 @@ class TestLayoutTemplateLoader:
                     "BACKEND": "next.urls.FileRouterBackend",
                     "APP_DIRS": True,
                 },
-                None,
+                [],
             ),
             (
                 "no_options",
@@ -1964,27 +1964,43 @@ class TestLayoutTemplateLoader:
                     "BACKEND": "next.urls.FileRouterBackend",
                     "APP_DIRS": False,
                 },
-                None,
+                [],
             ),
         ],
     )
-    def test_get_pages_dir_for_config_scenarios(
+    def test_get_pages_dirs_for_config_scenarios(
         self,
         temp_dir,
         test_case,
         config,
-        expected_result,
+        expected_list,
     ) -> None:
-        """Test _get_pages_dir_for_config with different configuration scenarios."""
+        """Test _get_pages_dirs_for_config with different configuration scenarios."""
         loader = LayoutTemplateLoader()
 
-        # replace test_dir with actual temp_dir for the first test case
         if test_case == "with_pages_dir":
             config["OPTIONS"]["PAGES_DIR"] = str(temp_dir)
-            expected_result = temp_dir
+            expected_list = [Path(temp_dir)]
 
-        result = loader._get_pages_dir_for_config(config)
-        assert result == expected_result
+        result = loader._get_pages_dirs_for_config(config)
+        assert result == expected_list
+
+    def test_get_pages_dirs_for_config_pages_dirs_not_list(self, temp_dir) -> None:
+        """Test _get_pages_dirs_for_config when PAGES_DIRS is not a list returns []."""
+        loader = LayoutTemplateLoader()
+        config = {
+            "OPTIONS": {"PAGES_DIRS": "not-a-list"},
+        }
+        result = loader._get_pages_dirs_for_config(config)
+        assert result == []
+
+    def test_get_pages_dirs_for_config_pages_dirs_list(self, temp_dir) -> None:
+        """Test _get_pages_dirs_for_config when PAGES_DIRS is a list returns paths."""
+        loader = LayoutTemplateLoader()
+        config = {"OPTIONS": {"PAGES_DIRS": [str(temp_dir)]}}
+        result = loader._get_pages_dirs_for_config(config)
+        assert len(result) == 1
+        assert result[0] == Path(temp_dir)
 
     @pytest.mark.parametrize(
         (
@@ -2279,6 +2295,22 @@ class TestLayoutTemplateLoader:
         assert "<html><body>" in result
         assert "</body></html>" in result
         # should contain empty template block
+        assert "{% block template %}{% endblock template %}" in result
+
+    def test_load_template_layout_accepts_unnamed_endblock(self, temp_dir) -> None:
+        """Compose works when layout uses {% endblock %} instead of {% endblock template %}."""
+        loader = LayoutTemplateLoader()
+        layout_file = temp_dir / "layout.djx"
+        layout_file.write_text(
+            "<html><body>{% block template %}{% endblock %}</body></html>",
+        )
+        page_file = temp_dir / "page.py"
+        result = loader.load_template(page_file)
+        assert result is not None
+        assert "<html><body>" in result
+        assert "</body></html>" in result
+        assert "{% block template %}" in result
+        # default content uses named endblock; layout used unnamed
         assert "{% block template %}{% endblock template %}" in result
 
     def test_find_layout_files(self, temp_dir) -> None:

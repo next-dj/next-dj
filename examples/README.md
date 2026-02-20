@@ -38,6 +38,18 @@ An advanced template inheritance example showcasing sophisticated layout managem
 
 **Best for:** Understanding advanced template patterns and building complex web applications
 
+### forms
+A Todo app example demonstrating next-dj's form handling: form actions, ModelForm create/edit flows, and the `{% form %}` template tag.
+
+**Key Features:**
+- Form actions registered with `@forms.action()` (create and update)
+- ModelForm with `get_initial()` for new vs edit (instance) flows
+- `{% form @action="..." %}` with automatic CSRF and action URL
+- URL parameters passed into edit page context and form handlers
+- Django messages and shared layout
+
+**Best for:** Building CRUD-style pages and understanding next-dj forms with file-based routing
+
 ## Getting Started
 
 Each example includes its own README with detailed setup and running instructions. To get started:
@@ -58,6 +70,9 @@ Use the `pages` example as a reference for integrating next-dj with Django's ful
 **If you're building complex layouts:**
 Use the `layouts` example to understand advanced template inheritance and layout management patterns.
 
+**If you're building forms and CRUD flows:**
+Use the `forms` example to see form actions, ModelForm, and `{% form %}` with file-based routing.
+
 **If you're exploring specific features:**
 - Parameter handling: `file-routing` example
 - Database integration: `pages` example
@@ -66,6 +81,8 @@ Use the `layouts` example to understand advanced template inheritance and layout
 - Template inheritance: `layouts` example
 - Context processors: `layouts` example
 - UI frameworks integration: `layouts` example
+- Form actions and ModelForm: `forms` example
+- Create/edit flows with URL params: `forms` example
 
 ## Common Patterns
 

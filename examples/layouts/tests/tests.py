@@ -82,6 +82,16 @@ def test_checks(check_function) -> None:
     assert errors == []
 
 
+def test_global_layout_from_root_pages(client) -> None:
+    """Test that app pages use global layout from root_pages/layout.djx (PAGES_DIRS)."""
+    response = client.get("/")
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert "Current path:" in content, (
+        "root_pages/layout.djx content should appear (global layout)"
+    )
+
+
 def test_example_app_files() -> None:
     """Test that all app files are covered."""
     assert hasattr(layouts.apps, "LayoutsConfig")

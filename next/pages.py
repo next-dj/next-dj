@@ -272,40 +272,49 @@ class LayoutTemplateLoader(TemplateLoader):
         return layout_files or None
 
     def _get_additional_layout_files(self) -> list[Path]:
-        """Get layout.djx files from other NEXT_PAGES directories.
+        """Get layout.djx files from root-level NEXT_PAGES directories.
 
-        Scans all configured NEXT_PAGES directories for layout.djx files
-        that should be available for inheritance across different apps.
+        Uses _get_pages_dirs_for_config per config (PAGES_DIRS / PAGES_DIR),
+        independent of APP_DIRS, so global layout works with one backend.
         """
-        additional_layouts = []
+        additional_layouts: list[Path] = []
         next_pages_config = getattr(settings, "NEXT_PAGES", [])
 
         for config in next_pages_config:
             if not isinstance(config, dict):
                 continue
 
-            pages_dir = self._get_pages_dir_for_config(config)
-            if not pages_dir or not pages_dir.exists():
-                continue
-
-            layout_file = pages_dir / "layout.djx"
-            if layout_file.exists() and layout_file not in additional_layouts:
-                additional_layouts.append(layout_file)
+            for pages_dir in self._get_pages_dirs_for_config(config):
+                if not pages_dir.exists():
+                    continue
+                layout_file = pages_dir / "layout.djx"
+                if layout_file.exists() and layout_file not in additional_layouts:
+                    additional_layouts.append(layout_file)
 
         return additional_layouts
 
-    def _get_pages_dir_for_config(self, config: dict) -> Path | None:
-        """Get the pages directory path for a NEXT_PAGES configuration."""
-        if config.get("APP_DIRS", True):
-            # for app directories, we can't easily determine the path here
-            # this will be handled by the individual app scanning
-            return None
+    def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
+        """Get root-level pages directory paths for a NEXT_PAGES config.
 
+        Returns list from OPTIONS.PAGES_DIRS or OPTIONS.PAGES_DIR.
+        Does not depend on APP_DIRS (so global layout works with app_dirs True).
+        """
+        result: list[Path] = []
         options = config.get("OPTIONS", {})
-        if "PAGES_DIR" in options:
-            return Path(options["PAGES_DIR"])
 
-        return None
+        if "PAGES_DIRS" in options:
+            dirs = options["PAGES_DIRS"]
+            if isinstance(dirs, (list, tuple)):
+                for item in dirs:
+                    path = Path(item) if not isinstance(item, Path) else item
+                    result.append(path)
+            return result
+
+        if "PAGES_DIR" in options:
+            path = options["PAGES_DIR"]
+            result.append(Path(path) if not isinstance(path, Path) else path)
+
+        return result
 
     def _wrap_in_template_block(self, file_path: Path) -> str:
         """Wrap template content in a template block for inheritance.
@@ -336,7 +345,9 @@ class LayoutTemplateLoader(TemplateLoader):
         """Compose layout hierarchy by nesting layouts and inserting content.
 
         Processes layout files in order, with local layouts taking precedence
-        over additional layouts from other NEXT_PAGES directories.
+        over additional layouts from other NEXT_PAGES directories. Accepts
+        either ``{% block template %}...{% endblock template %}`` or
+        ``{% block template %}...{% endblock %}`` in layout files.
         """
         result = template_content
 
@@ -345,10 +356,13 @@ class LayoutTemplateLoader(TemplateLoader):
         for layout_file in layout_files:
             with contextlib.suppress(OSError, UnicodeDecodeError):
                 layout_content = layout_file.read_text(encoding="utf-8")
-                result = layout_content.replace(
+                for placeholder in (
                     "{% block template %}{% endblock template %}",
-                    result,
-                )
+                    "{% block template %}{% endblock %}",
+                ):
+                    if placeholder in layout_content:
+                        result = layout_content.replace(placeholder, result, 1)
+                        break
         return result
 
 
