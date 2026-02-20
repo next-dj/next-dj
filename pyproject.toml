@@ -162,6 +162,7 @@ ignore = [
     "INP001",
     "S105", "S106"
 ]
+"tests/pages/*" = ["INP001", "D104"]
 "**/{test*,conftest}.py" = [
     "ANN001",  # missing type annotation for function argument
     "ANN201",  # missing return type annotation for public function

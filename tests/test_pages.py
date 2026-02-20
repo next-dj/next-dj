@@ -22,15 +22,17 @@ from next.pages import (
     Page,
     PythonTemplateLoader,
     _get_context_processors,
-    _get_default_context_processors,
     _import_context_processor,
     context,
+    get_layout_djx_paths_for_watch,
+    get_template_djx_paths_for_watch,
     page,
 )
 from next.urls import (
     FileRouterBackend,
     URLPatternParser,
 )
+from next.utils import NextStatReloader
 
 
 # shared fixtures
@@ -450,6 +452,76 @@ class TestPage:
             "test_key"
             in page_instance._context_manager._context_registry[test_file_path]
         )
+
+
+class TestPageHasTemplateAndLazyRender:
+    """Tests for Page.has_template and lazy template loading in render()."""
+
+    def test_has_template_true_for_djx(self, page_instance, temp_dir) -> None:
+        """has_template returns True when template.djx exists."""
+        (temp_dir / "template.djx").write_text("<h1>Hi</h1>")
+        page_file = temp_dir / "page.py"
+        page_file.write_text("x = 1")
+        assert page_instance.has_template(page_file, module=None) is True
+
+    def test_has_template_true_for_module_with_template_attr(
+        self, page_instance, temp_dir
+    ) -> None:
+        """has_template returns True when module has template attribute."""
+        page_file = temp_dir / "page.py"
+        page_file.write_text('template = "<p>{{ x }}</p>"')
+        module = _load_python_module(page_file)
+        assert module is not None
+        assert page_instance.has_template(page_file, module) is True
+
+    def test_has_template_false_when_no_template(self, page_instance, temp_dir) -> None:
+        """has_template returns False when no template.djx and no template attr."""
+        page_file = temp_dir / "page.py"
+        page_file.write_text("x = 1")
+        module = _load_python_module(page_file)
+        assert page_instance.has_template(page_file, module) is False
+        assert page_instance.has_template(page_file, module=None) is False
+
+    def test_render_loads_template_when_not_in_registry(
+        self, page_instance, temp_dir
+    ) -> None:
+        """render() calls _load_template_for_file when file_path not in registry."""
+        page_file = temp_dir / "page.py"
+        page_file.write_text("y = 2")
+        (temp_dir / "template.djx").write_text("<h1>{{ title }}</h1>")
+        assert page_file not in page_instance._template_registry
+        result = page_instance.render(page_file, title="Lazy")
+        assert page_file in page_instance._template_registry
+        assert "Lazy" in result
+
+    def test_render_invalidates_cache_when_template_stale(
+        self, page_instance, temp_dir
+    ) -> None:
+        """When source .djx mtime changes, render() reloads template."""
+        page_file = temp_dir / "page.py"
+        page_file.write_text("z = 3")
+        djx = temp_dir / "template.djx"
+        djx.write_text("<h1>{{ title }}</h1>")
+        result1 = page_instance.render(page_file, title="First")
+        assert "First" in result1
+        djx.write_text("<h2>{{ title }}</h2>")
+        result2 = page_instance.render(page_file, title="Second")
+        assert "<h2>Second</h2>" in result2
+
+    def test_record_template_source_mtimes_empty_paths(
+        self, page_instance, temp_dir
+    ) -> None:
+        """_record_template_source_mtimes returns early when no source paths."""
+        page_file = temp_dir / "page.py"
+        page_instance._record_template_source_mtimes(page_file)
+        assert page_file not in page_instance._template_source_mtimes
+
+    def test_is_template_stale_handles_oserror(self, page_instance, temp_dir) -> None:
+        """_is_template_stale catches OSError when stat() fails (e.g. file removed)."""
+        page_file = temp_dir / "page.py"
+        missing_path = temp_dir / "removed.djx"
+        page_instance._template_source_mtimes[page_file] = {missing_path: 1000.0}
+        assert page_instance._is_template_stale(page_file) is False
 
 
 class TestGlobalPageInstance:
@@ -1127,8 +1199,12 @@ class TestDjxTemplateLoader:
         pattern = page_instance.create_url_pattern("test", page_file, url_parser)
 
         assert pattern is not None
-        assert page_file in page_instance._template_registry
-        assert page_instance._template_registry[page_file] == expected_template
+        # Template is loaded lazily at first render, not at create_url_pattern
+        result = page_instance.render(page_file, title="Title", name="World")
+        expected_rendered = expected_template.replace("{{ title }}", "Title").replace(
+            "{{ name }}", "World"
+        )
+        assert expected_rendered in result
 
     def test_render_djx_template_with_context(self, page_instance, temp_dir) -> None:
         """Test rendering template.djx template with context."""
@@ -1337,6 +1413,8 @@ def render(request, **kwargs):
             assert pattern is not None
             assert pattern.name == expected_pattern_name
             if expected_template:
+                # Template is loaded lazily at first render
+                page_instance.render(page_file)
                 assert page_file in page_instance._template_registry
                 assert page_instance._template_registry[page_file] == expected_template
         else:
@@ -2484,7 +2562,9 @@ class TestLayoutIntegration:
         pattern = page_instance.create_url_pattern("test", page_file, url_parser)
 
         assert pattern is not None
-        assert page_file in page_instance._template_registry
+        # Template loaded lazily at first render
+        result = page_instance.render(page_file, title="Test")
+        assert "Test" in result
 
     def test_render_with_layout_inheritance(self, page_instance, temp_dir) -> None:
         """Test rendering with layout inheritance."""
@@ -2563,6 +2643,15 @@ class TestContextProcessors:
             processors = _get_context_processors()
             assert processors == []
 
+    def test_get_context_processors_next_pages_not_list(self, page_instance) -> None:
+        """When NEXT_PAGES is not a list, treat as no config."""
+        with (
+            patch("django.conf.settings.NEXT_PAGES", {}, create=True),
+            patch("django.conf.settings.TEMPLATES", [], create=True),
+        ):
+            processors = _get_context_processors()
+            assert processors == []
+
     def test_get_context_processors_no_context_processors(self, page_instance) -> None:
         """Test _get_context_processors with NEXT_PAGES config but no context_processors."""
         config = [{"BACKEND": "next.urls.FileRouterBackend", "OPTIONS": {}}]
@@ -2615,10 +2704,10 @@ class TestContextProcessors:
                 assert processors[0] == test_processor
                 assert processors[1] == auth_processor
 
-    def test_get_context_processors_explicit_overrides_inheritance(
+    def test_get_context_processors_merges_next_pages_and_templates(
         self, page_instance
     ) -> None:
-        """Test that explicit context_processors in NEXT_PAGES override TEMPLATES."""
+        """When both NEXT_PAGES and TEMPLATES set context_processors, both are merged (NEXT_PAGES first)."""
 
         def template_processor(request):
             return {"template_var": "template_value"}
@@ -2626,7 +2715,6 @@ class TestContextProcessors:
         def next_pages_processor(request):
             return {"next_var": "next_value"}
 
-        # TEMPLATES with context_processors
         templates_config = [
             {
                 "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -2637,8 +2725,6 @@ class TestContextProcessors:
                 },
             },
         ]
-
-        # NEXT_PAGES with explicit context_processors
         next_pages_config = [
             {
                 "BACKEND": "next.urls.FileRouterBackend",
@@ -2651,8 +2737,7 @@ class TestContextProcessors:
         ]
 
         with patch("next.pages.import_string") as mock_import:
-            mock_import.side_effect = [next_pages_processor]
-
+            mock_import.side_effect = [next_pages_processor, template_processor]
             with (
                 patch("django.conf.settings.TEMPLATES", templates_config, create=True),
                 patch(
@@ -2660,31 +2745,62 @@ class TestContextProcessors:
                 ),
             ):
                 processors = _get_context_processors()
-                # Should use NEXT_PAGES processors, not TEMPLATES
-                assert len(processors) == 1
+                assert len(processors) == 2
                 assert processors[0] == next_pages_processor
+                assert processors[1] == template_processor
 
-    def test_get_default_context_processors_with_empty_templates(
+    def test_get_context_processors_deduplicates_by_path(self, page_instance) -> None:
+        """Same path in NEXT_PAGES and TEMPLATES appears once (first occurrence wins)."""
+        shared_path = "test_app.context_processors.shared_processor"
+
+        def shared_processor(request):
+            return {"shared": True}
+
+        templates_config = [
+            {
+                "BACKEND": "django.template.backends.django.DjangoTemplates",
+                "OPTIONS": {"context_processors": [shared_path]},
+            },
+        ]
+        next_pages_config = [
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "OPTIONS": {"context_processors": [shared_path]},
+            },
+        ]
+        with (
+            patch("next.pages.import_string", return_value=shared_processor),
+            patch("django.conf.settings.TEMPLATES", templates_config, create=True),
+            patch("django.conf.settings.NEXT_PAGES", next_pages_config, create=True),
+        ):
+            processors = _get_context_processors()
+            assert len(processors) == 1
+            assert processors[0] == shared_processor
+
+    def test_get_context_processors_fallback_empty_templates(
         self, page_instance
     ) -> None:
-        """Test _get_default_context_processors with empty TEMPLATES config."""
-        # Test with empty list
-        with patch("django.conf.settings.TEMPLATES", [], create=True):
-            result = _get_default_context_processors()
+        """With empty TEMPLATES and no NEXT_PAGES processors, result is empty."""
+        with (
+            patch("django.conf.settings.TEMPLATES", [], create=True),
+            patch("django.conf.settings.NEXT_PAGES", [], create=True),
+        ):
+            result = _get_context_processors()
             assert result == []
 
-    def test_get_default_context_processors_with_non_list_context_processors(
-        self, page_instance
-    ) -> None:
-        """Test _get_default_context_processors when context_processors is not a list."""
+    def test_get_context_processors_fallback_non_list(self, page_instance) -> None:
+        """When TEMPLATES context_processors is not a list, fallback yields empty."""
         templates_config = [
             {
                 "BACKEND": "django.template.backends.django.DjangoTemplates",
                 "OPTIONS": {"context_processors": "not_a_list"},
             }
         ]
-        with patch("django.conf.settings.TEMPLATES", templates_config, create=True):
-            result = _get_default_context_processors()
+        with (
+            patch("django.conf.settings.TEMPLATES", templates_config, create=True),
+            patch("django.conf.settings.NEXT_PAGES", [], create=True),
+        ):
+            result = _get_context_processors()
             assert result == []
 
     def test_get_context_processors_with_valid_processors(self, page_instance) -> None:
@@ -2906,6 +3022,25 @@ class TestLoadPythonModule:
         result = _load_python_module(nonexistent_file)
         assert result is None
 
+    def test_load_python_module_no_spec_returns_none(self, temp_dir) -> None:
+        """Test _load_python_module when spec_from_file_location returns None."""
+        valid_file = temp_dir / "page.py"
+        valid_file.write_text("x = 1")
+        with patch("importlib.util.spec_from_file_location", return_value=None):
+            result = _load_python_module(valid_file)
+        assert result is None
+
+    def test_load_python_module_valid_file_returns_module(self, temp_dir) -> None:
+        """Test _load_python_module with valid Python file returns the module."""
+        valid_file = temp_dir / "page.py"
+        valid_file.write_text("x = 42\ntemplate = '<p>{{ x }}</p>'")
+
+        result = _load_python_module(valid_file)
+        assert result is not None
+        assert hasattr(result, "x")
+        assert result.x == 42
+        assert hasattr(result, "template")
+
 
 class TestPageCreateUrlPattern:
     """Test Page create_url_pattern functionality."""
@@ -2951,3 +3086,155 @@ class TestPageCreateUrlPattern:
             clean_name,
         )
         assert result is None
+
+
+class TestGetLayoutDjxPathsForWatch:
+    """Tests for get_layout_djx_paths_for_watch()."""
+
+    def test_returns_layout_djx_paths_under_pages_dirs(self, tmp_path) -> None:
+        """Returns resolved paths of all layout.djx under given pages dirs."""
+        (tmp_path / "a").mkdir()
+        (tmp_path / "a" / "layout.djx").write_text("<div>a</div>")
+        (tmp_path / "a" / "b").mkdir()
+        (tmp_path / "a" / "b" / "layout.djx").write_text("<div>b</div>")
+        with patch("next.urls.get_pages_directories_for_watch") as mock_watch:
+            mock_watch.return_value = [tmp_path]
+            result = get_layout_djx_paths_for_watch()
+        assert len(result) == 2
+        parent_names = {p.parent.name for p in result}
+        assert parent_names == {"a", "b"}
+        assert all(p.name == "layout.djx" for p in result)
+
+    def test_returns_empty_when_no_layout_djx(self, tmp_path) -> None:
+        """Returns empty set when no layout.djx under pages dirs."""
+        with patch("next.urls.get_pages_directories_for_watch") as mock_watch:
+            mock_watch.return_value = [tmp_path]
+            result = get_layout_djx_paths_for_watch()
+        assert result == set()
+
+    def test_swallows_oserror_on_rglob_layout(self, tmp_path) -> None:
+        """When rglob raises OSError (e.g. permission), log and return partial result."""
+        with (
+            patch("next.urls.get_pages_directories_for_watch") as mock_watch,
+            patch.object(Path, "rglob", side_effect=OSError(13, "Permission denied")),
+        ):
+            mock_watch.return_value = [tmp_path]
+            result = get_layout_djx_paths_for_watch()
+        assert result == set()
+
+
+class TestGetTemplateDjxPathsForWatch:
+    """Tests for get_template_djx_paths_for_watch()."""
+
+    def test_returns_template_djx_paths_under_pages_dirs(self, tmp_path) -> None:
+        """Returns resolved paths of all template.djx under given pages dirs."""
+        (tmp_path / "x").mkdir()
+        (tmp_path / "x" / "template.djx").write_text("x")
+        (tmp_path / "x" / "y").mkdir()
+        (tmp_path / "x" / "y" / "template.djx").write_text("y")
+        with patch("next.urls.get_pages_directories_for_watch") as mock_watch:
+            mock_watch.return_value = [tmp_path]
+            result = get_template_djx_paths_for_watch()
+        assert len(result) == 2
+        assert all(p.name == "template.djx" for p in result)
+        parent_names = {p.parent.name for p in result}
+        assert parent_names == {"x", "y"}
+
+    def test_returns_empty_when_no_template_djx(self, tmp_path) -> None:
+        """Returns empty set when no template.djx under pages dirs."""
+        with patch("next.urls.get_pages_directories_for_watch") as mock_watch:
+            mock_watch.return_value = [tmp_path]
+            result = get_template_djx_paths_for_watch()
+        assert result == set()
+
+    def test_swallows_oserror_on_rglob_template(self, tmp_path) -> None:
+        """When rglob raises OSError (e.g. permission), log and return partial result."""
+        with (
+            patch("next.urls.get_pages_directories_for_watch") as mock_watch,
+            patch.object(Path, "rglob", side_effect=OSError(13, "Permission denied")),
+        ):
+            mock_watch.return_value = [tmp_path]
+            result = get_template_djx_paths_for_watch()
+        assert result == set()
+
+
+class TestLayoutTemplateWatchReload:
+    """Tests that NextStatReloader triggers reload when layout/template set changes."""
+
+    def test_tick_notify_when_layout_set_grows(self) -> None:
+        """When a new layout.djx appears, notify_file_changed is called."""
+        reloader = NextStatReloader()
+        new_layout = Path("/fake/pages/simple/layout.djx").resolve()
+        call_count = [0]
+
+        def layout_side_effect():
+            call_count[0] += 1
+            return set() if call_count[0] == 1 else {new_layout}
+
+        with (
+            patch("next.utils.get_pages_directories_for_watch", return_value=[]),
+            patch("next.utils._scan_pages_directory", return_value=iter([])),
+            patch(
+                "next.utils.get_layout_djx_paths_for_watch",
+                side_effect=layout_side_effect,
+            ),
+            patch("next.utils.get_template_djx_paths_for_watch", return_value=set()),
+            patch.object(reloader, "snapshot_files", return_value=iter([])),
+            patch.object(reloader, "notify_file_changed") as mock_notify,
+        ):
+            gen = reloader.tick()
+            next(gen)
+            next(gen)
+            mock_notify.assert_called_once_with(new_layout)
+
+    def test_tick_notify_when_layout_set_shrinks(self) -> None:
+        """When a layout.djx is deleted, notify_file_changed is called."""
+        reloader = NextStatReloader()
+        deleted_layout = Path("/fake/pages/simple/layout.djx").resolve()
+        call_count = [0]
+
+        def layout_side_effect():
+            call_count[0] += 1
+            return {deleted_layout} if call_count[0] == 1 else set()
+
+        with (
+            patch("next.utils.get_pages_directories_for_watch", return_value=[]),
+            patch("next.utils._scan_pages_directory", return_value=iter([])),
+            patch(
+                "next.utils.get_layout_djx_paths_for_watch",
+                side_effect=layout_side_effect,
+            ),
+            patch("next.utils.get_template_djx_paths_for_watch", return_value=set()),
+            patch.object(reloader, "snapshot_files", return_value=iter([])),
+            patch.object(reloader, "notify_file_changed") as mock_notify,
+        ):
+            gen = reloader.tick()
+            next(gen)
+            next(gen)
+            mock_notify.assert_called_once_with(deleted_layout)
+
+    def test_tick_notify_when_template_set_shrinks(self) -> None:
+        """When a template.djx is deleted, notify_file_changed is called."""
+        reloader = NextStatReloader()
+        deleted_template = Path("/fake/pages/simple/template.djx").resolve()
+        call_count = [0]
+
+        def template_side_effect():
+            call_count[0] += 1
+            return {deleted_template} if call_count[0] == 1 else set()
+
+        with (
+            patch("next.utils.get_pages_directories_for_watch", return_value=[]),
+            patch("next.utils._scan_pages_directory", return_value=iter([])),
+            patch("next.utils.get_layout_djx_paths_for_watch", return_value=set()),
+            patch(
+                "next.utils.get_template_djx_paths_for_watch",
+                side_effect=template_side_effect,
+            ),
+            patch.object(reloader, "snapshot_files", return_value=iter([])),
+            patch.object(reloader, "notify_file_changed") as mock_notify,
+        ):
+            gen = reloader.tick()
+            next(gen)
+            next(gen)
+            mock_notify.assert_called_once_with(deleted_template)

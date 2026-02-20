@@ -11,6 +11,8 @@ from next.urls import (
     RouterBackend,
     RouterFactory,
     RouterManager,
+    _scan_pages_directory,
+    get_pages_directories_for_watch,
     router_manager,
     urlpatterns,
 )
@@ -1079,36 +1081,23 @@ class TestGlobalInstances:
         assert "blog/post" in url_paths
 
     def test_create_url_pattern_with_template_attribute(self) -> None:
-        """Test _create_url_pattern when module has template attribute (lines 192-200)."""
+        """create_url_pattern returns a pattern when module has template attribute."""
         router = FileRouterBackend()
 
-        # create a temporary file with template attribute
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write('template = "Hello {{ name }}!"')
             temp_file = Path(f.name)
 
         try:
-            with (
-                patch("next.urls.page.register_template") as mock_register,
-                patch("next.urls.page.render", return_value="Hello World!"),
-            ):
-                pattern = page.create_url_pattern(
-                    "test",
-                    temp_file,
-                    router._url_parser,
-                )
-
-                # verify that page.register_template was called
-                mock_register.assert_called_once_with(
-                    temp_file,
-                    "Hello {{ name }}!",
-                )
-
-                # verify that a URLPattern was returned
-                assert pattern is not None
-                assert hasattr(pattern, "callback")
-                assert hasattr(pattern, "name")
-                assert pattern.name == "page_test"
+            pattern = page.create_url_pattern(
+                "test",
+                temp_file,
+                router._url_parser,
+            )
+            assert pattern is not None
+            assert hasattr(pattern, "callback")
+            assert hasattr(pattern, "name")
+            assert pattern.name == "page_test"
         finally:
             temp_file.unlink()
 
@@ -1279,3 +1268,91 @@ class TestGlobalInstances:
                 router._url_parser,
             )
             assert pattern is None
+
+
+class TestGetPagesDirectoriesForWatch:
+    """Tests for get_pages_directories_for_watch()."""
+
+    def test_returns_empty_when_config_not_list(self, settings) -> None:
+        """When NEXT_PAGES is not a list, returns []."""
+        settings.NEXT_PAGES = {}
+        assert get_pages_directories_for_watch() == []
+
+    def test_skips_non_dict_config(self, settings) -> None:
+        """List entries that are not dicts are skipped."""
+        settings.NEXT_PAGES = ["not a dict", None]
+        assert get_pages_directories_for_watch() == []
+
+    def test_swallows_backend_creation_error(self, settings) -> None:
+        """When create_backend raises, entry is skipped and iteration continues."""
+        settings.NEXT_PAGES = [
+            {"BACKEND": "nonexistent.Backend"},
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "APP_DIRS": False,
+                "OPTIONS": {
+                    "BASE_DIR": str(Path(__file__).parent.parent / "tests" / "pages")
+                },
+            },
+        ]
+        result = get_pages_directories_for_watch()
+        # First config raises and is skipped; second may add paths depending on env
+        assert isinstance(result, list)
+
+    def test_skips_non_file_router_backend(self, settings) -> None:
+        """When backend is not FileRouterBackend, its paths are not added."""
+        with patch("next.urls.RouterFactory.create_backend") as mock_create:
+            mock_backend = Mock(spec=RouterBackend)
+            mock_backend._get_root_pages_paths = Mock(return_value=[])
+            mock_backend._get_installed_apps = Mock(return_value=[])
+            mock_create.return_value = mock_backend
+            settings.NEXT_PAGES = [{"BACKEND": "other.Backend"}]
+            assert get_pages_directories_for_watch() == []
+
+    def test_includes_root_and_app_paths_from_backend(self, settings, tmp_path) -> None:
+        """Backend root paths and app pages paths are both included."""
+        app_pages = tmp_path / "myapp_pages"
+        app_pages.mkdir()
+        with patch("next.urls.RouterFactory.create_backend") as mock_create:
+            mock_backend = Mock(spec=FileRouterBackend)
+            mock_backend._get_root_pages_paths = Mock(
+                return_value=[tmp_path / "root_pages"]
+            )
+            mock_backend._get_installed_apps = Mock(return_value=["myapp"])
+            mock_backend._get_app_pages_path = Mock(return_value=app_pages)
+            mock_create.return_value = mock_backend
+            settings.NEXT_PAGES = [{"BACKEND": "next.urls.FileRouterBackend"}]
+            result = get_pages_directories_for_watch()
+            assert (tmp_path / "root_pages").resolve() in result
+            assert app_pages.resolve() in result
+
+
+class TestScanPagesDirectory:
+    """Tests for module-level _scan_pages_directory()."""
+
+    def test_oserror_on_iterdir_returns_nothing(self, tmp_path) -> None:
+        """When iterdir() raises OSError, yields nothing."""
+        with patch.object(Path, "iterdir", side_effect=OSError):
+            result = list(_scan_pages_directory(tmp_path))
+        assert result == []
+
+    def test_virtual_page_template_djx_only(self, tmp_path) -> None:
+        """Directory with template.djx but no page.py yields virtual page."""
+        (tmp_path / "template.djx").write_text("<h1>Hi</h1>")
+        result = list(_scan_pages_directory(tmp_path))
+        assert len(result) == 1
+        url_path, file_path = result[0]
+        assert url_path == ""
+        assert file_path.name == "page.py"
+
+    def test_scan_recursive_with_subdir_and_page_py(self, tmp_path) -> None:
+        """Recursively yields page.py in dirs and subdirs."""
+        (tmp_path / "page.py").write_text("x = 1")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "page.py").write_text("y = 2")
+        result = list(_scan_pages_directory(tmp_path))
+        assert len(result) == 2
+        url_paths = {r[0] for r in result}
+        assert "" in url_paths
+        assert "sub" in url_paths

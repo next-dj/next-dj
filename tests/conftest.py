@@ -52,5 +52,17 @@ if not settings.configured:
         SECRET_KEY="test-secret-key",  # noqa: S106
         USE_TZ=True,
         TIME_ZONE="UTC",
+        NEXT_PAGES=[
+            {
+                "BACKEND": "next.urls.FileRouterBackend",
+                "APP_DIRS": False,
+                "OPTIONS": {"PAGES_DIR": str(project_root / "tests" / "pages")},
+            },
+        ],
     )
+    # Register form actions from test_forms before URLconf is loaded (django.setup()
+    # loads next.urls and builds urlpatterns; actions must be in form_action_manager
+    # by then so that the form_action URL pattern is included).
+    import tests.test_forms  # noqa: F401
+
     django.setup()
