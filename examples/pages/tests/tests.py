@@ -86,6 +86,7 @@ def test_page_content_matches_expected(client) -> None:
         "check_duplicate_url_parameters",
         "check_missing_page_content",
     ],
+    ids=["duplicate_params", "missing_content"],
 )
 def test_checks(check_function) -> None:
     """Test next-dj checks."""

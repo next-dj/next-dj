@@ -73,13 +73,6 @@ def layout_manager():
 
 
 @pytest.fixture()
-def temp_dir():
-    """Create a temporary directory for testing."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        yield Path(temp_dir)
-
-
-@pytest.fixture()
 def mock_frame():
     """Mock inspect.currentframe for testing."""
     with patch("next.pages.inspect.currentframe") as mock_frame:
@@ -149,6 +142,7 @@ class TestPage:
             ("without_key", None, "f_back.f_back"),
             ("without_parentheses", None, "f_back.f_back"),
         ],
+        ids=["with_key", "without_key", "without_parentheses"],
     )
     def test_context_decorator_variations(
         self,
@@ -346,10 +340,10 @@ class TestPage:
         assert result1 == "Page 1: First Page"
         assert result2 == "Page 2: Second Page"
 
-    def test_render_with_inherited_context(self, page_instance, temp_dir) -> None:
+    def test_render_with_inherited_context(self, page_instance, tmp_path) -> None:
         """Test render method with inherited context from layout directories."""
         # create layout structure
-        layout_dir = temp_dir / "layout_dir"
+        layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
@@ -385,11 +379,11 @@ class TestPage:
         assert "Child page: inherited_value" in result
 
     def test_render_with_inherited_context_override(
-        self, page_instance, temp_dir
+        self, page_instance, tmp_path
     ) -> None:
         """Test that child page context overrides inherited context."""
         # create layout structure
-        layout_dir = temp_dir / "layout_dir"
+        layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
@@ -457,50 +451,50 @@ class TestPage:
 class TestPageHasTemplateAndLazyRender:
     """Tests for Page.has_template and lazy template loading in render()."""
 
-    def test_has_template_true_for_djx(self, page_instance, temp_dir) -> None:
+    def test_has_template_true_for_djx(self, page_instance, tmp_path) -> None:
         """has_template returns True when template.djx exists."""
-        (temp_dir / "template.djx").write_text("<h1>Hi</h1>")
-        page_file = temp_dir / "page.py"
+        (tmp_path / "template.djx").write_text("<h1>Hi</h1>")
+        page_file = tmp_path / "page.py"
         page_file.write_text("x = 1")
         assert page_instance.has_template(page_file, module=None) is True
 
     def test_has_template_true_for_module_with_template_attr(
-        self, page_instance, temp_dir
+        self, page_instance, tmp_path
     ) -> None:
         """has_template returns True when module has template attribute."""
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text('template = "<p>{{ x }}</p>"')
         module = _load_python_module(page_file)
         assert module is not None
         assert page_instance.has_template(page_file, module) is True
 
-    def test_has_template_false_when_no_template(self, page_instance, temp_dir) -> None:
+    def test_has_template_false_when_no_template(self, page_instance, tmp_path) -> None:
         """has_template returns False when no template.djx and no template attr."""
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("x = 1")
         module = _load_python_module(page_file)
         assert page_instance.has_template(page_file, module) is False
         assert page_instance.has_template(page_file, module=None) is False
 
     def test_render_loads_template_when_not_in_registry(
-        self, page_instance, temp_dir
+        self, page_instance, tmp_path
     ) -> None:
         """render() calls _load_template_for_file when file_path not in registry."""
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("y = 2")
-        (temp_dir / "template.djx").write_text("<h1>{{ title }}</h1>")
+        (tmp_path / "template.djx").write_text("<h1>{{ title }}</h1>")
         assert page_file not in page_instance._template_registry
         result = page_instance.render(page_file, title="Lazy")
         assert page_file in page_instance._template_registry
         assert "Lazy" in result
 
     def test_render_invalidates_cache_when_template_stale(
-        self, page_instance, temp_dir
+        self, page_instance, tmp_path
     ) -> None:
         """When source .djx mtime changes, render() reloads template."""
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("z = 3")
-        djx = temp_dir / "template.djx"
+        djx = tmp_path / "template.djx"
         djx.write_text("<h1>{{ title }}</h1>")
         result1 = page_instance.render(page_file, title="First")
         assert "First" in result1
@@ -509,17 +503,17 @@ class TestPageHasTemplateAndLazyRender:
         assert "<h2>Second</h2>" in result2
 
     def test_record_template_source_mtimes_empty_paths(
-        self, page_instance, temp_dir
+        self, page_instance, tmp_path
     ) -> None:
         """_record_template_source_mtimes returns early when no source paths."""
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_instance._record_template_source_mtimes(page_file)
         assert page_file not in page_instance._template_source_mtimes
 
-    def test_is_template_stale_handles_oserror(self, page_instance, temp_dir) -> None:
+    def test_is_template_stale_handles_oserror(self, page_instance, tmp_path) -> None:
         """_is_template_stale catches OSError when stat() fails (e.g. file removed)."""
-        page_file = temp_dir / "page.py"
-        missing_path = temp_dir / "removed.djx"
+        page_file = tmp_path / "page.py"
+        missing_path = tmp_path / "removed.djx"
         page_instance._template_source_mtimes[page_file] = {missing_path: 1000.0}
         assert page_instance._is_template_stale(page_file) is False
 
@@ -660,6 +654,14 @@ class TestURLPatternParser:
             ),
             ("", "", {}),
         ],
+        ids=[
+            "simple",
+            "user_id",
+            "user_int_id",
+            "profile_args",
+            "user_id_posts_args",
+            "empty",
+        ],
     )
     def test_parse_url_pattern_variations(
         self,
@@ -790,19 +792,19 @@ class TestURLPatternParser:
         assert clean_name == expected_name
         assert ":" not in clean_name
 
-    def test_scan_pages_directory_virtual_view_detection(self, temp_dir) -> None:
+    def test_scan_pages_directory_virtual_view_detection(self, tmp_path) -> None:
         """Test _scan_pages_directory detects virtual views (template.djx without page.py)."""
         # create a FileRouterBackend instance
         backend = FileRouterBackend()
 
         # create a directory structure with template.djx but no page.py
-        virtual_dir = temp_dir / "virtual"
+        virtual_dir = tmp_path / "virtual"
         virtual_dir.mkdir()
         template_file = virtual_dir / "template.djx"
         template_file.write_text("<h1>Virtual Page</h1>")
 
         # scan the directory using the instance method
-        results = list(backend._scan_pages_directory(temp_dir))
+        results = list(backend._scan_pages_directory(tmp_path))
 
         # should find the virtual page
         assert len(results) == 1
@@ -821,17 +823,18 @@ class TestPythonTemplateLoader:
             ('print("test")', False, None),
             ("invalid python syntax !!!", False, None),
         ],
+        ids=["template_attr", "no_template_attr", "invalid_syntax"],
     )
     def test_can_load_and_load_template(
         self,
         python_template_loader,
-        temp_dir,
+        tmp_path,
         file_content,
         expected_can_load,
         expected_load_result,
     ) -> None:
         """Test can_load and load_template with different file contents."""
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text(file_content)
 
         can_load_result = python_template_loader.can_load(page_file)
@@ -931,10 +934,10 @@ class TestContextManager:
         assert func == test_func
         assert inherit is True
 
-    def test_collect_inherited_context(self, context_manager, temp_dir) -> None:
+    def test_collect_inherited_context(self, context_manager, tmp_path) -> None:
         """Test collecting inherited context from layout directories."""
         # create layout structure
-        layout_dir = temp_dir / "layout_dir"
+        layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
@@ -967,11 +970,11 @@ class TestContextManager:
         assert result["layout_var"] == "layout_value"
 
     def test_collect_inherited_context_multiple_levels(
-        self, context_manager, temp_dir
+        self, context_manager, tmp_path
     ) -> None:
         """Test collecting inherited context from multiple layout levels."""
         # create nested layout structure
-        root_dir = temp_dir / "root"
+        root_dir = tmp_path / "root"
         root_dir.mkdir()
         root_layout = root_dir / "layout.djx"
         root_layout.write_text(
@@ -1020,18 +1023,18 @@ class TestContextManager:
         assert result["sub_var"] == "sub_value"
 
     def test_collect_inherited_context_no_layout(
-        self, context_manager, temp_dir
+        self, context_manager, tmp_path
     ) -> None:
         """Test collecting context when no layout files exist."""
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         result = context_manager.collect_context(page_file)
         assert result == {}
 
     def test_collect_inherited_context_no_page_py(
-        self, context_manager, temp_dir
+        self, context_manager, tmp_path
     ) -> None:
         """Test collecting context when layout.djx exists but no page.py."""
-        layout_dir = temp_dir / "layout_dir"
+        layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
@@ -1046,11 +1049,11 @@ class TestContextManager:
         assert result == {}
 
     def test_collect_inherited_context_inherit_false(
-        self, context_manager, temp_dir
+        self, context_manager, tmp_path
     ) -> None:
         """Test that context with inherit_context=False is not inherited."""
         # create layout structure
-        layout_dir = temp_dir / "layout_dir"
+        layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
@@ -1082,11 +1085,11 @@ class TestContextManager:
         assert "layout_var" not in result
 
     def test_collect_inherited_context_dict_return(
-        self, context_manager, temp_dir
+        self, context_manager, tmp_path
     ) -> None:
         """Test collecting inherited context with dict return (key=None)."""
         # create layout structure
-        layout_dir = temp_dir / "layout_dir"
+        layout_dir = tmp_path / "layout_dir"
         layout_dir.mkdir()
         layout_file = layout_dir / "layout.djx"
         layout_file.write_text(
@@ -1138,19 +1141,19 @@ class TestDjxTemplateLoader:
     def test_load_djx_template(
         self,
         djx_template_loader,
-        temp_dir,
+        tmp_path,
         create_djx_file,
         djx_content,
         expected_result,
     ) -> None:
         """Test loading of template.djx template with different scenarios."""
         # create page.py file
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text('print("test")')
 
         # create template.djx file if needed
         if create_djx_file:
-            djx_file = temp_dir / "template.djx"
+            djx_file = tmp_path / "template.djx"
             djx_file.write_text(djx_content)
 
         # test loading
@@ -1180,7 +1183,7 @@ class TestDjxTemplateLoader:
     def test_create_url_pattern_template_scenarios(
         self,
         page_instance,
-        temp_dir,
+        tmp_path,
         url_parser,
         test_case,
         page_content,
@@ -1189,11 +1192,11 @@ class TestDjxTemplateLoader:
         expected_template,
     ) -> None:
         """Test create_url_pattern with different template scenarios."""
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text(page_content)
 
         if create_djx:
-            djx_file = temp_dir / "template.djx"
+            djx_file = tmp_path / "template.djx"
             djx_file.write_text(djx_content)
 
         pattern = page_instance.create_url_pattern("test", page_file, url_parser)
@@ -1206,14 +1209,14 @@ class TestDjxTemplateLoader:
         )
         assert expected_rendered in result
 
-    def test_render_djx_template_with_context(self, page_instance, temp_dir) -> None:
+    def test_render_djx_template_with_context(self, page_instance, tmp_path) -> None:
         """Test rendering template.djx template with context."""
         # create page.py file
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text('print("test")')
 
         # create template.djx file
-        djx_file = temp_dir / "template.djx"
+        djx_file = tmp_path / "template.djx"
         djx_content = "<h1>{{ title }}</h1><p>Hello {{ name }}!</p>"
         djx_file.write_text(djx_content)
 
@@ -1230,15 +1233,15 @@ class TestDjxTemplateLoader:
         assert result == "<h1>Welcome</h1><p>Hello World!</p>"
 
     def test_render_djx_template_with_django_tags(
-        self, page_instance, temp_dir
+        self, page_instance, tmp_path
     ) -> None:
         """Test rendering template.djx template with Django tags."""
         # create page.py file
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text('print("test")')
 
         # create template.djx file with Django tags
-        djx_file = temp_dir / "template.djx"
+        djx_file = tmp_path / "template.djx"
         djx_content = """
         <h1>{{ title }}</h1>
         {% if items %}
@@ -1272,10 +1275,10 @@ class TestDjxTemplateLoader:
         assert "Banana" in result
         assert "<li>" in result
 
-    def test_djx_template_with_context_functions(self, page_instance, temp_dir) -> None:
+    def test_djx_template_with_context_functions(self, page_instance, tmp_path) -> None:
         """Test template.djx template with context functions."""
         # create page.py file with context function
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("""
 from next.pages import context
 
@@ -1288,7 +1291,7 @@ def get_landing_data(*args, **kwargs):
         """)
 
         # create template.djx file
-        djx_file = temp_dir / "template.djx"
+        djx_file = tmp_path / "template.djx"
         djx_content = "<h1>{{ landing.title }}</h1><p>{{ landing.description }}</p>"
         djx_file.write_text(djx_content)
 
@@ -1385,7 +1388,7 @@ def render(request, **kwargs):
     def test_create_url_pattern_scenarios(
         self,
         page_instance,
-        temp_dir,
+        tmp_path,
         url_parser,
         test_case,
         page_content,
@@ -1396,7 +1399,7 @@ def render(request, **kwargs):
         expected_template,
     ) -> None:
         """Test various create_url_pattern scenarios."""
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
 
         # create page.py file if content provided
         if page_content:
@@ -1404,7 +1407,7 @@ def render(request, **kwargs):
 
         # create template.djx file if needed
         if create_djx:
-            djx_file = temp_dir / "template.djx"
+            djx_file = tmp_path / "template.djx"
             djx_file.write_text(djx_content)
 
         pattern = page_instance.create_url_pattern(url_pattern, page_file, url_parser)
@@ -1423,11 +1426,11 @@ def render(request, **kwargs):
     def test_create_url_pattern_render_function_fallback(
         self,
         page_instance,
-        temp_dir,
+        tmp_path,
         url_parser,
     ) -> None:
         """Test that render function is used as fallback when no template is found."""
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("""
 from django.http import HttpResponse
 
@@ -1443,12 +1446,12 @@ def render(request, **kwargs):
     def test_create_url_pattern_virtual_view_rendering(
         self,
         page_instance,
-        temp_dir,
+        tmp_path,
         url_parser,
     ) -> None:
         """Test that virtual view can be rendered with context."""
-        page_file = temp_dir / "page.py"
-        djx_file = temp_dir / "template.djx"
+        page_file = tmp_path / "page.py"
+        djx_file = tmp_path / "template.djx"
         djx_content = "<h1>{{ title }}</h1><p>Hello {{ name }}!</p>"
         djx_file.write_text(djx_content)
 
@@ -1463,12 +1466,12 @@ def render(request, **kwargs):
     def test_create_url_pattern_with_context_functions(
         self,
         page_instance,
-        temp_dir,
+        tmp_path,
         url_parser,
     ) -> None:
         """Test create_url_pattern with context functions for virtual view."""
-        page_file = temp_dir / "page.py"
-        djx_file = temp_dir / "template.djx"
+        page_file = tmp_path / "page.py"
+        djx_file = tmp_path / "template.djx"
         djx_content = "<h1>{{ title }}</h1><p>{{ description }}</p>"
         djx_file.write_text(djx_content)
 
@@ -1516,18 +1519,18 @@ def render(request, **kwargs):
     )
     def test_has_template_or_djx(
         self,
-        temp_dir,
+        tmp_path,
         page_content,
         create_djx,
         djx_content,
         expected_result,
     ) -> None:
         """Test _has_template_or_djx with different scenarios."""
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text(page_content)
 
         if create_djx:
-            djx_file = temp_dir / "template.djx"
+            djx_file = tmp_path / "template.djx"
             djx_file.write_text(djx_content)
 
         result = _has_template_or_djx(page_file)
@@ -1537,16 +1540,16 @@ def render(request, **kwargs):
 class TestLayoutChecks:
     """Test cases for layout checks functionality."""
 
-    def test_check_layout_templates_with_block(self, temp_dir) -> None:
+    def test_check_layout_templates_with_block(self, tmp_path) -> None:
         """Test check_layout_templates with proper template block."""
         # create layout file with proper block
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_file.write_text(
             "<html>{% block template %}{% endblock template %}</html>",
         )
 
         # create page file
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("")
 
         with (
@@ -1559,19 +1562,19 @@ class TestLayoutChecks:
             mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = temp_dir
+            mock_get_pages_dir.return_value = tmp_path
 
             warnings = check_layout_templates(None)
             assert len(warnings) == 0
 
-    def test_check_layout_templates_without_block(self, temp_dir) -> None:
+    def test_check_layout_templates_without_block(self, tmp_path) -> None:
         """Test check_layout_templates without template block."""
         # create layout file without proper block
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_file.write_text("<html><body>No template block</body></html>")
 
         # create page file
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("")
 
         with (
@@ -1584,13 +1587,13 @@ class TestLayoutChecks:
             mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = temp_dir
+            mock_get_pages_dir.return_value = tmp_path
 
             warnings = check_layout_templates(None)
             assert len(warnings) == 1
             assert "does not contain required {% block template %}" in warnings[0].msg
 
-    def test_check_layout_templates_disabled(self, temp_dir) -> None:
+    def test_check_layout_templates_disabled(self, tmp_path) -> None:
         """Test check_layout_templates when disabled in settings."""
         with patch("next.checks.getattr") as mock_getattr:
             mock_getattr.side_effect = (
@@ -1665,7 +1668,7 @@ class TestMissingPageContentChecks:
     )
     def test_check_missing_page_content_scenarios(
         self,
-        temp_dir,
+        tmp_path,
         test_case,
         page_content,
         create_template_djx,
@@ -1676,17 +1679,17 @@ class TestMissingPageContentChecks:
     ) -> None:
         """Test check_missing_page_content with different content scenarios."""
         # create page file with specified content
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text(page_content)
 
         # create template.djx file if needed for this test case
         if create_template_djx:
-            template_djx = temp_dir / "template.djx"
+            template_djx = tmp_path / "template.djx"
             template_djx.write_text(template_djx_content)
 
         # create layout.djx file if needed for this test case
         if create_layout_djx:
-            layout_djx = temp_dir / "layout.djx"
+            layout_djx = tmp_path / "layout.djx"
             layout_djx.write_text(layout_djx_content)
 
         # mock the router manager and pages directory for testing
@@ -1700,7 +1703,7 @@ class TestMissingPageContentChecks:
             mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = temp_dir
+            mock_get_pages_dir.return_value = tmp_path
 
             # run the check and verify the expected number of warnings
             warnings = check_missing_page_content(None)
@@ -1710,7 +1713,7 @@ class TestMissingPageContentChecks:
             if expected_warnings > 0:
                 assert "has no content" in warnings[0].msg
 
-    def test_check_missing_page_content_disabled(self, temp_dir) -> None:
+    def test_check_missing_page_content_disabled(self, tmp_path) -> None:
         """Test check_missing_page_content when disabled in settings."""
         with patch("next.checks.getattr") as mock_getattr:
             mock_getattr.side_effect = (
@@ -1744,7 +1747,7 @@ class TestDuplicateUrlParametersChecks:
     )
     def test_check_duplicate_url_parameters_scenarios(
         self,
-        temp_dir,
+        tmp_path,
         test_case,
         url_patterns,
         expected_errors,
@@ -1752,7 +1755,7 @@ class TestDuplicateUrlParametersChecks:
     ) -> None:
         """Test check_duplicate_url_parameters with different URL pattern scenarios."""
         # create page file
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("")
 
         with (
@@ -1767,7 +1770,7 @@ class TestDuplicateUrlParametersChecks:
             mock_router._scan_pages_directory.return_value = [
                 (pattern, page_file) for pattern, _ in url_patterns
             ]
-            mock_get_pages_dir.return_value = temp_dir
+            mock_get_pages_dir.return_value = tmp_path
 
             errors = check_duplicate_url_parameters(None)
             assert len(errors) == expected_errors
@@ -1777,7 +1780,7 @@ class TestDuplicateUrlParametersChecks:
                 if "duplicate parameter names" in expected_error_msg:
                     assert "id" in errors[0].msg
 
-    def test_check_duplicate_url_parameters_disabled(self, temp_dir) -> None:
+    def test_check_duplicate_url_parameters_disabled(self, tmp_path) -> None:
         """Test check_duplicate_url_parameters when disabled in settings."""
         with patch("next.checks.getattr") as mock_getattr:
             mock_getattr.side_effect = (
@@ -1792,10 +1795,10 @@ class TestDuplicateUrlParametersChecks:
 class TestContextFunctionsChecks:
     """Test cases for context functions checks."""
 
-    def test_check_context_functions_valid_dict_return(self, temp_dir) -> None:
+    def test_check_context_functions_valid_dict_return(self, tmp_path) -> None:
         """Test check_context_functions with valid dict return."""
         # create page file with valid context function
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("""
 from next.pages import context
 
@@ -1814,7 +1817,7 @@ def get_context_data():
             mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = temp_dir
+            mock_get_pages_dir.return_value = tmp_path
 
             # mock context manager
             mock_context_manager = MagicMock()
@@ -1826,10 +1829,10 @@ def get_context_data():
             errors = check_context_functions(None)
             assert len(errors) == 0
 
-    def test_check_context_functions_invalid_return_type(self, temp_dir) -> None:
+    def test_check_context_functions_invalid_return_type(self, tmp_path) -> None:
         """Test check_context_functions with invalid return type."""
         # create page file with invalid context function
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("""
 from next.pages import context
 
@@ -1848,17 +1851,17 @@ def get_context_data():
             mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = temp_dir
+            mock_get_pages_dir.return_value = tmp_path
 
             errors = check_context_functions(None)
             assert len(errors) == 1
             assert "must return a dictionary" in errors[0].msg
             assert "str" in errors[0].msg
 
-    def test_check_context_functions_with_key_not_checked(self, temp_dir) -> None:
+    def test_check_context_functions_with_key_not_checked(self, tmp_path) -> None:
         """Test check_context_functions ignores functions with key."""
         # create page file with context function with key
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("""
 from next.pages import context
 
@@ -1877,7 +1880,7 @@ def get_context_data():
             mock_router.pages_dir = "pages"
             mock_router.app_dirs = True
             mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = temp_dir
+            mock_get_pages_dir.return_value = tmp_path
 
             # mock context manager
             mock_context_manager = MagicMock()
@@ -1889,7 +1892,7 @@ def get_context_data():
             errors = check_context_functions(None)
             assert len(errors) == 0
 
-    def test_check_context_functions_disabled(self, temp_dir) -> None:
+    def test_check_context_functions_disabled(self, tmp_path) -> None:
         """Test check_context_functions when disabled in settings."""
         with patch("next.checks.getattr") as mock_getattr:
             mock_getattr.side_effect = (
@@ -1912,10 +1915,11 @@ class TestLayoutTemplateLoader:
             (True, False, True),
             (False, False, False),
         ],
+        ids=["layout_and_template", "template_only", "layout_only", "neither"],
     )
     def test_can_load_with_layout_files(
         self,
-        temp_dir,
+        tmp_path,
         create_layout,
         create_template,
         expected_can_load,
@@ -1924,12 +1928,12 @@ class TestLayoutTemplateLoader:
         loader = LayoutTemplateLoader()
 
         # create nested directory structure
-        sub_dir = temp_dir / "sub" / "nested"
+        sub_dir = tmp_path / "sub" / "nested"
         sub_dir.mkdir(parents=True)
 
         # create layout.djx in parent directory if needed
         if create_layout:
-            layout_file = temp_dir / "layout.djx"
+            layout_file = tmp_path / "layout.djx"
             layout_file.write_text(
                 "<html><body>{% block template %}{% endblock template %}</body></html>",
             )
@@ -1945,12 +1949,12 @@ class TestLayoutTemplateLoader:
         result = loader.can_load(page_file)
         assert result is expected_can_load
 
-    def test_get_additional_layout_files_with_next_pages_config(self, temp_dir) -> None:
+    def test_get_additional_layout_files_with_next_pages_config(self, tmp_path) -> None:
         """Test _get_additional_layout_files with NEXT_PAGES configuration."""
         loader = LayoutTemplateLoader()
 
         # create layout file
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_file.write_text("layout content")
 
         # mock NEXT_PAGES configuration
@@ -1959,7 +1963,7 @@ class TestLayoutTemplateLoader:
                 "BACKEND": "next.urls.FileRouterBackend",
                 "APP_DIRS": False,
                 "OPTIONS": {
-                    "PAGES_DIR": str(temp_dir),
+                    "PAGES_DIR": str(tmp_path),
                 },
             },
         ]
@@ -2001,7 +2005,7 @@ class TestLayoutTemplateLoader:
     )
     def test_get_additional_layout_files_scenarios(
         self,
-        temp_dir,
+        tmp_path,
         test_case,
         config,
         expected_result,
@@ -2048,7 +2052,7 @@ class TestLayoutTemplateLoader:
     )
     def test_get_pages_dirs_for_config_scenarios(
         self,
-        temp_dir,
+        tmp_path,
         test_case,
         config,
         expected_list,
@@ -2057,13 +2061,13 @@ class TestLayoutTemplateLoader:
         loader = LayoutTemplateLoader()
 
         if test_case == "with_pages_dir":
-            config["OPTIONS"]["PAGES_DIR"] = str(temp_dir)
-            expected_list = [Path(temp_dir)]
+            config["OPTIONS"]["PAGES_DIR"] = str(tmp_path)
+            expected_list = [Path(tmp_path)]
 
         result = loader._get_pages_dirs_for_config(config)
         assert result == expected_list
 
-    def test_get_pages_dirs_for_config_pages_dirs_not_list(self, temp_dir) -> None:
+    def test_get_pages_dirs_for_config_pages_dirs_not_list(self, tmp_path) -> None:
         """Test _get_pages_dirs_for_config when PAGES_DIRS is not a list returns []."""
         loader = LayoutTemplateLoader()
         config = {
@@ -2072,13 +2076,13 @@ class TestLayoutTemplateLoader:
         result = loader._get_pages_dirs_for_config(config)
         assert result == []
 
-    def test_get_pages_dirs_for_config_pages_dirs_list(self, temp_dir) -> None:
+    def test_get_pages_dirs_for_config_pages_dirs_list(self, tmp_path) -> None:
         """Test _get_pages_dirs_for_config when PAGES_DIRS is a list returns paths."""
         loader = LayoutTemplateLoader()
-        config = {"OPTIONS": {"PAGES_DIRS": [str(temp_dir)]}}
+        config = {"OPTIONS": {"PAGES_DIRS": [str(tmp_path)]}}
         result = loader._get_pages_dirs_for_config(config)
         assert len(result) == 1
-        assert result[0] == Path(temp_dir)
+        assert result[0] == Path(tmp_path)
 
     @pytest.mark.parametrize(
         (
@@ -2114,7 +2118,7 @@ class TestLayoutTemplateLoader:
     )
     def test_wrap_in_template_block_scenarios(
         self,
-        temp_dir,
+        tmp_path,
         test_case,
         create_layout,
         create_template,
@@ -2126,34 +2130,34 @@ class TestLayoutTemplateLoader:
 
         # create layout file if needed
         if create_layout:
-            layout_file = temp_dir / "layout.djx"
+            layout_file = tmp_path / "layout.djx"
             layout_file.write_text("layout content")
 
         # create template file if needed
         if create_template:
-            template_file = temp_dir / "template.djx"
+            template_file = tmp_path / "template.djx"
             template_file.write_text(template_content)
 
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         result = loader._wrap_in_template_block(page_file)
 
         assert result == expected_result
 
     def test_find_layout_files_with_duplicate_additional_layouts(
-        self, temp_dir
+        self, tmp_path
     ) -> None:
         """Test _find_layout_files when additional layouts are already in local hierarchy."""
         loader = LayoutTemplateLoader()
 
         # create layout file
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_file.write_text("layout content")
 
         # create template file
-        template_file = temp_dir / "template.djx"
+        template_file = tmp_path / "template.djx"
         template_file.write_text("template content")
 
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
 
         # mock NEXT_PAGES configuration pointing to the same directory
         config = [
@@ -2161,7 +2165,7 @@ class TestLayoutTemplateLoader:
                 "BACKEND": "next.urls.FileRouterBackend",
                 "APP_DIRS": False,
                 "OPTIONS": {
-                    "PAGES_DIR": str(temp_dir),
+                    "PAGES_DIR": str(tmp_path),
                 },
             },
         ]
@@ -2174,12 +2178,12 @@ class TestLayoutTemplateLoader:
         assert len(result) == 1
         assert layout_file in result
 
-    def test_get_additional_layout_files_with_duplicate_layouts(self, temp_dir) -> None:
+    def test_get_additional_layout_files_with_duplicate_layouts(self, tmp_path) -> None:
         """Test _get_additional_layout_files with duplicate layout files."""
         loader = LayoutTemplateLoader()
 
         # create layout file
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_file.write_text("layout content")
 
         # mock NEXT_PAGES configuration with same directory twice
@@ -2188,14 +2192,14 @@ class TestLayoutTemplateLoader:
                 "BACKEND": "next.urls.FileRouterBackend",
                 "APP_DIRS": False,
                 "OPTIONS": {
-                    "PAGES_DIR": str(temp_dir),
+                    "PAGES_DIR": str(tmp_path),
                 },
             },
             {
                 "BACKEND": "next.urls.FileRouterBackend",
                 "APP_DIRS": False,
                 "OPTIONS": {
-                    "PAGES_DIR": str(temp_dir),
+                    "PAGES_DIR": str(tmp_path),
                 },
             },
         ]
@@ -2208,13 +2212,13 @@ class TestLayoutTemplateLoader:
         assert layout_file in result
 
     def test_find_layout_files_with_additional_layouts_already_present(
-        self, temp_dir
+        self, tmp_path
     ) -> None:
         """Test _find_layout_files when additional layouts are already in layout_files."""
         loader = LayoutTemplateLoader()
 
         # create layout file in parent directory (local hierarchy)
-        parent_dir = temp_dir / "parent"
+        parent_dir = tmp_path / "parent"
         parent_dir.mkdir()
         local_layout = parent_dir / "layout.djx"
         local_layout.write_text("local layout")
@@ -2247,23 +2251,23 @@ class TestLayoutTemplateLoader:
         assert local_layout in result
 
     def test_find_layout_files_with_different_additional_layouts(
-        self, temp_dir
+        self, tmp_path
     ) -> None:
         """Test _find_layout_files when additional layouts are different from local ones."""
         loader = LayoutTemplateLoader()
 
         # create local layout file
-        local_layout = temp_dir / "layout.djx"
+        local_layout = tmp_path / "layout.djx"
         local_layout.write_text("local layout")
 
         # create template file
-        template_file = temp_dir / "template.djx"
+        template_file = tmp_path / "template.djx"
         template_file.write_text("template content")
 
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
 
         # create additional layout in different directory
-        additional_dir = temp_dir / "additional"
+        additional_dir = tmp_path / "additional"
         additional_dir.mkdir()
         additional_layout = additional_dir / "layout.djx"
         additional_layout.write_text("additional layout")
@@ -2288,19 +2292,19 @@ class TestLayoutTemplateLoader:
         assert local_layout in result
         assert additional_layout in result
 
-    def test_load_template_with_single_layout(self, temp_dir) -> None:
+    def test_load_template_with_single_layout(self, tmp_path) -> None:
         """Test load_template with single layout file."""
         loader = LayoutTemplateLoader()
 
         # create layout.djx
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_content = (
             "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
         layout_file.write_text(layout_content)
 
         # create template.djx
-        sub_dir = temp_dir / "sub"
+        sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
         template_file = sub_dir / "template.djx"
         template_content = "<h1>Test Content</h1>"
@@ -2317,18 +2321,18 @@ class TestLayoutTemplateLoader:
         # should contain template block
         assert "{% block template %}" in result
 
-    def test_load_template_with_multiple_layouts(self, temp_dir) -> None:
+    def test_load_template_with_multiple_layouts(self, tmp_path) -> None:
         """Test load_template with multiple layout files in hierarchy."""
         loader = LayoutTemplateLoader()
 
         # create root layout
-        root_layout = temp_dir / "layout.djx"
+        root_layout = tmp_path / "layout.djx"
         root_layout.write_text(
             "<html><head><title>Root</title></head><body>{% block template %}{% endblock template %}</body></html>",
         )
 
         # create sub layout
-        sub_dir = temp_dir / "sub"
+        sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
         sub_layout = sub_dir / "layout.djx"
         sub_layout.write_text(
@@ -2353,18 +2357,18 @@ class TestLayoutTemplateLoader:
         # should contain template block
         assert "{% block template %}" in result
 
-    def test_load_template_without_template_djx(self, temp_dir) -> None:
+    def test_load_template_without_template_djx(self, tmp_path) -> None:
         """Test load_template when template.djx doesn't exist."""
         loader = LayoutTemplateLoader()
 
         # create layout.djx
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_file.write_text(
             "<html><body>{% block template %}{% endblock template %}</body></html>",
         )
 
         # create page.py without template.djx
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
 
         result = loader.load_template(page_file)
 
@@ -2375,14 +2379,14 @@ class TestLayoutTemplateLoader:
         # should contain empty template block
         assert "{% block template %}{% endblock template %}" in result
 
-    def test_load_template_layout_accepts_unnamed_endblock(self, temp_dir) -> None:
+    def test_load_template_layout_accepts_unnamed_endblock(self, tmp_path) -> None:
         """Compose works when layout uses {% endblock %} instead of {% endblock template %}."""
         loader = LayoutTemplateLoader()
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_file.write_text(
             "<html><body>{% block template %}{% endblock %}</body></html>",
         )
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         result = loader.load_template(page_file)
         assert result is not None
         assert "<html><body>" in result
@@ -2391,19 +2395,19 @@ class TestLayoutTemplateLoader:
         # default content uses named endblock; layout used unnamed
         assert "{% block template %}{% endblock template %}" in result
 
-    def test_find_layout_files(self, temp_dir) -> None:
+    def test_find_layout_files(self, tmp_path) -> None:
         """Test _find_layout_files method."""
         loader = LayoutTemplateLoader()
 
         # create nested structure with layouts
-        sub_dir = temp_dir / "sub" / "nested"
+        sub_dir = tmp_path / "sub" / "nested"
         sub_dir.mkdir(parents=True)
 
         # create layouts at different levels
-        root_layout = temp_dir / "layout.djx"
+        root_layout = tmp_path / "layout.djx"
         root_layout.write_text("root layout")
 
-        sub_layout = temp_dir / "sub" / "layout.djx"
+        sub_layout = tmp_path / "sub" / "layout.djx"
         sub_layout.write_text("sub layout")
 
         page_file = sub_dir / "page.py"
@@ -2414,16 +2418,16 @@ class TestLayoutTemplateLoader:
         assert sub_layout in layout_files  # closest first
         assert root_layout in layout_files
 
-    def test_compose_layout_hierarchy_exception_handling(self, temp_dir) -> None:
+    def test_compose_layout_hierarchy_exception_handling(self, tmp_path) -> None:
         """Test _compose_layout_hierarchy handles exceptions gracefully."""
         loader = LayoutTemplateLoader()
 
         # create a layout file that will cause an exception when read
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_file.write_text("test")
 
         # create template file
-        template_file = temp_dir / "template.djx"
+        template_file = tmp_path / "template.djx"
         template_file.write_text("test")
 
         # mock the read_text method to raise an exception
@@ -2434,12 +2438,12 @@ class TestLayoutTemplateLoader:
                 result == "test content"
             )  # should return original content when exception occurs
 
-    def test_load_template_no_layout_files(self, temp_dir) -> None:
+    def test_load_template_no_layout_files(self, tmp_path) -> None:
         """Test load_template when no layout files exist."""
         loader = LayoutTemplateLoader()
 
         # create a page file without layout files
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("template = 'test'")
 
         result = loader.load_template(page_file)
@@ -2455,17 +2459,17 @@ class TestLayoutManager:
         assert manager._layout_registry == {}
         assert isinstance(manager._layout_loader, LayoutTemplateLoader)
 
-    def test_discover_layouts_for_template(self, temp_dir) -> None:
+    def test_discover_layouts_for_template(self, tmp_path) -> None:
         """Test discover_layouts_for_template method."""
         manager = LayoutManager()
 
         # create layout structure
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_file.write_text(
             "<html><body>{% block template %}{% endblock template %}</body></html>",
         )
 
-        sub_dir = temp_dir / "sub"
+        sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
         template_file = sub_dir / "template.djx"
         template_file.write_text("<h1>Test</h1>")
@@ -2476,11 +2480,11 @@ class TestLayoutManager:
         assert result is not None
         assert page_file in manager._layout_registry
 
-    def test_discover_layouts_no_layouts(self, temp_dir) -> None:
+    def test_discover_layouts_no_layouts(self, tmp_path) -> None:
         """Test discover_layouts_for_template when no layouts exist."""
         manager = LayoutManager()
 
-        sub_dir = temp_dir / "sub"
+        sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
         page_file = sub_dir / "page.py"
 
@@ -2489,17 +2493,17 @@ class TestLayoutManager:
         assert result is None
         assert page_file not in manager._layout_registry
 
-    def test_get_layout_template(self, temp_dir) -> None:
+    def test_get_layout_template(self, tmp_path) -> None:
         """Test get_layout_template method."""
         manager = LayoutManager()
 
         # create layout structure
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_file.write_text(
             "<html><body>{% block template %}{% endblock template %}</body></html>",
         )
 
-        sub_dir = temp_dir / "sub"
+        sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
         template_file = sub_dir / "template.djx"
         template_file.write_text("<h1>Test</h1>")
@@ -2510,11 +2514,11 @@ class TestLayoutManager:
         result = manager.get_layout_template(page_file)
         assert result is not None
 
-    def test_get_layout_template_not_found(self, temp_dir) -> None:
+    def test_get_layout_template_not_found(self, tmp_path) -> None:
         """Test get_layout_template when template not found."""
         manager = LayoutManager()
 
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         result = manager.get_layout_template(page_file)
 
         assert result is None
@@ -2541,18 +2545,18 @@ class TestLayoutIntegration:
         assert isinstance(page_instance._layout_manager, LayoutManager)
 
     def test_create_url_pattern_with_layout(
-        self, page_instance, temp_dir, url_parser
+        self, page_instance, tmp_path, url_parser
     ) -> None:
         """Test create_url_pattern with layout inheritance."""
         # create layout structure
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_content = (
             "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
         layout_file.write_text(layout_content)
 
         # create template.djx
-        sub_dir = temp_dir / "sub"
+        sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
         template_file = sub_dir / "template.djx"
         template_content = "<h1>{{ title }}</h1>"
@@ -2566,17 +2570,17 @@ class TestLayoutIntegration:
         result = page_instance.render(page_file, title="Test")
         assert "Test" in result
 
-    def test_render_with_layout_inheritance(self, page_instance, temp_dir) -> None:
+    def test_render_with_layout_inheritance(self, page_instance, tmp_path) -> None:
         """Test rendering with layout inheritance."""
         # create layout structure
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_content = (
             "<html><body>{% block template %}{% endblock template %}</body></html>"
         )
         layout_file.write_text(layout_content)
 
         # create template.djx
-        sub_dir = temp_dir / "sub"
+        sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
         template_file = sub_dir / "template.djx"
         template_content = "<h1>{{ title }}</h1>"
@@ -2595,17 +2599,17 @@ class TestLayoutIntegration:
         assert "{% block template %}" in layout_template
 
     def test_load_template_for_file_layout_fallback(
-        self, page_instance, temp_dir
+        self, page_instance, tmp_path
     ) -> None:
         """Test _load_template_for_file with layout fallback."""
         # create layout structure
-        layout_file = temp_dir / "layout.djx"
+        layout_file = tmp_path / "layout.djx"
         layout_file.write_text(
             "<html><body>{% block template %}{% endblock template %}</body></html>",
         )
 
         # create template.djx
-        sub_dir = temp_dir / "sub"
+        sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
         template_file = sub_dir / "template.djx"
         template_file.write_text("<h1>{{ title }}</h1>")
@@ -2617,11 +2621,11 @@ class TestLayoutIntegration:
         assert page_file in page_instance._template_registry
 
     def test_render_with_layout_template_detection(
-        self, page_instance, temp_dir
+        self, page_instance, tmp_path
     ) -> None:
         """Test render method with layout template detection."""
         # create a template that looks like a layout template but doesn't use extends
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1>"
         page_instance.register_template(page_file, template_str)
 
@@ -2876,10 +2880,10 @@ class TestContextProcessors:
             processor = _import_context_processor("some.module.path")
             assert processor is None
 
-    def test_render_with_context_processors(self, page_instance, temp_dir) -> None:
+    def test_render_with_context_processors(self, page_instance, tmp_path) -> None:
         """Test render method with context_processors."""
         # create a test template
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1><p>{{ request_var }}</p>"
         page_instance.register_template(page_file, template_str)
 
@@ -2897,10 +2901,10 @@ class TestContextProcessors:
             assert "Test Title" in result
             assert "from_processor" in result
 
-    def test_render_without_request_object(self, page_instance, temp_dir) -> None:
+    def test_render_without_request_object(self, page_instance, tmp_path) -> None:
         """Test render method without request object (should use regular Context)."""
         # create a test template
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1>"
         page_instance.register_template(page_file, template_str)
 
@@ -2915,10 +2919,10 @@ class TestContextProcessors:
             assert result == "<h1>Test Title</h1>"
             assert "from_processor" not in result
 
-    def test_render_without_context_processors(self, page_instance, temp_dir) -> None:
+    def test_render_without_context_processors(self, page_instance, tmp_path) -> None:
         """Test render method without context_processors (should use regular Context)."""
         # create a test template
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1>"
         page_instance.register_template(page_file, template_str)
 
@@ -2932,10 +2936,10 @@ class TestContextProcessors:
             # should use regular Context, not RequestContext
             assert result == "<h1>Test Title</h1>"
 
-    def test_render_with_context_processor_error(self, page_instance, temp_dir) -> None:
+    def test_render_with_context_processor_error(self, page_instance, tmp_path) -> None:
         """Test render method with context processor that raises an exception."""
         # create a test template
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1><p>{{ good_var }}</p>"
         page_instance.register_template(page_file, template_str)
 
@@ -2973,11 +2977,11 @@ class TestContextProcessors:
     def test_render_with_context_processor_non_dict_return(
         self,
         page_instance,
-        temp_dir,
+        tmp_path,
     ) -> None:
         """Test render method with context processor that returns non-dict."""
         # create a test template
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1><p>{{ good_var }}</p>"
         page_instance.register_template(page_file, template_str)
 
@@ -3006,33 +3010,33 @@ class TestContextProcessors:
 class TestLoadPythonModule:
     """Test _load_python_module functionality."""
 
-    def test_load_python_module_invalid_file(self, temp_dir) -> None:
+    def test_load_python_module_invalid_file(self, tmp_path) -> None:
         """Test _load_python_module with invalid Python file."""
         # create an invalid Python file
-        invalid_file = temp_dir / "invalid.py"
+        invalid_file = tmp_path / "invalid.py"
         invalid_file.write_text("invalid python syntax {")
 
         result = _load_python_module(invalid_file)
         assert result is None
 
-    def test_load_python_module_nonexistent_file(self, temp_dir) -> None:
+    def test_load_python_module_nonexistent_file(self, tmp_path) -> None:
         """Test _load_python_module with nonexistent file."""
-        nonexistent_file = temp_dir / "nonexistent.py"
+        nonexistent_file = tmp_path / "nonexistent.py"
 
         result = _load_python_module(nonexistent_file)
         assert result is None
 
-    def test_load_python_module_no_spec_returns_none(self, temp_dir) -> None:
+    def test_load_python_module_no_spec_returns_none(self, tmp_path) -> None:
         """Test _load_python_module when spec_from_file_location returns None."""
-        valid_file = temp_dir / "page.py"
+        valid_file = tmp_path / "page.py"
         valid_file.write_text("x = 1")
         with patch("importlib.util.spec_from_file_location", return_value=None):
             result = _load_python_module(valid_file)
         assert result is None
 
-    def test_load_python_module_valid_file_returns_module(self, temp_dir) -> None:
+    def test_load_python_module_valid_file_returns_module(self, tmp_path) -> None:
         """Test _load_python_module with valid Python file returns the module."""
-        valid_file = temp_dir / "page.py"
+        valid_file = tmp_path / "page.py"
         valid_file.write_text("x = 42\ntemplate = '<p>{{ x }}</p>'")
 
         result = _load_python_module(valid_file)
@@ -3046,11 +3050,11 @@ class TestPageCreateUrlPattern:
     """Test Page create_url_pattern functionality."""
 
     def test_create_regular_page_pattern_no_module(
-        self, page_instance, temp_dir
+        self, page_instance, tmp_path
     ) -> None:
         """Test _create_regular_page_pattern when module cannot be loaded."""
         # create an invalid page file
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("invalid python syntax {")
 
         url_parser = URLPatternParser()
@@ -3068,11 +3072,11 @@ class TestPageCreateUrlPattern:
     def test_create_regular_page_pattern_no_template_no_render(
         self,
         page_instance,
-        temp_dir,
+        tmp_path,
     ) -> None:
         """Test _create_regular_page_pattern when no template and no render function."""
         # create a page file without template or render function
-        page_file = temp_dir / "page.py"
+        page_file = tmp_path / "page.py"
         page_file.write_text("def other_function(): pass")
 
         url_parser = URLPatternParser()

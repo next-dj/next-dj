@@ -2,7 +2,9 @@ import sys
 from pathlib import Path
 
 import django
+import pytest
 from django.conf import settings
+from django.test import Client
 
 
 # add project root to python path
@@ -66,3 +68,9 @@ if not settings.configured:
     import tests.test_forms  # noqa: F401
 
     django.setup()
+
+
+@pytest.fixture()
+def client():
+    """Django test client for HTTP requests."""
+    return Client()
