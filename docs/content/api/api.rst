@@ -11,6 +11,7 @@ Core Modules
 
    api/pages
    api/urls
+   api/utils
    api/checks
 
 Pages Module
@@ -34,6 +35,11 @@ The urls module handles file-based URL pattern generation and routing.
    :undoc-members:
    :show-inheritance:
    :no-index:
+
+Utils Module
+~~~~~~~~~~~~
+
+The utils module provides :class:`next.utils.NextStatReloader`, the custom development-server reloader that watches route/layout/template set changes. See :doc:`/content/autoreload` and :doc:`api/utils`.
 
 Checks Module
 ~~~~~~~~~~~~~
@@ -416,14 +422,16 @@ Check Generated URLs
        print(f"Name: {pattern.name}")
        print(f"View: {pattern.callback}")
 
-Check Template Registry
-~~~~~~~~~~~~~~~~~~~~~~~
+Template registry and lazy loading
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Templates (including ``.djx`` and layout content) are loaded on **first render** of each page, not when URL patterns are built. The registry is then used for subsequent requests. So ``page._template_registry`` is only populated for pages that have been rendered at least once.
 
 .. code-block:: python
 
    from next.pages import page
 
-   # Print all registered templates
+   # After rendering some pages, inspect registered templates
    for file_path, template in page._template_registry.items():
        print(f"File: {file_path}")
        print(f"Template: {template[:100]}...")
@@ -431,10 +439,10 @@ Check Template Registry
 Performance Considerations
 ----------------------------
 
-Template Caching
+Template caching
 ~~~~~~~~~~~~~~~~
 
-Templates are automatically cached for performance. The cache is cleared when files are modified.
+Templates are cached after first load. The cache is invalidated when the source files (template.djx or layout.djx) are modified (mtime-based), so changes are picked up on the next request without restarting the server.
 
 URL Pattern Caching
 ~~~~~~~~~~~~~~~~~~~
