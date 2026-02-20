@@ -189,12 +189,15 @@ class FileRouterBackend(RouterBackend):
     def generate_urls(self) -> list[URLPattern | URLResolver]:
         """Generate URL patterns based on backend configuration.
 
-        Delegates to either app-specific or root-level URL generation
-        based on the app_dirs configuration setting.
+        When app_dirs is True: app patterns first, then root patterns
+        (from PAGES_DIRS / PAGES_DIR) if any. When app_dirs is False:
+        only root patterns. Order: app then root (like staticfiles).
         """
-        return (
-            self._generate_app_urls() if self.app_dirs else self._generate_root_urls()
-        )
+        if self.app_dirs:
+            urls = self._generate_app_urls()
+            urls.extend(self._generate_root_urls())
+            return urls
+        return self._generate_root_urls()
 
     def _generate_app_urls(self) -> list[URLPattern | URLResolver]:
         """Generate URL patterns from Django application directories.
@@ -212,14 +215,15 @@ class FileRouterBackend(RouterBackend):
         return urls
 
     def _generate_root_urls(self) -> list[URLPattern | URLResolver]:
-        """Generate URL patterns from root-level pages directory.
+        """Generate URL patterns from root-level pages directories.
 
-        Scans the project root for a pages directory and generates
-        URL patterns from page.py files found within it.
+        Scans each path from _get_root_pages_paths() and generates
+        URL patterns from page.py files found within them.
         """
-        if pages_path := self._get_root_pages_path():
-            return list(self._generate_patterns_from_directory(pages_path))
-        return []
+        urls: list[URLPattern | URLResolver] = []
+        for pages_path in self._get_root_pages_paths():
+            urls.extend(self._generate_patterns_from_directory(pages_path))
+        return urls
 
     def _get_installed_apps(self) -> Generator[str, None, None]:
         """Get installed Django apps, excluding Django built-ins."""
@@ -242,16 +246,43 @@ class FileRouterBackend(RouterBackend):
         except (ImportError, AttributeError):
             return None
 
-    def _get_root_pages_path(self) -> Path | None:
-        """Get the root pages directory path."""
-        if not (base_dir := getattr(settings, "BASE_DIR", None)):
-            return None
+    def _get_root_pages_paths(self) -> list[Path]:
+        """Get root-level pages directory paths (like STATICFILES_DIRS).
 
-        if isinstance(base_dir, str):
-            base_dir = Path(base_dir)
+        Uses OPTIONS.PAGES_DIRS (list), else OPTIONS.PAGES_DIR (single path),
+        else when app_dirs is False fallback to BASE_DIR / pages_dir.
+        Returns only paths that exist.
+        """
+        result: list[Path] = []
+        options = self.options
 
-        pages_path = base_dir / self.pages_dir
-        return pages_path if pages_path.exists() else None
+        if "PAGES_DIRS" in options:
+            dirs = options["PAGES_DIRS"]
+            if isinstance(dirs, (list, tuple)):
+                for item in dirs:
+                    path = Path(item) if not isinstance(item, Path) else item
+                    if path.exists():
+                        result.append(path)
+            return result
+
+        if "PAGES_DIR" in options:
+            path = (
+                Path(options["PAGES_DIR"])
+                if not isinstance(options["PAGES_DIR"], Path)
+                else options["PAGES_DIR"]
+            )
+            if path.exists():
+                result.append(path)
+            return result
+
+        if not self.app_dirs and (base_dir := getattr(settings, "BASE_DIR", None)):
+            if isinstance(base_dir, str):
+                base_dir = Path(base_dir)
+            pages_path = base_dir / self.pages_dir
+            if pages_path.exists():
+                result.append(pages_path)
+
+        return result
 
     def _generate_urls_for_app(self, app_name: str) -> list[URLPattern | URLResolver]:
         """Generate URL patterns for a specific Django application.

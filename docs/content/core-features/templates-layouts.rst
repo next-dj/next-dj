@@ -108,11 +108,17 @@ This allows you to have:
 Root Layout for Entire Site
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If you have a root ``pages/`` directory (or custom folder name), you can create a site-wide layout:
+A site-wide layout is provided the same way as root-level pages: via **PAGES_DIRS** or **PAGES_DIR** in the same backend (see :doc:`file-router`). Add a directory (e.g. ``root_pages``) that contains ``layout.djx``; it can contain only that file (no ``page.py``) and will be used as an additional layout for all app pages. If the directory also has its own pages, they are served as root-level URLs; duplicate URL patterns with app pages cause a check error (``next.E015``).
+
+.. code-block:: python
+
+   OPTIONS: {
+       "PAGES_DIRS": [str(BASE_DIR / "root_pages")],
+   }
 
 .. code-block:: html
 
-   <!-- pages/layout.djx -->
+   <!-- root_pages/layout.djx -->
    <!DOCTYPE html>
    <html lang="en">
    <head>
@@ -140,7 +146,7 @@ If you have a root ``pages/`` directory (or custom folder name), you can create 
    </body>
    </html>
 
-This layout will be automatically applied to all pages in subdirectories.
+This layout is automatically applied as the outermost wrapper for all pages that use it.
 
 Layout Inheritance Chain
 ------------------------

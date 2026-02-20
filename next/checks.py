@@ -16,7 +16,7 @@ import re
 import types
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 from django.apps import apps
@@ -30,11 +30,13 @@ from django.core.checks import (
 )
 
 from .pages import _load_python_module
-from .urls import RouterBackend, RouterFactory, RouterManager, URLPatternParser
-
-
-if TYPE_CHECKING:
-    from .urls import FileRouterBackend
+from .urls import (
+    FileRouterBackend,
+    RouterBackend,
+    RouterFactory,
+    RouterManager,
+    URLPatternParser,
+)
 
 
 # Expected number of parts when splitting parameter by colon
@@ -261,24 +263,21 @@ def _check_root_pages(
     errors: list[CheckMessage],
     warnings: list[CheckMessage],
 ) -> None:
-    """Check root pages for router."""
-    if not hasattr(router, "_get_root_pages_path"):
+    """Check root pages for router (all paths from _get_root_pages_paths)."""
+    if not hasattr(router, "_get_root_pages_paths"):
         return
-
-    # type assertion: we know this is a FileRouterBackend in practice
-    file_router: FileRouterBackend = router  # type: ignore[assignment]
-
-    pages_path = file_router._get_root_pages_path()
-    if not pages_path or not hasattr(file_router, "pages_dir"):
+    if not hasattr(router, "pages_dir"):
         return
-
-    root_errors, root_warnings = _check_pages_directory(
-        pages_path,
-        "Root",
-        file_router.pages_dir,
-    )
-    errors.extend(root_errors)
-    warnings.extend(root_warnings)
+    file_router = cast("FileRouterBackend", router)
+    for i, pages_path in enumerate(router._get_root_pages_paths()):
+        context = "Root" if i == 0 else f"Root ({pages_path})"
+        root_errors, root_warnings = _check_pages_directory(
+            pages_path,
+            context,
+            file_router.pages_dir,
+        )
+        errors.extend(root_errors)
+        warnings.extend(root_warnings)
 
 
 def _check_directory_syntax(pages_path: Path, context: str) -> list[CheckMessage]:
@@ -469,19 +468,13 @@ def _check_root_page_functions(
     router: RouterBackend,
     errors: list[CheckMessage],
 ) -> None:
-    """Check root page functions for router."""
-    if not hasattr(router, "_get_root_pages_path"):
+    """Check root page functions for router (all root paths)."""
+    if not hasattr(router, "_get_root_pages_paths"):
         return
-
-    # type assertion: we know this is a FileRouterBackend in practice
-    file_router: FileRouterBackend = router  # type: ignore[assignment]
-
-    pages_path = file_router._get_root_pages_path()
-    if not pages_path:
-        return
-
-    root_errors = _check_page_functions_in_directory(pages_path, "Root")
-    errors.extend(root_errors)
+    for i, pages_path in enumerate(router._get_root_pages_paths()):
+        context = "Root" if i == 0 else f"Root ({pages_path})"
+        root_errors = _check_page_functions_in_directory(pages_path, context)
+        errors.extend(root_errors)
 
 
 def _check_page_functions_in_directory(
@@ -626,16 +619,13 @@ def _check_root_missing_templates(
     router: RouterBackend,
     errors: list[CheckMessage],
 ) -> None:
-    """Check root missing templates for router."""
-    if not hasattr(router, "_get_root_pages_path"):
+    """Check root missing templates for router (all root paths)."""
+    if not hasattr(router, "_get_root_pages_paths"):
         return
-
-    pages_path = router._get_root_pages_path()
-    if not pages_path:
-        return
-
-    root_errors = _check_missing_templates_in_directory(pages_path, "Root")
-    errors.extend(root_errors)
+    for i, pages_path in enumerate(router._get_root_pages_paths()):
+        context = "Root" if i == 0 else f"Root ({pages_path})"
+        root_errors = _check_missing_templates_in_directory(pages_path, context)
+        errors.extend(root_errors)
 
 
 def _check_missing_templates_in_directory(
@@ -884,25 +874,34 @@ def _get_function_result(func: Callable[..., Any]) -> object:
         return func(MagicMock())
 
 
+def _get_first_root_pages_path(file_router: FileRouterBackend) -> Path | None:
+    """Return first root pages path if backend supports it, else None."""
+    if not hasattr(file_router, "_get_root_pages_paths"):
+        return None
+    root_paths = file_router._get_root_pages_paths()
+    return root_paths[0] if root_paths else None
+
+
+def _get_first_app_pages_dir(file_router: FileRouterBackend) -> Path | None:
+    """Return first existing app pages dir, or None."""
+    for app_config in apps.get_app_configs():
+        potential = Path(app_config.path) / str(file_router.pages_dir)
+        if potential.exists():
+            return potential
+    return None
+
+
 def _get_pages_directory(router: RouterBackend) -> Path | None:
-    """Get pages directory path for router."""
+    """Get a single pages directory path for router (for checks that need one dir)."""
     if not hasattr(router, "pages_dir"):
         return None
-
-    # type assertion: we know this is a FileRouterBackend in practice
     file_router: FileRouterBackend = router  # type: ignore[assignment]
-
     if file_router.app_dirs:
-        for app_config in apps.get_app_configs():
-            app_path = Path(app_config.path)
-            potential_pages_dir = app_path / str(file_router.pages_dir)
-            if potential_pages_dir.exists():
-                return potential_pages_dir
-    else:
-        pages_dir = Path(str(file_router.pages_dir))
-        if pages_dir.exists():
-            return pages_dir
-    return None
+        return _get_first_app_pages_dir(file_router) or _get_first_root_pages_path(
+            file_router
+        )
+    p = Path(str(file_router.pages_dir))
+    return _get_first_root_pages_path(file_router) or (p if p.exists() else None)
 
 
 def _check_context_function(
@@ -1018,8 +1017,7 @@ def check_url_patterns(_app_configs: list | None, **_kwargs) -> list[CheckMessag
         try:
             if hasattr(router, "app_dirs") and router.app_dirs:
                 _collect_app_patterns(router, all_patterns)
-            else:
-                _collect_root_patterns(router, all_patterns)
+            _collect_root_patterns(router, all_patterns)
         except (AttributeError, OSError) as e:
             errors.append(
                 Error(
@@ -1071,16 +1069,13 @@ def _collect_root_patterns(
     router: RouterBackend,
     all_patterns: list[tuple[str, str]],
 ) -> None:
-    """Collect URL patterns from root pages."""
-    if not hasattr(router, "_get_root_pages_path"):
+    """Collect URL patterns from root pages (all paths from PAGES_DIRS/PAGES_DIR)."""
+    if not hasattr(router, "_get_root_pages_paths"):
         return
-
-    pages_path = router._get_root_pages_path()
-    if not pages_path:
-        return
-
-    patterns = _collect_url_patterns(pages_path, "Root")
-    all_patterns.extend(patterns)
+    for i, pages_path in enumerate(router._get_root_pages_paths()):
+        context = "Root" if i == 0 else f"Root ({pages_path})"
+        patterns = _collect_url_patterns(pages_path, context)
+        all_patterns.extend(patterns)
 
 
 def _check_url_conflicts(

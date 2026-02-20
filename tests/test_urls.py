@@ -267,24 +267,83 @@ class TestFileRouterBackend:
         exists,
         expected_result,
     ) -> None:
-        """Test getting root pages path with different scenarios."""
+        """Test _get_root_pages_paths with different scenarios."""
         mock_settings.BASE_DIR = base_dir
 
         if base_dir is None:
-            result = router._get_root_pages_path()
-            assert result is None
+            result = router._get_root_pages_paths()
+            assert result == []
         else:
+            root_router = FileRouterBackend(app_dirs=False)
             with patch("next.urls.Path") as mock_path_class:
                 mock_path_instance = Mock()
                 mock_path_instance.exists.return_value = exists
                 mock_path_class.return_value = mock_path_instance
                 mock_path_instance.__truediv__ = Mock(return_value=mock_path_instance)
 
-                result = router._get_root_pages_path()
+                result = root_router._get_root_pages_paths()
                 if exists:
-                    assert result == mock_path_instance
+                    assert len(result) == 1
+                    assert result[0] == mock_path_instance
                 else:
-                    assert result is None
+                    assert result == []
+
+    def test_get_root_pages_paths_from_pages_dirs(self, temp_dir) -> None:
+        """Test _get_root_pages_paths returns list from OPTIONS.PAGES_DIRS."""
+        router = FileRouterBackend(options={"PAGES_DIRS": [temp_dir]})
+        result = router._get_root_pages_paths()
+        assert len(result) == 1
+        assert result[0] == Path(temp_dir)
+
+    def test_get_root_pages_paths_from_pages_dir(self, temp_dir) -> None:
+        """Test _get_root_pages_paths returns list from OPTIONS.PAGES_DIR."""
+        router = FileRouterBackend(options={"PAGES_DIR": temp_dir})
+        result = router._get_root_pages_paths()
+        assert len(result) == 1
+        assert result[0] == Path(temp_dir)
+
+    def test_get_root_pages_paths_skips_nonexistent(self) -> None:
+        """Test _get_root_pages_paths skips paths that do not exist."""
+        router = FileRouterBackend(
+            options={"PAGES_DIRS": ["/nonexistent/path", "/also/nonexistent"]},
+        )
+        result = router._get_root_pages_paths()
+        assert result == []
+
+    def test_get_root_pages_paths_fallback_when_app_dirs_false(
+        self, mock_settings, temp_dir
+    ) -> None:
+        """Test _get_root_pages_paths fallback to BASE_DIR/pages_dir when app_dirs False."""
+        pages_dir = Path(temp_dir) / "pages"
+        pages_dir.mkdir()
+        mock_settings.BASE_DIR = Path(temp_dir)
+        router = FileRouterBackend(app_dirs=False)
+        result = router._get_root_pages_paths()
+        assert len(result) == 1
+        assert result[0] == pages_dir
+
+    def test_get_root_pages_paths_empty_when_app_dirs_true_no_options(self) -> None:
+        """Test _get_root_pages_paths returns [] when app_dirs True and no PAGES_DIRS/PAGES_DIR."""
+        router = FileRouterBackend(app_dirs=True)
+        result = router._get_root_pages_paths()
+        assert result == []
+
+    def test_generate_urls_includes_root_when_app_dirs_and_pages_dirs(
+        self, temp_dir
+    ) -> None:
+        """Test generate_urls returns app patterns + root patterns when APP_DIRS and PAGES_DIRS."""
+        router = FileRouterBackend(app_dirs=True, options={"PAGES_DIRS": [temp_dir]})
+        with (
+            patch.object(router, "_generate_app_urls", return_value=[]),
+            patch.object(
+                router,
+                "_generate_patterns_from_directory",
+                return_value=[],
+            ) as mock_gen,
+        ):
+            urls = router.generate_urls()
+        assert urls == []
+        mock_gen.assert_called_with(Path(temp_dir))
 
     @pytest.mark.parametrize(
         (
@@ -708,8 +767,8 @@ class TestGlobalInstances:
         """Test _generate_root_urls with different scenarios."""
         router = FileRouterBackend()
 
-        # mock the pages path to return None to test empty result scenarios
-        with patch.object(router, "_get_root_pages_path", return_value=None):
+        # mock the pages path to return [] to test empty result scenarios
+        with patch.object(router, "_get_root_pages_paths", return_value=[]):
             urls = router._generate_root_urls()
             assert urls == expected_result
 
@@ -813,8 +872,8 @@ class TestGlobalInstances:
         """Test _generate_root_urls method."""
         router = FileRouterBackend()
 
-        # mock _get_root_pages_path to return None to hit the return [] path
-        with patch.object(router, "_get_root_pages_path", return_value=None):
+        # mock _get_root_pages_paths to return [] to hit the return [] path
+        with patch.object(router, "_get_root_pages_paths", return_value=[]):
             urls = router._generate_root_urls()
             assert urls == []
 
@@ -933,8 +992,8 @@ class TestGlobalInstances:
         with (
             patch.object(
                 router,
-                "_get_root_pages_path",
-                return_value=Path("/tmp/pages"),
+                "_get_root_pages_paths",
+                return_value=[Path("/tmp/pages")],
             ),
             patch.object(
                 router,

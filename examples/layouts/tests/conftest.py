@@ -52,9 +52,9 @@ if not settings.configured:
                 "BACKEND": "next.urls.FileRouterBackend",
                 "APP_DIRS": True,
                 "OPTIONS": {
-                    "PAGES_DIR": str(
-                        project_root / "examples" / "layouts" / "layouts" / "pages",
-                    ),
+                    "PAGES_DIRS": [
+                        str(project_root / "examples" / "layouts" / "root_pages"),
+                    ],
                     "context_processors": [
                         "django.template.context_processors.request",
                         "django.contrib.auth.context_processors.auth",
@@ -67,6 +67,8 @@ if not settings.configured:
         USE_TZ=True,
         TIME_ZONE="UTC",
         ALLOWED_HOSTS=["testserver"],
+        STATIC_URL="static/",
+        STATICFILES_DIRS=[str(project_root / "examples" / "layouts" / "static")],
     )
 
     django.setup()
