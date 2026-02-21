@@ -17,6 +17,16 @@ from django.test import RequestFactory
 pytestmark = pytest.mark.django_db
 
 
+def test_landing_page_global_and_context_var(client) -> None:
+    """Landing page: global @context dict + keyed @context('app_greeting') rendered."""
+    response = client.get("/")
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert "Welcome to the Catalog" in content
+    assert "Greeting from context DI!" in content
+    assert "App greeting" in content
+
+
 @pytest.mark.parametrize(
     ("url", "expected_content"),
     [
@@ -118,6 +128,7 @@ def test_example_app_files() -> None:
 def _test_context_functions_exist(main_page, catalog_page, catalog_detail_page) -> None:
     """Test that context functions exist."""
     assert hasattr(main_page, "landing_page_context")
+    assert hasattr(main_page, "app_greeting")
     assert hasattr(main_page, "landing_context_custom_name_with_args_kwargs")
     assert hasattr(catalog_page, "prepare_products")
     assert hasattr(catalog_page, "custom_name_abcdefg")
@@ -130,6 +141,7 @@ def _test_context_functions_callable(
 ) -> None:
     """Test that context functions are callable."""
     assert callable(main_page.landing_page_context)
+    assert callable(main_page.app_greeting)
     assert callable(main_page.landing_context_custom_name_with_args_kwargs)
     assert callable(catalog_page.prepare_products)
     assert callable(catalog_page.custom_name_abcdefg)
@@ -138,15 +150,23 @@ def _test_context_functions_callable(
 
 
 def _test_main_page_context_functions(main_page, request) -> None:
-    """Test main page context functions."""
+    """Test main page context functions (global context + context var)."""
     result1 = main_page.landing_page_context()
     assert isinstance(result1, dict)
     assert "title" in result1
 
-    result2 = main_page.landing_context_custom_name_with_args_kwargs()
+    # context var: keyed @context("app_greeting")
+    greeting = main_page.app_greeting()
+    assert greeting == "Greeting from context DI!"
+
+    # landing uses context var via param name (ContextKeyProvider)
+    result2 = main_page.landing_context_custom_name_with_args_kwargs(
+        app_greeting="Greeting from context DI!"
+    )
     assert isinstance(result2, dict)
-    assert "title" in result2
-    assert "description" in result2
+    assert result2["title"] == "Welcome to the Catalog"
+    assert result2["description"]
+    assert result2["app_greeting"] == "Greeting from context DI!"
 
 
 def _test_catalog_page_context_functions(catalog_page, request) -> None:
@@ -185,8 +205,13 @@ def _test_catalog_detail_page_context_functions(catalog_detail_page, request) ->
 
 def test_example_pages_coverage(page_modules) -> None:
     """Test that all page files are covered."""
-    detail_path = Path("catalog") / "pages" / "catalog" / "[int:id]" / "page.py"
-    spec = importlib.util.spec_from_file_location("catalog_detail_page", detail_path)
+    examples_root = Path(__file__).resolve().parent.parent
+    detail_path = (
+        examples_root / "catalog" / "pages" / "catalog" / "[int:id]" / "page.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "catalog_detail_page", detail_path
+    )
     catalog_detail_page = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(catalog_detail_page)
 

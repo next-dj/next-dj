@@ -253,8 +253,14 @@ class RegistryFormActionBackend(FormActionBackend):
                                 url_kwargs[param_name] = int(value)
                             else:
                                 url_kwargs[param_name] = value
+                dep_cache: dict[str, Any] = {}
+                dep_stack: list[str] = []
                 resolved = resolver.resolve_dependencies(
-                    form_class.get_initial, request=request, **url_kwargs
+                    form_class.get_initial,
+                    request=request,
+                    _cache=dep_cache,
+                    _stack=dep_stack,
+                    **url_kwargs,
                 )
                 initial_data = form_class.get_initial(**resolved)
                 # Check if initial_data is a model instance (for ModelForm)
@@ -370,9 +376,15 @@ class _FormActionDispatch:
                 else:
                     url_kwargs[param_name] = value
 
+        dep_cache: dict[str, Any] = {}
+        dep_stack: list[str] = []
         if form_class is None:
             resolved = resolver.resolve_dependencies(
-                handler, request=request, **url_kwargs
+                handler,
+                request=request,
+                _cache=dep_cache,
+                _stack=dep_stack,
+                **url_kwargs,
             )
             return _FormActionDispatch.ensure_http_response(
                 _normalize_handler_response(handler(**resolved)),
@@ -386,7 +398,11 @@ class _FormActionDispatch:
             msg = f"Form class {form_class} must have get_initial method"
             raise TypeError(msg)
         resolved = resolver.resolve_dependencies(
-            form_class.get_initial, request=request, **url_kwargs
+            form_class.get_initial,
+            request=request,
+            _cache=dep_cache,
+            _stack=dep_stack,
+            **url_kwargs,
         )
         initial_data = form_class.get_initial(**resolved)
 
@@ -418,7 +434,12 @@ class _FormActionDispatch:
             )
 
         resolved = resolver.resolve_dependencies(
-            handler, request=request, form=form, **url_kwargs
+            handler,
+            request=request,
+            form=form,
+            _cache=dep_cache,
+            _stack=dep_stack,
+            **url_kwargs,
         )
         return _FormActionDispatch.ensure_http_response(
             _normalize_handler_response(handler(**resolved)),

@@ -3,10 +3,14 @@
 import inspect
 from unittest.mock import MagicMock
 
+import pytest
 from django.http import HttpRequest
 
 from next.deps import (
+    _IN_PROGRESS,
     DEFAULT_PROVIDERS,
+    CallableDependencyProvider,
+    DependencyCycleError,
     Deps,
     FormProvider,
     HttpRequestProvider,
@@ -442,6 +446,19 @@ class TestDepsAddProvider:
         result = r.resolve_dependencies(fn)
         assert result == {"x": 99}
 
+    def test_context_key_provider_injects_from_context_data(self) -> None:
+        """Param whose name is in _context_data gets value from ContextKeyProvider."""
+        r = Deps(*DEFAULT_PROVIDERS)
+
+        def fn(custom_context_var: str) -> str:
+            return custom_context_var
+
+        result = r.resolve_dependencies(
+            fn, _context_data={"custom_context_var": "12345"}
+        )
+        assert result == {"custom_context_var": "12345"}
+        assert fn(**result) == "12345"
+
 
 class TestResolverRegister:
     """Tests for resolver.register decorator and method."""
@@ -528,3 +545,189 @@ class TestResolverResolveDependencies:
         form = MagicMock()
         result = resolver.resolve_dependencies(fn, form=form)
         assert result == {"form": form}
+
+
+class TestRegisterDependency:
+    """Tests for register_dependency and dependency decorator (callable dependencies)."""
+
+    def test_register_dependency_resolves_param_by_name(self) -> None:
+        """A param whose name is a registered dependency gets the callable result."""
+        r = Deps(*DEFAULT_PROVIDERS)
+
+        def get_user(request: HttpRequest) -> str:
+            return "alice"
+
+        r.register_dependency("current_user", get_user)
+        request = MagicMock(spec=HttpRequest)
+
+        def view(current_user: str) -> str:
+            return current_user
+
+        cache = {}
+        result = r.resolve_dependencies(view, request=request, _cache=cache)
+        assert result["current_user"] == "alice"
+        assert view(**result) == "alice"
+
+    def test_dependency_decorator_registers_callable(self) -> None:
+        """@resolver.dependency('name') registers the function and returns it."""
+        r = Deps(*DEFAULT_PROVIDERS)
+        request = MagicMock(spec=HttpRequest)
+
+        @r.dependency("product")
+        def get_product(request: HttpRequest, id: int) -> str:  # noqa: A002
+            return f"product-{id}"
+
+        def page(product: str) -> str:
+            return product
+
+        cache = {}
+        result = r.resolve_dependencies(page, request=request, id=3, _cache=cache)
+        assert result["product"] == "product-3"
+
+    def test_registered_dependency_not_used_if_url_kwargs_same_name(self) -> None:
+        """URL kwargs take precedence: param 'id' gets url value, not a dependency."""
+        r = Deps(*DEFAULT_PROVIDERS)
+
+        @r.dependency("id")
+        def get_id() -> int:
+            return 999
+
+        def fn(id: int) -> int:  # noqa: A002
+            return id
+
+        cache = {}
+        result = r.resolve_dependencies(fn, id=42, _cache=cache)
+        assert result["id"] == 42
+
+
+class TestCallableDependencyCache:
+    """Tests for request-scoped caching of dependency callable results."""
+
+    def test_same_dependency_requested_twice_called_once_with_cache(self) -> None:
+        """Two resolve_dependencies calls sharing _cache: dependency callable runs once."""
+        r = Deps(*DEFAULT_PROVIDERS)
+        call_count = 0
+
+        def get_user(request: HttpRequest) -> str:
+            nonlocal call_count
+            call_count += 1
+            return "alice"
+
+        r.register_dependency("current_user", get_user)
+        request = MagicMock(spec=HttpRequest)
+
+        def view1(current_user: str) -> str:
+            return current_user
+
+        def view2(current_user: str) -> str:
+            return current_user
+
+        cache = {}
+        stack = []
+        result1 = r.resolve_dependencies(
+            view1, request=request, _cache=cache, _stack=stack
+        )
+        result2 = r.resolve_dependencies(
+            view2, request=request, _cache=cache, _stack=stack
+        )
+        assert result1["current_user"] == "alice"
+        assert result2["current_user"] == "alice"
+        assert call_count == 1
+        assert cache.get("current_user") == "alice"
+
+    def test_without_cache_dependency_called_each_resolve(self) -> None:
+        """Without _cache, each resolve_dependencies call invokes the dependency."""
+        r = Deps(*DEFAULT_PROVIDERS)
+        call_count = 0
+
+        def get_user(request: HttpRequest) -> str:
+            nonlocal call_count
+            call_count += 1
+            return "alice"
+
+        r.register_dependency("current_user", get_user)
+        request = MagicMock(spec=HttpRequest)
+
+        def view(current_user: str) -> str:
+            return current_user
+
+        r.resolve_dependencies(view, request=request)
+        r.resolve_dependencies(view, request=request)
+        assert call_count == 2
+
+
+class TestDependencyCycleError:
+    """Tests for circular dependency detection."""
+
+    def test_self_cycle_raises(self) -> None:
+        """When a dependency needs itself (a -> a), DependencyCycleError is raised."""
+        r = Deps(*DEFAULT_PROVIDERS)
+
+        def get_a(a: str) -> str:
+            return f"a-{a}"
+
+        r.register_dependency("a", get_a)
+
+        def top(a: str) -> str:
+            return a
+
+        cache = {}
+        stack: list[str] = []
+        with pytest.raises(DependencyCycleError) as exc_info:
+            r.resolve_dependencies(top, request=None, _cache=cache, _stack=stack)
+        cycle = exc_info.value.cycle
+        assert "a" in cycle
+        assert "Circular dependency" in str(exc_info.value)
+
+    def test_cycle_a_depends_on_b_b_depends_on_a_raises(self) -> None:
+        """When A needs B and B needs A, DependencyCycleError is raised."""
+        r = Deps(*DEFAULT_PROVIDERS)
+
+        def get_a(b: str) -> str:
+            return f"a-{b}"
+
+        def get_b(a: str) -> str:
+            return f"b-{a}"
+
+        r.register_dependency("a", get_a)
+        r.register_dependency("b", get_b)
+
+        def top(a: str) -> str:
+            return a
+
+        cache = {}
+        stack = []
+        with pytest.raises(DependencyCycleError) as exc_info:
+            r.resolve_dependencies(top, request=None, _cache=cache, _stack=stack)
+        cycle = exc_info.value.cycle
+        assert "a" in cycle
+        assert "b" in cycle
+        assert "Circular dependency" in str(exc_info.value)
+
+    def test_cycle_detected_via_cache_in_progress_sentinel(self) -> None:
+        """When cache has name with _IN_PROGRESS, DependencyCycleError is raised."""
+        r = Deps(*DEFAULT_PROVIDERS)
+        r.register_dependency("a", lambda: None)
+        provider = CallableDependencyProvider(r)
+        param = inspect.Parameter(
+            "a", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=str
+        )
+        ctx = RequestContext(
+            cache={"a": _IN_PROGRESS},
+            stack=[],
+            resolver=r,
+        )
+        with pytest.raises(DependencyCycleError) as exc_info:
+            provider.resolve(param, ctx)
+        assert exc_info.value.cycle == ["a"]
+
+    def test_resolve_returns_none_when_resolver_is_none_no_cache(self) -> None:
+        """When resolver is None and no cache, resolve returns None."""
+        r = Deps(*DEFAULT_PROVIDERS)
+        r.register_dependency("a", lambda: None)
+        provider = CallableDependencyProvider(r)
+        param = inspect.Parameter(
+            "a", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=str
+        )
+        ctx = RequestContext(resolver=None, cache=None, stack=None)
+        assert provider.resolve(param, ctx) is None

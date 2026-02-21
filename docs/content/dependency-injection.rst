@@ -36,6 +36,11 @@ Built-in providers
   a list of path segments.
 - **Form** — Parameter named ``form`` or annotated with the form class receives the
   form instance (in form actions).
+- **Context key** — If the parameter name matches a **context key** from an already-run
+  ``@context("key")`` function, the value is taken from the accumulated context.
+  This lets one context function depend on another: declare a parameter with the same
+  name as the key (e.g. ``current_user: AnonymousUser`` when ``@context("current_user")``
+  was registered).
 
 Example: context function with URL parameter
 
@@ -101,6 +106,47 @@ applies your provider only where that resolver is used.
 
 Parameters that no provider handles receive ``None`` (or keep their default if
 they have one).
+
+Registered DI functions (nested context)
+----------------------------------------
+
+You can register **dependency callables** by name and use them from any context
+function, custom render, or form action. A parameter whose name matches a
+registered dependency receives the result of calling that callable (with its own
+dependencies resolved). This allows nesting: one context function can depend on
+another by declaring a parameter with the same name.
+
+**Register a callable:**
+
+.. code-block:: python
+
+   from next.deps import resolver
+
+   @resolver.dependency("current_user")
+   def get_current_user(request: HttpRequest):
+       return request.user
+
+   # or: resolver.register_dependency("current_user", get_current_user)
+
+**Use it anywhere:** Declare a parameter with that name; the framework resolves
+and calls the registered callable, then injects the result.
+
+.. code-block:: python
+
+   @context("profile")
+   def profile(current_user):  # same name as registered dependency
+       return {"user": current_user}
+
+- **Caching:** Within a single request, the framework caches the result of each
+  dependency callable by name, so multiple functions that request the same
+  dependency (e.g. ``current_user``) only trigger one call.
+- **Cycles:** Circular dependencies (e.g. ``a`` depends on ``b`` and ``b``
+  depends on ``a``) raise :exc:`next.deps.DependencyCycleError` with the cycle
+  path. Avoid registering mutually dependent callables.
+- **Order:** Built-in providers (request, URL kwargs, form) run first; a
+  parameter that matches both a URL segment and a registered dependency gets
+  the URL value. Prefer dependency names that do not clash with path parameter
+  names.
 
 Replacing the resolver
 ----------------------

@@ -30,6 +30,10 @@ Classes
    :members:
    :undoc-members:
 
+.. autoclass:: next.deps.CallableDependencyProvider
+   :members:
+   :undoc-members:
+
 .. autoclass:: next.deps.DependencyResolver
    :members:
    :undoc-members:
@@ -39,6 +43,11 @@ Classes
    :members:
    :undoc-members:
    :show-inheritance:
+
+Exceptions
+----------
+
+.. autoexception:: next.deps.DependencyCycleError
 
 Global variables
 ----------------

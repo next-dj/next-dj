@@ -901,6 +901,27 @@ class TestContextManager:
 
         assert result == {"key1": "value1", "key2": "value2", "key3": "value3"}
 
+    def test_collect_context_second_function_gets_first_via_param_name(
+        self, context_manager, test_file_path
+    ) -> None:
+        """Second @context("key") receives first key's value when param name matches."""
+        context_manager.register_context(
+            test_file_path, "custom_context_var", lambda: "12345"
+        )
+
+        def landing(custom_context_var: str) -> dict[str, str]:
+            return {"title": "Landing", "custom_context_var": custom_context_var}
+
+        context_manager.register_context(test_file_path, "landing", landing)
+
+        result = context_manager.collect_context(test_file_path)
+
+        assert result["custom_context_var"] == "12345"
+        assert result["landing"] == {
+            "title": "Landing",
+            "custom_context_var": "12345",
+        }
+
     def test_collect_context_no_functions(
         self, context_manager, test_file_path
     ) -> None:

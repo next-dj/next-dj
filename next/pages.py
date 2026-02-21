@@ -417,16 +417,29 @@ class ContextManager:
         """
         request = args[0] if args and isinstance(args[0], HttpRequest) else None
         context_data = {}
+        dep_cache: dict[str, Any] = {}
+        dep_stack: list[str] = []
 
         # collect inherited context from layout directories first (lower priority)
-        inherited_context = self._collect_inherited_context(file_path, request, kwargs)
+        inherited_context = self._collect_inherited_context(
+            file_path, request, kwargs, dep_cache, dep_stack
+        )
         context_data.update(inherited_context)
 
-        # collect context from the current file
-        # (higher priority - can override inherited)
-        for key, (func, _) in self._context_registry.get(file_path, {}).items():
+        # current file: None first, then by key
+        registry = self._context_registry.get(file_path, {})
+        ordered = sorted(
+            registry.items(),
+            key=lambda item: (item[0] is not None, str(item[0] or "")),
+        )
+        for key, (func, _) in ordered:
             resolved = self._resolver.resolve_dependencies(
-                func, request=request, **kwargs
+                func,
+                request=request,
+                _cache=dep_cache,
+                _stack=dep_stack,
+                _context_data=context_data,
+                **kwargs,
             )
             if key is None:
                 context_data.update(func(**resolved))
@@ -440,6 +453,8 @@ class ContextManager:
         file_path: Path,
         request: HttpRequest | None,
         url_kwargs: dict[str, object],
+        dep_cache: dict[str, Any],
+        dep_stack: list[str],
     ) -> dict[str, Any]:
         """Collect context from layout directories that should be inherited.
 
@@ -463,7 +478,11 @@ class ContextManager:
                 ).items():
                     if inherit_context:
                         resolved = self._resolver.resolve_dependencies(
-                            func, request=request, **url_kwargs
+                            func,
+                            request=request,
+                            _cache=dep_cache,
+                            _stack=dep_stack,
+                            **url_kwargs,
                         )
                         if key is None:
                             inherited_context.update(func(**resolved))
@@ -760,8 +779,14 @@ class Page:
         """Wrap custom render so it is called with resolved dependencies only."""
 
         def view(request: HttpRequest, **kwargs: object) -> HttpResponse:
+            dep_cache: dict[str, Any] = {}
+            dep_stack: list[str] = []
             resolved = self._resolver.resolve_dependencies(
-                render_func, request=request, **kwargs
+                render_func,
+                request=request,
+                _cache=dep_cache,
+                _stack=dep_stack,
+                **kwargs,
             )
             result = render_func(**resolved)
             if isinstance(result, str):
