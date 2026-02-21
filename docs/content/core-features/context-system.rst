@@ -101,17 +101,14 @@ Context data is merged with the following priority (highest to lowest):
 5. **Default context** (basic request data)
 
 Dependency Injection
--------------------
+--------------------
 
-Context functions receive only the arguments they declare. The framework resolves
-parameters from the request context by inspecting the function signature:
+Context functions receive only the arguments they declare: the framework resolves
+parameters from the request context (request, URL kwargs, form) by inspecting
+the function signature. Declare ``request: HttpRequest``, ``id: int``, etc.; no
+``*args`` or ``**kwargs`` needed.
 
-- Declare ``request: HttpRequest`` to receive the request.
-- Declare parameters whose names match URL path parameters (e.g. ``id: int`` for
-  ``[int:id]``) to receive them automatically; no need for ``*args`` or ``**kwargs``.
-
-You can replace the default resolver by passing a custom ``DependencyResolver``
-to ``ContextManager(resolver=...)``.
+For full details, custom providers, and API reference, see :doc:`/content/dependency-injection`.
 
 URL Parameters in Context
 -------------------------

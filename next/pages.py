@@ -32,7 +32,10 @@ from django.template import Context, Template
 from django.urls import URLPattern, path
 from django.utils.module_loading import import_string
 
-from .deps import DefaultDependencyResolver, DependencyResolver
+from .deps import (
+    DependencyResolver,
+    resolver as _global_resolver,
+)
 
 
 if TYPE_CHECKING:
@@ -381,9 +384,7 @@ class ContextManager:
             Path,
             dict[str | None, tuple[Callable[..., Any], bool]],
         ] = {}
-        self._resolver = (
-            resolver if resolver is not None else DefaultDependencyResolver()
-        )
+        self._resolver = resolver if resolver is not None else _global_resolver
 
     def register_context(
         self,
@@ -487,7 +488,7 @@ class Page:
         """Initialize the page manager with empty registries."""
         self._template_registry: dict[Path, str] = {}
         self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
-        self._resolver = DefaultDependencyResolver()
+        self._resolver = _global_resolver
         self._context_manager = ContextManager(self._resolver)
         self._layout_manager = LayoutManager()
         self._template_loaders = [

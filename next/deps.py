@@ -6,6 +6,19 @@ FastAPI-style dependency injection so callables declare only the arguments
 they need.
 """
 
+__all__ = [
+    "DEFAULT_PROVIDERS",
+    "DefaultDependencyResolver",
+    "DependencyResolver",
+    "Deps",
+    "FormProvider",
+    "HttpRequestProvider",
+    "ParameterProvider",
+    "RequestContext",
+    "UrlKwargsProvider",
+    "resolver",
+]
+
 import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -97,6 +110,13 @@ class FormProvider:
         return context.form
 
 
+DEFAULT_PROVIDERS: list[ParameterProvider] = [
+    HttpRequestProvider(),
+    UrlKwargsProvider(),
+    FormProvider(),
+]
+
+
 class DependencyResolver(ABC):
     """Abstract resolver that builds call kwargs from request context."""
 
@@ -108,21 +128,27 @@ class DependencyResolver(ABC):
         ...
 
 
-class DefaultDependencyResolver(DependencyResolver):
-    """Resolves dependencies using a list of parameter providers."""
+class Deps(DependencyResolver):
+    """Resolves dependencies using providers passed at construction."""
 
-    def __init__(
-        self,
-        providers: list[ParameterProvider] | None = None,
-    ) -> None:
-        """Initialize with optional list of providers; default set used if None."""
-        if providers is None:
-            providers = [
-                HttpRequestProvider(),
-                UrlKwargsProvider(),
-                FormProvider(),
-            ]
-        self._providers = providers
+    def __init__(self, *providers: ParameterProvider) -> None:
+        """Initialize with providers (e.g. Deps(*DEFAULT_PROVIDERS) or Deps(p1, p2))."""
+        self._providers = list(providers)
+
+    def add_provider(self, provider: ParameterProvider) -> None:
+        """Append a provider; registered providers run after built-in ones."""
+        self._providers.append(provider)
+
+    def register(
+        self, provider: ParameterProvider | type[ParameterProvider]
+    ) -> ParameterProvider | type[ParameterProvider]:
+        """Register a provider (instance or class). Use as @resolver.register."""
+        if isinstance(provider, type):
+            instance = provider()
+            self.add_provider(instance)
+            return provider
+        self.add_provider(provider)
+        return provider
 
     def resolve_dependencies(
         self, func: Callable[..., Any], **context: object
@@ -157,23 +183,6 @@ class DefaultDependencyResolver(DependencyResolver):
         return result
 
 
-_default_resolver = DefaultDependencyResolver()
+DefaultDependencyResolver = Deps
 
-
-def resolve_dependencies(
-    func: Callable[..., Any],
-    *,
-    request: HttpRequest | None = None,
-    form: object = None,
-    **url_kwargs: object,
-) -> dict[str, Any]:
-    """Resolve callable arguments from request context.
-
-    Convenience facade that builds RequestContext and uses DefaultDependencyResolver.
-    """
-    return _default_resolver.resolve_dependencies(
-        func,
-        request=request,
-        form=form,
-        **url_kwargs,
-    )
+resolver: Deps = Deps(*DEFAULT_PROVIDERS)

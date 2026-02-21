@@ -6,12 +6,13 @@ from unittest.mock import MagicMock
 from django.http import HttpRequest
 
 from next.deps import (
-    DefaultDependencyResolver,
+    DEFAULT_PROVIDERS,
+    Deps,
     FormProvider,
     HttpRequestProvider,
     RequestContext,
     UrlKwargsProvider,
-    resolve_dependencies,
+    resolver,
 )
 
 
@@ -273,7 +274,7 @@ class TestDefaultDependencyResolver:
         def fn(request: HttpRequest) -> str:
             return getattr(request, "path", "")
 
-        resolver = DefaultDependencyResolver()
+        resolver = Deps(*DEFAULT_PROVIDERS)
         request = MagicMock(spec=HttpRequest)
         request.path = "/test/"
         result = resolver.resolve_dependencies(fn, request=request)
@@ -285,7 +286,7 @@ class TestDefaultDependencyResolver:
         def fn(request: HttpRequest, id: int) -> None:  # noqa: A002
             pass
 
-        resolver = DefaultDependencyResolver()
+        resolver = Deps(*DEFAULT_PROVIDERS)
         request = MagicMock(spec=HttpRequest)
         result = resolver.resolve_dependencies(fn, request=request, id=42)
         assert result == {"request": request, "id": 42}
@@ -296,7 +297,7 @@ class TestDefaultDependencyResolver:
         def fn(request: HttpRequest, form: MagicMock) -> None:
             pass
 
-        resolver = DefaultDependencyResolver()
+        resolver = Deps(*DEFAULT_PROVIDERS)
         request = MagicMock(spec=HttpRequest)
         form = MagicMock()
         result = resolver.resolve_dependencies(fn, request=request, form=form)
@@ -308,7 +309,7 @@ class TestDefaultDependencyResolver:
         def fn() -> None:
             pass
 
-        resolver = DefaultDependencyResolver()
+        resolver = Deps(*DEFAULT_PROVIDERS)
         result = resolver.resolve_dependencies(fn)
         assert result == {}
 
@@ -319,7 +320,7 @@ class TestDefaultDependencyResolver:
             def method(self, request: HttpRequest) -> None:
                 pass
 
-        resolver = DefaultDependencyResolver()
+        resolver = Deps(*DEFAULT_PROVIDERS)
         request = MagicMock(spec=HttpRequest)
         result = resolver.resolve_dependencies(C.method, request=request)
         assert "self" not in result
@@ -333,7 +334,7 @@ class TestDefaultDependencyResolver:
             def get_initial(cls, request: HttpRequest, id: int) -> dict:  # noqa: A002, ARG003
                 return {}
 
-        resolver = DefaultDependencyResolver()
+        resolver = Deps(*DEFAULT_PROVIDERS)
         request = MagicMock(spec=HttpRequest)
         result = resolver.resolve_dependencies(C.get_initial, request=request, id=1)
         assert "cls" not in result
@@ -347,7 +348,7 @@ class TestDefaultDependencyResolver:
         def fn(unknown: str) -> None:
             pass
 
-        resolver = DefaultDependencyResolver()
+        resolver = Deps(*DEFAULT_PROVIDERS)
         result = resolver.resolve_dependencies(fn)
         assert result == {"unknown": None}
 
@@ -359,7 +360,7 @@ class TestDefaultDependencyResolver:
         def fn(request: HttpRequest, *args: object, **kwargs: object) -> None:
             pass
 
-        resolver = DefaultDependencyResolver()
+        resolver = Deps(*DEFAULT_PROVIDERS)
         request = MagicMock(spec=HttpRequest)
         result = resolver.resolve_dependencies(fn, request=request)
         assert result == {"request": request}
@@ -383,45 +384,147 @@ class TestDefaultDependencyResolver:
             ) -> object:
                 return 100
 
-        resolver = DefaultDependencyResolver(providers=[CustomProvider()])
+        resolver = Deps(CustomProvider())
         result = resolver.resolve_dependencies(fn)
         assert result == {"x": 100}
 
     def test_resolve_dependencies_invalid_signature_returns_empty(self) -> None:
         """Non-callable or invalid signature yields empty dict."""
-        resolver = DefaultDependencyResolver()
+        resolver = Deps(*DEFAULT_PROVIDERS)
         result = resolver.resolve_dependencies("not a callable")
         assert result == {}
 
 
-class TestResolveDependenciesFacade:
-    """Tests for resolve_dependencies facade function."""
+class TestDepsConstruction:
+    """Tests for Deps(*providers) and DEFAULT_PROVIDERS."""
+
+    def test_deps_with_default_providers_has_same_order(self) -> None:
+        """Deps(*DEFAULT_PROVIDERS) stores same providers in same order."""
+        instance = Deps(*DEFAULT_PROVIDERS)
+        assert len(instance._providers) == len(DEFAULT_PROVIDERS)
+        for i, p in enumerate(DEFAULT_PROVIDERS):
+            assert instance._providers[i] is p
+
+    def test_deps_empty_has_no_providers(self) -> None:
+        """Deps() with no args has empty _providers; unknown params get None."""
+        instance = Deps()
+
+        def fn(unknown: str) -> None:
+            pass
+
+        result = instance.resolve_dependencies(fn)
+        assert result == {"unknown": None}
+
+
+class TestDepsAddProvider:
+    """Tests for add_provider on Deps."""
+
+    def test_add_provider_appends_and_resolves(self) -> None:
+        """After add_provider, custom param is resolved by added provider."""
+        r = Deps(*DEFAULT_PROVIDERS)
+
+        class CustomProvider:
+            def can_handle(
+                self, param: inspect.Parameter, context: RequestContext
+            ) -> bool:
+                return param.name == "x"
+
+            def resolve(
+                self, param: inspect.Parameter, context: RequestContext
+            ) -> object:
+                return 99
+
+        r.add_provider(CustomProvider())
+
+        def fn(x: int) -> None:
+            pass
+
+        result = r.resolve_dependencies(fn)
+        assert result == {"x": 99}
+
+
+class TestResolverRegister:
+    """Tests for resolver.register decorator and method."""
+
+    def test_register_decorator_adds_provider_class(self) -> None:
+        """@resolver.register on a class registers an instance; next resolve uses it."""
+        initial_count = len(resolver._providers)
+
+        @resolver.register
+        class InjectedProvider:
+            def can_handle(
+                self, param: inspect.Parameter, context: RequestContext
+            ) -> bool:
+                return param.name == "injected"
+
+            def resolve(
+                self, param: inspect.Parameter, context: RequestContext
+            ) -> object:
+                return "from_register"
+
+        try:
+            assert len(resolver._providers) == initial_count + 1
+
+            def fn(injected: str) -> None:
+                pass
+
+            result = resolver.resolve_dependencies(fn)
+            assert result == {"injected": "from_register"}
+        finally:
+            resolver._providers.pop()
+
+    def test_register_instance_adds_provider(self) -> None:
+        """resolver.register(MyProvider()) adds the instance."""
+        r = Deps(*DEFAULT_PROVIDERS)
+
+        class MyProvider:
+            def can_handle(
+                self, param: inspect.Parameter, context: RequestContext
+            ) -> bool:
+                return param.name == "x"
+
+            def resolve(
+                self, param: inspect.Parameter, context: RequestContext
+            ) -> object:
+                return 42
+
+        r.register(MyProvider())
+
+        def fn(x: int) -> None:
+            pass
+
+        result = r.resolve_dependencies(fn)
+        assert result == {"x": 42}
+
+
+class TestResolverResolveDependencies:
+    """Tests for resolver.resolve_dependencies (global resolver)."""
 
     def test_resolve_dependencies_returns_resolved_dict(self) -> None:
-        """Facade returns same result as DefaultDependencyResolver."""
+        """resolver.resolve_dependencies returns request when only request declared."""
 
         def fn(request: HttpRequest) -> None:
             pass
 
         request = MagicMock(spec=HttpRequest)
-        result = resolve_dependencies(fn, request=request)
+        result = resolver.resolve_dependencies(fn, request=request)
         assert result == {"request": request}
 
     def test_resolve_dependencies_with_url_kwargs(self) -> None:
-        """Facade passes url_kwargs as keyword args."""
+        """Resolver passes url_kwargs as keyword args."""
 
         def fn(pk: int) -> None:
             pass
 
-        result = resolve_dependencies(fn, pk=5)
+        result = resolver.resolve_dependencies(fn, pk=5)
         assert result == {"pk": 5}
 
     def test_resolve_dependencies_with_form(self) -> None:
-        """Facade passes form in context."""
+        """Resolver passes form in context."""
 
         def fn(form: MagicMock) -> None:
             pass
 
         form = MagicMock()
-        result = resolve_dependencies(fn, form=form)
+        result = resolver.resolve_dependencies(fn, form=form)
         assert result == {"form": form}

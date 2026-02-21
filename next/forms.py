@@ -29,7 +29,7 @@ from django.urls import URLPattern, path, reverse
 from django.urls.exceptions import NoReverseMatch
 from django.views.decorators.http import require_http_methods
 
-from .deps import resolve_dependencies
+from .deps import resolver
 from .pages import page
 
 
@@ -253,7 +253,7 @@ class RegistryFormActionBackend(FormActionBackend):
                                 url_kwargs[param_name] = int(value)
                             else:
                                 url_kwargs[param_name] = value
-                resolved = resolve_dependencies(
+                resolved = resolver.resolve_dependencies(
                     form_class.get_initial, request=request, **url_kwargs
                 )
                 initial_data = form_class.get_initial(**resolved)
@@ -371,7 +371,9 @@ class _FormActionDispatch:
                     url_kwargs[param_name] = value
 
         if form_class is None:
-            resolved = resolve_dependencies(handler, request=request, **url_kwargs)
+            resolved = resolver.resolve_dependencies(
+                handler, request=request, **url_kwargs
+            )
             return _FormActionDispatch.ensure_http_response(
                 _normalize_handler_response(handler(**resolved)),
                 request=request,
@@ -383,7 +385,7 @@ class _FormActionDispatch:
         if not hasattr(form_class, "get_initial"):
             msg = f"Form class {form_class} must have get_initial method"
             raise TypeError(msg)
-        resolved = resolve_dependencies(
+        resolved = resolver.resolve_dependencies(
             form_class.get_initial, request=request, **url_kwargs
         )
         initial_data = form_class.get_initial(**resolved)
@@ -415,7 +417,7 @@ class _FormActionDispatch:
                 backend, request, action_name, form, None
             )
 
-        resolved = resolve_dependencies(
+        resolved = resolver.resolve_dependencies(
             handler, request=request, form=form, **url_kwargs
         )
         return _FormActionDispatch.ensure_http_response(
