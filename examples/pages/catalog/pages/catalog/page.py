@@ -4,12 +4,12 @@ from next.pages import context
 
 
 @context("products")
-def prepare_products(*_args, **_kwargs) -> list[Product]:
+def prepare_products() -> list[Product]:
     return Product.objects.all()
 
 
 @context("other_context_variable")
-def custom_name_abcdefg(*_args, **_kwargs) -> str:
+def custom_name_abcdefg() -> str:
     return "1234 + 5678"
 
 
@@ -34,7 +34,7 @@ template = """
 
 
 @context
-def show_other_context_variables(*_args, **_kwargs) -> dict[str, str]:
+def show_other_context_variables() -> dict[str, str]:
     return {
         "var1": "1",
         "var2": "2",

@@ -713,6 +713,101 @@ class TestBaseFormGetInitial:
             assert hasattr(result, "form")
             assert result.form is not None
 
+    def test_context_func_gets_url_kwargs_from_post_when_no_resolver_match(
+        self,
+    ) -> None:
+        """Test context_func extracts url params from POST when resolver_match has no kwargs."""
+        backend = RegistryFormActionBackend()
+
+        class FormWithId(Form):
+            name = forms.CharField(max_length=100)
+
+            @classmethod
+            def get_initial(cls, _request: HttpRequest, id: int) -> dict:  # noqa: A002
+                return {"name": f"from-{id}"}
+
+        def handler(_request: HttpRequest, form: FormWithId) -> HttpResponseRedirect:
+            return HttpResponseRedirect("/")
+
+        backend.register_action(
+            "post_params_action",
+            handler,
+            options=FormActionOptions(form_class=FormWithId),
+        )
+        meta = backend.get_meta("post_params_action")
+        assert meta is not None
+        file_path = meta["file_path"]
+        request = HttpRequest()
+        request.method = "POST"
+        request.POST = {"_url_param_id": "42"}
+        context_registry = page._context_manager._context_registry.get(file_path, {})
+        assert "post_params_action" in context_registry
+        func, _ = context_registry["post_params_action"]
+        result = func(request)
+        assert hasattr(result, "form")
+        assert result.form.initial.get("name") == "from-42"
+
+    def test_context_func_gets_url_kwargs_from_resolver_match(self) -> None:
+        """Test context_func uses resolver_match.kwargs when present."""
+        backend = RegistryFormActionBackend()
+
+        class FormWithId(Form):
+            name = forms.CharField(max_length=100)
+
+            @classmethod
+            def get_initial(cls, _request: HttpRequest, id: int) -> dict:  # noqa: A002
+                return {"name": f"resolver-{id}"}
+
+        def handler(_request: HttpRequest, form: FormWithId) -> HttpResponseRedirect:
+            return HttpResponseRedirect("/")
+
+        backend.register_action(
+            "resolver_params_action",
+            handler,
+            options=FormActionOptions(form_class=FormWithId),
+        )
+        meta = backend.get_meta("resolver_params_action")
+        assert meta is not None
+        file_path = meta["file_path"]
+        request = HttpRequest()
+        request.resolver_match = MagicMock()
+        request.resolver_match.kwargs = {"id": 7}
+        context_registry = page._context_manager._context_registry.get(file_path, {})
+        assert "resolver_params_action" in context_registry
+        func, _ = context_registry["resolver_params_action"]
+        result = func(request)
+        assert result.form.initial.get("name") == "resolver-7"
+
+    def test_context_func_post_url_param_non_digit_string(self) -> None:
+        """Test context_func uses POST value as-is when not convertible to int."""
+        backend = RegistryFormActionBackend()
+
+        class FormWithSlug(Form):
+            slug = forms.CharField(max_length=100)
+
+            @classmethod
+            def get_initial(cls, _request: HttpRequest, slug: str) -> dict:
+                return {"slug": slug}
+
+        def handler(_request: HttpRequest, form: FormWithSlug) -> HttpResponseRedirect:
+            return HttpResponseRedirect("/")
+
+        backend.register_action(
+            "slug_action",
+            handler,
+            options=FormActionOptions(form_class=FormWithSlug),
+        )
+        meta = backend.get_meta("slug_action")
+        assert meta is not None
+        file_path = meta["file_path"]
+        request = HttpRequest()
+        request.method = "POST"
+        request.POST = {"_url_param_slug": "my-slug"}
+        context_registry = page._context_manager._context_registry.get(file_path, {})
+        func, _ = context_registry["slug_action"]
+        result = func(request)
+        assert result.form.initial.get("slug") == "my-slug"
+
     def test_dispatch_with_modelform_returning_instance(self) -> None:
         """Test dispatch creates form with instance when ModelForm returns instance."""
         backend = RegistryFormActionBackend()

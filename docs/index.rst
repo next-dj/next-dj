@@ -111,6 +111,7 @@ Contents
 
    content/getting-started/index
    content/core-features/index
+   content/dependency-injection
    content/autoreload
    content/api/index
    content/development/index

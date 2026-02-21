@@ -9,7 +9,7 @@ from next.pages import context
 
 
 @context("todos")
-def get_todos(_request: HttpRequest) -> list[Todo]:
+def get_todos() -> list[Todo]:
     """Get all todos for the list."""
     return list(Todo.objects.all())
 
@@ -32,7 +32,7 @@ class TodoForm(forms.ModelForm):
 
 
 @forms.action("create_todo", form_class=TodoForm)
-def create_todo_handler(request: HttpRequest, form: TodoForm) -> HttpResponseRedirect:
+def create_todo_handler(form: TodoForm, request: HttpRequest) -> HttpResponseRedirect:
     """Create a new todo and redirect to home."""
     form.save()
     messages.success(request, "Todo created successfully.")

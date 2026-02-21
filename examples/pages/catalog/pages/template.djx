@@ -55,6 +55,7 @@
     <div class="landing-container">
         <h1>{{ landing.title }}</h1>
         <p>{{ landing.description }}</p>
+        <p>App greeting (context var): {{ landing.app_greeting }}</p>
         <a href="/catalog/" class="cta-btn">Browse Products</a>
         <ul class="features">
             <li>Wide selection of items</li>

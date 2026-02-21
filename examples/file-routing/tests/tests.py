@@ -232,16 +232,14 @@ def test_example_integration_comprehensive(client) -> None:
     response = client.get("/simple/")
     assert response.status_code == 200
 
-    factory = RequestFactory()
-    request = factory.get("/")
-
-    response = simple_page.render(request)
+    # Render functions use DI: only declare params they need (no request if unused)
+    response = simple_page.render()
     assert response.status_code == 200
 
-    response = kwargs_page.render(request, post_id=123)
+    response = kwargs_page.render(post_id=123)
     assert response.status_code == 200
 
-    response = args_page.render(request, args=["test", "path"])
+    response = args_page.render(args=["test", "path"])
     assert response.status_code == 200
 
 
@@ -265,16 +263,14 @@ def test_example_files_coverage() -> None:
     assert callable(kwargs_page.render)
     assert callable(args_page.render)
 
-    factory = RequestFactory()
-    request = factory.get("/")
-
-    response = simple_page.render(request)
+    # Call render with resolved params only (DI-style); no request when not in signature
+    response = simple_page.render()
     assert response.status_code == 200
 
-    response = kwargs_page.render(request, post_id=123)
+    response = kwargs_page.render(post_id=123)
     assert response.status_code == 200
 
-    response = args_page.render(request, args=["test", "path"])
+    response = args_page.render(args=["test", "path"])
     assert response.status_code == 200
 
 

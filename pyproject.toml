@@ -160,7 +160,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"examples/*" = [    
+"examples/*" = [
     "D100", "D101", "D103", "D104", "D105", "D106", "D401",
     "E501", "EXE001",
     "INP001",
@@ -168,19 +168,10 @@ ignore = [
 ]
 "tests/pages/*" = ["INP001", "D104"]
 "**/{test*,conftest}.py" = [
-    "ANN001",  # missing type annotation for function argument
-    "ANN201",  # missing return type annotation for public function
-    "ANN202",  # missing return type annotation for private function
-    "ARG001",  # unused function argument
-    "ARG002",  # unused method argument
-    "ARG005",  # unused lambda argument (tests use lambdas)
-    "S101",    # use of assert detected (tests need this)
-    "D100",    # undocumented public module (tests don't need docs)
-    "PLR2004", # magic value used in comparison
-    "PLR0913", # too many arguments (tests often have many params)
-    "S108",    # hardcoded temp file (tests use temp paths)
-    "E501",    # line too long (tests can be verbose)
-    "FBT003",  # boolean positional value in call (tests use bool args)
+    "ANN001", "ANN201", "ANN202",
+    "ARG001", "ARG002", "ARG005",
+    "S101", "D100",
+    "PLR2004", "PLR0913", "S108", "E501", "FBT003",
 ]
 "**/migrations/**/*.py" = ["F401", "PLR0913"]
 
