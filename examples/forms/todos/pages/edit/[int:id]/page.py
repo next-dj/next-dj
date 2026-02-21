@@ -9,7 +9,7 @@ from next.pages import context
 
 
 @context("todo")
-def get_todo(_request: HttpRequest, id: int, **_kwargs: object) -> Todo:  # noqa: A002
+def get_todo(id: int) -> Todo:  # noqa: A002
     """Get todo by ID or raise 404."""
     try:
         return Todo.objects.get(pk=id)
@@ -30,12 +30,7 @@ class TodoEditForm(forms.ModelForm):
     is_completed = forms.BooleanField(required=False)
 
     @classmethod
-    def get_initial(
-        cls,
-        _request: HttpRequest,
-        id: int,  # noqa: A002
-        **_kwargs: object,
-    ) -> Todo | dict:
+    def get_initial(cls, id: int) -> Todo | dict:  # noqa: A002
         """Get todo instance for editing.
 
         The `id` parameter is automatically passed from the URL pattern [int:id].
@@ -50,7 +45,7 @@ class TodoEditForm(forms.ModelForm):
 
 @forms.action("update_todo", form_class=TodoEditForm)
 def update_todo_handler(
-    request: HttpRequest, form: TodoEditForm, **_kwargs: object
+    form: TodoEditForm, request: HttpRequest
 ) -> HttpResponseRedirect:
     """Update todo and redirect to home.
 

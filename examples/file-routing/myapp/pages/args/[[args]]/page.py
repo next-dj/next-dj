@@ -1,4 +1,4 @@
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpResponse
 
 
 html = """
@@ -55,9 +55,9 @@ html = """
 """
 
 
-def render(_request: HttpRequest, *args, **_kwargs) -> HttpResponse:
-    """Render page with variable arguments."""
+def render(args: list[str]) -> HttpResponse:
+    """Render page with path segments (FastAPI-style: list from [[args]])."""
     args_str = ", ".join(args) if args else "(none)"
-    args_count = len(args) if args else 0
+    args_count = len(args)
 
     return HttpResponse(html.format(args_str=args_str, args_count=args_count))

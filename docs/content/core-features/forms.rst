@@ -133,7 +133,7 @@ Override ``get_initial()`` to provide initial data for forms:
        email = forms.EmailField()
 
        @classmethod
-       def get_initial(cls, request: HttpRequest, *args, **kwargs) -> dict:
+       def get_initial(cls, request: HttpRequest) -> dict:
            """Provide initial data based on request or URL parameters."""
            initial = {}
            if request.user.is_authenticated:
@@ -151,7 +151,7 @@ For ModelForm, ``get_initial()`` can return either a dictionary (for initial dat
            fields = ['title', 'description']
 
        @classmethod
-       def get_initial(cls, request: HttpRequest, id: int = None, **kwargs) -> Todo | dict:
+       def get_initial(cls, request: HttpRequest, id: int | None = None) -> Todo | dict:
            """Return model instance for editing, or empty dict for creating."""
            if id:
                try:
@@ -180,22 +180,26 @@ Use the ``@forms.action()`` decorator to register form action handlers:
 
 **Handler Function Signature:**
 
-Handlers receive the request and validated form (if ``form_class`` is provided):
+Handlers receive only the arguments they declare (dependency injection). Declare
+``request: HttpRequest``, ``form: MyForm`` (when using ``form_class``), and any
+URL parameter names (e.g. ``id: int``) you need:
 
 .. code-block:: python
 
    # With form_class
    @forms.action("submit", form_class=MyForm)
-   def submit_handler(request: HttpRequest, form: MyForm, **kwargs) -> HttpResponse:
+   def submit_handler(request: HttpRequest, form: MyForm) -> HttpResponse:
        # form is validated
-       # kwargs contains URL parameters from file routing
+       pass
+
+   # With URL parameter
+   @forms.action("edit", form_class=EditForm)
+   def edit_handler(request: HttpRequest, form: EditForm, id: int) -> HttpResponse:
        pass
 
    # Without form_class
    @forms.action("simple_action")
-   def simple_handler(request: HttpRequest, **kwargs) -> HttpResponse:
-       # No form validation
-       # kwargs contains URL parameters from file routing
+   def simple_handler(request: HttpRequest) -> HttpResponse:
        pass
 
 Using Forms in Templates

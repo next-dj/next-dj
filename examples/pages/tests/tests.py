@@ -139,11 +139,11 @@ def _test_context_functions_callable(
 
 def _test_main_page_context_functions(main_page, request) -> None:
     """Test main page context functions."""
-    result1 = main_page.landing_page_context(request)
+    result1 = main_page.landing_page_context()
     assert isinstance(result1, dict)
     assert "title" in result1
 
-    result2 = main_page.landing_context_custom_name_with_args_kwargs(request)
+    result2 = main_page.landing_context_custom_name_with_args_kwargs()
     assert isinstance(result2, dict)
     assert "title" in result2
     assert "description" in result2
@@ -151,14 +151,14 @@ def _test_main_page_context_functions(main_page, request) -> None:
 
 def _test_catalog_page_context_functions(catalog_page, request) -> None:
     """Test catalog page context functions."""
-    result3 = catalog_page.prepare_products(request)
+    result3 = catalog_page.prepare_products()
     assert hasattr(result3, "__iter__")
 
-    result4 = catalog_page.custom_name_abcdefg(request)
+    result4 = catalog_page.custom_name_abcdefg()
     assert isinstance(result4, str)
     assert "1234 + 5678" in result4
 
-    result5 = catalog_page.show_other_context_variables(request)
+    result5 = catalog_page.show_other_context_variables()
     assert isinstance(result5, dict)
     assert "var1" in result5
     assert "var2" in result5
@@ -176,7 +176,7 @@ def _test_catalog_detail_page_context_functions(catalog_detail_page, request) ->
     assert "product" in result6
 
     try:
-        catalog_detail_page.common_context_with_custom_name(request, id="id")
+        catalog_detail_page.common_context_with_custom_name(request, id=999999)
         msg = "Expected Http404 exception"
         raise AssertionError(msg)
     except Http404:

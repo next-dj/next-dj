@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 from django.apps import apps
-from django.http import HttpRequest
 from todos.models import Todo
 from todos.pages import page as home_page
 
@@ -149,10 +148,8 @@ def test_get_initial_returns_empty_dict_for_nonexistent_todo(client) -> None:
     edit_page = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(edit_page)
 
-    request = HttpRequest()
-    request.method = "GET"
-
-    result = edit_page.TodoEditForm.get_initial(request, id=999)
+    # get_initial uses DI: only id from URL (no request in signature)
+    result = edit_page.TodoEditForm.get_initial(id=999)
     assert result == {}
 
 

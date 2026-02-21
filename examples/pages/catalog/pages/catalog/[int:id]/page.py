@@ -15,13 +15,8 @@ template = """
 
 @page.context
 def common_context_with_custom_name(
-    request: HttpRequest, *_args, **kwargs
+    _request: HttpRequest,
+    id: int,  # noqa: A002
 ) -> dict[str, Product]:
-    product_id = kwargs.get("id")
-    if product_id is None or product_id == "id":
-        product_id = (
-            request.resolver_match.kwargs.get("id") if request.resolver_match else None
-        )
-
-    product = get_object_or_404(Product, id=product_id)
+    product = get_object_or_404(Product, id=id)
     return {"product": product}

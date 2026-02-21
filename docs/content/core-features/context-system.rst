@@ -100,10 +100,24 @@ Context data is merged with the following priority (highest to lowest):
 4. **Context processors** (global Django context)
 5. **Default context** (basic request data)
 
+Dependency Injection
+-------------------
+
+Context functions receive only the arguments they declare. The framework resolves
+parameters from the request context by inspecting the function signature:
+
+- Declare ``request: HttpRequest`` to receive the request.
+- Declare parameters whose names match URL path parameters (e.g. ``id: int`` for
+  ``[int:id]``) to receive them automatically; no need for ``*args`` or ``**kwargs``.
+
+You can replace the default resolver by passing a custom ``DependencyResolver``
+to ``ContextManager(resolver=...)``.
+
 URL Parameters in Context
 -------------------------
 
-URL parameters are automatically passed to context functions:
+URL parameters are automatically passed to context functions when you declare
+them by name:
 
 .. code-block:: python
 
@@ -115,7 +129,7 @@ URL parameters are automatically passed to context functions:
    """
 
    @context
-   def get_user_profile(request, username):
+   def get_user_profile(request: HttpRequest, username: str):
        # username is automatically passed from the URL
        return {
            "username": username,

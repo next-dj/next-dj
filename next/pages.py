@@ -24,13 +24,15 @@ import types
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 from django.template import Context, Template
 from django.urls import URLPattern, path
 from django.utils.module_loading import import_string
+
+from .deps import DefaultDependencyResolver, DependencyResolver
 
 
 if TYPE_CHECKING:
@@ -370,12 +372,18 @@ class ContextManager:
     to child pages using layout.djx files.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        resolver: DependencyResolver | None = None,
+    ) -> None:
         """Initialize the context manager with empty registry."""
         self._context_registry: dict[
             Path,
             dict[str | None, tuple[Callable[..., Any], bool]],
         ] = {}
+        self._resolver = (
+            resolver if resolver is not None else DefaultDependencyResolver()
+        )
 
     def register_context(
         self,
@@ -406,27 +414,31 @@ class ContextManager:
         while unkeyed functions contribute entire dictionaries that get merged.
         Returns the combined context data for template rendering.
         """
+        request = args[0] if args and isinstance(args[0], HttpRequest) else None
         context_data = {}
 
         # collect inherited context from layout directories first (lower priority)
-        inherited_context = self._collect_inherited_context(file_path, *args, **kwargs)
+        inherited_context = self._collect_inherited_context(file_path, request, kwargs)
         context_data.update(inherited_context)
 
         # collect context from the current file
         # (higher priority - can override inherited)
         for key, (func, _) in self._context_registry.get(file_path, {}).items():
+            resolved = self._resolver.resolve_dependencies(
+                func, request=request, **kwargs
+            )
             if key is None:
-                context_data.update(func(*args, **kwargs))
+                context_data.update(func(**resolved))
             else:
-                context_data[key] = func(*args, **kwargs)
+                context_data[key] = func(**resolved)
 
         return context_data
 
     def _collect_inherited_context(
         self,
         file_path: Path,
-        *args: object,
-        **kwargs: object,
+        request: HttpRequest | None,
+        url_kwargs: dict[str, object],
     ) -> dict[str, Any]:
         """Collect context from layout directories that should be inherited.
 
@@ -449,10 +461,13 @@ class ContextManager:
                     {},
                 ).items():
                     if inherit_context:
+                        resolved = self._resolver.resolve_dependencies(
+                            func, request=request, **url_kwargs
+                        )
                         if key is None:
-                            inherited_context.update(func(*args, **kwargs))
+                            inherited_context.update(func(**resolved))
                         else:
-                            inherited_context[key] = func(*args, **kwargs)
+                            inherited_context[key] = func(**resolved)
 
             current_dir = current_dir.parent
 
@@ -472,7 +487,8 @@ class Page:
         """Initialize the page manager with empty registries."""
         self._template_registry: dict[Path, str] = {}
         self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
-        self._context_manager = ContextManager()
+        self._resolver = DefaultDependencyResolver()
+        self._context_manager = ContextManager(self._resolver)
         self._layout_manager = LayoutManager()
         self._template_loaders = [
             PythonTemplateLoader(),
@@ -726,18 +742,32 @@ class Page:
                 django_pattern, view, name=URL_NAME_TEMPLATE.format(name=clean_name)
             )
 
-        # fall back to custom render function
+        # fall back to custom render function with DI wrapper
         if (render_func := getattr(module, "render", None)) and callable(render_func):
-            return cast(
-                "URLPattern",
-                path(
-                    django_pattern,
-                    render_func,
-                    name=URL_NAME_TEMPLATE.format(name=clean_name),
-                ),
+            view = self._create_render_wrapper(render_func)
+            return path(
+                django_pattern,
+                view,
+                name=URL_NAME_TEMPLATE.format(name=clean_name),
             )
 
         return None
+
+    def _create_render_wrapper(
+        self, render_func: Callable[..., HttpResponse | str]
+    ) -> Callable[..., HttpResponse]:
+        """Wrap custom render so it is called with resolved dependencies only."""
+
+        def view(request: HttpRequest, **kwargs: object) -> HttpResponse:
+            resolved = self._resolver.resolve_dependencies(
+                render_func, request=request, **kwargs
+            )
+            result = render_func(**resolved)
+            if isinstance(result, str):
+                return HttpResponse(result)
+            return result
+
+        return view
 
     def _create_virtual_page_pattern(
         self,
