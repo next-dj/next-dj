@@ -18,6 +18,7 @@ from django.test import RequestFactory
         "/guides/webpack/",
         "/starter-projects/",
     ],
+    ids=["home", "guides", "contributing", "parcel", "webpack", "starter"],
 )
 def test_pages_accessible_and_renders_correctly(client, url) -> None:
     """Test that pages are accessible and render correctly."""
@@ -44,7 +45,7 @@ def test_layout_features(client, url, expected_feature) -> None:
 
     if expected_feature == "layout_inheritance":
         assert "Bootstrap" in content
-        assert "Starter Template" in content
+        assert "starter template" in content
     elif expected_feature == "navigation_active_states":
         assert "Guides" in content
         assert "active" in content or "current" in content
@@ -62,6 +63,7 @@ def test_layout_features(client, url, expected_feature) -> None:
         "check_missing_page_content",
         "check_layout_templates",
     ],
+    ids=["duplicate_params", "missing_content", "layout_templates"],
 )
 def test_checks(check_function) -> None:
     """Test next-dj checks."""

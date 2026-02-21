@@ -324,38 +324,39 @@ class FileRouterBackend(RouterBackend):
         self,
         pages_path: Path,
     ) -> Generator[tuple[str, Path], None, None]:
-        """Recursively scan pages directory for page.py files and virtual views.
+        """Scan pages directory for page.py and virtual views."""
+        yield from _scan_pages_directory(pages_path)
 
-        Walks through the directory tree and identifies page.py files and
-        directories with template.djx files (virtual views), constructing
-        URL paths based on the directory structure. Each directory level
-        becomes a URL segment, creating a hierarchical URL structure that
-        mirrors the file system.
-        """
 
-        def scan_recursive(
-            current_path: Path,
-            url_path: str = "",
-        ) -> Generator[tuple[str, Path], None, None]:
-            for item in current_path.iterdir():
-                if item.is_dir():
-                    dir_name = item.name
-                    new_url_path = f"{url_path}/{dir_name}" if url_path else dir_name
-                    yield from scan_recursive(item, new_url_path)
-                elif item.name == "page.py":
-                    yield url_path, item
+def _scan_pages_directory(
+    pages_path: Path,
+) -> Generator[tuple[str, Path], None, None]:
+    """Scan a pages directory for page.py and virtual views (template.djx only)."""
 
-            # check for virtual views: directories with template.djx but no page.py
-            if current_path.is_dir():
-                page_file = current_path / "page.py"
-                template_file = current_path / "template.djx"
+    def scan_recursive(
+        current_path: Path,
+        url_path: str = "",
+    ) -> Generator[tuple[str, Path], None, None]:
+        try:
+            items = list(current_path.iterdir())
+        except OSError as e:
+            logger.debug("Cannot list directory %s: %s", current_path, e)
+            return
+        for item in items:
+            if item.is_dir():
+                dir_name = item.name
+                new_url_path = f"{url_path}/{dir_name}" if url_path else dir_name
+                yield from scan_recursive(item, new_url_path)
+            elif item.name == "page.py":
+                yield url_path, item
 
-                if not page_file.exists() and template_file.exists():
-                    # create a virtual page.py path for the virtual view
-                    virtual_page_path = current_path / "page.py"
-                    yield url_path, virtual_page_path
+        if current_path.is_dir():
+            page_file = current_path / "page.py"
+            template_file = current_path / "template.djx"
+            if not page_file.exists() and template_file.exists():
+                yield url_path, current_path / "page.py"
 
-        yield from scan_recursive(pages_path)
+    yield from scan_recursive(pages_path)
 
 
 class RouterFactory:
@@ -433,7 +434,7 @@ class RouterManager:
         return f"<{self.__class__.__name__} routers={len(self._routers)}>"
 
     def __len__(self) -> int:
-        """Return the number of configured routers."""
+        """Return number of configured backends."""
         return len(self._routers)
 
     def __iter__(self) -> Generator[URLPattern | URLResolver, None, None]:
@@ -449,7 +450,7 @@ class RouterManager:
             yield from router.generate_urls()
 
     def __getitem__(self, index: int) -> RouterBackend:
-        """Get router by index for direct access."""
+        """Return backend at index."""
         return self._routers[index]
 
     def _reload_config(self) -> None:
@@ -471,12 +472,7 @@ class RouterManager:
                 logger.exception("error creating router from config %s", config)
 
     def _get_next_pages_config(self) -> list[dict[str, Any]]:
-        """Get NEXT_PAGES configuration from Django settings.
-
-        Retrieves the router configuration from Django settings with
-        caching to avoid repeated settings access. Returns a default
-        configuration if NEXT_PAGES is not defined in settings.
-        """
+        """NEXT_PAGES from settings (cached)."""
         if self._config_cache is not None:
             return self._config_cache
 
@@ -490,6 +486,50 @@ class RouterManager:
 
         self._config_cache = getattr(settings, "NEXT_PAGES", default_config)
         return self._config_cache
+
+
+def _paths_from_file_backend(backend: FileRouterBackend) -> list[Path]:
+    """Collect root and app pages paths from a FileRouterBackend."""
+    paths = [p.resolve() for p in backend._get_root_pages_paths()]
+    paths.extend(
+        app_path.resolve()
+        for app_name in backend._get_installed_apps()
+        if (app_path := backend._get_app_pages_path(app_name))
+    )
+    return paths
+
+
+def get_pages_directories_for_watch() -> list[Path]:
+    """Pages directory paths from NEXT_PAGES for file watching (autoreload)."""
+    default = [
+        {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": DEFAULT_APP_DIRS,
+            "OPTIONS": {},
+        },
+    ]
+    configs = getattr(settings, "NEXT_PAGES", default)
+    if not isinstance(configs, list):
+        return []
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for config in configs:
+        if not isinstance(config, dict):
+            continue
+        try:
+            backend = RouterFactory.create_backend(config)
+        except Exception:
+            logger.exception(
+                "error creating backend for watch dirs from config %s", config
+            )
+            continue
+        if not isinstance(backend, FileRouterBackend):
+            continue
+        for path in _paths_from_file_backend(backend):
+            if path not in seen:
+                seen.add(path)
+                result.append(path)
+    return result
 
 
 # global router manager instance for application-wide URL pattern management

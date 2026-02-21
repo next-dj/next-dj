@@ -19,6 +19,7 @@ from django.test import RequestFactory
         ("/kwargs/invalid/", 404),
         ("/nonexistent/", 404),
     ],
+    ids=["simple", "kwargs_valid", "args_path", "kwargs_invalid", "nonexistent"],
 )
 def test_pages_accessible(client, url, expected_status) -> None:
     """Test that pages are accessible with expected status codes."""
@@ -93,28 +94,6 @@ def test_args_pages_renders_correctly(client, url, expected_content) -> None:
 
     for expected in expected_content:
         assert expected in content, f"Expected '{expected}' not found in content"
-
-
-def test_root_page_renders(client) -> None:
-    """Test that root page renders correctly."""
-    response = client.get("/home/")
-    if response.status_code == 200:
-        content = response.content.decode()
-        assert "Root Page" in content
-        assert "This is a root page without any parameters" in content
-        assert "URL: /home" in content
-    else:
-        assert response.status_code == 404
-
-
-def test_page_content_matches_expected(client) -> None:
-    """Test that page content matches expected values."""
-    response = client.get("/simple/")
-    assert response.status_code == 200
-    content = response.content.decode()
-    assert "Simple Page" in content
-    assert "This is a simple page without any parameters" in content
-    assert "URL: /simple" in content
 
 
 def test_check_duplicate_url_parameters() -> None:

@@ -85,6 +85,10 @@ exclude = [
 [tool.pytest.ini_options]
 python_files = ["test_*.py", "*_test.py", "tests.py"]
 testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
 addopts = [
     "--strict-markers",
     "--strict-config",
@@ -162,6 +166,7 @@ ignore = [
     "INP001",
     "S105", "S106"
 ]
+"tests/pages/*" = ["INP001", "D104"]
 "**/{test*,conftest}.py" = [
     "ANN001",  # missing type annotation for function argument
     "ANN201",  # missing return type annotation for public function

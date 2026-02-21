@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from django.apps import apps
 from django.http import HttpRequest
-from django.test import Client
 from todos.models import Todo
 from todos.pages import page as home_page
 
@@ -14,7 +13,7 @@ from next.forms import form_action_manager
 
 
 @pytest.mark.django_db()
-def test_home_page_returns_200(client: Client) -> None:
+def test_home_page_returns_200(client) -> None:
     """Test that GET / returns 200 with todo list."""
     response = client.get("/")
     assert response.status_code == 200
@@ -24,7 +23,7 @@ def test_home_page_returns_200(client: Client) -> None:
 
 
 @pytest.mark.django_db()
-def test_home_shows_empty_message_when_no_todos(client: Client) -> None:
+def test_home_shows_empty_message_when_no_todos(client) -> None:
     """Test that home page shows empty message when no todos exist."""
     response = client.get("/")
     assert response.status_code == 200
@@ -33,7 +32,7 @@ def test_home_shows_empty_message_when_no_todos(client: Client) -> None:
 
 
 @pytest.mark.django_db()
-def test_create_todo_creates_new_todo(client: Client) -> None:
+def test_create_todo_creates_new_todo(client) -> None:
     """Test that POST create_todo creates a new todo."""
     create_url = form_action_manager.get_action_url("create_todo")
     response = client.post(
@@ -56,7 +55,7 @@ def test_create_todo_creates_new_todo(client: Client) -> None:
 
 
 @pytest.mark.django_db()
-def test_home_shows_todos_after_creation(client: Client) -> None:
+def test_home_shows_todos_after_creation(client) -> None:
     """Test that home page shows todos after creation."""
     Todo.objects.create(title="Test Todo", description="Test", is_completed=False)
     response = client.get("/")
@@ -66,7 +65,7 @@ def test_home_shows_todos_after_creation(client: Client) -> None:
 
 
 @pytest.mark.django_db()
-def test_edit_page_returns_200(client: Client) -> None:
+def test_edit_page_returns_200(client) -> None:
     """Test that GET /edit/<id>/ returns 200 with edit form."""
     todo = Todo.objects.create(
         title="Test Todo", description="Test", is_completed=False
@@ -79,7 +78,7 @@ def test_edit_page_returns_200(client: Client) -> None:
 
 
 @pytest.mark.django_db()
-def test_edit_page_shows_initial_data(client: Client) -> None:
+def test_edit_page_shows_initial_data(client) -> None:
     """Test that edit page shows initial data from todo."""
     todo = Todo.objects.create(
         title="Original Title",
@@ -94,7 +93,7 @@ def test_edit_page_shows_initial_data(client: Client) -> None:
 
 
 @pytest.mark.django_db()
-def test_update_todo_updates_existing_todo(client: Client) -> None:
+def test_update_todo_updates_existing_todo(client) -> None:
     """Test that POST update_todo updates an existing todo."""
     todo = Todo.objects.create(
         title="Original", description="Original", is_completed=False
@@ -120,14 +119,14 @@ def test_update_todo_updates_existing_todo(client: Client) -> None:
 
 
 @pytest.mark.django_db()
-def test_edit_page_404_for_nonexistent_todo(client: Client) -> None:
+def test_edit_page_404_for_nonexistent_todo(client) -> None:
     """Test that edit page returns 404 for nonexistent todo."""
     response = client.get("/edit/999/")
     assert response.status_code == 404
 
 
 @pytest.mark.django_db()
-def test_todo_str_method(client: Client) -> None:
+def test_todo_str_method(client) -> None:
     """Test that Todo.__str__ returns title."""
     todo = Todo.objects.create(
         title="Test Todo", description="Test", is_completed=False
@@ -136,7 +135,7 @@ def test_todo_str_method(client: Client) -> None:
 
 
 @pytest.mark.django_db()
-def test_get_initial_returns_empty_dict_for_nonexistent_todo(client: Client) -> None:
+def test_get_initial_returns_empty_dict_for_nonexistent_todo(client) -> None:
     """Test that TodoEditForm.get_initial returns empty dict for nonexistent todo."""
     edit_path = (
         Path(__file__).resolve().parent.parent
@@ -177,20 +176,20 @@ def test_check_missing_page_content() -> None:
     assert errors == []
 
 
-def test_home_page_module_has_context(client: Client) -> None:
+def test_home_page_module_has_context(client) -> None:
     """Test that home page module has get_todos context."""
     assert hasattr(home_page, "get_todos")
     assert callable(home_page.get_todos)
 
 
-def test_home_page_module_has_action(client: Client) -> None:
+def test_home_page_module_has_action(client) -> None:
     """Test that home page module has create_todo_handler and TodoForm."""
     assert hasattr(home_page, "create_todo_handler")
     assert callable(home_page.create_todo_handler)
     assert hasattr(home_page, "TodoForm")
 
 
-def test_edit_page_module_has_action(client: Client) -> None:
+def test_edit_page_module_has_action(client) -> None:
     """Test that edit page module has update_todo_handler and TodoEditForm."""
     edit_path = (
         Path(__file__).resolve().parent.parent

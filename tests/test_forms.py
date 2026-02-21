@@ -1,5 +1,3 @@
-"""Tests for next.forms and next.templatetags.forms."""
-
 import inspect
 import types
 from pathlib import Path
@@ -13,7 +11,6 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDi
 from django.middleware.csrf import get_token
 from django.template import Context, TemplateSyntaxError
 from django.template.engine import Engine
-from django.test import Client
 
 from next.forms import (
     BaseModelForm,
@@ -29,12 +26,6 @@ from next.forms import (
     page,
 )
 from next.templatetags.forms import _parse_form_tag_args
-
-
-@pytest.fixture()
-def django_client():
-    """Django test client."""
-    return Client()
 
 
 @pytest.fixture()
@@ -293,37 +284,35 @@ class TestFormActionDispatch:
 class TestDispatchViaClient:
     """Form action dispatch via Django test client."""
 
-    def test_unknown_uid_returns_404(self, django_client) -> None:
+    def test_unknown_uid_returns_404(self, client) -> None:
         """Unknown form uid returns 404."""
-        resp = django_client.get("/_next/form/unknown_uid_12345/")
+        resp = client.get("/_next/form/unknown_uid_12345/")
         assert resp.status_code == 404
 
-    def test_valid_uid_get_returns_405(self, django_client) -> None:
+    def test_valid_uid_get_returns_405(self, client) -> None:
         """GET form action URL returns 405 Method Not Allowed."""
         url = form_action_manager.get_action_url("test_submit")
-        resp = django_client.get(url)
+        resp = client.get(url)
         assert resp.status_code == 405
 
-    def test_invalid_form_returns_200_with_errors(self, django_client) -> None:
+    def test_invalid_form_returns_200_with_errors(self, client) -> None:
         """Invalid POST returns 200 with validation errors."""
         url = form_action_manager.get_action_url("test_submit")
-        resp = django_client.post(url, data={"name": ""}, follow=False)
+        resp = client.post(url, data={"name": ""}, follow=False)
         assert resp.status_code == 200
         c = resp.content
         assert b"error" in c.lower() or b"required" in c.lower() or b"name" in c
 
-    def test_valid_form_calls_handler(self, django_client) -> None:
+    def test_valid_form_calls_handler(self, client) -> None:
         """Valid POST calls handler and returns 200/204."""
         url = form_action_manager.get_action_url("test_submit")
-        resp = django_client.post(
-            url, data={"name": "Alice", "email": ""}, follow=False
-        )
+        resp = client.post(url, data={"name": "Alice", "email": ""}, follow=False)
         assert resp.status_code in (200, 204)
 
-    def test_redirect_action_returns_redirect(self, django_client) -> None:
+    def test_redirect_action_returns_redirect(self, client) -> None:
         """Redirect action returns 302 redirect."""
         url = form_action_manager.get_action_url("test_redirect")
-        resp = django_client.post(
+        resp = client.post(
             url,
             data={"name": "Bob", "email": ""},
             follow=False,
@@ -331,16 +320,16 @@ class TestDispatchViaClient:
         assert resp.status_code == 302
         assert resp.url == "/done/"
 
-    def test_no_form_action_get_returns_405(self, django_client) -> None:
+    def test_no_form_action_get_returns_405(self, client) -> None:
         """Action without form_class GET returns 405."""
         url = form_action_manager.get_action_url("test_no_form")
-        resp = django_client.get(url)
+        resp = client.get(url)
         assert resp.status_code == 405
 
-    def test_no_form_action_post_returns_200(self, django_client) -> None:
+    def test_no_form_action_post_returns_200(self, client) -> None:
         """Action without form_class POST returns 200 and body."""
         url = form_action_manager.get_action_url("test_no_form")
-        resp = django_client.post(url, data={})
+        resp = client.post(url, data={})
         assert resp.status_code == 200
         assert b"ok" in resp.content
 

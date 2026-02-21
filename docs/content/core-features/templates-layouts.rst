@@ -52,7 +52,7 @@ Use separate template files for better organization:
    </body>
    </html>
 
-Template Loading Priority
+Template loading priority
 -------------------------
 
 The system tries to load templates in this order:
@@ -61,7 +61,7 @@ The system tries to load templates in this order:
 2. **Python string templates** (``template`` attribute)
 3. **Template files** (``template.djx`` files)
 
-This allows for flexible template organization and inheritance.
+This allows for flexible template organization and inheritance. ``.djx`` and layout content are loaded on **first render** of each page and then cached; if file mtime changes, the cache is invalidated and the template is reloaded on the next request (no server restart needed for content-only changes).
 
 Layout System
 -------------

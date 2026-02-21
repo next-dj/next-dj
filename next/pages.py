@@ -24,7 +24,7 @@ import types
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
@@ -58,75 +58,56 @@ def _import_context_processor(
     return None
 
 
-def _get_default_context_processors() -> list[str]:
-    """Get default context processors from TEMPLATES configuration.
-
-    Returns context_processors from TEMPLATES[0].OPTIONS.context_processors
-    if available, otherwise returns empty list.
-    """
-    templates_config = getattr(settings, "TEMPLATES", [])
-    if not templates_config:
-        return []
-
-    first_template = templates_config[0]
-    template_options = first_template.get("OPTIONS", {})
-    context_processors = template_options.get("context_processors", [])
-    if isinstance(context_processors, list):
-        return context_processors
-
-    return []
-
-
-def _extract_processor_paths(configs: list[dict]) -> list[str]:
-    """Extract context processor paths from NEXT_PAGES configurations.
-
-    Scans all configurations for context_processors in OPTIONS and returns a flat list
-    of processor paths. If no context_processors are found in NEXT_PAGES,
-    inherits them from TEMPLATES[0].OPTIONS.context_processors.
-    """
-    processor_paths = []
-    has_explicit_processors = False
-
-    for config in configs:
-        options = config.get("OPTIONS", {})
-
-        if "context_processors" in options and isinstance(
-            options["context_processors"],
-            list,
-        ):
-            processor_paths.extend(options["context_processors"])
-            has_explicit_processors = True
-
-    # If no explicit context_processors in NEXT_PAGES, inherit from TEMPLATES
-    if not has_explicit_processors:
-        default_processors = _get_default_context_processors()
-        processor_paths.extend(default_processors)
-
-    return processor_paths
-
-
 def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
-    """Load context processors from NEXT_PAGES configuration.
-
-    Retrieves context processors from NEXT_PAGES.OPTIONS.context_processors
-    setting, similar to how Django handles TEMPLATES context_processors.
-    If context_processors are not explicitly defined in NEXT_PAGES, inherits them from
-    TEMPLATES[0].OPTIONS.context_processors.
-
-    Returns a list of callable context processors.
-    """
-    # get NEXT_PAGES configuration
-    next_pages_config = getattr(settings, "NEXT_PAGES", [])
-
-    # extract all processor paths (with inheritance from TEMPLATES)
-    processor_paths = _extract_processor_paths(next_pages_config)
-
-    # import processors and filter out failed imports
-    return [
-        processor
-        for processor_path in processor_paths
-        if (processor := _import_context_processor(processor_path))
+    """Load context processors from NEXT_PAGES and TEMPLATES (merged, deduped)."""
+    configs = getattr(settings, "NEXT_PAGES", [])
+    if not isinstance(configs, list):
+        configs = []
+    from_next = [
+        path
+        for c in configs
+        if isinstance(c, dict)
+        for path in (c.get("OPTIONS", {}).get("context_processors") or [])
+        if isinstance(path, str)
     ]
+    templates = getattr(settings, "TEMPLATES", [])
+    opts = templates[0].get("OPTIONS", {}) if templates else {}
+    from_templates = (
+        list(opts.get("context_processors", []))
+        if isinstance(opts.get("context_processors"), list)
+        else []
+    )
+    # Merge both sources, NEXT_PAGES first; dict.fromkeys preserves order and dedupes.
+    processor_paths = list(dict.fromkeys(from_next + from_templates))
+    return [p for path in processor_paths if (p := _import_context_processor(path))]
+
+
+def get_layout_djx_paths_for_watch() -> set[Path]:
+    """All layout.djx paths under NEXT_PAGES dirs (for autoreload)."""
+    from next.urls import get_pages_directories_for_watch  # noqa: PLC0415
+
+    result: set[Path] = set()
+    for pages_path in get_pages_directories_for_watch():
+        try:
+            for path in pages_path.rglob("layout.djx"):
+                result.add(path.resolve())
+        except OSError as e:
+            logger.debug("Cannot rglob layout.djx under %s: %s", pages_path, e)
+    return result
+
+
+def get_template_djx_paths_for_watch() -> set[Path]:
+    """All template.djx paths under NEXT_PAGES dirs (for autoreload)."""
+    from next.urls import get_pages_directories_for_watch  # noqa: PLC0415
+
+    result: set[Path] = set()
+    for pages_path in get_pages_directories_for_watch():
+        try:
+            for path in pages_path.rglob("template.djx"):
+                result.add(path.resolve())
+        except OSError as e:
+            logger.debug("Cannot rglob template.djx under %s: %s", pages_path, e)
+    return result
 
 
 def _load_python_module(file_path: Path) -> types.ModuleType | None:
@@ -137,7 +118,8 @@ def _load_python_module(file_path: Path) -> types.ModuleType | None:
             return None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-    except (ImportError, AttributeError, OSError, SyntaxError):
+    except (ImportError, AttributeError, OSError, SyntaxError) as e:
+        logger.debug("Could not load module %s: %s", file_path, e)
         return None
     else:
         return module
@@ -179,31 +161,25 @@ class PythonTemplateLoader(TemplateLoader):
     """
 
     def can_load(self, file_path: Path) -> bool:
-        """Check if the Python module contains a 'template' attribute."""
+        """Whether the module has a ``template`` attribute."""
         module = _load_python_module(file_path)
         return module is not None and hasattr(module, "template")
 
     def load_template(self, file_path: Path) -> str | None:
-        """Extract the template string from the module's 'template' attribute."""
+        """Return the module's ``template`` string."""
         module = _load_python_module(file_path)
         return getattr(module, "template", None) if module else None
 
 
 class DjxTemplateLoader(TemplateLoader):
-    """Loads templates from .djx files located alongside page.py files.
-
-    This loader implements the alternative template approach where page.py
-    files without a 'template' attribute are paired with a corresponding
-    template.djx file containing the HTML template. This separation allows
-    for cleaner code organization and better template editing experience.
-    """
+    """Loads templates from template.djx next to page.py."""
 
     def can_load(self, file_path: Path) -> bool:
-        """Check if a corresponding template.djx file exists."""
+        """Whether template.djx exists in the same directory."""
         return (file_path.parent / "template.djx").exists()
 
     def load_template(self, file_path: Path) -> str | None:
-        """Read and return the content of the template.djx file."""
+        """Return template.djx content."""
         djx_file = file_path.parent / "template.djx"
         try:
             return djx_file.read_text(encoding="utf-8")
@@ -272,59 +248,32 @@ class LayoutTemplateLoader(TemplateLoader):
         return layout_files or None
 
     def _get_additional_layout_files(self) -> list[Path]:
-        """Get layout.djx files from root-level NEXT_PAGES directories.
-
-        Uses _get_pages_dirs_for_config per config (PAGES_DIRS / PAGES_DIR),
-        independent of APP_DIRS, so global layout works with one backend.
-        """
-        additional_layouts: list[Path] = []
-        next_pages_config = getattr(settings, "NEXT_PAGES", [])
-
-        for config in next_pages_config:
-            if not isinstance(config, dict):
-                continue
-
-            for pages_dir in self._get_pages_dirs_for_config(config):
-                if not pages_dir.exists():
-                    continue
-                layout_file = pages_dir / "layout.djx"
-                if layout_file.exists() and layout_file not in additional_layouts:
-                    additional_layouts.append(layout_file)
-
-        return additional_layouts
+        """Layout.djx from root-level NEXT_PAGES dirs (for global layout)."""
+        configs = getattr(settings, "NEXT_PAGES", []) or []
+        candidates = (
+            layout
+            for c in configs
+            if isinstance(c, dict)
+            for d in self._get_pages_dirs_for_config(c)
+            if d.exists() and (layout := d / "layout.djx").exists()
+        )
+        return list(dict.fromkeys(candidates))
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
-        """Get root-level pages directory paths for a NEXT_PAGES config.
-
-        Returns list from OPTIONS.PAGES_DIRS or OPTIONS.PAGES_DIR.
-        Does not depend on APP_DIRS (so global layout works with app_dirs True).
-        """
-        result: list[Path] = []
+        """Root-level pages dirs from OPTIONS.PAGES_DIRS or PAGES_DIR."""
         options = config.get("OPTIONS", {})
-
         if "PAGES_DIRS" in options:
             dirs = options["PAGES_DIRS"]
             if isinstance(dirs, (list, tuple)):
-                for item in dirs:
-                    path = Path(item) if not isinstance(item, Path) else item
-                    result.append(path)
-            return result
-
+                return [p if isinstance(p, Path) else Path(p) for p in dirs]
+            return []
         if "PAGES_DIR" in options:
-            path = options["PAGES_DIR"]
-            result.append(Path(path) if not isinstance(path, Path) else path)
-
-        return result
+            p = options["PAGES_DIR"]
+            return [p if isinstance(p, Path) else Path(p)]
+        return []
 
     def _wrap_in_template_block(self, file_path: Path) -> str:
-        """Wrap template content in a template block for inheritance.
-
-        Reads the template file and wraps its content in Django's
-        template block syntax to enable proper inheritance from
-        layout templates. If there's a layout.djx file in the same
-        directory as the template, the template is returned as-is
-        since it's already wrapped in the layout.
-        """
+        """Wrap template.djx content in {% block template %} for layout inheritance."""
         template_file = file_path.parent / "template.djx"
         if template_file.exists():
             with contextlib.suppress(OSError, UnicodeDecodeError):
@@ -342,13 +291,7 @@ class LayoutTemplateLoader(TemplateLoader):
         template_content: str,
         layout_files: list[Path],
     ) -> str:
-        """Compose layout hierarchy by nesting layouts and inserting content.
-
-        Processes layout files in order, with local layouts taking precedence
-        over additional layouts from other NEXT_PAGES directories. Accepts
-        either ``{% block template %}...{% endblock template %}`` or
-        ``{% block template %}...{% endblock %}`` in layout files.
-        """
+        """Nest layout content and insert template into block placeholder."""
         result = template_content
 
         # process all layout files in order (local layouts come first due to
@@ -528,6 +471,7 @@ class Page:
     def __init__(self) -> None:
         """Initialize the page manager with empty registries."""
         self._template_registry: dict[Path, str] = {}
+        self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
         self._context_manager = ContextManager()
         self._layout_manager = LayoutManager()
         self._template_loaders = [
@@ -621,7 +565,15 @@ class Page:
         template engine for rendering with full tag and filter support.
 
         Supports context_processors from NEXT_PAGES.OPTIONS.context_processors.
+        Loads .djx and layout template content on first render if not yet in registry.
         """
+        if file_path not in self._template_registry or self._is_template_stale(
+            file_path
+        ):
+            self._template_registry.pop(file_path, None)
+            self._template_source_mtimes.pop(file_path, None)
+            self._load_template_for_file(file_path)
+            self._record_template_source_mtimes(file_path)
         template_str = self._template_registry[file_path]
 
         # create default context that's always available
@@ -678,6 +630,28 @@ class Page:
 
         return view
 
+    def has_template(
+        self, file_path: Path, module: types.ModuleType | None = None
+    ) -> bool:
+        """Return True if a template can be provided for this file.
+
+        Uses only can_load() for Djx and Layout loaders.
+        For Python loader uses module if provided (hasattr template)
+        to avoid loading the module again.
+        """
+        if self._layout_manager._layout_loader.can_load(file_path):
+            return True
+        for loader in self._template_loaders:
+            if isinstance(loader, LayoutTemplateLoader):
+                continue
+            if isinstance(loader, PythonTemplateLoader):
+                if module is not None and hasattr(module, "template"):
+                    return True
+                continue
+            if loader.can_load(file_path):
+                return True
+        return False
+
     def _load_template_for_file(self, file_path: Path) -> bool:
         """Load template content for a file using available template loaders."""
         # try layout template loader first (priority for layout inheritance)
@@ -698,18 +672,36 @@ class Page:
                     return True
         return False
 
-    def _create_url_pattern_with_view(
-        self,
-        django_pattern: str,
-        view: Callable,
-        clean_name: str,
-    ) -> URLPattern:
-        """Create a URL pattern with the given view function."""
-        return path(
-            django_pattern,
-            view,
-            name=URL_NAME_TEMPLATE.format(name=clean_name),
-        )
+    def _get_template_source_paths(self, file_path: Path) -> list[Path]:
+        """Paths of .djx files that contribute to this template."""
+        template_djx = file_path.parent / "template.djx"
+        layout_files = self._layout_manager._layout_loader._find_layout_files(file_path)
+        return ([template_djx] if template_djx.exists() else []) + (layout_files or [])
+
+    def _record_template_source_mtimes(self, file_path: Path) -> None:
+        """Record mtimes of source files for this template."""
+        paths = self._get_template_source_paths(file_path)
+        if not paths:
+            return
+        mtimes: dict[Path, float] = {}
+        for p in paths:
+            with contextlib.suppress(OSError):
+                mtimes[p] = p.stat().st_mtime
+        if mtimes:
+            self._template_source_mtimes[file_path] = mtimes
+
+    def _is_template_stale(self, file_path: Path) -> bool:
+        """Return True if any source file was modified since we loaded the template."""
+        stored = self._template_source_mtimes.get(file_path)
+        if not stored:
+            return False
+        for p, old_mtime in stored.items():
+            try:
+                if p.stat().st_mtime > old_mtime:
+                    return True
+            except OSError as e:
+                logger.debug("Cannot stat %s in stale check: %s", p, e)
+        return False
 
     def _create_regular_page_pattern(
         self,
@@ -720,23 +712,29 @@ class Page:
     ) -> URLPattern | None:
         """Create URL pattern for a regular page with page.py file.
 
-        Handles template loading and custom render function fallback.
+        Uses has_template to decide template-based vs custom render. Template
+        content is loaded on first render.
         """
         module = _load_python_module(file_path)
         if not module:
             return None
 
-        # try template-based rendering first
-        if self._load_template_for_file(file_path):
+        # try template-based rendering first (check only; do not load .djx content)
+        if self.has_template(file_path, module):
             view = self._create_view_function(file_path, parameters)
-            return self._create_url_pattern_with_view(django_pattern, view, clean_name)
+            return path(
+                django_pattern, view, name=URL_NAME_TEMPLATE.format(name=clean_name)
+            )
 
         # fall back to custom render function
         if (render_func := getattr(module, "render", None)) and callable(render_func):
-            return self._create_url_pattern_with_view(
-                django_pattern,
-                render_func,
-                clean_name,
+            return cast(
+                "URLPattern",
+                path(
+                    django_pattern,
+                    render_func,
+                    name=URL_NAME_TEMPLATE.format(name=clean_name),
+                ),
             )
 
         return None
@@ -750,11 +748,13 @@ class Page:
     ) -> URLPattern | None:
         """Create URL pattern for a virtual page with template.djx but no page.py.
 
-        Handles template-only rendering for virtual views.
+        Template content is loaded on first render.
         """
-        if self._load_template_for_file(file_path):
+        if self.has_template(file_path, module=None):
             view = self._create_view_function(file_path, parameters)
-            return self._create_url_pattern_with_view(django_pattern, view, clean_name)
+            return path(
+                django_pattern, view, name=URL_NAME_TEMPLATE.format(name=clean_name)
+            )
         return None
 
     def create_url_pattern(
@@ -765,13 +765,10 @@ class Page:
     ) -> URLPattern | None:
         """Generate a Django URL pattern from a page file with template detection.
 
-        Processes the page file to create a complete Django URL pattern. First attempts
-        to load a template using registered loaders, falling back to a custom render
-        function if available. Creates a view function that handles URL parameters
-        and template rendering automatically.
-
-        If no page.py exists but template.djx is present, creates a virtual view
-        that renders the template directly.
+        Uses has_template to decide if the page has a template; if so creates a
+        view that renders it (template content loaded on first render). Falls back
+        to custom render function if no template. Virtual pages (template.djx
+        without page.py) get a view that renders the template.
         """
         django_pattern, parameters = url_parser.parse_url_pattern(url_path)
         clean_name = url_parser.prepare_url_name(url_path)

@@ -56,7 +56,6 @@ Functions
 ---------
 
 .. autofunction:: next.pages._import_context_processor
-.. autofunction:: next.pages._extract_processor_paths
 .. autofunction:: next.pages._get_context_processors
 .. autofunction:: next.pages._load_python_module
 
