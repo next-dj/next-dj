@@ -182,7 +182,9 @@ Use the ``@forms.action()`` decorator to register form action handlers:
 
 Handlers receive only the arguments they declare (dependency injection). Declare
 ``request: HttpRequest``, ``form: MyForm`` (when using ``form_class``), and any
-URL parameter names (e.g. ``id: int``) you need:
+URL parameter names (e.g. ``id: int``) you need. You can also inject context or
+global dependencies by name using ``DContext["key"]`` (value from current context)
+or ``DGlobalContext["name"]`` (registered callable); see :doc:`/content/dependency-injection`.
 
 .. code-block:: python
 
@@ -195,6 +197,13 @@ URL parameter names (e.g. ``id: int``) you need:
    # With URL parameter
    @forms.action("edit", form_class=EditForm)
    def edit_handler(request: HttpRequest, form: EditForm, id: int) -> HttpResponse:
+       pass
+
+   # With DGlobalContext (e.g. current_user from @resolver.dependency("current_user"))
+   from next.pages import DGlobalContext
+
+   @forms.action("submit", form_class=MyForm)
+   def submit_handler(request: HttpRequest, form: MyForm, current_user: DGlobalContext["current_user"]) -> HttpResponse:
        pass
 
    # Without form_class
