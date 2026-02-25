@@ -9,21 +9,112 @@ The system follows the Strategy pattern for backend selection and the Factory pa
 for object creation, ensuring high extensibility and maintainability.
 """
 
+import inspect
 import logging
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeVar, get_args, get_origin
 
 from django.conf import settings
+from django.http import HttpRequest
 from django.urls import URLPattern, URLResolver
 
+from .deps import DDependencyBase, RegisteredParameterProvider
 from .forms import form_action_manager
 from .pages import page
 
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+
+class DUrl(DDependencyBase[_T]):
+    """Marker for injecting a URL parameter (path/query) with optional type.
+
+    Use `DUrl["param"]` or `DUrl[SomeType]`.
+    """
+
+    __slots__ = ()
+
+
+def _coerce_url_value(value: str, hint: type) -> object:
+    """Coerce string from URL to hint (int, bool, float, str).
+
+    On conversion error, return value unchanged.
+    """
+    if hint is int:
+        try:
+            return int(value)
+        except ValueError:
+            return value
+    if hint is bool:
+        return value.lower() in ("1", "true", "yes")
+    if hint is float:
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    return value
+
+
+class HttpRequestProvider(RegisteredParameterProvider):
+    """Provides HttpRequest from context.request."""
+
+    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+        """Return True if param is HttpRequest and context has request."""
+        if getattr(context, "request", None) is None:
+            return False
+        origin = get_origin(param.annotation)
+        return origin is None and param.annotation is HttpRequest
+
+    def resolve(self, _param: inspect.Parameter, context: object) -> object:
+        """Return the request from context."""
+        return getattr(context, "request", None)
+
+
+class UrlByAnnotationProvider(RegisteredParameterProvider):
+    """Resolves DUrl[key] or DUrl[Type] from url_kwargs."""
+
+    def can_handle(self, param: inspect.Parameter, _context: object) -> bool:
+        """Return True if param is annotated with DUrl."""
+        return get_origin(param.annotation) is DUrl
+
+    def resolve(self, param: inspect.Parameter, context: object) -> object:
+        """Return the URL parameter value, coerced to annotation type."""
+        args = get_args(param.annotation)
+        key = args[0] if args and isinstance(args[0], str) else param.name
+        url_kwargs = getattr(context, "url_kwargs", {}) or {}
+        raw = (
+            url_kwargs.get(key) if isinstance(key, str) else url_kwargs.get(param.name)
+        )
+        if raw is None:
+            return None
+        hint = args[0] if args and isinstance(args[0], type) else str
+        return _coerce_url_value(str(raw), hint)
+
+
+class UrlKwargsProvider(RegisteredParameterProvider):
+    """Resolves parameter by name from url_kwargs."""
+
+    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+        """Return True if param name is in url_kwargs."""
+        return param.name in (getattr(context, "url_kwargs", {}) or {})
+
+    def resolve(self, param: inspect.Parameter, context: object) -> object:
+        """Return the URL kwarg value for the parameter."""
+        url_kwargs = getattr(context, "url_kwargs", {}) or {}
+        raw = url_kwargs.get(param.name)
+        if raw is None:
+            return None
+        hint = (
+            param.annotation if param.annotation is not inspect.Parameter.empty else str
+        )
+        if hint is str or hint is inspect.Parameter.empty:
+            return str(raw)
+        return _coerce_url_value(str(raw), hint)
 
 
 # Configuration constants

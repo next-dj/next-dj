@@ -209,9 +209,7 @@ def test_example_pages_coverage(page_modules) -> None:
     detail_path = (
         examples_root / "catalog" / "pages" / "catalog" / "[int:id]" / "page.py"
     )
-    spec = importlib.util.spec_from_file_location(
-        "catalog_detail_page", detail_path
-    )
+    spec = importlib.util.spec_from_file_location("catalog_detail_page", detail_path)
     catalog_detail_page = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(catalog_detail_page)
 

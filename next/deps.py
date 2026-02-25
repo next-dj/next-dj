@@ -4,15 +4,28 @@ Resolves function parameters from request context (request, URL kwargs, form)
 by inspecting signatures and matching parameters to known sources. Enables
 FastAPI-style dependency injection so callables declare only the arguments
 they need.
+
+D-markers (DContext, DGlobalContext, DForm, DUrl) use a common base Generic
+so that all DI markers can be validated by the linter. Import the base from
+this module when defining new markers.
 """
 
-import inspect
-from abc import ABC, abstractmethod
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Any, Protocol, cast, get_args, get_origin
+from __future__ import annotations
 
-from django.http import HttpRequest
+import inspect
+import types
+from abc import ABC, abstractmethod
+from collections.abc import Callable  # noqa: TC003
+from typing import Any, ClassVar
+
+
+class DDependencyBase[T]:
+    """Base for all D-markers.
+
+    All DI markers (DContext, DGlobalContext, DForm, DUrl) must inherit from this.
+    """
+
+    __slots__ = ()
 
 
 # Sentinel for "dependency currently being resolved" to detect cycles
@@ -28,210 +41,51 @@ class DependencyCycleError(Exception):
         super().__init__(f"Circular dependency: {' -> '.join(cycle)}")
 
 
-@dataclass
-class RequestContext:
-    """Context for resolving dependencies within a single request."""
+class DependencyResolver:
+    """Resolves dependencies using auto-registered providers. Single global instance."""
 
-    request: HttpRequest | None = None
-    form: object = None
-    url_kwargs: dict[str, Any] = field(default_factory=dict)
-    # Accumulated context from previously run context functions (key -> value)
-    context_data: dict[str, Any] = field(default_factory=dict)
-    # Used by CallableDependencyProvider for request-scoped cache and cycle detection
-    cache: dict[str, Any] | None = None
-    resolver: "Deps | None" = None
-    stack: list[str] | None = None  # names being resolved (cycle detection)
+    def __get__(self, obj: object, owner: type[object]) -> DependencyResolver:
+        """Return self when used as class attribute on RegisteredParameterProvider."""
+        return self
 
+    def __init__(self, *providers: RegisteredParameterProvider) -> None:
+        """Initialize with optional providers.
 
-class ParameterProvider(Protocol):
-    """Protocol for resolving a single parameter from request context."""
-
-    def can_handle(self, param: inspect.Parameter, context: RequestContext) -> bool:
-        """Return True if this provider can supply a value for the parameter."""
-
-    def resolve(self, param: inspect.Parameter, context: RequestContext) -> object:
-        """Return the value for the parameter. Called only when can_handle is True."""
-
-
-class HttpRequestProvider:
-    """Provides HttpRequest when parameter is annotated with HttpRequest or subclass."""
-
-    def can_handle(self, param: inspect.Parameter, context: RequestContext) -> bool:
-        """Return True if param is HttpRequest-annotated and request in context."""
-        if context.request is None:
-            return False
-        ann = param.annotation
-        if ann is inspect.Parameter.empty:
-            return False
-        return isinstance(ann, type) and issubclass(ann, HttpRequest)
-
-    def resolve(self, _param: inspect.Parameter, context: RequestContext) -> object:
-        """Return the request from context."""
-        return context.request
-
-
-class UrlKwargsProvider:
-    """Provides URL path parameter values by parameter name."""
-
-    def can_handle(self, param: inspect.Parameter, context: RequestContext) -> bool:
-        """Return True if param name is in context url_kwargs."""
-        return param.name in context.url_kwargs
-
-    def resolve(self, param: inspect.Parameter, context: RequestContext) -> object:
-        """Return value from url_kwargs with type coercion (int, list[str] for path)."""
-        value = context.url_kwargs[param.name]
-        ann = param.annotation
-        if ann is inspect.Parameter.empty:
-            return value
-        if ann is int and not isinstance(value, int) and isinstance(value, str):
-            try:
-                return int(value)
-            except ValueError:
-                pass
-        if get_origin(ann) is list:
-            args_tuple = get_args(ann)
-            if args_tuple and args_tuple[0] is str and isinstance(value, str):
-                return [s for s in value.split("/") if s]
-        return value
-
-
-class FormProvider:
-    """Provide form instance when param is form class or named 'form'."""
-
-    def can_handle(self, param: inspect.Parameter, context: RequestContext) -> bool:
-        """Return True if param is form or annotated with form class in context."""
-        if context.form is None:
-            return False
-        if param.name == "form":
-            return True
-        ann = param.annotation
-        if ann is inspect.Parameter.empty:
-            return False
-        return isinstance(ann, type) and isinstance(context.form, ann)
-
-    def resolve(self, _param: inspect.Parameter, context: RequestContext) -> object:
-        """Return the form instance from context."""
-        return context.form
-
-
-class ContextKeyProvider:
-    """Provides parameter from accumulated context_data (e.g. from other context funcs).
-
-    When resolving a context function, param.name is supplied from context_data
-    if that key exists. Allows one @context("key") to be used as a dependency
-    in another context function without registering a separate resolver.dependency.
-    """
-
-    def can_handle(self, param: inspect.Parameter, context: RequestContext) -> bool:
-        """Return True if param.name is in context.context_data."""
-        return param.name in context.context_data
-
-    def resolve(self, param: inspect.Parameter, context: RequestContext) -> object:
-        """Return the value from context_data for this param name."""
-        return context.context_data[param.name]
-
-
-DEFAULT_PROVIDERS: list[ParameterProvider] = [
-    HttpRequestProvider(),
-    ContextKeyProvider(),  # before URL kwargs so context keys win in context functions
-    UrlKwargsProvider(),
-    FormProvider(),
-]
-
-
-class CallableDependencyProvider:
-    """Provides parameter values by calling registered dependency callables.
-
-    Used when a parameter name matches a name registered via
-    resolver.register_dependency(name, callable). The callable is invoked with
-    its own resolved dependencies; result is cached per request when _cache
-    is passed to resolve_dependencies.
-    """
-
-    def __init__(self, resolver: "Deps") -> None:
-        """Store reference to the Deps instance that holds the dependency registry."""
-        self._resolver = resolver
-
-    def can_handle(self, param: inspect.Parameter, _context: RequestContext) -> bool:
-        """Return True if param name is registered as a dependency callable."""
-        return param.name in self._resolver._dependency_callables
-
-    def resolve(self, param: inspect.Parameter, context: RequestContext) -> object:
-        """Resolve by calling the registered callable; use cache and detect cycles."""
-        name = param.name
-        callable_dep = self._resolver._dependency_callables[name]
-        cache = context.cache
-        resolver = context.resolver
-        # Cycle: if this name is already on the resolution stack, we have a cycle
-        if context.stack is not None and name in context.stack:
-            cycle = [*context.stack[context.stack.index(name) :], name]
-            raise DependencyCycleError(cycle)
-        if cache is not None and context.stack is not None and resolver is not None:
-            if name in cache:
-                value = cache[name]
-                if value is _IN_PROGRESS:
-                    cycle = [*context.stack, name]
-                    raise DependencyCycleError(cycle)
-                return value
-            context.stack.append(name)
-            cache[name] = _IN_PROGRESS
-            try:
-                inner_ctx = {
-                    "request": context.request,
-                    "form": context.form,
-                    **context.url_kwargs,
-                    "_cache": cache,
-                    "_stack": context.stack,
-                }
-                resolved = resolver.resolve_dependencies(callable_dep, **inner_ctx)
-                value = callable_dep(**resolved)
-                cache[name] = value
-                return value
-            finally:
-                if context.stack and context.stack[-1] == name:
-                    context.stack.pop()
-                if cache.get(name) is _IN_PROGRESS:
-                    del cache[name]
-        # No cache: resolve and call without caching (no cycle detection)
-        if resolver is None:
-            return None
-        ctx_dict = {
-            "request": context.request,
-            "form": context.form,
-            **context.url_kwargs,
-        }
-        resolved = resolver.resolve_dependencies(callable_dep, **ctx_dict)
-        return callable_dep(**resolved)
-
-
-class DependencyResolver(ABC):
-    """Abstract resolver that builds call kwargs from request context."""
-
-    @abstractmethod
-    def resolve_dependencies(
-        self, func: Callable[..., Any], **context: object
-    ) -> dict[str, Any]:
-        """Resolve arguments for func from context; return dict of name -> value."""
-        ...
-
-
-class Deps(DependencyResolver):
-    """Resolves dependencies using providers passed at construction."""
-
-    def __init__(self, *providers: ParameterProvider) -> None:
-        """Initialize with providers (e.g. Deps(*DEFAULT_PROVIDERS) or Deps(p1, p2))."""
-        self._providers = list(providers)
+        With no args, chain is built lazily from registry on first resolve.
+        """
         self._dependency_callables: dict[str, Callable[..., Any]] = {}
-        self._callable_provider: CallableDependencyProvider | None = None
+        self._providers: list[RegisteredParameterProvider] = list(providers)
+        self._providers_loaded = bool(providers)
+
+    def _get_providers(self) -> list[RegisteredParameterProvider]:
+        """Build provider list from registry; inject resolver where needed."""
+        import next.forms  # noqa: PLC0415
+        import next.pages  # noqa: PLC0415
+        import next.urls  # noqa: F401, PLC0415
+
+        result: list[RegisteredParameterProvider] = []
+        for cls in RegisteredParameterProvider._registry:
+            sig = inspect.signature(cls)
+            if "resolver" in sig.parameters:
+                result.append(cls(resolver=self))
+            else:
+                result.append(cls())
+        return result
+
+    def _ensure_providers(self) -> None:
+        """Load providers from registry on first use."""
+        if not self._providers_loaded:
+            self._providers.extend(self._get_providers())
+            self._providers_loaded = True
 
     def register_dependency(
         self, name: str, callable_dep: Callable[..., Any]
     ) -> Callable[..., Any]:
-        """Register a callable as a dependency by name (context/form/render)."""
+        r"""Register a callable as a dependency by name.
+
+        Inject with DGlobalContext["name"].
+        """
         self._dependency_callables[name] = callable_dep
-        if self._callable_provider is None:
-            self._callable_provider = CallableDependencyProvider(self)
-            self.add_provider(self._callable_provider)
         return callable_dep
 
     def dependency(
@@ -248,13 +102,59 @@ class Deps(DependencyResolver):
 
         return decorator
 
-    def add_provider(self, provider: ParameterProvider) -> None:
-        """Append a provider; registered providers run after built-in ones."""
+    def _resolve_callable_dependency(self, name: str, context: object) -> object:
+        """Resolve a registered dependency by name; uses cache and cycle detection."""
+        if name not in self._dependency_callables:
+            return None
+        callable_dep = self._dependency_callables[name]
+        cache = getattr(context, "cache", None)
+        stack = getattr(context, "stack", None)
+        if stack is not None and name in stack:
+            cycle = [*stack[stack.index(name) :], name]
+            raise DependencyCycleError(cycle)
+        if cache is not None and stack is not None:
+            if name in cache:
+                value = cache[name]
+                if value is _IN_PROGRESS:
+                    raise DependencyCycleError([*stack, name])
+                return value
+            stack.append(name)
+            cache[name] = _IN_PROGRESS
+            try:
+                inner_ctx: dict[str, object] = {
+                    "request": getattr(context, "request", None),
+                    "form": getattr(context, "form", None),
+                    **getattr(context, "url_kwargs", {}),
+                    "_cache": cache,
+                    "_stack": stack,
+                    "_context_data": getattr(context, "context_data", {}),
+                }
+                resolved = self.resolve_dependencies(callable_dep, **inner_ctx)
+                value = callable_dep(**resolved)
+                cache[name] = value
+                return value
+            finally:
+                if stack and stack[-1] == name:
+                    stack.pop()
+                if cache.get(name) is _IN_PROGRESS:
+                    del cache[name]
+        inner_ctx = {
+            "request": getattr(context, "request", None),
+            "form": getattr(context, "form", None),
+            **getattr(context, "url_kwargs", {}),
+            "_context_data": getattr(context, "context_data", {}),
+        }
+        resolved = self.resolve_dependencies(callable_dep, **inner_ctx)
+        return callable_dep(**resolved)
+
+    def add_provider(self, provider: RegisteredParameterProvider) -> None:
+        """Append a provider."""
         self._providers.append(provider)
 
     def register(
-        self, provider: ParameterProvider | type[ParameterProvider]
-    ) -> ParameterProvider | type[ParameterProvider]:
+        self,
+        provider: RegisteredParameterProvider | type[RegisteredParameterProvider],
+    ) -> RegisteredParameterProvider | type[RegisteredParameterProvider]:
         """Register a provider (instance or class). Use as @resolver.register."""
         if isinstance(provider, type):
             instance = provider()
@@ -267,27 +167,17 @@ class Deps(DependencyResolver):
         self, func: Callable[..., Any], **context: object
     ) -> dict[str, Any]:
         """Resolve arguments for func from context; return dict of name -> value."""
-        _cache = context.get("_cache")
-        _stack = context.get("_stack")
-        stack = _stack if _stack is not None else ([] if _cache else None)
-        _context_data = context.get("_context_data")
-        url_kwargs = {
-            k: v
-            for k, v in context.items()
-            if k not in ("request", "form", "_cache", "_stack", "_context_data")
-        }
-        context_data = cast(
-            "dict[str, Any]",
-            _context_data if _context_data is not None else {},
-        )
-        req_context = RequestContext(
-            request=cast("HttpRequest | None", context.get("request")),
+        self._ensure_providers()
+        reserved = {"request", "form", "_cache", "_stack", "_context_data"}
+        url_kwargs = {k: v for k, v in context.items() if k not in reserved}
+        ctx = types.SimpleNamespace(
+            request=context.get("request"),
             form=context.get("form"),
             url_kwargs=url_kwargs,
-            context_data=context_data,
-            cache=cast("dict[str, Any] | None", _cache),
+            context_data=context.get("_context_data") or {},
+            cache=context.get("_cache"),
+            stack=context.get("_stack"),
             resolver=self,
-            stack=cast("list[str] | None", stack),
         )
         try:
             sig = inspect.signature(func)
@@ -303,8 +193,8 @@ class Deps(DependencyResolver):
             ):
                 continue
             for provider in self._providers:
-                if provider.can_handle(param, req_context):
-                    result[name] = provider.resolve(param, req_context)
+                if provider.can_handle(param, ctx):
+                    result[name] = provider.resolve(param, ctx)
                     break
             else:
                 if param.default is inspect.Parameter.empty:
@@ -312,6 +202,30 @@ class Deps(DependencyResolver):
         return result
 
 
-DefaultDependencyResolver = Deps
+resolver = DependencyResolver()
 
-resolver: Deps = Deps(*DEFAULT_PROVIDERS)
+
+class RegisteredParameterProvider(ABC):
+    """Base for parameter providers that auto-register via __init_subclass__.
+
+    Any subclass is appended to _registry and will be included when building
+    the default resolver chain. Use self.resolver to access the global resolver
+    (e.g. for _resolve_callable_dependency). If the subclass __init__ accepts
+    a 'resolver' parameter, DependencyResolver will pass self when instantiating.
+    """
+
+    resolver = resolver
+    _registry: ClassVar[list[type]] = []
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        """Register the subclass in _registry."""
+        super().__init_subclass__(**kwargs)
+        RegisteredParameterProvider._registry.append(cls)
+
+    @abstractmethod
+    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+        """Return True if this provider can supply a value for the parameter."""
+
+    @abstractmethod
+    def resolve(self, param: inspect.Parameter, context: object) -> object:
+        """Return the value for the parameter. Called only when can_handle is True."""
