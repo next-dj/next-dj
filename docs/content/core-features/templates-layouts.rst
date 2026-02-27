@@ -191,13 +191,13 @@ Accessing parent or global context in child pages
 
 In a child page's context functions you can inject:
 
-- **Parent/layout context by key** — Use ``DContext["key"]`` to get a value that
+- **Parent/layout context by key** — Use ``Context("key")`` to get a value that
   was set by the layout (e.g. ``@context("custom_variable", inherit_context=True)``)
   or by an earlier context function on the same page.
 
 - **Layout-level global dependency** — Register a callable with
   ``@resolver.dependency("name")`` in the layout (or app) and inject it in child
-  pages with ``DGlobalContext["name"]``.
+  pages with ``Depends("name")``.
 
 Example (see ``examples/layouts/``):
 
@@ -216,19 +216,20 @@ Example (see ``examples/layouts/``):
        return "Hello from layout!"
 
    # Child: pages/guides/page.py
-   from next.pages import DContext, DGlobalContext, context
+   from next.deps import Depends
+   from next.pages import Context, context
 
    @context("layout_theme_data")
-   def guides_theme(layout_theme: DGlobalContext["layout_theme"]):
+   def guides_theme(layout_theme: dict[str, str] | None = Depends("layout_theme")):
        return layout_theme
 
    @context("parent_context_data")
-   def guides_parent(custom_variable: DContext["custom_variable"]):
+   def guides_parent(custom_variable: str | None = Context("custom_variable")):
        return custom_variable
 
 Then in ``guides/template.djx`` you can use ``{{ layout_theme_data }}`` and
 ``{{ parent_context_data }}``. For the full walkthrough, see :doc:`/content/dependency-injection`
-(DContext vs DGlobalContext) and the ``examples/layouts/`` source.
+(Context vs Depends) and the ``examples/layouts/`` source.
 
 Layout Blocks
 -------------

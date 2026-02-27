@@ -95,23 +95,23 @@ def test_global_layout_from_root_pages(client) -> None:
 
 
 def test_guides_subpage_receives_layout_di(client) -> None:
-    """Test subpage receives layout-level global context via DGlobalContext."""
+    """Test subpage receives layout-level global context via Depends."""
     response = client.get("/guides/")
     assert response.status_code == 200
     content = response.content.decode()
     assert "Layout DI (Dependency Injection)" in content
-    assert "layout_theme" in content or "DGlobalContext" in content
+    assert "layout_theme" in content or 'Depends("layout_theme")' in content
     assert "Bootstrap" in content
     assert "5.0" in content
     assert "Layout-level global context via DI" in content
 
 
-def test_guides_subpage_receives_parent_context_via_dcontext(client) -> None:
-    """Subpage receives parent layout context by name via DContext["key"]."""
+def test_guides_subpage_receives_parent_context_via_context(client) -> None:
+    """Subpage receives parent layout context by name via Context("key")."""
     response = client.get("/guides/")
     assert response.status_code == 200
     content = response.content.decode()
-    assert "Parent context via DContext" in content
+    assert "Parent context via Context" in content
     assert "custom_variable" in content
     assert "inherit_context=True" in content or "context with inherit" in content
 

@@ -1,13 +1,12 @@
-"""Dependency resolution for core providers.
+"""Dependency resolution for next.dj.
 
 Resolves function parameters from request context (request, URL kwargs, form)
 by inspecting signatures and matching parameters to known sources. Enables
 FastAPI-style dependency injection so callables declare only the arguments
 they need.
 
-D-markers (DContext, DGlobalContext, DForm, DUrl) use a common base Generic
-so that all DI markers can be validated by the linter. Import the base from
-this module when defining new markers.
+D-markers use a common base Generic so that DI markers can be validated by the
+linter. Import the base from this module when defining new markers.
 """
 
 from __future__ import annotations
@@ -16,13 +15,14 @@ import inspect
 import types
 from abc import ABC, abstractmethod
 from collections.abc import Callable  # noqa: TC003
+from dataclasses import dataclass
 from typing import Any, ClassVar
 
 
 class DDependencyBase[T]:
     """Base for all D-markers.
 
-    All DI markers (DContext, DGlobalContext, DForm, DUrl) must inherit from this.
+    All DI markers (e.g. DForm, DUrl) must inherit from this.
     """
 
     __slots__ = ()
@@ -83,7 +83,7 @@ class DependencyResolver:
     ) -> Callable[..., Any]:
         r"""Register a callable as a dependency by name.
 
-        Inject with DGlobalContext["name"].
+        Inject with ``Depends("name")``.
         """
         self._dependency_callables[name] = callable_dep
         return callable_dep
@@ -229,3 +229,56 @@ class RegisteredParameterProvider(ABC):
     @abstractmethod
     def resolve(self, param: inspect.Parameter, context: object) -> object:
         """Return the value for the parameter. Called only when can_handle is True."""
+
+
+@dataclass(frozen=True, slots=True)
+class Depends:
+    """Mark a parameter as a dependency to be resolved by the resolver.
+
+    Use as a default parameter value:
+
+    - ``Depends("name")``: resolve a registered dependency by name
+    - ``Depends(callable)``: call a dependency factory with DI-resolved args
+    - ``Depends(value)``: inject a constant value
+    - ``Depends()``: resolve by parameter name (shorthand for ``Depends("param_name")``)
+    """
+
+    dependency: object | None = None
+
+
+class DependsProvider(RegisteredParameterProvider):
+    """Resolve parameters declared with ``Depends(...)`` defaults."""
+
+    def __init__(self, resolver: DependencyResolver) -> None:
+        """Store resolver for resolving nested dependencies."""
+        self._resolver = resolver
+
+    def can_handle(self, param: inspect.Parameter, _context: object) -> bool:
+        """Return True when param.default is a Depends marker."""
+        return isinstance(param.default, Depends)
+
+    def resolve(self, param: inspect.Parameter, context: object) -> object:
+        """Resolve Depends by name, callable, or constant value."""
+        marker = param.default
+        if not isinstance(marker, Depends):
+            return None
+
+        dep = marker.dependency
+        if dep is None:
+            dep = param.name
+
+        if isinstance(dep, str):
+            return self._resolver._resolve_callable_dependency(dep, context)
+
+        if callable(dep):
+            inner_ctx: dict[str, object] = {
+                "request": getattr(context, "request", None),
+                "form": getattr(context, "form", None),
+                **(getattr(context, "url_kwargs", {}) or {}),
+                "_cache": getattr(context, "cache", None),
+                "_stack": getattr(context, "stack", None),
+                "_context_data": getattr(context, "context_data", {}) or {},
+            }
+            resolved = self._resolver.resolve_dependencies(dep, **inner_ctx)
+            return dep(**resolved)
+        return dep

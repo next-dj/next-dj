@@ -11,17 +11,17 @@ Where it is used
 
 - **Context functions** — ``@context`` and ``@context("key")`` callables receive
   only the parameters they declare (e.g. ``request: HttpRequest``, ``id: int``,
-  ``layout_theme: DGlobalContext["layout_theme"]``, ``custom_variable: DContext["custom_variable"]``).
-  See :doc:`/content/core-features/context-system` and the **DContext vs DGlobalContext**
+  ``layout_theme: dict = Depends("layout_theme")``, ``custom_variable: str = Context("custom_variable")``).
+  See :doc:`/content/core-features/context-system` and the **Context vs Depends**
   section below.
 - **Custom render** — A page's ``render`` function (when there is no template)
   is called with resolved dependencies: ``def render(request: HttpRequest, post_id: int)``.
 - **Form actions** — ``get_initial`` and action handlers receive only declared
   parameters (e.g. ``id: int`` from the URL, ``form: MyForm``). Handlers can also
-  use ``DGlobalContext["name"]`` or ``DContext["key"]``. See :doc:`/content/core-features/forms`.
+  use ``Depends("name")`` or ``Context("key")``. See :doc:`/content/core-features/forms`.
 - **Pages and layouts** — In child pages under a layout, context functions can
-  inject layout-level global dependencies (``DGlobalContext["name"]``) and
-  parent context variables (``DContext["key"]``). See :doc:`/content/core-features/templates-layouts`
+  inject layout-level global dependencies (``Depends("name")``) and
+  parent context variables (``Context("key")``). See :doc:`/content/core-features/templates-layouts`
   and the ``examples/layouts/`` example in the source tree.
 
 How it works
@@ -33,17 +33,18 @@ that uses **providers** to supply values. For each parameter of your function
 one that can supply the value does so. Parameters that no provider handles get
 ``None`` (or keep their default).
 
-DContext vs DGlobalContext
---------------------------
+Context vs Depends
+------------------
 
-Two markers let you **explicitly** request injected values by name:
+Two markers let you **explicitly** request injected values by name, using
+**default parameter values** (FastAPI-style):
 
-- **``DContext["key"]``** — Injects the value of a **context variable** from the
+- **``Context("key")``** — Injects the value of a **context variable** from the
   current request: inherited layout context (e.g. ``@context("key", inherit_context=True)``)
   or context already produced by earlier context functions on the same page. Use this
   when a parent layout or a previous ``@context("key")`` has set that key.
 
-- **``DGlobalContext["name"]``** — Injects the result of a **registered dependency**
+- **``Depends("name")``** — Injects the result of a **registered dependency**
   (a callable registered with ``@resolver.dependency("name")`` or
   ``resolver.register_dependency("name", callable)``). Use this for app-wide
   dependencies (e.g. theme config, current user service) that are not tied to
@@ -54,12 +55,19 @@ Two markers let you **explicitly** request injected values by name:
 +------------------+--------------------------------+------------------------------------------+
 | Marker           | Source                         | Use when                                 |
 +==================+================================+==========================================+
-| ``DContext["x"]``| ``context_data["x"]``          | Value from parent layout or same-page    |
+| ``Context("x")`` | ``context_data["x"]``          | Value from parent layout or same-page    |
 |                  | (inherited + current page)     | context (key name)                       |
 +------------------+--------------------------------+------------------------------------------+
-| ``DGlobalContext | Registered callable by name   | App-level dependency (theme, user, etc.) |
-| ["name"]``       |                                |                                          |
+| ``Depends("name")`` | Registered callable by name | App-level dependency (theme, user, etc.) |
 +------------------+--------------------------------+------------------------------------------+
+
+Migration from DContext/DGlobalContext
+-------------------------------------
+
+If you used the old annotation-based markers, migrate as follows:
+
+- ``foo: DGlobalContext["name"]`` → ``foo = Depends("name")``
+- ``bar: DContext["key"]`` → ``bar = Context("key")`` (or ``Context()`` when the key equals the parameter name)
 
 **Example: layout-level global + parent context (see ``examples/layouts/``):**
 
@@ -78,20 +86,22 @@ Two markers let you **explicitly** request injected values by name:
        return "Hello from layout!"
 
    # Child page (e.g. guides/page.py): inject both by name
-   from next.pages import DContext, DGlobalContext, context
+   from next.deps import Depends
+   from next.pages import Context, context
 
    @context("layout_theme_data")
-   def guides_theme(layout_theme: DGlobalContext["layout_theme"]):
+   def guides_theme(layout_theme: dict[str, str] | None = Depends("layout_theme")):
        return layout_theme
 
    @context("parent_context_data")
-   def guides_parent(custom_variable: DContext["custom_variable"]):
+   def guides_parent(custom_variable: str | None = Context("custom_variable")):
        return custom_variable
 
 You can also rely on **parameter name**: if a parameter has the same name as a
-context key (and no annotation like ``DContext["key"]``), the built-in
-``ContextByNameProvider`` injects that key's value. Using ``DContext["key"]``
-makes the intent explicit and works when the key is not the same as the param name.
+context key (and no explicit ``Context(...)`` marker), the built-in
+``ContextByNameProvider`` injects that key's value. Using ``Context("key")`` or
+``Context()`` makes the intent explicit and works when the key is not the same
+as the param name.
 
 Built-in providers
 ------------------
@@ -103,11 +113,11 @@ Built-in providers
   is applied. For catch-all (``[[args]]``), use ``list[str]``.
 - **Form** — Parameter named ``form`` or annotated with ``DForm[FormClass]``
   receives the form instance (in form actions).
-- **Context by key** — ``DContext["key"]``: value from current context (inherited
-  + same page). Parameter name matching a context key also receives that value
-  (``ContextByNameProvider``).
-- **Global dependency** — ``DGlobalContext["name"]``: result of the callable
-  registered under that name.
+- **Context by key** — ``Context("key")`` or ``Context()``: value from current
+  context (inherited + same page). Parameter name matching a context key also
+  receives that value (``ContextByNameProvider``).
+- **Global dependency** — ``Depends("name")``: result of the callable registered
+  under that name.
 
 Example: context function with URL parameter
 
@@ -134,12 +144,12 @@ See :doc:`/content/api/api/deps` for the full API.
 
 Parameters that no provider handles receive ``None`` (or keep their default).
 
-Registered DI functions (DGlobalContext)
-----------------------------------------
+Registered DI functions (Depends)
+---------------------------------
 
 Register **dependency callables** by name with ``@resolver.dependency("name")``
-and inject them anywhere using **``DGlobalContext["name"]``** (or a parameter
-with the same name as the dependency).
+and inject them anywhere using **``Depends("name")``** (or ``Depends()`` as a
+shorthand for the parameter name).
 
 **Register a callable:**
 
@@ -154,15 +164,16 @@ with the same name as the dependency).
    # or: resolver.register_dependency("current_user", get_current_user)
 
 **Use it in context functions, form handlers, or custom render:** Use
-``DGlobalContext["current_user"]`` for explicit injection, or a parameter named
-``current_user``:
+``Depends("current_user")`` for explicit injection, or ``Depends()`` when the
+parameter name is ``current_user``:
 
 .. code-block:: python
 
-   from next.pages import DGlobalContext, context
+   from next.deps import Depends
+   from next.pages import context
 
    @context("profile")
-   def profile(current_user: DGlobalContext["current_user"]):
+   def profile(current_user = Depends("current_user")):
        return {"user": current_user}
 
 - **Caching:** Within a single request, the result of each dependency callable

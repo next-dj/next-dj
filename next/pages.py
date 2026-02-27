@@ -23,35 +23,21 @@ import logging
 import types
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar, get_args, get_origin
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
-from django.template import Context, Template
+from django.template import Context as DjangoTemplateContext, Template
 from django.urls import URLPattern, path
 from django.utils.module_loading import import_string
 
-from .deps import (
-    DDependencyBase,
-    DependencyResolver,
-    RegisteredParameterProvider,
-    resolver,
-)
+from .deps import DependencyResolver, RegisteredParameterProvider, resolver
 
 
 if TYPE_CHECKING:
     from .urls import URLPatternParser
-
-
-def _key_from_annotation_arg(arg: object) -> str | None:
-    """Return string key from DContext/DGlobalContext arg (str or ForwardRef)."""
-    if isinstance(arg, str):
-        return arg
-    if hasattr(arg, "__forward_arg__"):
-        val = arg.__forward_arg__
-        return val if isinstance(val, str) else None
-    return None
 
 
 # URL pattern naming template
@@ -60,52 +46,70 @@ URL_NAME_TEMPLATE = "page_{name}"
 
 logger = logging.getLogger(__name__)
 
-# D-markers for DI (inherit from DDependencyBase; linter can enforce this)
-_KeyT = TypeVar("_KeyT", bound=str)  # noqa: PYI018
+_CONTEXT_DEFAULT_UNSET: object = object()
 
 
-class DContext[KeyT](DDependencyBase[KeyT]):
-    """Annotation for injecting page context by key.
+@dataclass(frozen=True, slots=True)
+class Context:
+    """Mark a parameter as a value read from page/layout ``context_data``.
 
-    Use as DContext["key"] or DContext[SomeType].
+    Use as a default parameter value:
+
+    - ``Context("key")``: read ``context_data["key"]``
+    - ``Context()``: read ``context_data[param.name]``
+    - ``Context(callable)``: call a factory with DI-resolved args
+    - ``Context(value)``: inject a constant value
+    - ``Context("key", default=...)``: fallback when key is missing
+    - ``Context(default=...)``: fallback when param.name key is missing
     """
 
-    __slots__ = ()
+    source: object | None = None
+    default: object = field(default=_CONTEXT_DEFAULT_UNSET, kw_only=True)
 
 
-class DGlobalContext[KeyT](DDependencyBase[KeyT]):
-    """Annotation for injecting global dependency by name.
+class ContextByDefaultProvider(RegisteredParameterProvider):
+    """Resolve parameters declared with ``Context(...)`` defaults."""
 
-    Use as DGlobalContext["name"] or by callable.
-    """
+    def __init__(self, resolver: DependencyResolver) -> None:
+        """Store resolver for calling callable Context sources."""
+        self._resolver = resolver
 
-    __slots__ = ()
-
-
-class ContextByAnnotationProvider(RegisteredParameterProvider):
-    """Provide parameter from context_data when annotation is DContext["key"]."""
-
-    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
-        """Return True if this provider can supply the context value."""
-        ann = param.annotation
-        if ann is inspect.Parameter.empty:
-            return False
-        origin = get_origin(ann)
-        if origin is not DContext:
-            return False
-        args = get_args(ann)
-        if len(args) < 1:
-            return False
-        key = _key_from_annotation_arg(args[0])
-        return key is not None and key in getattr(context, "context_data", {})
+    def can_handle(self, param: inspect.Parameter, _context: object) -> bool:
+        """Return True when param.default is a Context marker."""
+        return isinstance(param.default, Context)
 
     def resolve(self, param: inspect.Parameter, context: object) -> object:
-        """Return the context value for the parameter."""
-        args = get_args(param.annotation)
-        key = _key_from_annotation_arg(args[0])
-        if key is None:
+        """Resolve Context marker by key, callable, or constant."""
+        marker = param.default
+        if not isinstance(marker, Context):
             return None
-        return getattr(context, "context_data", {})[key]
+
+        source = marker.source
+        context_data = getattr(context, "context_data", {}) or {}
+        default_value: object = (
+            None if marker.default is _CONTEXT_DEFAULT_UNSET else marker.default
+        )
+
+        if source is None:
+            return context_data.get(param.name, default_value)
+
+        if isinstance(source, str):
+            return context_data.get(source, default_value)
+
+        if callable(source):
+            inner_ctx: dict[str, object] = {
+                "request": getattr(context, "request", None),
+                "form": getattr(context, "form", None),
+                **(getattr(context, "url_kwargs", {}) or {}),
+                "_cache": getattr(context, "cache", None),
+                "_stack": getattr(context, "stack", None),
+                "_context_data": context_data,
+            }
+            resolved = self._resolver.resolve_dependencies(source, **inner_ctx)
+            return source(**resolved)
+
+        # Constant value mode.
+        return source
 
 
 class ContextByNameProvider(RegisteredParameterProvider):
@@ -125,43 +129,6 @@ class ContextByNameProvider(RegisteredParameterProvider):
         """Return the context value for the parameter."""
         context_data = getattr(context, "context_data", {}) or {}
         return context_data[param.name]
-
-
-class GlobalContextByAnnotationProvider(RegisteredParameterProvider):
-    """Provide parameter when annotation is DGlobalContext["name"].
-
-    Uses resolver's registered callables.
-    """
-
-    def __init__(self, resolver: DependencyResolver) -> None:
-        """Store the resolver for dependency lookup."""
-        self._resolver = resolver
-
-    def can_handle(self, param: inspect.Parameter, _context: object) -> bool:
-        """Return True if this provider can supply the global dependency."""
-        ann = param.annotation
-        if ann is inspect.Parameter.empty:
-            return False
-        origin = get_origin(ann)
-        if origin is not DGlobalContext:
-            return False
-        args = get_args(ann)
-        if len(args) < 1:
-            return False
-        name = _key_from_annotation_arg(args[0])
-        return (
-            name is not None
-            and hasattr(self._resolver, "_dependency_callables")
-            and name in self._resolver._dependency_callables
-        )
-
-    def resolve(self, param: inspect.Parameter, context: object) -> object:
-        """Return the resolved dependency value."""
-        args = get_args(param.annotation)
-        name = _key_from_annotation_arg(args[0])
-        if name is None:
-            return None
-        return self._resolver._resolve_callable_dependency(name, context)
 
 
 def _import_context_processor(
@@ -770,7 +737,7 @@ class Page:
                         e,
                     )
 
-        return Template(template_str).render(Context(context_data))
+        return Template(template_str).render(DjangoTemplateContext(context_data))
 
     def _create_view_function(
         self,

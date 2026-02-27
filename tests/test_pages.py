@@ -1,6 +1,5 @@
 import inspect
 import tempfile
-import types
 from pathlib import Path
 from typing import Never
 from unittest.mock import MagicMock, patch
@@ -16,21 +15,18 @@ from next.checks import (
     check_layout_templates,
     check_missing_page_content,
 )
-from next.deps import DependencyResolver, resolver
+from next.deps import DependencyResolver
 from next.pages import (
-    ContextByAnnotationProvider,
+    Context,
+    ContextByDefaultProvider,
     ContextManager,
-    DContext,
-    DGlobalContext,
     DjxTemplateLoader,
-    GlobalContextByAnnotationProvider,
     LayoutManager,
     LayoutTemplateLoader,
     Page,
     PythonTemplateLoader,
     _get_context_processors,
     _import_context_processor,
-    _key_from_annotation_arg,
     context,
     get_layout_djx_paths_for_watch,
     get_template_djx_paths_for_watch,
@@ -852,105 +848,77 @@ class TestPythonTemplateLoader:
         assert load_result == expected_load_result
 
 
-class TestContextProviderKeyFromAnnotation:
-    """Test _key_from_annotation_arg and provider behavior for non-string args."""
+class TestContextMarker:
+    """Tests for Context(...) marker used via param.default."""
 
-    def test_key_from_annotation_arg_returns_str_when_arg_is_str(self) -> None:
-        """_key_from_annotation_arg returns the string when arg is a string."""
-        assert _key_from_annotation_arg("my_key") == "my_key"
+    def test_context_marker_reads_by_key(self) -> None:
+        """Context("key") reads value from context_data by explicit key."""
 
-    def test_context_by_annotation_can_handle_true_when_key_in_context_data(
+        def fn(x: str = Context("key")) -> str:
+            return x
+
+        r = DependencyResolver()
+        resolved = r.resolve_dependencies(fn, _context_data={"key": "value"})
+        assert resolved["x"] == "value"
+
+    def test_context_marker_reads_by_param_name(self) -> None:
+        """Context() reads context_data by parameter name."""
+
+        def fn(user_id: int = Context()) -> int:
+            return user_id
+
+        r = DependencyResolver()
+        resolved = r.resolve_dependencies(fn, _context_data={"user_id": 123})
+        assert resolved["user_id"] == 123
+
+    def test_context_marker_returns_default_when_missing(self) -> None:
+        """Context(..., default=...) returns default when key is missing."""
+
+        def fn(x: str = Context("missing", default="fallback")) -> str:
+            return x
+
+        r = DependencyResolver()
+        resolved = r.resolve_dependencies(fn, _context_data={})
+        assert resolved["x"] == "fallback"
+
+    def test_context_marker_constant_value_mode(self) -> None:
+        """Context(value) injects constant value (non-callable, non-str)."""
+
+        def fn(x: int = Context(123)) -> int:
+            return x
+
+        r = DependencyResolver()
+        resolved = r.resolve_dependencies(fn, _context_data={"x": 999})
+        assert resolved["x"] == 123
+
+    def test_context_marker_callable_uses_di(self) -> None:
+        """Context(callable) is called with DI-resolved args."""
+
+        def source(request: HttpRequest) -> str:
+            return getattr(request, "path", "")
+
+        def fn(path: str = Context(source)) -> str:
+            return path
+
+        r = DependencyResolver()
+        request = MagicMock(spec=HttpRequest)
+        request.path = "/from-context/"
+        resolved = r.resolve_dependencies(fn, request=request)
+        assert resolved["path"] == "/from-context/"
+
+    def test_context_provider_resolve_returns_none_when_default_not_context(
         self,
     ) -> None:
-        """can_handle is True when annotation is DContext['key'] and key in context_data."""
-        provider = ContextByAnnotationProvider()
+        """Defensive: ContextByDefaultProvider.resolve returns None when default isn't Context."""
+        provider = ContextByDefaultProvider(DependencyResolver())
         param = inspect.Parameter(
             "x",
             inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=DContext["key"],
+            default=123,
+            annotation=int,
         )
-        ctx = types.SimpleNamespace(context_data={"key": "value"})
-        assert provider.can_handle(param, ctx) is True
-        assert provider.resolve(param, ctx) == "value"
-
-    def test_context_by_annotation_can_handle_false_when_no_type_args(self) -> None:
-        """can_handle is False when origin is DContext but get_args is empty (len < 1)."""
-        # Annotation that has origin DContext but get_args() returns () (cover line 98)
-        empty_args_annotation = MagicMock()
-        empty_args_annotation.__origin__ = DContext
-        empty_args_annotation.__args__ = ()
-        # get_origin/get_args in pages use typing.get_origin/get_args which use these
-        with (
-            patch("next.pages.get_origin", return_value=DContext),
-            patch("next.pages.get_args", return_value=()),
-        ):
-            provider = ContextByAnnotationProvider()
-            param = inspect.Parameter(
-                "x",
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                annotation=empty_args_annotation,
-            )
-            ctx = types.SimpleNamespace(context_data={})
-            assert provider.can_handle(param, ctx) is False
-
-    def test_context_by_annotation_key_none_when_arg_is_type(self) -> None:
-        """When DContext[Type] arg is a type (not str), key is None; can_handle False, resolve None."""
-        provider = ContextByAnnotationProvider()
-        param = inspect.Parameter(
-            "x",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=DContext[int],
-        )
-        ctx = types.SimpleNamespace(context_data={})
-        assert provider.can_handle(param, ctx) is False
+        ctx = MagicMock()
         assert provider.resolve(param, ctx) is None
-
-    def test_global_context_by_annotation_name_none_when_arg_is_type(self) -> None:
-        """When DGlobalContext[Type] arg is a type (not str), name is None; resolve None."""
-        prov = GlobalContextByAnnotationProvider(resolver)
-        param = inspect.Parameter(
-            "x",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=DGlobalContext[int],
-        )
-        ctx = types.SimpleNamespace()
-        assert prov.can_handle(param, ctx) is False
-        assert prov.resolve(param, ctx) is None
-
-    def test_global_context_by_annotation_can_handle_false_when_no_type_args(
-        self,
-    ) -> None:
-        """can_handle is False when origin is DGlobalContext but get_args is empty."""
-        empty_args_annotation = MagicMock()
-        empty_args_annotation.__origin__ = DGlobalContext
-        empty_args_annotation.__args__ = ()
-        with (
-            patch("next.pages.get_origin", return_value=DGlobalContext),
-            patch("next.pages.get_args", return_value=()),
-        ):
-            prov = GlobalContextByAnnotationProvider(resolver)
-            param = inspect.Parameter(
-                "x",
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                annotation=empty_args_annotation,
-            )
-            ctx = types.SimpleNamespace()
-            assert prov.can_handle(param, ctx) is False
-
-    def test_global_context_by_annotation_resolve_with_string_name(self) -> None:
-        """Resolve uses _key_from_annotation_arg for DGlobalContext['name']; name is str."""
-        resolver.register_dependency("cov_name", lambda: "resolved")
-        try:
-            prov = GlobalContextByAnnotationProvider(resolver)
-            param = inspect.Parameter(
-                "x",
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                annotation=DGlobalContext["cov_name"],
-            )
-            ctx = types.SimpleNamespace()
-            assert prov.resolve(param, ctx) == "resolved"
-        finally:
-            resolver._dependency_callables.pop("cov_name", None)
 
 
 class TestContextManager:
@@ -1019,13 +987,13 @@ class TestContextManager:
     def test_collect_context_second_function_gets_first_via_param_name(
         self, context_manager, test_file_path
     ) -> None:
-        """Second @context("key") receives first key's value via DContext annotation."""
+        """Second @context("key") can access first key via Context()."""
         context_manager.register_context(
             test_file_path, "custom_context_var", lambda: "12345"
         )
 
         def landing(
-            custom_context_var: DContext["custom_context_var"],  # noqa: F821
+            custom_context_var: str = Context(),
         ) -> dict[str, str]:
             return {"title": "Landing", "custom_context_var": custom_context_var}
 

@@ -11,11 +11,12 @@ from next.deps import (
     _IN_PROGRESS,
     DependencyCycleError,
     DependencyResolver,
+    Depends,
+    DependsProvider,
     RegisteredParameterProvider,
     resolver,
 )
 from next.forms import DForm, FormProvider
-from next.pages import DGlobalContext
 from next.urls import (
     DUrl,
     HttpRequestProvider,
@@ -86,10 +87,10 @@ class TestResolverDescriptor:
     """Test that providers can access resolver via descriptor when no __init__(resolver)."""
 
     def test_context_provider_resolver_attribute_returns_singleton(self) -> None:
-        """ContextByAnnotationProvider has no resolver in __init__; self.resolver returns global."""
-        from next.pages import ContextByAnnotationProvider  # noqa: PLC0415
+        """ContextByNameProvider has no resolver in __init__; self.resolver returns global."""
+        from next.pages import ContextByNameProvider  # noqa: PLC0415
 
-        provider = ContextByAnnotationProvider()
+        provider = ContextByNameProvider()
         assert provider.resolver is resolver
 
 
@@ -735,7 +736,7 @@ class TestRegisterDependency:
         try:
             request = MagicMock(spec=HttpRequest)
 
-            def view(current_user: DGlobalContext["current_user"]) -> str:  # noqa: F821
+            def view(current_user: str = Depends("current_user")) -> str:
                 return current_user
 
             cache = {}
@@ -756,7 +757,7 @@ class TestRegisterDependency:
         def get_product(request: HttpRequest, id: int) -> str:  # noqa: A002
             return f"product-{id}"
 
-        def page(product: DGlobalContext["product"]) -> str:  # noqa: F821
+        def page(product: str = Depends("product")) -> str:
             return product
 
         try:
@@ -769,14 +770,68 @@ class TestRegisterDependency:
         finally:
             resolver._dependency_callables.pop("product", None)
 
-    def test_unregistered_dglobal_context_returns_none(self) -> None:
-        r"""When DGlobalContext["name"] is used but name is not registered, param gets None."""
+    def test_depends_callable_is_called_with_di_resolved_args(self) -> None:
+        """Depends(callable) resolves callable args and calls it."""
 
-        def view(foo: DGlobalContext["nonexistent"]) -> str:  # noqa: F821
+        def build_value(request: HttpRequest, id: int) -> str:  # noqa: A002
+            return f"{getattr(request, 'path', '')}:{id}"
+
+        def view(value: str = Depends(build_value)) -> str:
+            return value
+
+        r = DependencyResolver()
+        request = MagicMock(spec=HttpRequest)
+        request.path = "/x/"
+        resolved = r.resolve_dependencies(view, request=request, id=7)
+        assert resolved["value"] == "/x/:7"
+        assert view(**resolved) == "/x/:7"
+
+    def test_depends_constant_value_injects_as_is(self) -> None:
+        """Depends(value) injects a constant value when not str/callable."""
+
+        def view(x: int = Depends(123)) -> int:
+            return x
+
+        r = DependencyResolver()
+        resolved = r.resolve_dependencies(view)
+        assert resolved["x"] == 123
+
+    def test_depends_without_args_uses_param_name(self) -> None:
+        """Depends() resolves by parameter name (Depends("param_name"))."""
+        r = DependencyResolver()
+        r.register_dependency("current_user", lambda: "alice")
+        try:
+
+            def view(current_user: str = Depends()) -> str:
+                return current_user
+
+            resolved = r.resolve_dependencies(view)
+            assert resolved["current_user"] == "alice"
+        finally:
+            r._dependency_callables.pop("current_user", None)
+
+    def test_unregistered_depends_name_returns_none(self) -> None:
+        """When Depends("name") is used but name is not registered, param gets None."""
+
+        def view(foo: object = Depends("nonexistent")) -> str:
             return str(foo)
 
         result = resolver.resolve_dependencies(view)
         assert result["foo"] is None
+
+    def test_depends_provider_resolve_returns_none_when_default_not_depends(
+        self,
+    ) -> None:
+        """Defensive: DependsProvider.resolve returns None when default isn't Depends."""
+        provider = DependsProvider(DependencyResolver())
+        param = inspect.Parameter(
+            "x",
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            default=123,
+            annotation=int,
+        )
+        ctx = _ctx()
+        assert provider.resolve(param, ctx) is None
 
     def test_registered_dependency_not_used_if_url_kwargs_same_name(self) -> None:
         """URL kwargs take precedence: param 'id' gets url value, not a dependency."""
@@ -810,10 +865,10 @@ class TestCallableDependencyCache:
         try:
             request = MagicMock(spec=HttpRequest)
 
-            def view1(current_user: DGlobalContext["current_user"]) -> str:  # noqa: F821
+            def view1(current_user: str = Depends("current_user")) -> str:
                 return current_user
 
-            def view2(current_user: DGlobalContext["current_user"]) -> str:  # noqa: F821
+            def view2(current_user: str = Depends("current_user")) -> str:
                 return current_user
 
             cache = {}
@@ -844,7 +899,7 @@ class TestCallableDependencyCache:
         try:
             request = MagicMock(spec=HttpRequest)
 
-            def view(current_user: DGlobalContext["current_user"]) -> str:  # noqa: F821
+            def view(current_user: str = Depends("current_user")) -> str:
                 return current_user
 
             resolver.resolve_dependencies(view, request=request)
@@ -860,13 +915,13 @@ class TestDependencyCycleError:
     def test_self_cycle_raises(self) -> None:
         """When a dependency needs itself (a -> a), DependencyCycleError is raised."""
 
-        def get_a(a: DGlobalContext["a"]) -> str:  # noqa: F821
+        def get_a(a: str = Depends("a")) -> str:
             return f"a-{a}"
 
         resolver.register_dependency("a", get_a)
         try:
 
-            def top(a: DGlobalContext["a"]) -> str:  # noqa: F821
+            def top(a: str = Depends("a")) -> str:
                 return a
 
             cache = {}
@@ -907,17 +962,17 @@ class TestDependencyCycleError:
     def test_cycle_a_depends_on_b_b_depends_on_a_raises(self) -> None:
         """When A needs B and B needs A, DependencyCycleError is raised."""
 
-        def get_a(b: DGlobalContext["b"]) -> str:  # noqa: F821
+        def get_a(b: str = Depends("b")) -> str:
             return f"a-{b}"
 
-        def get_b(a: DGlobalContext["a"]) -> str:  # noqa: F821
+        def get_b(a: str = Depends("a")) -> str:
             return f"b-{a}"
 
         resolver.register_dependency("a", get_a)
         resolver.register_dependency("b", get_b)
         try:
 
-            def top(a: DGlobalContext["a"]) -> str:  # noqa: F821
+            def top(a: str = Depends("a")) -> str:
                 return a
 
             cache = {}
