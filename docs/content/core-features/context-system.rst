@@ -100,10 +100,69 @@ Context data is merged with the following priority (highest to lowest):
 4. **Context processors** (global Django context)
 5. **Default context** (basic request data)
 
+Dependency Injection
+--------------------
+
+Context functions receive only the arguments they declare: the framework resolves
+parameters from the request context (request, URL kwargs, form) by inspecting
+the function signature. Declare ``request: HttpRequest``, ``id: int``, etc.; no
+``*args`` or ``**kwargs`` needed.
+
+Injecting context by name: Context and Depends
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can **explicitly** request values by name using two markers (FastAPI-style,
+via **default parameter values**):
+
+- **``Context("key")``** — Injects the value of a **context variable** already
+  in the current request: from a parent layout (e.g. ``@context("key", inherit_context=True)``)
+  or from an earlier context function on the same page. The ``key`` is the name
+  of the variable (e.g. ``"custom_variable"``, ``"app_greeting"``).
+
+- **``Depends("name")``** — Injects the result of a **registered dependency**
+  (a callable registered with ``@resolver.dependency("name")``). Use for app-wide
+  data (theme, config, current user) that is not tied to the page/layout hierarchy.
+
+**Example: subpage receiving layout global + parent context (see ``examples/layouts/``):**
+
+.. code-block:: python
+
+   # Layout page (e.g. pages/page.py): register global dependency and inherited context
+   from next.deps import resolver
+   from next.pages import context
+
+   @resolver.dependency("layout_theme")
+   def get_layout_theme():
+       return {"name": "Bootstrap", "version": "5.0"}
+
+   @context("custom_variable", inherit_context=True)
+   def custom_variable_context_with_inherit(request):
+       return "Hello from layout!"
+
+   # Child page (e.g. pages/guides/page.py): inject both by name
+   from next.deps import Depends
+   from next.pages import Context, context
+
+   @context("layout_theme_data")
+   def guides_theme(layout_theme: dict[str, str] | None = Depends("layout_theme")):
+       return layout_theme
+
+   @context("parent_context_data")
+   def guides_parent(custom_variable: str | None = Context("custom_variable")):
+       return custom_variable
+
+In the template you can then use ``{{ layout_theme_data }}`` and ``{{ parent_context_data }}``.
+You can also rely on **parameter name**: if the parameter has the same name as a
+context key (e.g. ``app_greeting: str`` when ``@context("app_greeting")`` exists),
+the value is injected without using ``Context(...)`` (see ``ContextByNameProvider``).
+
+For full details, custom providers, and API reference, see :doc:`/content/dependency-injection`.
+
 URL Parameters in Context
 -------------------------
 
-URL parameters are automatically passed to context functions:
+URL parameters are automatically passed to context functions when you declare
+them by name:
 
 .. code-block:: python
 
@@ -115,7 +174,7 @@ URL parameters are automatically passed to context functions:
    """
 
    @context
-   def get_user_profile(request, username):
+   def get_user_profile(request: HttpRequest, username: str):
        # username is automatically passed from the URL
        return {
            "username": username,
@@ -231,9 +290,10 @@ Examples
 
 See the ``examples/`` directory in the source code for complete working examples:
 
-- **layouts/**: Context inheritance examples
-- **pages/**: Context function usage examples
-- **components/**: Component-based context examples
+- **layouts/**: Context inheritance, **Context("key")** (parent context by name), and
+  **Depends("name")** (layout-level global dependency) — see ``layouts/pages/page.py``
+  and ``layouts/pages/guides/page.py``.
+- **pages/**: Context function usage and keyed context (e.g. ``@context("app_greeting")``).
 
 Best Practices
 --------------

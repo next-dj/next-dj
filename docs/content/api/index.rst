@@ -6,6 +6,7 @@ API Reference
 
    api
    api/pages
+   api/deps
    api/urls
    api/utils
    api/checks

@@ -1,3 +1,4 @@
+import inspect
 import tempfile
 from pathlib import Path
 from typing import Never
@@ -14,7 +15,10 @@ from next.checks import (
     check_layout_templates,
     check_missing_page_content,
 )
+from next.deps import DependencyResolver
 from next.pages import (
+    Context,
+    ContextByDefaultProvider,
     ContextManager,
     DjxTemplateLoader,
     LayoutManager,
@@ -844,12 +848,91 @@ class TestPythonTemplateLoader:
         assert load_result == expected_load_result
 
 
+class TestContextMarker:
+    """Tests for Context(...) marker used via param.default."""
+
+    def test_context_marker_reads_by_key(self) -> None:
+        """Context("key") reads value from context_data by explicit key."""
+
+        def fn(x: str = Context("key")) -> str:
+            return x
+
+        r = DependencyResolver()
+        resolved = r.resolve_dependencies(fn, _context_data={"key": "value"})
+        assert resolved["x"] == "value"
+
+    def test_context_marker_reads_by_param_name(self) -> None:
+        """Context() reads context_data by parameter name."""
+
+        def fn(user_id: int = Context()) -> int:
+            return user_id
+
+        r = DependencyResolver()
+        resolved = r.resolve_dependencies(fn, _context_data={"user_id": 123})
+        assert resolved["user_id"] == 123
+
+    def test_context_marker_returns_default_when_missing(self) -> None:
+        """Context(..., default=...) returns default when key is missing."""
+
+        def fn(x: str = Context("missing", default="fallback")) -> str:
+            return x
+
+        r = DependencyResolver()
+        resolved = r.resolve_dependencies(fn, _context_data={})
+        assert resolved["x"] == "fallback"
+
+    def test_context_marker_constant_value_mode(self) -> None:
+        """Context(value) injects constant value (non-callable, non-str)."""
+
+        def fn(x: int = Context(123)) -> int:
+            return x
+
+        r = DependencyResolver()
+        resolved = r.resolve_dependencies(fn, _context_data={"x": 999})
+        assert resolved["x"] == 123
+
+    def test_context_marker_callable_uses_di(self) -> None:
+        """Context(callable) is called with DI-resolved args."""
+
+        def source(request: HttpRequest) -> str:
+            return getattr(request, "path", "")
+
+        def fn(path: str = Context(source)) -> str:
+            return path
+
+        r = DependencyResolver()
+        request = MagicMock(spec=HttpRequest)
+        request.path = "/from-context/"
+        resolved = r.resolve_dependencies(fn, request=request)
+        assert resolved["path"] == "/from-context/"
+
+    def test_context_provider_resolve_returns_none_when_default_not_context(
+        self,
+    ) -> None:
+        """Defensive: ContextByDefaultProvider.resolve returns None when default isn't Context."""
+        provider = ContextByDefaultProvider(DependencyResolver())
+        param = inspect.Parameter(
+            "x",
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            default=123,
+            annotation=int,
+        )
+        ctx = MagicMock()
+        assert provider.resolve(param, ctx) is None
+
+
 class TestContextManager:
     """Test cases for ContextManager."""
 
     def test_init(self, context_manager) -> None:
         """Test ContextManager initialization."""
         assert context_manager._context_registry == {}
+
+    def test_get_resolver_returns_injected_resolver(self) -> None:
+        """When resolver is injected, _get_resolver() returns it."""
+        r = DependencyResolver()
+        cm = ContextManager(resolver=r)
+        assert cm._get_resolver() is r
 
     @pytest.mark.parametrize(
         ("key", "func_return", "expected_result"),
@@ -900,6 +983,47 @@ class TestContextManager:
         result = context_manager.collect_context(test_file_path)
 
         assert result == {"key1": "value1", "key2": "value2", "key3": "value3"}
+
+    def test_collect_context_second_function_gets_first_via_param_name(
+        self, context_manager, test_file_path
+    ) -> None:
+        """Second @context("key") can access first key via Context()."""
+        context_manager.register_context(
+            test_file_path, "custom_context_var", lambda: "12345"
+        )
+
+        def landing(
+            custom_context_var: str = Context(),
+        ) -> dict[str, str]:
+            return {"title": "Landing", "custom_context_var": custom_context_var}
+
+        context_manager.register_context(test_file_path, "landing", landing)
+
+        result = context_manager.collect_context(test_file_path)
+
+        assert result["custom_context_var"] == "12345"
+        assert result["landing"] == {
+            "title": "Landing",
+            "custom_context_var": "12345",
+        }
+
+    def test_collect_context_second_function_gets_value_by_param_name(
+        self, context_manager, test_file_path
+    ) -> None:
+        """ContextByNameProvider injects context_data value when param name matches key."""
+        context_manager.register_context(
+            test_file_path, "by_name_key", lambda: "injected-by-name"
+        )
+
+        def use_key(by_name_key: str) -> dict[str, str]:
+            return {"got": by_name_key}
+
+        context_manager.register_context(test_file_path, "use_key", use_key)
+
+        result = context_manager.collect_context(test_file_path)
+
+        assert result["by_name_key"] == "injected-by-name"
+        assert result["use_key"] == {"got": "injected-by-name"}
 
     def test_collect_context_no_functions(
         self, context_manager, test_file_path
@@ -2933,7 +3057,7 @@ class TestContextProcessors:
         with patch("next.pages._get_context_processors", return_value=[]):
             result = page_instance.render(page_file, mock_request, title="Test Title")
 
-            # should use regular Context, not RequestContext
+            # uses regular Django Context for template
             assert result == "<h1>Test Title</h1>"
 
     def test_render_with_context_processor_error(self, page_instance, tmp_path) -> None:
@@ -3101,7 +3225,7 @@ class TestGetLayoutDjxPathsForWatch:
         (tmp_path / "a" / "layout.djx").write_text("<div>a</div>")
         (tmp_path / "a" / "b").mkdir()
         (tmp_path / "a" / "b" / "layout.djx").write_text("<div>b</div>")
-        with patch("next.urls.get_pages_directories_for_watch") as mock_watch:
+        with patch("next.pages.get_pages_directories_for_watch") as mock_watch:
             mock_watch.return_value = [tmp_path]
             result = get_layout_djx_paths_for_watch()
         assert len(result) == 2
@@ -3111,7 +3235,7 @@ class TestGetLayoutDjxPathsForWatch:
 
     def test_returns_empty_when_no_layout_djx(self, tmp_path) -> None:
         """Returns empty set when no layout.djx under pages dirs."""
-        with patch("next.urls.get_pages_directories_for_watch") as mock_watch:
+        with patch("next.pages.get_pages_directories_for_watch") as mock_watch:
             mock_watch.return_value = [tmp_path]
             result = get_layout_djx_paths_for_watch()
         assert result == set()
@@ -3119,7 +3243,7 @@ class TestGetLayoutDjxPathsForWatch:
     def test_swallows_oserror_on_rglob_layout(self, tmp_path) -> None:
         """When rglob raises OSError (e.g. permission), log and return partial result."""
         with (
-            patch("next.urls.get_pages_directories_for_watch") as mock_watch,
+            patch("next.pages.get_pages_directories_for_watch") as mock_watch,
             patch.object(Path, "rglob", side_effect=OSError(13, "Permission denied")),
         ):
             mock_watch.return_value = [tmp_path]
@@ -3136,7 +3260,7 @@ class TestGetTemplateDjxPathsForWatch:
         (tmp_path / "x" / "template.djx").write_text("x")
         (tmp_path / "x" / "y").mkdir()
         (tmp_path / "x" / "y" / "template.djx").write_text("y")
-        with patch("next.urls.get_pages_directories_for_watch") as mock_watch:
+        with patch("next.pages.get_pages_directories_for_watch") as mock_watch:
             mock_watch.return_value = [tmp_path]
             result = get_template_djx_paths_for_watch()
         assert len(result) == 2
@@ -3146,7 +3270,7 @@ class TestGetTemplateDjxPathsForWatch:
 
     def test_returns_empty_when_no_template_djx(self, tmp_path) -> None:
         """Returns empty set when no template.djx under pages dirs."""
-        with patch("next.urls.get_pages_directories_for_watch") as mock_watch:
+        with patch("next.pages.get_pages_directories_for_watch") as mock_watch:
             mock_watch.return_value = [tmp_path]
             result = get_template_djx_paths_for_watch()
         assert result == set()
@@ -3154,7 +3278,7 @@ class TestGetTemplateDjxPathsForWatch:
     def test_swallows_oserror_on_rglob_template(self, tmp_path) -> None:
         """When rglob raises OSError (e.g. permission), log and return partial result."""
         with (
-            patch("next.urls.get_pages_directories_for_watch") as mock_watch,
+            patch("next.pages.get_pages_directories_for_watch") as mock_watch,
             patch.object(Path, "rglob", side_effect=OSError(13, "Permission denied")),
         ):
             mock_watch.return_value = [tmp_path]

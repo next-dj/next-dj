@@ -186,6 +186,51 @@ Layouts can have their own context functions that are inherited by child pages:
 
 The ``inherit_context=True`` parameter makes the context available to all child pages using this layout.
 
+Accessing parent or global context in child pages
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In a child page's context functions you can inject:
+
+- **Parent/layout context by key** — Use ``Context("key")`` to get a value that
+  was set by the layout (e.g. ``@context("custom_variable", inherit_context=True)``)
+  or by an earlier context function on the same page.
+
+- **Layout-level global dependency** — Register a callable with
+  ``@resolver.dependency("name")`` in the layout (or app) and inject it in child
+  pages with ``Depends("name")``.
+
+Example (see ``examples/layouts/``):
+
+.. code-block:: python
+
+   # Layout: pages/page.py
+   from next.deps import resolver
+   from next.pages import context
+
+   @resolver.dependency("layout_theme")
+   def get_layout_theme():
+       return {"name": "Bootstrap", "version": "5.0"}
+
+   @context("custom_variable", inherit_context=True)
+   def custom_variable_context_with_inherit(request):
+       return "Hello from layout!"
+
+   # Child: pages/guides/page.py
+   from next.deps import Depends
+   from next.pages import Context, context
+
+   @context("layout_theme_data")
+   def guides_theme(layout_theme: dict[str, str] | None = Depends("layout_theme")):
+       return layout_theme
+
+   @context("parent_context_data")
+   def guides_parent(custom_variable: str | None = Context("custom_variable")):
+       return custom_variable
+
+Then in ``guides/template.djx`` you can use ``{{ layout_theme_data }}`` and
+``{{ parent_context_data }}``. For the full walkthrough, see :doc:`/content/dependency-injection`
+(Context vs Depends) and the ``examples/layouts/`` source.
+
 Layout Blocks
 -------------
 

@@ -19,18 +19,22 @@ with caching and lazy loading throughout.
 import contextlib
 import importlib.util
 import inspect
+import itertools
 import logging
 import types
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
-from django.template import Context, Template
+from django.template import Context as DjangoTemplateContext, Template
 from django.urls import URLPattern, path
 from django.utils.module_loading import import_string
+
+from .deps import DependencyResolver, RegisteredParameterProvider, resolver
 
 
 if TYPE_CHECKING:
@@ -42,6 +46,90 @@ URL_NAME_TEMPLATE = "page_{name}"
 
 
 logger = logging.getLogger(__name__)
+
+_CONTEXT_DEFAULT_UNSET: object = object()
+
+
+@dataclass(frozen=True, slots=True)
+class Context:
+    """Mark a parameter as a value read from page/layout ``context_data``.
+
+    Use as a default parameter value:
+
+    - ``Context("key")``: read ``context_data["key"]``
+    - ``Context()``: read ``context_data[param.name]``
+    - ``Context(callable)``: call a factory with DI-resolved args
+    - ``Context(value)``: inject a constant value
+    - ``Context("key", default=...)``: fallback when key is missing
+    - ``Context(default=...)``: fallback when param.name key is missing
+    """
+
+    source: object | None = None
+    default: object = field(default=_CONTEXT_DEFAULT_UNSET, kw_only=True)
+
+
+class ContextByDefaultProvider(RegisteredParameterProvider):
+    """Resolve parameters declared with ``Context(...)`` defaults."""
+
+    def __init__(self, resolver: DependencyResolver) -> None:
+        """Store resolver for calling callable Context sources."""
+        self._resolver = resolver
+
+    def can_handle(self, param: inspect.Parameter, _context: object) -> bool:
+        """Return True when param.default is a Context marker."""
+        return isinstance(param.default, Context)
+
+    def resolve(self, param: inspect.Parameter, context: object) -> object:
+        """Resolve Context marker by key, callable, or constant."""
+        marker = param.default
+        if not isinstance(marker, Context):
+            return None
+
+        source = marker.source
+        context_data = getattr(context, "context_data", {}) or {}
+        default_value: object = (
+            None if marker.default is _CONTEXT_DEFAULT_UNSET else marker.default
+        )
+
+        if source is None:
+            return context_data.get(param.name, default_value)
+
+        if isinstance(source, str):
+            return context_data.get(source, default_value)
+
+        if callable(source):
+            inner_ctx: dict[str, object] = {
+                "request": getattr(context, "request", None),
+                "form": getattr(context, "form", None),
+                **(getattr(context, "url_kwargs", {}) or {}),
+                "_cache": getattr(context, "cache", None),
+                "_stack": getattr(context, "stack", None),
+                "_context_data": context_data,
+            }
+            resolved = self._resolver.resolve_dependencies(source, **inner_ctx)
+            return source(**resolved)
+
+        # Constant value mode.
+        return source
+
+
+class ContextByNameProvider(RegisteredParameterProvider):
+    """Provide parameter from context_data when param name matches a context key.
+
+    Used so that context functions can receive earlier keyed context values by
+    parameter name, e.g. def landing(app_greeting: str) when context_data has
+    "app_greeting" from a previous @context("app_greeting") function.
+    """
+
+    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+        """Return True if param.name is a key in context_data."""
+        context_data = getattr(context, "context_data", {}) or {}
+        return param.name in context_data
+
+    def resolve(self, param: inspect.Parameter, context: object) -> object:
+        """Return the context value for the parameter."""
+        context_data = getattr(context, "context_data", {}) or {}
+        return context_data[param.name]
 
 
 def _import_context_processor(
@@ -82,10 +170,55 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
     return [p for path in processor_paths if (p := _import_context_processor(path))]
 
 
+def get_pages_directories_for_watch() -> list[Path]:
+    """Pages directory paths from NEXT_PAGES for file watching (autoreload)."""
+    # resolve circular import
+    from next.urls import (  # noqa: PLC0415
+        DEFAULT_APP_DIRS,
+        FileRouterBackend,
+        RouterFactory,
+    )
+
+    default = [
+        {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": DEFAULT_APP_DIRS,
+            "OPTIONS": {},
+        },
+    ]
+    configs = getattr(settings, "NEXT_PAGES", default)
+    if not isinstance(configs, list):
+        return []
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for config in configs:
+        if not isinstance(config, dict):
+            continue
+        try:
+            backend = RouterFactory.create_backend(config)
+        except Exception:
+            logger.exception(
+                "error creating backend for watch dirs from config %s", config
+            )
+            continue
+        if not isinstance(backend, FileRouterBackend):
+            continue
+        for p in itertools.chain(
+            (p.resolve() for p in backend._get_root_pages_paths()),
+            (
+                a.resolve()
+                for app_name in backend._get_installed_apps()
+                if (a := backend._get_app_pages_path(app_name))
+            ),
+        ):
+            if p not in seen:
+                seen.add(p.resolve())
+                result.append(p.resolve())
+    return result
+
+
 def get_layout_djx_paths_for_watch() -> set[Path]:
     """All layout.djx paths under NEXT_PAGES dirs (for autoreload)."""
-    from next.urls import get_pages_directories_for_watch  # noqa: PLC0415
-
     result: set[Path] = set()
     for pages_path in get_pages_directories_for_watch():
         try:
@@ -98,8 +231,6 @@ def get_layout_djx_paths_for_watch() -> set[Path]:
 
 def get_template_djx_paths_for_watch() -> set[Path]:
     """All template.djx paths under NEXT_PAGES dirs (for autoreload)."""
-    from next.urls import get_pages_directories_for_watch  # noqa: PLC0415
-
     result: set[Path] = set()
     for pages_path in get_pages_directories_for_watch():
         try:
@@ -370,12 +501,22 @@ class ContextManager:
     to child pages using layout.djx files.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        resolver: DependencyResolver | None = None,
+    ) -> None:
         """Initialize the context manager with empty registry."""
         self._context_registry: dict[
             Path,
             dict[str | None, tuple[Callable[..., Any], bool]],
         ] = {}
+        self._resolver = resolver
+
+    def _get_resolver(self) -> DependencyResolver:
+        """Return resolver (injected or global singleton)."""
+        if self._resolver is not None:
+            return self._resolver
+        return resolver
 
     def register_context(
         self,
@@ -406,27 +547,46 @@ class ContextManager:
         while unkeyed functions contribute entire dictionaries that get merged.
         Returns the combined context data for template rendering.
         """
+        request = args[0] if args and isinstance(args[0], HttpRequest) else None
         context_data = {}
+        dep_cache: dict[str, Any] = {}
+        dep_stack: list[str] = []
 
         # collect inherited context from layout directories first (lower priority)
-        inherited_context = self._collect_inherited_context(file_path, *args, **kwargs)
+        inherited_context = self._collect_inherited_context(
+            file_path, request, kwargs, dep_cache, dep_stack
+        )
         context_data.update(inherited_context)
 
-        # collect context from the current file
-        # (higher priority - can override inherited)
-        for key, (func, _) in self._context_registry.get(file_path, {}).items():
+        # current file: None first, then by key
+        registry = self._context_registry.get(file_path, {})
+        ordered = sorted(
+            registry.items(),
+            key=lambda item: (item[0] is not None, str(item[0] or "")),
+        )
+        for key, (func, _) in ordered:
+            resolved = self._get_resolver().resolve_dependencies(
+                func,
+                request=request,
+                _cache=dep_cache,
+                _stack=dep_stack,
+                _context_data=context_data,
+                **kwargs,
+            )
             if key is None:
-                context_data.update(func(*args, **kwargs))
+                context_data.update(func(**resolved))
             else:
-                context_data[key] = func(*args, **kwargs)
+                context_data[key] = func(**resolved)
 
         return context_data
 
     def _collect_inherited_context(
         self,
         file_path: Path,
-        *args: object,
-        **kwargs: object,
+        request: HttpRequest | None,
+        url_kwargs: dict[str, object],
+        dep_cache: dict[str, Any],
+        dep_stack: list[str],
     ) -> dict[str, Any]:
         """Collect context from layout directories that should be inherited.
 
@@ -449,10 +609,17 @@ class ContextManager:
                     {},
                 ).items():
                     if inherit_context:
+                        resolved = self._get_resolver().resolve_dependencies(
+                            func,
+                            request=request,
+                            _cache=dep_cache,
+                            _stack=dep_stack,
+                            **url_kwargs,
+                        )
                         if key is None:
-                            inherited_context.update(func(*args, **kwargs))
+                            inherited_context.update(func(**resolved))
                         else:
-                            inherited_context[key] = func(*args, **kwargs)
+                            inherited_context[key] = func(**resolved)
 
             current_dir = current_dir.parent
 
@@ -472,13 +639,18 @@ class Page:
         """Initialize the page manager with empty registries."""
         self._template_registry: dict[Path, str] = {}
         self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
-        self._context_manager = ContextManager()
+        self._resolver: DependencyResolver | None = None
+        self._context_manager = ContextManager(None)
         self._layout_manager = LayoutManager()
         self._template_loaders = [
             PythonTemplateLoader(),
             DjxTemplateLoader(),
             LayoutTemplateLoader(),
         ]
+
+    def _get_resolver(self) -> DependencyResolver:
+        """Return the global resolver singleton."""
+        return resolver
 
     def register_template(self, file_path: Path, template_str: str) -> None:
         """Manually register a template string for a specific file path.
@@ -609,7 +781,7 @@ class Page:
                         e,
                     )
 
-        return Template(template_str).render(Context(context_data))
+        return Template(template_str).render(DjangoTemplateContext(context_data))
 
     def _create_view_function(
         self,
@@ -726,18 +898,38 @@ class Page:
                 django_pattern, view, name=URL_NAME_TEMPLATE.format(name=clean_name)
             )
 
-        # fall back to custom render function
+        # fall back to custom render function with DI wrapper
         if (render_func := getattr(module, "render", None)) and callable(render_func):
-            return cast(
-                "URLPattern",
-                path(
-                    django_pattern,
-                    render_func,
-                    name=URL_NAME_TEMPLATE.format(name=clean_name),
-                ),
+            view = self._create_render_wrapper(render_func)
+            return path(
+                django_pattern,
+                view,
+                name=URL_NAME_TEMPLATE.format(name=clean_name),
             )
 
         return None
+
+    def _create_render_wrapper(
+        self, render_func: Callable[..., HttpResponse | str]
+    ) -> Callable[..., HttpResponse]:
+        """Wrap custom render so it is called with resolved dependencies only."""
+
+        def view(request: HttpRequest, **kwargs: object) -> HttpResponse:
+            dep_cache: dict[str, Any] = {}
+            dep_stack: list[str] = []
+            resolved = self._get_resolver().resolve_dependencies(
+                render_func,
+                request=request,
+                _cache=dep_cache,
+                _stack=dep_stack,
+                **kwargs,
+            )
+            result = render_func(**resolved)
+            if isinstance(result, str):
+                return HttpResponse(result)
+            return result
+
+        return view
 
     def _create_virtual_page_pattern(
         self,

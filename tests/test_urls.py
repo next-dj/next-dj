@@ -4,14 +4,13 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from next.pages import page
+from next.pages import get_pages_directories_for_watch, page
 from next.urls import (
     FileRouterBackend,
     RouterBackend,
     RouterFactory,
     RouterManager,
     _scan_pages_directory,
-    get_pages_directories_for_watch,
     router_manager,
     urlpatterns,
 )

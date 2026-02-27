@@ -8,9 +8,10 @@ from django.utils.autoreload import StatReloader
 
 from .pages import (
     get_layout_djx_paths_for_watch,
+    get_pages_directories_for_watch,
     get_template_djx_paths_for_watch,
 )
-from .urls import _scan_pages_directory, get_pages_directories_for_watch
+from .urls import _scan_pages_directory
 
 
 logger = logging.getLogger(__name__)

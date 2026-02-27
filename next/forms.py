@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict, TypeVar, cast, get_args, get_origin
 
 from django import forms as django_forms
 from django.forms.forms import BaseForm as DjangoBaseForm, DeclarativeFieldsMetaclass
@@ -29,6 +29,7 @@ from django.urls import URLPattern, path, reverse
 from django.urls.exceptions import NoReverseMatch
 from django.views.decorators.http import require_http_methods
 
+from .deps import DDependencyBase, RegisteredParameterProvider, resolver
 from .pages import page
 
 
@@ -89,6 +90,47 @@ class ModelForm(BaseModelForm, metaclass=ModelFormMetaclass):
 
     This extends Django's ModelForm with get_initial support.
     """
+
+
+# D-marker for form DI (inherits from DDependencyBase)
+_FormT = TypeVar("_FormT", bound=type)  # noqa: PYI018
+
+
+class DForm[FormT](DDependencyBase[FormT]):
+    r"""Annotation for injecting form instance by class.
+
+    Use as DForm[MyForm] or DForm["MyForm"].
+    """
+
+    __slots__ = ()
+
+
+class FormProvider(RegisteredParameterProvider):
+    """Provide form when param is DForm[FormClass], form class, or name 'form'."""
+
+    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+        """Return True if this provider can supply the form for the parameter."""
+        form = getattr(context, "form", None)
+        if form is None:
+            return False
+        if param.name == "form":
+            return True
+        ann = param.annotation
+        if ann is inspect.Parameter.empty:
+            return False
+        origin = get_origin(ann)
+        if origin is DForm:
+            args = get_args(ann)
+            if len(args) >= 1:
+                form_class = args[0]
+                if isinstance(form_class, type) and isinstance(form, form_class):
+                    return True
+            return False
+        return isinstance(ann, type) and isinstance(form, ann)
+
+    def resolve(self, _param: inspect.Parameter, context: object) -> object:
+        """Return the form instance from context."""
+        return getattr(context, "form", None)
 
 
 # Re-export common Django form classes for convenience
@@ -213,7 +255,7 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry: dict[str, ActionMeta] = {}
         self._uid_to_name: dict[str, str] = {}
 
-    def register_action(
+    def register_action(  # noqa: C901
         self,
         name: str,
         handler: Callable[..., Any],
@@ -234,16 +276,34 @@ class RegistryFormActionBackend(FormActionBackend):
         if opts.form_class is not None:
             form_class = opts.form_class
 
-            def context_func(
-                request: HttpRequest, *args: object, **kwargs: object
-            ) -> types.SimpleNamespace:
-                # Pass URL parameters (args, kwargs) to get_initial, same as context
-                # functions form_class is guaranteed to have get_initial
-                # from BaseForm/BaseModelForm
+            def context_func(request: HttpRequest) -> types.SimpleNamespace:
                 if not hasattr(form_class, "get_initial"):
                     msg = f"Form class {form_class} must have get_initial method"
                     raise TypeError(msg)
-                initial_data = form_class.get_initial(request, *args, **kwargs)
+                url_kwargs: dict[str, object] = {}
+                resolver_match = getattr(request, "resolver_match", None)
+                if resolver_match and getattr(resolver_match, "kwargs", None):
+                    url_kwargs = dict(resolver_match.kwargs)
+                elif getattr(request, "method", None) == "POST" and hasattr(
+                    request, "POST"
+                ):
+                    for key, value in request.POST.items():
+                        if key.startswith("_url_param_"):
+                            param_name = key.replace("_url_param_", "")
+                            if isinstance(value, str) and value.isdigit():
+                                url_kwargs[param_name] = int(value)
+                            else:
+                                url_kwargs[param_name] = value
+                dep_cache: dict[str, Any] = {}
+                dep_stack: list[str] = []
+                resolved = resolver.resolve_dependencies(
+                    form_class.get_initial,
+                    request=request,
+                    _cache=dep_cache,
+                    _stack=dep_stack,
+                    **url_kwargs,
+                )
+                initial_data = form_class.get_initial(**resolved)
                 # Check if initial_data is a model instance (for ModelForm)
                 # Django models have _meta attribute
                 has_meta = hasattr(initial_data, "_meta")
@@ -357,9 +417,18 @@ class _FormActionDispatch:
                 else:
                     url_kwargs[param_name] = value
 
+        dep_cache: dict[str, Any] = {}
+        dep_stack: list[str] = []
         if form_class is None:
+            resolved = resolver.resolve_dependencies(
+                handler,
+                request=request,
+                _cache=dep_cache,
+                _stack=dep_stack,
+                **url_kwargs,
+            )
             return _FormActionDispatch.ensure_http_response(
-                _normalize_handler_response(handler(request, **url_kwargs)),
+                _normalize_handler_response(handler(**resolved)),
                 request=request,
             )
 
@@ -369,7 +438,14 @@ class _FormActionDispatch:
         if not hasattr(form_class, "get_initial"):
             msg = f"Form class {form_class} must have get_initial method"
             raise TypeError(msg)
-        initial_data = form_class.get_initial(request, **url_kwargs)
+        resolved = resolver.resolve_dependencies(
+            form_class.get_initial,
+            request=request,
+            _cache=dep_cache,
+            _stack=dep_stack,
+            **url_kwargs,
+        )
+        initial_data = form_class.get_initial(**resolved)
 
         # Check if initial_data is a model instance (for ModelForm)
         has_meta = hasattr(initial_data, "_meta")
@@ -398,8 +474,16 @@ class _FormActionDispatch:
                 backend, request, action_name, form, None
             )
 
+        resolved = resolver.resolve_dependencies(
+            handler,
+            request=request,
+            form=form,
+            _cache=dep_cache,
+            _stack=dep_stack,
+            **url_kwargs,
+        )
         return _FormActionDispatch.ensure_http_response(
-            _normalize_handler_response(handler(request, form, **url_kwargs)),
+            _normalize_handler_response(handler(**resolved)),
             request=request,
             action_name=action_name,
             backend=backend,

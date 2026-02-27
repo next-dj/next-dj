@@ -1,6 +1,16 @@
 from django.http import HttpRequest
 
+from next.deps import resolver
 from next.pages import context
+
+
+@resolver.dependency("layout_theme")
+def get_layout_theme() -> dict[str, str]:
+    return {
+        "name": "Bootstrap",
+        "version": "5.0",
+        "description": "Layout-level global context via DI",
+    }
 
 
 @context("custom_variable", inherit_context=True)
