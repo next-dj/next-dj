@@ -579,50 +579,6 @@ class RouterManager:
         return self._config_cache
 
 
-def _paths_from_file_backend(backend: FileRouterBackend) -> list[Path]:
-    """Collect root and app pages paths from a FileRouterBackend."""
-    paths = [p.resolve() for p in backend._get_root_pages_paths()]
-    paths.extend(
-        app_path.resolve()
-        for app_name in backend._get_installed_apps()
-        if (app_path := backend._get_app_pages_path(app_name))
-    )
-    return paths
-
-
-def get_pages_directories_for_watch() -> list[Path]:
-    """Pages directory paths from NEXT_PAGES for file watching (autoreload)."""
-    default = [
-        {
-            "BACKEND": "next.urls.FileRouterBackend",
-            "APP_DIRS": DEFAULT_APP_DIRS,
-            "OPTIONS": {},
-        },
-    ]
-    configs = getattr(settings, "NEXT_PAGES", default)
-    if not isinstance(configs, list):
-        return []
-    seen: set[Path] = set()
-    result: list[Path] = []
-    for config in configs:
-        if not isinstance(config, dict):
-            continue
-        try:
-            backend = RouterFactory.create_backend(config)
-        except Exception:
-            logger.exception(
-                "error creating backend for watch dirs from config %s", config
-            )
-            continue
-        if not isinstance(backend, FileRouterBackend):
-            continue
-        for path in _paths_from_file_backend(backend):
-            if path not in seen:
-                seen.add(path)
-                result.append(path)
-    return result
-
-
 # global router manager instance for application-wide URL pattern management
 router_manager = RouterManager()
 

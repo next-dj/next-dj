@@ -17,6 +17,7 @@ from next.deps import (
     resolver,
 )
 from next.forms import DForm, FormProvider
+from next.pages import ContextByNameProvider
 from next.urls import (
     DUrl,
     HttpRequestProvider,
@@ -88,8 +89,6 @@ class TestResolverDescriptor:
 
     def test_context_provider_resolver_attribute_returns_singleton(self) -> None:
         """ContextByNameProvider has no resolver in __init__; self.resolver returns global."""
-        from next.pages import ContextByNameProvider  # noqa: PLC0415
-
         provider = ContextByNameProvider()
         assert provider.resolver is resolver
 

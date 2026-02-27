@@ -19,6 +19,7 @@ with caching and lazy loading throughout.
 import contextlib
 import importlib.util
 import inspect
+import itertools
 import logging
 import types
 from abc import ABC, abstractmethod
@@ -169,10 +170,55 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
     return [p for path in processor_paths if (p := _import_context_processor(path))]
 
 
+def get_pages_directories_for_watch() -> list[Path]:
+    """Pages directory paths from NEXT_PAGES for file watching (autoreload)."""
+    # resolve circular import
+    from next.urls import (  # noqa: PLC0415
+        DEFAULT_APP_DIRS,
+        FileRouterBackend,
+        RouterFactory,
+    )
+
+    default = [
+        {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "APP_DIRS": DEFAULT_APP_DIRS,
+            "OPTIONS": {},
+        },
+    ]
+    configs = getattr(settings, "NEXT_PAGES", default)
+    if not isinstance(configs, list):
+        return []
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for config in configs:
+        if not isinstance(config, dict):
+            continue
+        try:
+            backend = RouterFactory.create_backend(config)
+        except Exception:
+            logger.exception(
+                "error creating backend for watch dirs from config %s", config
+            )
+            continue
+        if not isinstance(backend, FileRouterBackend):
+            continue
+        for p in itertools.chain(
+            (p.resolve() for p in backend._get_root_pages_paths()),
+            (
+                a.resolve()
+                for app_name in backend._get_installed_apps()
+                if (a := backend._get_app_pages_path(app_name))
+            ),
+        ):
+            if p not in seen:
+                seen.add(p.resolve())
+                result.append(p.resolve())
+    return result
+
+
 def get_layout_djx_paths_for_watch() -> set[Path]:
     """All layout.djx paths under NEXT_PAGES dirs (for autoreload)."""
-    from next.urls import get_pages_directories_for_watch  # noqa: PLC0415
-
     result: set[Path] = set()
     for pages_path in get_pages_directories_for_watch():
         try:
@@ -185,8 +231,6 @@ def get_layout_djx_paths_for_watch() -> set[Path]:
 
 def get_template_djx_paths_for_watch() -> set[Path]:
     """All template.djx paths under NEXT_PAGES dirs (for autoreload)."""
-    from next.urls import get_pages_directories_for_watch  # noqa: PLC0415
-
     result: set[Path] = set()
     for pages_path in get_pages_directories_for_watch():
         try:

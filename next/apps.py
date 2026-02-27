@@ -17,7 +17,7 @@ class NextFrameworkConfig(AppConfig):
         from django.utils import autoreload  # noqa: PLC0415
         from django.utils.autoreload import autoreload_started  # noqa: PLC0415
 
-        from next.urls import get_pages_directories_for_watch  # noqa: PLC0415
+        from next.pages import get_pages_directories_for_watch  # noqa: PLC0415
         from next.utils import NextStatReloader  # noqa: PLC0415
 
         autoreload.StatReloader = NextStatReloader  # type: ignore[misc]
