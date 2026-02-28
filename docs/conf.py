@@ -47,11 +47,14 @@ if not settings.configured:
     )
     django.setup()
 
+
+from next import __version__ as current_version
+
 # project information
 project = "next.dj"
 copyright = "2025, paqstd-dev"
 author = "paqstd-dev"
-release = "0.1.0"
+release = current_version
 
 # general configuration
 extensions = [
@@ -98,6 +101,9 @@ templates_path = ["_templates"]
 # list of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+
+# 404 and content/guide/index are intentionally not in toctree (no nav entry)
+suppress_warnings = ["toc.not_included"]
 
 # the name of the Pygments (syntax highlighting) style to use
 pygments_style = "sphinx"

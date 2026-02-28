@@ -120,7 +120,3 @@ docs-clean: # clean documentation build
 docs-linkcheck: # check documentation links
 	uv sync --group docs
 	uv run sphinx-build -b linkcheck docs docs/_build
-
-docs-spelling: # check documentation spelling
-	uv sync --group docs
-	uv run sphinx-build -b spelling docs docs/_build

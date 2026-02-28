@@ -52,6 +52,20 @@ jobs:
     - name: Check uv lock file
       run: uv run pre-commit run uv-lock --all-files
 
+  docs:
+    runs-on: ubuntu-latest
+    env:
+      DJANGO_SETTINGS_MODULE: django.conf.global_settings
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-python-uv
+      - name: Install docs dependencies
+        run: uv sync --group docs
+      - name: Build documentation (fail on warnings)
+        run: uv run sphinx-build -T -W --keep-going -b html docs docs/_build
+      - name: Check documentation links
+        run: uv run sphinx-build -b linkcheck docs docs/_build
+
   dependency-review:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'

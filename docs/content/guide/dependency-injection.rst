@@ -62,7 +62,7 @@ Two markers let you **explicitly** request injected values by name, using
 +------------------+--------------------------------+------------------------------------------+
 
 Migration from DContext/DGlobalContext
--------------------------------------
+-----------------------------------------
 
 If you used the old annotation-based markers, migrate as follows:
 

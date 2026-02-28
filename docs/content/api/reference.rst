@@ -14,6 +14,7 @@ Page rendering, template loaders, context and layout management.
    :members:
    :undoc-members:
    :show-inheritance:
+   :exclude-members: resolver
 
 URLs and routing (next.urls)
 ----------------------------
@@ -56,6 +57,7 @@ Dependency resolution and built-in providers for request, URL kwargs, and forms.
    :members:
    :undoc-members:
    :show-inheritance:
+   :exclude-members: resolver
 
 Configuration
 -------------
