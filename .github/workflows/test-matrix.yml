@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         django-version: ["4.2", "5.0", "5.1", "5.2", "6.0"]
         exclude:
           # Django 6.0 requires Python >= 3.12

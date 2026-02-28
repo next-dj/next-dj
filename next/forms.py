@@ -467,7 +467,7 @@ class _FormActionDispatch:
             form = form_class(
                 request.POST,
                 request.FILES if hasattr(request, "FILES") else None,
-                initial=initial_data if initial_data else None,
+                initial=initial_data,
             )
         if not form.is_valid():
             return _FormActionDispatch.form_response(
