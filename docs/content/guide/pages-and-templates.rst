@@ -1,4 +1,4 @@
-Templates & Layouts
+Pages and Templates
 ===================
 
 next.dj uses a custom template system with ``.djx`` files that provides powerful inheritance and composition capabilities. Unlike traditional Django templates, the inheritance system works through file-based layout composition rather than Django's extends mechanism.
@@ -228,7 +228,7 @@ Example (see ``examples/layouts/``):
        return custom_variable
 
 Then in ``guides/template.djx`` you can use ``{{ layout_theme_data }}`` and
-``{{ parent_context_data }}``. For the full walkthrough, see :doc:`/content/dependency-injection`
+``{{ parent_context_data }}``. For the full walkthrough, see :doc:`dependency-injection`
 (Context vs Depends) and the ``examples/layouts/`` source.
 
 Layout Blocks
@@ -281,7 +281,7 @@ Page templates can override these blocks:
    {% endblock %}
 
 Django Template Features
-------------------------
+-------------------------
 
 All templates support full Django template functionality:
 
@@ -367,3 +367,8 @@ Best Practices
 7. **Use Django template features**: Take advantage of filters, tags, and inheritance
 8. **Plan your layout hierarchy**: Design clear inheritance chains
 9. **Use multiple configurations**: Separate different sections of your application
+
+Next
+----
+
+:doc:`context` — Passing data to templates with the context system.

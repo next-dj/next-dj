@@ -156,7 +156,7 @@ You can also rely on **parameter name**: if the parameter has the same name as a
 context key (e.g. ``app_greeting: str`` when ``@context("app_greeting")`` exists),
 the value is injected without using ``Context(...)`` (see ``ContextByNameProvider``).
 
-For full details, custom providers, and API reference, see :doc:`/content/dependency-injection`.
+For full details, custom providers, and API reference, see :doc:`dependency-injection`.
 
 URL Parameters in Context
 -------------------------
@@ -306,3 +306,8 @@ Best Practices
 6. **Use inheritance wisely**: Mark context functions with ``inherit_context=True`` only when needed
 7. **Follow naming conventions**: Use consistent function and variable names
 8. **Document context data**: Help other developers understand what's available
+
+Next
+----
+
+:doc:`forms` — Form actions, validation, and the ``{% form %}`` template tag.

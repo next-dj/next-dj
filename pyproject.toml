@@ -9,15 +9,9 @@ description = "Next-gen framework for Django developers"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
-keywords = ["django", "framework", "low-code", "frontend"]
+keywords = ["django", "framework", "low-code", "frontend", "full-stack framework"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
     "Framework :: Django",
     "Framework :: Django :: 4.2",
     "Framework :: Django :: 5.0",
@@ -25,6 +19,12 @@ classifiers = [
     "Framework :: Django :: 5.2",
     "Framework :: Django :: 6.0",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13"
 ]
 
 dependencies = [
@@ -51,7 +51,9 @@ dev = [
 ]
 docs = [
     "sphinx==8.2.3",
-    "sphinx-rtd-theme==3.1.0",
+    "shibuya==2026.1.9",
+    "sphinx-design==0.7.0",
+    "sphinx-copybutton==0.5.2",
     "myst-parser==5.0.0",
     "sphinx-autodoc-typehints==3.5.2",
     "sphinxcontrib-apidoc==0.6.0",

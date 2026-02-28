@@ -12,16 +12,16 @@ Where it is used
 - **Context functions** — ``@context`` and ``@context("key")`` callables receive
   only the parameters they declare (e.g. ``request: HttpRequest``, ``id: int``,
   ``layout_theme: dict = Depends("layout_theme")``, ``custom_variable: str = Context("custom_variable")``).
-  See :doc:`/content/core-features/context-system` and the **Context vs Depends**
+  See :doc:`context` and the **Context vs Depends**
   section below.
 - **Custom render** — A page's ``render`` function (when there is no template)
   is called with resolved dependencies: ``def render(request: HttpRequest, post_id: int)``.
 - **Form actions** — ``get_initial`` and action handlers receive only declared
   parameters (e.g. ``id: int`` from the URL, ``form: MyForm``). Handlers can also
-  use ``Depends("name")`` or ``Context("key")``. See :doc:`/content/core-features/forms`.
+  use ``Depends("name")`` or ``Context("key")``. See :doc:`forms`.
 - **Pages and layouts** — In child pages under a layout, context functions can
   inject layout-level global dependencies (``Depends("name")``) and
-  parent context variables (``Context("key")``). See :doc:`/content/core-features/templates-layouts`
+  parent context variables (``Context("key")``). See :doc:`pages-and-templates`
   and the ``examples/layouts/`` example in the source tree.
 
 How it works
@@ -140,7 +140,7 @@ You can add providers that supply extra parameters (e.g. ``user`` from
 ``resolve(param, context)``. Register with ``@resolver.register`` or
 ``resolver.add_provider(instance)``. The ``context`` object is a dynamic
 namespace (e.g. ``request``, ``form``, ``url_kwargs``, ``context_data``).
-See :doc:`/content/api/api/deps` for the full API.
+See :ref:`dependency-injection-api` for the full API.
 
 Parameters that no provider handles receive ``None`` (or keep their default).
 
@@ -195,4 +195,9 @@ API reference
 -------------
 
 For the full API of the ``next.deps`` module (resolver, Deps, providers, protocol),
-see :doc:`/content/api/api/deps`.
+see :ref:`dependency-injection-api`.
+
+Next
+----
+
+:doc:`autoreload` — How the development server reloads when you change pages and templates.

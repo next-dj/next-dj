@@ -184,7 +184,7 @@ Handlers receive only the arguments they declare (dependency injection). Declare
 ``request: HttpRequest``, ``form: MyForm`` (when using ``form_class``), and any
 URL parameter names (e.g. ``id: int``) you need. You can also inject context or
 global dependencies by name using ``Context("key")`` (value from current context)
-or ``Depends("name")`` (registered callable); see :doc:`/content/dependency-injection`.
+or ``Depends("name")`` (registered callable); see :doc:`dependency-injection`.
 
 .. code-block:: python
 
@@ -1130,6 +1130,11 @@ See Also
 --------
 
 - :doc:`file-router` - File-based routing system
-- :doc:`context-system` - Context management
-- :doc:`templates-layouts` - Template and layout system
+- :doc:`context` - Context management
+- :doc:`pages-and-templates` - Template and layout system
 - `Django Forms Documentation <https://docs.djangoproject.com/en/stable/topics/forms/>`_ - Django forms reference
+
+Next
+----
+
+:doc:`dependency-injection` — How the framework injects request, URL params, and dependencies into context and form handlers.
