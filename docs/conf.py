@@ -63,6 +63,8 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.githubpages",
     "myst_parser",
+    "sphinx_design",
+    "sphinx_copybutton",
 ]
 
 # autodoc configuration
@@ -100,32 +102,29 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # the name of the Pygments (syntax highlighting) style to use
 pygments_style = "sphinx"
 
-# html theme options
-html_theme = "sphinx_rtd_theme"
+# html theme (Shibuya)
+html_theme = "shibuya"
 html_theme_options = {
-    "analytics_id": "",  # provided by Google Analytics
-    "logo_only": False,
-    "prev_next_buttons_location": "bottom",
-    "style_external_links": False,
-    "vcs_pageview_mode": "",
-    "style_nav_header_background": "#2980B9",
-    # toc options
-    "collapse_navigation": True,
-    "sticky_navigation": True,
-    "navigation_depth": 4,
-    "includehidden": True,
-    "titles_only": False,
+    "accent_color": "violet",
+    "page_layout": "default",
+    "github_url": "https://github.com/next-dj/next-dj",
+    "globaltoc_expand_depth": 2,
+    "toctree_collapse": False,
+    "nav_links": [
+        {"title": "Issues", "url": "https://github.com/next-dj/next-dj/issues", "external": True},
+        {"title": "Discussions", "url": "https://github.com/orgs/next-dj/discussions", "external": True},
+    ],
 }
 
 # html static files
 html_static_path = ["_static"]
+html_css_files = ["custom.css"]
 
-# ensure _static directory exists
+# ensure _static and _static/images exist
 import os
 static_dir = os.path.join(os.path.dirname(__file__), "_static")
 if not os.path.exists(static_dir):
     os.makedirs(static_dir)
-
 # html help
 htmlhelp_basename = "nextdjdoc"
 

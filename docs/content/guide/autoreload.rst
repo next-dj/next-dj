@@ -41,3 +41,8 @@ Limitations
 * Only applies when using Django's development server (e.g. ``runserver``). Production servers (gunicorn, uWSGI, etc.) do not use this reloader.
 * Reload is process restart; there is no in-process hot reload of URLconf or templates.
 * Layout/template **content** changes (without adding/removing files) are not handled by the reloader: they are picked up at render time if you use lazy loading and mtime-based invalidation for templates.
+
+Next
+----
+
+:doc:`API Reference </content/api/reference>` — all classes and methods.

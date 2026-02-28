@@ -1,124 +1,95 @@
-next.dj Documentation
-=====================
+:layout: landing
+:description: next.dj — A full-stack Django framework with file-based routing, DJX templates, and modern web development patterns.
+:content_max_width: 100%
 
-A next-gen framework based on Django for cool engineers who love to do complex things!
+Full-stack Django framework
+==============================
 
-What is next.dj?
-----------------
+.. rst-class:: lead
 
-``next.dj`` is a **full-stack Django framework** that brings file-based routing and modern web development patterns to Django applications. It provides a Next.js-like development experience while maintaining Django's powerful backend capabilities.
+next.dj brings **file-based routing** and **modern frontend patterns** to Django. You get a Next.js-like structure—pages, layouts, and forms from the filesystem—while keeping Django's backend, ORM, and ecosystem. Less boilerplate, clear conventions, one stack.
 
-**Current Status: Active Development Phase**
+.. container:: buttons
 
-next.dj is currently in active development. While the core features are stable and production-ready, many advanced features are still being developed:
+   :doc:`Getting started <content/guide/getting-started>`
+   `Source code <https://github.com/next-dj/next-dj>`_
 
-**Available Now:**
-* File-based routing system
-* DJX template system with layout inheritance
-* Context management system
-* Forms system with action handlers
-* Comprehensive validation checks
+Features
+--------
 
-**Coming Soon:**
-* Component system for reusable UI elements
-* Suspense for async data loading
-* Forms with fast partial page reloads
-* Integration with JavaScript frameworks
-* WebSocket support out of the box
+.. grid:: 1 1 2 3
+   :gutter: 2
+   :padding: 0
+   :class-row: surface
 
-**We Need Developers!**
+   .. grid-item-card:: :octicon:`file-directory` File-based routing
+      :link: content/guide/file-router
+      :link-type: doc
 
-next.dj is actively seeking contributors! If you're interested in modern web development, Django, or want to help shape the future of Python web frameworks, we'd love to have you on board. See our :doc:`content/development/contributing` guide for how to get started.
+      Stop editing ``urls.py`` for every new page. Add a file, get a route—ship faster and forget routing boilerplate.
 
-Key Features
-------------
+   .. grid-item-card:: :octicon:`browser` Pages and templates
+      :link: content/guide/pages-and-templates
+      :link-type: doc
 
-* **File-based Routing**: Create pages by simply adding ``page.py`` files to your project structure
-* **DJX Templates**: Custom template system with powerful layout inheritance
-* **Context Management**: Flexible context system for passing data to templates
-* **Forms System**: Powerful form handling with automatic CSRF protection and validation
-* **Multiple Configurations**: Support for multiple NEXT_PAGES configurations
-* **Comprehensive Validation**: Built-in checks for configuration and structure validation
+      One layout, many pages. Reuse structure instead of copy-pasting—less repetition and fewer bugs as you scale.
 
-Quick Start
+   .. grid-item-card:: :octicon:`database` Context and data
+      :link: content/guide/context
+      :link-type: doc
+
+      No more passing the same data in every view. Define once, use everywhere—views stay clean and easy to change.
+
+   .. grid-item-card:: :octicon:`pencil` Forms and actions
+      :link: content/guide/forms
+      :link-type: doc
+
+      Forms that render and validate with less code. Handlers get request, form, and params automatically—no manual wiring.
+
+   .. grid-item-card:: :octicon:`plug` Dependency injection
+      :link: content/guide/dependency-injection
+      :link-type: doc
+
+      Get request and params where you need them, without threading through functions. Less glue code, faster iteration.
+
+   .. grid-item-card:: :octicon:`sync` Development server
+      :link: content/guide/autoreload
+      :link-type: doc
+
+      Edit and see. No restart, no manual refresh—focus on building instead of waiting for the server.
+
+Open source
 -----------
 
-Installation
-~~~~~~~~~~~~
+.. admonition:: Open source
+   :class: note
 
-.. code-block:: bash
-
-   pip install next.dj
-
-Basic Usage
-~~~~~~~~~~~
-
-1. Add ``next`` to your ``INSTALLED_APPS``:
-
-.. code-block:: python
-
-   INSTALLED_APPS = [
-       'django.contrib.admin',
-       'django.contrib.auth',
-       'django.contrib.contenttypes',
-       'django.contrib.sessions',
-       'django.contrib.messages',
-       'django.contrib.staticfiles',
-       'next',  # Add this
-   ]
-
-2. Include the URLs in your main ``urls.py``:
-
-.. code-block:: python
-
-   from django.urls import path, include
-
-   urlpatterns = [
-       path('', include('next.urls')),
-   ]
-
-3. Create a page by adding a ``page.py`` file:
-
-.. code-block:: python
-
-   # pages/home/page.py
-   template = """
-   <h1>Welcome to next.dj!</h1>
-   <p>Hello, {{ name }}!</p>
-   """
-
-   @context
-   def get_name(request):
-       return {"name": "World"}
-
-That's it! Your page will be available at ``/home/``.
-
-Examples
---------
-
-See the ``examples/`` directory in the source code for complete working examples:
-
-- **file-routing/**: Basic file-based routing examples
-- **pages/**: Page creation and template examples  
-- **layouts/**: Layout inheritance examples
-- **forms/**: Form handling examples with ModelForm
-
-Contents
---------
+   next.dj is **open source**. Contributions—bug fixes, docs, and ideas—are welcome. See :doc:`content/contributing/contributing` to get started.
 
 .. toctree::
-   :maxdepth: 2
+   :caption: Guide
+   :hidden:
+   :maxdepth: 1
 
-   content/getting-started/index
-   content/core-features/index
-   content/dependency-injection
-   content/autoreload
-   content/api/index
-   content/development/index
+   content/guide/getting-started
+   content/guide/file-router
+   content/guide/pages-and-templates
+   content/guide/context
+   content/guide/forms
+   content/guide/dependency-injection
+   content/guide/autoreload
 
-Indices and tables
-==================
+.. toctree::
+   :caption: API Reference
+   :hidden:
+   :maxdepth: 1
 
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+   content/api/reference
+
+.. toctree::
+   :caption: Contributing
+   :hidden:
+   :maxdepth: 1
+
+   content/contributing/contributing
+   content/contributing/documentation-guide

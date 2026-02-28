@@ -257,3 +257,8 @@ Best Practices
 4. **Test all routes**: Ensure they work correctly
 5. **Follow naming conventions**: Use consistent directory and file names
 6. **Handle errors gracefully**: Always provide fallback data in context functions
+
+Next
+----
+
+:doc:`pages-and-templates` — Pages, DJX templates, and layout inheritance.
