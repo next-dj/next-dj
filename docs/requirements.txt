@@ -1,4 +1,4 @@
-sphinx==8.2.3
+sphinx>=9.0.4
 shibuya
 sphinx-design
 sphinx-copybutton

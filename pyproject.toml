@@ -50,7 +50,7 @@ dev = [
     "twine==6.2.0",
 ]
 docs = [
-    "sphinx==8.2.3",
+    "sphinx==9.0.4",
     "shibuya==2026.1.9",
     "sphinx-design==0.7.0",
     "sphinx-copybutton==0.5.2",
