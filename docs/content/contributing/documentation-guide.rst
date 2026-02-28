@@ -81,7 +81,6 @@ Before submitting documentation changes:
 - [ ] Code examples are tested and working
 - [ ] RST syntax is correct (no warnings)
 - [ ] Links are working (use ``make linkcheck``)
-- [ ] Spelling is correct (use ``make spelling``)
 - [ ] Table of contents is updated
 - [ ] Cross-references are working
 

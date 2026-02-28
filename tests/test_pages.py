@@ -1720,8 +1720,8 @@ class TestLayoutChecks:
     def test_check_layout_templates_disabled(self, tmp_path) -> None:
         """Test check_layout_templates when disabled in settings."""
         with patch("next.checks.getattr") as mock_getattr:
-            mock_getattr.side_effect = (
-                lambda obj, attr, default: {"check_layout_template_blocks": False}
+            mock_getattr.side_effect = lambda obj, attr, default: (
+                {"check_layout_template_blocks": False}
                 if attr == "NEXT_PAGES_OPTIONS"
                 else default
             )
@@ -1840,8 +1840,8 @@ class TestMissingPageContentChecks:
     def test_check_missing_page_content_disabled(self, tmp_path) -> None:
         """Test check_missing_page_content when disabled in settings."""
         with patch("next.checks.getattr") as mock_getattr:
-            mock_getattr.side_effect = (
-                lambda obj, attr, default: {"check_missing_page_content": False}
+            mock_getattr.side_effect = lambda obj, attr, default: (
+                {"check_missing_page_content": False}
                 if attr == "NEXT_PAGES_OPTIONS"
                 else default
             )
@@ -1907,8 +1907,8 @@ class TestDuplicateUrlParametersChecks:
     def test_check_duplicate_url_parameters_disabled(self, tmp_path) -> None:
         """Test check_duplicate_url_parameters when disabled in settings."""
         with patch("next.checks.getattr") as mock_getattr:
-            mock_getattr.side_effect = (
-                lambda obj, attr, default: {"check_duplicate_url_parameters": False}
+            mock_getattr.side_effect = lambda obj, attr, default: (
+                {"check_duplicate_url_parameters": False}
                 if attr == "NEXT_PAGES_OPTIONS"
                 else default
             )
@@ -2019,8 +2019,8 @@ def get_context_data():
     def test_check_context_functions_disabled(self, tmp_path) -> None:
         """Test check_context_functions when disabled in settings."""
         with patch("next.checks.getattr") as mock_getattr:
-            mock_getattr.side_effect = (
-                lambda obj, attr, default: {"check_context_return_types": False}
+            mock_getattr.side_effect = lambda obj, attr, default: (
+                {"check_context_return_types": False}
                 if attr == "NEXT_PAGES_OPTIONS"
                 else default
             )
