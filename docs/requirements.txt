@@ -2,6 +2,6 @@ sphinx==8.2.3
 shibuya
 sphinx-design
 sphinx-copybutton
-myst-parser==4.0.1
+myst-parser==5.0.0
 sphinx-autodoc-typehints==3.5.2
 sphinxcontrib-apidoc==0.6.0

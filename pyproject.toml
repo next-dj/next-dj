@@ -42,10 +42,10 @@ dev = [
     "pytest==9.0.2",
     "pytest-cov==7.0.0",
     "pytest-django==4.11.1",
-    "django-stubs[compatible-mypy]==5.2.8",
+    "django-stubs[compatible-mypy]==5.2.9",
     "ruff==0.14.14",
     "mypy==1.19.1",
-    "pre-commit==4.5.0",
+    "pre-commit==4.5.1",
     "build==1.4.0",
     "twine==6.2.0",
 ]
@@ -54,7 +54,7 @@ docs = [
     "shibuya==2026.1.9",
     "sphinx-design==0.7.0",
     "sphinx-copybutton==0.5.2",
-    "myst-parser==4.0.1",
+    "myst-parser==5.0.0",
     "sphinx-autodoc-typehints==3.5.2",
     "sphinxcontrib-apidoc==0.6.0",
 ]
