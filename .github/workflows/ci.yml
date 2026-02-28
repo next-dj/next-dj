@@ -60,11 +60,11 @@ jobs:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-python-uv
       - name: Install docs dependencies
-        run: uv sync --dev --extra docs
+        run: uv sync --group docs
       - name: Build documentation (fail on warnings)
-        run: cd docs && uv run python -m sphinx -T -W --keep-going -b html -d _build/doctrees . _build/html
+        run: uv run sphinx-build -T -W --keep-going -b html docs docs/_build
       - name: Check documentation links
-        run: cd docs && uv run python -m sphinx -b linkcheck -d _build/doctrees . _build/linkcheck
+        run: uv run sphinx-build -b linkcheck docs docs/_build
 
   dependency-review:
     runs-on: ubuntu-latest
