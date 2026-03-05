@@ -66,6 +66,13 @@ Open source
 
    next.dj is **open source**. Contributions—bug fixes, docs, and ideas—are welcome. See :doc:`content/contributing/contributing` to get started.
 
+Sponsors
+--------
+
+.. image:: _images/sponsored/evrone_sponsored.svg
+   :width: 130px
+   :alt: Evrone
+
 .. toctree::
    :caption: Guide
    :hidden:
