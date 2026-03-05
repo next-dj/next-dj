@@ -52,7 +52,7 @@ from next import __version__ as current_version
 
 # project information
 project = "next.dj"
-copyright = "2025, paqstd-dev"
+copyright = "2025-2026, paqstd-dev"
 author = "paqstd-dev"
 release = current_version
 
