@@ -34,6 +34,12 @@ Features
 
       One layout, many pages. Reuse structure instead of copy-pasting—less repetition and fewer bugs as you scale.
 
+   .. grid-item-card:: :octicon:`package` Components
+      :link: content/guide/components
+      :link-type: doc
+
+      Reusable template fragments with props and slots. Simple and composite components, scoped by page branch and root directories.
+
    .. grid-item-card:: :octicon:`database` Context and data
       :link: content/guide/context
       :link-type: doc
@@ -81,6 +87,7 @@ Sponsors
    content/guide/getting-started
    content/guide/file-router
    content/guide/pages-and-templates
+   content/guide/components
    content/guide/context
    content/guide/forms
    content/guide/dependency-injection

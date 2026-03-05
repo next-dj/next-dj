@@ -1,0 +1,3 @@
+<h1>About</h1>
+{% component "header" %} {% endcomponent %}
+{% component "local_card" title="About card" description="Local component" %} {% endcomponent %}

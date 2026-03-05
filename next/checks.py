@@ -29,6 +29,7 @@ from django.core.checks import (
     register,
 )
 
+from .components import ComponentsManager, FileComponentsBackend
 from .pages import _load_python_module
 from .urls import (
     FileRouterBackend,
@@ -1140,3 +1141,95 @@ def _convert_to_django_pattern(url_path: str) -> str | None:
     # handle argument [param]
     param_pattern = re.compile(r"\[([^\[\]]+)\]")
     return param_pattern.sub(r"<str:\1>", url_path)
+
+
+@register(Tags.compatibility)
+def check_duplicate_component_names(*_args, **_kwargs) -> list[CheckMessage]:
+    """Check that no two components share the same name within the same scope."""
+    errors: list[CheckMessage] = []
+    configs = getattr(settings, "NEXT_COMPONENTS", None)
+    if not isinstance(configs, list):
+        return errors
+    manager = ComponentsManager()
+    manager._reload_config()
+    for backend in manager._backends:
+        if not isinstance(backend, FileComponentsBackend):
+            continue
+        backend._ensure_loaded()
+        seen: dict[tuple[Path, str], list[tuple[str, str]]] = {}
+        for scope_root, scope_relative, name, info in backend._registry:
+            key = (scope_root, name)
+            if key not in seen:
+                seen[key] = []
+            path_str = str(info.template_path or info.module_path or "")
+            seen[key].append((scope_relative, path_str))
+        for (_scope_root, name), entries in seen.items():
+            if len(entries) > 1:
+                paths_str = ", ".join(p for _sr, p in entries if p)
+                errors.append(
+                    Error(
+                        f'Component name "{name}" is registered more than once '
+                        f"within the same scope: {paths_str}",
+                        obj=settings,
+                        id="next.E020",
+                    ),
+                )
+    return errors
+
+
+def _component_py_uses_pages_context(file_path: Path) -> bool:
+    """Return True if component.py imports or uses context from next.pages."""
+    try:
+        source = file_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and getattr(node, "module", None) == "next.pages"
+        ):
+            for alias in node.names:
+                if getattr(alias, "name", None) == "context":
+                    return True
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "page"
+            and node.attr == "context"
+        ):
+            return True
+    return False
+
+
+@register(Tags.compatibility)
+def check_component_py_no_pages_context(*_args, **_kwargs) -> list[CheckMessage]:
+    """Check that component.py files do not use context from next.pages."""
+    errors: list[CheckMessage] = []
+    configs = getattr(settings, "NEXT_COMPONENTS", None)
+    if not isinstance(configs, list):
+        return errors
+    manager = ComponentsManager()
+    manager._reload_config()
+    for backend in manager._backends:
+        if not isinstance(backend, FileComponentsBackend):
+            continue
+        backend._ensure_loaded()
+        for _scope_root, _scope_relative, _name, info in backend._registry:
+            if info.module_path is None:
+                continue
+            if not info.module_path.exists():
+                continue
+            if _component_py_uses_pages_context(info.module_path):
+                errors.append(
+                    Error(
+                        "component.py must not use context from next.pages; "
+                        "use component context from next.components instead.",
+                        obj=str(info.module_path),
+                        id="next.E021",
+                    ),
+                )
+    return errors

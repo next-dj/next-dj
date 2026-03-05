@@ -749,7 +749,11 @@ class Page:
         template_str = self._template_registry[file_path]
 
         # create default context that's always available
-        context_data = {}
+        context_data: dict[str, object] = {}
+        template_djx = file_path.parent / "template.djx"
+        context_data["current_template_path"] = (
+            str(template_djx) if template_djx.exists() else str(file_path)
+        )
         # add kwargs first (lower priority)
         context_data.update(kwargs)
         # add context functions (higher priority - can override kwargs)
@@ -758,7 +762,7 @@ class Page:
         )
 
         # check if we have a request object for context_processors
-        request = None
+        request: HttpRequest | None = None
         if args and isinstance(args[0], HttpRequest):  # first arg is likely a request
             request = args[0]
 
