@@ -50,6 +50,17 @@ A Todo app example demonstrating next-dj's form handling: form actions, ModelFor
 
 **Best for:** Building CRUD-style pages and understanding next-dj forms with file-based routing
 
+### components
+A small example demonstrating next-dj's component system: simple and composite components, props, slots, and scope.
+
+**Key Features:**
+- Simple components (single `.djx` file) and composite components (folder with `component.djx` and optional `component.py`)
+- Root-level components visible everywhere and local `_components` visible only to that page branch
+- Template tags `{% component %}`, `{% slot %}`, `{% set_slot %}` (no `{% load %}` needed, builtins)
+- NEXT_COMPONENTS and COMPONENTS_DIR so the file router skips the component folder
+
+**Best for:** Understanding reusable template fragments, slots, and component scope with file-based routing
+
 ## Getting Started
 
 Each example includes its own README with detailed setup and running instructions. To get started:
@@ -73,6 +84,9 @@ Use the `layouts` example to understand advanced template inheritance and layout
 **If you're building forms and CRUD flows:**
 Use the `forms` example to see form actions, ModelForm, and `{% form %}` with file-based routing.
 
+**If you're building reusable UI pieces:**
+Use the `components` example to see simple/composite components, props, slots, and scope.
+
 **If you're exploring specific features:**
 - Parameter handling: `file-routing` example
 - Database integration: `pages` example
@@ -83,6 +97,7 @@ Use the `forms` example to see form actions, ModelForm, and `{% form %}` with fi
 - UI frameworks integration: `layouts` example
 - Form actions and ModelForm: `forms` example
 - Create/edit flows with URL params: `forms` example
+- Simple and composite components, slots, scope: `components` example
 
 ## Common Patterns
 

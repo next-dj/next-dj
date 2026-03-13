@@ -148,6 +148,11 @@ You can use both in one backend: set ``APP_DIRS: True`` and add ``PAGES_DIRS`` o
 **PAGES_DIRS**: List of absolute (or project-relative) paths to root-level pages directories.
 **PAGES_DIR**: Single path to one root-level pages directory (alternative to ``PAGES_DIRS``).
 
+Component folder and file routing
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A directory whose name is set as the components folder (e.g. ``OPTIONS.COMPONENTS_DIR``, default ``"_components"``) is **not** used for file-based routing and does not create URL segments. The router skips that directory when scanning for ``page.py`` and ``template.djx``. Only the configured name is skipped (not all directories starting with an underscore). See :doc:`components` for the components system.
+
 Multiple Configurations
 ~~~~~~~~~~~~~~~~~~~~~~~
 

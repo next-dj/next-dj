@@ -1,0 +1,8 @@
+<div class="profile">
+  <div class="avatar">
+    {% set_slot "avatar" %}
+      <span class="badge">{{ username.0 }}</span>
+    {% endset_slot %}
+  </div>
+  <div class="info">{{ username }}</div>
+</div>

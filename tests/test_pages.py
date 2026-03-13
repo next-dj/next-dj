@@ -506,6 +506,17 @@ class TestPageHasTemplateAndLazyRender:
         result2 = page_instance.render(page_file, title="Second")
         assert "<h2>Second</h2>" in result2
 
+    def test_render_injects_current_template_path_in_context(
+        self, page_instance, tmp_path
+    ) -> None:
+        """render() adds current_template_path to template context for component resolution."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1")
+        (tmp_path / "template.djx").write_text("path={{ current_template_path }}")
+        result = page_instance.render(page_file)
+        assert "current_template_path" in result or str(tmp_path) in result
+        assert "path=" in result
+
     def test_record_template_source_mtimes_empty_paths(
         self, page_instance, tmp_path
     ) -> None:
