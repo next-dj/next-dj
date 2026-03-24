@@ -517,6 +517,36 @@ class TestComponentContextManager:
         func, _ = registry["data"]
         assert func(None) == {"count": 1}
 
+    def test_register_reserved_di_key_raises(self) -> None:
+        """@component.context cannot use names reserved for resolve_dependencies."""
+        path = Path("/fake/app/pages/_components/x/component.py")
+        with pytest.raises(ValueError, match="reserved for dependency injection"):
+            component.register(path, "request", lambda: None)
+
+    def test_register_duplicate_key_raises(self) -> None:
+        """Same context key cannot be registered twice for one component.py."""
+        path = Path("/fake/app/pages/_components/y/component.py")
+
+        def f1() -> int:
+            return 1
+
+        def f2() -> int:
+            return 2
+
+        component.register(path, "slot", f1)
+        with pytest.raises(ValueError, match="Duplicate component context"):
+            component.register(path, "slot", f2)
+
+    def test_register_same_callable_twice_ok(self) -> None:
+        """Re-registering the same function (e.g. reload) does not raise."""
+        path = Path("/fake/app/pages/_components/z/component.py")
+
+        def stable() -> int:
+            return 1
+
+        component.register(path, "x", stable)
+        component.register(path, "x", stable)
+
 
 class TestComponentTag:
     """Tests for {% component %} and {% endcomponent %} tags."""

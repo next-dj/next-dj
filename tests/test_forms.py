@@ -174,6 +174,27 @@ class TestRenderFormFragment:
             page._template_registry.clear()
             page._template_registry.update(original_registry)
 
+    def test_render_form_fragment_includes_current_template_path(self) -> None:
+        """Error replay context must set current_template_path (used by {% component %})."""
+        request = MagicMock(spec=HttpRequest)
+        request.method = "GET"
+        form = SimpleForm(initial={"name": "a"})
+        backend = form_action_manager.default_backend
+        assert isinstance(backend, RegistryFormActionBackend)
+        meta = backend.get_meta("test_submit")
+        assert meta is not None
+        file_path = meta["file_path"]
+        original_registry = page._template_registry.copy()
+        page._template_registry[file_path] = "{{ current_template_path }}"
+        try:
+            html = backend.render_form_fragment(
+                request, "test_submit", form, template_fragment=None
+            )
+            assert str(file_path) in html
+        finally:
+            page._template_registry.clear()
+            page._template_registry.update(original_registry)
+
 
 class TestFormActionBackendAbstract:
     """FormActionBackend default implementations: get_meta, render_form_fragment."""

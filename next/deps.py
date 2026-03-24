@@ -44,6 +44,12 @@ class DependencyCycleError(Exception):
 class DependencyResolver:
     """Resolves dependencies using auto-registered providers. Single global instance."""
 
+    # Names passed as their own kwargs to resolve_dependencies; anything else in
+    # **context is treated like URL kwargs for providers.
+    EXPLICIT_RESOLVE_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"request", "form", "_cache", "_stack", "_context_data"},
+    )
+
     def __get__(self, obj: object, owner: type[object]) -> DependencyResolver:
         """Return self when used as class attribute on RegisteredParameterProvider."""
         return self
@@ -168,7 +174,7 @@ class DependencyResolver:
     ) -> dict[str, Any]:
         """Resolve arguments for func from context; return dict of name -> value."""
         self._ensure_providers()
-        reserved = {"request", "form", "_cache", "_stack", "_context_data"}
+        reserved = self.EXPLICIT_RESOLVE_KEYS
         url_kwargs = {k: v for k, v in context.items() if k not in reserved}
         ctx = types.SimpleNamespace(
             request=context.get("request"),
@@ -200,6 +206,33 @@ class DependencyResolver:
                 if param.default is inspect.Parameter.empty:
                     result[name] = None
         return result
+
+    def resolve_with_template_context(
+        self,
+        func: Callable[..., Any],
+        *,
+        request: object | None = None,
+        template_context: dict[str, Any] | None = None,
+        _cache: object | None = None,
+        _stack: object | None = None,
+    ) -> dict[str, Any]:
+        """Resolve func for component callables.
+
+        Keys in EXPLICIT_RESOLVE_KEYS are omitted from _context_data so
+        ContextByNameProvider does not beat HttpRequestProvider on a parameter
+        named request.
+        """
+        tc: dict[str, Any] = dict(template_context or {})
+        injectable = {
+            k: v for k, v in tc.items() if k not in self.EXPLICIT_RESOLVE_KEYS
+        }
+        flat: dict[str, Any] = dict(injectable)
+        flat["request"] = request
+        flat["form"] = tc.get("form")
+        flat["_cache"] = _cache
+        flat["_stack"] = _stack
+        flat["_context_data"] = injectable
+        return self.resolve_dependencies(func, **flat)
 
 
 resolver = DependencyResolver()

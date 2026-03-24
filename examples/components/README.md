@@ -1,83 +1,74 @@
 # Components Example
 
-This example demonstrates next-dj's **components** feature: reusable template fragments with props and slots, scoped by page branch and root-level directories.
+This example demonstrates next-dj **components** in a small **blog** app (English UI): file-based routing, simple and composite components with **slots**, root vs scoped `_components`, `next.forms` for auth and posts, middleware for protected routes, and pytest.
 
 ## What This Example Demonstrates
 
-This example showcases next-dj's component system:
-
-- **Simple components** — a single `.djx` file (e.g. `_components/card.djx`) with props
-- **Composite components** — a folder with `component.djx` and optional `component.py` (e.g. `_components/profile/`)
-- **Scope** — components in `_components` are visible only to that page branch; root-level components in `root_components/` are visible everywhere
-- **Template tags** — `{% component "name" %}`, `{% slot "name" %}`, `{% set_slot "name" %}` for invoking and defining components with slots
-
-The app has a home page and an about page. Both use a global header from `root_components/`. Home uses a simple card and a composite profile; about uses a local card only visible to about and its nested routes.
+- **Simple components** — single `.djx` file (e.g. footer).
+- **Composite components** — folder with `component.djx` and optional `component.py`; `component.py` registers **component context** via `next.components.component.context` (not `next.pages.context`).
+- **Slots** — `{% component "post_card" %} ... {% slot "title" %} ... {% endslot %} ...` because `{% component %}` props are string literals only; slots carry dynamic values from loops.
+- **author_chip** — small composite: default circular avatar (first letter of login) via `{% set_slot "avatar" %}`, plus a `login` slot for the username; used inside `post_card` meta and on the post detail header.
+- **Root components** (`root_components/`) visible from every template; **local** `_components` under `pages/` visible to that branch.
+- **Layout** — `layout.djx` wraps pages; global **header** is a composite with `@component.context("user")` and `request.path` for active nav; `request` is still provided by the renderer for CSRF.
+- **Forms** — `@forms.action()` for register, login, create post, update post; ModelForm + `get_initial()` for edit.
+- **Auth** — login/register pages, `LogoutView` at `/account/logout/`, middleware requiring login for `/posts/create/` and `/posts/<id>/edit/`.
+- **Blog** — `Post` model, paginated list at `/`, detail with recommendations, author-only edit.
 
 ## Example Structure
 
 ```
 components/
-├── config/                      # Django project configuration
-│   ├── settings.py              # NEXT_PAGES (COMPONENTS_DIR), NEXT_COMPONENTS
-│   └── urls.py                  # Main URL configuration
-├── myapp/                       # Django application
-│   └── pages/                   # Pages directory
-│       ├── _components/        # Components visible to all app pages
-│       │   ├── card.djx         # Simple component (title, description)
-│       │   └── profile/         # Composite component
-│       │       ├── component.djx
-│       │       └── component.py # Optional
-│       ├── home/
-│       │   ├── page.py
-│       │   └── template.djx    # Uses header, card, profile
-│       └── about/
-│           ├── _components/     # Local: only visible to about and below
-│           │   └── local_card.djx
-│           ├── page.py
-│           └── template.djx    # Uses header, local_card
-├── root_components/             # Global components (visible everywhere)
-│   └── header.djx
+├── config/                      # Django project (settings, urls)
+│   ├── settings.py              # NEXT_PAGES, NEXT_COMPONENTS, LOGIN_URL, middleware
+│   └── urls.py                  # admin, logout, include(next.urls)
+├── myapp/
+│   ├── models.py                # Post
+│   ├── migrations/
+│   ├── middleware.py            # LoginRequiredForPostEditorMiddleware
+│   └── pages/
+│       ├── layout.djx           # HTML shell, {% component header/footer %}
+│       ├── page.py              # Home: @context page_obj + Paginator
+│       ├── template.djx         # Article list + post_card slots + pagination
+│       ├── _components/
+│       │   ├── post_card/       # Composite: title, meta (author + date), actions
+│       │   └── author_chip/     # Avatar (initial) + login slot
+│       ├── account/login/       # LoginForm + @forms.action("login")
+│       ├── account/register/
+│       └── posts/
+│           ├── create/
+│           └── [int:id]/details/ | edit/
+├── root_components/
+│   ├── header/                  # Composite: component.djx + component.py (user context)
+│   └── footer.djx
+├── manage.py
 └── tests/
-    ├── conftest.py              # Django settings, NEXT_COMPONENTS, client
-    └── tests.py                 # Page access, component rendering, scope
 ```
 
-### Main Pieces
+## Main Pieces
 
-**Settings** (`config/settings.py`):
+**Post model** (`myapp/models.py`): `title`, `content`, `author` (FK User), `created_at`; `get_absolute_url()` for links.
 
-- `NEXT_PAGES` — one backend with `OPTIONS.COMPONENTS_DIR: "_components"` so the file router skips the component folder and does not create URL segments from it
-- `NEXT_COMPONENTS` — one `FileComponentsBackend` with `APP_DIRS: True` and `OPTIONS.COMPONENTS_DIRS: [root_components]` for global components
+**Home** (`myapp/pages/page.py`): `@context("page_obj")` → `Paginator(Post.objects..., 10)`; template lists cards and pagination.
 
-**Simple component** (`myapp/pages/_components/card.djx`):
+**Detail** (`posts/[int:id]/details/page.py`): context `post`, `recommended` (up to three other posts).
 
-- Receives `title` and `description` as props
-- Rendered via `{% component "card" title="Post 1" description="First post" %} {% endcomponent %}`
+**Create / edit** (`posts/create/`, `posts/[int:id]/edit/page.py`): `PostCreateForm` / `PostEditForm` with `@forms.action`; edit context checks author (`PermissionDenied` if not author).
 
-**Composite component** (`myapp/pages/_components/profile/`):
+**Account** (`account/login/`, `account/register/page.py`): `LoginForm`, `RegisterForm` with `@forms.action`.
 
-- `component.djx` uses `{% set_slot "avatar" %} ... {% endset_slot %}` for optional slot content with a default (first letter of username)
-- Can be called with or without `{% slot "avatar" %} ... {% endslot %}` in the caller
-
-**Root component** (`root_components/header.djx`):
-
-- Visible from every template
-- Used on both home and about
-
-**Local component** (`myapp/pages/about/_components/local_card.djx`):
-
-- Visible only from about and any nested route (e.g. about/team)
-- Not visible from home
+**Header** (`root_components/header/`): `component.py` exposes `user`; template uses `user.is_authenticated` and `request.path` for highlighted nav links.
 
 ## How It Works
 
-1. **File router** — The directory whose name is `COMPONENTS_DIR` (default `_components`) is skipped when scanning for `page.py` and `template.djx`, so it does not create URL segments. See :doc:`file-router` and :doc:`components` in the main docs.
+1. **File router** — Directories named `_components` are skipped for URL segments (`COMPONENTS_DIR` in `NEXT_PAGES` and `NEXT_COMPONENTS`).
 
-2. **Discovery** — The component backend scans each app’s pages tree for folders named `_components` and each root in `COMPONENTS_DIRS`. Simple components are single `.djx` files; composite components are subfolders with `component.djx` and optionally `component.py`.
+2. **Component scope** — Templates resolve components from root dirs + each ancestor `_components` along the template path.
 
-3. **Scope** — For a given template path, visible components are: all root components, plus components from each `_components` folder that is an ancestor of that template’s directory. So `pages/about/team/template.djx` sees root components, `pages/_components`, and `pages/about/_components`, but not `pages/blog/_components`.
+3. **Component context** — In `component.py`, use `from next.components import component` and `@component.context("user")` (see main docs). Do not use `next.pages.context` in `component.py`.
 
-4. **Template tags** — In a page or layout template you use `{% component "name" prop="value" %} ... {% endcomponent %}`. Slots are passed with `{% slot "name" %} ... {% endslot %}` inside the component block. In the component template, `{% set_slot "name" %} default {% endset_slot %}` renders the slot content or the default.
+4. **Forms** — Same pattern as the `forms` example: `{% load forms %}`, `{% form @action="create_post" %}`, POST to internal action URL; edit pages include hidden `_url_param_id` from the route.
+
+5. **Protected routes** — Middleware redirects anonymous users to `LOGIN_URL` with optional `?next=` for create/edit.
 
 ## Running the Example
 
@@ -85,53 +76,40 @@ components/
 
 - Python 3.8+
 - Django 4.0+
-- next-dj package installed
+- next-dj installed (e.g. from the repo root)
 
 ### Setup
 
-1. Navigate to the example directory:
-   ```bash
-   cd examples/components
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install django next-dj
-   ```
-   Or from the repo root: `uv run pytest examples/components/tests/` (no separate install needed).
+```bash
+cd examples/components
+pip install django next-dj
+python manage.py migrate
+```
 
 ### Running the Server
 
-This example does not include a top-level `manage.py`. To run the app, copy `manage.py` from another example (e.g. `examples/file-routing/manage.py`) and set `DJANGO_SETTINGS_MODULE=config.settings`, or run the app from the repo root with the package installed. The primary way to verify the example is via tests.
+```bash
+python manage.py runserver
+```
 
-### Testing the Routes (if server is running)
+### URLs to Try
 
-- **Home:** http://127.0.0.1:8000/home/ — header, card (“Post 1”, “First post”), profile (“Admin”)
-- **About:** http://127.0.0.1:8000/about/ — header, local card (“About card”, “Local component”)
+| URL | Description |
+|-----|-------------|
+| `/` | Post list (10 per page, `?page=`) |
+| `/posts/<id>/details/` | Post + recommended posts |
+| `/posts/create/` | New post (signed in) |
+| `/posts/<id>/edit/` | Edit (author only) |
+| `/account/login/`, `/account/register/` | Sign in / sign up |
 
 ### Running Tests
 
-From the example directory:
+From the repository root (use `--no-cov` to skip the main project coverage gate when running only this example):
 
 ```bash
-pytest tests/ -v
+uv run pytest examples/components/tests/tests.py -v --no-cov
 ```
-
-With coverage (from example dir):
-
-```bash
-uv run pytest tests/ -v --cov=. --cov-config=../.coveragerc --cov-report=term-missing
-```
-
-Tests cover: page access (home, about, 404), rendering with root/simple/composite/local components, scope (local_card only on about), header on both pages, app/config loading, and component resolution for the home template path.
 
 ## Contributing
 
-This example is part of the next-dj project. If you find issues or have suggestions for improvement, please:
-
-1. Check the main project repository for existing issues
-2. Create a new issue with detailed description
-3. Follow the project's contribution guidelines
-4. Ensure any changes maintain backward compatibility
-
-For more information about next-dj, visit the main project documentation.
+Issues and PRs welcome via the main next-dj repository; keep backward compatibility when changing examples.

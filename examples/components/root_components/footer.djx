@@ -1,0 +1,5 @@
+<footer class="border-top mt-auto py-3 bg-white">
+    <div class="container text-muted small">
+        &copy; {% now "Y" %} Blog
+    </div>
+</footer>

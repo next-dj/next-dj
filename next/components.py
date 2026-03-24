@@ -443,13 +443,12 @@ def render_component(
             if callable(render_func):
                 dep_cache: dict[str, Any] = {}
                 dep_stack: list[str] = []
-                resolved = resolver.resolve_dependencies(
+                resolved = resolver.resolve_with_template_context(
                     render_func,
                     request=request,
+                    template_context=context_data,
                     _cache=dep_cache,
                     _stack=dep_stack,
-                    _context_data=context_data,
-                    **context_data,
                 )
                 result = render_func(**resolved)
                 if isinstance(result, HttpResponse):  # pragma: no cover
@@ -483,13 +482,12 @@ def _inject_component_context(
     dep_cache: dict[str, Any] = {}
     dep_stack: list[str] = []
     for key, (func, _) in ctx_registry.items():
-        resolved = resolver.resolve_dependencies(
+        resolved = resolver.resolve_with_template_context(
             func,
             request=request,
+            template_context=context_data,
             _cache=dep_cache,
             _stack=dep_stack,
-            _context_data=context_data,
-            **context_data,
         )
         if key is None:
             data = func(**resolved)
@@ -512,7 +510,38 @@ class ComponentContextManager:
         self, file_path: Path, key: str | None, func: Callable[..., Any]
     ) -> None:
         """Register a context function for a component file."""
-        self._registry.setdefault(file_path.resolve(), {})[key] = (func, False)
+        path_resolved = file_path.resolve()
+        reg = self._registry.setdefault(path_resolved, {})
+        if isinstance(key, str) and key in resolver.EXPLICIT_RESOLVE_KEYS:
+            msg = (
+                f"Component context key {key!r} is reserved for dependency injection; "
+                f"use another name. Reserved: {sorted(resolver.EXPLICIT_RESOLVE_KEYS)}."
+            )
+            raise ValueError(msg)
+        if key in reg:
+            existing_func, _ = reg[key]
+            repeat = existing_func is func
+            if not repeat:
+                na = getattr(existing_func, "__name__", None)
+                nb = getattr(func, "__name__", None)
+                if na == nb and nb:
+                    try:
+                        fa = inspect.getsourcefile(existing_func)
+                        fb = inspect.getsourcefile(func)
+                        repeat = bool(
+                            fa and fb and Path(fa).resolve() == Path(fb).resolve()
+                        )
+                    except (OSError, TypeError, ValueError):
+                        repeat = False
+            if repeat:
+                reg[key] = (func, False)
+                return
+            dup = "unkeyed @component.context" if key is None else f"key {key!r}"
+            msg = (
+                f"Duplicate component context registration ({dup}) for {path_resolved}"
+            )
+            raise ValueError(msg)
+        reg[key] = (func, False)
 
     def get_registry_for_path(
         self, file_path: Path

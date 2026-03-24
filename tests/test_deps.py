@@ -1,5 +1,3 @@
-"""Tests for next.deps dependency resolution."""
-
 import inspect
 import types
 from unittest.mock import MagicMock
@@ -720,6 +718,45 @@ class TestResolverResolveDependencies:
         form = MagicMock()
         result = resolver.resolve_dependencies(fn, form=form)
         assert result == {"form": form}
+
+
+class TestResolveWithTemplateContext:
+    """DependencyResolver.resolve_with_template_context."""
+
+    def test_explicit_request_wins_over_template_context(self) -> None:
+        """Explicit request= wins over template_context['request']."""
+        req_real = MagicMock(spec=HttpRequest)
+        req_wrong = MagicMock(spec=HttpRequest)
+
+        def fn(request: HttpRequest) -> None:
+            pass
+
+        r = DependencyResolver()
+        result = r.resolve_with_template_context(
+            fn,
+            request=req_real,
+            template_context={"request": req_wrong},
+            _cache={},
+            _stack=[],
+        )
+        assert result["request"] is req_real
+
+    def test_form_taken_from_template_context(self) -> None:
+        """Form instance is taken from template_context['form']."""
+        form = MagicMock()
+
+        def fn(form: MagicMock) -> None:
+            pass
+
+        r = DependencyResolver()
+        result = r.resolve_with_template_context(
+            fn,
+            request=None,
+            template_context={"form": form},
+            _cache={},
+            _stack=[],
+        )
+        assert result["form"] is form
 
 
 class TestRegisterDependency:

@@ -1,0 +1,18 @@
+<header class="border-bottom bg-white shadow-sm">
+    <nav class="container py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <a href="/" class="text-decoration-none fs-5 {% if request.path == '/' %}fw-bold text-primary{% else %}fw-semibold text-body{% endif %}">Blog</a>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            {% if user.is_authenticated %}
+                <a href="/account/profile/" class="btn btn-sm {% if request.path == '/account/profile/' %}btn-primary{% else %}btn-outline-primary{% endif %}">Profile</a>
+                <a href="/posts/create/" class="btn btn-sm {% if request.path == '/posts/create/' %}btn-primary{% else %}btn-outline-primary{% endif %}">Create</a>
+                <form method="post" action="/account/logout/" class="d-inline m-0">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-outline-secondary">Log out</button>
+                </form>
+            {% else %}
+                <a href="/account/login/" class="btn btn-sm {% if request.path == '/account/login/' %}btn-primary{% else %}btn-outline-primary{% endif %}">Log in</a>
+                <a href="/account/register/" class="btn btn-sm {% if request.path == '/account/register/' %}btn-primary{% else %}btn-outline-primary{% endif %}">Sign up</a>
+            {% endif %}
+        </div>
+    </nav>
+</header>

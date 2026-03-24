@@ -1,3 +1,4 @@
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -38,6 +39,7 @@ if not settings.configured:
             "django.middleware.common.CommonMiddleware",
             "django.middleware.csrf.CsrfViewMiddleware",
             "django.contrib.auth.middleware.AuthenticationMiddleware",
+            "myapp.middleware.LoginRequiredForPostEditorMiddleware",
             "django.contrib.messages.middleware.MessageMiddleware",
             "django.middleware.clickjacking.XFrameOptionsMiddleware",
         ],
@@ -76,11 +78,32 @@ if not settings.configured:
         USE_TZ=True,
         TIME_ZONE="UTC",
         ALLOWED_HOSTS=["testserver"],
+        LOGIN_URL="/account/login/",
+        LOGOUT_REDIRECT_URL="/",
+        DEFAULT_AUTO_FIELD="django.db.models.BigAutoField",
     )
     django.setup()
 
+    import myapp.pages.account.login.page
+    import myapp.pages.account.profile.page
+    import myapp.pages.account.register.page
+    import myapp.pages.page
+    import myapp.pages.posts.create.page  # noqa: F401
+
+    authors_page = example_root / "myapp" / "pages" / "authors" / "[int:id]" / "page.py"
+    spec = importlib.util.spec_from_file_location("myapp_authors_page", authors_page)
+    authors_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(authors_mod)
+
+    for sub in ("edit", "details"):
+        path = example_root / "myapp" / "pages" / "posts" / "[int:id]" / sub / "page.py"
+        name = f"myapp_posts_bracket_{sub}"
+        spec = importlib.util.spec_from_file_location(name, path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
 
 @pytest.fixture()
-def client():
+def client() -> Client:
     """Django test client fixture."""
     return Client()

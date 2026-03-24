@@ -728,6 +728,51 @@ class Page:
 
         return decorator(func_or_key) if callable(func_or_key) else decorator
 
+    def build_render_context(
+        self,
+        file_path: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        """Build template context for a page (normal render and form error replay).
+
+        Matches :meth:`render` context: ``current_template_path`` (for
+        ``{% component %}`` resolution), merged kwargs, registered context
+        functions, ``request``, and configured context processors.
+        """
+        context_data: dict[str, object] = {}
+        template_djx = file_path.parent / "template.djx"
+        context_data["current_template_path"] = (
+            str(template_djx) if template_djx.exists() else str(file_path)
+        )
+        context_data.update(kwargs)
+        context_data.update(
+            self._context_manager.collect_context(file_path, *args, **kwargs),
+        )
+
+        request: HttpRequest | None = None
+        if args and isinstance(args[0], HttpRequest):
+            request = args[0]
+
+        if request is not None:
+            context_data["request"] = request
+
+        context_processors = _get_context_processors()
+        if request and context_processors:
+            for processor in context_processors:
+                try:
+                    processor_data = processor(request)
+                    if isinstance(processor_data, dict):
+                        context_data.update(processor_data)
+                except (TypeError, ValueError, AttributeError, KeyError) as e:
+                    logger.warning(
+                        "Error in context processor %s: %s",
+                        processor.__name__,
+                        e,
+                    )
+
+        return context_data
+
     def render(self, file_path: Path, *args: object, **kwargs: object) -> str:
         """Render a template with context data and return the final HTML.
 
@@ -747,44 +792,7 @@ class Page:
             self._load_template_for_file(file_path)
             self._record_template_source_mtimes(file_path)
         template_str = self._template_registry[file_path]
-
-        # create default context that's always available
-        context_data: dict[str, object] = {}
-        template_djx = file_path.parent / "template.djx"
-        context_data["current_template_path"] = (
-            str(template_djx) if template_djx.exists() else str(file_path)
-        )
-        # add kwargs first (lower priority)
-        context_data.update(kwargs)
-        # add context functions (higher priority - can override kwargs)
-        context_data.update(
-            self._context_manager.collect_context(file_path, *args, **kwargs),
-        )
-
-        # check if we have a request object for context_processors
-        request: HttpRequest | None = None
-        if args and isinstance(args[0], HttpRequest):  # first arg is likely a request
-            request = args[0]
-
-        if request is not None:
-            context_data["request"] = request
-
-        # add context_processors data if we have a request and context_processors
-        context_processors = _get_context_processors()
-        if request and context_processors:
-            # manually add context_processors data
-            for processor in context_processors:
-                try:
-                    processor_data = processor(request)
-                    if isinstance(processor_data, dict):
-                        context_data.update(processor_data)
-                except (TypeError, ValueError, AttributeError, KeyError) as e:
-                    logger.warning(
-                        "Error in context processor %s: %s",
-                        processor.__name__,
-                        e,
-                    )
-
+        context_data = self.build_render_context(file_path, *args, **kwargs)
         return Template(template_str).render(DjangoTemplateContext(context_data))
 
     def _create_view_function(

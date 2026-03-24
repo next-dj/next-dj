@@ -1,0 +1,35 @@
+<div class="mb-4">
+    <h1 class="h3 mb-2">
+        {% if author_user.get_full_name %}
+            {{ author_user.get_full_name }}
+        {% else %}
+            {{ author_user.username }}
+        {% endif %}
+    </h1>
+    <p class="text-muted small mb-0">@{{ author_user.username }}</p>
+</div>
+<div class="d-flex align-items-start gap-3 mb-4">
+    {% component "author_chip" %}
+        {% slot "login" %}{{ author_user.username }}{% endslot %}
+    {% endcomponent %}
+</div>
+<h2 class="h5 mb-3">Posts</h2>
+<div class="row g-3">
+    {% for post in author_posts %}
+        <div class="col-md-6">
+            {% component "post_card" %}
+                {% slot "title" %}{{ post.title }}{% endslot %}
+                {% slot "meta" %}
+                    <div class="text-muted small">
+                        <time datetime="{{ post.created_at|date:'c' }}">{{ post.created_at|date:"M j, Y" }}</time>
+                    </div>
+                {% endslot %}
+                {% slot "actions" %}
+                    <a href="{{ post.get_absolute_url }}" class="btn btn-outline-primary btn-sm align-self-start">View</a>
+                {% endslot %}
+            {% endcomponent %}
+        </div>
+    {% empty %}
+        <p class="text-muted">No posts yet.</p>
+    {% endfor %}
+</div>

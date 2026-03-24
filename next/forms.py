@@ -24,7 +24,7 @@ from django.http import (
     HttpResponseNotFound,
     HttpResponseRedirect,
 )
-from django.template import Context, Template
+from django.template import Context as DjangoTemplateContext, Template
 from django.urls import URLPattern, path, reverse
 from django.urls.exceptions import NoReverseMatch
 from django.views.decorators.http import require_http_methods
@@ -155,6 +155,15 @@ TextInput = django_forms.TextInput
 Textarea = django_forms.Textarea
 Select = django_forms.Select
 CheckboxInput = django_forms.CheckboxInput
+SelectMultiple = django_forms.SelectMultiple
+DateInput = django_forms.DateInput
+DateTimeInput = django_forms.DateTimeInput
+TimeInput = django_forms.TimeInput
+NumberInput = django_forms.NumberInput
+EmailInput = django_forms.EmailInput
+URLInput = django_forms.URLInput
+HiddenInput = django_forms.HiddenInput
+Widget = django_forms.Widget
 
 
 URL_NAME_FORM_ACTION = "form_action"
@@ -564,16 +573,13 @@ class _FormActionDispatch:
 
         # Build context with form errors
         # Pass URL kwargs to context functions, same as during normal page rendering
-        context_data = page._context_manager.collect_context(
-            file_path, request, **url_kwargs
-        )
-        context_data["request"] = request
+        context_data = page.build_render_context(file_path, request, **url_kwargs)
         if form is not None:
             context_data[action_name] = types.SimpleNamespace(form=form)
             # Also add form as direct variable for template compatibility
             context_data["form"] = form
 
-        return Template(template_str).render(Context(context_data))
+        return Template(template_str).render(DjangoTemplateContext(context_data))
 
 
 class FormActionManager:

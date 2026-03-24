@@ -51,15 +51,16 @@ A Todo app example demonstrating next-dj's form handling: form actions, ModelFor
 **Best for:** Building CRUD-style pages and understanding next-dj forms with file-based routing
 
 ### components
-A small example demonstrating next-dj's component system: simple and composite components, props, slots, and scope.
+A **blog** sample (English UI) built on next-dj components: simple and composite pieces, **slots** for dynamic props, root vs branch scope, plus `next.forms` (auth + post CRUD), pagination, and a composite **header** with `component.py` context (`user`, active nav via `request.path`).
 
 **Key Features:**
-- Simple components (single `.djx` file) and composite components (folder with `component.djx` and optional `component.py`)
-- Root-level components visible everywhere and local `_components` visible only to that page branch
-- Template tags `{% component %}`, `{% slot %}`, `{% set_slot %}` (no `{% load %}` needed, builtins)
-- NEXT_COMPONENTS and COMPONENTS_DIR so the file router skips the component folder
+- Simple `.djx` components and composite folders (`component.djx` + optional `component.py` with `next.components.component.context`)
+- Slots for list-driven UI where `{% component %}` only accepts literal props
+- Root `root_components/` vs app `pages/_components/` scope; `NEXT_COMPONENTS` and `COMPONENTS_DIR` so the file router skips the components folder
+- Template tags `{% component %}`, `{% slot %}`, `{% set_slot %}` (builtins; no `{% load %}` for these)
+- Optional: middleware protecting `/posts/create/` and `/posts/<id>/edit/`, `LogoutView`, pytest suite
 
-**Best for:** Understanding reusable template fragments, slots, and component scope with file-based routing
+**Best for:** Reusable UI fragments, slots, component scope, and combining components with forms and file-based routing
 
 ## Getting Started
 
@@ -85,7 +86,7 @@ Use the `layouts` example to understand advanced template inheritance and layout
 Use the `forms` example to see form actions, ModelForm, and `{% form %}` with file-based routing.
 
 **If you're building reusable UI pieces:**
-Use the `components` example to see simple/composite components, props, slots, and scope.
+Use the `components` example for a small blog with simple/composite components, slots, root scope, and forms-driven auth and posts.
 
 **If you're exploring specific features:**
 - Parameter handling: `file-routing` example
@@ -97,7 +98,7 @@ Use the `components` example to see simple/composite components, props, slots, a
 - UI frameworks integration: `layouts` example
 - Form actions and ModelForm: `forms` example
 - Create/edit flows with URL params: `forms` example
-- Simple and composite components, slots, scope: `components` example
+- Components, slots, scope, blog + forms: `components` example
 
 ## Common Patterns
 

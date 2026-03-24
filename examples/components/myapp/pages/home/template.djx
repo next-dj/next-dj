@@ -1,4 +1,0 @@
-<h1>Home</h1>
-{% component "header" %} {% endcomponent %}
-{% component "card" title="Post 1" description="First post" %} {% endcomponent %}
-{% component "profile" username="Admin" %} {% endcomponent %}
