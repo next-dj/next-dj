@@ -54,7 +54,7 @@ A Todo app example demonstrating next-dj's form handling: form actions, ModelFor
 A **blog** sample (English UI) built on next-dj components: simple and composite pieces, **slots** for dynamic props, root vs branch scope, plus `next.forms` (auth + post CRUD), pagination, and a composite **header** with `component.py` context (`user`, active nav via `request.path`).
 
 **Key Features:**
-- Simple `.djx` components and composite folders (`component.djx` + optional `component.py` with `next.components.component.context`)
+- Simple `.djx` components and composite folders (`component.djx` + optional `component.py` with `@context` decorator from `next.components`)
 - Slots for list-driven UI where `{% component %}` only accepts literal props
 - Root `root_components/` vs app `pages/_components/` scope; `NEXT_COMPONENTS` and `COMPONENTS_DIR` so the file router skips the components folder
 - Template tags `{% component %}`, `{% slot %}`, `{% set_slot %}` (builtins; no `{% load %}` for these)

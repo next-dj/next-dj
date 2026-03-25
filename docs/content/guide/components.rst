@@ -65,9 +65,30 @@ Component name = folder name (e.g. ``profile``). Template loading follows the sa
 Component context (no page context)
 -----------------------------------
 
-Context for a component is provided only through the **components** API (e.g. ``next.components``), not through ``next.pages``. It is not inherited from the page by default; it only adds variables when the component is rendered.
+Context for a component is provided only through the **components** API (``next.components``), not through ``next.pages``. It is not inherited from the page by default; it only adds variables when the component is rendered.
 
 In ``component.py`` you **must not** use context from ``next.pages`` (e.g. ``from next.pages import context`` or ``page.context``). Use the component context API from ``next.components`` instead. This is enforced by the ``python manage.py check`` system (see :ref:`components-checks`).
+
+**Registering component context**
+
+Use the ``@context`` decorator from ``next.components`` in your ``component.py``:
+
+.. code-block:: python
+
+   from django.http import HttpRequest
+   from next.components import context
+
+   @context("user")
+   def get_user(request: HttpRequest):
+       return request.user
+
+   @context
+   def get_data(request: HttpRequest):
+       return {"count": 42, "items": [...]}
+
+The decorator automatically detects the component file (no need to pass ``__file__``). Functions with a key (e.g. ``@context("user")``) add that key to the template context. Functions without a key must return a dictionary that gets merged into the context.
+
+This API is similar to ``next.pages.context`` but designed specifically for components. The framework uses dependency injection to resolve function parameters (``request``, ``form``, URL kwargs, etc.).
 
 Scope
 -----

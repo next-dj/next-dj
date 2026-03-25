@@ -1,10 +1,14 @@
+import importlib.util
 from pathlib import Path
 
 import pytest
 from django.apps import apps
 from django.contrib.auth import get_user_model
+from django.test import RequestFactory
 from django.urls import get_resolver
 from myapp.models import Post
+from myapp.pages.account.login.page import LoginForm
+from myapp.pages.posts.create.page import PostCreateForm
 
 from next.components import components_manager, get_component
 from next.forms import form_action_manager
@@ -327,3 +331,195 @@ def test_profile_component_removed() -> None:
         example_root / "myapp" / "pages" / "_components" / "profile" / "component.py"
     )
     assert not component_py.exists()
+
+
+@pytest.mark.django_db()
+def test_post_model_str() -> None:
+    """Post __str__ returns title."""
+    author = User.objects.create_user(username="test", password="pw")
+    post = Post.objects.create(title="Test Post", content="Content", author=author)
+    assert str(post) == "Test Post"
+
+
+@pytest.mark.django_db()
+def test_post_get_absolute_url() -> None:
+    """Post get_absolute_url returns detail page URL."""
+    author = User.objects.create_user(username="test", password="pw")
+    post = Post.objects.create(title="Test", content="C", author=author)
+    url = post.get_absolute_url()
+    assert f"/posts/{post.id}/details/" in url
+
+
+@pytest.mark.django_db()
+def test_home_invalid_page_number(client) -> None:
+    """Invalid page number defaults to page 1."""
+    author = User.objects.create_user(username="u", password="pw")
+    Post.objects.create(title="P1", content="c", author=author)
+    response = client.get("/?page=invalid")
+    assert response.status_code == 200
+
+
+@pytest.mark.django_db()
+def test_login_form_get_initial(client) -> None:
+    """LoginForm get_initial returns empty dict."""
+    request = RequestFactory().get("/")
+    initial = LoginForm.get_initial(request)
+    assert initial == {}
+
+
+@pytest.mark.django_db()
+def test_login_form_clean_missing_credentials() -> None:
+    """LoginForm clean handles missing username or password."""
+    form = LoginForm(data={"username": "", "password": ""})
+    assert not form.is_valid()
+
+
+@pytest.mark.django_db()
+def test_login_handler_next_url_validation(client) -> None:
+    """Login handler validates next URL to prevent open redirect."""
+    User.objects.create_user(username="test", password="pw")
+    login_url = form_action_manager.get_action_url("login")
+    response = client.post(
+        login_url,
+        {
+            "username": "test",
+            "password": "pw",
+            "next": "https://evil.com",
+        },
+        follow=False,
+    )
+    assert response.status_code == 302
+    assert response.url == "/"
+
+
+@pytest.mark.django_db()
+def test_register_form_password_mismatch(client) -> None:
+    """Register with mismatched passwords fails."""
+    reg_url = form_action_manager.get_action_url("register")
+    response = client.post(
+        reg_url,
+        {
+            "username": "test",
+            "password1": "pass123",
+            "password2": "different",
+        },
+    )
+    assert response.status_code == 200
+    assert not User.objects.filter(username="test").exists()
+
+
+@pytest.mark.django_db()
+def test_profile_form_get_initial(client) -> None:
+    """Profile form get_initial returns user first and last name."""
+    user = User.objects.create_user(
+        username="test",
+        password="pw",
+        first_name="Test",
+        last_name="User",
+    )
+    client.force_login(user)
+    response = client.get("/account/profile/")
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert "Test" in content
+    assert "User" in content
+
+
+@pytest.mark.django_db()
+def test_create_post_form_get_initial() -> None:
+    """Create post form get_initial returns empty dict."""
+    request = RequestFactory().get("/")
+    initial = PostCreateForm.get_initial(request)
+    assert initial == {}
+
+
+@pytest.mark.django_db()
+def test_edit_post_form_get_initial(client) -> None:
+    """Edit post form get_initial returns post title and content."""
+    author = User.objects.create_user(username="test", password="pw")
+    post = Post.objects.create(title="Original", content="Content", author=author)
+    client.force_login(author)
+    response = client.get(f"/posts/{post.id}/edit/")
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert "Original" in content
+    assert "Content" in content
+
+
+@pytest.mark.django_db()
+def test_profile_update_anonymous_redirects(client) -> None:
+    """Anonymous user cannot update profile."""
+    update_url = form_action_manager.get_action_url("update_profile")
+    response = client.post(
+        update_url,
+        {"first_name": "Test", "last_name": "User"},
+        follow=False,
+    )
+    assert response.status_code == 302
+    assert "/account/login/" in response.url
+
+
+@pytest.mark.django_db()
+def test_register_form_username_exists(client) -> None:
+    """Register with existing username fails."""
+    User.objects.create_user(username="existing", password="pw")
+    reg_url = form_action_manager.get_action_url("register")
+    response = client.post(
+        reg_url,
+        {
+            "username": "existing",
+            "password1": "newpass123",
+            "password2": "newpass123",
+        },
+    )
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert "already exists" in content
+
+
+@pytest.mark.django_db()
+def test_edit_post_form_get_initial_missing_post() -> None:
+    """Edit form get_initial returns empty dict for missing post."""
+    example_root = Path(__file__).resolve().parent.parent
+    edit_page_path = (
+        example_root / "myapp" / "pages" / "posts" / "[int:id]" / "edit" / "page.py"
+    )
+
+    spec = importlib.util.spec_from_file_location("edit_page", edit_page_path)
+    if spec and spec.loader:
+        edit_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(edit_module)
+        initial = edit_module.PostEditForm.get_initial(99999)
+        assert initial == {}
+
+
+@pytest.mark.django_db()
+def test_update_post_handler_non_author_forbidden(client) -> None:
+    """Update post handler returns 403 for non-author."""
+    alice = User.objects.create_user(username="alice", password="pw")
+    bob = User.objects.create_user(username="bob", password="pw")
+    post = Post.objects.create(title="Alice Post", content="Content", author=alice)
+    client.force_login(bob)
+    update_url = form_action_manager.get_action_url("update_post")
+    response = client.post(
+        update_url,
+        {
+            "_url_param_id": str(post.id),
+            "title": "Hacked",
+            "content": "No",
+        },
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db()
+def test_create_post_anonymous_redirects(client) -> None:
+    """Anonymous user cannot create post."""
+    create_url = form_action_manager.get_action_url("create_post")
+    response = client.post(
+        create_url,
+        {"title": "Test", "content": "Content"},
+        follow=False,
+    )
+    assert response.status_code == 302
+    assert "/account/login/" in response.url

@@ -1,12 +1,10 @@
-"""Component context for the global header (next.components, not next.pages)."""
-
 from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 from django.http import HttpRequest
 
-from next.components import component
+from next.components import context
 
 
-@component.context("user")
+@context("user")
 def bind_user(request: HttpRequest) -> AbstractBaseUser | AnonymousUser:
     """Expose the current user (anonymous included)."""
     return request.user

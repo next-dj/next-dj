@@ -5,11 +5,11 @@ This example demonstrates next-dj **components** in a small **blog** app (Englis
 ## What This Example Demonstrates
 
 - **Simple components** — single `.djx` file (e.g. footer).
-- **Composite components** — folder with `component.djx` and optional `component.py`; `component.py` registers **component context** via `next.components.component.context` (not `next.pages.context`).
+- **Composite components** — folder with `component.djx` and optional `component.py`; `component.py` registers **component context** via `from next.components import context` and `@context("key")` decorator (similar to `next.pages.context`).
 - **Slots** — `{% component "post_card" %} ... {% slot "title" %} ... {% endslot %} ...` because `{% component %}` props are string literals only; slots carry dynamic values from loops.
 - **author_chip** — small composite: default circular avatar (first letter of login) via `{% set_slot "avatar" %}`, plus a `login` slot for the username; used inside `post_card` meta and on the post detail header.
 - **Root components** (`root_components/`) visible from every template; **local** `_components` under `pages/` visible to that branch.
-- **Layout** — `layout.djx` wraps pages; global **header** is a composite with `@component.context("user")` and `request.path` for active nav; `request` is still provided by the renderer for CSRF.
+- **Layout** — `layout.djx` wraps pages; global **header** is a composite with `@context("user")` and `request.path` for active nav; `request` is still provided by the renderer for CSRF.
 - **Forms** — `@forms.action()` for register, login, create post, update post; ModelForm + `get_initial()` for edit.
 - **Auth** — login/register pages, `LogoutView` at `/account/logout/`, middleware requiring login for `/posts/create/` and `/posts/<id>/edit/`.
 - **Blog** — `Post` model, paginated list at `/`, detail with recommendations, author-only edit.
@@ -56,7 +56,7 @@ components/
 
 **Account** (`account/login/`, `account/register/page.py`): `LoginForm`, `RegisterForm` with `@forms.action`.
 
-**Header** (`root_components/header/`): `component.py` exposes `user`; template uses `user.is_authenticated` and `request.path` for highlighted nav links.
+**Header** (`root_components/header/`): `component.py` exposes `user` via `@context("user")` decorator; template uses `user.is_authenticated` and `request.path` for highlighted nav links.
 
 ## How It Works
 
@@ -64,7 +64,7 @@ components/
 
 2. **Component scope** — Templates resolve components from root dirs + each ancestor `_components` along the template path.
 
-3. **Component context** — In `component.py`, use `from next.components import component` and `@component.context("user")` (see main docs). Do not use `next.pages.context` in `component.py`.
+3. **Component context** — In `component.py`, use `from next.components import context` and `@context("user")` decorator. The API is similar to `next.pages.context` but designed specifically for components. Do not use `next.pages.context` in `component.py`.
 
 4. **Forms** — Same pattern as the `forms` example: `{% load forms %}`, `{% form @action="create_post" %}`, POST to internal action URL; edit pages include hidden `_url_param_id` from the route.
 

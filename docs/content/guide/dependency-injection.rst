@@ -135,11 +135,12 @@ Custom dependency providers
 ---------------------------
 
 You can add providers that supply extra parameters (e.g. ``user`` from
-``request.user``) by subclassing ``RegisteredParameterProvider`` from
-``next.deps`` and implementing ``can_handle(param, context)`` and
-``resolve(param, context)``. Register with ``@resolver.register`` or
-``resolver.add_provider(instance)``. The ``context`` object is a dynamic
-namespace (e.g. ``request``, ``form``, ``url_kwargs``, ``context_data``).
+``request.user``) by implementing the ``ParameterProvider`` protocol from
+``next.deps`` with ``can_handle(param, context)`` and
+``resolve(param, context)`` methods. Register with ``@resolver.register`` or
+``resolver.add_provider(instance)``. The ``context`` parameter is a
+``ResolutionContext`` dataclass containing ``request``, ``form``, ``url_kwargs``,
+``context_data``, ``cache``, and ``stack`` for cycle detection.
 See :ref:`dependency-injection-api` for the full API.
 
 Parameters that no provider handles receive ``None`` (or keep their default).

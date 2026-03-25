@@ -1157,12 +1157,14 @@ def check_duplicate_component_names(*_args, **_kwargs) -> list[CheckMessage]:
             continue
         backend._ensure_loaded()
         seen: dict[tuple[Path, str], list[tuple[str, str]]] = {}
-        for scope_root, scope_relative, name, info in backend._registry:
-            key = (scope_root, name)
+
+        for info in backend._registry:
+            key = (info.scope_root, info.name)
             if key not in seen:
                 seen[key] = []
             path_str = str(info.template_path or info.module_path or "")
-            seen[key].append((scope_relative, path_str))
+            seen[key].append((info.scope_relative, path_str))
+
         for (_scope_root, name), entries in seen.items():
             if len(entries) > 1:
                 paths_str = ", ".join(p for _sr, p in entries if p)
@@ -1218,7 +1220,8 @@ def check_component_py_no_pages_context(*_args, **_kwargs) -> list[CheckMessage]
         if not isinstance(backend, FileComponentsBackend):
             continue
         backend._ensure_loaded()
-        for _scope_root, _scope_relative, _name, info in backend._registry:
+
+        for info in backend._registry:
             if info.module_path is None:
                 continue
             if not info.module_path.exists():

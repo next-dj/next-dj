@@ -2967,7 +2967,10 @@ class TestContextProcessors:
                 },
             ]
 
-            with patch("django.conf.settings.NEXT_PAGES", config, create=True):
+            with (
+                patch("django.conf.settings.NEXT_PAGES", config, create=True),
+                patch("django.conf.settings.TEMPLATES", [], create=True),
+            ):
                 processors = _get_context_processors()
                 assert len(processors) == 2
                 assert processors[0] == test_processor

@@ -7,10 +7,12 @@ from django.http import HttpRequest
 
 from next.deps import (
     _IN_PROGRESS,
+    DependencyCache,
     DependencyCycleError,
     DependencyResolver,
     Depends,
     DependsProvider,
+    ProviderRegistry,
     RegisteredParameterProvider,
     resolver,
 )
@@ -720,6 +722,53 @@ class TestResolverResolveDependencies:
         assert result == {"form": form}
 
 
+class TestDependencyCache:
+    """Direct tests for DependencyCache (get sentinel, len, contains)."""
+
+    def test_get_returns_in_progress_when_key_marked(self) -> None:
+        """Get returns _IN_PROGRESS while key is in the in-progress set."""
+        cache = DependencyCache()
+        cache.mark_in_progress("dep")
+        assert cache.get("dep") is _IN_PROGRESS
+        cache.set("dep", "done")
+        assert cache.get("dep") == "done"
+
+    def test_len_and_contains_use_backing_cache(self) -> None:
+        """__len__ and __contain__ reflect stored values, not in-progress markers."""
+        cache = DependencyCache()
+        assert len(cache) == 0
+        assert "x" not in cache
+        cache.set("x", 1)
+        assert len(cache) == 1
+        assert "x" in cache
+
+    def test_is_in_progress_and_unmark(self) -> None:
+        """The is_in_progress flag reflects mark; unmark clears it."""
+        cache = DependencyCache()
+        cache.mark_in_progress("k")
+        assert cache.is_in_progress("k")
+        cache.unmark_in_progress("k")
+        assert not cache.is_in_progress("k")
+
+
+class TestProviderRegistry:
+    """Tests for ProviderRegistry."""
+
+    def test_register_get_providers_clear_len_iter(self) -> None:
+        """Register providers, iterate, clear empties registry."""
+        reg = ProviderRegistry()
+        p1 = HttpRequestProvider()
+        p2 = UrlKwargsProvider()
+        reg.register(p1)
+        reg.register(p2)
+        assert len(reg) == 2
+        assert reg.get_providers() == (p1, p2)
+        assert list(iter(reg)) == [p1, p2]
+        reg.clear()
+        assert len(reg) == 0
+        assert reg.get_providers() == ()
+
+
 class TestResolveWithTemplateContext:
     """DependencyResolver.resolve_with_template_context."""
 
@@ -757,6 +806,40 @@ class TestResolveWithTemplateContext:
             _stack=[],
         )
         assert result["form"] is form
+
+    def test_uses_dependency_cache_instance_when_passed(self) -> None:
+        """When _cache is a DependencyCache, that instance is used (values land in backing)."""
+        r = DependencyResolver()
+
+        def provide() -> str:
+            return "cached"
+
+        r.register_dependency("d", provide)
+
+        def fn(x: str = Depends("d")) -> None:
+            pass
+
+        backing: dict[str, object] = {}
+        dc = DependencyCache(backing_dict=backing)
+        try:
+            r.resolve_with_template_context(
+                fn, request=None, template_context={}, _cache=dc
+            )
+            assert backing["d"] == "cached"
+        finally:
+            r._dependency_callables.pop("d", None)
+
+    def test_creates_new_cache_when_cache_arg_none(self) -> None:
+        """When _cache is None, a fresh DependencyCache is created."""
+
+        def fn(x: str) -> None:
+            pass
+
+        r = DependencyResolver()
+        result = r.resolve_with_template_context(
+            fn, request=None, template_context={"x": "hi"}, _cache=None
+        )
+        assert result == {"x": "hi"}
 
 
 class TestRegisterDependency:
