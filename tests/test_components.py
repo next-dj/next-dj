@@ -10,6 +10,7 @@ from django.template import Context, Template
 from django.template.base import TemplateSyntaxError
 from django.test import RequestFactory
 
+import next.components as next_components_mod
 from next.checks import (
     check_component_py_no_pages_context,
     check_duplicate_component_names,
@@ -21,25 +22,30 @@ from next.components import (
     ComponentRegistry,
     ComponentRenderer,
     ComponentRootDiscovery,
-    ComponentsBackend,
     ComponentScanner,
     ComponentsFactory,
     ComponentsManager,
     ComponentTemplateLoader,
     ComponentVisibilityResolver,
     CompositeComponentRenderer,
+    DummyBackend,
     FileComponentsBackend,
     ModuleCache,
     ModuleLoader,
     SimpleComponentRenderer,
     _inject_component_context,
-    _load_python_module,
     component,
     components_manager,
     get_component,
     load_component_template,
     render_component,
 )
+
+
+def test_next_components_all_exports() -> None:
+    """Every name in ``next.components.__all__`` exists on the module."""
+    for name in next_components_mod.__all__:
+        assert hasattr(next_components_mod, name)
 
 
 class TestComponentInfo:
@@ -66,20 +72,20 @@ class TestFileComponentsBackend:
 
     def test_collect_visible_empty_when_no_roots(self) -> None:
         """With app_dirs=False and no root dirs, no components are visible."""
-        backend = FileComponentsBackend(app_dirs=False, options={})
+        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
         visible = backend.collect_visible_components(Path("/tmp/some/template.djx"))
         assert visible == {}
 
     def test_get_component_returns_none_when_empty(self) -> None:
         """get_component returns None when no backends have it."""
-        backend = FileComponentsBackend(app_dirs=False, options={})
+        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
         assert backend.get_component("card", Path("/tmp/template.djx")) is None
 
     def test_discover_in_component_root_simple(self, tmp_path: Path) -> None:
         """Root component dir: .djx files are discovered as simple components."""
         (tmp_path / "header.djx").write_text("<header>Hi</header>")
         backend = FileComponentsBackend(
-            app_dirs=False, options={"COMPONENTS_DIR": str(tmp_path)}
+            {"APP_DIRS": False, "OPTIONS": {"COMPONENTS_DIR": str(tmp_path)}},
         )
         backend._ensure_loaded()
         assert len(backend._registry) == 1
@@ -96,7 +102,7 @@ class TestFileComponentsBackend:
         (tmp_path / "profile").mkdir()
         (tmp_path / "profile" / "component.djx").write_text("<div>profile</div>")
         backend = FileComponentsBackend(
-            app_dirs=False, options={"COMPONENTS_DIR": str(tmp_path)}
+            {"APP_DIRS": False, "OPTIONS": {"COMPONENTS_DIR": str(tmp_path)}},
         )
         backend._ensure_loaded()
         assert len(backend._registry) == 1
@@ -111,7 +117,7 @@ class TestFileComponentsBackend:
         (tmp_path / "_components").mkdir()
         (tmp_path / "_components" / "card.djx").write_text("<div>card</div>")
         backend = FileComponentsBackend(
-            components_dir="_components", app_dirs=True, options={}
+            {"APP_DIRS": True, "OPTIONS": {}},
         )
         with patch.object(
             backend._root_discovery, "discover_app_roots", return_value=[tmp_path]
@@ -124,15 +130,19 @@ class TestFileComponentsBackend:
     def test_get_root_component_roots_from_options(self, tmp_path: Path) -> None:
         """ComponentRootDiscovery returns paths from COMPONENTS_DIRS or COMPONENTS_DIR."""
         backend = FileComponentsBackend(
-            app_dirs=False,
-            options={"COMPONENTS_DIRS": ["/nonexistent/root"]},
+            {
+                "APP_DIRS": False,
+                "OPTIONS": {"COMPONENTS_DIRS": ["/nonexistent/root"]},
+            },
         )
         roots = backend._root_discovery.discover_component_roots(backend.options)
         assert roots == []
 
         backend2 = FileComponentsBackend(
-            app_dirs=False,
-            options={"COMPONENTS_DIR": str(tmp_path)},
+            {
+                "APP_DIRS": False,
+                "OPTIONS": {"COMPONENTS_DIR": str(tmp_path)},
+            },
         )
         roots2 = backend2._root_discovery.discover_component_roots(backend2.options)
         assert len(roots2) == 1
@@ -143,9 +153,7 @@ class TestFileComponentsBackend:
         (tmp_path / "_components").mkdir()
         (tmp_path / "_components" / "card.djx").write_text("<div>card</div>")
         backend = FileComponentsBackend(
-            components_dir="_components",
-            app_dirs=True,
-            options={},
+            {"APP_DIRS": True, "OPTIONS": {}},
         )
         with patch.object(
             backend._root_discovery, "discover_app_roots", return_value=[tmp_path]
@@ -158,7 +166,7 @@ class TestFileComponentsBackend:
     def test_root_components_visible_from_any_path(self, tmp_path: Path) -> None:
         """Root component roots are visible from any template path."""
         (tmp_path / "global.djx").write_text("<div>global</div>")
-        backend = FileComponentsBackend(app_dirs=False, options={})
+        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
 
         # Register component directly in the new registry
         info = ComponentInfo(
@@ -181,7 +189,7 @@ class TestFileComponentsBackend:
         comp_dir = tmp_path / "pages" / "about" / "_components"
         comp_dir.mkdir(parents=True)
         (comp_dir / "card.djx").write_text("<div>card</div>")
-        backend = FileComponentsBackend(app_dirs=False, options={})
+        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
 
         # Register component directly in the new registry
         info = ComponentInfo(
@@ -227,8 +235,8 @@ class TestComponentsFactory:
         assert backend.options.get("PAGES_DIR") == "views"
 
     def test_create_backend_unknown_raises(self) -> None:
-        """Unknown backend name raises ValueError."""
-        with pytest.raises(ValueError, match="Unsupported backend"):
+        """Unknown backend class path raises ImportError."""
+        with pytest.raises(ImportError):
             ComponentsFactory.create_backend(
                 {"BACKEND": "next.components.UnknownBackend"}
             )
@@ -428,7 +436,7 @@ class TestChecks:
         """check_duplicate_component_names reports when same name in same scope."""
         (tmp_path / "a.djx").write_text("a")
         (tmp_path / "b.djx").write_text("b")
-        fake_backend = FileComponentsBackend(app_dirs=False, options={})
+        fake_backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
 
         # Register duplicates using new registry
         fake_backend._registry.register(
@@ -453,7 +461,7 @@ class TestChecks:
     ) -> None:
         """check_component_py_no_pages_context reports when component.py imports context from next.pages."""
         (tmp_path / "component.py").write_text("from next.pages import context\n")
-        fake_backend = FileComponentsBackend(app_dirs=False, options={})
+        fake_backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
 
         # Register component using new registry
         fake_backend._registry.register(
@@ -694,6 +702,30 @@ class TestComponentTag:
             )
         assert "My Title" in result
 
+    def test_component_tag_ignores_token_without_equals(self, tmp_path: Path) -> None:
+        """Extra words without ``=`` in the opening tag are skipped for props."""
+        (tmp_path / "card.djx").write_text("<h1>{{ title }}</h1>")
+        with patch.object(
+            components_manager,
+            "get_component",
+            return_value=ComponentInfo(
+                name="card",
+                scope_root=tmp_path,
+                scope_relative="",
+                template_path=tmp_path / "card.djx",
+                module_path=None,
+                is_simple=True,
+            ),
+        ):
+            t = Template(
+                "{% load components %}"
+                '{% component "card" orphan title="Kept" %}{% endcomponent %}'
+            )
+            result = t.render(
+                Context({"current_template_path": str(tmp_path / "t.djx")}),
+            )
+        assert "Kept" in result
+
 
 class TestSlotTag:
     """Tests for {% slot %} and {% endslot %} tags."""
@@ -846,10 +878,10 @@ class TestModuleLoader:
 
 
 class TestComponentInfoDunders:
-    """ComponentInfo str, repr, hash, eq."""
+    """ComponentInfo repr, hash, eq, scope_key."""
 
-    def test_str_and_repr(self) -> None:
-        """__str__ and __repr__ are defined."""
+    def test_repr_contains_fields(self) -> None:
+        """Repr includes name and scope fields."""
         root = Path("/app/pages")
         info = ComponentInfo(
             name="card",
@@ -859,47 +891,51 @@ class TestComponentInfoDunders:
             module_path=None,
             is_simple=True,
         )
-        assert "card" in str(info)
-        assert "simple" in str(info)
-        assert "blog" in str(info)
-        assert "ComponentInfo" in repr(info)
+        r = repr(info)
+        assert "card" in r
+        assert "blog" in r
+        assert "ComponentInfo" in r
 
-    def test_hash_eq(self) -> None:
-        """Equal infos share hash; different scope_relative are not equal."""
+    def test_hash_eq_includes_paths(self) -> None:
+        """Same name and scope but different files are not equal; scope_key can match."""
         r = Path("/p")
-        a = ComponentInfo("x", r, "", None, None, True)
-        b = ComponentInfo("x", r, "", None, None, True)
-        c = ComponentInfo("x", r, "sub", None, None, True)
-        assert hash(a) == hash(b)
-        assert a == b
+        a = ComponentInfo("x", r, "", Path("/p/a.djx"), None, True)
+        b = ComponentInfo("x", r, "", Path("/p/b.djx"), None, True)
+        c = ComponentInfo("x", r, "sub", Path("/p/a.djx"), None, True)
+        assert a != b
+        assert a.scope_key == b.scope_key
         assert a != c
+        d = ComponentInfo("x", r, "", Path("/p/a.djx"), None, True)
+        assert a == d
+        assert hash(a) == hash(d)
         assert a != object()
 
 
-class TestLoadPythonModuleComponents:
-    """next.components._load_python_module."""
+class TestModuleLoaderDisk:
+    """ModuleLoader loads from disk the same way the old helper did."""
 
     def test_success_and_failure(self, tmp_path: Path) -> None:
-        """Valid file loads; bad syntax returns None."""
+        """Valid module loads; syntax errors yield ``None``."""
         good = tmp_path / "ok.py"
         good.write_text("ANSWER = 42\n")
-        mod = _load_python_module(good)
+        loader = ModuleLoader()
+        mod = loader.load(good)
         assert mod is not None
         assert mod.ANSWER == 42
 
         bad = tmp_path / "bad.py"
         bad.write_text("def x(\n")
-        assert _load_python_module(bad) is None
+        assert loader.load(bad) is None
 
     def test_no_spec_returns_none(self, tmp_path: Path) -> None:
-        """When spec_from_file_location returns None, loading returns None."""
+        """Missing import spec yields ``None``."""
         p = tmp_path / "x.py"
         p.write_text("pass\n")
         with patch(
             "next.components.importlib.util.spec_from_file_location",
             return_value=None,
         ):
-            assert _load_python_module(p) is None
+            assert ModuleLoader(ModuleCache()).load(p) is None
 
 
 class TestComponentRegistry:
@@ -919,6 +955,17 @@ class TestComponentRegistry:
         reg.clear()
         assert len(reg) == 0
         assert not reg.is_root(root)
+
+    def test_contains_is_indexed_by_name(self, tmp_path: Path) -> None:
+        """Name lookup does not scan every row."""
+        reg = ComponentRegistry()
+        root = tmp_path.resolve()
+        for i in range(50):
+            reg.register(
+                ComponentInfo(f"c{i}", root, "", tmp_path / f"{i}.djx", None, True),
+            )
+        assert "c49" in reg
+        assert "missing" not in reg
 
 
 class TestComponentScanner:
@@ -1080,6 +1127,67 @@ class TestComponentVisibilityResolver:
         res.clear_cache()
         assert res._path_cache == {}
 
+    def test_scope_index_reused_for_second_template_path(self, tmp_path: Path) -> None:
+        """Second template path does not rebuild the per-root index."""
+        pages = tmp_path / "pages"
+        comp_dir = pages / "about" / "_components"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "c.djx").write_text("x")
+        reg = ComponentRegistry()
+        reg.register(
+            ComponentInfo(
+                "c",
+                pages.resolve(),
+                "about",
+                comp_dir / "c.djx",
+                None,
+                True,
+            )
+        )
+        res = ComponentVisibilityResolver(reg)
+        t1 = pages / "about" / "a.djx"
+        t2 = pages / "about" / "b.djx"
+        t1.parent.mkdir(parents=True, exist_ok=True)
+        t1.write_text("z")
+        t2.write_text("z")
+        res.resolve_visible(t1)
+        res.resolve_visible(t2)
+
+    def test_global_root_component_with_scope_relative_not_visible_far_away(
+        self, tmp_path: Path
+    ) -> None:
+        """Marked global root still checks scope path when ``scope_relative`` is set."""
+        root = tmp_path / "global"
+        root.mkdir()
+        reg = ComponentRegistry()
+        reg.mark_as_root(root.resolve())
+        reg.register(
+            ComponentInfo(
+                "x",
+                root.resolve(),
+                "onlyhere",
+                root / "x.djx",
+                None,
+                True,
+            )
+        )
+        res = ComponentVisibilityResolver(reg)
+        outsider = tmp_path / "else" / "t.djx"
+        outsider.parent.mkdir()
+        assert res.resolve_visible(outsider) == {}
+
+    def test_compute_relative_parts_valueerror(self, tmp_path: Path) -> None:
+        """Paths on different branches return ``None`` from the helper."""
+        reg = ComponentRegistry()
+        res = ComponentVisibilityResolver(reg)
+        assert (
+            res._compute_relative_parts(
+                tmp_path / "a" / "t.djx",
+                tmp_path / "b",
+            )
+            is None
+        )
+
 
 class TestComponentRenderers:
     """Strategy classes and coordinator."""
@@ -1185,7 +1293,7 @@ class TestComponentRenderers:
         assert r._fallback_to_template(info, {}) == ""
 
     def test_simple_renderer_accepts_request_kwarg(self, tmp_path: Path) -> None:
-        """SimpleComponentRenderer.render ignores request (coverage of del request)."""
+        """SimpleComponentRenderer.render ignores request argument."""
         (tmp_path / "s.djx").write_text("<b>ok</b>")
         info = ComponentInfo("s", tmp_path, "", tmp_path / "s.djx", None, True)
         tl = ComponentTemplateLoader(ModuleLoader())
@@ -1204,9 +1312,7 @@ class TestFileComponentsBackendDiscovery:
         comp = pages / "sec" / "_components"
         comp.mkdir(parents=True)
         (comp / "a.djx").write_text("a")
-        backend = FileComponentsBackend(
-            components_dir="_components", app_dirs=False, options={}
-        )
+        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
         calls: dict[str, int] = {"n": 0}
         orig_rt = Path.relative_to
         simulated_rel = ValueError("simulated")
@@ -1240,41 +1346,85 @@ class TestFileComponentsBackendDiscovery:
             return orig_rglob(self, pattern)
 
         monkeypatch.setattr(Path, "rglob", bad_rglob)
-        backend = FileComponentsBackend(
-            components_dir="_components", app_dirs=False, options={}
-        )
+        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
         backend._discover_in_pages_root(pages.resolve())
         assert len(backend._registry) == 0
 
 
+class TestFileComponentsBackendRuntime:
+    """``NEXT_COMPONENTS_RUNTIME`` and discovery edge cases."""
+
+    def test_respects_next_components_runtime_module_loader(self) -> None:
+        """``NEXT_COMPONENTS_RUNTIME`` can point at a custom ``ModuleLoader`` class."""
+        with patch("next.components.settings") as m:
+            m.NEXT_COMPONENTS_RUNTIME = {
+                "module_loader_class": "next.components.ModuleLoader",
+            }
+            b = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
+            assert isinstance(b._module_loader, ModuleLoader)
+
+    def test_discover_skips_when_components_name_is_file(self, tmp_path: Path) -> None:
+        """A file named like the components dir is ignored during discovery."""
+        pages = tmp_path / "pages"
+        pages.mkdir()
+        (pages / "_components").write_text("not a directory")
+        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
+        backend._discover_in_pages_root(pages.resolve())
+        assert len(backend._registry) == 0
+
+    def test_options_not_dict_treated_as_empty(self) -> None:
+        """Non-dict ``OPTIONS`` is replaced with an empty dict."""
+        b = FileComponentsBackend(
+            {"APP_DIRS": False, "OPTIONS": "invalid"},
+        )
+        assert b.options == {}
+
+
+class TestComponentsManagerRenderPipeline:
+    """Lazy render pipeline and ``NEXT_COMPONENTS_RUNTIME``."""
+
+    def test_runtime_module_loader_class(self) -> None:
+        """Manager render pipeline honors ``module_loader_class`` when it is a string."""
+        mgr = ComponentsManager()
+        with patch("next.components.settings") as m:
+            m.NEXT_COMPONENTS_RUNTIME = {
+                "module_loader_class": "next.components.ModuleLoader",
+            }
+            m.NEXT_COMPONENTS = []
+            mgr._reload_config()
+            tl = mgr.template_loader
+            assert isinstance(tl, ComponentTemplateLoader)
+
+    def test_runtime_dict_non_string_loader_uses_default(self) -> None:
+        """Invalid ``module_loader_class`` values fall back to ``ModuleLoader``."""
+        mgr = ComponentsManager()
+        with patch("next.components.settings") as m:
+            m.NEXT_COMPONENTS_RUNTIME = {"module_loader_class": 123}
+            m.NEXT_COMPONENTS = []
+            mgr._reload_config()
+            assert isinstance(mgr.template_loader, ComponentTemplateLoader)
+
+
 class TestComponentsFactoryManager:
-    """ComponentsFactory.register_backend and ComponentsManager branches."""
+    """ComponentsFactory import path and ComponentsManager branches."""
 
-    def test_register_backend_non_file_subclass_uses_no_arg_ctor(self) -> None:
-        """Non-FileComponentsBackend is constructed with backend_class()."""
+    def test_create_backend_imports_class_and_passes_config(self) -> None:
+        """Backend is loaded by dotted path and receives the full config dict."""
+        b = ComponentsFactory.create_backend(
+            {
+                "BACKEND": "next.components.DummyBackend",
+                "APP_DIRS": True,
+                "OPTIONS": {"marker": 7},
+            },
+        )
+        assert isinstance(b, DummyBackend)
+        assert b.config["OPTIONS"]["marker"] == 7
 
-        class DummyBackend(ComponentsBackend):
-            def __init__(self) -> None:
-                self.created = True
-
-            def get_component(
-                self, name: str, template_path: Path
-            ) -> ComponentInfo | None:
-                return None
-
-            def collect_visible_components(
-                self, template_path: Path
-            ) -> dict[str, ComponentInfo]:
-                return {}
-
-        key = "tests.dummy_components_backend.DummyBackend"
-        try:
-            ComponentsFactory.register_backend(key, DummyBackend)
-            b = ComponentsFactory.create_backend({"BACKEND": key})
-            assert isinstance(b, DummyBackend)
-            assert getattr(b, "created", False) is True
-        finally:
-            ComponentsFactory._backends.pop(key, None)
+    def test_dummy_backend_lookups_are_empty(self) -> None:
+        """DummyBackend does not resolve names and reports no visible components."""
+        b = DummyBackend({})
+        assert b.get_component("x", Path("/t.djx")) is None
+        assert b.collect_visible_components(Path("/t.djx")) == {}
 
     def test_manager_skips_non_list_config_and_non_dict_entries(self) -> None:
         """NEXT_COMPONENTS not a list returns early; non-dict entries skipped."""
@@ -1295,32 +1445,13 @@ class TestComponentsFactoryManager:
 
     def test_manager_swallows_backend_init_exception(self) -> None:
         """Exception from create_backend is logged; backend not appended."""
-        boom_msg = "boom"
-
-        class Boom(ComponentsBackend):
-            def __init__(self) -> None:
-                raise RuntimeError(boom_msg)
-
-            def get_component(
-                self, name: str, template_path: Path
-            ) -> ComponentInfo | None:
-                return None
-
-            def collect_visible_components(
-                self, template_path: Path
-            ) -> dict[str, ComponentInfo]:
-                return {}
-
-        key = "tests.BoomBackend"
-        ComponentsFactory.register_backend(key, Boom)
-        try:
-            mgr = ComponentsManager()
-            with patch("next.components.settings") as m:
-                m.NEXT_COMPONENTS = [{"BACKEND": key}]
-                mgr._reload_config()
-            assert mgr._backends == []
-        finally:
-            ComponentsFactory._backends.pop(key, None)
+        mgr = ComponentsManager()
+        with patch("next.components.settings") as m:
+            m.NEXT_COMPONENTS = [
+                {"BACKEND": "next.components.BoomBackend"},
+            ]
+            mgr._reload_config()
+        assert mgr._backends == []
 
     def test_manager_collect_visible_first_backend_wins(self) -> None:
         """Same component name from two backends: first backend wins."""
@@ -1491,7 +1622,7 @@ class TestComponentContextRegistryInternals:
 
 
 class TestComponentContextManagerFrames:
-    """Frame inspection in ComponentContextManager."""
+    """How ComponentContextManager finds the caller's file."""
 
     def test_get_caller_path_raises_when_back_count_too_large(self) -> None:
         """Exceeding frame chain raises RuntimeError."""
@@ -1499,35 +1630,17 @@ class TestComponentContextManagerFrames:
         with pytest.raises(RuntimeError, match="Could not determine caller"):
             mgr._get_caller_path(10_000)
 
-    def test_get_caller_path_raises_when_only_components_frames(self) -> None:
-        """If walk finds no non-components.py file within 10 steps, raises."""
-
-        def linear_frames(n: int, fp: str) -> types.SimpleNamespace:
-            f: types.SimpleNamespace | None = None
-            for _ in range(n):
-                f = types.SimpleNamespace(f_back=f, f_globals={"__file__": fp})
-            assert f is not None
-            return f
-
-        head = linear_frames(15, "/fake/site-packages/next/components.py")
-        mgr = ComponentContextManager()
-        with (
-            patch("next.components.inspect.currentframe", return_value=head),
-            pytest.raises(RuntimeError, match="Could not determine caller"),
-        ):
-            mgr._get_caller_path(1)
-
-    def test_get_caller_path_breaks_when_frame_exhausted_mid_walk(self) -> None:
-        """Inner loop hits `if not frame: break` then raises."""
-        target = types.SimpleNamespace(f_back=None, f_globals={})
+    def test_get_caller_path_raises_when_no_python_file_in_chain(self) -> None:
+        """Walk stops if no frame exposes a ``.py`` __file__."""
+        inner = types.SimpleNamespace(f_back=None, f_globals={"__file__": "/x.txt"})
         start = types.SimpleNamespace(
-            f_back=target,
-            f_globals={"__file__": "/pkg/next/components.py"},
+            f_back=inner,
+            f_globals={"__file__": "/y.txt"},
         )
         mgr = ComponentContextManager()
         with (
             patch("next.components.inspect.currentframe", return_value=start),
-            pytest.raises(RuntimeError, match="Could not determine caller"),
+            pytest.raises(RuntimeError, match="no __file__ in caller frames"),
         ):
             mgr._get_caller_path(1)
 

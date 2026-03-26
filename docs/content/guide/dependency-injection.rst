@@ -2,7 +2,8 @@ Dependency Injection
 ====================
 
 Dependency injection in next.dj works at the **project level**: the same resolver
-is used for context functions, custom render, and form actions across the app.
+is used for page context functions, page ``render``, **component** ``component.py``
+helpers (``@context`` and composite ``render``), and form actions across the app.
 You declare the parameters you need; the framework injects values from the request
 context — no ``*args`` or ``**kwargs`` required.
 
@@ -14,6 +15,11 @@ Where it is used
   ``layout_theme: dict = Depends("layout_theme")``, ``custom_variable: str = Context("custom_variable")``).
   See :doc:`context` and the **Context vs Depends**
   section below.
+- **Component context and composite** ``render`` — In ``component.py`` use
+  ``from next.components import context`` (not ``next.pages``). Functions registered
+  with ``@context`` / ``@context("key")`` and the optional ``render`` callable use
+  the same providers and markers (``Depends``, ``Context``, URL kwargs, ``request``,
+  etc.). See :doc:`components`.
 - **Custom render** — A page's ``render`` function (when there is no template)
   is called with resolved dependencies: ``def render(request: HttpRequest, post_id: int)``.
 - **Form actions** — ``get_initial`` and action handlers receive only declared

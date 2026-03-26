@@ -140,7 +140,7 @@ class DependencyResolver:
         self._providers_loaded = bool(providers)
 
     def _get_providers(self) -> list[ParameterProvider]:
-        """Build provider list from registry; inject resolver where needed."""
+        """Build providers from the registry and inject the resolver when required."""
         import next.forms  # noqa: PLC0415
         import next.pages  # noqa: PLC0415
         import next.urls  # noqa: F401, PLC0415

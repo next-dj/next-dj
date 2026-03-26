@@ -969,10 +969,10 @@ class Page:
     ) -> URLPattern | None:
         """Generate a Django URL pattern from a page file with template detection.
 
-        Uses has_template to decide if the page has a template; if so creates a
-        view that renders it (template content loaded on first render). Falls back
-        to custom render function if no template. Virtual pages (template.djx
-        without page.py) get a view that renders the template.
+        Uses has_template to decide if the page has a template. If it does, create a
+        view that renders it (template content loaded on first render). Fall back
+        to a custom render function if there is no template. Virtual pages
+        (template.djx without page.py) get a view that renders the template.
         """
         django_pattern, parameters = url_parser.parse_url_pattern(url_path)
         clean_name = url_parser.prepare_url_name(url_path)
