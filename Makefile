@@ -4,9 +4,9 @@ help: # show this help message
 	@echo "Available commands:"
 	@echo "  install         - install the package"
 	@echo "  install-dev     - install development dependencies"
-	@echo "  test            - run tests with 100% coverage requirement"
+	@echo "  test            - run tests in parallel with 100% coverage requirement"
 	@echo "  test-fast       - run tests without coverage"
-	@echo "  test-examples   - run tests for examples with coverage"
+	@echo "  test-examples   - run tests for examples in parallel with coverage"
 	@echo "  test-all        - run all tests including examples"
 	@echo "  lint            - run linting with ruff"
 	@echo "  format          - format code with ruff"
@@ -30,7 +30,7 @@ install-dev: # install development dependencies
 	uv sync --dev
 
 test: # run tests with 100% coverage requirement
-	uv run pytest tests/ -v --cov=next --cov-report=html --cov-report=term-missing --cov-fail-under=100
+	uv run pytest tests/ -n auto -v --cov=next --cov-report=html --cov-report=term-missing --cov-fail-under=100
 
 test-fast: # run tests without coverage
 	uv run pytest tests/ -v
@@ -53,10 +53,10 @@ test-examples: # run tests for examples with coverage
 	for example_dir in examples/*/; do \
 		if [ -d "$$example_dir" ]; then \
 			if [ -d "$$example_dir/tests" ]; then \
-				cd "$$example_dir" && uv run pytest tests/ -v --cov=. --cov-config=../.coveragerc --cov-report=term-missing; \
+				cd "$$example_dir" && uv run pytest tests/ -n auto -v --cov=. --cov-config=../.coveragerc --cov-report=term-missing; \
 				cd - > /dev/null; \
 			elif [ -f "$$example_dir/tests.py" ]; then \
-				cd "$$example_dir" && uv run pytest tests.py -v --cov=. --cov-config=../.coveragerc --cov-report=term-missing; \
+				cd "$$example_dir" && uv run pytest tests.py -n auto -v --cov=. --cov-config=../.coveragerc --cov-report=term-missing; \
 				cd - > /dev/null; \
 			fi; \
 		fi; \

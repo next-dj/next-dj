@@ -16,6 +16,16 @@ Page rendering, template loaders, context and layout management.
    :show-inheritance:
    :exclude-members: resolver
 
+Components (next.components)
+----------------------------
+
+Scoped reusable template fragments, backends, and rendering helpers. See :doc:`/content/guide/components` for usage, settings, and examples.
+
+.. automodule:: next.components
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 URLs and routing (next.urls)
 ----------------------------
 
@@ -82,3 +92,30 @@ Configure backends and options in Django settings:
    ]
 
 FileRouterBackend options: ``APP_DIRS`` (bool), ``context_processors`` (list of dotted paths).
+
+NEXT_COMPONENTS
+~~~~~~~~~~~~~~~
+
+List of component backend dicts (same shape as ``NEXT_PAGES`` entries: ``BACKEND``, ``APP_DIRS``, ``OPTIONS``). The built-in :class:`next.components.FileComponentsBackend` reads ``OPTIONS`` keys such as ``PAGES_DIR``, ``COMPONENTS_DIR``, and ``COMPONENTS_DIRS``. Full annotated examples live in :doc:`/content/guide/components`.
+
+.. code-block:: python
+
+   from pathlib import Path
+
+   BASE_DIR = Path(__file__).resolve().parent.parent
+
+   NEXT_COMPONENTS = [
+       {
+           "BACKEND": "next.components.FileComponentsBackend",
+           "APP_DIRS": True,
+           "OPTIONS": {
+               "COMPONENTS_DIR": "_components",
+               "COMPONENTS_DIRS": [str(BASE_DIR / "root_components")],
+           },
+       },
+   ]
+
+NEXT_COMPONENTS_RUNTIME
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Optional dict. Supported keys today: ``module_loader_class`` (dotted path to a custom ``ModuleLoader``). See :doc:`/content/guide/components`.

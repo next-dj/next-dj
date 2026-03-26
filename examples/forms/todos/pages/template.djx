@@ -1,7 +1,5 @@
 <h1>Todo List</h1>
 
-{% load forms %}
-
 <h2>Create New Todo</h2>
 {% form @action="create_todo" %}
     {{ form.as_p }}

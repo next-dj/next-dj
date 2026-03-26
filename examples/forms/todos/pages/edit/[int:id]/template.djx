@@ -1,7 +1,5 @@
 <h1>Edit Todo</h1>
 
-{% load forms %}
-
 <p><a href="/">Back to list</a></p>
 
 {% form @action="update_todo" %}

@@ -49,6 +49,7 @@ dev = [
     "pre-commit==4.5.1",
     "build==1.4.0",
     "twine==6.2.0",
+    "pytest-xdist==3.8.0",
 ]
 docs = [
     "sphinx==9.0.4",
@@ -101,6 +102,7 @@ addopts = [
 ]
 
 [tool.coverage.run]
+parallel = true
 source = ["next"]
 omit = [
     "*/tests/*",
@@ -169,6 +171,8 @@ ignore = [
     "INP001",
     "S105", "S106"
 ]
+"tests/__init__.py" = ["D104"]
+"tests/pages/__init__.py" = ["D104"]
 "tests/pages/*" = ["INP001", "D104"]
 "**/{test*,conftest}.py" = [
     "ANN001", "ANN201", "ANN202",

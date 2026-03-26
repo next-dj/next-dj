@@ -50,6 +50,18 @@ A Todo app example demonstrating next-dj's form handling: form actions, ModelFor
 
 **Best for:** Building CRUD-style pages and understanding next-dj forms with file-based routing
 
+### components
+A **blog** sample (English UI) built on next-dj components: simple and composite pieces, **slots** for dynamic props, root vs branch scope, plus `next.forms` (auth + post CRUD), pagination, and a composite **header** with `component.py` context (`user`, active nav via `request.path`).
+
+**Key Features:**
+- Simple `.djx` components and composite folders (`component.djx` + optional `component.py` with `@context` decorator from `next.components`)
+- Slots for list-driven UI where `{% component %}` only accepts literal props
+- Root `root_components/` vs app `pages/_components/` scope; `NEXT_COMPONENTS` and `COMPONENTS_DIR` so the file router skips the components folder
+- Template tags `{% component %}`, `{% slot %}`, `{% set_slot %}` (builtins; no `{% load %}` for these)
+- Optional: middleware protecting `/posts/create/` and `/posts/<id>/edit/`, `LogoutView`, pytest suite
+
+**Best for:** Reusable UI fragments, slots, component scope, and combining components with forms and file-based routing
+
 ## Getting Started
 
 Each example includes its own README with detailed setup and running instructions. To get started:
@@ -73,6 +85,9 @@ Use the `layouts` example to understand advanced template inheritance and layout
 **If you're building forms and CRUD flows:**
 Use the `forms` example to see form actions, ModelForm, and `{% form %}` with file-based routing.
 
+**If you're building reusable UI pieces:**
+Use the `components` example for a small blog with simple/composite components, slots, root scope, and forms-driven auth and posts.
+
 **If you're exploring specific features:**
 - Parameter handling: `file-routing` example
 - Database integration: `pages` example
@@ -83,6 +98,7 @@ Use the `forms` example to see form actions, ModelForm, and `{% form %}` with fi
 - UI frameworks integration: `layouts` example
 - Form actions and ModelForm: `forms` example
 - Create/edit flows with URL params: `forms` example
+- Components, slots, scope, blog + forms: `components` example
 
 ## Common Patterns
 
