@@ -1,5 +1,4 @@
 <h1 class="h3 mb-4">Sign in</h1>
-{% load forms %}
 {% form @action="login" %}
     {% if request.GET.next %}
         <input type="hidden" name="next" value="{{ request.GET.next }}">

@@ -56,7 +56,7 @@ forms/
 
 **Templates:**
 - `layout.djx`: HTML shell, nav (active state for `/`), Django messages, `{% block template %}`
-- Home `template.djx`: `{% load forms %}`, `{% form @action="create_todo" %}`, list of todos with links to `/edit/{{ todo.id }}/`
+- Home `template.djx`: `{% form @action="create_todo" %}`, list of todos with links to `/edit/{{ todo.id }}/`
 - Edit `template.djx`: `{% form @action="update_todo" %}` with `{{ form.as_p }}`
 
 ## How It Works
@@ -65,7 +65,7 @@ forms/
 
 2. **ModelForm and get_initial** — For create, `get_initial(request)` returns `{}`. For edit, `get_initial(request, id, **kwargs)` returns the `Todo` instance; the form is built with `instance=...`, so saving updates the same record. URL parameter `id` comes from the file route `[int:id]`.
 
-3. **Template tag** — `{% load forms %}` and `{% form @action="create_todo" %} ... {% endform %}` render a `<form method="post">` with the correct action URL, CSRF token, and (on edit) hidden field for `id` (e.g. `_url_param_id`). Inside the tag, `form` is the form instance (e.g. `{{ form.as_p }}`).
+3. **Template tag** — `{% form @action="create_todo" %} ... {% endform %}` render a `<form method="post">` with the correct action URL, CSRF token, and (on edit) hidden field for `id` (e.g. `_url_param_id`). Inside the tag, `form` is the form instance (e.g. `{{ form.as_p }}`). With `next` in `INSTALLED_APPS`, the tag is available without `{% load forms %}`.
 
 4. **Context** — List page uses `get_todos()`; edit page uses `get_todo(request, id)` so the template can show the todo and the form is pre-filled via `get_initial`.
 
@@ -174,8 +174,6 @@ def update_todo_handler(request, form, **_kwargs):
 ### Using the form in a template
 
 ```html
-{% load forms %}
-
 {% form @action="create_todo" %}
     {{ form.as_p }}
     <button type="submit">Create Todo</button>

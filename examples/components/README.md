@@ -88,7 +88,7 @@ components/
 
 3. **Component context** — In `component.py`, use `from next.components import context` and `@context` / `@context("user")`. The API is similar to `next.pages.context` but designed specifically for components. Do not use `next.pages.context` in `component.py`.
 
-4. **Forms** — Same pattern as the `forms` example: `{% load forms %}`, `{% form @action="create_post" %}`, POST to internal action URL; edit pages include hidden `_url_param_id` from the route.
+4. **Forms** — Same pattern as the `forms` example: `{% form @action="create_post" %}`, POST to internal action URL; edit pages include hidden `_url_param_id` from the route.
 
 5. **Protected routes** — Middleware redirects anonymous users to `LOGIN_URL` with optional `?next=` for create/edit.
 

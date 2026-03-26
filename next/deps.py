@@ -349,11 +349,11 @@ class ParameterProvider(Protocol):
 
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Check if this provider can supply a value for the parameter."""
-        ...
+        raise NotImplementedError
 
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Resolve and return the value for the parameter."""
-        ...
+        raise NotImplementedError
 
 
 class ProviderRegistry:

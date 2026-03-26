@@ -632,14 +632,16 @@ def _inject_component_context(
 class ComponentRenderStrategy(Protocol):
     """Protocol for a renderer that can turn ``ComponentInfo`` into HTML."""
 
-    def can_render(self, info: ComponentInfo) -> bool: ...
+    def can_render(self, info: ComponentInfo) -> bool:
+        raise NotImplementedError
 
     def render(
         self,
         info: ComponentInfo,
         context_data: Mapping[str, Any],
         request: HttpRequest | None,
-    ) -> str: ...
+    ) -> str:
+        raise NotImplementedError
 
 
 class SimpleComponentRenderer:
