@@ -72,8 +72,8 @@ Migration from DContext/DGlobalContext
 
 If you used the old annotation-based markers, migrate as follows:
 
-- ``foo: DGlobalContext["name"]`` → ``foo = Depends("name")``
-- ``bar: DContext["key"]`` → ``bar = Context("key")`` (or ``Context()`` when the key equals the parameter name)
+- ``foo: DGlobalContext["name"]`` -> ``foo = Depends("name")``
+- ``bar: DContext["key"]`` -> ``bar = Context("key")`` (or ``Context()`` when the key equals the parameter name)
 
 **Example: layout-level global + parent context (see ``examples/layouts/``):**
 

@@ -44,14 +44,14 @@ forms/
 
 **Home page** (`todos/pages/page.py`):
 - **URL:** `/`
-- **Context:** `@context("todos")` → `get_todos()` returns all todos
-- **Form action:** `@forms.action("create_todo", form_class=TodoForm)` → `create_todo_handler` saves and redirects to `/`
+- **Context:** `@context("todos")` -> `get_todos()` returns all todos
+- **Form action:** `@forms.action("create_todo", form_class=TodoForm)` -> `create_todo_handler` saves and redirects to `/`
 - **Form:** `TodoForm` with `get_initial()` returning `{}` for new todos
 
 **Edit page** (`todos/pages/edit/[int:id]/page.py`):
 - **URL:** `/edit/<id>/`
-- **Context:** `@context("todo")` → `get_todo(request, id)` returns one todo or 404
-- **Form action:** `@forms.action("update_todo", form_class=TodoEditForm)` → `update_todo_handler` saves and redirects to `/`
+- **Context:** `@context("todo")` -> `get_todo(request, id)` returns one todo or 404
+- **Form action:** `@forms.action("update_todo", form_class=TodoEditForm)` -> `update_todo_handler` saves and redirects to `/`
 - **Form:** `TodoEditForm` with `get_initial(request, id)` returning the `Todo` instance so ModelForm gets `instance=...` for editing; URL param `id` is passed from the route
 
 **Templates:**

@@ -171,6 +171,8 @@ ignore = [
     "INP001",
     "S105", "S106"
 ]
+"tests/__init__.py" = ["D104"]
+"tests/pages/__init__.py" = ["D104"]
 "tests/pages/*" = ["INP001", "D104"]
 "**/{test*,conftest}.py" = [
     "ANN001", "ANN201", "ANN202",

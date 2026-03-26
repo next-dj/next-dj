@@ -1,9 +1,3 @@
-"""Configuration file for the Sphinx documentation builder.
-
-This file contains the configuration for generating documentation
-for the next.dj framework using Sphinx and Read the Docs.
-"""
-
 import os
 import sys
 from pathlib import Path

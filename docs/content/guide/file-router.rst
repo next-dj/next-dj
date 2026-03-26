@@ -15,14 +15,14 @@ Basic File Structure
 
    pages/
    ├── home/
-   │   └── page.py          → /home/
+   │   └── page.py          -> /home/
    ├── about/
-   │   └── page.py          → /about/
+   │   └── page.py          -> /about/
    └── blog/
-       ├── page.py          → /blog/
+       ├── page.py          -> /blog/
        └── post/
            └── [slug]/
-               └── page.py  → /blog/post/<str:slug>/
+               └── page.py  -> /blog/post/<str:slug>/
 
 URL Pattern Generation
 ----------------------
@@ -33,21 +33,21 @@ The system automatically converts file paths to Django URL patterns using a cust
 
 .. code-block:: text
 
-   [username]               → <str:username>
+   [username]               -> <str:username>
 
 **Typed Parameters**:
 
 .. code-block:: text
 
-   [int:post_id]           → <int:post_id>
-   [slug:category]         → <slug:category>
-   [uuid:user_id]          → <uuid:user_id>
+   [int:post_id]           -> <int:post_id>
+   [slug:category]         -> <slug:category>
+   [uuid:user_id]          -> <uuid:user_id>
 
 **Wildcard Parameters**:
 
 .. code-block:: text
 
-   [[path]]                → <path:path>
+   [[path]]                -> <path:path>
 
 **Examples**:
 
@@ -56,13 +56,13 @@ The system automatically converts file paths to Django URL patterns using a cust
    pages/
    ├── user/
    │   └── [username]/
-   │       └── page.py      → /user/<str:username>/
+   │       └── page.py      -> /user/<str:username>/
    ├── post/
    │   └── [int:post_id]/
-   │       └── page.py      → /post/<int:post_id>/
+   │       └── page.py      -> /post/<int:post_id>/
    └── api/
        └── [[path]]/
-           └── page.py      → /api/<path:path>/
+           └── page.py      -> /api/<path:path>/
 
 Virtual Routes
 --------------
@@ -74,10 +74,10 @@ Routes can exist without ``page.py`` files if they have a ``template.djx`` file:
    pages/
    ├── static/
    │   └── about/
-   │       └── template.djx  → /static/about/ (virtual route)
+   │       └── template.djx  -> /static/about/ (virtual route)
    └── api/
        └── health/
-           └── template.djx  → /api/health/ (virtual route)
+           └── template.djx  -> /api/health/ (virtual route)
 
 URL Naming
 ----------
@@ -86,9 +86,9 @@ URL patterns are automatically named based on the file path:
 
 .. code-block:: text
 
-   pages/home/page.py                    → page_home
-   pages/user/[username]/page.py         → page_user_username
-   pages/blog/post/[int:post_id]/page.py → page_blog_post_post_id
+   pages/home/page.py                    -> page_home
+   pages/user/[username]/page.py         -> page_user_username
+   pages/blog/post/[int:post_id]/page.py -> page_blog_post_post_id
 
 Use these names in your templates:
 

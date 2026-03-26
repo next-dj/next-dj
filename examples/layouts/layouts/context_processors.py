@@ -1,9 +1,3 @@
-"""Context processors for the layouts example.
-
-This module provides context processors that add variables to all page templates
-when using NEXT_PAGES with context_processors support.
-"""
-
 from django.conf import settings
 from django.http import HttpRequest
 

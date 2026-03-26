@@ -1,10 +1,14 @@
+from __future__ import annotations
+
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
 import django
 import pytest
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.test import Client
 
 
@@ -13,82 +17,10 @@ repo_root = example_root.parent.parent
 sys.path.insert(0, str(example_root))
 sys.path.insert(0, str(repo_root))
 
-if not settings.configured:
-    settings.configure(
-        SECRET_KEY="django-insecure-example-key-for-components",
-        DEBUG=True,
-        DATABASES={
-            "default": {
-                "ENGINE": "django.db.backends.sqlite3",
-                "NAME": ":memory:",
-            },
-        },
-        INSTALLED_APPS=[
-            "django.contrib.admin",
-            "django.contrib.auth",
-            "django.contrib.contenttypes",
-            "django.contrib.sessions",
-            "django.contrib.messages",
-            "django.contrib.staticfiles",
-            "next",
-            "myapp",
-        ],
-        MIDDLEWARE=[
-            "django.middleware.security.SecurityMiddleware",
-            "django.contrib.sessions.middleware.SessionMiddleware",
-            "django.middleware.common.CommonMiddleware",
-            "django.middleware.csrf.CsrfViewMiddleware",
-            "django.contrib.auth.middleware.AuthenticationMiddleware",
-            "myapp.middleware.LoginRequiredForPostEditorMiddleware",
-            "django.contrib.messages.middleware.MessageMiddleware",
-            "django.middleware.clickjacking.XFrameOptionsMiddleware",
-        ],
-        ROOT_URLCONF="config.urls",
-        TEMPLATES=[
-            {
-                "BACKEND": "django.template.backends.django.DjangoTemplates",
-                "DIRS": [],
-                "APP_DIRS": True,
-                "OPTIONS": {
-                    "context_processors": [
-                        "django.template.context_processors.request",
-                        "django.contrib.auth.context_processors.auth",
-                        "django.contrib.messages.context_processors.messages",
-                    ],
-                },
-            },
-        ],
-        NEXT_PAGES=[
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "APP_DIRS": True,
-                "OPTIONS": {"COMPONENTS_DIR": "_components"},
-            },
-        ],
-        NEXT_COMPONENTS=[
-            {
-                "BACKEND": "next.components.FileComponentsBackend",
-                "APP_DIRS": True,
-                "OPTIONS": {
-                    "COMPONENTS_DIR": "_components",
-                    "COMPONENTS_DIRS": [str(example_root / "root_components")],
-                },
-            },
-        ],
-        USE_TZ=True,
-        TIME_ZONE="UTC",
-        ALLOWED_HOSTS=["testserver"],
-        LOGIN_URL="/account/login/",
-        LOGOUT_REDIRECT_URL="/",
-        DEFAULT_AUTO_FIELD="django.db.models.BigAutoField",
-    )
-    django.setup()
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
-    import myapp.pages.account.login.page
-    import myapp.pages.account.profile.page
-    import myapp.pages.account.register.page
-    import myapp.pages.page
-    import myapp.pages.posts.create.page  # noqa: F401
+if not settings.configured:
+    django.setup()
 
     authors_page = example_root / "myapp" / "pages" / "authors" / "[int:id]" / "page.py"
     spec = importlib.util.spec_from_file_location("myapp_authors_page", authors_page)
@@ -107,3 +39,15 @@ if not settings.configured:
 def client() -> Client:
     """Django test client fixture."""
     return Client()
+
+
+@pytest.fixture()
+def user_factory():
+    """Create users with less boilerplate (use with ``@pytest.mark.django_db``)."""
+    user_model = get_user_model()
+
+    def _create(**kwargs):
+        password = kwargs.pop("password", "pw")
+        return user_model.objects.create_user(password=password, **kwargs)
+
+    return _create

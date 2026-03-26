@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from django.apps import apps
@@ -10,11 +11,34 @@ from myapp.models import Post
 from myapp.pages.account.login.page import LoginForm
 from myapp.pages.posts.create.page import PostCreateForm
 
-from next.components import components_manager, get_component
+from next.components import get_component, load_component_template, render_component
 from next.forms import form_action_manager
 
 
 User = get_user_model()
+
+example_root = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture()
+def home_template() -> Path:
+    path = example_root / "myapp" / "pages" / "template.djx"
+    assert path.exists()
+    return path.resolve()
+
+
+@pytest.fixture()
+def layout_template() -> Path:
+    path = example_root / "myapp" / "pages" / "layout.djx"
+    assert path.exists()
+    return path.resolve()
+
+
+@pytest.fixture()
+def post_create_template() -> Path:
+    path = example_root / "myapp" / "pages" / "posts" / "create" / "template.djx"
+    assert path.exists()
+    return path.resolve()
 
 
 @pytest.mark.django_db()
@@ -46,6 +70,7 @@ def test_home_lists_posts_and_header(client) -> None:
     text = response.content.decode()
     assert "Articles" in text
     assert "Blog" in text
+    assert "Components demo" in text
     assert "Alpha" in text
     assert "writer" in text
     assert "/authors/" in text
@@ -292,45 +317,15 @@ def test_config_urls_loaded() -> None:
     assert resolver.url_patterns is not None
 
 
-def test_post_card_component_resolves_from_home_template_path() -> None:
-    """post_card is visible from root page template path."""
-    example_root = Path(__file__).resolve().parent.parent
-    home_template = example_root / "myapp" / "pages" / "template.djx"
-    assert home_template.exists()
-    components_manager._ensure_backends()
-    card_info = get_component("post_card", home_template.resolve())
-    assert card_info is not None
-
-
-def test_author_chip_component_resolves_from_home_template_path() -> None:
-    """author_chip is visible from the same scope as post_card."""
-    example_root = Path(__file__).resolve().parent.parent
-    home_template = example_root / "myapp" / "pages" / "template.djx"
-    assert home_template.exists()
-    components_manager._ensure_backends()
-    chip = get_component("author_chip", home_template.resolve())
-    assert chip is not None
-    assert chip.is_simple is False
-
-
-def test_header_composite_resolves_from_layout_path() -> None:
-    """Root composite header is visible from layout.djx."""
-    example_root = Path(__file__).resolve().parent.parent
-    layout_template = example_root / "myapp" / "pages" / "layout.djx"
-    assert layout_template.exists()
-    components_manager._ensure_backends()
-    header_info = get_component("header", layout_template.resolve())
-    assert header_info is not None
-    assert header_info.is_simple is False
-
-
-def test_profile_component_removed() -> None:
-    """Old profile component path is gone (example was replaced by blog)."""
-    example_root = Path(__file__).resolve().parent.parent
-    component_py = (
-        example_root / "myapp" / "pages" / "_components" / "profile" / "component.py"
-    )
-    assert not component_py.exists()
+@pytest.mark.django_db()
+def test_create_post_page_shows_branch_scoped_banner(client) -> None:
+    """draft_banner from pages/posts/_components appears on the create form page."""
+    User.objects.create_user(username="banner_user", password="pw")
+    assert client.login(username="banner_user", password="pw")
+    response = client.get("/posts/create/")
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert "pages/posts/_components" in body
 
 
 @pytest.mark.django_db()
@@ -480,7 +475,6 @@ def test_register_form_username_exists(client) -> None:
 @pytest.mark.django_db()
 def test_edit_post_form_get_initial_missing_post() -> None:
     """Edit form get_initial returns empty dict for missing post."""
-    example_root = Path(__file__).resolve().parent.parent
     edit_page_path = (
         example_root / "myapp" / "pages" / "posts" / "[int:id]" / "edit" / "page.py"
     )
@@ -523,3 +517,94 @@ def test_create_post_anonymous_redirects(client) -> None:
     )
     assert response.status_code == 302
     assert "/account/login/" in response.url
+
+
+@pytest.mark.parametrize(
+    ("template_path_fixture", "component_name", "visibility", "simple_kind"),
+    [
+        pytest.param(
+            "home_template", "post_card", "found", "any", id="post_card_from_home"
+        ),
+        pytest.param(
+            "home_template",
+            "author_chip",
+            "found",
+            "composite",
+            id="author_chip_from_home",
+        ),
+        pytest.param(
+            "layout_template", "header", "found", "composite", id="header_from_layout"
+        ),
+        pytest.param(
+            "home_template",
+            "draft_banner",
+            "missing",
+            "n/a",
+            id="draft_banner_hidden_from_home",
+        ),
+        pytest.param(
+            "post_create_template",
+            "draft_banner",
+            "found",
+            "simple",
+            id="draft_banner_from_post_create",
+        ),
+    ],
+)
+def test_get_component_resolves_by_template_scope(
+    template_path_fixture: str,
+    component_name: str,
+    visibility: Literal["found", "missing"],
+    simple_kind: Literal["any", "simple", "composite", "n/a"],
+    request: pytest.FixtureRequest,
+) -> None:
+    """Component lookup follows template path scope (root vs branch _components)."""
+    template_path: Path = request.getfixturevalue(template_path_fixture)
+    info = get_component(component_name, template_path)
+    if visibility == "missing":
+        assert info is None
+        return
+    assert info is not None
+    if simple_kind == "simple":
+        assert info.is_simple is True
+    elif simple_kind == "composite":
+        assert info.is_simple is False
+
+
+def test_render_component_server_time_uses_render_callable(
+    layout_template: Path,
+) -> None:
+    """server_time is a composite that implements ``render()`` in component.py."""
+    info = get_component("server_time", layout_template)
+    assert info is not None
+    request = RequestFactory().get("/")
+    html = render_component(info, {}, request=request)
+    assert "UTC" in html
+    assert "Rendered by" in html
+
+
+def test_load_component_template_version_stamp(layout_template: Path) -> None:
+    """version_stamp uses an inline component template string (no component.djx)."""
+    info = get_component("version_stamp", layout_template)
+    assert info is not None
+    source = load_component_template(info)
+    assert source is not None
+    assert "next-dj" in source
+
+
+def test_example_includes_expected_component_artifacts() -> None:
+    """Stable disk layout for documented demos (simple, composite, branch scope)."""
+    assert (
+        example_root / "myapp" / "pages" / "_components" / "post_card" / "component.djx"
+    ).exists()
+    assert (
+        example_root / "myapp" / "pages" / "posts" / "_components" / "draft_banner.djx"
+    ).exists()
+    assert (example_root / "root_components" / "header" / "component.py").exists()
+    assert (example_root / "root_components" / "server_time" / "component.py").exists()
+    assert (
+        example_root / "root_components" / "version_stamp" / "component.py"
+    ).exists()
+    assert not (
+        example_root / "root_components" / "version_stamp" / "component.djx"
+    ).exists()

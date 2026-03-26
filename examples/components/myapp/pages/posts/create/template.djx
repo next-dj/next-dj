@@ -1,4 +1,5 @@
 <h1 class="h3 mb-4">New post</h1>
+{% component "draft_banner" %}{% endcomponent %}
 {% load forms %}
 {% form @action="create_post" %}
     <div class="mb-3">

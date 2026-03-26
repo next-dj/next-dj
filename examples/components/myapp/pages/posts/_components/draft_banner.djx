@@ -1,0 +1,3 @@
+<p class="alert alert-info py-2 small mb-3" role="status">
+    This banner lives under <code>pages/posts/_components/</code> and is visible only from templates under the posts branch.
+</p>
