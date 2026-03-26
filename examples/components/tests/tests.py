@@ -266,6 +266,18 @@ def test_authenticated_header_shows_create(client) -> None:
 
 
 @pytest.mark.django_db()
+def test_authenticated_home_logout_form_includes_csrf(client) -> None:
+    """Logout POST must send csrfmiddlewaretoken (component context binds csrf_token)."""
+    User.objects.create_user(username="csrfuser", password="pw")
+    assert client.login(username="csrfuser", password="pw")
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert 'name="csrfmiddlewaretoken"' in body
+    assert 'action="/account/logout/"' in body
+
+
+@pytest.mark.django_db()
 def test_logout_post(client) -> None:
     """Logout clears session."""
     user = User.objects.create_user(username="dave", password="pw")

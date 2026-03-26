@@ -20,7 +20,9 @@ from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
+from django.middleware.csrf import get_token
 from django.template import Context as DjangoTemplateContext, Template
+from django.utils.functional import SimpleLazyObject
 from django.utils.module_loading import import_string
 
 from .deps import DependencyCache, resolver
@@ -580,6 +582,21 @@ def _render_template_string(template_str: str, context_dict: dict[str, Any]) -> 
     return Template(template_str).render(DjangoTemplateContext(context_dict))
 
 
+def _merge_csrf_context(
+    context_dict: dict[str, Any],
+    request: HttpRequest | None,
+) -> None:
+    """Bind ``csrf_token`` like ``django.template.context_processors.csrf``.
+
+    Component templates use plain :class:`~django.template.Context`, so
+    ``{% csrf_token %}`` would otherwise render empty without this merge.
+    """
+    if request is None or "csrf_token" in context_dict:
+        return
+
+    context_dict["csrf_token"] = SimpleLazyObject(lambda: get_token(request))
+
+
 def _inject_component_context(
     info: ComponentInfo,
     context_data: dict[str, Any],
@@ -640,11 +657,14 @@ class SimpleComponentRenderer:
         context_data: Mapping[str, Any],
         request: HttpRequest | None,
     ) -> str:
-        _ = request
         template_str = self._loader.load(info)
         if template_str is None:
             return ""
-        return _render_template_string(template_str, dict(context_data))
+        context_dict = dict(context_data)
+        if request is not None:
+            context_dict.setdefault("request", request)
+            _merge_csrf_context(context_dict, request)
+        return _render_template_string(template_str, context_dict)
 
 
 class CompositeComponentRenderer:
@@ -716,6 +736,7 @@ class CompositeComponentRenderer:
         context_dict = dict(context_data)
         if request is not None:
             context_dict["request"] = request
+            _merge_csrf_context(context_dict, request)
 
         _inject_component_context(info, context_dict, request)
 

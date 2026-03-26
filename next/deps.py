@@ -429,8 +429,9 @@ class DependsProvider(RegisteredParameterProvider):
         """Store resolver for resolving nested dependencies."""
         self._resolver = resolver
 
-    def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
+    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Check if param.default is a Depends marker."""
+        _: ResolutionContext = context
         return isinstance(param.default, Depends)
 
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:

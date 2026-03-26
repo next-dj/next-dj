@@ -1252,6 +1252,40 @@ class TestComponentRenderers:
         html = render_component(info, {}, request=req)
         assert "/hello" in html
 
+    def test_composite_template_render_includes_csrf_token(
+        self, tmp_path: Path
+    ) -> None:
+        """{% csrf_token %} works in component.djx when request is passed."""
+        d = tmp_path / "csrf"
+        d.mkdir()
+        (d / "component.djx").write_text("{% csrf_token %}")
+        (d / "component.py").write_text("# no render\n")
+        info = ComponentInfo(
+            "csrf",
+            tmp_path,
+            "",
+            d / "component.djx",
+            d / "component.py",
+            False,
+        )
+        req = RequestFactory().get("/")
+        html = render_component(info, {}, request=req)
+        assert "csrfmiddlewaretoken" in html
+
+    def test_merge_csrf_context_no_op_without_request(self) -> None:
+        """Early return when ``request`` is None (defensive API)."""
+        ctx: dict[str, object] = {}
+        next_components_mod._merge_csrf_context(ctx, None)
+        assert "csrf_token" not in ctx
+
+    def test_merge_csrf_context_skips_when_csrf_token_present(self) -> None:
+        """Do not replace an existing ``csrf_token`` (caller supplied)."""
+        req = RequestFactory().get("/")
+        existing = "__test_merge_csrf_existing__"
+        ctx: dict[str, object] = {"csrf_token": existing}
+        next_components_mod._merge_csrf_context(ctx, req)
+        assert ctx["csrf_token"] == existing
+
     def test_render_with_template_returns_empty_when_no_template_string(
         self, tmp_path: Path
     ) -> None:
@@ -1292,13 +1326,18 @@ class TestComponentRenderers:
         )
         assert r._fallback_to_template(info, {}) == ""
 
-    def test_simple_renderer_accepts_request_kwarg(self, tmp_path: Path) -> None:
-        """SimpleComponentRenderer.render ignores request argument."""
-        (tmp_path / "s.djx").write_text("<b>ok</b>")
+    def test_simple_renderer_passes_request_and_csrf_for_forms(
+        self, tmp_path: Path
+    ) -> None:
+        """SimpleComponentRenderer adds request and csrf_token for {% csrf_token %}."""
+        (tmp_path / "s.djx").write_text("<b>{% csrf_token %}</b>")
         info = ComponentInfo("s", tmp_path, "", tmp_path / "s.djx", None, True)
         tl = ComponentTemplateLoader(ModuleLoader())
         sr = SimpleComponentRenderer(tl)
-        assert "<b>ok</b>" in sr.render(info, {}, MagicMock())
+        req = RequestFactory().get("/")
+        html = sr.render(info, {}, request=req)
+        assert "csrfmiddlewaretoken" in html
+        assert "<b>" in html
 
 
 class TestFileComponentsBackendDiscovery:
