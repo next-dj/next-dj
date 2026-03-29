@@ -1,0 +1,6 @@
+<footer class="border-top mt-auto py-3 bg-white">
+    <div class="container text-muted small d-flex flex-wrap align-items-center">
+        <span>&copy; {% now "Y" %} Blog</span>
+        {% component "version_stamp" %}{% endcomponent %}
+    </div>
+</footer>

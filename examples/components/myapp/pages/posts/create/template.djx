@@ -1,0 +1,17 @@
+<h1 class="h3 mb-4">New post</h1>
+{% component "draft_banner" %}{% endcomponent %}
+{% form @action="create_post" %}
+    <div class="mb-3">
+        <label class="form-label" for="id_title">Title</label>
+        {{ form.title }}
+        {{ form.title.errors }}
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="id_content">Content</label>
+        {{ form.content }}
+        {{ form.content.errors }}
+    </div>
+    {{ form.non_field_errors }}
+    <button type="submit" class="btn btn-primary">Publish</button>
+    <a href="/" class="btn btn-link">Cancel</a>
+{% endform %}

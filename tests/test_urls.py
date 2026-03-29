@@ -1182,3 +1182,20 @@ class TestScanPagesDirectory:
         url_paths = {r[0] for r in result}
         assert "" in url_paths
         assert "sub" in url_paths
+
+    def test_skip_dir_names_excludes_component_folder(self, tmp_path) -> None:
+        """Directories in skip_dir_names are not recursed and create no URL segments."""
+        (tmp_path / "page.py").write_text("x = 1")
+        (tmp_path / "home").mkdir()
+        (tmp_path / "home" / "page.py").write_text("y = 2")
+        (tmp_path / "_components").mkdir()
+        (tmp_path / "_components" / "card.djx").write_text("<div>card</div>")
+        (tmp_path / "_components" / "nested").mkdir()
+        (tmp_path / "_components" / "nested" / "page.py").write_text("z = 3")
+        result = list(_scan_pages_directory(tmp_path, skip_dir_names=("_components",)))
+        url_paths = {r[0] for r in result}
+        assert "" in url_paths
+        assert "home" in url_paths
+        assert "_components" not in url_paths
+        assert "_components/nested" not in url_paths
+        assert len(result) == 2

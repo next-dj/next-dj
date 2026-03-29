@@ -13,7 +13,7 @@ import inspect
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from pathlib import Path
 from typing import Any, ClassVar, TypeVar, get_args, get_origin
 
@@ -120,6 +120,7 @@ class UrlKwargsProvider(RegisteredParameterProvider):
 # Configuration constants
 DEFAULT_PAGES_DIR = "pages"
 DEFAULT_APP_DIRS = True
+DEFAULT_COMPONENTS_DIR = "_components"
 
 
 class URLPatternParser:
@@ -416,13 +417,20 @@ class FileRouterBackend(RouterBackend):
         pages_path: Path,
     ) -> Generator[tuple[str, Path], None, None]:
         """Scan pages directory for page.py and virtual views."""
-        yield from _scan_pages_directory(pages_path)
+        skip_dir_names = (self.options.get("COMPONENTS_DIR", DEFAULT_COMPONENTS_DIR),)
+        yield from _scan_pages_directory(pages_path, skip_dir_names)
 
 
 def _scan_pages_directory(
     pages_path: Path,
+    skip_dir_names: Iterable[str] = (),
 ) -> Generator[tuple[str, Path], None, None]:
-    """Scan a pages directory for page.py and virtual views (template.djx only)."""
+    """Scan a pages directory for page.py and virtual views (template.djx only).
+
+    Directories whose names are in skip_dir_names are not recursed into and
+    do not create URL segments (e.g. component folder from OPTIONS.COMPONENTS_DIR).
+    """
+    skip_set = frozenset(skip_dir_names)
 
     def scan_recursive(
         current_path: Path,
@@ -435,6 +443,8 @@ def _scan_pages_directory(
             return
         for item in items:
             if item.is_dir():
+                if item.name in skip_set:
+                    continue
                 dir_name = item.name
                 new_url_path = f"{url_path}/{dir_name}" if url_path else dir_name
                 yield from scan_recursive(item, new_url_path)

@@ -61,8 +61,6 @@ Here's a minimal example of a form in next.dj:
 
 .. code-block:: html
 
-   {% load forms %}
-   
    {% form @action="contact" %}
        {{ form.as_p }}
        <button type="submit">Send Message</button>
@@ -218,8 +216,6 @@ Use the ``{% form %}`` template tag to render forms:
 
 .. code-block:: html
 
-   {% load forms %}
-   
    {% form @action="contact" %}
        {{ form.as_p }}
        <button type="submit">Submit</button>
@@ -755,7 +751,6 @@ A complete example of a contact form without a model:
    <!-- pages/contact/template.djx -->
    <h1>Contact Us</h1>
    
-   {% load forms %}
    {% form @action="contact" %}
        {{ form.as_p }}
        <button type="submit">Send Message</button>
@@ -810,8 +805,6 @@ Complete CRUD example with a Todo model:
 
    <!-- pages/template.djx -->
    <h1>Todo List</h1>
-   
-   {% load forms %}
    
    <h2>Create New Todo</h2>
    {% form @action="create_todo" %}
@@ -891,8 +884,6 @@ Complete CRUD example with a Todo model:
 
    <!-- pages/edit/[int:id]/template.djx -->
    <h1>Edit Todo</h1>
-   
-   {% load forms %}
    
    <p><a href="/">Back to list</a></p>
    
@@ -1063,7 +1054,7 @@ Common Issues
 
 **Form not appearing in template:**
 
-- Ensure ``{% load forms %}`` is called before using ``{% form %}``
+- Ensure ``next`` is in ``INSTALLED_APPS`` (the app registers the ``{% form %}`` tag as a template builtin). For a custom engine, add ``next.templatetags.forms`` to ``OPTIONS['builtins']`` or use ``{% load forms %}`` in the template.
 - Check that action name matches ``@action`` parameter
 - Verify form action is registered (check for import errors)
 

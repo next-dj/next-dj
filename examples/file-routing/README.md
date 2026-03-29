@@ -62,9 +62,9 @@ The example uses next-dj's file-based routing system:
 
 1. **Directory Scanning**: The system scans configured directories for `page.py` files
 2. **URL Pattern Generation**: File paths are converted to Django URL patterns using special syntax:
-   - `[param]` → `<str:param>` (string parameter)
-   - `[int:param]` → `<int:param>` (typed parameter)
-   - `[[args]]` → `<path:args>` (wildcard arguments)
+   - `[param]` -> `<str:param>` (string parameter)
+   - `[int:param]` -> `<int:param>` (typed parameter)
+   - `[[args]]` -> `<path:args>` (wildcard arguments)
 3. **Template Loading**: Each page can define templates via:
    - `template` attribute in `page.py`
    - `template.djx` file in the same directory

@@ -1,0 +1,19 @@
+<h1 class="h3 mb-4">Sign in</h1>
+{% form @action="login" %}
+    {% if request.GET.next %}
+        <input type="hidden" name="next" value="{{ request.GET.next }}">
+    {% endif %}
+    <div class="mb-3">
+        <label class="form-label" for="id_username">Username</label>
+        {{ form.username }}
+        {{ form.username.errors }}
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="id_password">Password</label>
+        {{ form.password }}
+        {{ form.password.errors }}
+    </div>
+    {{ form.non_field_errors }}
+    <button type="submit" class="btn btn-primary">Sign in</button>
+    <a href="/account/register/" class="btn btn-link">Sign up</a>
+{% endform %}

@@ -1,5 +1,3 @@
-"""Tests for examples/forms todos app: CRUD operations for todos."""
-
 import importlib.util
 from pathlib import Path
 

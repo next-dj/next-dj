@@ -23,9 +23,10 @@ class NextFrameworkConfig(AppConfig):
         autoreload.StatReloader = NextStatReloader  # type: ignore[misc]
 
         builtins = list(settings.TEMPLATES[0].get("OPTIONS", {}).get("builtins", []))
-        if "next.templatetags.forms" not in builtins:
-            builtins.append("next.templatetags.forms")
-            settings.TEMPLATES[0].setdefault("OPTIONS", {})["builtins"] = builtins
+        for mod in ("next.templatetags.forms", "next.templatetags.components"):
+            if mod not in builtins:
+                builtins.append(mod)
+        settings.TEMPLATES[0].setdefault("OPTIONS", {})["builtins"] = builtins
 
         def watch_pages(sender: object, **_: object) -> None:
             for p in get_pages_directories_for_watch():

@@ -1,0 +1,21 @@
+<h1 class="h3 mb-4">Sign up</h1>
+{% form @action="register" %}
+    <div class="mb-3">
+        <label class="form-label" for="id_username">Username</label>
+        {{ form.username }}
+        {{ form.username.errors }}
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="id_password1">Password</label>
+        {{ form.password1 }}
+        {{ form.password1.errors }}
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="id_password2">Password (again)</label>
+        {{ form.password2 }}
+        {{ form.password2.errors }}
+    </div>
+    {{ form.non_field_errors }}
+    <button type="submit" class="btn btn-primary">Create account</button>
+    <a href="/account/login/" class="btn btn-link">Already have an account</a>
+{% endform %}

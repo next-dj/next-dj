@@ -8,7 +8,7 @@ r"""                  __           __
                                          \ \____/
                                           \/___/
 
-Django next generation framework without the tears.
+A next-gen framework based on Django without the tears.
 """
 
 __title__ = "Next Django Framework"

@@ -74,7 +74,7 @@ class FormConfig:
 
 @dataclass(slots=True)
 class FormAttrsBuilder:
-    """Builds form tag attributes: action URL, method, custom attrs."""
+    """Builds form tag attributes for action URL, method, and custom HTML attrs."""
 
     action_url: str = ""
     html_attrs: tuple[tuple[str, str], ...] = ()

@@ -1,0 +1,9 @@
+<div class="card h-100 border-0 shadow-sm">
+    <div class="card-body d-flex flex-column">
+        <h2 class="card-title h5">{{ title }}</h2>
+        {% if meta %}
+            <div class="mb-3 small">{{ meta }}</div>
+        {% endif %}
+        <div class="mt-auto pt-1">{{ actions }}</div>
+    </div>
+</div>
