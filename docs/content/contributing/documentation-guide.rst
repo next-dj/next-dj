@@ -10,7 +10,7 @@ The documentation is organized into logical sections (see ``index.rst``):
 
 * **Guide** - Getting started and main framework topics (routing, templates, components, context, forms, and more)
 * **API Reference** - Generated API docs and reference pages such as system checks
-* **Contributing** - This guide and :doc:`content/contributing/contributing`
+* **Contributing** - This guide and :doc:`the contributing guide </content/contributing/contributing>`
 
 File Naming Convention
 ----------------------
