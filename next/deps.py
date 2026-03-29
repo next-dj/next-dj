@@ -1,12 +1,7 @@
-"""Dependency resolution for next.dj.
+"""Resolve callable parameters from the current request and template context.
 
-Resolves function parameters from request context (request, URL kwargs, form)
-by inspecting signatures and matching parameters to known sources. Enables
-FastAPI-style dependency injection so callables declare only the arguments
-they need.
-
-D-markers use a common base Generic so that DI markers can be validated by the
-linter. Import the base from this module when defining new markers.
+Inspects signatures and fills parameters from ``request``, URL kwargs, forms, and
+registered providers. New markers should subclass ``DDependencyBase`` for typing.
 """
 
 from __future__ import annotations
@@ -40,10 +35,7 @@ RESERVED_KEYS: Final[frozenset[str]] = frozenset(
 
 
 class DDependencyBase[T]:
-    """Base for all D-markers.
-
-    All DI markers (e.g. DForm, DUrl) must inherit from this.
-    """
+    """Shared base for annotation markers such as ``DForm`` and ``DUrl``."""
 
     __slots__ = ()
 
@@ -54,25 +46,25 @@ _CACHE_MISS: object = object()
 
 
 class DependencyCycleError(Exception):
-    """Raised when a circular dependency is detected between registered callables."""
+    """Circular dependency between registered callables."""
 
     def __init__(self, cycle: list[str]) -> None:
-        """Store cycle path and set exception message."""
+        """Record the dependency chain."""
         self.cycle = cycle
         super().__init__(f"Circular dependency: {' -> '.join(cycle)}")
 
 
 class DependencyCache:
-    """Cache for resolved dependencies with cycle detection."""
+    """Stores resolved values and detects cycles via in-progress keys."""
 
     def __init__(self, backing_dict: dict[str, Any] | None = None) -> None:
-        """Initialize cache, optionally wrapping an existing dict for compatibility."""
+        """Initialize cache storage, optionally sharing an existing dict."""
         self._cache: dict[str, Any] = backing_dict if backing_dict is not None else {}
         self._in_progress: set[str] = set()
         self._owns_cache = backing_dict is None
 
     def get(self, key: str) -> object:
-        """Get cached value for key."""
+        """Return cached value, ``_IN_PROGRESS``, or ``_CACHE_MISS``."""
         if key in self._in_progress:
             return _IN_PROGRESS
         if key in self._cache:
@@ -80,34 +72,34 @@ class DependencyCache:
         return _CACHE_MISS
 
     def set(self, key: str, value: object) -> None:
-        """Store resolved value in cache."""
+        """Persist a finished resolution."""
         self._cache[key] = value
         self._in_progress.discard(key)
 
     def mark_in_progress(self, key: str) -> None:
-        """Mark dependency as currently being resolved."""
+        """Begin resolving ``key`` (cycle detection)."""
         self._in_progress.add(key)
 
     def unmark_in_progress(self, key: str) -> None:
-        """Remove in-progress marker for dependency."""
+        """Clear in-progress state for ``key``."""
         self._in_progress.discard(key)
 
     def is_in_progress(self, key: str) -> bool:
-        """Check if dependency is currently being resolved."""
+        """Whether ``key`` is mid-resolution."""
         return key in self._in_progress
 
     def __len__(self) -> int:
-        """Return number of cached values."""
+        """Return the number of stored values."""
         return len(self._cache)
 
     def __contains__(self, key: str) -> bool:
-        """Check if key is in cache."""
+        """Membership in the backing dict."""
         return key in self._cache
 
 
 @dataclass(frozen=True, slots=True)
 class ResolutionContext:
-    """Immutable context for dependency resolution."""
+    """Snapshot passed to providers during resolution."""
 
     request: HttpRequest | None
     form: object | None
@@ -118,29 +110,26 @@ class ResolutionContext:
 
 
 class DependencyResolver:
-    """Resolves function parameters from context using a chain of providers."""
+    """Walks registered providers to fill a callable's parameters."""
 
-    # Names passed as their own kwargs to resolve_dependencies; anything else in
+    # Names are passed as their own kwargs to resolve_dependencies. Anything else in
     # **context is treated like URL kwargs for providers.
     EXPLICIT_RESOLVE_KEYS: ClassVar[frozenset[str]] = RESERVED_KEYS
 
     def __get__(self, obj: object, owner: type[object]) -> DependencyResolver:
-        """Return self when used as class attribute on RegisteredParameterProvider."""
+        """Return the shared resolver instance."""
         return self
 
     def __init__(
         self, *providers: ParameterProvider | RegisteredParameterProvider
     ) -> None:
-        """Initialize with optional providers.
-
-        With no args, chain is built lazily from registry on first resolve.
-        """
+        """Explicit providers now, or lazy registry fill on first resolve."""
         self._dependency_callables: dict[str, Callable[..., Any]] = {}
         self._providers: list[ParameterProvider] = list(providers)
         self._providers_loaded = bool(providers)
 
     def _get_providers(self) -> list[ParameterProvider]:
-        """Build providers from the registry and inject the resolver when required."""
+        """Instantiate registered ``RegisteredParameterProvider`` subclasses."""
         import next.forms  # noqa: PLC0415
         import next.pages  # noqa: PLC0415
         import next.urls  # noqa: F401, PLC0415
@@ -155,13 +144,13 @@ class DependencyResolver:
         return result
 
     def _ensure_providers(self) -> None:
-        """Load providers from registry on first use."""
+        """Populate ``_providers`` once."""
         if not self._providers_loaded:
             self._providers.extend(self._get_providers())
             self._providers_loaded = True
 
     def _should_skip_parameter(self, param: inspect.Parameter) -> bool:
-        """Check if parameter should be skipped during resolution."""
+        """Skip ``self``/``cls`` and variadic parameters."""
         return param.name in ("self", "cls") or param.kind in (
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
@@ -170,7 +159,7 @@ class DependencyResolver:
     def _resolve_parameter(
         self, param: inspect.Parameter, context: ResolutionContext
     ) -> object:
-        """Resolve a single parameter through provider chain."""
+        """First provider that handles ``param``, else default or ``None``."""
         for provider in self._providers:
             if provider.can_handle(param, context):
                 return provider.resolve(param, context)
@@ -191,10 +180,7 @@ class DependencyResolver:
     def dependency(
         self, name: str
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        r"""Return a decorator that registers a callable as a dependency.
-
-        Example: @resolver.dependency("name").
-        """
+        r"""``@resolver.dependency("name")`` shorthand for ``register_dependency``."""
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             self.register_dependency(name, func)
@@ -205,7 +191,7 @@ class DependencyResolver:
     def _resolve_callable_dependency(
         self, name: str, context: ResolutionContext
     ) -> object:
-        """Resolve a registered dependency by name with caching and cycle detection."""
+        """Named dependency with cycle-safe memoization."""
         if name not in self._dependency_callables:
             return None
 
@@ -239,14 +225,14 @@ class DependencyResolver:
             context.cache.unmark_in_progress(name)
 
     def add_provider(self, provider: ParameterProvider) -> None:
-        """Append a provider to the resolution chain."""
+        """Extra provider tried after existing entries."""
         self._providers.append(provider)
 
     def register(
         self,
         provider: ParameterProvider | type[ParameterProvider],
     ) -> ParameterProvider | type[ParameterProvider]:
-        """Register a provider (instance or class). Use as @resolver.register."""
+        """``@resolver.register`` on a class or instance."""
         if isinstance(provider, type):
             instance = provider()
             self.add_provider(instance)
@@ -257,7 +243,7 @@ class DependencyResolver:
     def resolve(
         self, func: Callable[..., T], context: ResolutionContext
     ) -> dict[str, Any]:
-        """Resolve function parameters from context."""
+        """Keyword args for calling ``func`` from ``context``."""
         self._ensure_providers()
 
         try:
@@ -278,7 +264,7 @@ class DependencyResolver:
     def resolve_dependencies(
         self, func: Callable[..., Any], **context: object
     ) -> dict[str, Any]:
-        """Resolve arguments for func from context."""
+        """Resolve like ``resolve`` but accept a loose kwargs mapping."""
         self._ensure_providers()
 
         # Convert legacy dict context to ResolutionContext
@@ -345,14 +331,14 @@ class DependencyResolver:
 
 
 class ParameterProvider(Protocol):
-    """Protocol for parameter providers."""
+    """Optional provider hook for ``DependencyResolver``."""
 
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
-        """Check if this provider can supply a value for the parameter."""
+        """Whether this provider owns ``param``."""
         raise NotImplementedError
 
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
-        """Resolve and return the value for the parameter."""
+        """Value for ``param``."""
         raise NotImplementedError
 
 
@@ -368,7 +354,7 @@ class ProviderRegistry:
         self._providers.append(provider)
 
     def get_providers(self) -> tuple[ParameterProvider, ...]:
-        """Get all registered providers as immutable tuple."""
+        """Frozen snapshot of the list."""
         return tuple(self._providers)
 
     def clear(self) -> None:
@@ -376,11 +362,11 @@ class ProviderRegistry:
         self._providers.clear()
 
     def __len__(self) -> int:
-        """Return number of registered providers."""
+        """Return the number of registered providers."""
         return len(self._providers)
 
     def __iter__(self) -> Iterator[ParameterProvider]:
-        """Iterate over registered providers."""
+        """Iterate registered providers."""
         return iter(self._providers)
 
 
@@ -388,19 +374,19 @@ resolver = DependencyResolver()
 
 
 class RegisteredParameterProvider(ABC):
-    """Base for parameter providers that auto-register via __init_subclass__."""
+    """Auto-registered provider base (subclasses join the default chain)."""
 
     resolver = resolver
     _registry: ClassVar[list[type]] = []
 
     def __init_subclass__(cls, **kwargs: object) -> None:
-        """Register the subclass in _registry."""
+        """Track concrete subclasses for lazy instantiation."""
         super().__init_subclass__(**kwargs)
         RegisteredParameterProvider._registry.append(cls)
 
     @abstractmethod
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
-        """Check if this provider can supply a value for the parameter."""
+        """Whether this provider owns ``param``."""
 
     @abstractmethod
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
@@ -423,10 +409,10 @@ class Depends:
 
 
 class DependsProvider(RegisteredParameterProvider):
-    """Resolve parameters declared with ``Depends(...)`` defaults."""
+    """Parameters whose default is a ``Depends`` marker."""
 
     def __init__(self, resolver: DependencyResolver) -> None:
-        """Store resolver for resolving nested dependencies."""
+        """Store the resolver used for nested dependency calls."""
         self._resolver = resolver
 
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:

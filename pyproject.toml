@@ -50,6 +50,7 @@ dev = [
     "build==1.4.2",
     "twine==6.2.0",
     "pytest-xdist==3.8.0",
+    "pytest-lazy-fixtures==1.4.0",
 ]
 docs = [
     "sphinx==9.0.4",
@@ -179,6 +180,19 @@ ignore = [
     "ARG001", "ARG002", "ARG005",
     "S101", "D100",
     "PLR2004", "PLR0913", "S108", "E501", "FBT003",
+]
+"tests/fixtures.py" = [
+    "ANN001", "ANN201", "ANN202",
+    "ARG001", "ARG002", "ARG005",
+    "S101", "D100",
+    "PLR2004", "PLR0913", "S108", "E501", "FBT003",
+]
+"tests/support.py" = [
+    "ANN001", "ANN201", "ANN202",
+    "ARG001", "ARG002", "ARG005",
+    "S101", "D100",
+    "PLR2004", "PLR0913", "S108", "E501", "FBT003",
+    "TC001", "TC003", "B006", "D401",
 ]
 "**/migrations/**/*.py" = ["F401", "PLR0913"]
 

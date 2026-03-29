@@ -1,6 +1,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from django.utils.autoreload import StatReloader
 
 from next.utils import NextStatReloader
@@ -31,103 +32,50 @@ class TestNextStatReloader:
             next(gen)
             mock_snapshot.assert_called()
 
-    def test_tick_notify_when_route_set_grows(self) -> None:
-        """When route set (from watch dirs + scan) grows, notify_file_changed is called."""
-        reloader = NextStatReloader()
-        fake_path = Path("/fake/pages/home/page.py")
-        call_count = [0]
-
-        def watch_side_effect():
-            call_count[0] += 1
-            return [] if call_count[0] == 1 else [Path("/fake/pages")]
-
-        def scan_side_effect(pages_path):
-            if call_count[0] < 2:
-                return iter([])
-            return iter([("home", pages_path / "home" / "page.py")])
-
-        with (
-            patch(
-                "next.utils.get_pages_directories_for_watch",
-                side_effect=watch_side_effect,
+    @pytest.mark.parametrize(
+        ("reloader_tick_scenario", "num_ticks", "expect"),
+        [
+            pytest.param("route_set_grows", 2, "notify_path", id="route_set_grows"),
+            pytest.param(
+                "no_notify_first_tick", 1, "no_notify", id="no_notify_first_tick"
             ),
-            patch("next.utils._scan_pages_directory", side_effect=scan_side_effect),
-            patch("next.utils.get_layout_djx_paths_for_watch", return_value=set()),
-            patch("next.utils.get_template_djx_paths_for_watch", return_value=set()),
-            patch.object(reloader, "snapshot_files", return_value=iter([])),
-            patch.object(reloader, "notify_file_changed") as mock_notify,
-        ):
-            gen = reloader.tick()
-            next(gen)  # first tick: previous_route_set = {}
-            next(gen)  # second tick: current != previous -> notify
-            mock_notify.assert_called_once()
-            mock_notify.assert_called_with(fake_path.resolve())
-
-    def test_tick_no_notify_on_first_tick(self) -> None:
-        """First tick only stores route set, does not notify."""
-        reloader = NextStatReloader()
-        fake_dir = Path("/fake")
-        fake_page = fake_dir / "page.py"
-        with (
-            patch(
-                "next.utils.get_pages_directories_for_watch",
-                return_value=[fake_dir],
+            pytest.param(
+                "route_set_unchanged", 2, "no_notify", id="route_set_unchanged"
             ),
-            patch(
-                "next.utils._scan_pages_directory",
-                return_value=iter([("home", fake_page)]),
+            pytest.param("watch_raises", 1, "ok", id="watch_raises"),
+            pytest.param(
+                "template_set_changes",
+                2,
+                "template_notify",
+                id="template_set_changes",
             ),
-            patch("next.utils.get_layout_djx_paths_for_watch", return_value=set()),
-            patch("next.utils.get_template_djx_paths_for_watch", return_value=set()),
-            patch.object(reloader, "snapshot_files", return_value=iter([])),
-            patch.object(reloader, "notify_file_changed") as mock_notify,
-        ):
-            gen = reloader.tick()
+            pytest.param("mtime_change", 2, "notify_path", id="mtime_change"),
+        ],
+        indirect=["reloader_tick_scenario"],
+    )
+    def test_tick_scenario_notify_behavior(
+        self,
+        reloader_tick_scenario,
+        num_ticks: int,
+        expect: str,
+    ) -> None:
+        """tick() under each patched scenario matches expected notify behavior."""
+        reloader, payload = reloader_tick_scenario
+        gen = reloader.tick()
+        for _ in range(num_ticks):
             next(gen)
+        if expect == "notify_path":
+            mock_notify, expected_path = payload
+            mock_notify.assert_called_once_with(expected_path)
+        elif expect == "no_notify":
+            mock_notify = payload
             mock_notify.assert_not_called()
-
-    def test_tick_no_notify_when_route_set_unchanged(self) -> None:
-        """When route/layout/template sets are unchanged, notify_file_changed is not called."""
-        reloader = NextStatReloader()
-        fake_dir = Path("/fake")
-        fake_page = fake_dir / "page.py"
-
-        def route_iter(_path):
-            return iter([("home", fake_page)])
-
-        with (
-            patch(
-                "next.utils.get_pages_directories_for_watch",
-                return_value=[fake_dir],
-            ),
-            patch(
-                "next.utils._scan_pages_directory",
-                side_effect=route_iter,
-            ),
-            patch("next.utils.get_layout_djx_paths_for_watch", return_value=set()),
-            patch("next.utils.get_template_djx_paths_for_watch", return_value=set()),
-            patch.object(reloader, "snapshot_files", return_value=iter([])),
-            patch.object(reloader, "notify_file_changed") as mock_notify,
-        ):
-            gen = reloader.tick()
-            next(gen)
-            next(gen)
-            mock_notify.assert_not_called()
-
-    def test_tick_swallows_exception_from_route_set_build(self) -> None:
-        """If building route set raises (e.g. get_pages_directories_for_watch), tick continues."""
-        reloader = NextStatReloader()
-        with (
-            patch(
-                "next.utils.get_pages_directories_for_watch",
-                side_effect=ValueError("bad"),
-            ),
-            patch("next.utils.get_layout_djx_paths_for_watch", return_value=set()),
-            patch("next.utils.get_template_djx_paths_for_watch", return_value=set()),
-            patch.object(reloader, "snapshot_files", return_value=iter([])),
-        ):
-            gen = reloader.tick()
-            next(gen)
+        elif expect == "ok":
+            assert payload is None
+        elif expect == "template_notify":
+            mock_notify, fake_template = payload
+            calls = [c[0][0] for c in mock_notify.call_args_list]
+            assert fake_template in calls
 
     def test_check_layouts_notify_when_layout_used_by_route(self) -> None:
         """_check_layouts notifies when layout in diff is under a route's dir."""
@@ -180,65 +128,3 @@ class TestNextStatReloader:
         with patch.object(reloader, "notify_file_changed") as mock_notify:
             reloader._check_templates({template_djx})
         mock_notify.assert_called_once_with(template_djx)
-
-    def test_tick_notify_when_template_set_changes(self) -> None:
-        """When template.djx set changes, notify_file_changed is called with that path."""
-        reloader = NextStatReloader()
-        fake_dir = Path("/fake")
-        fake_page = fake_dir / "page.py"
-        fake_template = Path("/fake/pages/foo/template.djx").resolve()
-        call_count = [0]
-
-        def templates_side_effect():
-            call_count[0] += 1
-            return set() if call_count[0] == 1 else {fake_template}
-
-        with (
-            patch(
-                "next.utils.get_pages_directories_for_watch",
-                return_value=[fake_dir],
-            ),
-            patch(
-                "next.utils._scan_pages_directory",
-                return_value=iter([("home", fake_page)]),
-            ),
-            patch("next.utils.get_layout_djx_paths_for_watch", return_value=set()),
-            patch(
-                "next.utils.get_template_djx_paths_for_watch",
-                side_effect=templates_side_effect,
-            ),
-            patch.object(reloader, "snapshot_files", return_value=iter([])),
-            patch.object(reloader, "notify_file_changed") as mock_notify,
-        ):
-            gen = reloader.tick()
-            next(gen)
-            next(gen)
-            calls = [c[0][0] for c in mock_notify.call_args_list]
-            assert fake_template in calls
-
-    def test_tick_notify_when_file_mtime_changes(self) -> None:
-        """When snapshot_files returns a file whose mtime increases, notify_file_changed is called."""
-        reloader = NextStatReloader()
-        fake_path = Path("/fake/file.py")
-        first_snapshot = [(fake_path, 1000.0)]
-        second_snapshot = [(fake_path, 2000.0)]
-        call_count = [0]
-
-        def snapshot_side_effect():
-            call_count[0] += 1
-            return iter(first_snapshot if call_count[0] == 1 else second_snapshot)
-
-        with (
-            patch(
-                "next.utils.get_pages_directories_for_watch",
-                return_value=[],
-            ),
-            patch("next.utils.get_layout_djx_paths_for_watch", return_value=set()),
-            patch("next.utils.get_template_djx_paths_for_watch", return_value=set()),
-            patch.object(reloader, "snapshot_files", side_effect=snapshot_side_effect),
-            patch.object(reloader, "notify_file_changed") as mock_notify,
-        ):
-            gen = reloader.tick()
-            next(gen)  # first tick: stores mtime 1000
-            next(gen)  # second tick: mtime 2000 > 1000 -> notify
-            mock_notify.assert_called_once_with(fake_path)

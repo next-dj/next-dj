@@ -61,7 +61,7 @@ The system tries to load templates in this order:
 2. **Python string templates** (``template`` attribute)
 3. **Template files** (``template.djx`` files)
 
-This allows for flexible template organization and inheritance. ``.djx`` and layout content are loaded on **first render** of each page and then cached; if file mtime changes, the cache is invalidated and the template is reloaded on the next request (no server restart needed for content-only changes).
+This allows for flexible template organization and inheritance. ``.djx`` and layout content are loaded on **first render** of each page and then cached. If file mtime changes, the cache is invalidated and the template is reloaded on the next request (no server restart needed for content-only changes).
 
 Layout System
 -------------
@@ -108,7 +108,7 @@ This allows you to have:
 Root Layout for Entire Site
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A site-wide layout is provided the same way as root-level pages: via **PAGES_DIRS** or **PAGES_DIR** in the same backend (see :doc:`file-router`). Add a directory (e.g. ``root_pages``) that contains ``layout.djx``; it can contain only that file (no ``page.py``) and will be used as an additional layout for all app pages. If the directory also has its own pages, they are served as root-level URLs; duplicate URL patterns with app pages cause a check error (``next.E015``).
+A site-wide layout is provided the same way as root-level pages: via **PAGES_DIRS** or **PAGES_DIR** in the same backend (see :doc:`file-router`). Add a directory (e.g. ``root_pages``) that contains ``layout.djx``. It can contain only that file (no ``page.py``) and will be used as an additional layout for all app pages. If the directory also has its own pages, they are served as root-level URLs. Duplicate URL patterns with app pages cause a check error (``next.E015``).
 
 .. code-block:: python
 

@@ -4,7 +4,7 @@ Dependency Injection
 Dependency injection in next.dj works at the **project level**: the same resolver
 is used for page context functions, page ``render``, **component** ``component.py``
 helpers (``@context`` and composite ``render``), and form actions across the app.
-You declare the parameters you need; the framework injects values from the request
+You declare the parameters you need. The framework injects values from the request
 context — no ``*args`` or ``**kwargs`` required.
 
 Where it is used
@@ -35,7 +35,7 @@ How it works
 
 The global **resolver** (``next.deps.resolver``) is a ``DependencyResolver`` instance
 that uses **providers** to supply values. For each parameter of your function
-(excluding ``self``/``cls``), the resolver asks the providers in order; the first
+(excluding ``self``/``cls``), the resolver asks the providers in order. The first
 one that can supply the value does so. Parameters that no provider handles get
 ``None`` (or keep their default).
 
@@ -115,7 +115,7 @@ Built-in providers
 - **HttpRequest** — Parameter annotated with ``HttpRequest`` (or subclass) receives
   the current request.
 - **URL path parameters** — Parameter name matching the path segment (e.g. ``id``
-  for ``[int:id]``), or annotation ``DUrl[int]`` / ``DUrl["param"]``; type coercion
+  for ``[int:id]``), or annotation ``DUrl[int]`` / ``DUrl["param"]``. Type coercion
   is applied. For catch-all (``[[args]]``), use ``list[str]``.
 - **Form** — Parameter named ``form`` or annotated with ``DForm[FormClass]``
   receives the form instance (in form actions).
@@ -186,7 +186,7 @@ parameter name is ``current_user``:
 - **Caching:** Within a single request, the result of each dependency callable
   is cached by name.
 - **Cycles:** Circular dependencies raise :exc:`next.deps.DependencyCycleError`.
-- **Order:** Built-in providers run first; avoid dependency names that clash
+- **Order:** Built-in providers run first. Avoid dependency names that clash
   with URL parameter names.
 
 Replacing the resolver

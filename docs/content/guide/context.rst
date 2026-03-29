@@ -108,8 +108,8 @@ Dependency Injection
 
 Context functions receive only the arguments they declare: the framework resolves
 parameters from the request context (request, URL kwargs, form) by inspecting
-the function signature. Declare ``request: HttpRequest``, ``id: int``, etc.; no
-``*args`` or ``**kwargs`` needed.
+the function signature. Declare ``request: HttpRequest``, ``id: int``, and so on.
+You do not need ``*args`` or ``**kwargs``.
 
 Injecting context by name: Context and Depends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

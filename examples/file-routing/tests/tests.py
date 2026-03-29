@@ -263,7 +263,7 @@ def test_example_files_coverage() -> None:
     assert callable(kwargs_page.render)
     assert callable(args_page.render)
 
-    # Call render with resolved params only (DI-style); no request when not in signature
+    # Call render with resolved params only (DI-style). No request when not in signature.
     response = simple_page.render()
     assert response.status_code == 200
 

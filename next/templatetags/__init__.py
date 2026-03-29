@@ -1,1 +1,1 @@
-"""Template tags package for next-dj."""
+"""Template tag modules for next-dj."""

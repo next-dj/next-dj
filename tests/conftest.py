@@ -2,9 +2,7 @@ import sys
 from pathlib import Path
 
 import django
-import pytest
 from django.conf import settings
-from django.test import Client
 
 
 # add project root to python path
@@ -66,14 +64,11 @@ if not settings.configured:
         },
     )
     # Register form actions from test_forms before URLconf is loaded (django.setup()
-    # loads next.urls and builds urlpatterns; actions must be in form_action_manager
+    # Loads next.urls and builds urlpatterns. Actions must be in form_action_manager.
     # by then so that the form_action URL pattern is included).
     import tests.test_forms  # noqa: F401
 
     django.setup()
 
-
-@pytest.fixture()
-def client():
-    """Django test client for HTTP requests."""
-    return Client()
+# Shared fixtures
+pytest_plugins = ["tests.fixtures"]

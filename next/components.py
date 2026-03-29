@@ -1,12 +1,4 @@
-"""Discover and render reusable UI pieces for next-dj templates.
-
-Simple components are single ``.djx`` files. Composite components live in a folder
-with ``component.djx`` and optional ``component.py``. Configure roots and backends
-via ``NEXT_FRAMEWORK['DEFAULT_COMPONENT_BACKENDS']`` in Django settings. Names resolve
-from the current template path so nearby components win over distant ones, unless
-they live
-in a global root.
-"""
+"""Discover and render ``.djx`` components for templates."""
 
 from __future__ import annotations
 
@@ -483,8 +475,8 @@ class ComponentContextRegistry:
 
         if isinstance(key, str) and key in resolver.EXPLICIT_RESOLVE_KEYS:
             msg = (
-                f"Component context key {key!r} is reserved for dependency injection; "
-                f"use another name. Reserved: {sorted(resolver.EXPLICIT_RESOLVE_KEYS)}."
+                f"Component context key {key!r} is reserved for dependency injection. "
+                f"Use another name. Reserved: {sorted(resolver.EXPLICIT_RESOLVE_KEYS)}."
             )
             raise ValueError(msg)
 
@@ -597,11 +589,7 @@ def _merge_csrf_context(
     context_dict: dict[str, Any],
     request: HttpRequest | None,
 ) -> None:
-    """Bind ``csrf_token`` like ``django.template.context_processors.csrf``.
-
-    Component templates use plain :class:`~django.template.Context`, so
-    ``{% csrf_token %}`` would otherwise render empty without this merge.
-    """
+    """Lazy ``csrf_token`` for plain ``Context`` (matches request-context processor)."""
     if request is None or "csrf_token" in context_dict:
         return
 
@@ -641,7 +629,7 @@ def _inject_component_context(
 
 
 class ComponentRenderStrategy(Protocol):
-    """Protocol for a renderer that can turn ``ComponentInfo`` into HTML."""
+    """Optional render path for a ``ComponentInfo``."""
 
     def can_render(self, info: ComponentInfo) -> bool:
         raise NotImplementedError
@@ -794,14 +782,14 @@ class ComponentsBackend(ABC):
         name: str,
         template_path: Path,
     ) -> ComponentInfo | None:
-        """Return metadata for ``name`` visible from ``template_path``, or ``None``."""
+        """Metadata for ``name`` from a backend, or ``None``."""
 
     @abstractmethod
     def collect_visible_components(
         self,
         template_path: Path,
     ) -> Mapping[str, ComponentInfo]:
-        """All names visible from ``template_path`` with their metadata."""
+        """Name to metadata for components visible when rendering ``template_path``."""
 
 
 class FileComponentsBackend(ComponentsBackend):
@@ -881,7 +869,7 @@ class FileComponentsBackend(ComponentsBackend):
         name: str,
         template_path: Path,
     ) -> ComponentInfo | None:
-        """Resolve one visible component by name for ``template_path``."""
+        """Named component visible from ``template_path`` after discovery."""
         self._ensure_loaded()
         visible = self.collect_visible_components(template_path)
         return visible.get(name)
@@ -890,7 +878,7 @@ class FileComponentsBackend(ComponentsBackend):
         self,
         template_path: Path,
     ) -> Mapping[str, ComponentInfo]:
-        """Return all components visible when rendering ``template_path``."""
+        """Full visibility map for ``template_path``."""
         self._ensure_loaded()
         return self._visibility_resolver.resolve_visible(template_path)
 
@@ -941,18 +929,18 @@ class BoomBackend(ComponentsBackend):
 
 
 class ComponentsFactory:
-    """Build one backend from a ``DEFAULT_COMPONENT_BACKENDS`` list entry."""
+    """Instantiates backends from merged ``DEFAULT_COMPONENT_BACKENDS`` entries."""
 
     @classmethod
     def create_backend(cls, config: dict[str, Any]) -> ComponentsBackend:
-        """Import the backend class and construct it with the full config dict."""
+        """Single backend from one config dict (``BACKEND`` class path)."""
         backend_path = config.get("BACKEND", _default_components_entry["BACKEND"])
         backend_class = import_class_cached(backend_path)
         return cast("ComponentsBackend", backend_class(config))
 
 
 class ComponentsManager:
-    """Runs all configured backends and merges lookups."""
+    """Loads backends from settings and merges name resolution across them."""
 
     def __init__(self) -> None:
         """Prepare an empty backend list and load settings on first access."""
@@ -978,13 +966,13 @@ class ComponentsManager:
 
     @property
     def template_loader(self) -> ComponentTemplateLoader:
-        """Loader used by ``load_component_template`` (built lazily from settings)."""
+        """Shared ``ComponentTemplateLoader`` for template reads."""
         self._ensure_render_pipeline()
         return cast("ComponentTemplateLoader", self._template_loader)
 
     @property
     def component_renderer(self) -> ComponentRenderer:
-        """Coordinator used by ``render_component`` (built lazily from settings)."""
+        """Simple vs composite render strategies."""
         self._ensure_render_pipeline()
         return cast("ComponentRenderer", self._component_renderer)
 
@@ -1014,7 +1002,7 @@ class ComponentsManager:
         name: str,
         template_path: Path,
     ) -> ComponentInfo | None:
-        """Ask each backend in order until one returns a match."""
+        """First non-``None`` from backends in configuration order."""
         self._ensure_backends()
         for backend in self._backends:
             info = backend.get_component(name, template_path)
@@ -1039,12 +1027,12 @@ components_manager = ComponentsManager()
 
 
 def get_component(name: str, template_path: Path) -> ComponentInfo | None:
-    """Look up a component visible from ``template_path`` using configured backends."""
+    """Delegate to ``components_manager.get_component``."""
     return components_manager.get_component(name, template_path)
 
 
 def load_component_template(info: ComponentInfo) -> str | None:
-    """Return raw template source for ``info``, or ``None`` if it cannot be read."""
+    """Raw template text for ``info``."""
     return components_manager.template_loader.load(info)
 
 
@@ -1053,5 +1041,5 @@ def render_component(
     context_data: Mapping[str, Any],
     request: HttpRequest | None = None,
 ) -> str:
-    """Render ``info`` with the given context and optional ``request``."""
+    """Render ``info`` to HTML using template context and an optional request."""
     return components_manager.component_renderer.render(info, context_data, request)

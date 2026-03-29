@@ -1,5 +1,4 @@
 import inspect
-import types
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,70 +24,38 @@ from next.urls import (
     UrlKwargsProvider,
     _coerce_url_value,
 )
+from tests.support import (
+    COERCE_URL_VALUE_CASES,
+    URL_BY_ANNOTATION_RESOLVE_CASES,
+    URL_KWARGS_RESOLVE_CASES,
+    CoerceUrlValueCase,
+    UrlByAnnotationResolveCase,
+    UrlKwargsResolveCase,
+    _ctx,
+    _minimal_resolver,
+    _resolver_with_form,
+    build_mock_http_request,
+    inspect_parameter,
+)
 
 
 # For coverage of _resolve_callable_dependency edge cases
 _IN_PROGRESS_SENTINEL = _IN_PROGRESS
 
 
-def _ctx(
-    request=None,
-    form=None,
-    url_kwargs=None,
-    context_data=None,
-    cache=None,
-    stack=None,
-    resolver_inst=None,
-    _context_data=None,
-    **kwargs: object,
-) -> types.SimpleNamespace:
-    """Build dynamic context (SimpleNamespace) for provider tests."""
-    if url_kwargs is None:
-        reserved = {
-            "request",
-            "form",
-            "context_data",
-            "cache",
-            "stack",
-            "resolver",
-            "_context_data",
-        }
-        url_kwargs = {k: v for k, v in kwargs.items() if k not in reserved}
-    return types.SimpleNamespace(
-        request=request,
-        form=form,
-        url_kwargs=url_kwargs or {},
-        context_data=context_data or _context_data or {},
-        cache=cache,
-        stack=stack,
-        resolver=resolver_inst,
-    )
+def _mock_request_factory() -> MagicMock:
+    return build_mock_http_request()
 
 
-def _minimal_resolver() -> DependencyResolver:
-    """Return a resolver with only HttpRequest and URL providers (for isolated tests)."""
-    return DependencyResolver(HttpRequestProvider(), UrlKwargsProvider())
-
-
-def _resolver_with_form() -> DependencyResolver:
-    """Return a resolver with request, URL and form providers."""
-    return DependencyResolver(
-        HttpRequestProvider(),
-        UrlKwargsProvider(),
-        FormProvider(),
-    )
-
-
-def _full_resolver() -> DependencyResolver:
-    """Return a resolver with all auto-registered providers (for callable dependency tests)."""
-    return DependencyResolver()
+def _no_request() -> None:
+    return None
 
 
 class TestResolverDescriptor:
     """Test that providers can access resolver via descriptor when no __init__(resolver)."""
 
     def test_context_provider_resolver_attribute_returns_singleton(self) -> None:
-        """ContextByNameProvider has no resolver in __init__; self.resolver returns global."""
+        """ContextByNameProvider has no resolver in ``__init__``. ``self.resolver`` returns the global resolver."""
         provider = ContextByNameProvider()
         assert provider.resolver is resolver
 
@@ -96,9 +63,9 @@ class TestResolverDescriptor:
 class TestDynamicContext:
     """Tests for dynamic context (SimpleNamespace) used in resolve_dependencies."""
 
-    def test_context_has_url_kwargs_and_request_form(self) -> None:
+    def test_context_has_url_kwargs_and_request_form(self, mock_http_request) -> None:
         """Context can hold request, form, url_kwargs."""
-        request = MagicMock(spec=HttpRequest)
+        request = mock_http_request()
         form = MagicMock()
         ctx = _ctx(request=request, form=form, id=1)
         assert ctx.request is request
@@ -116,50 +83,28 @@ class TestDynamicContext:
 class TestHttpRequestProvider:
     """Tests for HttpRequestProvider (from next.urls)."""
 
-    def test_can_handle_when_annotation_is_http_request_and_request_present(
-        self,
-    ) -> None:
-        """can_handle is True when param is HttpRequest and request is in context."""
+    @pytest.mark.parametrize(
+        ("request_obj", "annotation", "expected"),
+        [
+            (_mock_request_factory, HttpRequest, True),
+            (_no_request, HttpRequest, False),
+            (_mock_request_factory, inspect.Parameter.empty, False),
+        ],
+        ids=["request_present", "request_none", "annotation_empty"],
+    )
+    def test_can_handle(self, request_obj, annotation, expected) -> None:
+        """can_handle matches request presence and HttpRequest annotation."""
         provider = HttpRequestProvider()
-        param = inspect.Parameter(
-            "request",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=HttpRequest,
-        )
-        ctx = _ctx(request=MagicMock(spec=HttpRequest))
-        assert provider.can_handle(param, ctx) is True
+        param = inspect_parameter("request", annotation)
+        req = request_obj()
+        ctx = _ctx(request=req)
+        assert provider.can_handle(param, ctx) is expected
 
-    def test_can_handle_false_when_request_is_none(self) -> None:
-        """can_handle is False when context.request is None."""
-        provider = HttpRequestProvider()
-        param = inspect.Parameter(
-            "request",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=HttpRequest,
-        )
-        ctx = _ctx()
-        assert provider.can_handle(param, ctx) is False
-
-    def test_can_handle_false_when_annotation_empty(self) -> None:
-        """can_handle is False when param has no annotation."""
-        provider = HttpRequestProvider()
-        param = inspect.Parameter(
-            "request",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=inspect.Parameter.empty,
-        )
-        ctx = _ctx(request=MagicMock(spec=HttpRequest))
-        assert provider.can_handle(param, ctx) is False
-
-    def test_resolve_returns_request(self) -> None:
+    def test_resolve_returns_request(self, mock_http_request) -> None:
         """Resolve returns context.request."""
         provider = HttpRequestProvider()
-        request = MagicMock(spec=HttpRequest)
-        param = inspect.Parameter(
-            "request",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=HttpRequest,
-        )
+        request = mock_http_request()
+        param = inspect_parameter("request", HttpRequest)
         ctx = _ctx(request=request)
         assert provider.resolve(param, ctx) is request
 
@@ -167,214 +112,93 @@ class TestHttpRequestProvider:
 class TestUrlKwargsProvider:
     """Tests for UrlKwargsProvider (from next.urls)."""
 
-    def test_can_handle_true_when_name_in_url_kwargs(self) -> None:
-        """can_handle is True when param name is in url_kwargs."""
+    @pytest.mark.parametrize(
+        ("url_kwargs", "expected"),
+        [
+            ({"id": 42}, True),
+            ({}, False),
+        ],
+        ids=["name_in_kwargs", "name_missing"],
+    )
+    def test_can_handle(self, url_kwargs, expected) -> None:
+        """can_handle is True exactly when param name appears in url_kwargs."""
         provider = UrlKwargsProvider()
-        param = inspect.Parameter(
-            "id",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=int,
-        )
-        ctx = _ctx(url_kwargs={"id": 42})
-        assert provider.can_handle(param, ctx) is True
+        param = inspect_parameter("id", int)
+        ctx = _ctx(url_kwargs=url_kwargs)
+        assert provider.can_handle(param, ctx) is expected
 
-    def test_can_handle_false_when_name_not_in_url_kwargs(self) -> None:
-        """can_handle is False when param name is not in url_kwargs."""
+    @pytest.mark.parametrize(
+        "case", URL_KWARGS_RESOLVE_CASES, ids=[c.id for c in URL_KWARGS_RESOLVE_CASES]
+    )
+    def test_resolve(self, case: UrlKwargsResolveCase) -> None:
+        """Resolve applies annotation coercion and missing key rules."""
         provider = UrlKwargsProvider()
-        param = inspect.Parameter(
-            "id",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=int,
-        )
-        ctx = _ctx()
-        assert provider.can_handle(param, ctx) is False
-
-    def test_resolve_returns_value_as_is_when_type_matches(self) -> None:
-        """Resolve returns url_kwargs value unchanged when type matches annotation."""
-        provider = UrlKwargsProvider()
-        param = inspect.Parameter(
-            "id",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=int,
-        )
-        ctx = _ctx(url_kwargs={"id": 42})
-        assert provider.resolve(param, ctx) == 42
-
-    def test_resolve_converts_str_to_int_when_annotation_int(self) -> None:
-        """Resolve converts string to int when param is annotated as int."""
-        provider = UrlKwargsProvider()
-        param = inspect.Parameter(
-            "id",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=int,
-        )
-        ctx = _ctx(url_kwargs={"id": "99"})
-        assert provider.resolve(param, ctx) == 99
-
-    def test_resolve_returns_value_unchanged_when_annotation_empty(self) -> None:
-        """Resolve returns value as-is when param has no annotation."""
-        provider = UrlKwargsProvider()
-        param = inspect.Parameter(
-            "slug",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=inspect.Parameter.empty,
-        )
-        ctx = _ctx(url_kwargs={"slug": "hello"})
-        assert provider.resolve(param, ctx) == "hello"
-
-    def test_resolve_returns_value_unchanged_when_int_conversion_fails(self) -> None:
-        """Resolve returns original value when int() conversion fails."""
-        provider = UrlKwargsProvider()
-        param = inspect.Parameter(
-            "id",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=int,
-        )
-        ctx = _ctx(url_kwargs={"id": "not-a-number"})
-        assert provider.resolve(param, ctx) == "not-a-number"
-
-    def test_resolve_returns_str_when_annotation_is_str(self) -> None:
-        """Resolve returns str(raw) when param is annotated as str."""
-        provider = UrlKwargsProvider()
-        param = inspect.Parameter(
-            "slug",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=str,
-        )
-        ctx = _ctx(url_kwargs={"slug": "hello-world"})
-        assert provider.resolve(param, ctx) == "hello-world"
-
-    def test_resolve_returns_none_when_param_name_not_in_url_kwargs(self) -> None:
-        """Resolve returns None when param name is not in url_kwargs."""
-        provider = UrlKwargsProvider()
-        param = inspect.Parameter(
-            "missing",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=str,
-        )
-        ctx = _ctx(url_kwargs={"other": "value"})
-        assert provider.resolve(param, ctx) is None
+        param = inspect_parameter(case.name, case.annotation)
+        ctx = _ctx(url_kwargs=case.url_kwargs)
+        assert provider.resolve(param, ctx) == case.expected
 
 
 class TestCoerceUrlValue:
     """Tests for _coerce_url_value (next.urls)."""
 
-    def test_coerce_int_valid(self) -> None:
-        """Valid int string is converted to int."""
-        assert _coerce_url_value("42", int) == 42
-
-    def test_coerce_int_invalid_returns_unchanged(self) -> None:
-        """Invalid int string is returned unchanged."""
-        assert _coerce_url_value("x", int) == "x"
-
-    def test_coerce_bool_true(self) -> None:
-        """Bool hint: '1', 'true', 'yes' are True."""
-        assert _coerce_url_value("true", bool) is True
-        assert _coerce_url_value("1", bool) is True
-        assert _coerce_url_value("yes", bool) is True
-
-    def test_coerce_bool_false(self) -> None:
-        """Bool hint: other values are False."""
-        assert _coerce_url_value("0", bool) is False
-        assert _coerce_url_value("false", bool) is False
-
-    def test_coerce_float_valid(self) -> None:
-        """Valid float string is converted to float."""
-        assert _coerce_url_value("3.14", float) == 3.14
-
-    def test_coerce_float_invalid_returns_unchanged(self) -> None:
-        """Invalid float string is returned unchanged."""
-        assert _coerce_url_value("x", float) == "x"
-
-    def test_coerce_str_returns_unchanged(self) -> None:
-        """Str or other hint returns value unchanged."""
-        assert _coerce_url_value("hello", str) == "hello"
+    @pytest.mark.parametrize(
+        "case", COERCE_URL_VALUE_CASES, ids=[c.id for c in COERCE_URL_VALUE_CASES]
+    )
+    def test_coerce(self, case: CoerceUrlValueCase) -> None:
+        """Coercion follows int, bool, float, and str rules."""
+        assert _coerce_url_value(case.raw, case.hint) == case.expected
 
 
 class TestUrlByAnnotationProvider:
     """Tests for UrlByAnnotationProvider (from next.urls)."""
 
-    def test_can_handle_true_when_annotation_is_durl(self) -> None:
-        """can_handle is True when param is annotated with DUrl."""
+    @pytest.mark.parametrize(
+        ("annotation", "expected"),
+        [
+            (DUrl[int], True),
+            (int, False),
+        ],
+        ids=["durl", "plain_int"],
+    )
+    def test_can_handle(self, annotation, expected) -> None:
+        """can_handle is True only for DUrl annotations."""
         provider = UrlByAnnotationProvider()
-        param = inspect.Parameter(
-            "id",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=DUrl[int],
-        )
+        param = inspect_parameter("id", annotation)
         ctx = _ctx()
-        assert provider.can_handle(param, ctx) is True
+        assert provider.can_handle(param, ctx) is expected
 
-    def test_can_handle_false_when_annotation_not_durl(self) -> None:
-        """can_handle is False when param is not DUrl."""
+    @pytest.mark.parametrize(
+        "case",
+        URL_BY_ANNOTATION_RESOLVE_CASES,
+        ids=[c.id for c in URL_BY_ANNOTATION_RESOLVE_CASES],
+    )
+    def test_resolve(self, case: UrlByAnnotationResolveCase) -> None:
+        """Resolve reads url_kwargs by param name and coerces via DUrl."""
         provider = UrlByAnnotationProvider()
-        param = inspect.Parameter(
-            "id",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=int,
-        )
-        ctx = _ctx()
-        assert provider.can_handle(param, ctx) is False
-
-    def test_resolve_returns_value_from_url_kwargs_by_key(self) -> None:
-        """Resolve returns url_kwargs value coerced by DUrl type (e.g. DUrl[int])."""
-        provider = UrlByAnnotationProvider()
-        param = inspect.Parameter(
-            "pk",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=DUrl[int],
-        )
-        ctx = _ctx(url_kwargs={"pk": "123"})
-        assert provider.resolve(param, ctx) == 123
-
-    def test_resolve_returns_value_by_param_name_when_key_not_str(self) -> None:
-        """Resolve uses param.name when DUrl arg is not a string."""
-        provider = UrlByAnnotationProvider()
-        param = inspect.Parameter(
-            "slug",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=DUrl[str],
-        )
-        ctx = _ctx(url_kwargs={"slug": "hello"})
-        assert provider.resolve(param, ctx) == "hello"
-
-    def test_resolve_returns_none_when_key_missing(self) -> None:
-        """Resolve returns None when key is not in url_kwargs."""
-        provider = UrlByAnnotationProvider()
-        param = inspect.Parameter(
-            "missing",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=DUrl[str],
-        )
-        ctx = _ctx(url_kwargs={})
-        assert provider.resolve(param, ctx) is None
+        param = inspect_parameter(case.name, case.annotation)
+        ctx = _ctx(url_kwargs=case.url_kwargs)
+        assert provider.resolve(param, ctx) == case.expected
 
 
 class TestFormProvider:
     """Tests for FormProvider (from next.forms)."""
 
-    def test_can_handle_true_when_param_name_is_form_and_form_present(self) -> None:
-        """can_handle is True when param name is 'form' and form is in context."""
+    @pytest.mark.parametrize(
+        ("param_name", "form_kind", "expected"),
+        [
+            ("form", "mock", True),
+            ("form", "none", False),
+            ("other", "mock", False),
+        ],
+        ids=["name_form_with_instance", "form_none", "wrong_name"],
+    )
+    def test_can_handle_basic(self, param_name, form_kind, expected) -> None:
+        """can_handle for name 'form', missing form, and non-form param names."""
         provider = FormProvider()
-        form = MagicMock()
-        param = inspect.Parameter(
-            "form",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=inspect.Parameter.empty,
-        )
+        param = inspect_parameter(param_name, inspect.Parameter.empty)
+        form = None if form_kind == "none" else MagicMock()
         ctx = _ctx(form=form)
-        assert provider.can_handle(param, ctx) is True
-
-    def test_can_handle_false_when_form_is_none(self) -> None:
-        """can_handle is False when context.form is None."""
-        provider = FormProvider()
-        param = inspect.Parameter(
-            "form",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=inspect.Parameter.empty,
-        )
-        ctx = _ctx()
-        assert provider.can_handle(param, ctx) is False
+        assert provider.can_handle(param, ctx) is expected
 
     def test_can_handle_true_when_annotation_is_form_class_and_instance_matches(
         self,
@@ -386,11 +210,7 @@ class TestFormProvider:
 
         provider = FormProvider()
         form = MyForm()
-        param = inspect.Parameter(
-            "f",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=MyForm,
-        )
+        param = inspect_parameter("f", MyForm)
         ctx = _ctx(form=form)
         assert provider.can_handle(param, ctx) is True
 
@@ -404,24 +224,8 @@ class TestFormProvider:
             pass
 
         provider = FormProvider()
-        param = inspect.Parameter(
-            "f",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=FormB,
-        )
+        param = inspect_parameter("f", FormB)
         ctx = _ctx(form=FormA())
-        assert provider.can_handle(param, ctx) is False
-
-    def test_can_handle_false_when_annotation_empty_and_name_not_form(self) -> None:
-        """can_handle is False when param has no annotation and name is not 'form'."""
-        provider = FormProvider()
-        form = MagicMock()
-        param = inspect.Parameter(
-            "other",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=inspect.Parameter.empty,
-        )
-        ctx = _ctx(form=form)
         assert provider.can_handle(param, ctx) is False
 
     def test_can_handle_true_when_annotation_is_dform_and_form_matches(self) -> None:
@@ -432,11 +236,7 @@ class TestFormProvider:
             pass
 
         form = MyForm()
-        param = inspect.Parameter(
-            "f",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=DForm[MyForm],
-        )
+        param = inspect_parameter("f", DForm[MyForm])
         ctx = _ctx(form=form)
         assert provider.can_handle(param, ctx) is True
 
@@ -450,11 +250,7 @@ class TestFormProvider:
             pass
 
         provider = FormProvider()
-        param = inspect.Parameter(
-            "f",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=DForm[FormB],
-        )
+        param = inspect_parameter("f", DForm[FormB])
         ctx = _ctx(form=FormA())
         assert provider.can_handle(param, ctx) is False
 
@@ -462,11 +258,7 @@ class TestFormProvider:
         """Resolve returns context.form."""
         provider = FormProvider()
         form = MagicMock()
-        param = inspect.Parameter(
-            "form",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=inspect.Parameter.empty,
-        )
+        param = inspect_parameter("form", inspect.Parameter.empty)
         ctx = _ctx(form=form)
         assert provider.resolve(param, ctx) is form
 
@@ -474,37 +266,38 @@ class TestFormProvider:
 class TestDependencyResolver:
     """Tests for DependencyResolver (single class, no Deps/DefaultDependencyResolver)."""
 
-    def test_resolve_dependencies_injects_request_only(self) -> None:
+    def test_resolve_dependencies_injects_request_only(self, mock_http_request) -> None:
         """Only request is injected when function has single request param."""
 
         def fn(request: HttpRequest) -> str:
             return getattr(request, "path", "")
 
         r = _minimal_resolver()
-        request = MagicMock(spec=HttpRequest)
-        request.path = "/test/"
+        request = mock_http_request()
         result = r.resolve_dependencies(fn, request=request)
         assert result == {"request": request}
 
-    def test_resolve_dependencies_injects_request_and_id(self) -> None:
+    def test_resolve_dependencies_injects_request_and_id(
+        self, mock_http_request
+    ) -> None:
         """Request and url_kwargs (id) are injected."""
 
         def fn(request: HttpRequest, id: int) -> None:  # noqa: A002
             pass
 
         r = _minimal_resolver()
-        request = MagicMock(spec=HttpRequest)
+        request = mock_http_request()
         result = r.resolve_dependencies(fn, request=request, id=42)
         assert result == {"request": request, "id": 42}
 
-    def test_resolve_dependencies_injects_form(self) -> None:
+    def test_resolve_dependencies_injects_form(self, mock_http_request) -> None:
         """Request and form are injected when both in context."""
 
         def fn(request: HttpRequest, form: MagicMock) -> None:
             pass
 
         r = _resolver_with_form()
-        request = MagicMock(spec=HttpRequest)
+        request = mock_http_request()
         form = MagicMock()
         result = r.resolve_dependencies(fn, request=request, form=form)
         assert result == {"request": request, "form": form}
@@ -519,7 +312,7 @@ class TestDependencyResolver:
         result = r.resolve_dependencies(fn)
         assert result == {}
 
-    def test_resolve_dependencies_skips_self(self) -> None:
+    def test_resolve_dependencies_skips_self(self, mock_http_request) -> None:
         """'self' is not included in resolved dict for bound methods."""
 
         class C:
@@ -527,12 +320,12 @@ class TestDependencyResolver:
                 pass
 
         r = _minimal_resolver()
-        request = MagicMock(spec=HttpRequest)
+        request = mock_http_request()
         result = r.resolve_dependencies(C.method, request=request)
         assert "self" not in result
         assert result == {"request": request}
 
-    def test_resolve_dependencies_skips_cls(self) -> None:
+    def test_resolve_dependencies_skips_cls(self, mock_http_request) -> None:
         """'cls' is not included in resolved dict for classmethods."""
 
         class C:
@@ -541,7 +334,7 @@ class TestDependencyResolver:
                 return {}
 
         r = _minimal_resolver()
-        request = MagicMock(spec=HttpRequest)
+        request = mock_http_request()
         result = r.resolve_dependencies(C.get_initial, request=request, id=1)
         assert "cls" not in result
         assert result == {"request": request, "id": 1}
@@ -560,6 +353,7 @@ class TestDependencyResolver:
 
     def test_resolve_dependencies_skips_var_positional_and_var_keyword(
         self,
+        mock_http_request,
     ) -> None:
         """*args and **kwargs are not included in resolved dict."""
 
@@ -567,7 +361,7 @@ class TestDependencyResolver:
             pass
 
         r = _minimal_resolver()
-        request = MagicMock(spec=HttpRequest)
+        request = mock_http_request()
         result = r.resolve_dependencies(fn, request=request)
         assert result == {"request": request}
         assert "args" not in result
@@ -647,7 +441,7 @@ class TestResolverRegister:
     """Tests for resolver.register decorator and method."""
 
     def test_register_decorator_adds_provider_class(self) -> None:
-        """@resolver.register on a class registers an instance; next resolve uses it."""
+        """``@resolver.register`` on a class registers an instance. The next resolve uses it."""
         initial_count = len(resolver._providers)
 
         @resolver.register
@@ -692,13 +486,15 @@ class TestResolverRegister:
 class TestResolverResolveDependencies:
     """Tests for resolver.resolve_dependencies (global resolver)."""
 
-    def test_resolve_dependencies_returns_resolved_dict(self) -> None:
+    def test_resolve_dependencies_returns_resolved_dict(
+        self, mock_http_request
+    ) -> None:
         """resolver.resolve_dependencies returns request when only request declared."""
 
         def fn(request: HttpRequest) -> None:
             pass
 
-        request = MagicMock(spec=HttpRequest)
+        request = mock_http_request()
         result = resolver.resolve_dependencies(fn, request=request)
         assert result == {"request": request}
 
@@ -743,7 +539,7 @@ class TestDependencyCache:
         assert "x" in cache
 
     def test_is_in_progress_and_unmark(self) -> None:
-        """The is_in_progress flag reflects mark; unmark clears it."""
+        """The ``is_in_progress`` flag reflects ``mark``. ``unmark`` clears it."""
         cache = DependencyCache()
         cache.mark_in_progress("k")
         assert cache.is_in_progress("k")
@@ -772,10 +568,12 @@ class TestProviderRegistry:
 class TestResolveWithTemplateContext:
     """DependencyResolver.resolve_with_template_context."""
 
-    def test_explicit_request_wins_over_template_context(self) -> None:
+    def test_explicit_request_wins_over_template_context(
+        self, mock_http_request
+    ) -> None:
         """Explicit request= wins over template_context['request']."""
-        req_real = MagicMock(spec=HttpRequest)
-        req_wrong = MagicMock(spec=HttpRequest)
+        req_real = mock_http_request()
+        req_wrong = mock_http_request()
 
         def fn(request: HttpRequest) -> None:
             pass
@@ -845,7 +643,9 @@ class TestResolveWithTemplateContext:
 class TestRegisterDependency:
     """Tests for register_dependency and dependency decorator (callable dependencies)."""
 
-    def test_register_dependency_resolves_param_by_name(self) -> None:
+    def test_register_dependency_resolves_param_by_name(
+        self, mock_http_request
+    ) -> None:
         """A param whose name is a registered dependency gets the callable result."""
 
         def get_user(request: HttpRequest) -> str:
@@ -853,7 +653,7 @@ class TestRegisterDependency:
 
         resolver.register_dependency("current_user", get_user)
         try:
-            request = MagicMock(spec=HttpRequest)
+            request = mock_http_request()
 
             def view(current_user: str = Depends("current_user")) -> str:
                 return current_user
@@ -868,9 +668,9 @@ class TestRegisterDependency:
         finally:
             resolver._dependency_callables.pop("current_user", None)
 
-    def test_dependency_decorator_registers_callable(self) -> None:
+    def test_dependency_decorator_registers_callable(self, mock_http_request) -> None:
         """@resolver.dependency('name') registers the function and returns it."""
-        request = MagicMock(spec=HttpRequest)
+        request = mock_http_request()
 
         @resolver.dependency("product")
         def get_product(request: HttpRequest, id: int) -> str:  # noqa: A002
@@ -889,7 +689,9 @@ class TestRegisterDependency:
         finally:
             resolver._dependency_callables.pop("product", None)
 
-    def test_depends_callable_is_called_with_di_resolved_args(self) -> None:
+    def test_depends_callable_is_called_with_di_resolved_args(
+        self, mock_http_request
+    ) -> None:
         """Depends(callable) resolves callable args and calls it."""
 
         def build_value(request: HttpRequest, id: int) -> str:  # noqa: A002
@@ -899,8 +701,7 @@ class TestRegisterDependency:
             return value
 
         r = DependencyResolver()
-        request = MagicMock(spec=HttpRequest)
-        request.path = "/x/"
+        request = mock_http_request(path="/x/")
         resolved = r.resolve_dependencies(view, request=request, id=7)
         assert resolved["value"] == "/x/:7"
         assert view(**resolved) == "/x/:7"
@@ -943,12 +744,7 @@ class TestRegisterDependency:
     ) -> None:
         """Defensive: DependsProvider.resolve returns None when default isn't Depends."""
         provider = DependsProvider(DependencyResolver())
-        param = inspect.Parameter(
-            "x",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            default=123,
-            annotation=int,
-        )
+        param = inspect_parameter("x", int, default=123)
         ctx = _ctx()
         assert provider.resolve(param, ctx) is None
 
@@ -971,7 +767,9 @@ class TestRegisterDependency:
 class TestCallableDependencyCache:
     """Tests for request-scoped caching of dependency callable results."""
 
-    def test_same_dependency_requested_twice_called_once_with_cache(self) -> None:
+    def test_same_dependency_requested_twice_called_once_with_cache(
+        self, mock_http_request
+    ) -> None:
         """Two resolve_dependencies calls sharing _cache: dependency callable runs once."""
         call_count = 0
 
@@ -982,7 +780,7 @@ class TestCallableDependencyCache:
 
         resolver.register_dependency("current_user", get_user)
         try:
-            request = MagicMock(spec=HttpRequest)
+            request = mock_http_request()
 
             def view1(current_user: str = Depends("current_user")) -> str:
                 return current_user
@@ -1005,7 +803,9 @@ class TestCallableDependencyCache:
         finally:
             resolver._dependency_callables.pop("current_user", None)
 
-    def test_without_cache_dependency_called_each_resolve(self) -> None:
+    def test_without_cache_dependency_called_each_resolve(
+        self, mock_http_request
+    ) -> None:
         """Without _cache, each resolve_dependencies call invokes the dependency."""
         call_count = 0
 
@@ -1016,7 +816,7 @@ class TestCallableDependencyCache:
 
         resolver.register_dependency("current_user", get_user)
         try:
-            request = MagicMock(spec=HttpRequest)
+            request = mock_http_request()
 
             def view(current_user: str = Depends("current_user")) -> str:
                 return current_user
@@ -1070,7 +870,7 @@ class TestDependencyCycleError:
         resolver.register_dependency("a", lambda: None)
         try:
             cache = {"a": _IN_PROGRESS_SENTINEL}
-            stack = []  # name not in stack; we hit the cache[_IN_PROGRESS] branch
+            stack = []  # Name not in stack. We hit the cache[_IN_PROGRESS] branch.
             ctx = _ctx(cache=cache, stack=stack)
             with pytest.raises(DependencyCycleError) as exc_info:
                 resolver._resolve_callable_dependency("a", ctx)

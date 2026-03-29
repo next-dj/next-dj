@@ -33,13 +33,13 @@ Implementation
   The signal :py:data:`django.utils.autoreload.autoreload_started` is connected to a handler that calls :func:`next.urls.get_pages_directories_for_watch` and, for each path, ``sender.watch_dir(path, "**/page.py")``. So Django's watcher sees every ``page.py`` under those directories.
 
 * **NextStatReloader**  
-  In :file:`next/utils.py`, :class:`NextStatReloader` subclasses :class:`django.utils.autoreload.StatReloader`. Its :meth:`~NextStatReloader.tick` generator runs one full "next" check per tick (recompute route/layout/template sets and compare to previous; call ``notify_file_changed`` on any change), then delegates to the parent's tick (mtime loop and sleep). The parent's tick uses the same watched files as before; next.dj only adds logic for **set** changes (add/remove of files), not for mtime of individual files.
+  In :file:`next/utils.py`, :class:`NextStatReloader` subclasses :class:`django.utils.autoreload.StatReloader`. Its :meth:`~NextStatReloader.tick` generator runs one full "next" check per tick (recompute route/layout/template sets and compare to previous, then call ``notify_file_changed`` on any change), then delegates to the parent's tick (mtime loop and sleep). The parent's tick uses the same watched files as before. next.dj only adds logic for **set** changes (add/remove of files), not for mtime of individual files.
 
 Limitations
 -----------
 
 * Only applies when using Django's development server (e.g. ``runserver``). Production servers (gunicorn, uWSGI, etc.) do not use this reloader.
-* Reload is process restart; there is no in-process hot reload of URLconf or templates.
+* Reload is process restart. There is no in-process hot reload of URLconf or templates.
 * Layout/template **content** changes (without adding/removing files) are not handled by the reloader: they are picked up at render time if you use lazy loading and mtime-based invalidation for templates.
 
 Next

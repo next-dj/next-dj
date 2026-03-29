@@ -1,19 +1,8 @@
-"""File-based page rendering system for Django applications.
+"""Build views and templates from ``page.py`` files under each app's pages tree.
 
-This module implements a sophisticated page rendering system that automatically
-generates Django views and URL patterns from page.py files located in application
-directories. The system supports multiple template sources, context management,
-and seamless integration with Django's URL routing.
-
-The core concept is simple: place a page.py file in any directory within your
-Django app's pages/ folder, and the system will automatically create a corresponding
-URL pattern and view function. Pages can define templates either as Python string
-attributes or as separate .djx files, providing flexibility in template management.
-
-The system uses a plugin architecture with template loaders that can be extended
-to support different template sources. Context functions can be registered to
-provide data to templates, and the entire system is designed to be performant
-with caching and lazy loading throughout.
+Registers templates from a module-level ``template`` string or ``template.djx``,
+composes ``layout.djx`` parents, merges context functions, and exposes URL wiring
+through the page API.
 """
 
 import contextlib
@@ -66,18 +55,18 @@ class Context:
 
 
 class ContextByDefaultProvider(RegisteredParameterProvider):
-    """Resolve parameters declared with ``Context(...)`` defaults."""
+    """Fills parameters whose default is a ``Context(...)`` marker."""
 
     def __init__(self, resolver: DependencyResolver) -> None:
-        """Store resolver for calling callable Context sources."""
+        """Keep a resolver for callable ``Context`` sources."""
         self._resolver = resolver
 
     def can_handle(self, param: inspect.Parameter, _context: object) -> bool:
-        """Return True when param.default is a Context marker."""
+        """Whether ``param.default`` is a ``Context`` instance."""
         return isinstance(param.default, Context)
 
     def resolve(self, param: inspect.Parameter, context: object) -> object:
-        """Resolve Context marker by key, callable, or constant."""
+        """Value from ``context_data``, a callable, or a constant per the marker."""
         marker = param.default
         if not isinstance(marker, Context):
             return None
@@ -111,20 +100,15 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
 
 
 class ContextByNameProvider(RegisteredParameterProvider):
-    """Provide parameter from context_data when param name matches a context key.
-
-    Used so that context functions can receive earlier keyed context values by
-    parameter name, e.g. def landing(app_greeting: str) when context_data has
-    "app_greeting" from a previous @context("app_greeting") function.
-    """
+    """Injects ``context_data[param.name]`` when that key exists."""
 
     def can_handle(self, param: inspect.Parameter, context: object) -> bool:
-        """Return True if param.name is a key in context_data."""
+        """Whether ``context_data`` already defines this parameter name."""
         context_data = getattr(context, "context_data", {}) or {}
         return param.name in context_data
 
     def resolve(self, param: inspect.Parameter, context: object) -> object:
-        """Return the context value for the parameter."""
+        """Return ``context_data[param.name]``."""
         context_data = getattr(context, "context_data", {}) or {}
         return context_data[param.name]
 
@@ -132,7 +116,7 @@ class ContextByNameProvider(RegisteredParameterProvider):
 def _import_context_processor(
     processor_path: str,
 ) -> Callable[[Any], dict[str, Any]] | None:
-    """Import a single context processor by path."""
+    """Import a context processor callable or return ``None``."""
     try:
         processor = import_string(processor_path)
         # type check to ensure it's a callable
@@ -144,7 +128,7 @@ def _import_context_processor(
 
 
 def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
-    """Load context processors from router configs and ``TEMPLATES``."""
+    """Load merged ``context_processors`` from routers and ``TEMPLATES``."""
     configs = next_framework_settings.DEFAULT_PAGE_ROUTERS
     if not isinstance(configs, list):
         configs = []
@@ -162,13 +146,14 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
         if isinstance(opts.get("context_processors"), list)
         else []
     )
-    # Merge both sources, Next routers first; dict.fromkeys preserves order and dedupes.
+    # Merge both sources with Next routers first.
+    # dict.fromkeys preserves order and dedupes.
     processor_paths = list(dict.fromkeys(from_next + from_templates))
     return [p for path in processor_paths if (p := _import_context_processor(path))]
 
 
 def get_pages_directories_for_watch() -> list[Path]:
-    """Pages directory paths from merged router config (for autoreload)."""
+    """Absolute pages roots to watch for autoreload."""
     from next.urls import FileRouterBackend, RouterFactory  # noqa: PLC0415
 
     configs = next_framework_settings.DEFAULT_PAGE_ROUTERS
@@ -203,7 +188,7 @@ def get_pages_directories_for_watch() -> list[Path]:
 
 
 def get_layout_djx_paths_for_watch() -> set[Path]:
-    """All layout.djx paths under configured pages dirs (for autoreload)."""
+    """Every ``layout.djx`` under configured pages trees (autoreload)."""
     result: set[Path] = set()
     for pages_path in get_pages_directories_for_watch():
         try:
@@ -215,7 +200,7 @@ def get_layout_djx_paths_for_watch() -> set[Path]:
 
 
 def get_template_djx_paths_for_watch() -> set[Path]:
-    """All template.djx paths under configured pages dirs (for autoreload)."""
+    """Every ``template.djx`` under configured pages trees (autoreload)."""
     result: set[Path] = set()
     for pages_path in get_pages_directories_for_watch():
         try:
@@ -227,7 +212,7 @@ def get_template_djx_paths_for_watch() -> set[Path]:
 
 
 def _load_python_module(file_path: Path) -> types.ModuleType | None:
-    """Load Python module from file path, returning None on failure."""
+    """Load ``file_path`` as a module or return ``None``."""
     try:
         spec = importlib.util.spec_from_file_location("page_module", file_path)
         if not spec or not spec.loader:
@@ -242,60 +227,40 @@ def _load_python_module(file_path: Path) -> types.ModuleType | None:
 
 
 class TemplateLoader(ABC):
-    """Abstract interface for loading page templates from various sources.
-
-    Implements the Strategy pattern to allow different template loading mechanisms
-    (Python modules, .djx files, etc.) to be used interchangeably. Each loader
-    is responsible for detecting whether it can handle a specific file and
-    extracting template content from it.
-    """
+    """Pluggable source of template text for a ``page.py`` path."""
 
     @abstractmethod
     def can_load(self, file_path: Path) -> bool:
-        """Determine if this loader can extract a template from the given file.
-
-        Performs lightweight checks (file existence, basic validation) without
-        expensive operations like full module loading or file reading.
-        """
+        """Whether this loader applies without heavy work."""
 
     @abstractmethod
     def load_template(self, file_path: Path) -> str | None:
-        """Extract template content from the file, returning None on failure.
-
-        Performs the actual template extraction. Should handle errors gracefully
-        and return None rather than raising exceptions for recoverable failures.
-        """
+        """Template source string, or ``None`` if unavailable."""
 
 
 class PythonTemplateLoader(TemplateLoader):
-    """Loads templates from Python modules that define a 'template' attribute.
-
-    This loader handles the traditional approach where page.py files contain
-    a module-level 'template' string variable. It dynamically imports the
-    module and extracts the template content, making it suitable for simple
-    page definitions without complex logic.
-    """
+    """Template from ``page.py`` when the module defines ``template``."""
 
     def can_load(self, file_path: Path) -> bool:
-        """Whether the module has a ``template`` attribute."""
+        """Return whether the module loads and defines ``template``."""
         module = _load_python_module(file_path)
         return module is not None and hasattr(module, "template")
 
     def load_template(self, file_path: Path) -> str | None:
-        """Return the module's ``template`` string."""
+        """``module.template`` if present."""
         module = _load_python_module(file_path)
         return getattr(module, "template", None) if module else None
 
 
 class DjxTemplateLoader(TemplateLoader):
-    """Loads templates from template.djx next to page.py."""
+    """Template from ``template.djx`` beside ``page.py``."""
 
     def can_load(self, file_path: Path) -> bool:
-        """Whether template.djx exists in the same directory."""
+        """Sibling ``template.djx`` exists."""
         return (file_path.parent / "template.djx").exists()
 
     def load_template(self, file_path: Path) -> str | None:
-        """Return template.djx content."""
+        """File contents of ``template.djx``."""
         djx_file = file_path.parent / "template.djx"
         try:
             return djx_file.read_text(encoding="utf-8")
@@ -304,29 +269,14 @@ class DjxTemplateLoader(TemplateLoader):
 
 
 class LayoutTemplateLoader(TemplateLoader):
-    """Loads layout templates from layout.djx files in parent directories.
-
-    This loader implements the layout inheritance system by scanning
-    parent directories for layout.djx files. It supports hierarchical
-    layout inheritance where templates can extend layouts from their
-    parent directories, creating a nested inheritance chain.
-    """
+    """Wraps page content in outer ``layout.djx`` files up the directory chain."""
 
     def can_load(self, file_path: Path) -> bool:
-        """Check if any layout.djx file exists in the directory hierarchy.
-
-        Walks up the directory tree from the template's location to
-        find layout.djx files. Returns True if at least one layout
-        is found in the hierarchy.
-        """
+        """At least one ``layout.djx`` exists on the path to the template."""
         return self._find_layout_files(file_path) is not None
 
     def load_template(self, file_path: Path) -> str | None:
-        """Load and compose layout templates from the directory hierarchy.
-
-        Discovers all layout.djx files in the parent directories and
-        composes them into a single template using manual string replacement.
-        """
+        """Nested layout files with the page block inserted into the innermost slot."""
         layout_files = self._find_layout_files(file_path)
         if not layout_files:
             return None
@@ -338,12 +288,7 @@ class LayoutTemplateLoader(TemplateLoader):
         return self._compose_layout_hierarchy(template_content, layout_files)
 
     def _find_layout_files(self, file_path: Path) -> list[Path] | None:
-        """Find all layout.djx files in the directory hierarchy.
-
-        Walks up the directory tree from the template's location
-        and collects all layout.djx files found. Returns them in
-        order from closest to furthest parent directory.
-        """
+        """``layout.djx`` paths from near to far, plus optional global layouts."""
         layout_files = []
         current_dir = file_path.parent
 
@@ -364,7 +309,7 @@ class LayoutTemplateLoader(TemplateLoader):
         return layout_files or None
 
     def _get_additional_layout_files(self) -> list[Path]:
-        """Layout.djx from root-level pages dirs (for global layout)."""
+        """Root-level ``layout.djx`` from router ``PAGES_*`` options."""
         configs = next_framework_settings.DEFAULT_PAGE_ROUTERS or []
         if not isinstance(configs, list):
             configs = []
@@ -378,7 +323,7 @@ class LayoutTemplateLoader(TemplateLoader):
         return list(dict.fromkeys(candidates))
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
-        """Root-level pages dirs from OPTIONS.PAGES_DIRS or PAGES_DIR."""
+        """Candidate roots from one router ``OPTIONS`` block."""
         options = config.get("OPTIONS", {})
         if "PAGES_DIRS" in options:
             dirs = options["PAGES_DIRS"]
@@ -391,7 +336,7 @@ class LayoutTemplateLoader(TemplateLoader):
         return []
 
     def _wrap_in_template_block(self, file_path: Path) -> str:
-        """Wrap template.djx content in {% block template %} for layout inheritance."""
+        """Page body wrapped in ``{% block template %}`` when needed."""
         template_file = file_path.parent / "template.djx"
         if template_file.exists():
             with contextlib.suppress(OSError, UnicodeDecodeError):
@@ -409,7 +354,7 @@ class LayoutTemplateLoader(TemplateLoader):
         template_content: str,
         layout_files: list[Path],
     ) -> str:
-        """Nest layout content and insert template into block placeholder."""
+        """Outermost layout last. Page replaces the first matching template block."""
         result = template_content
 
         # process all layout files in order (local layouts come first due to
@@ -428,31 +373,15 @@ class LayoutTemplateLoader(TemplateLoader):
 
 
 class LayoutManager:
-    """Manages layout template discovery and inheritance for page templates.
-
-    This class implements a sophisticated layout inheritance system that
-    automatically discovers layout.djx files in the directory hierarchy
-    and composes them using Django's template inheritance mechanism.
-    The system supports nested layouts where templates can inherit from
-    multiple levels of parent directories.
-
-    The manager maintains a registry of discovered layouts and provides
-    efficient lookup and composition services for the template rendering
-    system.
-    """
+    """Caches composed layout strings per page path."""
 
     def __init__(self) -> None:
-        """Initialize the layout manager with empty registry."""
+        """Empty layout cache."""
         self._layout_registry: dict[Path, str] = {}
         self._layout_loader = LayoutTemplateLoader()
 
     def discover_layouts_for_template(self, template_path: Path) -> str | None:
-        """Discover and compose layout hierarchy for a template.
-
-        Scans the directory hierarchy for layout.djx files and composes
-        them into a single template using Django's extends mechanism.
-        Returns the composed template or None if no layouts are found.
-        """
+        """Compose and store layout text when ``LayoutTemplateLoader`` applies."""
         if not self._layout_loader.can_load(template_path):
             return None
 
@@ -463,36 +392,22 @@ class LayoutManager:
         return composed_template
 
     def get_layout_template(self, template_path: Path) -> str | None:
-        """Get the composed layout template for a given template path.
-
-        Returns the previously discovered and composed layout template
-        or None if no layout has been discovered for this path.
-        """
+        """Return the cached composed template for ``template_path``."""
         return self._layout_registry.get(template_path)
 
     def clear_registry(self) -> None:
-        """Clear the layout registry to free memory."""
+        """Drop all cached layout strings."""
         self._layout_registry.clear()
 
 
 class ContextManager:
-    """Manages context functions and their execution for page templates.
-
-    Implements a registry system that maps file paths to context functions,
-    allowing each page to have its own set of context providers. Supports
-    two registration patterns: keyed functions (returning single values)
-    and unkeyed functions (returning dictionaries that get merged).
-
-    Also supports context inheritance from layout directories where
-    context functions marked with inherit_context=True will be available
-    to child pages using layout.djx files.
-    """
+    """Registers per-``page.py`` context callables and merges their output."""
 
     def __init__(
         self,
         resolver: DependencyResolver | None = None,
     ) -> None:
-        """Initialize the context manager with empty registry."""
+        """Initialize with an optional resolver and an empty registry."""
         self._context_registry: dict[
             Path,
             dict[str | None, tuple[Callable[..., Any], bool]],
@@ -500,7 +415,7 @@ class ContextManager:
         self._resolver = resolver
 
     def _get_resolver(self) -> DependencyResolver:
-        """Return resolver (injected or global singleton)."""
+        """Injected resolver or the shared ``resolver``."""
         if self._resolver is not None:
             return self._resolver
         return resolver
@@ -513,12 +428,7 @@ class ContextManager:
         *,
         inherit_context: bool = False,
     ) -> None:
-        """Register a context function for a specific file.
-
-        Associates a callable with a file path and optional key. Keyed functions
-        are stored under their key name, while unkeyed functions (key=None) are
-        expected to return dictionaries that will be merged into the context.
-        """
+        """Bind ``func`` to ``file_path``. Keyed vs dict-merge semantics by ``key``."""
         self._context_registry.setdefault(file_path, {})[key] = (func, inherit_context)
 
     def collect_context(
@@ -527,13 +437,7 @@ class ContextManager:
         *args: object,
         **kwargs: object,
     ) -> dict[str, Any]:
-        """Execute all registered context functions for a file and merge results.
-
-        Runs all context functions associated with the file, passing through
-        any provided arguments. Keyed functions contribute single values,
-        while unkeyed functions contribute entire dictionaries that get merged.
-        Returns the combined context data for template rendering.
-        """
+        """Merge inherited layout context with this file's context callables."""
         request = args[0] if args and isinstance(args[0], HttpRequest) else None
         context_data = {}
         dep_cache: dict[str, Any] = {}
@@ -575,12 +479,7 @@ class ContextManager:
         dep_cache: dict[str, Any],
         dep_stack: list[str],
     ) -> dict[str, Any]:
-        """Collect context from layout directories that should be inherited.
-
-        Walks up the directory tree from the template's location to find
-        layout.djx files and collects context from their corresponding
-        page.py files if they have inherit_context=True functions.
-        """
+        """Values from parent ``page.py`` callables marked ``inherit_context``."""
         inherited_context = {}
         current_dir = file_path.parent
 
@@ -614,16 +513,10 @@ class ContextManager:
 
 
 class Page:
-    """Central coordinator for page-based template rendering and URL pattern generation.
-
-    Acts as the main facade that orchestrates template loading, context management,
-    and URL pattern creation. Implements a plugin architecture where different
-    template loaders can be registered and tried in sequence. Manages the
-    complete lifecycle from page file discovery to Django URL pattern generation.
-    """
+    """Template loading, context, layouts, rendering, and URL pattern wiring."""
 
     def __init__(self) -> None:
-        """Initialize the page manager with empty registries."""
+        """Fresh registries and the default loader chain."""
         self._template_registry: dict[Path, str] = {}
         self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
         self._resolver: DependencyResolver | None = None
@@ -636,26 +529,15 @@ class Page:
         ]
 
     def _get_resolver(self) -> DependencyResolver:
-        """Return the global resolver singleton."""
+        """Shared ``resolver`` instance."""
         return resolver
 
     def register_template(self, file_path: Path, template_str: str) -> None:
-        """Manually register a template string for a specific file path.
-
-        This method is typically called internally by template loaders after
-        successful template extraction. Stores the template content for later
-        rendering, with file path as the key for efficient lookup.
-        """
+        """Store rendered template source for ``file_path``."""
         self._template_registry[file_path] = template_str
 
     def _get_caller_path(self, back_count: int = 1) -> Path:
-        """Extract the file path of the calling code using stack frame inspection.
-
-        Walks up the call stack to find the actual module file that contains
-        the calling code, skipping over this module itself. Used primarily
-        by the context decorator to automatically associate context functions
-        with their source files without requiring manual path specification.
-        """
+        """Filesystem path of the caller outside ``pages.py`` (for ``@context``)."""
         frame = inspect.currentframe()
         for _ in range(back_count):
             if not frame or not frame.f_back:
@@ -681,16 +563,7 @@ class Page:
         *,
         inherit_context: bool = False,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """Register context functions that provide template variables.
-
-        Supports two usage patterns:
-        1. @context("key") - function result stored under the specified key
-        2. @context - function must return a dictionary that gets merged
-
-        Automatically detects the calling file and associates the context function
-        with it. The function will be called during template rendering with the
-        same arguments passed to the render method.
-        """
+        """Register keyed or dict-merge ``@context`` for the caller file."""
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             if callable(func_or_key):
@@ -721,12 +594,7 @@ class Page:
         *args: object,
         **kwargs: object,
     ) -> dict[str, object]:
-        """Build template context for a page (normal render and form error replay).
-
-        Matches :meth:`render` context: ``current_template_path`` (for
-        ``{% component %}`` resolution), merged kwargs, registered context
-        functions, ``request``, and configured context processors.
-        """
+        """Build render context: path, kwargs, ``@context``, request, processors."""
         context_data: dict[str, object] = {}
         template_djx = file_path.parent / "template.djx"
         context_data["current_template_path"] = (
@@ -761,16 +629,7 @@ class Page:
         return context_data
 
     def render(self, file_path: Path, *args: object, **kwargs: object) -> str:
-        """Render a template with context data and return the final HTML.
-
-        Combines template content with context data from registered functions
-        and any additional variables passed as kwargs. Template variables
-        take precedence over context function results. Uses Django's
-        template engine for rendering with full tag and filter support.
-
-        Supports context_processors from each router's ``OPTIONS``.
-        Loads .djx and layout template content on first render if not yet in registry.
-        """
+        """Render with Django ``Template`` after reloading stale sources and context."""
         if file_path not in self._template_registry or self._is_template_stale(
             file_path
         ):
@@ -787,11 +646,7 @@ class Page:
         file_path: Path,
         _parameters: dict[str, str],
     ) -> Callable[..., HttpResponse]:
-        """Create a view function that handles URL parameters and template rendering.
-
-        Django already passes URL parameter values via **kwargs, so we don't need
-        to update kwargs with the parameters mapping.
-        """
+        """Callable view: ``HttpResponse`` with ``render`` output for this page."""
 
         def view(request: HttpRequest, **kwargs: object) -> HttpResponse:
             # kwargs already contains real parameter values from URL (e.g., id=999)
@@ -804,12 +659,7 @@ class Page:
     def has_template(
         self, file_path: Path, module: types.ModuleType | None = None
     ) -> bool:
-        """Return True if a template can be provided for this file.
-
-        Uses only can_load() for Djx and Layout loaders.
-        For Python loader uses module if provided (hasattr template)
-        to avoid loading the module again.
-        """
+        """Return whether loaders can supply a template (reuse ``module`` if passed)."""
         if self._layout_manager._layout_loader.can_load(file_path):
             return True
         for loader in self._template_loaders:
@@ -824,7 +674,7 @@ class Page:
         return False
 
     def _load_template_for_file(self, file_path: Path) -> bool:
-        """Load template content for a file using available template loaders."""
+        """Populate ``_template_registry`` from layout or inline loaders."""
         # try layout template loader first (priority for layout inheritance)
         if self._layout_manager.discover_layouts_for_template(file_path):
             layout_template = self._layout_manager.get_layout_template(file_path)
@@ -844,13 +694,13 @@ class Page:
         return False
 
     def _get_template_source_paths(self, file_path: Path) -> list[Path]:
-        """Paths of .djx files that contribute to this template."""
+        """``template.djx`` and layout files that define this page's source."""
         template_djx = file_path.parent / "template.djx"
         layout_files = self._layout_manager._layout_loader._find_layout_files(file_path)
         return ([template_djx] if template_djx.exists() else []) + (layout_files or [])
 
     def _record_template_source_mtimes(self, file_path: Path) -> None:
-        """Record mtimes of source files for this template."""
+        """Snapshot mtimes for stale detection."""
         paths = self._get_template_source_paths(file_path)
         if not paths:
             return
@@ -862,7 +712,7 @@ class Page:
             self._template_source_mtimes[file_path] = mtimes
 
     def _is_template_stale(self, file_path: Path) -> bool:
-        """Return True if any source file was modified since we loaded the template."""
+        """Whether any tracked source file changed on disk."""
         stored = self._template_source_mtimes.get(file_path)
         if not stored:
             return False
@@ -881,16 +731,13 @@ class Page:
         parameters: dict[str, str],
         clean_name: str,
     ) -> URLPattern | None:
-        """Create URL pattern for a regular page with page.py file.
-
-        Uses has_template to decide template-based vs custom render. Template
-        content is loaded on first render.
-        """
+        """URL for a real ``page.py``: template view or ``render`` with DI."""
         module = _load_python_module(file_path)
         if not module:
             return None
 
-        # try template-based rendering first (check only; do not load .djx content)
+        # Try template-based rendering first as a check only.
+        # Do not load .djx content here.
         if self.has_template(file_path, module):
             view = self._create_view_function(file_path, parameters)
             return path(
@@ -939,10 +786,7 @@ class Page:
         parameters: dict[str, str],
         clean_name: str,
     ) -> URLPattern | None:
-        """Create URL pattern for a virtual page with template.djx but no page.py.
-
-        Template content is loaded on first render.
-        """
+        """URL when only ``template.djx`` exists (no ``page.py``)."""
         if self.has_template(file_path, module=None):
             view = self._create_view_function(file_path, parameters)
             return path(
@@ -958,13 +802,7 @@ class Page:
         file_path: Path,
         url_parser: "URLPatternParser",
     ) -> URLPattern | None:
-        """Generate a Django URL pattern from a page file with template detection.
-
-        Uses has_template to decide if the page has a template. If it does, create a
-        view that renders it (template content loaded on first render). Fall back
-        to a custom render function if there is no template. Virtual pages
-        (template.djx without page.py) get a view that renders the template.
-        """
+        """``path()`` for a page: template view, custom ``render``, or virtual."""
         django_pattern, parameters = url_parser.parse_url_pattern(url_path)
         clean_name = url_parser.prepare_url_name(url_path)
 

@@ -16,7 +16,7 @@ Use project commands via `make` / `uv run` rather than a bare system `python`.
 
 | Command | Purpose |
 | --- | --- |
-| `make install` | Sync runtime dependencies and the package from `uv.lock` (`uv sync --locked --no-dev`; editable install, no dev group). |
+| `make install` | Sync runtime dependencies and the package from `uv.lock` (`uv sync --locked --no-dev`. Editable install, no dev group). |
 | `make dev-setup` | Full dev environment: `uv sync --locked --dev` plus pre-commit hooks. Prefer this for day-to-day work. |
 
 Equivalent: `uv sync --locked --dev` (then `uv run …` for tools). `uv sync` installs the project in editable mode and matches the lockfile.
@@ -60,7 +60,7 @@ GitHub Actions additionally:
 - Runs typos and `uv-lock` via pre-commit (`security` job)
 - On pull requests: dependency review (`dependency-review` job)
 - In CI, lint runs on **`next/` only**, plus a separate import-order pass with `--select I`. Locally, `make lint` also covers `tests/` and `examples/`. Keep those directories clean so you do not surprise reviewers.
-- The test matrix installs a specific Django version with `uv pip install "django==…"` **after** `uv sync --locked`. That overrides the Django version from `uv.lock` only for those jobs so multiple Django versions are exercised; it is intentional, not a broken lockfile.
+- The test matrix installs a specific Django version with `uv pip install "django==…"` **after** `uv sync --locked`. That overrides the Django version from `uv.lock` only for those jobs so multiple Django versions are exercised. It is intentional, not a broken lockfile.
 
 Ruff uses `select = ["ALL"]` with ignores and per-file rules in [`pyproject.toml`](pyproject.toml). That includes line length 88, isort with `known-first-party = ["next"]`, and relaxed rules under `examples/` and in test and `conftest` files.
 

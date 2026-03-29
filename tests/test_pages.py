@@ -1,5 +1,3 @@
-import inspect
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Never
@@ -40,82 +38,13 @@ from next.urls import (
     URLPatternParser,
 )
 from next.utils import NextStatReloader
-
-
-# shared fixtures
-@pytest.fixture()
-def page_instance():
-    """Create a fresh Page instance for each test."""
-    return Page()
-
-
-@pytest.fixture()
-def url_parser():
-    """Create a URLPatternParser instance for testing."""
-    return URLPatternParser()
-
-
-@pytest.fixture()
-def python_template_loader():
-    """Create a PythonTemplateLoader instance for testing."""
-    return PythonTemplateLoader()
-
-
-@pytest.fixture()
-def djx_template_loader():
-    """Create a DjxTemplateLoader instance for testing."""
-    return DjxTemplateLoader()
-
-
-@pytest.fixture()
-def context_manager():
-    """Create a ContextManager instance for testing."""
-    return ContextManager()
-
-
-@pytest.fixture()
-def layout_manager():
-    """Create a LayoutManager instance for testing."""
-    return LayoutManager()
-
-
-@pytest.fixture()
-def mock_frame():
-    """Mock inspect.currentframe for testing."""
-    with patch("next.pages.inspect.currentframe") as mock_frame:
-        yield mock_frame
-
-
-@pytest.fixture()
-def test_file_path():
-    """Create a test file path for render tests."""
-    return Path("/test/path/page.py")
-
-
-@pytest.fixture()
-def global_file_path():
-    """Create a file path for global page tests."""
-    return Path("/test/global/page.py")
-
-
-@pytest.fixture()
-def temp_python_file():
-    """Create a temporary Python file for testing."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-        f.write('template = "test template"')
-        temp_file = Path(f.name)
-    yield temp_file
-    temp_file.unlink()
-
-
-@pytest.fixture()
-def context_temp_file():
-    """Create a temporary file for context decorator tests."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-        f.write("def test_func(): pass")
-        temp_file = Path(f.name)
-    yield temp_file
-    temp_file.unlink()
+from tests.support import (
+    default_page_router_config,
+    file_router_config_entry,
+    inspect_parameter,
+    patch_checks_router_manager,
+    patch_checks_router_manager_with_routers,
+)
 
 
 class TestPage:
@@ -905,7 +834,7 @@ class TestContextMarker:
         resolved = r.resolve_dependencies(fn, _context_data={"x": 999})
         assert resolved["x"] == 123
 
-    def test_context_marker_callable_uses_di(self) -> None:
+    def test_context_marker_callable_uses_di(self, mock_http_request) -> None:
         """Context(callable) is called with DI-resolved args."""
 
         def source(request: HttpRequest) -> str:
@@ -915,8 +844,7 @@ class TestContextMarker:
             return path
 
         r = DependencyResolver()
-        request = MagicMock(spec=HttpRequest)
-        request.path = "/from-context/"
+        request = mock_http_request(path="/from-context/")
         resolved = r.resolve_dependencies(fn, request=request)
         assert resolved["path"] == "/from-context/"
 
@@ -925,12 +853,7 @@ class TestContextMarker:
     ) -> None:
         """Defensive: ContextByDefaultProvider.resolve returns None when default isn't Context."""
         provider = ContextByDefaultProvider(DependencyResolver())
-        param = inspect.Parameter(
-            "x",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            default=123,
-            annotation=int,
-        )
+        param = inspect_parameter("x", int, default=123)
         ctx = MagicMock()
         assert provider.resolve(param, ctx) is None
 
@@ -1678,60 +1601,42 @@ def render(request, **kwargs):
 class TestLayoutChecks:
     """Test cases for layout checks functionality."""
 
-    def test_check_layout_templates_with_block(self, tmp_path) -> None:
-        """Test check_layout_templates with proper template block."""
-        # create layout file with proper block
-        layout_file = tmp_path / "layout.djx"
-        layout_file.write_text(
-            "<html>{% block template %}{% endblock template %}</html>",
-        )
-
-        # create page file
+    @pytest.mark.parametrize(
+        ("layout_body", "expected_warnings", "msg_substring"),
+        [
+            (
+                "<html>{% block template %}{% endblock template %}</html>",
+                0,
+                None,
+            ),
+            (
+                "<html><body>No template block</body></html>",
+                1,
+                "does not contain required {% block template %}",
+            ),
+        ],
+        ids=["with_block", "without_block"],
+    )
+    def test_check_layout_templates_scenarios(
+        self,
+        tmp_path,
+        layout_body: str,
+        expected_warnings: int,
+        msg_substring: str | None,
+    ) -> None:
+        """Layout.djx with or without required ``{% block template %}``."""
+        (tmp_path / "layout.djx").write_text(layout_body)
         page_file = tmp_path / "page.py"
         page_file.write_text("")
 
-        with (
-            patch("next.checks._get_router_manager") as mock_grm,
-            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        with patch_checks_router_manager(
+            pages_directory=tmp_path,
+            scan_routes=[("test", page_file)],
         ):
-            mock_mgr = MagicMock()
-            mock_router = MagicMock()
-            mock_grm.return_value = (mock_mgr, [])
-            mock_mgr._routers = [mock_router]
-            mock_router.pages_dir = "pages"
-            mock_router.app_dirs = True
-            mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = tmp_path
-
             warnings = check_layout_templates(None)
-            assert len(warnings) == 0
-
-    def test_check_layout_templates_without_block(self, tmp_path) -> None:
-        """Test check_layout_templates without template block."""
-        # create layout file without proper block
-        layout_file = tmp_path / "layout.djx"
-        layout_file.write_text("<html><body>No template block</body></html>")
-
-        # create page file
-        page_file = tmp_path / "page.py"
-        page_file.write_text("")
-
-        with (
-            patch("next.checks._get_router_manager") as mock_grm,
-            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
-        ):
-            mock_mgr = MagicMock()
-            mock_router = MagicMock()
-            mock_grm.return_value = (mock_mgr, [])
-            mock_mgr._routers = [mock_router]
-            mock_router.pages_dir = "pages"
-            mock_router.app_dirs = True
-            mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = tmp_path
-
-            warnings = check_layout_templates(None)
-            assert len(warnings) == 1
-            assert "does not contain required {% block template %}" in warnings[0].msg
+        assert len(warnings) == expected_warnings
+        if msg_substring is not None:
+            assert msg_substring in warnings[0].msg
 
 
 class TestMissingPageContentChecks:
@@ -1835,9 +1740,7 @@ class TestMissingPageContentChecks:
             def _get_app_pages_path(self, _app: str) -> Path:
                 return tmp_path
 
-        mock_mgr = MagicMock()
-        mock_mgr._routers = [_FakeRouter()]
-        with patch("next.checks._get_router_manager", return_value=(mock_mgr, [])):
+        with patch_checks_router_manager_with_routers(routers=[_FakeRouter()]):
             messages = check_page_functions(None)
             errors = [m for m in messages if m.id.startswith("next.E")]
             warnings = [m for m in messages if m.id.startswith("next.W")]
@@ -1880,21 +1783,10 @@ class TestDuplicateUrlParametersChecks:
         page_file = tmp_path / "page.py"
         page_file.write_text("")
 
-        with (
-            patch("next.checks._get_router_manager") as mock_grm,
-            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        with patch_checks_router_manager(
+            pages_directory=tmp_path,
+            scan_routes=[(pattern, page_file) for pattern, _ in url_patterns],
         ):
-            mock_mgr = MagicMock()
-            mock_router = MagicMock()
-            mock_grm.return_value = (mock_mgr, [])
-            mock_mgr._routers = [mock_router]
-            mock_router.pages_dir = "pages"
-            mock_router.app_dirs = True
-            mock_router._scan_pages_directory.return_value = [
-                (pattern, page_file) for pattern, _ in url_patterns
-            ]
-            mock_get_pages_dir.return_value = tmp_path
-
             errors = check_duplicate_url_parameters(None)
             assert len(errors) == expected_errors
 
@@ -1919,19 +1811,10 @@ def get_context_data():
     return {"key": "value"}
         """)
 
-        with (
-            patch("next.checks._get_router_manager") as mock_grm,
-            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
-        ):
-            mock_mgr = MagicMock()
-            mock_router = MagicMock()
-            mock_grm.return_value = (mock_mgr, [])
-            mock_mgr._routers = [mock_router]
-            mock_router.pages_dir = "pages"
-            mock_router.app_dirs = True
-            mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = tmp_path
-
+        with patch_checks_router_manager(
+            pages_directory=tmp_path,
+            scan_routes=[("test", page_file)],
+        ) as (_mock_mgr, mock_router, _):
             mock_context_manager = MagicMock()
             mock_context_manager._context_registry = {
                 page_file: {None: (lambda: {"key": "value"}, False)},
@@ -1953,19 +1836,10 @@ def get_context_data():
     return "not a dict"
         """)
 
-        with (
-            patch("next.checks._get_router_manager") as mock_grm,
-            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        with patch_checks_router_manager(
+            pages_directory=tmp_path,
+            scan_routes=[("test", page_file)],
         ):
-            mock_mgr = MagicMock()
-            mock_router = MagicMock()
-            mock_grm.return_value = (mock_mgr, [])
-            mock_mgr._routers = [mock_router]
-            mock_router.pages_dir = "pages"
-            mock_router.app_dirs = True
-            mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = tmp_path
-
             errors = check_context_functions(None)
             assert len(errors) == 1
             assert "must return a dictionary" in errors[0].msg
@@ -1983,19 +1857,10 @@ def get_context_data():
     return "not a dict but with key"
         """)
 
-        with (
-            patch("next.checks._get_router_manager") as mock_grm,
-            patch("next.checks._get_pages_directory") as mock_get_pages_dir,
-        ):
-            mock_mgr = MagicMock()
-            mock_router = MagicMock()
-            mock_grm.return_value = (mock_mgr, [])
-            mock_mgr._routers = [mock_router]
-            mock_router.pages_dir = "pages"
-            mock_router.app_dirs = True
-            mock_router._scan_pages_directory.return_value = [("test", page_file)]
-            mock_get_pages_dir.return_value = tmp_path
-
+        with patch_checks_router_manager(
+            pages_directory=tmp_path,
+            scan_routes=[("test", page_file)],
+        ) as (_mock_mgr, mock_router, _):
             mock_context_manager = MagicMock()
             mock_context_manager._context_registry = {
                 page_file: {"my_key": (lambda: "not a dict but with key", False)},
@@ -2059,18 +1924,11 @@ class TestLayoutTemplateLoader:
         layout_file = tmp_path / "layout.djx"
         layout_file.write_text("layout content")
 
-        config = [
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "PAGES_DIR": "pages",
-                "APP_DIRS": False,
-                "OPTIONS": {
-                    "PAGES_DIR": str(tmp_path),
-                },
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_ROUTERS": default_page_router_config(tmp_path)
             },
-        ]
-
-        with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": config}):
+        ):
             next_framework_settings.reload()
             result = loader._get_additional_layout_files()
 
@@ -2095,27 +1953,13 @@ class TestLayoutTemplateLoader:
                 "invalid_config",
                 [
                     "invalid_config",  # not a dict
-                    {
-                        "BACKEND": "next.urls.FileRouterBackend",
-                        "PAGES_DIR": "pages",
-                        "APP_DIRS": False,
-                        "OPTIONS": {
-                            "PAGES_DIR": "/nonexistent/path",
-                        },
-                    },
+                    file_router_config_entry(pages_dir="/nonexistent/path"),
                 ],
                 [],
             ),
             (
                 "app_dirs_true",
-                [
-                    {
-                        "BACKEND": "next.urls.FileRouterBackend",
-                        "PAGES_DIR": "pages",
-                        "APP_DIRS": True,
-                        "OPTIONS": {},
-                    },
-                ],
+                [file_router_config_entry(app_dirs=True)],
                 [],
             ),
         ],
@@ -2141,34 +1985,17 @@ class TestLayoutTemplateLoader:
         [
             (
                 "with_pages_dir",
-                {
-                    "BACKEND": "next.urls.FileRouterBackend",
-                    "PAGES_DIR": "pages",
-                    "APP_DIRS": False,
-                    "OPTIONS": {
-                        "PAGES_DIR": "test_dir",
-                    },
-                },
+                file_router_config_entry(pages_dir="test_dir"),
                 ["test_dir"],
             ),
             (
                 "with_app_dirs",
-                {
-                    "BACKEND": "next.urls.FileRouterBackend",
-                    "PAGES_DIR": "pages",
-                    "APP_DIRS": True,
-                    "OPTIONS": {},
-                },
+                file_router_config_entry(app_dirs=True),
                 [],
             ),
             (
                 "no_options",
-                {
-                    "BACKEND": "next.urls.FileRouterBackend",
-                    "PAGES_DIR": "pages",
-                    "APP_DIRS": False,
-                    "OPTIONS": {},
-                },
+                file_router_config_entry(),
                 [],
             ),
         ],
@@ -2282,18 +2109,11 @@ class TestLayoutTemplateLoader:
 
         page_file = tmp_path / "page.py"
 
-        config = [
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "PAGES_DIR": "pages",
-                "APP_DIRS": False,
-                "OPTIONS": {
-                    "PAGES_DIR": str(tmp_path),
-                },
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_ROUTERS": default_page_router_config(tmp_path)
             },
-        ]
-
-        with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": config}):
+        ):
             next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
 
@@ -2310,24 +2130,9 @@ class TestLayoutTemplateLoader:
         layout_file = tmp_path / "layout.djx"
         layout_file.write_text("layout content")
 
-        config = [
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "PAGES_DIR": "pages",
-                "APP_DIRS": False,
-                "OPTIONS": {
-                    "PAGES_DIR": str(tmp_path),
-                },
-            },
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "PAGES_DIR": "pages",
-                "APP_DIRS": False,
-                "OPTIONS": {
-                    "PAGES_DIR": str(tmp_path),
-                },
-            },
-        ]
+        config = default_page_router_config(tmp_path) + default_page_router_config(
+            tmp_path
+        )
 
         with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": config}):
             next_framework_settings.reload()
@@ -2357,18 +2162,11 @@ class TestLayoutTemplateLoader:
 
         page_file = child_dir / "page.py"
 
-        config = [
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "PAGES_DIR": "pages",
-                "APP_DIRS": False,
-                "OPTIONS": {
-                    "PAGES_DIR": str(parent_dir),
-                },
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_ROUTERS": default_page_router_config(parent_dir)
             },
-        ]
-
-        with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": config}):
+        ):
             next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
 
@@ -2399,18 +2197,11 @@ class TestLayoutTemplateLoader:
         additional_layout = additional_dir / "layout.djx"
         additional_layout.write_text("additional layout")
 
-        config = [
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "PAGES_DIR": "pages",
-                "APP_DIRS": False,
-                "OPTIONS": {
-                    "PAGES_DIR": str(additional_dir),
-                },
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_ROUTERS": default_page_router_config(additional_dir),
             },
-        ]
-
-        with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": config}):
+        ):
             next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
 
@@ -2520,7 +2311,7 @@ class TestLayoutTemplateLoader:
         assert "<html><body>" in result
         assert "</body></html>" in result
         assert "{% block template %}" in result
-        # default content uses named endblock; layout used unnamed
+        # Default content uses named endblock. Layout used unnamed.
         assert "{% block template %}{% endblock template %}" in result
 
     def test_find_layout_files(self, tmp_path) -> None:
@@ -2788,14 +2579,7 @@ class TestContextProcessors:
 
     def test_get_context_processors_no_context_processors(self, page_instance) -> None:
         """Test _get_context_processors with routers but no context_processors."""
-        config = [
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "PAGES_DIR": "pages",
-                "APP_DIRS": True,
-                "OPTIONS": {},
-            },
-        ]
+        config = [file_router_config_entry(app_dirs=True)]
         with override_settings(
             NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": config},
             TEMPLATES=[],
@@ -2828,14 +2612,7 @@ class TestContextProcessors:
             },
         ]
 
-        next_pages_config = [
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "PAGES_DIR": "pages",
-                "APP_DIRS": True,
-                "OPTIONS": {},
-            },
-        ]
+        next_pages_config = [file_router_config_entry(app_dirs=True)]
 
         with patch("next.pages.import_string") as mock_import:
             mock_import.side_effect = [test_processor, auth_processor]
@@ -2872,16 +2649,14 @@ class TestContextProcessors:
             },
         ]
         next_pages_config = [
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "PAGES_DIR": "pages",
-                "APP_DIRS": True,
-                "OPTIONS": {
+            file_router_config_entry(
+                app_dirs=True,
+                options={
                     "context_processors": [
                         "test_app.context_processors.next_pages_processor",
                     ],
                 },
-            }
+            ),
         ]
 
         with patch("next.pages.import_string") as mock_import:
@@ -2910,12 +2685,10 @@ class TestContextProcessors:
             },
         ]
         next_pages_config = [
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "PAGES_DIR": "pages",
-                "APP_DIRS": True,
-                "OPTIONS": {"context_processors": [shared_path]},
-            },
+            file_router_config_entry(
+                app_dirs=True,
+                options={"context_processors": [shared_path]},
+            ),
         ]
         with (
             patch("next.pages.import_string", return_value=shared_processor),
@@ -2971,17 +2744,15 @@ class TestContextProcessors:
             mock_import.side_effect = [test_processor, another_processor]
 
             config = [
-                {
-                    "BACKEND": "next.urls.FileRouterBackend",
-                    "PAGES_DIR": "pages",
-                    "APP_DIRS": True,
-                    "OPTIONS": {
+                file_router_config_entry(
+                    app_dirs=True,
+                    options={
                         "context_processors": [
                             "test_app.context_processors.test_processor",
                             "test_app.context_processors.another_processor",
                         ],
                     },
-                },
+                ),
             ]
 
             with override_settings(
@@ -2997,17 +2768,15 @@ class TestContextProcessors:
     def test_get_context_processors_with_invalid_processor(self, page_instance) -> None:
         """Test _get_context_processors with invalid processor path."""
         config = [
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "PAGES_DIR": "pages",
-                "APP_DIRS": True,
-                "OPTIONS": {
+            file_router_config_entry(
+                app_dirs=True,
+                options={
                     "context_processors": [
                         "invalid.module.path",
                         "django.template.context_processors.request",
                     ],
                 },
-            },
+            ),
         ]
 
         with (

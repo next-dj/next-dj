@@ -182,7 +182,7 @@ Handlers receive only the arguments they declare (dependency injection). Declare
 ``request: HttpRequest``, ``form: MyForm`` (when using ``form_class``), and any
 URL parameter names (e.g. ``id: int``) you need. You can also inject context or
 global dependencies by name using ``Context("key")`` (value from current context)
-or ``Depends("name")`` (registered callable); see :doc:`dependency-injection`.
+or ``Depends("name")`` (registered callable). See :doc:`dependency-injection`.
 
 .. code-block:: python
 

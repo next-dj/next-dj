@@ -178,7 +178,7 @@ def test_anonymous_redirect_from_create(client) -> None:
 
 @pytest.mark.django_db()
 def test_register_login_create_edit_flow(client) -> None:
-    """Register, create post, view, edit; form actions work."""
+    """Register, create post, view, and edit. Form actions work."""
     reg_url = form_action_manager.get_action_url("register")
     response = client.post(
         reg_url,

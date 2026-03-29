@@ -1,6 +1,6 @@
-"""System checks for next-dj (``manage.py check``).
+"""Register ``manage.py check`` hooks for next-dj.
 
-Validates settings, file routes, templates, URLs, and components.
+Covers settings, file routes, templates, URLs, and components.
 """
 
 import ast
@@ -40,11 +40,7 @@ EXPECTED_PARAMETER_PARTS = 2
 
 
 def _get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
-    """Initialize RouterManager with error handling.
-
-    Returns a tuple of (router_manager, errors) where router_manager is None
-    if initialization fails and errors contains any error messages.
-    """
+    """Fresh ``RouterManager`` or init errors for ``check`` messages."""
     try:
         router_manager = RouterManager()
         router_manager._reload_config()
@@ -63,7 +59,7 @@ def _validate_config_structure(
     config: object,
     index: int,
 ) -> list[CheckMessage]:
-    """Validate basic structure of a single configuration."""
+    """Validate required keys and types for one ``DEFAULT_PAGE_ROUTERS`` entry."""
     errors: list[CheckMessage] = []
 
     if not isinstance(config, dict):
@@ -287,13 +283,7 @@ def check_next_components_configuration(*_args, **_kwargs) -> list[CheckMessage]
 
 @register(Tags.compatibility)
 def check_pages_structure(*_args, **_kwargs) -> list[CheckMessage]:
-    """Validate pages directory structure and file organization.
-
-    Scans all configured router backends to identify pages directories and
-    validates their structure. Checks for proper file organization, naming
-    conventions, and potential conflicts in URL pattern generation. Provides
-    warnings for structural issues that might cause problems during runtime.
-    """
+    """Check pages trees from each router for layouts, naming, and structure."""
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
@@ -729,7 +719,7 @@ def check_layout_templates(*_args, **_kwargs) -> list[CheckMessage]:
 
 
 def _get_duplicate_parameters(url_path: str, parser: URLPatternParser) -> list[str]:
-    """Get list of duplicate parameter names in URL path."""
+    """Parameter names that appear more than once in bracket segments."""
     param_matches = parser._param_pattern.findall(url_path)
     param_names = []
     for param_str in param_matches:
@@ -744,11 +734,7 @@ def _get_duplicate_parameters(url_path: str, parser: URLPatternParser) -> list[s
 
 @register(Tags.urls)
 def check_duplicate_url_parameters(*_args, **_kwargs) -> list[CheckMessage]:
-    """Check for duplicate parameter names in URL patterns.
-
-    Validates that URL patterns don't have duplicate parameter names like
-    /page/[id]/[id]/ which would cause conflicts.
-    """
+    """Fail when the same ``[param]`` name is repeated in one route."""
     errors: list[CheckMessage] = []
 
     router_manager, init_errors = _get_router_manager()
@@ -815,7 +801,7 @@ def _get_function_result(func: Callable[..., Any]) -> object:
 
 
 def _get_first_root_pages_path(file_router: FileRouterBackend) -> Path | None:
-    """Return first root pages path if backend supports it, else None."""
+    """First entry from ``_get_root_pages_paths`` when defined."""
     if not hasattr(file_router, "_get_root_pages_paths"):
         return None
     root_paths = file_router._get_root_pages_paths()
@@ -832,7 +818,7 @@ def _get_first_app_pages_dir(file_router: FileRouterBackend) -> Path | None:
 
 
 def _get_pages_directory(router: RouterBackend) -> Path | None:
-    """Get a single pages directory path for router (for checks that need one dir)."""
+    """One representative ``pages`` root for scanning checks."""
     if not hasattr(router, "pages_dir"):
         return None
     file_router: FileRouterBackend = router  # type: ignore[assignment]
@@ -849,7 +835,7 @@ def _check_context_function(
     func: Callable[..., Any],
     page_path: Path,
 ) -> CheckMessage | None:
-    """Check if context function returns dictionary."""
+    """Error when keyless ``@context`` callables do not produce a dict."""
     try:
         result = _get_function_result(func)
         if not isinstance(result, dict):
@@ -870,7 +856,7 @@ def _check_module_context_functions(
     module: types.ModuleType,
     page_path: Path,
 ) -> list[CheckMessage]:
-    """Check context functions in a single module."""
+    """Keyless ``@context`` functions in one ``page.py`` module."""
     errors: list[CheckMessage] = []
 
     for name, obj in inspect.getmembers(module, inspect.isfunction):
@@ -885,7 +871,7 @@ def _check_module_context_functions(
 
 
 def _check_router_context_functions(router: RouterBackend) -> list[CheckMessage]:
-    """Check context functions for a single router."""
+    """All ``page.py`` modules under one router's pages tree."""
     errors: list[CheckMessage] = []
 
     if not hasattr(router, "_scan_pages_directory"):
@@ -911,11 +897,7 @@ def _check_router_context_functions(router: RouterBackend) -> list[CheckMessage]
 
 @register(Tags.templates)
 def check_context_functions(*_args, **_kwargs) -> list[CheckMessage]:
-    """Check context functions for proper return types.
-
-    Validates that context functions decorated with @context (without key)
-    always return a dictionary.
-    """
+    """Keyless ``@context`` callables must yield a dict when invoked."""
     router_manager, init_errors = _get_router_manager()
     if router_manager is None:
         return init_errors
@@ -930,13 +912,7 @@ def check_context_functions(*_args, **_kwargs) -> list[CheckMessage]:
 
 @register(Tags.urls)
 def check_url_patterns(*_args, **_kwargs) -> list[CheckMessage]:
-    """Validate URL pattern generation and identify potential conflicts.
-
-    Generates URL patterns from all configured router backends and validates
-    them for naming conflicts, parameter consistency, and Django compatibility.
-    Checks for duplicate URL names, invalid parameter types, and potential
-    routing conflicts that could cause unexpected behavior.
-    """
+    """Collect patterns from routers and flag duplicate Django path strings."""
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
@@ -980,7 +956,7 @@ def _collect_app_patterns(
     router: RouterBackend,
     all_patterns: list[tuple[str, str]],
 ) -> None:
-    """Collect URL patterns from app pages."""
+    """Append patterns discovered under each app's pages dir."""
     if not hasattr(router, "_get_installed_apps"):
         return
 
@@ -1003,7 +979,7 @@ def _collect_root_patterns(
     router: RouterBackend,
     all_patterns: list[tuple[str, str]],
 ) -> None:
-    """Collect URL patterns from root pages (all paths from PAGES_DIRS/PAGES_DIR)."""
+    """Append patterns from each configured root pages directory."""
     if not hasattr(router, "_get_root_pages_paths"):
         return
     for i, pages_path in enumerate(router._get_root_pages_paths()):
@@ -1017,7 +993,7 @@ def _check_url_conflicts(
     errors: list[CheckMessage],
     _warnings: list[CheckMessage],
 ) -> None:
-    """Check for URL pattern conflicts."""
+    """Errors when the same Django path string comes from multiple sources."""
     pattern_dict: dict[str, list[str]] = {}
     for pattern, source in all_patterns:
         if pattern in pattern_dict:
@@ -1063,7 +1039,7 @@ def _collect_url_patterns(pages_path: Path, context: str) -> list[tuple[str, str
 
 
 def _convert_to_django_pattern(url_path: str) -> str | None:
-    """Convert file path to Django URL pattern."""
+    """Bracket syntax to ``<str:>`` / ``<path:>`` for conflict comparison."""
     if not url_path:
         return ""
 

@@ -7,10 +7,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django import forms, forms as django_forms
 from django.core.exceptions import ImproperlyConfigured
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDict
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.middleware.csrf import get_token
 from django.template import Context, TemplateSyntaxError
-from django.template.engine import Engine
 
 from next.forms import (
     BaseModelForm,
@@ -26,21 +25,6 @@ from next.forms import (
     page,
 )
 from next.templatetags.forms import _parse_form_tag_args
-
-
-@pytest.fixture()
-def form_engine():
-    """Template engine with forms builtin."""
-    return Engine(builtins=["next.templatetags.forms"])
-
-
-@pytest.fixture()
-def csrf_request():
-    """HttpRequest with CSRF token set (for form tag tests)."""
-    req = HttpRequest()
-    req.method = "GET"
-    get_token(req)
-    return req
 
 
 class SimpleForm(Form):
@@ -113,19 +97,17 @@ class TestRegistryFormActionBackend:
 class TestRenderFormFragment:
     """render_form_fragment: unknown action, template_fragment, fallback, context."""
 
-    def test_unknown_action_returns_empty(self) -> None:
+    def test_unknown_action_returns_empty(self, mock_http_request) -> None:
         """Unknown action renders empty string."""
-        request = MagicMock(spec=HttpRequest)
-        request.method = "GET"
+        request = mock_http_request(method="GET")
         html = form_action_manager.render_form_fragment(
             request, "unknown_action_xyz", None
         )
         assert html == ""
 
-    def test_with_template_fragment(self) -> None:
+    def test_with_template_fragment(self, mock_http_request) -> None:
         """Render form with given template fragment."""
-        request = MagicMock(spec=HttpRequest)
-        request.method = "GET"
+        request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "test"})
         fragment = "{{ form.name }}"
         html = form_action_manager.render_form_fragment(
@@ -133,51 +115,36 @@ class TestRenderFormFragment:
         )
         assert "test" in html or "name" in html
 
-    def test_with_form_only_no_template(self) -> None:
+    def test_with_form_only_no_template(self, mock_http_request) -> None:
         """Render form without template returns string."""
-        request = MagicMock(spec=HttpRequest)
-        request.method = "GET"
+        request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "x"})
         html = form_action_manager.render_form_fragment(
             request, "test_submit", form, template_fragment=None
         )
         assert isinstance(html, str)
 
-    def test_form_none_no_template_returns_string(self) -> None:
+    def test_form_none_no_template_returns_string(self, mock_http_request) -> None:
         """Form None and no template still returns a string."""
-        request = MagicMock(spec=HttpRequest)
-        request.method = "GET"
+        request = mock_http_request(method="GET")
         html = form_action_manager.render_form_fragment(
             request, "test_submit", form=None, template_fragment=None
         )
         assert isinstance(html, str)
 
-    def test_with_template_in_registry(self) -> None:
-        """Render using template from registry for action file."""
-        request = MagicMock(spec=HttpRequest)
-        request.method = "GET"
-        form = SimpleForm(initial={"name": "a"})
-        backend = form_action_manager.default_backend
-        assert isinstance(backend, RegistryFormActionBackend)
-        meta = backend.get_meta("test_submit")
-        assert meta is not None
-        file_path = meta["file_path"]
-        # Pre-populate registry and skip _load_template_for_file
-        original_registry = page._template_registry.copy()
-        page._template_registry[file_path] = "{{ form.name }}"
-        try:
-            html = backend.render_form_fragment(
-                request, "test_submit", form, template_fragment=None
-            )
-            assert "a" in html or "name" in html
-        finally:
-            page._template_registry.clear()
-            page._template_registry.update(original_registry)
-
-    def test_render_form_fragment_includes_current_template_path(self) -> None:
-        """Error replay context must set current_template_path (used by {% component %})."""
-        request = MagicMock(spec=HttpRequest)
-        request.method = "GET"
+    @pytest.mark.parametrize(
+        ("registry_template", "output_mode"),
+        [
+            ("{{ form.name }}", "form_fields"),
+            ("{{ current_template_path }}", "path"),
+        ],
+        ids=("form_fields", "current_template_path"),
+    )
+    def test_renders_from_registry_template(
+        self, mock_http_request, registry_template: str, output_mode: str
+    ) -> None:
+        """Render fragment using template stored in page registry for the action file."""
+        request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "a"})
         backend = form_action_manager.default_backend
         assert isinstance(backend, RegistryFormActionBackend)
@@ -185,12 +152,15 @@ class TestRenderFormFragment:
         assert meta is not None
         file_path = meta["file_path"]
         original_registry = page._template_registry.copy()
-        page._template_registry[file_path] = "{{ current_template_path }}"
+        page._template_registry[file_path] = registry_template
         try:
             html = backend.render_form_fragment(
                 request, "test_submit", form, template_fragment=None
             )
-            assert str(file_path) in html
+            if output_mode == "path":
+                assert str(file_path) in html
+            else:
+                assert "a" in html or "name" in html
         finally:
             page._template_registry.clear()
             page._template_registry.update(original_registry)
@@ -310,9 +280,14 @@ class TestDispatchViaClient:
         resp = client.get("/_next/form/unknown_uid_12345/")
         assert resp.status_code == 404
 
-    def test_valid_uid_get_returns_405(self, client) -> None:
+    @pytest.mark.parametrize(
+        "action_name",
+        ["test_submit", "test_no_form"],
+        ids=("with_form_class", "without_form_class"),
+    )
+    def test_get_returns_405(self, client, action_name: str) -> None:
         """GET form action URL returns 405 Method Not Allowed."""
-        url = form_action_manager.get_action_url("test_submit")
+        url = form_action_manager.get_action_url(action_name)
         resp = client.get(url)
         assert resp.status_code == 405
 
@@ -341,12 +316,6 @@ class TestDispatchViaClient:
         assert resp.status_code == 302
         assert resp.url == "/done/"
 
-    def test_no_form_action_get_returns_405(self, client) -> None:
-        """Action without form_class GET returns 405."""
-        url = form_action_manager.get_action_url("test_no_form")
-        resp = client.get(url)
-        assert resp.status_code == 405
-
     def test_no_form_action_post_returns_200(self, client) -> None:
         """Action without form_class POST returns 200 and body."""
         url = form_action_manager.get_action_url("test_no_form")
@@ -358,29 +327,30 @@ class TestDispatchViaClient:
 class TestFormTagParse:
     """_parse_form_tag_args: quoted and unquoted values."""
 
-    def test_quoted_args(self) -> None:
-        """Parse quoted key=value args from tag."""
-        args = _parse_form_tag_args('@action="submit_contact" class="my-form"')
-        assert args.get("@action") == "submit_contact"
-        assert args.get("class") == "my-form"
-
-    def test_unquoted_value(self) -> None:
-        """Parse unquoted key=value from tag."""
-        args = _parse_form_tag_args("foo=bar")
-        assert args.get("foo") == "bar"
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            (
+                '@action="submit_contact" class="my-form"',
+                {"@action": "submit_contact", "class": "my-form"},
+            ),
+            ("foo=bar", {"foo": "bar"}),
+        ],
+        ids=("quoted", "unquoted"),
+    )
+    def test_parses_key_value_pairs(self, raw: str, expected: dict[str, str]) -> None:
+        """Parse tag string into key value pairs."""
+        args = _parse_form_tag_args(raw)
+        assert args == expected
 
 
 class TestFormTagSyntax:
     """{% form %} tag: required @action, syntax errors."""
 
-    def test_requires_at_least_one_arg(self) -> None:
+    def test_requires_at_least_one_arg(self, form_engine) -> None:
         """{% form %} without args raises TemplateSyntaxError."""
-        engine = Engine.get_default()
-        if "next.templatetags.forms" not in engine.template_libraries:
-            lib = __import__("next.templatetags.forms", fromlist=[""])
-            engine.libraries["next.templatetags.forms"] = lib
         with pytest.raises(TemplateSyntaxError):
-            engine.from_string("{% load forms %}{% form %}x{% endform %}")
+            form_engine.from_string("{% form %}x{% endform %}")
 
     def test_requires_action_name_raises(self, form_engine) -> None:
         """{% form %} without @action raises with 'requires' message."""
@@ -635,7 +605,7 @@ class TestBaseFormGetInitial:
         ):
             func(request)  # This will trigger the error
 
-    def test_post_with_non_string_value_in_dispatch(self) -> None:
+    def test_post_with_non_string_value_in_dispatch(self, mock_http_request) -> None:
         """Test that POST values that are not strings are handled correctly in dispatch."""
         backend = RegistryFormActionBackend()
 
@@ -651,25 +621,12 @@ class TestBaseFormGetInitial:
             "test_action", handler, options=FormActionOptions(form_class=TestForm)
         )
 
-        # Create a mock request with non-string POST value
-        request = MagicMock(spec=HttpRequest)
-        request.method = "POST"
-        # Create a QueryDict-like mock that supports both string and non-string values
-        # First create normal POST data
-        post_data = QueryDict(mutable=True)
-        post_data["name"] = "test"
-        post_data["_url_param_test"] = "123"  # Normal string value first
-
-        # Then manually add non-string value to test that branch
-        # We'll test the non-string handling by directly testing the extraction logic
         mock_post = MagicMock()
-        # Simulate POST.items() returning a non-string value for _url_param_test
         mock_post.items.return_value = [
-            ("_url_param_test", ["list", "value"]),  # Non-string value
-            ("name", "test"),  # Form field
+            ("_url_param_test", ["list", "value"]),
+            ("name", "test"),
         ]
-        request.POST = mock_post
-        request.FILES = None
+        request = mock_http_request(method="POST", POST=mock_post, FILES=None)
 
         # Test the extraction logic directly to cover the non-string branch
         url_kwargs: dict[str, object] = {}
@@ -829,7 +786,9 @@ class TestBaseFormGetInitial:
         result = func(request)
         assert result.form.initial.get("slug") == "my-slug"
 
-    def test_dispatch_with_modelform_returning_instance(self) -> None:
+    def test_dispatch_with_modelform_returning_instance(
+        self, mock_http_request
+    ) -> None:
         """Test dispatch creates form with instance when ModelForm returns instance."""
         backend = RegistryFormActionBackend()
 
@@ -862,13 +821,9 @@ class TestBaseFormGetInitial:
             "test_action", handler, options=FormActionOptions(form_class=TestModelForm)
         )
 
-        # Create a POST request
-        request = MagicMock(spec=HttpRequest)
-        request.method = "POST"
         mock_post = MagicMock()
         mock_post.items.return_value = [("name", "test")]
-        request.POST = mock_post
-        request.FILES = None
+        request = mock_http_request(method="POST", POST=mock_post, FILES=None)
 
         meta = backend.get_meta("test_action")
         assert meta is not None
@@ -878,7 +833,9 @@ class TestBaseFormGetInitial:
         # Should succeed
         assert response.status_code == 302
 
-    def test_dispatch_with_non_string_post_value_real_call(self) -> None:
+    def test_dispatch_with_non_string_post_value_real_call(
+        self, mock_http_request
+    ) -> None:
         """Test dispatch handles non-string POST values in real call."""
         backend = RegistryFormActionBackend()
 
@@ -894,17 +851,12 @@ class TestBaseFormGetInitial:
             "test_action", handler, options=FormActionOptions(form_class=TestForm)
         )
 
-        # Create a mock request with non-string POST value
-        request = MagicMock(spec=HttpRequest)
-        request.method = "POST"
         mock_post = MagicMock()
-        # Simulate POST.items() returning a non-string value
         mock_post.items.return_value = [
-            ("_url_param_test", ["list", "value"]),  # Non-string value (covers 357-358)
-            ("name", "test"),  # Form field
+            ("_url_param_test", ["list", "value"]),
+            ("name", "test"),
         ]
-        request.POST = mock_post
-        request.FILES = None
+        request = mock_http_request(method="POST", POST=mock_post, FILES=None)
 
         meta = backend.get_meta("test_action")
         assert meta is not None
@@ -914,7 +866,7 @@ class TestBaseFormGetInitial:
         # Should succeed
         assert response.status_code == 302
 
-    def test_dispatch_with_string_post_value_not_int(self) -> None:
+    def test_dispatch_with_string_post_value_not_int(self, mock_http_request) -> None:
         """Test dispatch handles string POST values that can't be converted to int."""
         backend = RegistryFormActionBackend()
 
@@ -930,20 +882,12 @@ class TestBaseFormGetInitial:
             "test_action", handler, options=FormActionOptions(form_class=TestForm)
         )
 
-        # Create a mock request with string POST value that can't be converted to int
-        request = MagicMock(spec=HttpRequest)
-        request.method = "POST"
         mock_post = MagicMock()
-        # Simulate POST.items() returning a string value that raises ValueError on int()
         mock_post.items.return_value = [
-            (
-                "_url_param_test",
-                "not_a_number",
-            ),  # String that can't be int (covers 353-356)
-            ("name", "test"),  # Form field
+            ("_url_param_test", "not_a_number"),
+            ("name", "test"),
         ]
-        request.POST = mock_post
-        request.FILES = None
+        request = mock_http_request(method="POST", POST=mock_post, FILES=None)
 
         meta = backend.get_meta("test_action")
         assert meta is not None
@@ -953,7 +897,9 @@ class TestBaseFormGetInitial:
         # Should succeed
         assert response.status_code == 302
 
-    def test_render_form_fragment_with_non_string_post_value_real_call(self) -> None:
+    def test_render_form_fragment_with_non_string_post_value_real_call(
+        self, mock_http_request
+    ) -> None:
         """Test render_form_fragment handles non-string POST values in real call."""
         backend = RegistryFormActionBackend()
 
@@ -970,13 +916,11 @@ class TestBaseFormGetInitial:
             options=FormActionOptions(form_class=TestForm, file_path=test_file),
         )
 
-        # Create a mock request with non-string POST value
-        request = MagicMock(spec=HttpRequest)
         mock_post = MagicMock()
         mock_post.items.return_value = [
-            ("_url_param_test", ["list", "value"]),  # Non-string value (covers 478-479)
+            ("_url_param_test", ["list", "value"]),
         ]
-        request.POST = mock_post
+        request = mock_http_request(POST=mock_post)
 
         # Pre-populate template registry
         meta = backend.get_meta("test_action")
@@ -991,7 +935,9 @@ class TestBaseFormGetInitial:
         )
         assert isinstance(html, str)
 
-    def test_render_form_fragment_with_string_post_value_not_int(self) -> None:
+    def test_render_form_fragment_with_string_post_value_not_int(
+        self, mock_http_request
+    ) -> None:
         """Test render_form_fragment handles string POST values that can't be converted to int."""
         backend = RegistryFormActionBackend()
 
@@ -1008,16 +954,11 @@ class TestBaseFormGetInitial:
             options=FormActionOptions(form_class=TestForm, file_path=test_file),
         )
 
-        # Create a mock request with string POST value that can't be converted to int
-        request = MagicMock(spec=HttpRequest)
         mock_post = MagicMock()
         mock_post.items.return_value = [
-            (
-                "_url_param_test",
-                "not_a_number",
-            ),  # String that can't be int (covers 474-477)
+            ("_url_param_test", "not_a_number"),
         ]
-        request.POST = mock_post
+        request = mock_http_request(POST=mock_post)
 
         # Pre-populate template registry
         meta = backend.get_meta("test_action")
@@ -1032,7 +973,7 @@ class TestBaseFormGetInitial:
         )
         assert isinstance(html, str)
 
-    def test_dispatch_with_form_without_get_initial(self) -> None:
+    def test_dispatch_with_form_without_get_initial(self, mock_http_request) -> None:
         """Test that dispatch raises TypeError when form class doesn't have get_initial."""
         backend = RegistryFormActionBackend()
 
@@ -1051,12 +992,9 @@ class TestBaseFormGetInitial:
             options=FormActionOptions(form_class=CustomDjangoForm),
         )
 
-        # Create a POST request
-        request = MagicMock(spec=HttpRequest)
-        request.method = "POST"
-        request.POST = MagicMock()
-        request.POST.items.return_value = []
-        request.FILES = None
+        post = MagicMock()
+        post.items.return_value = []
+        request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = backend.get_meta("test_action")
         assert meta is not None
@@ -1065,7 +1003,9 @@ class TestBaseFormGetInitial:
         with pytest.raises(TypeError, match="must have get_initial method"):
             _FormActionDispatch.dispatch(backend, request, "test_action", meta)
 
-    def test_dispatch_with_form_returning_instance_but_not_modelform(self) -> None:
+    def test_dispatch_with_form_returning_instance_but_not_modelform(
+        self, mock_http_request
+    ) -> None:
         """Test that dispatch raises TypeError when Form returns instance but isn't ModelForm."""
         backend = RegistryFormActionBackend()
 
@@ -1087,12 +1027,9 @@ class TestBaseFormGetInitial:
             "test_action", handler, options=FormActionOptions(form_class=CustomForm)
         )
 
-        # Create a POST request
-        request = MagicMock(spec=HttpRequest)
-        request.method = "POST"
-        request.POST = MagicMock()
-        request.POST.items.return_value = []
-        request.FILES = None
+        post = MagicMock()
+        post.items.return_value = []
+        request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = backend.get_meta("test_action")
         assert meta is not None
@@ -1103,7 +1040,9 @@ class TestBaseFormGetInitial:
         ):
             _FormActionDispatch.dispatch(backend, request, "test_action", meta)
 
-    def test_render_form_fragment_with_non_string_post_value(self) -> None:
+    def test_render_form_fragment_with_non_string_post_value(
+        self, mock_http_request
+    ) -> None:
         """Test render_form_fragment handles non-string POST values."""
         backend = RegistryFormActionBackend()
 
@@ -1120,11 +1059,9 @@ class TestBaseFormGetInitial:
             options=FormActionOptions(form_class=TestForm, file_path=test_file),
         )
 
-        # Create a mock request with non-string POST value
-        request = MagicMock(spec=HttpRequest)
         mock_post = MagicMock()
         mock_post.items.return_value = [("_url_param_test", ["list", "value"])]
-        request.POST = mock_post
+        request = mock_http_request(POST=mock_post)
 
         # Pre-populate template registry
         meta = backend.get_meta("test_action")

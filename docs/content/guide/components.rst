@@ -24,7 +24,7 @@ Components are provided by backends, similar to the page router. In Django setti
 - ``PAGES_DIR`` (str, default ``"pages"``) — directory name under each app package where the pages tree lives (used with ``APP_DIRS``).
 - ``COMPONENTS_DIR`` (str, default ``"_components"``) — folder name to look for **under** each pages root when scanning apps (e.g. ``myapp/pages/_components/``). Use the same value in the file router’s ``OPTIONS`` (``NEXT_FRAMEWORK["DEFAULT_PAGE_ROUTERS"]``) so URLs skip that folder.
 - ``COMPONENTS_DIRS`` (list of paths or ``Path`` objects) — directories registered as **global** component roots (visible from every template). Only entries whose paths exist are used.
-- You may list **several backends** in ``DEFAULT_COMPONENT_BACKENDS``; earlier entries win when the same component name appears twice.
+- You may list **several backends** in ``DEFAULT_COMPONENT_BACKENDS``. Earlier entries win when the same component name appears twice.
 
 ``component.py`` modules are always loaded with the framework’s built-in :class:`~next.components.ModuleLoader`.
 
@@ -49,7 +49,7 @@ Minimal example:
        ],
    }
 
-Full example with every key shown (values are illustrative; remove or adjust what you do not need):
+Full example with every key shown (values are illustrative. Remove or adjust what you do not need):
 
 .. code-block:: python
 
@@ -157,7 +157,7 @@ You can ship a composite with **no** ``component.djx`` file by assigning a templ
 Component context (no page context)
 -----------------------------------
 
-Context for a component is provided only through the **components** API (``next.components``), not through ``next.pages``. It is not inherited from the page by default; it only adds variables when the component is rendered.
+Context for a component is provided only through the **components** API (``next.components``), not through ``next.pages``. It is not inherited from the page by default. It only adds variables when the component is rendered.
 
 In ``component.py`` you **must not** use context from ``next.pages`` (e.g. ``from next.pages import context`` or ``page.context``). Use the component context API from ``next.components`` instead. This is enforced by the ``python manage.py check`` system (see :ref:`components-checks`).
 
@@ -205,13 +205,13 @@ Everything after the component name on ``{% component %}`` is parsed as ``name="
 **Invoking a component**
 
 - Without body: ``{% component "card" title="Post 1" description="First post" %} {% endcomponent %}``
-- With slots: put ``{% slot "name" %} ... {% endslot %}`` inside the component block; the component template can render them with ``{% set_slot "name" %} ... {% endset_slot %}`` (with optional default content between the tags).
+- With slots: put ``{% slot "name" %} ... {% endslot %}`` inside the component block. The component template can render them with ``{% set_slot "name" %} ... {% endset_slot %}`` (with optional default content between the tags).
 
 Components are available in ``template.djx`` and ``layout.djx`` without a ``{% load %}`` (they are in builtins). Use the same block form (with ``{% endcomponent %}``) even when there is no body.
 
 **Defining slots in the component template**
 
-- ``{% set_slot "avatar" %}`` … ``{% endset_slot %}`` — place where slot content is inserted; the content between the tags is the default if the slot is not provided.
+- ``{% set_slot "avatar" %}`` … ``{% endset_slot %}`` — place where slot content is inserted. The content between the tags is the default if the slot is not provided.
 
 Example (call site):
 
@@ -238,7 +238,7 @@ Example (component template ``_components/profile/component.djx``):
 
 **Template inheritance and includes**
 
-``component.djx`` and inline ``component = "..."`` strings are normal Django templates. You may use ``{% extends %}`` or ``{% include %}`` like anywhere else; keep component paths and block names easy to reason about because errors surface at render time for that component only.
+``component.djx`` and inline ``component = "..."`` strings are normal Django templates. You may use ``{% extends %}`` or ``{% include %}`` like anywhere else. Keep component paths and block names easy to reason about because errors surface at render time for that component only.
 
 Python API
 ----------

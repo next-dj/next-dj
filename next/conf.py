@@ -1,4 +1,7 @@
-"""Next framework settings ``NEXT_FRAMEWORK`` in Django ``settings``."""
+"""Provide merged ``settings.NEXT_FRAMEWORK`` with framework ``DEFAULTS``.
+
+Caches imported classes until ``NextFrameworkSettings.reload()`` clears caches.
+"""
 
 from __future__ import annotations
 
@@ -17,21 +20,14 @@ _import_class_cache: dict[str, type[Any]] = {}
 
 
 def import_class_cached(dotted_path: str) -> type[Any]:
-    """Resolve ``dotted_path`` to a class.
-
-    Result is cached until :meth:`NextFrameworkSettings.reload`.
-    """
+    """Import a class by dotted path and cache it until ``reload()``."""
     if dotted_path not in _import_class_cache:
         _import_class_cache[dotted_path] = import_string(dotted_path)
     return _import_class_cache[dotted_path]
 
 
-def _clear_import_class_cache() -> None:
-    _import_class_cache.clear()
-
-
 class NextFrameworkSettings:
-    """Merged ``settings.NEXT_FRAMEWORK`` with :attr:`DEFAULTS` (attribute access)."""
+    """Lazy merged view of ``NEXT_FRAMEWORK`` keys defined in ``DEFAULTS``."""
 
     DEFAULTS: ClassVar[dict[str, Any]] = {
         "DEFAULT_PAGE_ROUTERS": [
@@ -57,19 +53,20 @@ class NextFrameworkSettings:
         ],
     }
 
-    #: Top-level keys whose values are dotted paths resolved via :func:`import_string`.
     IMPORT_STRINGS: ClassVar[frozenset[str]] = frozenset()
 
     def __init__(self) -> None:
-        """Initialize merge cache and per-attribute value cache."""
+        """Empty merge and attribute caches."""
         self._merged_cache: dict[str, Any] | None = None
         self._attr_value_cache: dict[str, Any] = {}
 
     def reload(self) -> None:
-        """Clear caches and refresh router and component manager state."""
+        """Drop caches and reload URL and component backends."""
         self._merged_cache = None
         self._attr_value_cache.clear()
-        _clear_import_class_cache()
+
+        _import_class_cache.clear()
+
         urls_mod = importlib.import_module("next.urls")
         components_mod = importlib.import_module("next.components")
         urls_mod.router_manager._reload_config()
@@ -106,7 +103,7 @@ class NextFrameworkSettings:
         return out
 
     def __getattr__(self, attr: str) -> Any:  # noqa: ANN401
-        """Return merged setting ``attr`` (cached after first access)."""
+        """Return merged value for known ``DEFAULTS`` keys."""
         if attr in self._attr_value_cache:
             return self._attr_value_cache[attr]
         if attr not in self.DEFAULTS:
@@ -118,13 +115,13 @@ class NextFrameworkSettings:
         return val
 
     def __setattr__(self, name: str, value: Any) -> None:  # noqa: ANN401
-        """Allow internal slots; forbid assigning top-level framework keys."""
+        """Allow only internal caches."""
         if name in {"_merged_cache", "_attr_value_cache"}:
             super().__setattr__(name, value)
             return
         if name in self.DEFAULTS:
             msg = (
-                f"Setting {name!r} cannot be assigned; update "
+                f"Setting {name!r} cannot be assigned. Update "
                 f"settings.{USER_SETTING} instead."
             )
             raise AttributeError(msg)
@@ -132,7 +129,7 @@ class NextFrameworkSettings:
 
 
 def perform_import(val: Any, setting_name: str) -> Any:  # noqa: ANN401
-    """Resolve ``val`` when it is a dotted path (see :attr:`IMPORT_STRINGS`)."""
+    """Resolve ``val`` when it is a dotted path (see ``IMPORT_STRINGS``)."""
     if val is None or not isinstance(val, str):
         return val
     try:
