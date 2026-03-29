@@ -19,7 +19,7 @@ def app_greeting() -> str:
 def landing_context_custom_name_with_args_kwargs(
     app_greeting: str,
 ) -> dict[str, str]:
-    """Param name matches context key; ContextKeyProvider injects it."""
+    """Param name matches the context key. ContextKeyProvider injects it."""
     return {
         "title": "Welcome to the Catalog",
         "description": "Discover our collection of amazing products and find what suits you best. Fast, simple, and convenient shopping experience.",

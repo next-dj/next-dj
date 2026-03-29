@@ -18,17 +18,17 @@ logger = logging.getLogger(__name__)
 
 
 class NextStatReloader(StatReloader):
-    """StatReloader that also reacts to route/layout/template set changes."""
+    """Triggers reload when page routes or ``.djx`` sets change, not only mtimes."""
 
     def __init__(self) -> None:
-        """Init previous-route/layout/template state for set comparison."""
+        """Baseline sets for routes, layouts, and templates."""
         super().__init__()
         self._previous_routes: set[tuple[str, Path]] | None = None
         self._previous_layouts: set[Path] | None = None
         self._previous_templates: set[Path] | None = None
 
     def _check_routes(self, current: set[tuple[str, Path]]) -> None:
-        """Notify once when the set of (url_path, file_path) routes changes."""
+        """Ping autoreload when the discovered route set differs."""
         prev = self._previous_routes
         if prev is None or current == prev:
             self._previous_routes = current
@@ -41,7 +41,7 @@ class NextStatReloader(StatReloader):
     def _check_layouts(
         self, current: set[Path], current_routes: set[tuple[str, Path]]
     ) -> None:
-        """Notify when the set of layout files changes."""
+        """Ping when layout files change for affected routes."""
         prev = self._previous_layouts
         if prev is None or current == prev:
             self._previous_layouts = current
@@ -60,7 +60,7 @@ class NextStatReloader(StatReloader):
         self._previous_layouts = current
 
     def _check_templates(self, current: set[Path]) -> None:
-        """Notify once when the set of template files changes."""
+        """Ping when any ``template.djx`` set changes."""
         prev = self._previous_templates
         if prev is None or current == prev:
             self._previous_templates = current
@@ -71,7 +71,7 @@ class NextStatReloader(StatReloader):
         self._previous_templates = current
 
     def tick(self) -> Generator[None, None, None]:
-        """Run next-dj set checks, then one parent tick step."""
+        """Compare route/layout/template sets, then run ``StatReloader.tick``."""
         parent_ticker = super().tick()
         while True:
             try:

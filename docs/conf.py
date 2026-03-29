@@ -20,13 +20,6 @@ if not settings.configured:
             'django.contrib.auth',
             'next',
         ],
-        NEXT_PAGES=[
-            {
-                'BACKEND': 'next.urls.FileRouterBackend',
-                'APP_DIRS': True,
-                'OPTIONS': {},
-            },
-        ],
         TEMPLATES=[
             {
                 'BACKEND': 'django.template.backends.django.DjangoTemplates',

@@ -106,14 +106,14 @@ def test_check_duplicate_url_parameters() -> None:
     assert errors == []
 
 
-def test_check_missing_page_content() -> None:
-    """Test check_missing_page_content check."""
+def test_check_page_functions() -> None:
+    """Test check_page_functions check."""
     checks_module = importlib.import_module("next.checks")
-    check_missing_page_content = checks_module.check_missing_page_content
+    check_page_functions = checks_module.check_page_functions
 
     app_configs = apps.get_app_configs()
-    errors = check_missing_page_content(app_configs)
-    assert errors == []
+    messages = check_page_functions(app_configs)
+    assert messages == []
 
 
 def test_example_pages_comprehensive(client) -> None:
@@ -263,7 +263,7 @@ def test_example_files_coverage() -> None:
     assert callable(kwargs_page.render)
     assert callable(args_page.render)
 
-    # Call render with resolved params only (DI-style); no request when not in signature
+    # Call render with resolved params only (DI-style). No request when not in signature.
     response = simple_page.render()
     assert response.status_code == 200
 

@@ -60,28 +60,28 @@ def test_layout_features(client, url, expected_feature) -> None:
     "check_function",
     [
         "check_duplicate_url_parameters",
-        "check_missing_page_content",
+        "check_page_functions",
         "check_layout_templates",
     ],
-    ids=["duplicate_params", "missing_content", "layout_templates"],
+    ids=["duplicate_params", "page_functions", "layout_templates"],
 )
 def test_checks(check_function) -> None:
     """Test next-dj checks."""
     checks_module = importlib.import_module("next.checks")
     check_duplicate_url_parameters = checks_module.check_duplicate_url_parameters
-    check_missing_page_content = checks_module.check_missing_page_content
+    check_page_functions = checks_module.check_page_functions
     check_layout_templates = checks_module.check_layout_templates
 
     check_funcs = {
         "check_duplicate_url_parameters": check_duplicate_url_parameters,
-        "check_missing_page_content": check_missing_page_content,
+        "check_page_functions": check_page_functions,
         "check_layout_templates": check_layout_templates,
     }
 
     check_func = check_funcs[check_function]
     app_configs = apps.get_app_configs()
-    errors = check_func(app_configs)
-    assert errors == []
+    messages = check_func(app_configs)
+    assert messages == []
 
 
 def test_global_layout_from_root_pages(client) -> None:

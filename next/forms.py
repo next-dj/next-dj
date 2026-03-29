@@ -1,8 +1,8 @@
-"""Form actions for next-dj.
+"""Form actions and helpers for next-dj.
 
-Register handlers with @forms.action. Each action gets a unique UID endpoint.
-Handlers run only when the form is valid. Otherwise the form is re-rendered
-with errors. CSRF token is inserted in forms automatically.
+Register handlers with ``@forms.action``. Each action gets a stable UID endpoint.
+Valid submissions run the handler. Invalid forms re-render with errors. CSRF is
+applied for posted forms.
 """
 
 import hashlib
@@ -106,10 +106,10 @@ class DForm[FormT](DDependencyBase[FormT]):
 
 
 class FormProvider(RegisteredParameterProvider):
-    """Provide form when param is DForm[FormClass], form class, or name 'form'."""
+    """``DForm[...]``, a concrete form class, or the parameter name ``form``."""
 
     def can_handle(self, param: inspect.Parameter, context: object) -> bool:
-        """Return True if this provider can supply the form for the parameter."""
+        """Context has a form matching the annotation or name."""
         form = getattr(context, "form", None)
         if form is None:
             return False
@@ -190,7 +190,7 @@ class FormActionOptions:
 
 
 class FormActionBackend(ABC):
-    """Backend for form actions. Plug registry, config or dynamic source."""
+    """Storage and HTTP dispatch for ``@action`` handlers."""
 
     @abstractmethod
     def register_action(
@@ -200,22 +200,22 @@ class FormActionBackend(ABC):
         *,
         options: FormActionOptions | None = None,
     ) -> None:
-        """Register one action. Used by @action decorator."""
+        """Record an action from the decorator."""
 
     @abstractmethod
     def get_action_url(self, action_name: str) -> str:
-        """URL for that action. KeyError if unknown."""
+        """Reverse URL for ``action_name``."""
 
     @abstractmethod
     def generate_urls(self) -> list[URLPattern]:
-        """URL patterns for all registered actions."""
+        """URLconf entries for this backend."""
 
     @abstractmethod
     def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
-        """Handle GET/POST by uid. 404 if uid unknown."""
+        """Run the handler for ``uid``."""
 
     def get_meta(self, action_name: str) -> dict[str, Any] | None:  # noqa: ARG002
-        """Metadata for action or None. Override in custom backends."""
+        """Return optional per-action metadata for subclasses."""
         return None
 
     def render_form_fragment(
@@ -225,7 +225,7 @@ class FormActionBackend(ABC):
         form: django_forms.Form | None,  # noqa: ARG002
         template_fragment: str | None = None,  # noqa: ARG002
     ) -> str:
-        """HTML fragment for re-display. Override for custom rendering."""
+        """Override this method to provide custom HTML for validation errors."""
         return ""
 
 
@@ -257,10 +257,10 @@ def _get_caller_path(back_count: int = 1) -> Path:
 
 
 class RegistryFormActionBackend(FormActionBackend):
-    """In-memory backend. One URL pattern serves all actions by uid."""
+    """In-memory actions behind one dispatcher path keyed by UID."""
 
     def __init__(self) -> None:
-        """Empty registry and uid->name map."""
+        """Empty action map."""
         self._registry: dict[str, ActionMeta] = {}
         self._uid_to_name: dict[str, str] = {}
 
@@ -338,7 +338,7 @@ class RegistryFormActionBackend(FormActionBackend):
             )
 
     def get_action_url(self, action_name: str) -> str:
-        """URL for that action. KeyError if unknown."""
+        """Reverse URL for a registered name."""
         if action_name not in self._registry:
             msg = f"Unknown form action: {action_name}"
             raise KeyError(msg)
@@ -350,14 +350,14 @@ class RegistryFormActionBackend(FormActionBackend):
             return reverse(URL_NAME_FORM_ACTION, kwargs=kwargs)
 
     def generate_urls(self) -> list[URLPattern]:
-        """Single path that dispatches by uid."""
+        """One catch-all route when any action exists."""
         if not self._registry:
             return []
         view = require_http_methods(["GET", "POST"])(self.dispatch)
         return [path("_next/form/<str:uid>/", view, name=URL_NAME_FORM_ACTION)]
 
     def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
-        """Resolve uid to action and delegate to _FormActionDispatch.dispatch."""
+        """POST handler forwarded to ``_FormActionDispatch``."""
         action_name = self._uid_to_name.get(uid)
         if action_name not in self._registry:
             return HttpResponseNotFound()
@@ -367,7 +367,7 @@ class RegistryFormActionBackend(FormActionBackend):
         )
 
     def get_meta(self, action_name: str) -> dict[str, Any] | None:
-        """Metadata for that action or None."""
+        """Return stored ``ActionMeta`` for the name, if any."""
         return cast("dict[str, Any] | None", self._registry.get(action_name))
 
     def render_form_fragment(
@@ -377,7 +377,7 @@ class RegistryFormActionBackend(FormActionBackend):
         form: django_forms.Form | None,
         template_fragment: str | None = None,
     ) -> str:
-        """Delegate to default (template or form.as_p)."""
+        """Default fragment renderer."""
         return _FormActionDispatch.render_form_fragment(
             self, request, action_name, form, template_fragment
         )
@@ -386,7 +386,7 @@ class RegistryFormActionBackend(FormActionBackend):
 def _normalize_handler_response(
     raw: HttpResponse | str | None | object,
 ) -> HttpResponse | str | None:
-    """Handlers may return None, str, HttpResponse, or object with .url. Normalize."""
+    """Coerce handler output to string, response, redirect, or ``None``."""
     if raw is None or isinstance(raw, (HttpResponse, str)):
         return raw
     if hasattr(raw, "url") and (url := getattr(raw, "url", None)):
@@ -395,7 +395,7 @@ def _normalize_handler_response(
 
 
 class _FormActionDispatch:
-    """Dispatch and response normalization. Used by backends only."""
+    """Shared POST pipeline and response shaping for backends."""
 
     @staticmethod
     def dispatch(  # noqa: C901, PLR0912
@@ -404,7 +404,7 @@ class _FormActionDispatch:
         action_name: str,
         meta: dict[str, Any],
     ) -> HttpResponse:
-        """POST only. GET returns 405."""
+        """Validate the form, run the handler, or re-render errors."""
         handler = meta["handler"]
         form_class = meta.get("form_class")
 
@@ -506,7 +506,7 @@ class _FormActionDispatch:
         form: django_forms.Form | None,
         template_fragment: str | None,
     ) -> HttpResponse:
-        """HTML from backend.render_form_fragment wrapped in HttpResponse."""
+        """``HttpResponse`` around the error fragment."""
         html = backend.render_form_fragment(
             request, action_name, form, template_fragment
         )
@@ -519,7 +519,7 @@ class _FormActionDispatch:
         action_name: str | None = None,
         backend: FormActionBackend | None = None,
     ) -> HttpResponse:
-        """Normalize handler response to HttpResponse."""
+        """Coerce ``None``, str, or ``HttpResponse`` to a response."""
         response = _normalize_handler_response(response)
 
         if response is None:
@@ -541,7 +541,7 @@ class _FormActionDispatch:
         form: django_forms.Form | None,
         template_fragment: str | None,  # noqa: ARG004
     ) -> str:
-        """Render full page with form errors for regular POST response."""
+        """Full page template with bound form errors."""
         meta = backend.get_meta(action_name)
         if not meta:
             return form.as_p() if form else ""
@@ -589,17 +589,17 @@ class FormActionManager:
         self,
         backends: list[FormActionBackend] | None = None,
     ) -> None:
-        """One RegistryFormActionBackend if backends not given."""
+        """Initialize with backends or a single ``RegistryFormActionBackend``."""
         self._backends: list[FormActionBackend] = backends or [
             RegistryFormActionBackend(),
         ]
 
     def __repr__(self) -> str:
-        """Repr with backend count."""
+        """Debug representation."""
         return f"<{self.__class__.__name__} backends={len(self._backends)}>"
 
     def __iter__(self) -> Iterator[URLPattern]:
-        """URL patterns from all backends."""
+        """Concatenated patterns from each backend."""
         for backend in self._backends:
             yield from backend.generate_urls()
 
@@ -614,7 +614,7 @@ class FormActionManager:
         self._backends[0].register_action(name, handler, options=options)
 
     def get_action_url(self, action_name: str) -> str:
-        """URL from first backend that has this action. KeyError if none."""
+        """Reverse URL from the first backend that knows ``action_name``."""
         for backend in self._backends:
             if backend.get_meta(action_name) is not None:
                 return backend.get_action_url(action_name)

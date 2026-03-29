@@ -45,21 +45,29 @@ if not settings.configured:
                 },
             },
         ],
-        NEXT_PAGES=[
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "APP_DIRS": True,
-            },
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "APP_DIRS": False,
-                "OPTIONS": {
-                    "PAGES_DIR": str(
-                        project_root / "examples" / "file-routing" / "root_pages",
-                    ),
+        NEXT_FRAMEWORK={
+            "DEFAULT_PAGE_ROUTERS": [
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "PAGES_DIR": "pages",
+                    "APP_DIRS": True,
+                    "OPTIONS": {
+                        "COMPONENTS_DIR": "_components",
+                    },
                 },
-            },
-        ],
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "PAGES_DIR": "pages",
+                    "APP_DIRS": False,
+                    "OPTIONS": {
+                        "COMPONENTS_DIR": "_components",
+                        "PAGES_DIR": str(
+                            project_root / "examples" / "file-routing" / "root_pages",
+                        ),
+                    },
+                },
+            ],
+        },
         USE_TZ=True,
         TIME_ZONE="UTC",
         ALLOWED_HOSTS=["testserver"],

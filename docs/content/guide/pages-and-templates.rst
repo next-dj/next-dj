@@ -61,7 +61,7 @@ The system tries to load templates in this order:
 2. **Python string templates** (``template`` attribute)
 3. **Template files** (``template.djx`` files)
 
-This allows for flexible template organization and inheritance. ``.djx`` and layout content are loaded on **first render** of each page and then cached; if file mtime changes, the cache is invalidated and the template is reloaded on the next request (no server restart needed for content-only changes).
+This allows for flexible template organization and inheritance. ``.djx`` and layout content are loaded on **first render** of each page and then cached. If file mtime changes, the cache is invalidated and the template is reloaded on the next request (no server restart needed for content-only changes).
 
 Layout System
 -------------
@@ -76,29 +76,29 @@ How Layout Inheritance Works
 3. **Hierarchical Composition**: Layouts are composed by string replacement, not Django's extends mechanism
 4. **Block Replacement**: The ``{% block template %}{% endblock %}`` in each layout is replaced with the composed content
 
-Multiple NEXT_PAGES Configurations
-----------------------------------
+Multiple router entries
+-----------------------
 
-next.dj supports multiple NEXT_PAGES configurations, allowing you to have different layout hierarchies for different parts of your application:
+next.dj supports multiple entries in ``NEXT_FRAMEWORK["DEFAULT_PAGE_ROUTERS"]``, allowing you to have different layout hierarchies for different parts of your application:
 
 .. code-block:: python
 
-   NEXT_PAGES = [
-       {
-           'BACKEND': 'next.urls.FileRouterBackend',
-           'APP_DIRS': True,
-           'OPTIONS': {
-               'pages_dir': 'pages',  # Main site pages
+   NEXT_FRAMEWORK = {
+       "DEFAULT_PAGE_ROUTERS": [
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "PAGES_DIR": "pages",
+               "APP_DIRS": True,
+               "OPTIONS": {},
            },
-       },
-       {
-           'BACKEND': 'next.urls.FileRouterBackend',
-           'APP_DIRS': True,
-           'OPTIONS': {
-               'pages_dir': 'admin_pages',  # Admin interface pages
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "PAGES_DIR": "admin_pages",
+               "APP_DIRS": True,
+               "OPTIONS": {},
            },
-       },
-   ]
+       ],
+   }
 
 This allows you to have:
 - **Main site layout** in ``pages/layout.djx``
@@ -108,7 +108,7 @@ This allows you to have:
 Root Layout for Entire Site
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A site-wide layout is provided the same way as root-level pages: via **PAGES_DIRS** or **PAGES_DIR** in the same backend (see :doc:`file-router`). Add a directory (e.g. ``root_pages``) that contains ``layout.djx``; it can contain only that file (no ``page.py``) and will be used as an additional layout for all app pages. If the directory also has its own pages, they are served as root-level URLs; duplicate URL patterns with app pages cause a check error (``next.E015``).
+A site-wide layout is provided the same way as root-level pages: via **PAGES_DIRS** or **PAGES_DIR** in the same backend (see :doc:`file-router`). Add a directory (e.g. ``root_pages``) that contains ``layout.djx``. It can contain only that file (no ``page.py``) and will be used as an additional layout for all app pages. If the directory also has its own pages, they are served as root-level URLs. Duplicate URL patterns with app pages cause a check error (``next.E015``).
 
 .. code-block:: python
 
@@ -154,7 +154,7 @@ Layout Inheritance Chain
 Layouts can inherit from each other through the directory hierarchy. The system automatically discovers and composes layouts from multiple sources:
 
 1. **Local layouts** (from current directory hierarchy)
-2. **Additional layouts** (from other NEXT_PAGES directories)
+2. **Additional layouts** (from other configured root pages directories)
 
 When a page is rendered, the system composes all layouts in the inheritance chain:
 
@@ -330,16 +330,10 @@ The system includes validation checks for template integrity:
 **Layout Template Validation** (``check_layout_templates``):
 - Validates that layout.djx files contain the required ``{% block template %}`` structure
 - Provides warnings for layout files that may cause inheritance issues
-- Can be disabled by setting ``NEXT_PAGES_OPTIONS.check_layout_template_blocks = False``
 
-**Missing Template Validation** (``check_missing_templates``):
-- Ensures every page.py has either a template attribute or template.djx file
-- Prevents pages from being created without proper template definitions
-
-**Missing Page Content Validation** (``check_missing_page_content``):
-- Checks for page.py files that have no content (no template, no render function)
-- Validates that pages have either template variable, template.djx file, layout.djx file, or render function
-- Can be disabled by setting ``NEXT_PAGES_OPTIONS.check_missing_page_content = False``
+**Page modules** (``check_page_functions``):
+- Ensures each ``page.py`` defines a callable ``render`` and/or a template (attribute or ``template.djx``)
+- Emits a warning when a file has no template, render, ``template.djx``, or ``layout.djx`` (see :doc:`../reference/system-checks`)
 
 Run validation checks:
 

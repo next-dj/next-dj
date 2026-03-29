@@ -2,7 +2,7 @@
 
 help: # show this help message
 	@echo "Available commands:"
-	@echo "  install         - install the package"
+	@echo "  install         - sync runtime deps + project from uv.lock (no dev group)"
 	@echo "  test            - run tests in parallel with 100% coverage requirement"
 	@echo "  test-examples   - run tests for examples in parallel with coverage"
 	@echo "  lint            - run linting with ruff"
@@ -19,11 +19,11 @@ help: # show this help message
 	@echo "  docs-clean      - clean documentation build"
 	@echo "  docs-linkcheck  - check documentation links"
 
-install: # install the package
-	uv pip install -e .
+install: # install the package (editable) using the lockfile
+	uv sync --locked --no-dev
 
 test: # run tests with 100% coverage requirement
-	uv run pytest tests/ -n auto -v --cov=next --cov-report=html --cov-report=term-missing --cov-fail-under=100
+	uv run pytest tests/ -n auto --cov=next --cov-report=html --cov-report=term-missing --cov-fail-under=100
 
 test-examples: # run tests for examples with coverage
 	@set -e; \
@@ -43,10 +43,10 @@ test-examples: # run tests for examples with coverage
 	for example_dir in examples/*/; do \
 		if [ -d "$$example_dir" ]; then \
 			if [ -d "$$example_dir/tests" ]; then \
-				cd "$$example_dir" && uv run pytest tests/ -n auto -v --cov=. --cov-config=../.coveragerc --cov-report=term-missing; \
+				cd "$$example_dir" && uv run pytest tests/ -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing; \
 				cd - > /dev/null; \
 			elif [ -f "$$example_dir/tests.py" ]; then \
-				cd "$$example_dir" && uv run pytest tests.py -n auto -v --cov=. --cov-config=../.coveragerc --cov-report=term-missing; \
+				cd "$$example_dir" && uv run pytest tests.py -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing; \
 				cd - > /dev/null; \
 			fi; \
 		fi; \
@@ -74,7 +74,7 @@ clean: # clean build artifacts
 	find . -type f -name "*.pyc" -delete
 
 build: # build the package
-	uv run python -m build
+	uv build
 
 pre-commit-install: # install pre-commit hooks
 	uv run pre-commit install
@@ -89,11 +89,11 @@ ci: # run all CI checks locally with 100% coverage
 	make test-examples
 
 dev-setup: # setup development environment
-	uv sync --dev
+	uv sync --locked --dev
 	make pre-commit-install
 
 docs: # build documentation
-	uv sync --group docs
+	uv sync --locked --group docs
 	uv run sphinx-build docs docs/_build
 
 docs-serve: docs # build and serve documentation
@@ -104,5 +104,5 @@ docs-clean: # clean documentation build
 	rm -rf docs/_build/*
 
 docs-linkcheck: # check documentation links
-	uv sync --group docs
+	uv sync --locked --group docs
 	uv run sphinx-build -b linkcheck docs docs/_build

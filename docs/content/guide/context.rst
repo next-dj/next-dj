@@ -65,19 +65,22 @@ Use Django's context processors for global template variables:
 .. code-block:: python
 
    # settings.py
-   NEXT_PAGES = [
-       {
-           'BACKEND': 'next.urls.FileRouterBackend',
-           'APP_DIRS': True,
-           'OPTIONS': {
-               'context_processors': [
-                   'django.template.context_processors.request',
-                   'django.template.context_processors.debug',
-                   'myapp.context_processors.global_context',
-               ],
+   NEXT_FRAMEWORK = {
+       "DEFAULT_PAGE_ROUTERS": [
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "PAGES_DIR": "pages",
+               "APP_DIRS": True,
+               "OPTIONS": {
+                   "context_processors": [
+                       "django.template.context_processors.request",
+                       "django.template.context_processors.debug",
+                       "myapp.context_processors.global_context",
+                   ],
+               },
            },
-       },
-   ]
+       ],
+   }
 
 .. code-block:: python
 
@@ -105,8 +108,8 @@ Dependency Injection
 
 Context functions receive only the arguments they declare: the framework resolves
 parameters from the request context (request, URL kwargs, form) by inspecting
-the function signature. Declare ``request: HttpRequest``, ``id: int``, etc.; no
-``*args`` or ``**kwargs`` needed.
+the function signature. Declare ``request: HttpRequest``, ``id: int``, and so on.
+You do not need ``*args`` or ``**kwargs``.
 
 Injecting context by name: Context and Depends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -267,17 +270,10 @@ The system includes validation checks for context functions:
 **Context Function Validation** (``check_context_functions``):
 - Validates that context functions decorated with ``@context`` (without key) always return a dictionary
 - Ensures proper return types for different context function patterns
-- Can be disabled by setting ``NEXT_PAGES_OPTIONS.check_context_return_types = False``
 
 **Page Function Validation** (``check_page_functions``):
 - Ensures page.py files have valid render functions or proper template definitions
-- Validates function signatures, return types, and argument handling
-- Prevents runtime errors during page rendering
-
-**Missing Page Content Validation** (``check_missing_page_content``):
-- Checks for page.py files that have no content (no template, no render function)
-- Validates that pages have either template variable, template.djx file, layout.djx file, or render function
-- Can be disabled by setting ``NEXT_PAGES_OPTIONS.check_missing_page_content = False``
+- Warns when a page has no template, render, ``template.djx``, or ``layout.djx``
 
 Run validation checks:
 

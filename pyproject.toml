@@ -50,6 +50,7 @@ dev = [
     "build==1.4.2",
     "twine==6.2.0",
     "pytest-xdist==3.8.0",
+    "pytest-lazy-fixtures==1.4.0",
 ]
 docs = [
     "sphinx==9.0.4",

@@ -5,13 +5,13 @@ from django.conf import settings
 
 
 class NextFrameworkConfig(AppConfig):
-    """Configuration class for the next-dj Django framework app."""
+    """Wires autoreload, template tag builtins, and page directory watches."""
 
     name = "next"
     verbose_name = "Next Django Framework"
 
     def ready(self) -> None:
-        """Patch StatReloader, register pages dirs, add form builtins."""
+        """Swap ``StatReloader``, ensure tag builtins, watch pages trees."""
         # Deferred imports to avoid circular deps (next.urls/next.utils) and
         # because autoreload is only needed when wiring the reloader.
         from django.utils import autoreload  # noqa: PLC0415

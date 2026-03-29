@@ -1,7 +1,6 @@
-"""Template tag {% form %} for next-dj form actions.
+"""Template tag ``{% form %}`` for next-dj form actions.
 
-Parses @action and other HTML attributes, inserts csrf_token,
-and outputs a <form> with method="post".
+Parses ``@action`` and other attributes, inserts the CSRF token, and emits POST forms.
 """
 
 from __future__ import annotations

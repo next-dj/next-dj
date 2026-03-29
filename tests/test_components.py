@@ -40,12 +40,20 @@ from next.components import (
     load_component_template,
     render_component,
 )
+from tests.support import (
+    next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
+    next_framework_settings_for_checks_backends_value as _next_framework_settings_for_checks_backends_value,
+    patch_checks_components_manager,
+)
 
 
-def test_next_components_all_exports() -> None:
-    """Every name in ``next.components.__all__`` exists on the module."""
-    for name in next_components_mod.__all__:
-        assert hasattr(next_components_mod, name)
+class TestComponentsModuleExports:
+    """``next.components`` public API surface."""
+
+    def test_all_names_exist_on_module(self) -> None:
+        """Every name in ``__all__`` exists on the module."""
+        for name in next_components_mod.__all__:
+            assert hasattr(next_components_mod, name)
 
 
 class TestComponentInfo:
@@ -112,8 +120,8 @@ class TestFileComponentsBackend:
         assert not info.is_simple
         assert info.template_path == tmp_path / "profile" / "component.djx"
 
-    def test_discover_in_pages_root_finds_components_dir(self, tmp_path: Path) -> None:
-        """Pages root discovery finds _components and scans it."""
+    def test_discover_under_app_root_finds_components_dir(self, tmp_path: Path) -> None:
+        """``_components`` under a pages root is scanned when app roots supply that path."""
         (tmp_path / "_components").mkdir()
         (tmp_path / "_components" / "card.djx").write_text("<div>card</div>")
         backend = FileComponentsBackend(
@@ -147,21 +155,6 @@ class TestFileComponentsBackend:
         roots2 = backend2._root_discovery.discover_component_roots(backend2.options)
         assert len(roots2) == 1
         assert roots2[0] == tmp_path.resolve()
-
-    def test_discover_all_via_patched_app_roots(self, tmp_path: Path) -> None:
-        """Discovery runs when app roots return a path with _components."""
-        (tmp_path / "_components").mkdir()
-        (tmp_path / "_components" / "card.djx").write_text("<div>card</div>")
-        backend = FileComponentsBackend(
-            {"APP_DIRS": True, "OPTIONS": {}},
-        )
-        with patch.object(
-            backend._root_discovery, "discover_app_roots", return_value=[tmp_path]
-        ):
-            backend._ensure_loaded()
-        assert len(backend._registry) == 1
-        components = list(backend._registry)
-        assert components[0].name == "card"
 
     def test_root_components_visible_from_any_path(self, tmp_path: Path) -> None:
         """Root component roots are visible from any template path."""
@@ -246,30 +239,41 @@ class TestComponentsManager:
     """Tests for ComponentsManager."""
 
     def test_get_component_empty_when_no_config(self) -> None:
-        """When NEXT_COMPONENTS is not set or empty, get_component returns None."""
-        with patch("next.components.settings") as mock_settings:
-            mock_settings.NEXT_COMPONENTS = []
+        """When ``BACKENDS`` is empty, get_component returns None."""
+        mock_ns = _next_framework_settings_component_backends_list([])
+        with patch("next.components.next_framework_settings", mock_ns):
             manager = ComponentsManager()
             manager._reload_config()
             assert manager.get_component("card", Path("/tmp/t.djx")) is None
 
     def test_collect_visible_components_merges_backends(self) -> None:
         """collect_visible_components merges from all backends, first wins."""
-        with patch("next.components.settings") as mock_settings:
-            mock_settings.NEXT_COMPONENTS = []
+        mock_ns = _next_framework_settings_component_backends_list([])
+        with patch("next.components.next_framework_settings", mock_ns):
             manager = ComponentsManager()
             manager._reload_config()
             assert manager.collect_visible_components(Path("/x")) == {}
 
     def test_reload_config_swallows_backend_creation_error(self) -> None:
         """When create_backend raises, _reload_config logs and continues."""
-        with patch("next.components.settings") as mock_settings:
-            mock_settings.NEXT_COMPONENTS = [
+        mock_ns = _next_framework_settings_component_backends_list(
+            [
                 {"BACKEND": "next.components.NonexistentBackend", "OPTIONS": {}},
-            ]
+            ],
+        )
+        with patch("next.components.next_framework_settings", mock_ns):
             manager = ComponentsManager()
             manager._reload_config()
             assert len(manager._backends) == 0
+
+    def test_template_loader_built_with_default_module_loader(self) -> None:
+        """Render pipeline uses ``ComponentTemplateLoader`` wrapping ``ModuleLoader``."""
+        mgr = ComponentsManager()
+        mock_ns = _next_framework_settings_component_backends_list([])
+        with patch("next.components.next_framework_settings", mock_ns):
+            mgr._reload_config()
+        assert isinstance(mgr.template_loader, ComponentTemplateLoader)
+        assert isinstance(mgr.component_renderer, ComponentRenderer)
 
 
 class TestGetComponent:
@@ -419,15 +423,15 @@ class TestChecks:
     """Tests for component-related Django checks."""
 
     def test_check_duplicate_component_names_empty_when_no_config(self) -> None:
-        """check_duplicate_component_names returns [] when NEXT_COMPONENTS not set."""
-        with patch("next.checks.settings") as mock_settings:
-            mock_settings.NEXT_COMPONENTS = None
+        """check_duplicate_component_names returns [] when backends is not a list."""
+        mock_ns = _next_framework_settings_for_checks_backends_value(None)
+        with patch("next.checks.next_framework_settings", mock_ns):
             assert check_duplicate_component_names() == []
 
     def test_check_component_py_no_pages_context_empty_when_no_config(self) -> None:
-        """check_component_py_no_pages_context returns [] when NEXT_COMPONENTS not set."""
-        with patch("next.checks.settings") as mock_settings:
-            mock_settings.NEXT_COMPONENTS = None
+        """check_component_py_no_pages_context returns [] when backends is not a list."""
+        mock_ns = _next_framework_settings_for_checks_backends_value(None)
+        with patch("next.checks.next_framework_settings", mock_ns):
             assert check_component_py_no_pages_context() == []
 
     def test_check_duplicate_component_names_reports_duplicate(
@@ -447,13 +451,8 @@ class TestChecks:
         )
         fake_backend._loaded = True
 
-        with patch("next.checks.settings") as mock_settings:
-            mock_settings.NEXT_COMPONENTS = [{"BACKEND": "x", "OPTIONS": {}}]
-            with patch("next.checks.ComponentsManager") as mock_manager_klass:
-                mock_manager = mock_manager_klass.return_value
-                mock_manager._reload_config = lambda: None
-                mock_manager._backends = [fake_backend]
-                errors = check_duplicate_component_names()
+        with patch_checks_components_manager(fake_backend):
+            errors = check_duplicate_component_names()
         assert any(e.id == "next.E020" for e in errors)
 
     def test_check_component_py_no_pages_context_reports_import(
@@ -476,13 +475,8 @@ class TestChecks:
         )
         fake_backend._loaded = True
 
-        with patch("next.checks.settings") as mock_settings:
-            mock_settings.NEXT_COMPONENTS = [{"BACKEND": "x", "OPTIONS": {}}]
-            with patch("next.checks.ComponentsManager") as mock_manager_klass:
-                mock_manager = mock_manager_klass.return_value
-                mock_manager._reload_config = lambda: None
-                mock_manager._backends = [fake_backend]
-                errors = check_component_py_no_pages_context()
+        with patch_checks_components_manager(fake_backend):
+            errors = check_component_py_no_pages_context()
         assert any(e.id == "next.E021" for e in errors)
 
 
@@ -897,7 +891,7 @@ class TestComponentInfoDunders:
         assert "ComponentInfo" in r
 
     def test_hash_eq_includes_paths(self) -> None:
-        """Same name and scope but different files are not equal; scope_key can match."""
+        """Same name and scope but different files are not equal. ``scope_key`` can still match."""
         r = Path("/p")
         a = ComponentInfo("x", r, "", Path("/p/a.djx"), None, True)
         b = ComponentInfo("x", r, "", Path("/p/b.djx"), None, True)
@@ -915,7 +909,7 @@ class TestModuleLoaderDisk:
     """ModuleLoader loads from disk the same way the old helper did."""
 
     def test_success_and_failure(self, tmp_path: Path) -> None:
-        """Valid module loads; syntax errors yield ``None``."""
+        """A valid module loads. Syntax errors yield ``None``."""
         good = tmp_path / "ok.py"
         good.write_text("ANSWER = 42\n")
         loader = ModuleLoader()
@@ -972,7 +966,7 @@ class TestComponentScanner:
     """ComponentScanner edge cases."""
 
     def test_scan_oserror_on_iterdir(self, tmp_path: Path) -> None:
-        """OSError from iterdir is swallowed; empty list returned."""
+        """OSError from ``iterdir`` is swallowed. An empty list is returned."""
         err = OSError("no access")
 
         def boom() -> None:
@@ -1102,7 +1096,7 @@ class TestComponentVisibilityResolver:
         assert resolver.resolve_visible(outside) == {}
 
     def test_path_cache_and_clear_cache(self, tmp_path: Path) -> None:
-        """Second resolve reuses cache; clear_cache resets."""
+        """The second resolve reuses the cache. ``clear_cache`` resets it."""
         pages = tmp_path / "pages"
         tmpl = pages / "home.djx"
         tmpl.parent.mkdir(parents=True)
@@ -1215,7 +1209,7 @@ class TestComponentRenderers:
     def test_composite_render_returns_httpresponse_content(
         self, tmp_path: Path
     ) -> None:
-        """render() may return HttpResponse; content is decoded to str."""
+        """``render()`` may return ``HttpResponse``. Content is decoded to ``str``."""
         d = tmp_path / "hr"
         d.mkdir()
         (d / "component.py").write_text(
@@ -1293,7 +1287,7 @@ class TestComponentRenderers:
         d = tmp_path / "nt"
         d.mkdir()
         (d / "component.djx").write_text("<p>x</p>")
-        (d / "component.py").write_text("# template path via djx; no render()\n")
+        (d / "component.py").write_text("# template path via djx. no render()\n")
         info = ComponentInfo(
             "nt",
             tmp_path,
@@ -1390,17 +1384,8 @@ class TestFileComponentsBackendDiscovery:
         assert len(backend._registry) == 0
 
 
-class TestFileComponentsBackendRuntime:
-    """``NEXT_COMPONENTS_RUNTIME`` and discovery edge cases."""
-
-    def test_respects_next_components_runtime_module_loader(self) -> None:
-        """``NEXT_COMPONENTS_RUNTIME`` can point at a custom ``ModuleLoader`` class."""
-        with patch("next.components.settings") as m:
-            m.NEXT_COMPONENTS_RUNTIME = {
-                "module_loader_class": "next.components.ModuleLoader",
-            }
-            b = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
-            assert isinstance(b._module_loader, ModuleLoader)
+class TestFileComponentsBackendDiscoveryEdgeCases:
+    """Discovery edge cases for ``FileComponentsBackend``."""
 
     def test_discover_skips_when_components_name_is_file(self, tmp_path: Path) -> None:
         """A file named like the components dir is ignored during discovery."""
@@ -1417,31 +1402,6 @@ class TestFileComponentsBackendRuntime:
             {"APP_DIRS": False, "OPTIONS": "invalid"},
         )
         assert b.options == {}
-
-
-class TestComponentsManagerRenderPipeline:
-    """Lazy render pipeline and ``NEXT_COMPONENTS_RUNTIME``."""
-
-    def test_runtime_module_loader_class(self) -> None:
-        """Manager render pipeline honors ``module_loader_class`` when it is a string."""
-        mgr = ComponentsManager()
-        with patch("next.components.settings") as m:
-            m.NEXT_COMPONENTS_RUNTIME = {
-                "module_loader_class": "next.components.ModuleLoader",
-            }
-            m.NEXT_COMPONENTS = []
-            mgr._reload_config()
-            tl = mgr.template_loader
-            assert isinstance(tl, ComponentTemplateLoader)
-
-    def test_runtime_dict_non_string_loader_uses_default(self) -> None:
-        """Invalid ``module_loader_class`` values fall back to ``ModuleLoader``."""
-        mgr = ComponentsManager()
-        with patch("next.components.settings") as m:
-            m.NEXT_COMPONENTS_RUNTIME = {"module_loader_class": 123}
-            m.NEXT_COMPONENTS = []
-            mgr._reload_config()
-            assert isinstance(mgr.template_loader, ComponentTemplateLoader)
 
 
 class TestComponentsFactoryManager:
@@ -1466,29 +1426,47 @@ class TestComponentsFactoryManager:
         assert b.collect_visible_components(Path("/t.djx")) == {}
 
     def test_manager_skips_non_list_config_and_non_dict_entries(self) -> None:
-        """NEXT_COMPONENTS not a list returns early; non-dict entries skipped."""
+        """If ``DEFAULT_COMPONENT_BACKENDS`` is not a list, return early. Non-dict entries are skipped."""
         mgr = ComponentsManager()
-        with patch("next.components.settings") as m:
-            m.NEXT_COMPONENTS = "bad"
+        mock_ns = _next_framework_settings_component_backends_list("bad")
+        with patch("next.components.next_framework_settings", mock_ns):
             mgr._reload_config()
             assert mgr._backends == []
 
         mgr2 = ComponentsManager()
-        with patch("next.components.settings") as m:
-            m.NEXT_COMPONENTS = [
+        mock_ns2 = _next_framework_settings_component_backends_list(
+            [
                 None,
-                {"BACKEND": "next.components.FileComponentsBackend"},
-            ]
+                {
+                    "BACKEND": "next.components.FileComponentsBackend",
+                    "APP_DIRS": True,
+                    "OPTIONS": {
+                        "COMPONENTS_DIR": "_components",
+                        "PAGES_DIR": "pages",
+                    },
+                },
+            ],
+        )
+        with patch("next.components.next_framework_settings", mock_ns2):
             mgr2._reload_config()
             assert len(mgr2._backends) >= 1
 
     def test_manager_swallows_backend_init_exception(self) -> None:
-        """Exception from create_backend is logged; backend not appended."""
+        """An exception from ``create_backend`` is logged. The backend is not appended."""
         mgr = ComponentsManager()
-        with patch("next.components.settings") as m:
-            m.NEXT_COMPONENTS = [
-                {"BACKEND": "next.components.BoomBackend"},
-            ]
+        mock_ns = _next_framework_settings_component_backends_list(
+            [
+                {
+                    "BACKEND": "next.components.BoomBackend",
+                    "APP_DIRS": True,
+                    "OPTIONS": {
+                        "COMPONENTS_DIR": "_components",
+                        "PAGES_DIR": "pages",
+                    },
+                },
+            ],
+        )
+        with patch("next.components.next_framework_settings", mock_ns):
             mgr._reload_config()
         assert mgr._backends == []
 

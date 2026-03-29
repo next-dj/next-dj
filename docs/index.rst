@@ -99,6 +99,7 @@ Sponsors
    :maxdepth: 1
 
    content/api/reference
+   content/reference/system-checks
 
 .. toctree::
    :caption: Contributing

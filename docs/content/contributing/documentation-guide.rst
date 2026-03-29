@@ -6,12 +6,11 @@ This guide explains how to write and maintain documentation for next.dj.
 Documentation Structure
 -----------------------
 
-The documentation is organized into logical sections:
+The documentation is organized into logical sections (see ``index.rst``):
 
-* **Getting Started** - Installation and basic setup
-* **Core Features** - Main framework features (file router, templates, context)
-* **API Reference** - Complete API documentation
-* **Development** - Contributing guidelines and development docs
+* **Guide** - Getting started and main framework topics (routing, templates, components, context, forms, and more)
+* **API Reference** - Generated API docs and reference pages such as system checks
+* **Contributing** - This guide and :doc:`the contributing guide </content/contributing/contributing>`
 
 File Naming Convention
 ----------------------
@@ -80,41 +79,37 @@ Before submitting documentation changes:
 - [ ] All new features are documented
 - [ ] Code examples are tested and working
 - [ ] RST syntax is correct (no warnings)
-- [ ] Links are working (use ``make linkcheck``)
+- [ ] Links are working (use ``make docs-linkcheck``)
 - [ ] Table of contents is updated
 - [ ] Cross-references are working
 
 Building Documentation
 ----------------------
 
+Doc tooling is invoked from the **project root** via the root ``Makefile`` (there is no ``docs/Makefile``).
+
 To build documentation locally:
 
 .. code-block:: bash
 
-   # From project root
    make docs
 
-   # Or from docs directory
-   cd docs
-   make html
+After ``uv sync --locked --group docs``, you can build with ``uv run sphinx-build docs docs/_build``.
 
-To serve documentation:
+To open the built HTML in your browser after a build:
 
 .. code-block:: bash
 
-   # From project root
    make docs-serve
 
-   # Or from docs directory
-   cd docs
-   make serve
+On macOS, ``make docs-serve`` runs ``open docs/_build/index.html``. On other systems, open ``docs/_build/index.html`` in a browser yourself. On Linux, ``xdg-open`` is a common way to do that.
 
 Common Issues
 -------------
 
 * **Duplicate object descriptions** - Use ``:no-index:`` for duplicate API docs
 * **Missing imports** - Ensure all modules are importable in ``conf.py``
-* **Broken links** - Run ``make linkcheck`` to find broken links
+* **Broken links** - Run ``make docs-linkcheck`` to find broken links
 * **RST warnings** - Fix indentation and formatting issues
 
-Remember: Good documentation is as important as good code!
+Remember that good documentation is as important as good code.

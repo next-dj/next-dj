@@ -17,12 +17,12 @@ This example demonstrates next-dj **components** in a small **blog** app (Englis
 ## What This Example Demonstrates
 
 - **Simple components** — single `.djx` file (e.g. footer).
-- **Composite components** — folder with `component.djx` and/or `component.py`; `component.py` can register **component context** via `from next.components import context` and `@context` / `@context("key")` (similar to `next.pages.context`).
-- **Slots** — `{% component "post_card" %} ... {% slot "title" %} ... {% endslot %} ...` because `{% component %}` props are string literals only; slots carry dynamic values from loops.
-- **author_chip** — small composite: default circular avatar (first letter of login) via `{% set_slot "avatar" %}`, plus a `login` slot for the username; used inside `post_card` meta and on the post detail header.
-- **Root components** (`root_components/`) visible from every template; **`pages/_components/`** shared across all templates under `pages/`; **`pages/posts/_components/`** only for templates under the `posts/` branch (see `draft_banner`).
-- **Layout** — `layout.djx` wraps pages; global **header** is a composite with `@context("user")`, merged branding keys, and a nested **server_time** component using `render()`.
-- **Forms** — `@forms.action()` for register, login, create post, update post; ModelForm + `get_initial()` for edit.
+- **Composite components** — folder with `component.djx` and/or `component.py`. `component.py` can register **component context** via `from next.components import context` and `@context` / `@context("key")` (similar to `next.pages.context`).
+- **Slots** — `{% component "post_card" %} ... {% slot "title" %} ... {% endslot %} ...` because `{% component %}` props are string literals only. Slots carry dynamic values from loops.
+- **author_chip** — small composite: default circular avatar (first letter of login) via `{% set_slot "avatar" %}`, plus a `login` slot for the username. Used inside `post_card` meta and on the post detail header.
+- **Root components** (`root_components/`) visible from every template. **`pages/_components/`** is shared across all templates under `pages/`. **`pages/posts/_components/`** is only for templates under the `posts/` branch (see `draft_banner`).
+- **Layout** — `layout.djx` wraps pages. Global **header** is a composite with `@context("user")`, merged branding keys, and a nested **server_time** component using `render()`.
+- **Forms** — `@forms.action()` for register, login, create post, update post. ModelForm + `get_initial()` for edit.
 - **Auth** — login/register pages, `LogoutView` at `/account/logout/`, middleware requiring login for `/posts/create/` and `/posts/<id>/edit/`.
 - **Blog** — `Post` model, paginated list at `/`, detail with recommendations, author-only edit.
 
@@ -31,7 +31,7 @@ This example demonstrates next-dj **components** in a small **blog** app (Englis
 ```
 components/
 ├── config/                      # Django project (settings, urls, test_settings for pytest)
-│   ├── settings.py              # NEXT_PAGES, NEXT_COMPONENTS, LOGIN_URL, middleware
+│   ├── settings.py              # NEXT_FRAMEWORK, LOGIN_URL, middleware
 │   ├── test_settings.py         # In-memory SQLite for tests
 │   └── urls.py                  # admin, logout, include(next.urls)
 ├── myapp/
@@ -66,13 +66,13 @@ components/
 
 ## Main Pieces
 
-**Post model** (`myapp/models.py`): `title`, `content`, `author` (FK User), `created_at`; `get_absolute_url()` for links.
+**Post model** (`myapp/models.py`): `title`, `content`, `author` (FK User), `created_at`. `get_absolute_url()` for links.
 
-**Home** (`myapp/pages/page.py`): `@context("page_obj")` -> `Paginator(Post.objects..., 10)`; template lists cards and pagination.
+**Home** (`myapp/pages/page.py`): `@context("page_obj")` -> `Paginator(Post.objects..., 10)`. Template lists cards and pagination.
 
 **Detail** (`posts/[int:id]/details/page.py`): context `post`, `recommended` (up to three other posts).
 
-**Create / edit** (`posts/create/`, `posts/[int:id]/edit/page.py`): `PostCreateForm` / `PostEditForm` with `@forms.action`; edit context checks author (`PermissionDenied` if not author); **draft_banner** component on both forms.
+**Create / edit** (`posts/create/`, `posts/[int:id]/edit/page.py`): `PostCreateForm` / `PostEditForm` with `@forms.action`. Edit context checks author (`PermissionDenied` if not author). **draft_banner** component on both forms.
 
 **Account** (`account/login/`, `account/register/page.py`): `LoginForm`, `RegisterForm` with `@forms.action`.
 
@@ -82,13 +82,13 @@ components/
 
 ## How It Works
 
-1. **File router** — Directories named `_components` are skipped for URL segments (`COMPONENTS_DIR` in `NEXT_PAGES` and `NEXT_COMPONENTS`).
+1. **File router** — Directories named `_components` are skipped for URL segments (`COMPONENTS_DIR` in `NEXT_FRAMEWORK` router and component options).
 
 2. **Component scope** — Templates resolve components from root dirs plus `_components` folders on the path from the pages root down to the template. A folder `pages/posts/_components/` is visible only under `pages/posts/...`, not from `pages/template.djx` at the root of the tree.
 
 3. **Component context** — In `component.py`, use `from next.components import context` and `@context` / `@context("user")`. The API is similar to `next.pages.context` but designed specifically for components. Do not use `next.pages.context` in `component.py`.
 
-4. **Forms** — Same pattern as the `forms` example: `{% form @action="create_post" %}`, POST to internal action URL; edit pages include hidden `_url_param_id` from the route.
+4. **Forms** — Same pattern as the `forms` example: `{% form @action="create_post" %}`, POST to internal action URL. Edit pages include hidden `_url_param_id` from the route.
 
 5. **Protected routes** — Middleware redirects anonymous users to `LOGIN_URL` with optional `?next=` for create/edit.
 
@@ -120,8 +120,8 @@ python manage.py runserver
 |-----|-------------|
 | `/` | Post list (10 per page, `?page=`) |
 | `/posts/<id>/details/` | Post + recommended posts |
-| `/posts/create/` | New post (signed in); branch-scoped banner |
-| `/posts/<id>/edit/` | Edit (author only); same banner |
+| `/posts/create/` | New post (signed in). Branch-scoped banner |
+| `/posts/<id>/edit/` | Edit (author only). Same banner |
 | `/account/login/`, `/account/register/` | Sign in / sign up |
 
 ### Running Tests
@@ -139,8 +139,8 @@ cd examples/components
 uv run pytest tests/ -v --no-cov
 ```
 
-`pytest.ini` sets `testpaths` and `pythonpath`; tests use `config.test_settings` (in-memory SQLite).
+`pytest.ini` sets `testpaths` and `pythonpath`. Tests use `config.test_settings` (in-memory SQLite).
 
 ## Contributing
 
-Issues and PRs welcome via the main next-dj repository; keep backward compatibility when changing examples.
+Issues and PRs welcome via the main next-dj repository. Keep backward compatibility when changing examples.

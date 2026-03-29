@@ -20,7 +20,7 @@ The app provides a todo list at `/`, create form on the same page, and edit at `
 ```
 forms/
 ├── config/                      # Django project configuration
-│   ├── settings.py              # Project settings with NEXT_PAGES
+│   ├── settings.py              # Project settings (optional NEXT_FRAMEWORK)
 │   └── urls.py                  # Main URL configuration (next.urls at root)
 ├── todos/                       # Django application
 │   ├── models.py                # Todo model
@@ -52,7 +52,7 @@ forms/
 - **URL:** `/edit/<id>/`
 - **Context:** `@context("todo")` -> `get_todo(request, id)` returns one todo or 404
 - **Form action:** `@forms.action("update_todo", form_class=TodoEditForm)` -> `update_todo_handler` saves and redirects to `/`
-- **Form:** `TodoEditForm` with `get_initial(request, id)` returning the `Todo` instance so ModelForm gets `instance=...` for editing; URL param `id` is passed from the route
+- **Form:** `TodoEditForm` with `get_initial(request, id)` returning the `Todo` instance so ModelForm gets `instance=...` for editing. URL param `id` is passed from the route
 
 **Templates:**
 - `layout.djx`: HTML shell, nav (active state for `/`), Django messages, `{% block template %}`
@@ -61,15 +61,15 @@ forms/
 
 ## How It Works
 
-1. **Form actions** — Handlers are registered with `@forms.action("name", form_class=FormClass)`. The name is used in templates as `{% form @action="name" %}`. POST goes to an internal action URL; next-dj dispatches to the handler and passes the validated form (and URL kwargs for parameterized pages).
+1. **Form actions** — Handlers are registered with `@forms.action("name", form_class=FormClass)`. The name is used in templates as `{% form @action="name" %}`. POST goes to an internal action URL. next-dj dispatches to the handler and passes the validated form (and URL kwargs for parameterized pages).
 
-2. **ModelForm and get_initial** — For create, `get_initial(request)` returns `{}`. For edit, `get_initial(request, id, **kwargs)` returns the `Todo` instance; the form is built with `instance=...`, so saving updates the same record. URL parameter `id` comes from the file route `[int:id]`.
+2. **ModelForm and get_initial** — For create, `get_initial(request)` returns `{}`. For edit, `get_initial(request, id, **kwargs)` returns the `Todo` instance. The form is built with `instance=...`, so saving updates the same record. URL parameter `id` comes from the file route `[int:id]`.
 
 3. **Template tag** — `{% form @action="create_todo" %} ... {% endform %}` render a `<form method="post">` with the correct action URL, CSRF token, and (on edit) hidden field for `id` (e.g. `_url_param_id`). Inside the tag, `form` is the form instance (e.g. `{{ form.as_p }}`). With `next` in `INSTALLED_APPS`, the tag is available without `{% load forms %}`.
 
-4. **Context** — List page uses `get_todos()`; edit page uses `get_todo(request, id)` so the template can show the todo and the form is pre-filled via `get_initial`.
+4. **Context** — List page uses `get_todos()`. Edit page uses `get_todo(request, id)` so the template can show the todo and the form is pre-filled via `get_initial`.
 
-5. **Messages** — After create/update, handlers call `messages.success(request, "...")` and redirect to `/`; the layout shows messages in the block above the content.
+5. **Messages** — After create/update, handlers call `messages.success(request, "...")` and redirect to `/`. The layout shows messages in the block above the content.
 
 ## Running the Example
 

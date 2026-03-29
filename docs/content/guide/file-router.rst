@@ -100,21 +100,24 @@ Use these names in your templates:
 Configuration
 -------------
 
-Configure the file router in your Django settings:
+Configure the file router in your Django settings (``NEXT_FRAMEWORK``):
 
 .. code-block:: python
 
-   NEXT_PAGES = [
-       {
-           'BACKEND': 'next.urls.FileRouterBackend',
-           'APP_DIRS': True,  # Scan Django app directories
-           'OPTIONS': {
-               'context_processors': [
-                   'myapp.context_processors.global_context',
-               ],
+   NEXT_FRAMEWORK = {
+       "DEFAULT_PAGE_ROUTERS": [
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "PAGES_DIR": "pages",
+               "APP_DIRS": True,  # Scan Django app directories
+               "OPTIONS": {
+                   "context_processors": [
+                       "myapp.context_processors.global_context",
+                   ],
+               },
            },
-       },
-   ]
+       ],
+   }
 
 **APP_DIRS**: Whether to scan Django app directories (default: True)
 **context_processors**: List of context processor paths for global template variables
@@ -134,16 +137,19 @@ You can use both in one backend: set ``APP_DIRS: True`` and add ``PAGES_DIRS`` o
    from pathlib import Path
    BASE_DIR = Path(__file__).resolve().parent.parent
 
-   NEXT_PAGES = [
-       {
-           'BACKEND': 'next.urls.FileRouterBackend',
-           'APP_DIRS': True,
-           'OPTIONS': {
-               'PAGES_DIRS': [str(BASE_DIR / "root_pages")],
-               'context_processors': [...],
+   NEXT_FRAMEWORK = {
+       "DEFAULT_PAGE_ROUTERS": [
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "PAGES_DIR": "pages",
+               "APP_DIRS": True,
+               "OPTIONS": {
+                   "PAGES_DIRS": [str(BASE_DIR / "root_pages")],
+                   "context_processors": [...],
+               },
            },
-       },
-   ]
+       ],
+   }
 
 **PAGES_DIRS**: List of absolute (or project-relative) paths to root-level pages directories.
 **PAGES_DIR**: Single path to one root-level pages directory (alternative to ``PAGES_DIRS``).
@@ -156,26 +162,26 @@ A directory whose name is set as the components folder (e.g. ``OPTIONS.COMPONENT
 Multiple Configurations
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-next.dj supports multiple NEXT_PAGES configurations, allowing you to have different routing strategies for different parts of your application:
+next.dj supports multiple router entries in ``NEXT_FRAMEWORK["DEFAULT_PAGE_ROUTERS"]``, allowing you to have different routing strategies for different parts of your application:
 
 .. code-block:: python
 
-   NEXT_PAGES = [
-       {
-           'BACKEND': 'next.urls.FileRouterBackend',
-           'APP_DIRS': True,
-           'OPTIONS': {
-               'pages_dir': 'pages',  # Main site pages
+   NEXT_FRAMEWORK = {
+       "DEFAULT_PAGE_ROUTERS": [
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "PAGES_DIR": "pages",
+               "APP_DIRS": True,
+               "OPTIONS": {},
            },
-       },
-       {
-           'BACKEND': 'next.urls.FileRouterBackend',
-           'APP_DIRS': True,
-           'OPTIONS': {
-               'pages_dir': 'admin_pages',  # Admin interface pages
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "PAGES_DIR": "admin_pages",
+               "APP_DIRS": True,
+               "OPTIONS": {},
            },
-       },
-   ]
+       ],
+   }
 
 This allows you to have:
 - **Main site routes** in ``pages/`` directory
@@ -209,7 +215,7 @@ Validation Checks
 The system includes comprehensive validation checks to prevent configuration errors:
 
 **Configuration Validation** (``check_next_pages_configuration``):
-- Validates NEXT_PAGES configuration structure
+- Validates ``NEXT_FRAMEWORK`` (including ``DEFAULT_PAGE_ROUTERS``) structure
 - Checks for required fields (BACKEND)
 - Validates backend types and option structures
 - Ensures all configured backends can be instantiated
@@ -221,12 +227,7 @@ The system includes comprehensive validation checks to prevent configuration err
 
 **Page Function Validation** (``check_page_functions``):
 - Ensures page.py files have valid render functions or templates
-- Validates function signatures and return types
-- Prevents runtime errors during page rendering
-
-**Template Validation** (``check_missing_templates``):
-- Ensures every page.py has either a template attribute or template.djx file
-- Prevents pages from being created without proper template definitions
+- Warns on empty pages when no template, render, or djx files are present
 
 **URL Pattern Validation** (``check_url_patterns``):
 - Generates URL patterns and validates them for conflicts

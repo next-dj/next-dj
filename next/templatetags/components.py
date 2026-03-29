@@ -1,9 +1,7 @@
-"""Django template tags that render next-dj components and named slots.
+"""Template tags for next-dj components (``{% component %}``, slots).
 
-``{% component %}`` resolves a component from ``current_template_path`` in the
-context, collects nested ``{% slot %}`` blocks, and passes props and slot HTML
-into the component renderer. ``{% set_slot %}`` outputs slot content from the
-context or a fallback body inside the tag.
+Resolve from ``current_template_path``, collect nested ``{% slot %}`` blocks, and
+pass props and slot HTML to the renderer.
 """
 
 from __future__ import annotations

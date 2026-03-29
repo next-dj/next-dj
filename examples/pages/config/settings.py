@@ -67,3 +67,17 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+NEXT_FRAMEWORK = {
+    "DEFAULT_PAGE_ROUTERS": [
+        {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "PAGES_DIR": "pages",
+            "APP_DIRS": True,
+            "OPTIONS": {
+                "COMPONENTS_DIR": "_components",
+                "PAGES_DIR": "catalog/pages",
+            },
+        },
+    ],
+}

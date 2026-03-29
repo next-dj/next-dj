@@ -6,7 +6,7 @@ inputs:
     required: false
     default: "3.12"
   django-version:
-    description: Django version to install (optional, skip if empty)
+    description: Django version to install (optional, skip if empty). Overrides the locked Django for matrix jobs only.
     required: false
     default: ""
   cache:
@@ -27,21 +27,13 @@ runs:
     - name: Install uv
       uses: astral-sh/setup-uv@v6
       with:
-        version: "latest"
-    - name: Cache uv dependencies
-      if: inputs.cache == 'true'
-      uses: actions/cache@v3
-      with:
-        path: |
-          .venv
-          .uv_cache
-        key: ${{ runner.os }}-uv-${{ hashFiles('**/uv.lock') }}-${{ inputs.cache-key-suffix }}
-        restore-keys: |
-          ${{ runner.os }}-uv-
+        version: "0.11.2"
+        enable-cache: ${{ inputs.cache == 'true' }}
+        cache-suffix: ${{ inputs.cache-key-suffix }}
     - name: Install dependencies
       shell: bash
-      run: uv sync --dev --python ${{ inputs.python-version }}
-    - name: Install Django ${{ inputs.django-version }}
+      run: uv sync --locked --dev --python ${{ inputs.python-version }}
+    - name: Install Django ${{ inputs.django-version }} (matrix override for integration tests)
       if: inputs.django-version != ''
       shell: bash
       run: uv pip install "django==${{ inputs.django-version }}"

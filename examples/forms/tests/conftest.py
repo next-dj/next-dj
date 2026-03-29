@@ -55,12 +55,6 @@ if not settings.configured:
                 },
             },
         ],
-        NEXT_PAGES=[
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "APP_DIRS": True,
-            },
-        ],
         USE_TZ=True,
         TIME_ZONE="UTC",
         ALLOWED_HOSTS=["testserver"],
