@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import inspect
 import tempfile
-import types
-from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 from django.http import HttpRequest
@@ -16,7 +15,12 @@ from next.conf import NextFrameworkSettings
 from next.deps import DependencyResolver
 from next.forms import FormProvider
 from next.urls import DUrl, FileRouterBackend, HttpRequestProvider, UrlKwargsProvider
-from next.utils import NextStatReloader
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Iterable
+
+    from next.utils import NextStatReloader
 
 
 def build_mock_http_request(
@@ -211,7 +215,7 @@ def _ctx(
     resolver_inst=None,
     _context_data=None,
     **kwargs: object,
-) -> types.SimpleNamespace:
+) -> SimpleNamespace:
     """Build dynamic context (SimpleNamespace) for provider tests."""
     if url_kwargs is None:
         reserved = {
@@ -224,7 +228,7 @@ def _ctx(
             "_context_data",
         }
         url_kwargs = {k: v for k, v in kwargs.items() if k not in reserved}
-    return types.SimpleNamespace(
+    return SimpleNamespace(
         request=request,
         form=form,
         url_kwargs=url_kwargs or {},
@@ -259,8 +263,6 @@ def route_watch_layer_patches(
     *,
     get_pages_directories_for_watch,
     _scan_pages_directory,
-    get_layout_djx_paths_for_watch=set(),
-    get_template_djx_paths_for_watch=set(),
     template_paths_side_effect=None,
 ):
     """Apply the usual ``next.utils`` patches around route discovery for ``tick()`` tests."""
@@ -272,7 +274,7 @@ def route_watch_layer_patches(
     else:
         template_patch = patch(
             "next.utils.get_template_djx_paths_for_watch",
-            return_value=get_template_djx_paths_for_watch,
+            return_value=set(),
         )
     with (
         patch(
@@ -282,7 +284,7 @@ def route_watch_layer_patches(
         patch("next.utils._scan_pages_directory", _scan_pages_directory),
         patch(
             "next.utils.get_layout_djx_paths_for_watch",
-            return_value=get_layout_djx_paths_for_watch,
+            return_value=set(),
         ),
         template_patch,
     ):

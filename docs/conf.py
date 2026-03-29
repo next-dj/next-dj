@@ -112,7 +112,6 @@ html_theme_options = {
 # html static files
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
-html_js_files = ["custom.js"]
 
 # ensure _static and _static/images exist
 import os
