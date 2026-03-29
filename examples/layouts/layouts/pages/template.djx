@@ -6,7 +6,7 @@
     <!-- Context processors example -->
     <div class="alert alert-info" role="alert">
         <h4 class="alert-heading">Context Processors Demo</h4>
-        <p>This page demonstrates the use of context_processors in NEXT_PAGES:</p>
+        <p>This page demonstrates the use of context_processors in NEXT_FRAMEWORK:</p>
         <ul>
             <li><strong>Site Name:</strong> {{ site_name }}</li>
             <li><strong>Version:</strong> {{ site_version }}</li>

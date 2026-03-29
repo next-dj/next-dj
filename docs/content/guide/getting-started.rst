@@ -35,8 +35,7 @@ Install from source
 
          git clone https://github.com/next-dj/next-dj.git
          cd next-dj
-         uv sync --dev
-         uv pip install -e .
+         uv sync --locked --dev
 
    .. tab-item:: pip
 
@@ -57,8 +56,7 @@ Development Installation
 
          git clone https://github.com/next-dj/next-dj.git
          cd next-dj
-         uv sync --dev
-         uv pip install -e .
+         uv sync --locked --dev
 
    .. tab-item:: pip
 
@@ -66,9 +64,9 @@ Development Installation
 
          git clone https://github.com/next-dj/next-dj.git
          cd next-dj
-         pip install -e ".[dev]"
+         pip install -e .
 
-This will install additional development tools like pytest, ruff, and mypy.
+Development tools (pytest, ruff, mypy, and others) are listed under ``[dependency-groups] dev`` in ``pyproject.toml``. With ``uv`` use ``uv sync --locked --dev``. With pip alone, install those packages as needed for your workflow.
 
 Django Setup
 ------------
@@ -97,21 +95,24 @@ Django Setup
        path('', include('next.urls')),
    ]
 
-3. Optionally configure ``NEXT_PAGES`` in your settings:
+3. Optionally configure ``NEXT_FRAMEWORK`` in your settings:
 
 .. code-block:: python
 
-   NEXT_PAGES = [
-       {
-           'BACKEND': 'next.urls.FileRouterBackend',
-           'APP_DIRS': True,
-           'OPTIONS': {
-               'context_processors': [
-                   'myapp.context_processors.global_context',
-               ],
+   NEXT_FRAMEWORK = {
+       "DEFAULT_PAGE_ROUTERS": [
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "PAGES_DIR": "pages",
+               "APP_DIRS": True,
+               "OPTIONS": {
+                   "context_processors": [
+                       "myapp.context_processors.global_context",
+                   ],
+               },
            },
-       },
-   ]
+       ],
+   }
 
 That's it! You're ready to start building with next.dj.
 

@@ -20,7 +20,7 @@ The app provides a todo list at `/`, create form on the same page, and edit at `
 ```
 forms/
 ├── config/                      # Django project configuration
-│   ├── settings.py              # Project settings with NEXT_PAGES
+│   ├── settings.py              # Project settings (optional NEXT_FRAMEWORK)
 │   └── urls.py                  # Main URL configuration (next.urls at root)
 ├── todos/                       # Django application
 │   ├── models.py                # Todo model

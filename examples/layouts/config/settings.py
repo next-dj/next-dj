@@ -74,19 +74,22 @@ STATICFILES_DIRS = [
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-# next-dj pages configuration (app pages + root_pages for global layout, like staticfiles)
-NEXT_PAGES = [
-    {
-        "BACKEND": "next.urls.FileRouterBackend",
-        "APP_DIRS": True,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-                "layouts.context_processors.site_info",
-            ],
-            "PAGES_DIRS": [str(BASE_DIR / "root_pages")],
+NEXT_FRAMEWORK = {
+    "DEFAULT_PAGE_ROUTERS": [
+        {
+            "BACKEND": "next.urls.FileRouterBackend",
+            "PAGES_DIR": "pages",
+            "APP_DIRS": True,
+            "OPTIONS": {
+                "COMPONENTS_DIR": "_components",
+                "context_processors": [
+                    "django.template.context_processors.request",
+                    "django.contrib.auth.context_processors.auth",
+                    "django.contrib.messages.context_processors.messages",
+                    "layouts.context_processors.site_info",
+                ],
+                "PAGES_DIRS": [str(BASE_DIR / "root_pages")],
+            },
         },
-    },
-]
+    ],
+}

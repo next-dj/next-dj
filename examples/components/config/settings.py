@@ -69,23 +69,16 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-NEXT_PAGES = [
-    {
-        "BACKEND": "next.urls.FileRouterBackend",
-        "APP_DIRS": True,
-        "OPTIONS": {
-            "COMPONENTS_DIR": "_components",
+NEXT_FRAMEWORK = {
+    "DEFAULT_COMPONENT_BACKENDS": [
+        {
+            "BACKEND": "next.components.FileComponentsBackend",
+            "APP_DIRS": True,
+            "OPTIONS": {
+                "COMPONENTS_DIR": "_components",
+                "PAGES_DIR": "pages",
+                "COMPONENTS_DIRS": [str(BASE_DIR / "root_components")],
+            },
         },
-    },
-]
-
-NEXT_COMPONENTS = [
-    {
-        "BACKEND": "next.components.FileComponentsBackend",
-        "APP_DIRS": True,
-        "OPTIONS": {
-            "COMPONENTS_DIR": "_components",
-            "COMPONENTS_DIRS": [str(BASE_DIR / "root_components")],
-        },
-    },
-]
+    ],
+}

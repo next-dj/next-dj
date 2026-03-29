@@ -1,9 +1,12 @@
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from django.test import override_settings
 
+from next.conf import next_framework_settings
 from next.pages import get_pages_directories_for_watch, page
 from next.urls import (
     FileRouterBackend,
@@ -510,19 +513,13 @@ class TestRouterFactory:
                 "success",
                 {
                     "BACKEND": "next.urls.FileRouterBackend",
+                    "PAGES_DIR": "pages",
                     "APP_DIRS": True,
                     "OPTIONS": {},
                 },
                 FileRouterBackend,
-                {"pages_dir": "pages", "app_dirs": True},
-            ),
-            (
-                "defaults",
-                {"BACKEND": "next.urls.FileRouterBackend"},
-                FileRouterBackend,
                 {"pages_dir": "pages", "app_dirs": True, "options": {}},
             ),
-            ("missing_backend", {}, FileRouterBackend, {}),
         ],
     )
     def test_create_backend_variations(
@@ -539,12 +536,54 @@ class TestRouterFactory:
         for attr, expected_value in expected_attrs.items():
             assert getattr(router, attr) == expected_value
 
+    @pytest.mark.parametrize(
+        ("config", "missing_key"),
+        [
+            ({}, "BACKEND"),
+            ({"BACKEND": "next.urls.FileRouterBackend"}, "PAGES_DIR"),
+            (
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "PAGES_DIR": "pages",
+                },
+                "APP_DIRS",
+            ),
+            (
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "PAGES_DIR": "pages",
+                    "APP_DIRS": True,
+                },
+                "OPTIONS",
+            ),
+        ],
+    )
+    def test_create_backend_keyerror_when_required_key_missing(
+        self,
+        config,
+        missing_key,
+    ) -> None:
+        """FileRouterBackend config must list BACKEND, PAGES_DIR, APP_DIRS, OPTIONS explicitly."""
+        with pytest.raises(KeyError) as exc:
+            RouterFactory.create_backend(config)
+        assert exc.value.args[0] == missing_key
+
     def test_create_backend_unsupported(self) -> None:
         """Test creating backend with unsupported backend name."""
         config = {"BACKEND": "unsupported.backend"}
 
         with pytest.raises(ValueError, match="Unsupported backend"):
             RouterFactory.create_backend(config)
+
+    def test_create_backend_typeerror_when_not_router_subclass(self) -> None:
+        """Registered class must be a RouterBackend subclass."""
+
+        class Plain:
+            pass
+
+        RouterFactory.register_backend("plain.not.Router", Plain)
+        with pytest.raises(TypeError, match="RouterBackend"):
+            RouterFactory.create_backend({"BACKEND": "plain.not.Router"})
 
     def test_create_backend_non_file_router_backend(self, custom_backend_class) -> None:
         """Test creating backend with non-FileRouterBackend type."""
@@ -630,7 +669,12 @@ class TestRouterManager:
             patch("next.urls.RouterFactory.create_backend") as mock_create,
         ):
             mock_get_config.return_value = [
-                {"BACKEND": "next.urls.FileRouterBackend"},
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "PAGES_DIR": "pages",
+                    "APP_DIRS": True,
+                    "OPTIONS": {},
+                },
             ]
             mock_router = Mock()
             mock_router.generate_urls.return_value = ["url1"]
@@ -690,15 +734,12 @@ class TestRouterManager:
         result = manager._get_next_pages_config()
         assert result == cached_config
 
-    def test_get_next_pages_config_no_next_pages_setting(self, manager) -> None:
-        """Test _get_next_pages_config when NEXT_PAGES setting is not configured."""
-        with patch("next.urls.settings") as mock_settings:
-            # remove NEXT_PAGES attribute to test default config
-            if hasattr(mock_settings, "NEXT_PAGES"):
-                delattr(mock_settings, "NEXT_PAGES")
-
+    def test_get_next_pages_config_no_next_setting(self, manager) -> None:
+        """When ``NEXT`` is unset, merged framework defaults include ``ROUTERS``."""
+        with override_settings(NEXT_FRAMEWORK=None):
+            next_framework_settings.reload()
+            manager._config_cache = None
             result = manager._get_next_pages_config()
-            # should return default config
             assert len(result) == 1
             assert result[0]["BACKEND"] == "next.urls.FileRouterBackend"
 
@@ -1096,61 +1137,99 @@ class TestGlobalInstances:
             assert pattern is None
 
 
+class TestRouterManagerNextPagesConfig:
+    """``RouterManager._get_next_pages_config`` defensive branches."""
+
+    def test_non_list_default_page_routers_returns_empty_cached(self) -> None:
+        """When ``DEFAULT_PAGE_ROUTERS`` is not a list, config is empty and cached."""
+        mock_nf = SimpleNamespace(DEFAULT_PAGE_ROUTERS="not-a-list")
+        with patch("next.urls.next_framework_settings", mock_nf):
+            mgr = RouterManager()
+            assert mgr._get_next_pages_config() == []
+            assert mgr._get_next_pages_config() == []
+
+
 class TestGetPagesDirectoriesForWatch:
     """Tests for get_pages_directories_for_watch()."""
 
-    def test_returns_empty_when_config_not_list(self, settings) -> None:
-        """When NEXT_PAGES is not a list, returns []."""
-        settings.NEXT_PAGES = {}
-        assert get_pages_directories_for_watch() == []
+    def test_returns_empty_when_routers_not_list(self) -> None:
+        """When ``ROUTERS`` is not a list, returns []."""
+        mock_nf = SimpleNamespace(DEFAULT_PAGE_ROUTERS={})
+        with patch("next.pages.next_framework_settings", mock_nf):
+            assert get_pages_directories_for_watch() == []
 
-    def test_skips_non_dict_config(self, settings) -> None:
+    def test_skips_non_dict_config(self) -> None:
         """List entries that are not dicts are skipped."""
-        settings.NEXT_PAGES = ["not a dict", None]
-        assert get_pages_directories_for_watch() == []
+        with override_settings(
+            NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": ["not a dict", None]},
+        ):
+            next_framework_settings.reload()
+            assert get_pages_directories_for_watch() == []
 
-    def test_swallows_backend_creation_error(self, settings) -> None:
+    def test_swallows_backend_creation_error(self) -> None:
         """When create_backend raises, entry is skipped and iteration continues."""
-        settings.NEXT_PAGES = [
-            {"BACKEND": "nonexistent.Backend"},
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "APP_DIRS": False,
-                "OPTIONS": {
-                    "BASE_DIR": str(Path(__file__).parent.parent / "tests" / "pages")
-                },
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_ROUTERS": [
+                    {"BACKEND": "nonexistent.Backend"},
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "OPTIONS": {
+                            "BASE_DIR": str(
+                                Path(__file__).parent.parent / "tests" / "pages",
+                            ),
+                        },
+                    },
+                ],
             },
-        ]
-        result = get_pages_directories_for_watch()
-        # First config raises and is skipped; second may add paths depending on env
-        assert isinstance(result, list)
+        ):
+            next_framework_settings.reload()
+            result = get_pages_directories_for_watch()
+            assert isinstance(result, list)
 
-    def test_skips_non_file_router_backend(self, settings) -> None:
+    def test_skips_non_file_router_backend(self) -> None:
         """When backend is not FileRouterBackend, its paths are not added."""
         with patch("next.urls.RouterFactory.create_backend") as mock_create:
             mock_backend = Mock(spec=RouterBackend)
             mock_backend._get_root_pages_paths = Mock(return_value=[])
             mock_backend._get_installed_apps = Mock(return_value=[])
             mock_create.return_value = mock_backend
-            settings.NEXT_PAGES = [{"BACKEND": "other.Backend"}]
-            assert get_pages_directories_for_watch() == []
+            with override_settings(
+                NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": [{"BACKEND": "other.Backend"}]},
+            ):
+                next_framework_settings.reload()
+                assert get_pages_directories_for_watch() == []
 
-    def test_includes_root_and_app_paths_from_backend(self, settings, tmp_path) -> None:
+    def test_includes_root_and_app_paths_from_backend(self, tmp_path) -> None:
         """Backend root paths and app pages paths are both included."""
         app_pages = tmp_path / "myapp_pages"
         app_pages.mkdir()
         with patch("next.urls.RouterFactory.create_backend") as mock_create:
             mock_backend = Mock(spec=FileRouterBackend)
             mock_backend._get_root_pages_paths = Mock(
-                return_value=[tmp_path / "root_pages"]
+                return_value=[tmp_path / "root_pages"],
             )
             mock_backend._get_installed_apps = Mock(return_value=["myapp"])
             mock_backend._get_app_pages_path = Mock(return_value=app_pages)
             mock_create.return_value = mock_backend
-            settings.NEXT_PAGES = [{"BACKEND": "next.urls.FileRouterBackend"}]
-            result = get_pages_directories_for_watch()
-            assert (tmp_path / "root_pages").resolve() in result
-            assert app_pages.resolve() in result
+            with override_settings(
+                NEXT_FRAMEWORK={
+                    "DEFAULT_PAGE_ROUTERS": [
+                        {
+                            "BACKEND": "next.urls.FileRouterBackend",
+                            "PAGES_DIR": "pages",
+                            "APP_DIRS": True,
+                            "OPTIONS": {},
+                        },
+                    ],
+                },
+            ):
+                next_framework_settings.reload()
+                result = get_pages_directories_for_watch()
+                assert (tmp_path / "root_pages").resolve() in result
+                assert app_pages.resolve() in result
 
 
 class TestScanPagesDirectory:

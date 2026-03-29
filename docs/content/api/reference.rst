@@ -72,31 +72,14 @@ Dependency resolution and built-in providers for request, URL kwargs, and forms.
 Configuration
 -------------
 
-NEXT_PAGES
-~~~~~~~~~~
+NEXT_FRAMEWORK
+~~~~~~~~~~~~~~
 
-Configure backends and options in Django settings:
+Single dictionary in Django settings. Top-level keys (each optional beyond defaults):
 
-.. code-block:: python
-
-   NEXT_PAGES = [
-       {
-           'BACKEND': 'next.urls.FileRouterBackend',
-           'APP_DIRS': True,
-           'OPTIONS': {
-               'context_processors': [
-                   'myapp.context_processors.global_context',
-               ],
-           },
-       },
-   ]
-
-FileRouterBackend options: ``APP_DIRS`` (bool), ``context_processors`` (list of dotted paths).
-
-NEXT_COMPONENTS
-~~~~~~~~~~~~~~~
-
-List of component backend dicts (same shape as ``NEXT_PAGES`` entries: ``BACKEND``, ``APP_DIRS``, ``OPTIONS``). The built-in :class:`next.components.FileComponentsBackend` reads ``OPTIONS`` keys such as ``PAGES_DIR``, ``COMPONENTS_DIR``, and ``COMPONENTS_DIRS``. Full annotated examples live in :doc:`/content/guide/components`.
+* ``DEFAULT_PAGE_ROUTERS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``OPTIONS``, …). See :doc:`/content/guide/file-router`.
+* ``URL_NAME_TEMPLATE`` — format string for URL pattern names (default ``page_{name}``).
+* ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts (``BACKEND``, ``APP_DIRS``, ``OPTIONS``, …). See :doc:`/content/guide/components`.
 
 .. code-block:: python
 
@@ -104,18 +87,30 @@ List of component backend dicts (same shape as ``NEXT_PAGES`` entries: ``BACKEND
 
    BASE_DIR = Path(__file__).resolve().parent.parent
 
-   NEXT_COMPONENTS = [
-       {
-           "BACKEND": "next.components.FileComponentsBackend",
-           "APP_DIRS": True,
-           "OPTIONS": {
-               "COMPONENTS_DIR": "_components",
-               "COMPONENTS_DIRS": [str(BASE_DIR / "root_components")],
+   NEXT_FRAMEWORK = {
+       "DEFAULT_PAGE_ROUTERS": [
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "PAGES_DIR": "pages",
+               "APP_DIRS": True,
+               "OPTIONS": {
+                   "context_processors": [
+                       "myapp.context_processors.global_context",
+                   ],
+               },
            },
-       },
-   ]
+       ],
+       "DEFAULT_COMPONENT_BACKENDS": [
+           {
+               "BACKEND": "next.components.FileComponentsBackend",
+               "APP_DIRS": True,
+               "OPTIONS": {
+                   "COMPONENTS_DIR": "_components",
+                   "PAGES_DIR": "pages",
+                   "COMPONENTS_DIRS": [str(BASE_DIR / "root_components")],
+               },
+           },
+       ],
+   }
 
-NEXT_COMPONENTS_RUNTIME
-~~~~~~~~~~~~~~~~~~~~~~~
-
-Optional dict. Supported keys today: ``module_loader_class`` (dotted path to a custom ``ModuleLoader``). See :doc:`/content/guide/components`.
+Implementation: :mod:`next.conf`.

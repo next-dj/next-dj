@@ -1,17 +1,15 @@
 version: 2
 
+# Docs dependencies: single source of truth is pyproject.toml [dependency-groups] docs + uv.lock.
+# See https://docs.readthedocs.com/platform/stable/build-customization.html#install-dependencies-with-uv
 build:
   os: ubuntu-24.04
   tools:
     python: "3.12"
-
-python:
-  install:
-    - method: pip
-      path: .
-      extra_requirements:
-        - docs
-    - requirements: docs/requirements.txt
+  jobs:
+    post_install:
+      - python -m pip install --upgrade "uv==0.11.2"
+      - UV_PROJECT_ENVIRONMENT=$READTHEDOCS_VIRTUALENV_PATH uv sync --frozen --no-dev --group docs --link-mode=copy
 
 sphinx:
   configuration: docs/conf.py

@@ -65,10 +65,4 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Next Framework Configuration
-NEXT_PAGES = [
-    {
-        "BACKEND": "next.urls.FileRouterBackend",
-        "APP_DIRS": True,
-    },
-]
+# NEXT_FRAMEWORK omitted: framework defaults (DEFAULT_PAGE_ROUTERS, URL_NAME_TEMPLATE, etc.) apply as-is.

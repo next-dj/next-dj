@@ -21,6 +21,7 @@ from django.conf import settings
 from django.http import HttpRequest
 from django.urls import URLPattern, URLResolver
 
+from .conf import import_class_cached, next_framework_settings
 from .deps import DDependencyBase, RegisteredParameterProvider
 from .forms import form_action_manager
 from .pages import page
@@ -115,12 +116,6 @@ class UrlKwargsProvider(RegisteredParameterProvider):
         if hint is str or hint is inspect.Parameter.empty:
             return str(raw)
         return _coerce_url_value(str(raw), hint)
-
-
-# Configuration constants
-DEFAULT_PAGES_DIR = "pages"
-DEFAULT_APP_DIRS = True
-DEFAULT_COMPONENTS_DIR = "_components"
 
 
 class URLPatternParser:
@@ -243,14 +238,14 @@ class FileRouterBackend(RouterBackend):
 
     def __init__(
         self,
-        pages_dir: str = DEFAULT_PAGES_DIR,
+        pages_dir: str | None = None,
         *,
-        app_dirs: bool = DEFAULT_APP_DIRS,
+        app_dirs: bool | None = None,
         options: dict[str, Any] | None = None,
     ) -> None:
         """Initialize router backend with configuration options."""
-        self.pages_dir = pages_dir
-        self.app_dirs = app_dirs
+        self.pages_dir = pages_dir if pages_dir is not None else "pages"
+        self.app_dirs = app_dirs if app_dirs is not None else True
         self.options = options or {}
         self._patterns_cache: dict[str, list[URLPattern | URLResolver]] = {}
         self._url_parser = URLPatternParser()
@@ -417,7 +412,7 @@ class FileRouterBackend(RouterBackend):
         pages_path: Path,
     ) -> Generator[tuple[str, Path], None, None]:
         """Scan pages directory for page.py and virtual views."""
-        skip_dir_names = (self.options.get("COMPONENTS_DIR", DEFAULT_COMPONENTS_DIR),)
+        skip_dir_names = (self.options.get("COMPONENTS_DIR", "_components"),)
         yield from _scan_pages_directory(pages_path, skip_dir_names)
 
 
@@ -493,22 +488,34 @@ class RouterFactory:
         and creates an appropriately configured instance. Handles different
         backend types with their specific initialization requirements.
 
-        Raises ValueError if the specified backend type is not registered.
+        Raises ``ValueError`` if the backend cannot be imported, ``TypeError`` if
+        the resolved object is not a ``RouterBackend`` subclass.
         """
-        backend_name = config.get("BACKEND", "next.urls.FileRouterBackend")
+        backend_name = config["BACKEND"]
+        backend_class: Any
 
-        if backend_name not in cls._backends:
-            msg = f"Unsupported backend: {backend_name}"
-            raise ValueError(msg)
+        if backend_name in cls._backends:
+            backend_class = cls._backends[backend_name]
+        else:
+            try:
+                backend_class = import_class_cached(backend_name)
+            except ImportError as e:
+                msg = f"Unsupported backend: {backend_name}"
+                raise ValueError(msg) from e
 
-        backend_class = cls._backends[backend_name]
+        if not isinstance(backend_class, type) or not issubclass(
+            backend_class,
+            RouterBackend,
+        ):
+            msg = f"Backend {backend_name!r} is not a RouterBackend subclass"
+            raise TypeError(msg)
 
         # handle FileRouterBackend with specific configuration
         if issubclass(backend_class, FileRouterBackend):
             return backend_class(
-                pages_dir=DEFAULT_PAGES_DIR,
-                app_dirs=config.get("APP_DIRS", DEFAULT_APP_DIRS),
-                options=config.get("OPTIONS", {}),
+                pages_dir=config["PAGES_DIR"],
+                app_dirs=config["APP_DIRS"],
+                options=config["OPTIONS"],
             )
         # for other backend types, create with default initialization
         return backend_class()
@@ -573,19 +580,16 @@ class RouterManager:
                 logger.exception("error creating router from config %s", config)
 
     def _get_next_pages_config(self) -> list[dict[str, Any]]:
-        """NEXT_PAGES from settings (cached)."""
+        """ROUTERS from ``settings.NEXT_FRAMEWORK`` (merged with defaults, cached)."""
         if self._config_cache is not None:
             return self._config_cache
 
-        default_config = [
-            {
-                "BACKEND": "next.urls.FileRouterBackend",
-                "APP_DIRS": DEFAULT_APP_DIRS,
-                "OPTIONS": {},
-            },
-        ]
+        routers = next_framework_settings.DEFAULT_PAGE_ROUTERS
+        if not isinstance(routers, list):
+            self._config_cache = []
+            return self._config_cache
 
-        self._config_cache = getattr(settings, "NEXT_PAGES", default_config)
+        self._config_cache = routers
         return self._config_cache
 
 

@@ -20,13 +20,6 @@ if not settings.configured:
             'django.contrib.auth',
             'next',
         ],
-        NEXT_PAGES=[
-            {
-                'BACKEND': 'next.urls.FileRouterBackend',
-                'APP_DIRS': True,
-                'OPTIONS': {},
-            },
-        ],
         TEMPLATES=[
             {
                 'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -119,6 +112,7 @@ html_theme_options = {
 # html static files
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
+html_js_files = ["custom.js"]
 
 # ensure _static and _static/images exist
 import os

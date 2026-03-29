@@ -162,13 +162,13 @@ def test_check_duplicate_url_parameters() -> None:
     assert errors == []
 
 
-def test_check_missing_page_content() -> None:
-    """Test check_missing_page_content check."""
-    checks_module = __import__("next.checks", fromlist=["check_missing_page_content"])
-    check_missing_page_content = checks_module.check_missing_page_content
+def test_check_page_functions() -> None:
+    """Test check_page_functions check."""
+    checks_module = __import__("next.checks", fromlist=["check_page_functions"])
+    check_page_functions = checks_module.check_page_functions
     app_configs = apps.get_app_configs()
-    errors = check_missing_page_content(app_configs)
-    assert errors == []
+    messages = check_page_functions(app_configs)
+    assert messages == []
 
 
 def test_home_page_module_has_context(client) -> None:

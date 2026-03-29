@@ -2,8 +2,10 @@
 
 Simple components are single ``.djx`` files. Composite components live in a folder
 with ``component.djx`` and optional ``component.py``. Configure roots and backends
-via ``NEXT_COMPONENTS`` in Django settings. Names resolve from the current template
-path so nearby components win over distant ones, unless they live in a global root.
+via ``NEXT_FRAMEWORK['DEFAULT_COMPONENT_BACKENDS']`` in Django settings. Names resolve
+from the current template path so nearby components win over distant ones, unless
+they live
+in a global root.
 """
 
 from __future__ import annotations
@@ -16,16 +18,22 @@ from abc import ABC, abstractmethod
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 from django.middleware.csrf import get_token
 from django.template import Context as DjangoTemplateContext, Template
 from django.utils.functional import SimpleLazyObject
-from django.utils.module_loading import import_string
 
+from .conf import NextFrameworkSettings, import_class_cached, next_framework_settings
 from .deps import DependencyCache, resolver
+
+
+_default_components_entry = NextFrameworkSettings.DEFAULTS[
+    "DEFAULT_COMPONENT_BACKENDS"
+][0]
+_default_components_options: dict[str, Any] = _default_components_entry["OPTIONS"]
 
 
 if TYPE_CHECKING:
@@ -33,11 +41,6 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_COMPONENTS_DIR: Final[str] = "_components"
-DEFAULT_PAGES_DIR: Final[str] = "pages"
-
-_DEFAULT_FILE_BACKEND: Final[str] = "next.components.FileComponentsBackend"
 
 __all__ = [
     "ComponentContextManager",
@@ -190,11 +193,15 @@ class ComponentScanner:
 
     def __init__(
         self,
-        components_dir: str = DEFAULT_COMPONENTS_DIR,
+        components_dir: str | None = None,
         *,
         module_loader: ModuleLoader | None = None,
     ) -> None:
-        self._components_dir = components_dir
+        self._components_dir = (
+            components_dir
+            if components_dir is not None
+            else _default_components_options["COMPONENTS_DIR"]
+        )
         self._module_loader = module_loader or ModuleLoader()
 
     def scan_directory(
@@ -270,8 +277,12 @@ class ComponentScanner:
 class ComponentRootDiscovery:
     """Finds pages trees and explicit component directories from settings."""
 
-    def __init__(self, pages_dir: str = DEFAULT_PAGES_DIR) -> None:
-        self._pages_dir = pages_dir
+    def __init__(self, pages_dir: str | None = None) -> None:
+        self._pages_dir = (
+            pages_dir
+            if pages_dir is not None
+            else _default_components_options["PAGES_DIR"]
+        )
 
     def discover_app_roots(self) -> Sequence[Path]:
         roots: list[Path] = []
@@ -797,30 +808,28 @@ class FileComponentsBackend(ComponentsBackend):
     """Loads components from ``_components`` folders and optional global dirs."""
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Parse ``APP_DIRS``, ``OPTIONS``, and optional runtime overrides."""
+        """Parse ``APP_DIRS`` and ``OPTIONS``."""
         options = config.get("OPTIONS")
         if not isinstance(options, dict):
             options = {}
         self.options = options
         self.components_dir = str(
-            options.get("COMPONENTS_DIR", DEFAULT_COMPONENTS_DIR),
+            options.get(
+                "COMPONENTS_DIR",
+                _default_components_options["COMPONENTS_DIR"],
+            ),
         )
         self.app_dirs = bool(config.get("APP_DIRS", True))
 
         self._registry = ComponentRegistry()
-        runtime = getattr(settings, "NEXT_COMPONENTS_RUNTIME", None)
-        ml: ModuleLoader | None = None
-        if isinstance(runtime, dict):
-            ml_path = runtime.get("module_loader_class")
-            if isinstance(ml_path, str):
-                ml_cls = import_string(ml_path)
-                ml = ml_cls()
-        self._module_loader = ml or ModuleLoader()
+        self._module_loader = ModuleLoader()
         self._scanner = ComponentScanner(
             self.components_dir,
             module_loader=self._module_loader,
         )
-        pages_dir = str(options.get("PAGES_DIR", DEFAULT_PAGES_DIR))
+        pages_dir = str(
+            options.get("PAGES_DIR", _default_components_options["PAGES_DIR"]),
+        )
         self._root_discovery = ComponentRootDiscovery(pages_dir)
         self._visibility_resolver = ComponentVisibilityResolver(self._registry)
 
@@ -932,13 +941,13 @@ class BoomBackend(ComponentsBackend):
 
 
 class ComponentsFactory:
-    """Builds a backend instance from one ``NEXT_COMPONENTS`` list entry."""
+    """Build one backend from a ``DEFAULT_COMPONENT_BACKENDS`` list entry."""
 
     @classmethod
     def create_backend(cls, config: dict[str, Any]) -> ComponentsBackend:
         """Import the backend class and construct it with the full config dict."""
-        backend_path = config.get("BACKEND", _DEFAULT_FILE_BACKEND)
-        backend_class = import_string(backend_path)
+        backend_path = config.get("BACKEND", _default_components_entry["BACKEND"])
+        backend_class = import_class_cached(backend_path)
         return cast("ComponentsBackend", backend_class(config))
 
 
@@ -955,17 +964,7 @@ class ComponentsManager:
         if self._component_renderer is not None:
             return
 
-        runtime = getattr(settings, "NEXT_COMPONENTS_RUNTIME", None)
-        ml: ModuleLoader
-        if isinstance(runtime, dict):
-            ml_path = runtime.get("module_loader_class")
-            if isinstance(ml_path, str):
-                ml_cls = import_string(ml_path)
-                ml = ml_cls()
-            else:
-                ml = ModuleLoader()
-        else:
-            ml = ModuleLoader()
+        ml = ModuleLoader()
 
         tl = ComponentTemplateLoader(ml)
         self._template_loader = tl
@@ -992,7 +991,7 @@ class ComponentsManager:
     def _reload_config(self) -> None:
         self._reset_render_pipeline()
         self._backends.clear()
-        configs = getattr(settings, "NEXT_COMPONENTS", None)
+        configs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
         if not isinstance(configs, list):
             return
         for config in configs:

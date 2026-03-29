@@ -65,19 +65,22 @@ Use Django's context processors for global template variables:
 .. code-block:: python
 
    # settings.py
-   NEXT_PAGES = [
-       {
-           'BACKEND': 'next.urls.FileRouterBackend',
-           'APP_DIRS': True,
-           'OPTIONS': {
-               'context_processors': [
-                   'django.template.context_processors.request',
-                   'django.template.context_processors.debug',
-                   'myapp.context_processors.global_context',
-               ],
+   NEXT_FRAMEWORK = {
+       "DEFAULT_PAGE_ROUTERS": [
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "PAGES_DIR": "pages",
+               "APP_DIRS": True,
+               "OPTIONS": {
+                   "context_processors": [
+                       "django.template.context_processors.request",
+                       "django.template.context_processors.debug",
+                       "myapp.context_processors.global_context",
+                   ],
+               },
            },
-       },
-   ]
+       ],
+   }
 
 .. code-block:: python
 
@@ -267,17 +270,10 @@ The system includes validation checks for context functions:
 **Context Function Validation** (``check_context_functions``):
 - Validates that context functions decorated with ``@context`` (without key) always return a dictionary
 - Ensures proper return types for different context function patterns
-- Can be disabled by setting ``NEXT_PAGES_OPTIONS.check_context_return_types = False``
 
 **Page Function Validation** (``check_page_functions``):
 - Ensures page.py files have valid render functions or proper template definitions
-- Validates function signatures, return types, and argument handling
-- Prevents runtime errors during page rendering
-
-**Missing Page Content Validation** (``check_missing_page_content``):
-- Checks for page.py files that have no content (no template, no render function)
-- Validates that pages have either template variable, template.djx file, layout.djx file, or render function
-- Can be disabled by setting ``NEXT_PAGES_OPTIONS.check_missing_page_content = False``
+- Warns when a page has no template, render, ``template.djx``, or ``layout.djx``
 
 Run validation checks:
 

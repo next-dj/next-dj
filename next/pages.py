@@ -34,15 +34,12 @@ from django.template import Context as DjangoTemplateContext, Template
 from django.urls import URLPattern, path
 from django.utils.module_loading import import_string
 
+from .conf import next_framework_settings
 from .deps import DependencyResolver, RegisteredParameterProvider, resolver
 
 
 if TYPE_CHECKING:
     from .urls import URLPatternParser
-
-
-# URL pattern naming template
-URL_NAME_TEMPLATE = "page_{name}"
 
 
 logger = logging.getLogger(__name__)
@@ -147,8 +144,8 @@ def _import_context_processor(
 
 
 def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
-    """Load context processors from NEXT_PAGES and TEMPLATES (merged, deduped)."""
-    configs = getattr(settings, "NEXT_PAGES", [])
+    """Load context processors from router configs and ``TEMPLATES``."""
+    configs = next_framework_settings.DEFAULT_PAGE_ROUTERS
     if not isinstance(configs, list):
         configs = []
     from_next = [
@@ -165,28 +162,16 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
         if isinstance(opts.get("context_processors"), list)
         else []
     )
-    # Merge both sources, NEXT_PAGES first; dict.fromkeys preserves order and dedupes.
+    # Merge both sources, Next routers first; dict.fromkeys preserves order and dedupes.
     processor_paths = list(dict.fromkeys(from_next + from_templates))
     return [p for path in processor_paths if (p := _import_context_processor(path))]
 
 
 def get_pages_directories_for_watch() -> list[Path]:
-    """Pages directory paths from NEXT_PAGES for file watching (autoreload)."""
-    # resolve circular import
-    from next.urls import (  # noqa: PLC0415
-        DEFAULT_APP_DIRS,
-        FileRouterBackend,
-        RouterFactory,
-    )
+    """Pages directory paths from merged router config (for autoreload)."""
+    from next.urls import FileRouterBackend, RouterFactory  # noqa: PLC0415
 
-    default = [
-        {
-            "BACKEND": "next.urls.FileRouterBackend",
-            "APP_DIRS": DEFAULT_APP_DIRS,
-            "OPTIONS": {},
-        },
-    ]
-    configs = getattr(settings, "NEXT_PAGES", default)
+    configs = next_framework_settings.DEFAULT_PAGE_ROUTERS
     if not isinstance(configs, list):
         return []
     seen: set[Path] = set()
@@ -218,7 +203,7 @@ def get_pages_directories_for_watch() -> list[Path]:
 
 
 def get_layout_djx_paths_for_watch() -> set[Path]:
-    """All layout.djx paths under NEXT_PAGES dirs (for autoreload)."""
+    """All layout.djx paths under configured pages dirs (for autoreload)."""
     result: set[Path] = set()
     for pages_path in get_pages_directories_for_watch():
         try:
@@ -230,7 +215,7 @@ def get_layout_djx_paths_for_watch() -> set[Path]:
 
 
 def get_template_djx_paths_for_watch() -> set[Path]:
-    """All template.djx paths under NEXT_PAGES dirs (for autoreload)."""
+    """All template.djx paths under configured pages dirs (for autoreload)."""
     result: set[Path] = set()
     for pages_path in get_pages_directories_for_watch():
         try:
@@ -369,7 +354,7 @@ class LayoutTemplateLoader(TemplateLoader):
                 layout_files.append(layout_file)
             current_dir = current_dir.parent
 
-        # also add additional layouts from other NEXT_PAGES directories
+        # also add additional layouts from other configured pages router dirs
         # but only if they're not already in the local hierarchy
         if additional_layouts := self._get_additional_layout_files():
             for additional_layout in additional_layouts:
@@ -379,8 +364,10 @@ class LayoutTemplateLoader(TemplateLoader):
         return layout_files or None
 
     def _get_additional_layout_files(self) -> list[Path]:
-        """Layout.djx from root-level NEXT_PAGES dirs (for global layout)."""
-        configs = getattr(settings, "NEXT_PAGES", []) or []
+        """Layout.djx from root-level pages dirs (for global layout)."""
+        configs = next_framework_settings.DEFAULT_PAGE_ROUTERS or []
+        if not isinstance(configs, list):
+            configs = []
         candidates = (
             layout
             for c in configs
@@ -781,7 +768,7 @@ class Page:
         take precedence over context function results. Uses Django's
         template engine for rendering with full tag and filter support.
 
-        Supports context_processors from NEXT_PAGES.OPTIONS.context_processors.
+        Supports context_processors from each router's ``OPTIONS``.
         Loads .djx and layout template content on first render if not yet in registry.
         """
         if file_path not in self._template_registry or self._is_template_stale(
@@ -907,7 +894,9 @@ class Page:
         if self.has_template(file_path, module):
             view = self._create_view_function(file_path, parameters)
             return path(
-                django_pattern, view, name=URL_NAME_TEMPLATE.format(name=clean_name)
+                django_pattern,
+                view,
+                name=next_framework_settings.URL_NAME_TEMPLATE.format(name=clean_name),
             )
 
         # fall back to custom render function with DI wrapper
@@ -916,7 +905,7 @@ class Page:
             return path(
                 django_pattern,
                 view,
-                name=URL_NAME_TEMPLATE.format(name=clean_name),
+                name=next_framework_settings.URL_NAME_TEMPLATE.format(name=clean_name),
             )
 
         return None
@@ -957,7 +946,9 @@ class Page:
         if self.has_template(file_path, module=None):
             view = self._create_view_function(file_path, parameters)
             return path(
-                django_pattern, view, name=URL_NAME_TEMPLATE.format(name=clean_name)
+                django_pattern,
+                view,
+                name=next_framework_settings.URL_NAME_TEMPLATE.format(name=clean_name),
             )
         return None
 

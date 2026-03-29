@@ -106,14 +106,14 @@ def test_check_duplicate_url_parameters() -> None:
     assert errors == []
 
 
-def test_check_missing_page_content() -> None:
-    """Test check_missing_page_content check."""
+def test_check_page_functions() -> None:
+    """Test check_page_functions check."""
     checks_module = importlib.import_module("next.checks")
-    check_missing_page_content = checks_module.check_missing_page_content
+    check_page_functions = checks_module.check_page_functions
 
     app_configs = apps.get_app_configs()
-    errors = check_missing_page_content(app_configs)
-    assert errors == []
+    messages = check_page_functions(app_configs)
+    assert messages == []
 
 
 def test_example_pages_comprehensive(client) -> None:

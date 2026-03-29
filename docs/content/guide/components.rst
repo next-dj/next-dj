@@ -13,9 +13,7 @@ The directory name used for components (e.g. ``_components``) is configured in t
 Backends and settings
 ---------------------
 
-Components are provided by backends, similar to the page router. In Django settings you configure:
-
-**NEXT_COMPONENTS** — list of backend configs. Each item is a dict that is passed unchanged into the backend class constructor:
+Components are provided by backends, similar to the page router. In Django settings, use the top-level dict ``NEXT_FRAMEWORK`` with the key **``DEFAULT_COMPONENT_BACKENDS``**: a list of backend configs. Each item is a dict that is passed unchanged into the backend class constructor:
 
 - ``BACKEND`` (str) — dotted import path of the backend class (default for the built-in file backend is ``"next.components.FileComponentsBackend"``).
 - ``APP_DIRS`` (bool, default ``True`` for ``FileComponentsBackend``) — when true, scan every installed app’s ``pages`` tree (see ``PAGES_DIR``) for folders named like ``COMPONENTS_DIR`` and register components there.
@@ -24,13 +22,11 @@ Components are provided by backends, similar to the page router. In Django setti
 **``OPTIONS`` for ``FileComponentsBackend``**
 
 - ``PAGES_DIR`` (str, default ``"pages"``) — directory name under each app package where the pages tree lives (used with ``APP_DIRS``).
-- ``COMPONENTS_DIR`` (str, default ``"_components"``) — folder name to look for **under** each pages root when scanning apps (e.g. ``myapp/pages/_components/``). Use the same value in ``NEXT_PAGES`` ``OPTIONS`` so the file router skips that folder for URLs.
+- ``COMPONENTS_DIR`` (str, default ``"_components"``) — folder name to look for **under** each pages root when scanning apps (e.g. ``myapp/pages/_components/``). Use the same value in the file router’s ``OPTIONS`` (``NEXT_FRAMEWORK["DEFAULT_PAGE_ROUTERS"]``) so URLs skip that folder.
 - ``COMPONENTS_DIRS`` (list of paths or ``Path`` objects) — directories registered as **global** component roots (visible from every template). Only entries whose paths exist are used.
-- You may list **several backends** in ``NEXT_COMPONENTS``; earlier entries win when the same component name appears twice.
+- You may list **several backends** in ``DEFAULT_COMPONENT_BACKENDS``; earlier entries win when the same component name appears twice.
 
-**``NEXT_COMPONENTS_RUNTIME``** (optional top-level setting)
-
-- ``module_loader_class`` (str) — dotted path to a custom ``ModuleLoader`` class used when loading ``component.py`` modules for discovery and rendering. Omit the setting or the key to use the default ``ModuleLoader``.
+``component.py`` modules are always loaded with the framework’s built-in :class:`~next.components.ModuleLoader`.
 
 Minimal example:
 
@@ -39,16 +35,19 @@ Minimal example:
    from pathlib import Path
    BASE_DIR = Path(__file__).resolve().parent.parent
 
-   NEXT_COMPONENTS = [
-       {
-           "BACKEND": "next.components.FileComponentsBackend",
-           "APP_DIRS": True,
-           "OPTIONS": {
-               "COMPONENTS_DIR": "_components",
-               "COMPONENTS_DIRS": [str(BASE_DIR / "root_components")],
+   NEXT_FRAMEWORK = {
+       "DEFAULT_COMPONENT_BACKENDS": [
+           {
+               "BACKEND": "next.components.FileComponentsBackend",
+               "APP_DIRS": True,
+               "OPTIONS": {
+                   "COMPONENTS_DIR": "_components",
+                   "PAGES_DIR": "pages",
+                   "COMPONENTS_DIRS": [str(BASE_DIR / "root_components")],
+               },
            },
-       },
-   ]
+       ],
+   }
 
 Full example with every key shown (values are illustrative; remove or adjust what you do not need):
 
@@ -58,35 +57,26 @@ Full example with every key shown (values are illustrative; remove or adjust wha
 
    BASE_DIR = Path(__file__).resolve().parent.parent
 
-   # Optional. Custom Python module loader for component.py (discovery + render pipeline).
-   NEXT_COMPONENTS_RUNTIME = {
-       "module_loader_class": "myapp.components.CustomModuleLoader",
-   }
-
-   NEXT_COMPONENTS = [
-       {
-           # import_string target; if omitted, the factory uses FileComponentsBackend.
-           "BACKEND": "next.components.FileComponentsBackend",
-           # Scan <app>/PAGES_DIR/.../<COMPONENTS_DIR>/ for components.
-           "APP_DIRS": True,
-           "OPTIONS": {
-               # App pages package directory name (default "pages").
-               "PAGES_DIR": "pages",
-               # Name of the components folder under each pages tree (default "_components").
-               "COMPONENTS_DIR": "_components",
-               # Global component roots (each directory is scanned as a root scope).
-               "COMPONENTS_DIRS": [
-                   str(BASE_DIR / "root_components"),
-               ],
+   NEXT_FRAMEWORK = {
+       "DEFAULT_COMPONENT_BACKENDS": [
+           {
+               "BACKEND": "next.components.FileComponentsBackend",
+               "APP_DIRS": True,
+               "OPTIONS": {
+                   "PAGES_DIR": "pages",
+                   "COMPONENTS_DIR": "_components",
+                   "COMPONENTS_DIRS": [
+                       str(BASE_DIR / "root_components"),
+                   ],
+               },
            },
-       },
-       # Second backend example: custom implementation (dotted path to your class).
-       # {
-       #     "BACKEND": "myapp.backends.MyComponentsBackend",
-       #     "APP_DIRS": False,
-       #     "OPTIONS": {},
-       # },
-   ]
+           # {
+           #     "BACKEND": "myapp.backends.MyComponentsBackend",
+           #     "APP_DIRS": False,
+           #     "OPTIONS": {},
+           # },
+       ],
+   }
 
 Custom backends are plain classes referenced by dotted path in ``BACKEND``. Each backend receives the **full** config dict for that list entry (``BACKEND``, ``APP_DIRS``, ``OPTIONS``, and any extra keys you add) and reads what it needs.
 

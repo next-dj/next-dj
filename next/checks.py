@@ -1,12 +1,6 @@
-"""Django checks framework integration for next-dj file-based routing system.
+"""System checks for next-dj (``manage.py check``).
 
-This module implements comprehensive validation checks for the next-dj routing
-system, ensuring proper configuration and file structure integrity. The checks
-validate router configurations, page file structures, template availability,
-and URL pattern generation to prevent runtime errors and configuration issues.
-
-All checks are integrated with Django's built-in checks framework, making them
-available through standard Django management commands like 'check' and 'runserver'.
+Validates settings, file routes, templates, URLs, and components.
 """
 
 import ast
@@ -17,7 +11,6 @@ import types
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import MagicMock
 
 from django.apps import apps
 from django.conf import settings
@@ -28,8 +21,10 @@ from django.core.checks import (
     Warning as DjangoWarning,
     register,
 )
+from django.utils.module_loading import import_string
 
 from .components import ComponentsManager, FileComponentsBackend
+from .conf import next_framework_settings
 from .pages import _load_python_module
 from .urls import (
     FileRouterBackend,
@@ -74,7 +69,8 @@ def _validate_config_structure(
     if not isinstance(config, dict):
         errors.append(
             Error(
-                f"NEXT_PAGES[{index}] must be a dictionary.",
+                f"NEXT_FRAMEWORK['DEFAULT_PAGE_ROUTERS'][{index}] "
+                "must be a dictionary.",
                 obj=settings,
                 id="next.E002",
             ),
@@ -85,9 +81,85 @@ def _validate_config_structure(
     if "BACKEND" not in config:
         errors.append(
             Error(
-                f"NEXT_PAGES[{index}] must specify a BACKEND.",
+                f"NEXT_FRAMEWORK['DEFAULT_PAGE_ROUTERS'][{index}] "
+                "must specify a BACKEND.",
                 obj=settings,
                 id="next.E003",
+            ),
+        )
+
+    return errors
+
+
+FILE_ROUTER_BACKEND = "next.urls.FileRouterBackend"
+
+
+def _router_backend_path_is_valid(backend_path: str) -> bool:
+    """Whether ``backend_path`` names a registered or importable ``RouterBackend``."""
+    if backend_path in RouterFactory._backends:
+        return True
+    try:
+        resolved = import_string(backend_path)
+    except ImportError:
+        return False
+    return isinstance(resolved, type) and issubclass(resolved, RouterBackend)
+
+
+def _validate_file_router_backend_fields(
+    config: dict,
+    index: int,
+) -> list[CheckMessage]:
+    """Validate PAGES_DIR / APP_DIRS / OPTIONS for ``FileRouterBackend``."""
+    errors: list[CheckMessage] = []
+    rf_routers = f"NEXT_FRAMEWORK['DEFAULT_PAGE_ROUTERS'][{index}]"
+    if "PAGES_DIR" not in config:
+        errors.append(
+            Error(
+                f"{rf_routers} must specify PAGES_DIR when using FileRouterBackend.",
+                obj=settings,
+                id="next.E024",
+            ),
+        )
+    elif not isinstance(config["PAGES_DIR"], str):
+        errors.append(
+            Error(
+                f"{rf_routers}.PAGES_DIR must be a string.",
+                obj=settings,
+                id="next.E027",
+            ),
+        )
+
+    if "APP_DIRS" not in config:
+        errors.append(
+            Error(
+                f"{rf_routers} must specify APP_DIRS when using FileRouterBackend.",
+                obj=settings,
+                id="next.E025",
+            ),
+        )
+    elif not isinstance(config["APP_DIRS"], bool):
+        errors.append(
+            Error(
+                f"{rf_routers}.APP_DIRS must be a boolean.",
+                obj=settings,
+                id="next.E005",
+            ),
+        )
+
+    if "OPTIONS" not in config:
+        errors.append(
+            Error(
+                f"{rf_routers} must specify OPTIONS when using FileRouterBackend.",
+                obj=settings,
+                id="next.E026",
+            ),
+        )
+    elif not isinstance(config["OPTIONS"], dict):
+        errors.append(
+            Error(
+                f"{rf_routers}.OPTIONS must be a dictionary.",
+                obj=settings,
+                id="next.E006",
             ),
         )
 
@@ -98,35 +170,19 @@ def _validate_config_fields(config: dict, index: int) -> list[CheckMessage]:
     """Validate specific fields of a configuration."""
     errors: list[CheckMessage] = []
 
-    # check backend validity
-    if (backend := config.get("BACKEND")) and backend not in RouterFactory._backends:
+    backend = config.get("BACKEND")
+    if backend is not None and not _router_backend_path_is_valid(str(backend)):
         errors.append(
             Error(
-                f'NEXT_PAGES[{index}] specifies unknown backend "{backend}".',
+                f'NEXT_FRAMEWORK["DEFAULT_PAGE_ROUTERS"][{index}] specifies unknown '
+                f'backend "{backend}".',
                 obj=settings,
                 id="next.E004",
             ),
         )
 
-    # check APP_DIRS
-    if not isinstance((config.get("APP_DIRS", True)), bool):
-        errors.append(
-            Error(
-                f"NEXT_PAGES[{index}].APP_DIRS must be a boolean.",
-                obj=settings,
-                id="next.E005",
-            ),
-        )
-
-    # check OPTIONS
-    if not isinstance((config.get("OPTIONS", {})), dict):
-        errors.append(
-            Error(
-                f"NEXT_PAGES[{index}].OPTIONS must be a dictionary.",
-                obj=settings,
-                id="next.E006",
-            ),
-        )
+    if backend == FILE_ROUTER_BACKEND:
+        errors.extend(_validate_file_router_backend_fields(config, index))
 
     return errors
 
@@ -134,7 +190,7 @@ def _validate_config_fields(config: dict, index: int) -> list[CheckMessage]:
 REQUEST_CONTEXT_PROCESSOR = "django.template.context_processors.request"
 
 
-@register(Tags.compatibility)
+@register(Tags.templates)
 def check_request_in_context(*_args, **_kwargs) -> list[CheckMessage]:
     """Ensure request in template context (required for {% form %})."""
     if "next" not in settings.INSTALLED_APPS:
@@ -167,27 +223,38 @@ def check_request_in_context(*_args, **_kwargs) -> list[CheckMessage]:
 
 @register(Tags.compatibility)
 def check_next_pages_configuration(*_args, **_kwargs) -> list[CheckMessage]:
-    """Validate NEXT_PAGES configuration settings for correctness and completeness.
-
-    Performs comprehensive validation of the NEXT_PAGES configuration dictionary,
-    checking for required fields, valid backend types, and proper option structures.
-    Validates that all configured backends can be instantiated successfully and
-    that the configuration follows the expected schema.
-    """
-    # check if NEXT_PAGES is defined
-    if (next_pages := getattr(settings, "NEXT_PAGES", None)) is None:
-        return []  # no configuration means default will be used
-
-    if not isinstance(next_pages, list):
+    """Validate ``NEXT_FRAMEWORK['DEFAULT_PAGE_ROUTERS']`` after merge with defaults."""
+    raw = getattr(settings, "NEXT_FRAMEWORK", None)
+    if raw is not None and not isinstance(raw, dict):
         return [
             Error(
-                "NEXT_PAGES must be a list of configuration dictionaries.",
+                "NEXT_FRAMEWORK must be a dictionary.",
                 obj=settings,
                 id="next.E001",
             ),
         ]
 
-    # validate each configuration using helper functions
+    next_pages = next_framework_settings.DEFAULT_PAGE_ROUTERS
+    if not isinstance(next_pages, list):
+        return [
+            Error(
+                "NEXT_FRAMEWORK['DEFAULT_PAGE_ROUTERS'] must be a list of "
+                "configuration dictionaries.",
+                obj=settings,
+                id="next.E001",
+            ),
+        ]
+
+    if len(next_pages) == 0:
+        return [
+            Error(
+                "NEXT_FRAMEWORK['DEFAULT_PAGE_ROUTERS'] must contain at least one "
+                "router entry (configure the file router or another backend).",
+                obj=settings,
+                id="next.E022",
+            ),
+        ]
+
     errors: list[CheckMessage] = []
     for i, config in enumerate(next_pages):
         errors.extend(_validate_config_structure(config, i))
@@ -195,6 +262,27 @@ def check_next_pages_configuration(*_args, **_kwargs) -> list[CheckMessage]:
             errors.extend(_validate_config_fields(config, i))
 
     return errors
+
+
+@register(Tags.compatibility)
+def check_next_components_configuration(*_args, **_kwargs) -> list[CheckMessage]:
+    """Validate ``NEXT_FRAMEWORK['DEFAULT_COMPONENT_BACKENDS']`` shape after merge."""
+    raw = getattr(settings, "NEXT_FRAMEWORK", None)
+    if raw is not None and not isinstance(raw, dict):
+        return []
+
+    backends = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+    if not isinstance(backends, list):
+        return [
+            Error(
+                "NEXT_FRAMEWORK['DEFAULT_COMPONENT_BACKENDS'] must be a list of "
+                "backend configuration dictionaries.",
+                obj=settings,
+                id="next.E023",
+            ),
+        ]
+
+    return []
 
 
 @register(Tags.compatibility)
@@ -224,7 +312,7 @@ def check_pages_structure(*_args, **_kwargs) -> list[CheckMessage]:
                 Error(
                     f"Error checking router pages: {e}",
                     obj=settings,
-                    id="next.E007",
+                    id="next.E030",
                 ),
             )
 
@@ -411,14 +499,9 @@ def _is_valid_args_syntax(args_str: str) -> bool:
 
 @register(Tags.compatibility)
 def check_page_functions(*_args, **_kwargs) -> list[CheckMessage]:
-    """Validate page.py files for proper function definitions and structure.
-
-    Scans all page.py files in configured pages directories to ensure they
-    contain valid render functions or proper template definitions. Validates
-    function signatures, return types, and argument handling to prevent
-    runtime errors during page rendering.
-    """
+    """Validate each ``page.py``: ``render`` and/or template, and warn if empty."""
     errors: list[CheckMessage] = []
+    warnings: list[CheckMessage] = []
 
     router_manager, init_errors = _get_router_manager()
     if router_manager is None:
@@ -427,9 +510,9 @@ def check_page_functions(*_args, **_kwargs) -> list[CheckMessage]:
     for router in router_manager._routers:
         try:
             if hasattr(router, "app_dirs") and router.app_dirs:
-                _check_app_page_functions(router, errors)
+                _check_app_page_functions(router, errors, warnings)
             else:
-                _check_root_page_functions(router, errors)
+                _check_root_page_functions(router, errors, warnings)
         except (AttributeError, OSError) as e:
             errors.append(
                 Error(
@@ -439,12 +522,13 @@ def check_page_functions(*_args, **_kwargs) -> list[CheckMessage]:
                 ),
             )
 
-    return errors
+    return errors + warnings
 
 
 def _check_app_page_functions(
     router: RouterBackend,
     errors: list[CheckMessage],
+    warnings: list[CheckMessage],
 ) -> None:
     """Check app page functions for router."""
     if not hasattr(router, "_get_installed_apps"):
@@ -461,39 +545,44 @@ def _check_app_page_functions(
         if not pages_path:
             continue
 
-        app_errors = _check_page_functions_in_directory(pages_path, f"App '{app_name}'")
-        errors.extend(app_errors)
+        e, w = _check_page_functions_in_directory(
+            pages_path,
+            f"App '{app_name}'",
+        )
+        errors.extend(e)
+        warnings.extend(w)
 
 
 def _check_root_page_functions(
     router: RouterBackend,
     errors: list[CheckMessage],
+    warnings: list[CheckMessage],
 ) -> None:
     """Check root page functions for router (all root paths)."""
     if not hasattr(router, "_get_root_pages_paths"):
         return
     for i, pages_path in enumerate(router._get_root_pages_paths()):
         context = "Root" if i == 0 else f"Root ({pages_path})"
-        root_errors = _check_page_functions_in_directory(pages_path, context)
-        errors.extend(root_errors)
+        e, w = _check_page_functions_in_directory(pages_path, context)
+        errors.extend(e)
+        warnings.extend(w)
 
 
 def _check_page_functions_in_directory(
     pages_path: Path,
     context: str,
-) -> list[CheckMessage]:
-    """Check page.py files in a directory for valid render functions or templates."""
+) -> tuple[list[CheckMessage], list[CheckMessage]]:
+    """Check page.py files: render/template rules and empty-page warning."""
     errors: list[CheckMessage] = []
+    warnings: list[CheckMessage] = []
 
     if not pages_path.exists():
-        return errors
+        return errors, warnings
 
     for page_file in pages_path.rglob("page.py"):
-        # check if page has render function
         render_func = _load_render_function(page_file)
-
-        # check if page has template or template.djx
         has_template = _has_template_or_djx(page_file)
+        hard_error = False
 
         if render_func is None and not has_template:
             errors.append(
@@ -505,6 +594,7 @@ def _check_page_functions_in_directory(
                     id="next.E012",
                 ),
             )
+            hard_error = True
         elif render_func is not None and not callable(render_func):
             errors.append(
                 Error(
@@ -514,8 +604,20 @@ def _check_page_functions_in_directory(
                     id="next.E013",
                 ),
             )
+            hard_error = True
 
-    return errors
+        if not hard_error and not _has_page_content(page_file):
+            warnings.append(
+                DjangoWarning(
+                    f"Page file {page_file} has no content: no template variable, "
+                    "no render function, no template.djx, and no layout.djx found. "
+                    "This page will not render anything.",
+                    obj=str(page_file),
+                    id="next.W002",
+                ),
+            )
+
+    return errors, warnings
 
 
 def _load_render_function(file_path: Path) -> object:
@@ -557,103 +659,23 @@ def _has_template_or_djx(file_path: Path) -> bool:
         return False
 
 
-@register(Tags.compatibility)
-def check_missing_templates(*_args, **_kwargs) -> list[CheckMessage]:
-    """Validate template availability for all page.py files.
+def _has_page_content(page_path: Path) -> bool:
+    """Whether page.py exposes template/render or sibling djx files exist."""
+    module = _load_python_module(page_path)
+    has_template = False
+    has_render = False
 
-    Ensures that every page.py file has either a template attribute defined
-    or a corresponding template.djx file. This check prevents pages from
-    being created without proper template definitions, which would cause
-    rendering errors during runtime.
-    """
-    errors: list[CheckMessage] = []
+    if module:
+        has_template = hasattr(module, "template")
+        has_render = hasattr(module, "render") and callable(module.render)
 
-    router_manager, init_errors = _get_router_manager()
-    if router_manager is None:
-        return init_errors
+    template_djx = page_path.parent / "template.djx"
+    has_template_djx = template_djx.exists()
 
-    for router in router_manager._routers:
-        try:
-            if hasattr(router, "app_dirs") and router.app_dirs:
-                _check_app_missing_templates(router, errors)
-            else:
-                _check_root_missing_templates(router, errors)
-        except (AttributeError, OSError) as e:
-            errors.append(
-                Error(
-                    f"Error checking missing templates: {e}",
-                    obj=settings,
-                    id="next.E017",
-                ),
-            )
+    layout_djx = page_path.parent / "layout.djx"
+    has_layout_djx = layout_djx.exists()
 
-    return errors
-
-
-def _check_app_missing_templates(
-    router: RouterBackend,
-    errors: list[CheckMessage],
-) -> None:
-    """Check app missing templates for router."""
-    if not hasattr(router, "_get_installed_apps"):
-        return
-
-    # type assertion: we know this is a FileRouterBackend in practice
-    file_router: FileRouterBackend = router  # type: ignore[assignment]
-
-    for app_name in file_router._get_installed_apps():
-        if not hasattr(file_router, "_get_app_pages_path"):
-            continue
-
-        pages_path = file_router._get_app_pages_path(app_name)
-        if not pages_path:
-            continue
-
-        app_errors = _check_missing_templates_in_directory(
-            pages_path,
-            f"App '{app_name}'",
-        )
-        errors.extend(app_errors)
-
-
-def _check_root_missing_templates(
-    router: RouterBackend,
-    errors: list[CheckMessage],
-) -> None:
-    """Check root missing templates for router (all root paths)."""
-    if not hasattr(router, "_get_root_pages_paths"):
-        return
-    for i, pages_path in enumerate(router._get_root_pages_paths()):
-        context = "Root" if i == 0 else f"Root ({pages_path})"
-        root_errors = _check_missing_templates_in_directory(pages_path, context)
-        errors.extend(root_errors)
-
-
-def _check_missing_templates_in_directory(
-    pages_path: Path,
-    context: str,
-) -> list[CheckMessage]:
-    """Check for missing templates in page.py files."""
-    errors: list[CheckMessage] = []
-
-    if not pages_path.exists():
-        return errors
-
-    for page_file in pages_path.rglob("page.py"):
-        # check if page has template or template.djx
-        has_template = _has_template_or_djx(page_file)
-
-        if not has_template:
-            errors.append(
-                Error(
-                    f"{context} pages: {page_file.relative_to(pages_path)} "
-                    "is missing a template attribute or template.djx file.",
-                    obj=settings,
-                    id="next.E018",
-                ),
-            )
-
-    return errors
+    return any([has_template, has_render, has_template_djx, has_layout_djx])
 
 
 def _check_layout_file(layout_file: Path) -> CheckMessage | None:
@@ -673,26 +695,18 @@ def _check_layout_file(layout_file: Path) -> CheckMessage | None:
     return None
 
 
-@register(Tags.compatibility)
+@register(Tags.templates)
 def check_layout_templates(*_args, **_kwargs) -> list[CheckMessage]:
     """Check layout.djx files for proper template block structure.
 
     Validates that layout.djx files contain the required {% block template %}
-    structure for proper inheritance. This check can be disabled by setting
-    NEXT_PAGES_OPTIONS.check_layout_template_blocks = False.
+    structure for proper inheritance.
     """
     warnings: list[CheckMessage] = []
 
-    # check if this check is disabled
-    next_pages_options = getattr(settings, "NEXT_PAGES_OPTIONS", {})
-    if not next_pages_options.get("check_layout_template_blocks", True):
-        return warnings
-
-    try:
-        router_manager = RouterManager()
-        router_manager._reload_config()
-    except (ImportError, AttributeError):
-        return warnings
+    router_manager, init_errors = _get_router_manager()
+    if router_manager is None:
+        return init_errors + warnings
 
     for router in router_manager._routers:
         if not hasattr(router, "_scan_pages_directory"):
@@ -714,75 +728,6 @@ def check_layout_templates(*_args, **_kwargs) -> list[CheckMessage]:
     return warnings
 
 
-def _has_page_content(page_path: Path) -> bool:
-    """Check if page has any content (template, render, template.djx, layout.djx)."""
-    # check if page.py has content
-    module = _load_python_module(page_path)
-    has_template = False
-    has_render = False
-
-    if module:
-        has_template = hasattr(module, "template")
-        has_render = hasattr(module, "render") and callable(module.render)
-
-    # check for template.djx
-    template_djx = page_path.parent / "template.djx"
-    has_template_djx = template_djx.exists()
-
-    # check for layout.djx
-    layout_djx = page_path.parent / "layout.djx"
-    has_layout_djx = layout_djx.exists()
-
-    return any([has_template, has_render, has_template_djx, has_layout_djx])
-
-
-@register(Tags.compatibility)
-def check_missing_page_content(*_args, **_kwargs) -> list[CheckMessage]:
-    """Check for page.py files that have no content (no template, no render function).
-
-    Validates that page.py files have either a template variable, template.djx file,
-    layout.djx file, or a render function. This check can be disabled by setting
-    NEXT_PAGES_OPTIONS.check_missing_page_content = False.
-    """
-    warnings: list[CheckMessage] = []
-
-    # check if this check is disabled
-    next_pages_options = getattr(settings, "NEXT_PAGES_OPTIONS", {})
-    if not next_pages_options.get("check_missing_page_content", True):
-        return warnings
-
-    try:
-        router_manager = RouterManager()
-        router_manager._reload_config()
-    except (ImportError, AttributeError):
-        return warnings
-
-    for router in router_manager._routers:
-        if not hasattr(router, "_scan_pages_directory"):
-            continue
-
-        pages_dir = _get_pages_directory(router)
-        if not pages_dir:
-            continue
-
-        for _url_path, page_path in router._scan_pages_directory(pages_dir):
-            if not page_path.exists():
-                continue
-
-            if not _has_page_content(page_path):
-                warnings.append(
-                    DjangoWarning(
-                        f"Page file {page_path} has no content: no template variable, "
-                        "no render function, no template.djx, and no layout.djx found. "
-                        "This page will not render anything.",
-                        obj=str(page_path),
-                        id="next.W002",
-                    ),
-                )
-
-    return warnings
-
-
 def _get_duplicate_parameters(url_path: str, parser: URLPatternParser) -> list[str]:
     """Get list of duplicate parameter names in URL path."""
     param_matches = parser._param_pattern.findall(url_path)
@@ -797,26 +742,18 @@ def _get_duplicate_parameters(url_path: str, parser: URLPatternParser) -> list[s
     return [name for name in set(param_names) if param_names.count(name) > 1]
 
 
-@register(Tags.compatibility)
+@register(Tags.urls)
 def check_duplicate_url_parameters(*_args, **_kwargs) -> list[CheckMessage]:
     """Check for duplicate parameter names in URL patterns.
 
     Validates that URL patterns don't have duplicate parameter names like
-    /page/[id]/[id]/ which would cause conflicts. This check can be disabled by setting
-    NEXT_PAGES_OPTIONS.check_duplicate_url_parameters = False.
+    /page/[id]/[id]/ which would cause conflicts.
     """
     errors: list[CheckMessage] = []
 
-    # check if this check is disabled
-    next_pages_options = getattr(settings, "NEXT_PAGES_OPTIONS", {})
-    if not next_pages_options.get("check_duplicate_url_parameters", True):
-        return errors
-
-    try:
-        router_manager = RouterManager()
-        router_manager._reload_config()
-    except (ImportError, AttributeError):
-        return errors
+    router_manager, init_errors = _get_router_manager()
+    if router_manager is None:
+        return init_errors
 
     parser = URLPatternParser()
 
@@ -843,7 +780,7 @@ def check_duplicate_url_parameters(*_args, **_kwargs) -> list[CheckMessage]:
                             f"names: {duplicates}. "
                             "Each parameter must have a unique name.",
                             obj=str(page_path),
-                            id="next.E002",
+                            id="next.E028",
                         ),
                     )
             except (ValueError, TypeError, AttributeError):
@@ -868,11 +805,13 @@ def _has_context_decorator_without_key(func: Callable[..., Any]) -> bool:
 
 
 def _get_function_result(func: Callable[..., Any]) -> object:
-    """Get function result, handling arguments if needed."""
+    """Call ``func()`` or with a stub if it requires arguments (e.g. ``request``)."""
     try:
         return func()
     except TypeError:
-        return func(MagicMock())
+        # Minimal stand-in for view-like context callables that expect one argument.
+        stub = types.SimpleNamespace()
+        return func(stub)
 
 
 def _get_first_root_pages_path(file_router: FileRouterBackend) -> Path | None:
@@ -920,7 +859,7 @@ def _check_context_function(
                 f"when used with @context decorator (without key). "
                 f"Got {type(result).__name__} instead.",
                 obj=str(page_path),
-                id="next.E003",
+                id="next.E029",
             )
     except (TypeError, AttributeError, OSError):
         pass
@@ -970,19 +909,13 @@ def _check_router_context_functions(router: RouterBackend) -> list[CheckMessage]
     return errors
 
 
-@register(Tags.compatibility)
+@register(Tags.templates)
 def check_context_functions(*_args, **_kwargs) -> list[CheckMessage]:
     """Check context functions for proper return types.
 
     Validates that context functions decorated with @context (without key)
-    always return a dictionary. This check can be disabled by setting
-    NEXT_PAGES_OPTIONS.check_context_return_types = False.
+    always return a dictionary.
     """
-    # check if this check is disabled
-    next_pages_options = getattr(settings, "NEXT_PAGES_OPTIONS", {})
-    if not next_pages_options.get("check_context_return_types", True):
-        return []
-
     router_manager, init_errors = _get_router_manager()
     if router_manager is None:
         return init_errors
@@ -995,8 +928,8 @@ def check_context_functions(*_args, **_kwargs) -> list[CheckMessage]:
     return errors
 
 
-@register(Tags.compatibility)  # type: ignore[type-var]
-def check_url_patterns(_app_configs: list | None, **_kwargs) -> list[CheckMessage]:
+@register(Tags.urls)
+def check_url_patterns(*_args, **_kwargs) -> list[CheckMessage]:
     """Validate URL pattern generation and identify potential conflicts.
 
     Generates URL patterns from all configured router backends and validates
@@ -1036,7 +969,7 @@ def check_url_patterns(_app_configs: list | None, **_kwargs) -> list[CheckMessag
             Error(
                 f"Error checking URL conflicts: {e}",
                 obj=settings,
-                id="next.E016",
+                id="next.E014",
             ),
         )
 
@@ -1147,8 +1080,8 @@ def _convert_to_django_pattern(url_path: str) -> str | None:
 def check_duplicate_component_names(*_args, **_kwargs) -> list[CheckMessage]:
     """Check that no two components share the same name within the same scope."""
     errors: list[CheckMessage] = []
-    configs = getattr(settings, "NEXT_COMPONENTS", None)
-    if not isinstance(configs, list):
+    configs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+    if not isinstance(configs, list) or not configs:
         return errors
     manager = ComponentsManager()
     manager._reload_config()
@@ -1211,8 +1144,8 @@ def _component_py_uses_pages_context(file_path: Path) -> bool:
 def check_component_py_no_pages_context(*_args, **_kwargs) -> list[CheckMessage]:
     """Check that component.py files do not use context from next.pages."""
     errors: list[CheckMessage] = []
-    configs = getattr(settings, "NEXT_COMPONENTS", None)
-    if not isinstance(configs, list):
+    configs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+    if not isinstance(configs, list) or not configs:
         return errors
     manager = ComponentsManager()
     manager._reload_config()
@@ -1229,8 +1162,8 @@ def check_component_py_no_pages_context(*_args, **_kwargs) -> list[CheckMessage]
             if _component_py_uses_pages_context(info.module_path):
                 errors.append(
                     Error(
-                        "component.py must not use context from next.pages; "
-                        "use component context from next.components instead.",
+                        "component.py must not use context from next.pages. "
+                        "Use component context from next.components instead.",
                         obj=str(info.module_path),
                         id="next.E021",
                     ),

@@ -31,7 +31,7 @@ This example demonstrates next-dj **components** in a small **blog** app (Englis
 ```
 components/
 ├── config/                      # Django project (settings, urls, test_settings for pytest)
-│   ├── settings.py              # NEXT_PAGES, NEXT_COMPONENTS, LOGIN_URL, middleware
+│   ├── settings.py              # NEXT_FRAMEWORK, LOGIN_URL, middleware
 │   ├── test_settings.py         # In-memory SQLite for tests
 │   └── urls.py                  # admin, logout, include(next.urls)
 ├── myapp/
@@ -82,7 +82,7 @@ components/
 
 ## How It Works
 
-1. **File router** — Directories named `_components` are skipped for URL segments (`COMPONENTS_DIR` in `NEXT_PAGES` and `NEXT_COMPONENTS`).
+1. **File router** — Directories named `_components` are skipped for URL segments (`COMPONENTS_DIR` in `NEXT_FRAMEWORK` router and component options).
 
 2. **Component scope** — Templates resolve components from root dirs plus `_components` folders on the path from the pages root down to the template. A folder `pages/posts/_components/` is visible only under `pages/posts/...`, not from `pages/template.djx` at the root of the tree.
 

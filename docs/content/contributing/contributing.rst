@@ -25,11 +25,11 @@ Install and setup
    * - Command
      - Purpose
    * - ``make install``
-     - Editable install of the package (``uv pip install -e .``)
-   * - ``make install-dev``
-     - Dev dependencies (``uv sync --dev``)
+     - Sync runtime dependencies and the package from ``uv.lock`` (``uv sync --locked --no-dev``; editable install, no dev group).
    * - ``make dev-setup``
-     - ``uv sync --dev`` + pre-commit hooks
+     - Full dev environment: ``uv sync --locked --dev`` plus pre-commit hooks. Prefer this for day-to-day work.
+
+Equivalent: ``uv sync --locked --dev`` (then ``uv run …`` for tools). ``uv sync`` installs the project in editable mode and matches the lockfile.
 
 Tests
 ~~~~~
@@ -42,12 +42,10 @@ Tests
      - Purpose
    * - ``make test``
      - Runs the main suite under ``tests/`` with coverage. The run **fails** if coverage for ``next/`` is below 100%. Uses parallel workers (``pytest -n auto``). Writes an HTML report to ``htmlcov/``.
-   * - ``make test-fast``
-     - Runs the same tests without coverage for faster iteration.
    * - ``make test-examples``
      - Requires each example to have ``tests/`` or ``tests.py``. Runs pytest with coverage per example (see Examples_).
-   * - ``make test-all``
-     - ``make test`` then ``make test-examples``
+
+For a faster loop without coverage, run e.g. ``uv run pytest tests/ -n auto`` (same discovery, no ``--cov`` flags).
 
 There is **no** ``make test-coverage``. Use ``make test`` and open ``htmlcov/index.html`` if you need a detailed report.
 
@@ -97,6 +95,7 @@ GitHub Actions additionally:
 - Runs typos and ``uv-lock`` via pre-commit (``security`` job)
 - On pull requests: dependency review (``dependency-review`` job)
 - In CI, lint runs on **`next/` only**, plus a separate import-order pass with ``--select I``. Locally, ``make lint`` also covers ``tests/`` and ``examples/``. Keep those directories clean so you do not surprise reviewers.
+- The test matrix installs a specific Django version with ``uv pip install "django==…"`` **after** ``uv sync --locked``. That overrides the Django version from ``uv.lock`` only for those jobs so multiple Django versions are exercised; it is intentional, not a broken lockfile.
 
 Ruff uses ``select = ["ALL"]`` with ignores and per-file rules in ``pyproject.toml``. That includes line length 88, isort with ``known-first-party = ["next"]``, and relaxed rules under ``examples/`` and in test and ``conftest`` files.
 
@@ -196,7 +195,7 @@ Use an existing example such as ``examples/file-routing/tests/conftest.py`` as t
 Documentation
 -------------
 
-User-facing docs live under ``docs/`` and publish to Read the Docs (see README). If you change documentation, run ``make docs`` or rely on the CI docs job. Fix any warnings and broken links.
+User-facing docs live under ``docs/`` and publish to Read the Docs (see README). Doc build dependencies are the ``docs`` group in ``pyproject.toml`` (locked in ``uv.lock``); Read the Docs runs ``uv sync`` with that group (see ``.readthedocs.yaml``). Locally, run ``make docs`` or rely on the CI docs job. Fix any warnings and broken links.
 
 Pull requests
 -------------
@@ -239,4 +238,4 @@ Help
 - Search `issues <https://github.com/next-dj/next-dj/issues>`_ and prior PRs.
 - Mirror patterns in ``next/`` and ``tests/`` for similar features.
 - For failing coverage after ``make test``, inspect terminal output and ``htmlcov/index.html``.
-- For quick test loops, run ``make test-fast``.
+- For quick test loops, run ``uv run pytest tests/ -n auto`` without coverage flags.
