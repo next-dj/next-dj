@@ -1,13 +1,10 @@
-.PHONY: help install install-dev test lint format type-check clean build publish docs docs-serve docs-clean docs-linkcheck docs-spelling
+.PHONY: help install test lint format type-check clean build docs docs-serve docs-clean docs-linkcheck
 
 help: # show this help message
 	@echo "Available commands:"
 	@echo "  install         - install the package"
-	@echo "  install-dev     - install development dependencies"
 	@echo "  test            - run tests in parallel with 100% coverage requirement"
-	@echo "  test-fast       - run tests without coverage"
 	@echo "  test-examples   - run tests for examples in parallel with coverage"
-	@echo "  test-all        - run all tests including examples"
 	@echo "  lint            - run linting with ruff"
 	@echo "  format          - format code with ruff"
 	@echo "  type-check      - run type checking with mypy"
@@ -21,19 +18,12 @@ help: # show this help message
 	@echo "  docs-serve      - build and serve documentation"
 	@echo "  docs-clean      - clean documentation build"
 	@echo "  docs-linkcheck  - check documentation links"
-	@echo "  docs-spelling   - check documentation spelling"
 
 install: # install the package
 	uv pip install -e .
 
-install-dev: # install development dependencies
-	uv sync --dev
-
 test: # run tests with 100% coverage requirement
 	uv run pytest tests/ -n auto -v --cov=next --cov-report=html --cov-report=term-missing --cov-fail-under=100
-
-test-fast: # run tests without coverage
-	uv run pytest tests/ -v
 
 test-examples: # run tests for examples with coverage
 	@set -e; \
@@ -61,10 +51,6 @@ test-examples: # run tests for examples with coverage
 			fi; \
 		fi; \
 	done
-
-test-all: # run all tests including examples
-	make test
-	make test-examples
 
 lint: # run linting with ruff
 	uv run ruff check next/ tests/ examples/ --fix
