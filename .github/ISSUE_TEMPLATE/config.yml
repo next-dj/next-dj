@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Contributing guidelines
+    url: https://github.com/next-dj/next-dj/blob/main/CONTRIBUTING.md
+    about: Commands, testing, coverage, pull request checklist, and code style.
+  - name: Existing issues
+    url: https://github.com/next-dj/next-dj/issues
+    about: Search open and closed issues before filing a new one.

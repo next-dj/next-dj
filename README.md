@@ -24,7 +24,9 @@ We welcome contributions from the community! `next.dj` is designed to make Djang
 
 ## Sponsors
 
-<img src="./docs/_images/sponsored/evrone_sponsored.svg" width="130px" alt="Sponsored by Evrone" />
+<a target="_blank" href="https://evrone.com">
+    <img src="./docs/_images/sponsored/evrone_sponsored.svg" width="130px" alt="Sponsored by Evrone" />
+</a>
 
 ## License
 
