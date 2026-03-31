@@ -43,23 +43,18 @@ pages/
 - Includes Django admin integration for easy content management
 - Demonstrates database integration with file-based routing
 
-**Main Catalog Page** (`catalog/pages/page.py`):
+**Landing page** (`catalog/pages/page.py` + `template.djx`):
+- Creates URL: `/`
+- Demonstrates `@context` (including keyed context and DI-style parameters)
+- Uses `template.djx` beside `page.py`
+
+**Product listing** (`catalog/pages/catalog/page.py`):
 - Creates URL: `/catalog/`
-- Uses `template.djx` file for template definition
-- Shows context function registration for database queries
-- Demonstrates template.djx usage as alternative to Python strings
+- Lists products via a context function and `template` string in the module
 
-**Product Listing** (`catalog/pages/catalog/page.py`):
-- Creates URL: `/catalog/catalog/`
-- Displays all products in a list format
-- Shows context management with database queries
-- Demonstrates nested page structure
-
-**Product Detail** (`catalog/pages/catalog/[int:id]/page.py`):
-- Creates URL: `/catalog/catalog/<int:id>/`
-- Displays individual product details
-- Shows parameterized routing with database lookups
-- Demonstrates error handling for non-existent products
+**Product detail** (`catalog/pages/catalog/[int:id]/page.py`):
+- Creates URL: `/catalog/<id>/` (e.g. `/catalog/1/`)
+- Shows parameterized routing and per-product content
 
 ## How It Works
 
@@ -77,18 +72,8 @@ The example demonstrates next-dj's integration with Django's full feature set:
 The example shows how to use `template.djx` files:
 
 ```html
-<!-- catalog/pages/template.djx -->
-<h1>{{ catalog.title }}</h1>
-<p>{{ catalog.description }}</p>
-<ul>
-{% for product in catalog.products %}
-    <li>
-        <a href="{% url 'page_catalog_catalog_int_id' product.id %}">
-            {{ product.name }} - ${{ product.price }}
-        </a>
-    </li>
-{% endfor %}
-</ul>
+<!-- Illustrative: link to a product detail route -->
+<a href="{% url 'page_catalog_int_id' id=product.id %}">{{ product.title }}</a>
 ```
 
 This approach separates template logic from Python code, making templates easier to edit and maintain.
@@ -97,9 +82,9 @@ This approach separates template logic from Python code, making templates easier
 
 ### Prerequisites
 
-- Python 3.8+
-- Django 4.0+
-- next-dj package installed
+- Python 3.11+
+- Django 4.2+
+- next-dj installed
 
 ### Setup
 
@@ -139,12 +124,9 @@ python manage.py runserver
 
 ### Testing the Application
 
-1. **Main catalog page**: http://127.0.0.1:8000/
+1. **Landing page**: http://127.0.0.1:8000/
 2. **Product listing**: http://127.0.0.1:8000/catalog/
-3. **Product details**: 
-   - http://127.0.0.1:8000/catalog/1/
-   - http://127.0.0.1:8000/catalog/2/
-   - http://127.0.0.1:8000/catalog/3/
+3. **Product details** (use ids that exist in the database): http://127.0.0.1:8000/catalog/1/, etc.
 
 ### Admin Interface
 

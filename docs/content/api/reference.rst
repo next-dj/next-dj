@@ -39,7 +39,7 @@ File-based URL pattern generation and router backends.
 Server (next.server)
 --------------------
 
-``runserver`` integration: :class:`~next.server.NextStatReloader` watches route and ``.djx`` set changes. See :doc:`/content/guide/autoreload`.
+``runserver`` integration: :class:`~next.server.NextStatReloader` watches the route set and Python entrypoints; ``.djx`` files are not watched. See :doc:`/content/guide/autoreload`.
 
 .. automodule:: next.server
    :members:

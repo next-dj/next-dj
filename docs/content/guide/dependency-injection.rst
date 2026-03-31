@@ -207,4 +207,4 @@ see :ref:`dependency-injection-api`.
 Next
 ----
 
-:doc:`autoreload` — How the development server reloads when you change pages and templates.
+:doc:`autoreload` — How ``runserver`` reloads (Python entrypoints, route set, and why ``.djx`` is not glob-watched).

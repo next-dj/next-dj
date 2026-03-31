@@ -107,7 +107,7 @@ def _validate_file_router_backend_fields(  # noqa: C901, PLR0912
     config: dict,
     index: int,
 ) -> list[CheckMessage]:
-    """Validate DIRS, PAGES_DIR, APP_DIRS, and OPTIONS for the file router."""
+    """Validate ``DIRS``, ``PAGES_DIR``, ``APP_DIRS``, ``OPTIONS`` (file router)."""
     errors: list[CheckMessage] = []
     rf_routers = f"NEXT_FRAMEWORK['{_PAGE_BACKEND_SETTINGS_KEY}'][{index}]"
     if "DIRS" in config and not isinstance(config["DIRS"], list):
@@ -244,7 +244,7 @@ REQUEST_CONTEXT_PROCESSOR = "django.template.context_processors.request"
 
 @register(Tags.templates)
 def check_request_in_context(*_args, **_kwargs) -> list[CheckMessage]:
-    """Ensure request in template context (required for {% form %})."""
+    """Ensure ``request`` in template context (required for ``{% form %}``)."""
     if "next" not in settings.INSTALLED_APPS:
         return []
 
@@ -275,7 +275,7 @@ def check_request_in_context(*_args, **_kwargs) -> list[CheckMessage]:
 
 @register(Tags.compatibility)
 def check_next_pages_configuration(*_args, **_kwargs) -> list[CheckMessage]:
-    """Validate ``DEFAULT_PAGE_BACKENDS`` in merged ``NEXT_FRAMEWORK``."""
+    """Validate ``DEFAULT_PAGE_BACKENDS`` inside merged ``NEXT_FRAMEWORK``."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if raw is not None and not isinstance(raw, dict):
         return [
@@ -365,7 +365,7 @@ def _validate_single_component_backend(
 
 @register(Tags.compatibility)
 def check_next_components_configuration(*_args, **_kwargs) -> list[CheckMessage]:
-    """Validate ``NEXT_FRAMEWORK['DEFAULT_COMPONENT_BACKENDS']`` shape after merge."""
+    """Validate ``DEFAULT_COMPONENT_BACKENDS`` shape in merged ``NEXT_FRAMEWORK``."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if raw is not None and not isinstance(raw, dict):
         return []
@@ -469,7 +469,7 @@ def _check_root_pages(
     errors: list[CheckMessage],
     warnings: list[CheckMessage],
 ) -> None:
-    """Check root pages for router (all paths from _get_root_pages_paths)."""
+    """Check root pages for router (all paths from ``_get_root_pages_paths``)."""
     if not hasattr(router, "_get_root_pages_paths"):
         return
     if not hasattr(router, "pages_dir"):
@@ -540,7 +540,7 @@ def _check_directory_syntax(pages_path: Path, context: str) -> list[CheckMessage
 
 
 def _check_missing_page_files(pages_path: Path, context: str) -> list[CheckMessage]:
-    """Check for missing page.py files in parameter directories."""
+    """Check for missing ``page.py`` files in parameter directories."""
     errors: list[CheckMessage] = []
 
     for item in pages_path.rglob("*"):
@@ -616,7 +616,7 @@ def _is_valid_args_syntax(args_str: str) -> bool:
 
 @register(Tags.compatibility)
 def check_page_functions(*_args, **_kwargs) -> list[CheckMessage]:
-    """Validate each ``page.py``: ``render`` and/or template, and warn if empty."""
+    """Validate each page module for ``render`` and ``template``. Warn when empty."""
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
@@ -689,7 +689,7 @@ def _check_page_functions_in_directory(
     pages_path: Path,
     context: str,
 ) -> tuple[list[CheckMessage], list[CheckMessage]]:
-    """Check page.py files: render/template rules and empty-page warning."""
+    """Check ``page.py`` files: ``render``/``template`` rules and empty-page warning."""
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
@@ -738,7 +738,7 @@ def _check_page_functions_in_directory(
 
 
 def _load_render_function(file_path: Path) -> object:
-    """Load render function from page.py file."""
+    """Load ``render`` function from ``page.py`` file."""
     try:
         if (
             spec := importlib.util.spec_from_file_location("page_module", file_path)
@@ -754,7 +754,7 @@ def _load_render_function(file_path: Path) -> object:
 
 
 def _has_template_or_djx(file_path: Path) -> bool:
-    """Check if page.py has template attribute or template.djx file exists."""
+    """Check if ``page.py`` has ``template`` or sibling ``template.djx`` exists."""
     try:
         if (
             spec := importlib.util.spec_from_file_location("page_module", file_path)
@@ -777,7 +777,7 @@ def _has_template_or_djx(file_path: Path) -> bool:
 
 
 def _has_page_content(page_path: Path) -> bool:
-    """Whether page.py exposes template/render or sibling djx files exist."""
+    """Whether ``page.py`` has ``template``, ``render``, or sibling djx files."""
     module = _load_python_module(page_path)
     has_template = False
     has_render = False
@@ -796,7 +796,7 @@ def _has_page_content(page_path: Path) -> bool:
 
 
 def _check_layout_file(layout_file: Path) -> CheckMessage | None:
-    """Check if layout file has required template block."""
+    """Check if layout file has required ``{% block template %}``."""
     try:
         content = layout_file.read_text(encoding="utf-8")
         if "{% block template %}" not in content:
@@ -814,9 +814,9 @@ def _check_layout_file(layout_file: Path) -> CheckMessage | None:
 
 @register(Tags.templates)
 def check_layout_templates(*_args, **_kwargs) -> list[CheckMessage]:
-    """Check layout.djx files for proper template block structure.
+    """Check ``layout.djx`` files for proper template block structure.
 
-    Validates that layout.djx files contain the required {% block template %}
+    Validates that ``layout.djx`` files contain the required ``{% block template %}``
     structure for proper inheritance.
     """
     warnings: list[CheckMessage] = []
@@ -854,7 +854,7 @@ def _get_duplicate_parameters(url_path: str, parser: URLPatternParser) -> list[s
 
 @register(Tags.urls)
 def check_duplicate_url_parameters(*_args, **_kwargs) -> list[CheckMessage]:
-    """Fail when the same ``[param]`` name is repeated in one route."""
+    """Fail when the same bracket parameter name is repeated in one route."""
     errors: list[CheckMessage] = []
 
     router_manager, init_errors = _get_router_manager()
@@ -889,7 +889,7 @@ def check_duplicate_url_parameters(*_args, **_kwargs) -> list[CheckMessage]:
 
 
 def _has_context_decorator_without_key(func: Callable[..., Any]) -> bool:
-    """Check if function has @context decorator without key."""
+    """Check if function has ``@context`` decorator without key."""
     try:
         source = inspect.getsource(func)
         tree = ast.parse(source)
@@ -904,7 +904,7 @@ def _has_context_decorator_without_key(func: Callable[..., Any]) -> bool:
 
 
 def _get_function_result(func: Callable[..., Any]) -> object:
-    """Call ``func()`` or with a stub if it requires arguments (e.g. ``request``)."""
+    """Call ``func()`` with no args or with a stub when it needs arguments."""
     try:
         return func()
     except TypeError:
@@ -914,7 +914,7 @@ def _get_function_result(func: Callable[..., Any]) -> object:
 
 
 def _get_first_root_pages_path(file_router: FileRouterBackend) -> Path | None:
-    """First entry from ``_get_root_pages_paths`` when defined."""
+    """Return the first entry from ``_get_root_pages_paths`` when defined."""
     if not hasattr(file_router, "_get_root_pages_paths"):
         return None
     root_paths = file_router._get_root_pages_paths()
@@ -922,7 +922,7 @@ def _get_first_root_pages_path(file_router: FileRouterBackend) -> Path | None:
 
 
 def _get_first_app_pages_dir(file_router: FileRouterBackend) -> Path | None:
-    """Return first existing app pages dir, or None."""
+    """Return first existing app ``pages`` dir, or ``None``."""
     for app_config in apps.get_app_configs():
         potential = Path(app_config.path) / str(file_router.pages_dir)
         if potential.exists():
@@ -931,7 +931,7 @@ def _get_first_app_pages_dir(file_router: FileRouterBackend) -> Path | None:
 
 
 def _get_pages_directory(router: RouterBackend) -> Path | None:
-    """One representative ``pages`` root for scanning checks."""
+    """Pick one representative pages root directory for scanning checks."""
     if not hasattr(router, "pages_dir"):
         return None
     file_router: FileRouterBackend = router  # type: ignore[assignment]
@@ -946,7 +946,7 @@ def _get_pages_directory(router: RouterBackend) -> Path | None:
 def _iter_scanned_page_pairs(
     router: RouterBackend,
 ) -> Iterator[tuple[str, Path]]:
-    """``(url_path, page_path)`` from the file router's page tree when scannable."""
+    """Yield pairs from ``_scan_pages_directory`` when the router is scannable."""
     if not hasattr(router, "_scan_pages_directory"):
         return
     pages_dir = _get_pages_directory(router)
@@ -960,7 +960,7 @@ def _check_context_function(
     func: Callable[..., Any],
     page_path: Path,
 ) -> CheckMessage | None:
-    """Error when keyless ``@context`` callables do not produce a dict."""
+    """Emit an error when keyless context callables do not produce a ``dict``."""
     try:
         result = _get_function_result(func)
         if not isinstance(result, dict):
@@ -981,7 +981,7 @@ def _check_module_context_functions(
     module: types.ModuleType,
     page_path: Path,
 ) -> list[CheckMessage]:
-    """Keyless ``@context`` functions in one ``page.py`` module."""
+    """Collect keyless ``@context`` functions declared in one page module."""
     errors: list[CheckMessage] = []
 
     for name, obj in inspect.getmembers(module, inspect.isfunction):
@@ -1074,7 +1074,7 @@ def _collect_app_patterns(
     router: RouterBackend,
     all_patterns: list[tuple[str, str]],
 ) -> None:
-    """Append patterns discovered under each app's pages dir."""
+    """Append patterns discovered under each app's ``pages_dir``."""
     if not hasattr(router, "_get_installed_apps"):
         return
 
@@ -1207,7 +1207,7 @@ def check_duplicate_component_names(*_args, **_kwargs) -> list[CheckMessage]:
 
 
 def _component_py_uses_pages_context(file_path: Path) -> bool:
-    """Return True if component.py imports or uses context from next.pages."""
+    """Return True if ``component.py`` imports ``context`` from ``next.pages``."""
     try:
         source = file_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -1236,7 +1236,7 @@ def _component_py_uses_pages_context(file_path: Path) -> bool:
 
 @register(Tags.compatibility)
 def check_component_py_no_pages_context(*_args, **_kwargs) -> list[CheckMessage]:
-    """Check that component.py files do not use context from next.pages."""
+    """Check that ``component.py`` files do not use ``context`` from ``next.pages``."""
     errors: list[CheckMessage] = []
     configs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:

@@ -1,6 +1,6 @@
 """Provide merged ``settings.NEXT_FRAMEWORK`` with framework ``DEFAULTS``.
 
-Caches imported classes until ``NextFrameworkSettings.reload()`` clears caches.
+Imported classes stay cached until ``NextFrameworkSettings.reload()`` clears caches.
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ class NextFrameworkSettings:
         return out
 
     def __getattr__(self, attr: str) -> Any:  # noqa: ANN401
-        """Return merged value for known ``DEFAULTS`` keys."""
+        """Return merged values for keys that exist in ``DEFAULTS``."""
         if attr in self._attr_value_cache:
             return self._attr_value_cache[attr]
         if attr not in self.DEFAULTS:
@@ -128,7 +128,7 @@ class NextFrameworkSettings:
 
 
 def perform_import(val: Any, setting_name: str) -> Any:  # noqa: ANN401
-    """Resolve ``val`` when it is a dotted path (see ``IMPORT_STRINGS``)."""
+    """Resolve ``val`` when it is a dotted import path (see ``IMPORT_STRINGS``)."""
     if val is None or not isinstance(val, str):
         return val
     try:

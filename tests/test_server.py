@@ -1,10 +1,33 @@
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+from django.test import override_settings
 from django.utils.autoreload import StatReloader
 
-from next.server import NextStatReloader
+import next.server as next_server_mod
+from next.conf import next_framework_settings
+from next.server import (
+    NextStatReloader,
+    _dedupe_watch_specs,
+    get_framework_filesystem_roots_for_linking,
+    iter_all_autoreload_watch_specs,
+    iter_default_autoreload_watch_specs,
+    register_autoreload_watch_spec,
+)
+
+
+def _paths_matched_by_reloader_globs(reloader: StatReloader) -> set[Path]:
+    """Paths returned by ``Path.glob`` for each registered ``watch_dir`` pair.
+
+    This matches the subset of files Django's :meth:`~StatReloader.snapshot_files`
+    tracks for mtime changes from next-registered globs (excluding Python modules).
+    """
+    out: set[Path] = set()
+    for directory, patterns in reloader.directory_globs.items():
+        for pattern in patterns:
+            out.update(p.resolve() for p in directory.glob(pattern))
+    return out
 
 
 class TestNextStatReloader:
@@ -43,12 +66,6 @@ class TestNextStatReloader:
                 "route_set_unchanged", 2, "no_notify", id="route_set_unchanged"
             ),
             pytest.param("watch_raises", 1, "ok", id="watch_raises"),
-            pytest.param(
-                "template_set_changes",
-                2,
-                "template_notify",
-                id="template_set_changes",
-            ),
             pytest.param("mtime_change", 2, "notify_path", id="mtime_change"),
         ],
         indirect=["reloader_tick_scenario"],
@@ -72,59 +89,127 @@ class TestNextStatReloader:
             mock_notify.assert_not_called()
         elif expect == "ok":
             assert payload is None
-        elif expect == "template_notify":
-            mock_notify, fake_template = payload
-            calls = [c[0][0] for c in mock_notify.call_args_list]
-            assert fake_template in calls
 
-    def test_check_layouts_notify_when_layout_used_by_route(self) -> None:
-        """_check_layouts notifies when layout in diff is under a route's dir."""
+
+class TestServerAutoreloadWatchApi:
+    """Public autoreload helpers live on ``next.server`` with ``NextStatReloader``."""
+
+    def test_register_autoreload_watch_spec_then_iter_all(self) -> None:
+        """Extra registration is deduplicated in ``iter_all_autoreload_watch_specs``."""
+        root = Path("/tmp/next_autoreload_extra_test")
+        try:
+            register_autoreload_watch_spec(root, "**/plugin.py")
+            register_autoreload_watch_spec(root, "**/plugin.py")
+            with patch.object(
+                next_server_mod,
+                "iter_default_autoreload_watch_specs",
+                return_value=[],
+            ):
+                specs = iter_all_autoreload_watch_specs()
+            matches = [x for x in specs if x == (root, "**/plugin.py")]
+            assert len(matches) == 1
+        finally:
+            next_server_mod._registered_extra_watch_specs.clear()
+
+    def test_get_framework_filesystem_roots_for_linking_returns_paths(self) -> None:
+        """Linking helper returns a sorted list of paths."""
+        roots = get_framework_filesystem_roots_for_linking()
+        assert isinstance(roots, list)
+        assert all(isinstance(p, Path) for p in roots)
+
+    def test_dedupe_watch_specs_when_resolve_raises_oserror(self) -> None:
+        """Duplicate specs collapse when ``Path.resolve`` fails."""
+        mock_path = MagicMock()
+        mock_path.resolve.side_effect = OSError("no resolve")
+        specs = _dedupe_watch_specs([(mock_path, "*.py"), (mock_path, "*.py")])
+        assert len(specs) == 1
+
+    def test_iter_default_includes_component_backend_dirs(self, tmp_path: Path) -> None:
+        """``DEFAULT_COMPONENT_BACKENDS`` ``DIRS`` add ``**/component.py`` (not ``.djx``)."""
+        comp_root = tmp_path / "shared_components"
+        comp_root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    "not-a-dict",
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [str(comp_root)],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            specs = iter_default_autoreload_watch_specs()
+        next_framework_settings.reload()
+        assert all(".djx" not in g for _, g in specs)
+        assert any(g == "**/component.py" and p == comp_root for p, g in specs)
+
+
+class TestDjxNotInStatReloaderGlobMatches:
+    """``.djx`` files are not among paths matched by next's ``watch_dir`` globs."""
+
+    def test_glob_matched_paths_exclude_djx_alongside_page_and_components(
+        self, tmp_path: Path
+    ) -> None:
+        """Mimic production globs under a pages root; no ``.djx`` is glob-matched."""
+        pages = tmp_path / "pages"
+        home = pages / "home"
+        home.mkdir(parents=True)
+        (home / "page.py").write_text("#")
+        (home / "template.djx").write_text("<p/>")
+        chip = pages / "_components" / "chip"
+        chip.mkdir(parents=True)
+        (chip / "component.djx").write_text("<span/>")
+        (chip / "component.py").write_text("#")
+        (pages / "_components" / "solo.djx").write_text("<div/>")
+
         reloader = NextStatReloader()
-        reloader._previous_layouts = set()
-        layout_djx = Path("/app/pages/blog/layout.djx").resolve()
-        page_py = Path("/app/pages/blog/page.py").resolve()
-        routes = {("blog", page_py)}
-        with patch.object(reloader, "notify_file_changed") as mock_notify:
-            reloader._check_layouts({layout_djx}, routes)
-        mock_notify.assert_called_once_with(layout_djx)
+        reloader.watch_dir(pages, "**/page.py")
+        reloader.watch_dir(pages, "**/_components/**/component.py")
 
-    def test_check_layouts_no_notify_when_layout_not_used_by_route(self) -> None:
-        """_check_layouts does not notify when no route is under the layout dir."""
+        matched = _paths_matched_by_reloader_globs(reloader)
+        assert (home / "template.djx").resolve() not in matched
+        assert (chip / "component.djx").resolve() not in matched
+        assert (pages / "_components" / "solo.djx").resolve() not in matched
+        assert (home / "page.py").resolve() in matched
+        assert (chip / "component.py").resolve() in matched
+
+    def test_changing_only_djx_does_not_call_notify_file_changed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Editing ``.djx`` does not go through ``notify_file_changed`` (no process reload)."""
+        page = tmp_path / "p" / "page.py"
+        page.parent.mkdir(parents=True)
+        page.write_text("#")
+        djx = tmp_path / "p" / "template.djx"
+        djx.write_text("a")
+
         reloader = NextStatReloader()
-        reloader._previous_layouts = set()
-        unused_layout = Path("/app/pages/other/layout.djx").resolve()
-        page_py = Path("/app/pages/blog/page.py").resolve()
-        routes = {("blog", page_py)}
-        with patch.object(reloader, "notify_file_changed") as mock_notify:
-            reloader._check_layouts({unused_layout}, routes)
-        mock_notify.assert_not_called()
-        assert reloader._previous_layouts == {unused_layout}
+        reloader.watch_dir(tmp_path, "**/page.py")
+        notified: list[Path] = []
 
-    def test_check_layouts_skips_value_error_from_is_relative_to(self) -> None:
-        """_check_layouts continues when is_relative_to raises ValueError."""
-        reloader = NextStatReloader()
-        reloader._previous_layouts = set()
-        layout_djx = Path("/app/pages/blog/layout.djx").resolve()
-        route_path = Path("/app/pages/blog/page.py").resolve()
-        routes = {("blog", route_path)}
+        def record_notify(p: Path) -> None:
+            notified.append(Path(p))
 
+        monkeypatch.setattr(reloader, "notify_file_changed", record_notify)
+
+        # Restrict the parent StatReloader snapshot to ``page.py`` only; real runserver
+        # also skips ``.djx`` because it is not matched by next's ``watch_dir`` globs.
         with (
-            patch.object(reloader, "notify_file_changed") as mock_notify,
+            patch("next.server.get_pages_directories_for_watch", return_value=[]),
+            patch("next.server.scan_pages_tree", return_value=iter([])),
             patch.object(
-                Path,
-                "is_relative_to",
-                side_effect=ValueError("not relative"),
+                reloader,
+                "snapshot_files",
+                return_value=iter([(page.resolve(), 1000.0)]),
             ),
         ):
-            reloader._check_layouts({layout_djx}, routes)
-        mock_notify.assert_not_called()
-        assert reloader._previous_layouts == {layout_djx}
+            gen = reloader.tick()
+            next(gen)
+            djx.write_text("changed")
+            next(gen)
 
-    def test_check_templates_notify_when_set_changes(self) -> None:
-        """_check_templates notifies when template set changes."""
-        reloader = NextStatReloader()
-        reloader._previous_templates = set()
-        template_djx = Path("/app/pages/foo/template.djx").resolve()
-        with patch.object(reloader, "notify_file_changed") as mock_notify:
-            reloader._check_templates({template_djx})
-        mock_notify.assert_called_once_with(template_djx)
+        assert notified == []

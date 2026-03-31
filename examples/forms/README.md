@@ -75,9 +75,9 @@ forms/
 
 ### Prerequisites
 
-- Python 3.8+
-- Django 4.0+
-- next-dj package installed
+- Python 3.11+
+- Django 4.2+
+- next-dj installed
 
 ### Setup
 

@@ -9,7 +9,7 @@ from django.conf import settings
 
 
 def resolve_base_dir() -> Path | None:
-    """Return ``settings.BASE_DIR`` as a :class:`~pathlib.Path`, or ``None``."""
+    """Return ``settings.BASE_DIR`` as a ``pathlib.Path``, or ``None``."""
     raw = getattr(settings, "BASE_DIR", None)
     if isinstance(raw, Path):
         return raw
@@ -47,7 +47,7 @@ def classify_dirs_entries(
     entries: list[Any] | tuple[Any, ...] | None,
     base_dir: Path | None,
 ) -> tuple[list[Path], frozenset[str]]:
-    """Split ``DIRS`` into existing directory roots and segment names (file router)."""
+    """Split ``DIRS`` into directory roots and URL segment names (file router)."""
     path_roots: list[Path] = []
     segments: set[str] = set()
     if not entries:

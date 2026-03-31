@@ -6,7 +6,11 @@ import pytest
 from django.test import override_settings
 
 from next.conf import next_framework_settings
-from next.pages import get_pages_directories_for_watch, page
+from next.pages import (
+    get_pages_directories_for_watch,
+    iter_pages_roots_with_components_folder_names,
+    page,
+)
 from next.urls import (
     FileRouterBackend,
     RouterBackend,
@@ -699,7 +703,7 @@ class TestRouterFactory:
 
 
 class TestClassifyDirsEntries:
-    """Branch coverage for :func:`next.urls.classify_dirs_entries`."""
+    """Branch coverage for ``next.urls.classify_dirs_entries``."""
 
     def test_segment_when_relative_name_only(self) -> None:
         """A bare name becomes a segment when it is not a path under base_dir."""
@@ -1308,6 +1312,62 @@ class TestGetPagesDirectoriesForWatch:
                 assert app_pages.resolve() in result
 
 
+class TestIterPagesRootsWithComponentsFolderNames:
+    """Pairs ``(pages root, COMPONENTS_DIR)`` for autoreload globs."""
+
+    def test_returns_empty_when_backends_not_list(self) -> None:
+        """When ``DEFAULT_PAGE_BACKENDS`` is not a list, return []."""
+        mock_nf = SimpleNamespace(DEFAULT_PAGE_BACKENDS=None)
+        with patch("next.pages.next_framework_settings", mock_nf):
+            assert iter_pages_roots_with_components_folder_names() == []
+
+    def test_skips_non_dict_config(self) -> None:
+        """Non-dict entries are skipped."""
+        with override_settings(
+            NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": ["not a dict"]},
+        ):
+            next_framework_settings.reload()
+            assert iter_pages_roots_with_components_folder_names() == []
+
+    def test_skips_non_file_router_backend(self) -> None:
+        """When backend is not a filesystem discovery router, its paths are not added."""
+        with patch("next.urls.RouterFactory.create_backend") as mock_create:
+            mock_backend = Mock(spec=RouterBackend)
+            mock_backend._get_root_pages_paths = Mock(return_value=[])
+            mock_backend._get_installed_apps = Mock(return_value=[])
+            mock_create.return_value = mock_backend
+            with override_settings(
+                NEXT_FRAMEWORK={
+                    "DEFAULT_PAGE_BACKENDS": [{"BACKEND": "other.Backend"}]
+                },
+            ):
+                next_framework_settings.reload()
+                assert iter_pages_roots_with_components_folder_names() == []
+
+    def test_swallows_backend_creation_error(self) -> None:
+        """Invalid backend is skipped; valid entry still contributes pairs."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {"BACKEND": "nonexistent.Backend"},
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [
+                            str(Path(__file__).parent.parent / "tests" / "pages"),
+                        ],
+                        "COMPONENTS_DIR": "_components",
+                        "OPTIONS": {},
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            result = iter_pages_roots_with_components_folder_names()
+            assert isinstance(result, list)
+
+
 # ``scan_pages_tree`` in ``next.urls`` (see also FileRouterBackend delegation in test_pages).
 class TestScanPagesDirectory:
     """Edge cases for the standalone scan helper including skip_dir_names."""
@@ -1391,7 +1451,7 @@ class TestScanPagesDirectory:
         mock_reg.assert_called_once_with(comp, tmp_path, "scope")
 
     def test_scan_pages_directory_matches_scan_pages_tree(self, tmp_path) -> None:
-        """The module helper yields the same pairs as :func:`scan_pages_tree`."""
+        """The module helper yields the same pairs as ``scan_pages_tree``."""
         (tmp_path / "page.py").write_text("x=1")
         a = list(scan_pages_tree(tmp_path))
         b = list(_scan_pages_directory(tmp_path))

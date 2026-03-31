@@ -3,12 +3,13 @@ import inspect
 import textwrap
 import types
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django.template import Context, Template
 from django.template.base import TemplateSyntaxError
-from django.test import RequestFactory
+from django.test import RequestFactory, override_settings
 
 import next.components as next_components_mod
 from next.checks import (
@@ -37,10 +38,12 @@ from next.components import (
     component_extra_roots_from_config,
     components_manager,
     get_component,
+    get_component_paths_for_watch,
     load_component_template,
     register_components_folder_from_router_walk,
     render_component,
 )
+from next.conf import next_framework_settings
 from tests.support import (
     next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
     next_framework_settings_for_checks_backends_value as _next_framework_settings_for_checks_backends_value,
@@ -1617,3 +1620,335 @@ class TestComponentContextManagerFrames:
         funcs = mgr.get_functions(script.resolve())
         assert len(funcs) == 1
         assert funcs[0].key == "slot"
+
+
+class TestGetComponentPathsForWatch:
+    """``get_component_paths_for_watch`` mirrors discovery without mutating managers."""
+
+    def test_empty_when_backend_settings_not_lists(self) -> None:
+        """Return empty sets when ``DEFAULT_*_BACKENDS`` are not lists."""
+        mock_nf = SimpleNamespace(
+            DEFAULT_PAGE_BACKENDS="not-a-list",
+            DEFAULT_COMPONENT_BACKENDS="not-a-list",
+        )
+        with patch("next.components.next_framework_settings", mock_nf):
+            assert get_component_paths_for_watch() == set()
+
+    def test_collects_composite_under_pages_tree(self, tmp_path: Path) -> None:
+        """Paths include ``component.djx`` under ``COMPONENTS_DIR`` in a pages tree."""
+        pages_root = tmp_path / "pages"
+        comp_dir = pages_root / "_components" / "widget"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "component.djx").write_text("<span/>")
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "COMPONENTS_DIR": "_components",
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            paths = get_component_paths_for_watch()
+        next_framework_settings.reload()
+        assert (comp_dir / "component.djx").resolve() in paths
+
+    def test_includes_module_path_for_py_only_composite(self, tmp_path: Path) -> None:
+        """Composite with only ``component.py`` (string template) adds that path."""
+        pages_root = tmp_path / "pages"
+        comp_dir = pages_root / "_components" / "modonly"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "component.py").write_text('component = "<b/>"\n')
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "COMPONENTS_DIR": "_components",
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [],
+            },
+        ):
+            next_framework_settings.reload()
+            paths = get_component_paths_for_watch()
+        next_framework_settings.reload()
+        assert (comp_dir / "component.py").resolve() in paths
+
+    def test_skips_non_dict_page_config(self) -> None:
+        """Non-dict ``DEFAULT_PAGE_BACKENDS`` entries are ignored."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": ["not-dict"],
+                "DEFAULT_COMPONENT_BACKENDS": [],
+            },
+        ):
+            next_framework_settings.reload()
+            assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_skips_non_dict_component_config(self) -> None:
+        """Non-dict ``DEFAULT_COMPONENT_BACKENDS`` entries are ignored."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": ["bad"],
+            },
+        ):
+            next_framework_settings.reload()
+            assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_collects_simple_djx_in_extra_root(self, tmp_path: Path) -> None:
+        """Extra component root picks up top-level ``.djx`` simple components."""
+        root = tmp_path / "extra"
+        root.mkdir()
+        (root / "solo.djx").write_text("x")
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [str(root)],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            paths = get_component_paths_for_watch()
+        next_framework_settings.reload()
+        assert (root / "solo.djx").resolve() in paths
+
+    def test_swallows_page_backend_create_error(self, tmp_path: Path) -> None:
+        """Invalid page backend config is skipped after logging."""
+        pages_root = tmp_path / "pages"
+        pages_root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "COMPONENTS_DIR": "_components",
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch(
+                "next.urls.RouterFactory.create_backend",
+                side_effect=ValueError("bad config"),
+            ):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_glob_oserror_swallowed_for_pages_scan(self, tmp_path: Path) -> None:
+        """OSError from ``Path.glob`` while finding component dirs is handled."""
+        pages_root = tmp_path / "pages"
+        pages_root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "COMPONENTS_DIR": "_components",
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch.object(Path, "glob", side_effect=OSError("glob fail")):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_relative_to_valueerror_skips_component_dir(self, tmp_path: Path) -> None:
+        """When ``relative_to`` fails, that ``_components`` folder is skipped."""
+        pages_root = tmp_path / "pages"
+        comp_dir = pages_root / "_components" / "w"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "component.djx").write_text("x")
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "COMPONENTS_DIR": "_components",
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch.object(Path, "relative_to", side_effect=ValueError("outside")):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_swallows_component_backend_create_error(self) -> None:
+        """Failure to build a component backend is skipped."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch(
+                "next.components.ComponentsFactory.create_backend",
+                side_effect=RuntimeError("boom"),
+            ):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_skips_non_file_component_backend(self) -> None:
+        """Non-``FileComponentsBackend`` entries do not contribute paths."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.DummyBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_oserror_scanning_extra_root(self, tmp_path: Path) -> None:
+        """OSError when listing an extra component root is handled."""
+        root = tmp_path / "r"
+        root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [str(root)],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch.object(Path, "iterdir", side_effect=OSError("read")):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_skips_non_filesystem_page_router(self, tmp_path: Path) -> None:
+        """Non-filesystem discovery routers do not run the pages-tree scan."""
+        pages_root = tmp_path / "pages"
+        pages_root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "COMPONENTS_DIR": "_components",
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch(
+                "next.urls.RouterFactory.is_filesystem_discovery_router",
+                return_value=False,
+            ):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_skips_glob_match_that_is_not_a_directory(self, tmp_path: Path) -> None:
+        """Glob can match a file named like ``COMPONENTS_DIR``; it is ignored."""
+        pages_root = tmp_path / "pages"
+        fake = pages_root / "seg" / "_components"
+        fake.parent.mkdir(parents=True)
+        fake.write_text("not a directory")
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "COMPONENTS_DIR": "_components",
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [],
+            },
+        ):
+            next_framework_settings.reload()
+            assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_oserror_from_scan_directory_on_extra_root(self, tmp_path: Path) -> None:
+        """OSError raised while scanning an extra component root is handled."""
+        root = tmp_path / "root"
+        root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [str(root)],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch.object(
+                ComponentScanner,
+                "scan_directory",
+                side_effect=OSError("scan"),
+            ):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()

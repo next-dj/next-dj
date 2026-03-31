@@ -270,30 +270,14 @@ def route_watch_layer_patches(
     *,
     get_pages_directories_for_watch,
     scan_pages_tree,
-    template_paths_side_effect=None,
 ):
     """Apply the usual ``next.server`` patches around route discovery for ``tick()`` tests."""
-    if template_paths_side_effect is not None:
-        template_patch = patch(
-            "next.server.get_template_djx_paths_for_watch",
-            side_effect=template_paths_side_effect,
-        )
-    else:
-        template_patch = patch(
-            "next.server.get_template_djx_paths_for_watch",
-            return_value=set(),
-        )
     with (
         patch(
             "next.server.get_pages_directories_for_watch",
             get_pages_directories_for_watch,
         ),
         patch("next.server.scan_pages_tree", scan_pages_tree),
-        patch(
-            "next.server.get_layout_djx_paths_for_watch",
-            return_value=set(),
-        ),
-        template_patch,
     ):
         yield
 
@@ -368,35 +352,9 @@ def tick_scenario_watch_raises(reloader: NextStatReloader):
             "next.server.get_pages_directories_for_watch",
             side_effect=ValueError("bad"),
         ),
-        patch("next.server.get_layout_djx_paths_for_watch", return_value=set()),
-        patch("next.server.get_template_djx_paths_for_watch", return_value=set()),
         patch.object(reloader, "snapshot_files", return_value=iter([])),
     ):
         yield
-
-
-@contextmanager
-def tick_scenario_template_set_changes(reloader: NextStatReloader):
-    """Template watch set grows on second tick."""
-    fake_dir = Path("/fake")
-    fake_page = fake_dir / "page.py"
-    fake_template = Path("/fake/pages/foo/template.djx").resolve()
-    call_count = [0]
-
-    def templates_side_effect():
-        call_count[0] += 1
-        return set() if call_count[0] == 1 else {fake_template}
-
-    with (
-        route_watch_layer_patches(
-            get_pages_directories_for_watch=lambda: [fake_dir],
-            scan_pages_tree=lambda _p: iter([("home", fake_page)]),
-            template_paths_side_effect=templates_side_effect,
-        ),
-        patch.object(reloader, "snapshot_files", return_value=iter([])),
-        patch.object(reloader, "notify_file_changed") as mock_notify,
-    ):
-        yield mock_notify, fake_template
 
 
 @contextmanager
@@ -427,7 +385,6 @@ TICK_SCENARIOS: dict[str, object] = {
     "no_notify_first_tick": tick_scenario_no_notify_first_tick,
     "route_set_unchanged": tick_scenario_route_set_unchanged,
     "watch_raises": tick_scenario_watch_raises,
-    "template_set_changes": tick_scenario_template_set_changes,
     "mtime_change": tick_scenario_mtime_change,
 }
 
@@ -525,6 +482,5 @@ __all__ = [
     "tick_scenario_no_notify_first_tick",
     "tick_scenario_route_set_grows",
     "tick_scenario_route_set_unchanged",
-    "tick_scenario_template_set_changes",
     "tick_scenario_watch_raises",
 ]

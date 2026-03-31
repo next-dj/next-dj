@@ -88,12 +88,12 @@ The example demonstrates next-dj's advanced template management capabilities:
 The example includes a context processor (`layouts/context_processors.py`) that adds site-wide variables:
 
 ```python
-def site_info(request):
+def site_info(_request):
     return {
         "site_name": "next-dj layouts example",
-        "site_version": "1.0.0", 
+        "site_version": "0.1.0",
         "debug_mode": settings.DEBUG,
-        "current_year": 2024,
+        "current_year": 2025,
     }
 ```
 
@@ -116,9 +116,9 @@ This pattern allows for:
 
 ### Prerequisites
 
-- Python 3.8+
-- Django 4.0+
-- next-dj package installed
+- Python 3.11+
+- Django 4.2+
+- next-dj installed
 
 ### Setup
 

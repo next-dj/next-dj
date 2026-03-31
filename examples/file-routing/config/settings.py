@@ -72,16 +72,7 @@ NEXT_FRAMEWORK = {
             "BACKEND": "next.urls.FileRouterBackend",
             "PAGES_DIR": "pages",
             "APP_DIRS": True,
-            "DIRS": [],
-            "COMPONENTS_DIR": "_components",
-            "OPTIONS": {
-                "context_processors": [],
-            },
-        },
-        {
-            "BACKEND": "next.urls.FileRouterBackend",
-            "PAGES_DIR": "pages",
-            "APP_DIRS": False,
+            # App trees under each installed app's pages/, plus extra filesystem roots
             "DIRS": [str(BASE_DIR / "root_pages")],
             "COMPONENTS_DIR": "_components",
             "OPTIONS": {

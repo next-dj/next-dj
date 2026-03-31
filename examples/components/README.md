@@ -96,9 +96,9 @@ components/
 
 ### Prerequisites
 
-- Python 3.8+
-- Django 4.0+
-- next-dj installed (e.g. from the repo root)
+- Python 3.11+
+- Django 4.2+
+- next-dj installed (e.g. editable from the repo root)
 
 ### Setup
 

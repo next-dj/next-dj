@@ -15,16 +15,16 @@ def caller_source_path(  # noqa: C901, PLR0912
 ) -> Path:
     """Resolve ``Path`` of the caller module's ``__file__`` for decorator registration.
 
-    ``back_count``: steps upward before scanning (e.g. past the decorator wrapper).
+    ``back_count`` is how many frames to step up before scanning. Use this to skip
+    past a decorator wrapper.
 
-    **Pages/forms mode:** pass ``skip_while_filename_endswith``
-    (e.g. ``("pages.py",)``).
-    Scan frames until ``__file__`` is missing or no longer ends with one of these
-    suffixes, then return that path.
+    For pages and forms pass ``skip_while_filename_endswith``, for example
+    ``("pages.py",)``. Walk frames until ``__file__`` is missing or no longer ends
+    with one of those suffixes. Then return that path.
 
-    **Components mode:** pass ``skip_framework_file`` as ``(basename, parent_dir_name)``
-    e.g. ``("components.py", "next")``. Only ``str`` paths ending in ``.py`` are
-    considered; the framework module path (resolved) is skipped.
+    For components pass ``skip_framework_file`` as ``(basename, parent_dir_name)``,
+    for example ``("components.py", "next")``. Only ``str`` paths ending in ``.py``
+    are considered. The resolved framework module path is skipped.
     """
     if skip_while_filename_endswith is not None and skip_framework_file is not None:
         msg = "Specify only one of skip_while_filename_endswith or skip_framework_file"

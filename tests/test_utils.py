@@ -1,5 +1,3 @@
-"""Tests for ``next.utils`` shared helpers."""
-
 import pytest
 
 from next.utils import caller_source_path

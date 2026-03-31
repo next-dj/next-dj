@@ -1,10 +1,10 @@
-"""Build Django URL patterns from filesystem routes under configured ``pages/`` trees.
+"""Build Django URL patterns from filesystem routes under configured page trees.
 
-Router backends come from merged ``NEXT_FRAMEWORK`` (see ``DEFAULT_PAGE_BACKENDS``).
-:class:`FilesystemTreeDispatcher` performs the shared depth-first walk for URL
-patterns and passes component folders to ``next.components``.
-The default backend walks ``page.py`` and virtual ``template.djx`` entries and turns
-paths and bracket segments into ``URLPattern`` objects.
+Router backends come from merged ``NEXT_FRAMEWORK`` and ``DEFAULT_PAGE_BACKENDS``.
+``FilesystemTreeDispatcher`` walks the tree depth first for URL patterns and passes
+component folders to ``next.components``. The default backend discovers ``page.py``
+and virtual ``template.djx`` entries and turns path segments into ``URLPattern``
+objects.
 """
 
 import inspect
@@ -62,10 +62,10 @@ def _coerce_url_value(value: str, hint: type) -> object:
 
 
 class HttpRequestProvider(RegisteredParameterProvider):
-    """Supplies ``HttpRequest`` from ``context.request``."""
+    """Supply ``HttpRequest`` from ``context.request``."""
 
     def can_handle(self, param: inspect.Parameter, context: object) -> bool:
-        """Return whether the parameter is ``HttpRequest`` and a request exists."""
+        """Return True when the parameter is ``HttpRequest`` and a request exists."""
         if getattr(context, "request", None) is None:
             return False
         origin = get_origin(param.annotation)
@@ -77,10 +77,10 @@ class HttpRequestProvider(RegisteredParameterProvider):
 
 
 class UrlByAnnotationProvider(RegisteredParameterProvider):
-    """Fills ``DUrl[...]`` parameters from ``url_kwargs``."""
+    """Fill ``DUrl[...]`` parameters from ``url_kwargs``."""
 
     def can_handle(self, param: inspect.Parameter, _context: object) -> bool:
-        """Whether the parameter uses a ``DUrl`` annotation."""
+        """Return True when the parameter uses a ``DUrl`` annotation."""
         return get_origin(param.annotation) is DUrl
 
     def resolve(self, param: inspect.Parameter, context: object) -> object:
@@ -98,10 +98,10 @@ class UrlByAnnotationProvider(RegisteredParameterProvider):
 
 
 class UrlKwargsProvider(RegisteredParameterProvider):
-    """Fills parameters by name from ``url_kwargs``."""
+    """Fill parameters by name from ``url_kwargs``."""
 
     def can_handle(self, param: inspect.Parameter, context: object) -> bool:
-        """Whether ``url_kwargs`` contains this parameter name."""
+        """Return True when ``url_kwargs`` contains this parameter name."""
         return param.name in (getattr(context, "url_kwargs", {}) or {})
 
     def resolve(self, param: inspect.Parameter, context: object) -> object:
@@ -119,10 +119,10 @@ class UrlKwargsProvider(RegisteredParameterProvider):
 
 
 class URLPatternParser:
-    """Maps bracket segments in a file-based path to Django path converters.
+    """Map bracket segments in a file-based path to Django path converters.
 
-    ``url_path`` (and ``""`` at the tree root) is the logical URL trail built from
-    directory names (e.g. ``blog/[slug]``), not a ``pathlib.Path``. The on-disk file
+    The ``url_path`` string is the logical URL trail built from directory names. An
+    empty string means the tree root. It is not a ``pathlib.Path``. The on-disk file
     is the second value from the page-tree scanner.
     """
 
@@ -133,7 +133,7 @@ class URLPatternParser:
         self._args_pattern = re.compile(r"\[\[([^\[\]]+)\]\]")  # [[args]]
 
     def parse_url_pattern(self, url_path: str) -> tuple[str, dict[str, str]]:
-        """Django path string and parameter names derived from ``url_path``."""
+        """Return the Django path string and parameter names for ``url_path``."""
         django_pattern = url_path
         parameters: dict[str, str] = {}
 
@@ -189,7 +189,7 @@ class URLPatternParser:
 
 
 class RouterBackend(ABC):
-    """Pluggable source of ``URLPattern`` / ``URLResolver`` entries."""
+    """Pluggable source of ``URLPattern`` and ``URLResolver`` entries."""
 
     @abstractmethod
     def generate_urls(self) -> list[URLPattern | URLResolver]:
@@ -208,7 +208,7 @@ def _narrow_file_router_options(options: dict[str, Any]) -> dict[str, Any]:
 
 
 class FileRouterBackend(RouterBackend):
-    """Discovers ``page.py`` (and virtual pages) under app and optional root trees."""
+    """Discover ``page.py`` (and virtual pages) under app and optional root trees."""
 
     DEFAULT_COMPONENTS_FOLDER_NAME: ClassVar[str] = "_components"
 
@@ -272,7 +272,7 @@ class FileRouterBackend(RouterBackend):
         )
 
     def __eq__(self, other: object) -> bool:
-        """Return whether ``other`` has the same pages config as this backend."""
+        """Return True when the other backend has the same pages configuration."""
         if not isinstance(other, FileRouterBackend):
             return False
         return (
@@ -300,7 +300,7 @@ class FileRouterBackend(RouterBackend):
         )
 
     def generate_urls(self) -> list[URLPattern | URLResolver]:
-        """Yield app routes first when ``app_dirs``, then root ``PAGES_*`` dirs."""
+        """Yield app routes first when ``app_dirs`` is set, then root ``pages`` dirs."""
         if self.app_dirs:
             urls = self._generate_app_urls()
             urls.extend(self._generate_root_urls())
@@ -308,7 +308,7 @@ class FileRouterBackend(RouterBackend):
         return self._generate_root_urls()
 
     def _generate_app_urls(self) -> list[URLPattern | URLResolver]:
-        """Patterns from each installed app's ``pages_dir`` tree."""
+        """Return patterns from each installed app's ``pages_dir`` tree."""
         urls: list[URLPattern | URLResolver] = []
 
         for app_name in self._get_installed_apps():
@@ -325,13 +325,13 @@ class FileRouterBackend(RouterBackend):
         return urls
 
     def _get_installed_apps(self) -> Generator[str, None, None]:
-        """Non-``django.*`` entries from ``INSTALLED_APPS``."""
+        """Yield installed app names except django framework packages."""
         for app in getattr(settings, "INSTALLED_APPS", []):
             if not app.startswith("django."):
                 yield app
 
     def _get_app_pages_path(self, app_name: str) -> Path | None:
-        """``<app>/pages_dir`` when that directory exists."""
+        """Return ``<app>/pages_dir`` when that directory exists."""
         try:
             app_module = __import__(app_name, fromlist=[""])
             if app_module.__file__ is None:
@@ -346,7 +346,7 @@ class FileRouterBackend(RouterBackend):
             return None
 
     def _get_root_pages_paths(self) -> list[Path]:
-        """Return paths from ``DIRS`` plus optional ``BASE_DIR``+``pages_dir``."""
+        """Return paths from ``DIRS`` plus optional ``BASE_DIR`` / ``pages_dir``."""
         result: list[Path] = [p.resolve() for p in self._extra_root_paths if p.exists()]
 
         if not self.app_dirs and not result:
@@ -375,7 +375,7 @@ class FileRouterBackend(RouterBackend):
         self,
         pages_path: Path,
     ) -> Generator[URLPattern, None, None]:
-        """One ``URLPattern`` per discovered page under ``pages_path``."""
+        """Yield one ``URLPattern`` per discovered page under ``pages_path``."""
         for url_path, file_path in self._scan_pages_directory(pages_path):
             if pattern := page.create_url_pattern(
                 url_path,
@@ -390,7 +390,7 @@ class FileRouterBackend(RouterBackend):
         *,
         register_components: bool = True,
     ) -> Generator[tuple[str, Path], None, None]:
-        """Yield URL path and page file path pairs discovered under ``pages_path``."""
+        """Yield ``(url_path, page_file)`` pairs discovered under ``pages_path``."""
         dispatcher = FilesystemTreeDispatcher(
             self._skip_dir_names,
             components_folder_name=self._components_folder_name,
@@ -415,7 +415,7 @@ class FilesystemTreeDispatcher:
         self._register_components = register_components
 
     def walk(self, pages_path: Path) -> Generator[tuple[str, Path], None, None]:
-        """Yield ``(url_path, page_file)``; ``url_path`` is the route trail string."""
+        """Yield ``(url_path, page_file)``. ``url_path`` is the route trail string."""
         yield from self._visit(pages_path, pages_path, "")
 
     def _visit(
@@ -478,7 +478,7 @@ def _scan_pages_directory(
     components_folder_name: str = "_components",
     register_components: bool = False,
 ) -> Generator[tuple[str, Path], None, None]:
-    """Yield the same pairs as :func:`scan_pages_tree`."""
+    """Yield the same pairs as ``scan_pages_tree``."""
     yield from scan_pages_tree(
         pages_path,
         skip_dir_names,
@@ -503,7 +503,7 @@ def _register_components_folder(
 
 
 class RouterFactory:
-    """Builds ``RouterBackend`` instances from ``DEFAULT_PAGE_BACKENDS``-style dicts."""
+    """Build ``RouterBackend`` instances from ``DEFAULT_PAGE_BACKENDS``-style dicts."""
 
     _backends: ClassVar[dict[str, type[RouterBackend]]] = {
         "next.urls.FileRouterBackend": FileRouterBackend,
@@ -624,7 +624,7 @@ class RouterManager:
             yield from backend.generate_urls()
 
     def __getitem__(self, index: int) -> RouterBackend:
-        """Backend at ``index``."""
+        """Return the backend at the given index."""
         return self._backends[index]
 
     def _reload_config(self) -> None:
@@ -641,7 +641,7 @@ class RouterManager:
                 logger.exception("error creating router from config %s", config)
 
     def _get_next_pages_config(self) -> list[dict[str, Any]]:
-        """ROUTERS from ``settings.NEXT_FRAMEWORK`` (merged with defaults, cached)."""
+        """Router list from ``settings.NEXT_FRAMEWORK`` (merged defaults, cached)."""
         if self._config_cache is not None:
             return self._config_cache
 
@@ -659,10 +659,11 @@ router_manager = RouterManager()
 
 
 class _LazyUrlPatterns(list):
-    """Defer router/form pattern expansion until first use (avoids import-time walk).
+    """Defer expanding router and form patterns until first use.
 
-    Rebuilds from ``router_manager`` and ``form_action_manager`` on each access.
-    Subclasses ``list`` so ``isinstance(urlpatterns, list)`` holds; overrides
+    Avoids walking the tree at import time. Rebuilds from ``router_manager`` and
+    ``form_action_manager`` on each access.
+    Subclasses ``list`` so ``isinstance(urlpatterns, list)`` holds. Overrides
     ``__reversed__`` because the inherited empty internal buffer would break
     ``reversed(urlpatterns)`` in Django's URL resolver.
     """

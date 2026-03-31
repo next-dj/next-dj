@@ -51,16 +51,6 @@ if not settings.configured:
                     "BACKEND": "next.urls.FileRouterBackend",
                     "PAGES_DIR": "pages",
                     "APP_DIRS": True,
-                    "DIRS": [],
-                    "COMPONENTS_DIR": "_components",
-                    "OPTIONS": {
-                        "context_processors": [],
-                    },
-                },
-                {
-                    "BACKEND": "next.urls.FileRouterBackend",
-                    "PAGES_DIR": "pages",
-                    "APP_DIRS": False,
                     "DIRS": [
                         str(project_root / "examples" / "file-routing" / "root_pages"),
                     ],
