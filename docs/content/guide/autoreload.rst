@@ -12,7 +12,7 @@ What is watched
 ---------------
 
 * **Existing files (mtime)**  
-  Django's reloader already watches Python modules and any paths registered via ``watch_dir``. next.dj ensures that all **pages** directories derived from ``NEXT_FRAMEWORK`` (see ``DEFAULT_PAGE_ROUTERS``) are registered so that every ``**/page.py`` under them is watched. Changes to those files are detected by the standard mtime loop and trigger a reload.
+  Django's reloader already watches Python modules and any paths registered via ``watch_dir``. next.dj ensures that all **pages** directories derived from ``NEXT_FRAMEWORK`` (see ``DEFAULT_PAGE_BACKENDS``) are registered so that every ``**/page.py`` under them is watched. Changes to those files are detected by the standard mtime loop and trigger a reload.
 
 * **Set of routes**  
   The set of page routes (each ``page.py`` and each virtual page from ``template.djx``) is recomputed every tick. If the set **grows or shrinks** (new or deleted ``page.py`` or virtual page), the reloader calls ``notify_file_changed`` so the server restarts and URL patterns are rebuilt.
@@ -27,7 +27,7 @@ Implementation
 --------------
 
 * **Patch in ``ready()``**  
-  In :file:`next/apps.py`, ``autoreload.StatReloader`` is replaced with :class:`next.utils.NextStatReloader`. This happens at app load, before the reloader instance is created, so ``runserver`` uses the next.dj reloader.
+  In :file:`next/apps.py`, ``autoreload.StatReloader`` is replaced with :class:`next.server.NextStatReloader`. This happens at app load, before the reloader instance is created, so ``runserver`` uses the next.dj reloader.
 
 * **Registration of pages dirs**  
   The signal :py:data:`django.utils.autoreload.autoreload_started` is connected to a handler that calls :func:`next.urls.get_pages_directories_for_watch` and, for each path, ``sender.watch_dir(path, "**/page.py")``. So Django's watcher sees every ``page.py`` under those directories.

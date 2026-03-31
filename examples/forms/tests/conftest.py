@@ -1,8 +1,10 @@
+import importlib.util
 import sys
 from pathlib import Path
 
 import django
 import pytest
+from django.apps import apps
 from django.conf import settings
 from django.test import Client
 
@@ -59,28 +61,33 @@ if not settings.configured:
         TIME_ZONE="UTC",
         ALLOWED_HOSTS=["testserver"],
     )
+
+if not apps.ready:
     django.setup()
 
-    try:
-        import importlib.util
-        from pathlib import Path
+_FormsPagesLoaded = {"done": False}
 
-        import todos.pages.home.page  # noqa: F401
 
-        edit_path = (
-            Path(forms_example_root)
-            / "todos"
-            / "pages"
-            / "edit"
-            / "[id:int]"
-            / "page.py"
-        )
-        if edit_path.exists():
-            spec = importlib.util.spec_from_file_location("edit_page", edit_path)
-            edit_page = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(edit_page)
-    except ImportError:
-        pass  # Modules may not exist in all test environments
+def _eager_load_todo_pages() -> None:
+    """Load page modules so ``@forms.action`` handlers register on ``form_action_manager``."""
+    if _FormsPagesLoaded["done"]:
+        return
+    for rel, mod_name in (
+        ("todos/pages/page.py", "todos_pages_root"),
+        (
+            "todos/pages/edit/[int:id]/page.py",
+            "todos_pages_edit_bracket",
+        ),
+    ):
+        path = forms_example_root / rel
+        spec = importlib.util.spec_from_file_location(mod_name, path)
+        mod = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(mod)
+    _FormsPagesLoaded["done"] = True
+
+
+_eager_load_todo_pages()
 
 
 @pytest.fixture()

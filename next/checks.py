@@ -8,7 +8,7 @@ import importlib.util
 import inspect
 import re
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -59,13 +59,13 @@ def _validate_config_structure(
     config: object,
     index: int,
 ) -> list[CheckMessage]:
-    """Validate required keys and types for one ``DEFAULT_PAGE_ROUTERS`` entry."""
+    """Validate required keys and types for one ``DEFAULT_PAGE_BACKENDS`` entry."""
     errors: list[CheckMessage] = []
 
     if not isinstance(config, dict):
         errors.append(
             Error(
-                f"NEXT_FRAMEWORK['DEFAULT_PAGE_ROUTERS'][{index}] "
+                f"NEXT_FRAMEWORK['{_PAGE_BACKEND_SETTINGS_KEY}'][{index}] "
                 "must be a dictionary.",
                 obj=settings,
                 id="next.E002",
@@ -77,7 +77,7 @@ def _validate_config_structure(
     if "BACKEND" not in config:
         errors.append(
             Error(
-                f"NEXT_FRAMEWORK['DEFAULT_PAGE_ROUTERS'][{index}] "
+                f"NEXT_FRAMEWORK['{_PAGE_BACKEND_SETTINGS_KEY}'][{index}] "
                 "must specify a BACKEND.",
                 obj=settings,
                 id="next.E003",
@@ -88,6 +88,8 @@ def _validate_config_structure(
 
 
 FILE_ROUTER_BACKEND = "next.urls.FileRouterBackend"
+
+_PAGE_BACKEND_SETTINGS_KEY = "DEFAULT_PAGE_BACKENDS"
 
 
 def _router_backend_path_is_valid(backend_path: str) -> bool:
@@ -101,13 +103,31 @@ def _router_backend_path_is_valid(backend_path: str) -> bool:
     return isinstance(resolved, type) and issubclass(resolved, RouterBackend)
 
 
-def _validate_file_router_backend_fields(
+def _validate_file_router_backend_fields(  # noqa: C901, PLR0912
     config: dict,
     index: int,
 ) -> list[CheckMessage]:
-    """Validate PAGES_DIR / APP_DIRS / OPTIONS for ``FileRouterBackend``."""
+    """Validate DIRS, PAGES_DIR, APP_DIRS, and OPTIONS for the file router."""
     errors: list[CheckMessage] = []
-    rf_routers = f"NEXT_FRAMEWORK['DEFAULT_PAGE_ROUTERS'][{index}]"
+    rf_routers = f"NEXT_FRAMEWORK['{_PAGE_BACKEND_SETTINGS_KEY}'][{index}]"
+    if "DIRS" in config and not isinstance(config["DIRS"], list):
+        errors.append(
+            Error(
+                f"{rf_routers}.DIRS must be a list.",
+                obj=settings,
+                id="next.E006",
+            ),
+        )
+
+    if "COMPONENTS_DIR" in config and not isinstance(config["COMPONENTS_DIR"], str):
+        errors.append(
+            Error(
+                f"{rf_routers}.COMPONENTS_DIR must be a string.",
+                obj=settings,
+                id="next.E027",
+            ),
+        )
+
     if "PAGES_DIR" not in config:
         errors.append(
             Error(
@@ -158,6 +178,42 @@ def _validate_file_router_backend_fields(
                 id="next.E006",
             ),
         )
+    else:
+        opts = config["OPTIONS"]
+        cp = opts.get("context_processors")
+        if cp is not None and not isinstance(cp, list):
+            errors.append(
+                Error(
+                    f"{rf_routers}.OPTIONS['context_processors'] must be a list.",
+                    obj=settings,
+                    id="next.E006",
+                ),
+            )
+        elif isinstance(cp, list):
+            for item in cp:
+                if not isinstance(item, str):
+                    errors.append(
+                        Error(
+                            f"{rf_routers}.OPTIONS['context_processors'] must contain "
+                            "only strings.",
+                            obj=settings,
+                            id="next.E006",
+                        ),
+                    )
+                    break
+        for key in opts:
+            if key == "context_processors":
+                continue
+            errors.append(
+                Error(
+                    f"{rf_routers}.OPTIONS contains unknown key {key!r}. "
+                    "OPTIONS only supports context_processors; use top-level DIRS and "
+                    "COMPONENTS_DIR for paths.",
+                    obj=settings,
+                    id="next.E006",
+                ),
+            )
+            break
 
     return errors
 
@@ -170,8 +226,8 @@ def _validate_config_fields(config: dict, index: int) -> list[CheckMessage]:
     if backend is not None and not _router_backend_path_is_valid(str(backend)):
         errors.append(
             Error(
-                f'NEXT_FRAMEWORK["DEFAULT_PAGE_ROUTERS"][{index}] specifies unknown '
-                f'backend "{backend}".',
+                f'NEXT_FRAMEWORK["{_PAGE_BACKEND_SETTINGS_KEY}"][{index}] specifies '
+                f'unknown backend "{backend}".',
                 obj=settings,
                 id="next.E004",
             ),
@@ -219,7 +275,7 @@ def check_request_in_context(*_args, **_kwargs) -> list[CheckMessage]:
 
 @register(Tags.compatibility)
 def check_next_pages_configuration(*_args, **_kwargs) -> list[CheckMessage]:
-    """Validate ``NEXT_FRAMEWORK['DEFAULT_PAGE_ROUTERS']`` after merge with defaults."""
+    """Validate ``DEFAULT_PAGE_BACKENDS`` in merged ``NEXT_FRAMEWORK``."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if raw is not None and not isinstance(raw, dict):
         return [
@@ -230,11 +286,11 @@ def check_next_pages_configuration(*_args, **_kwargs) -> list[CheckMessage]:
             ),
         ]
 
-    next_pages = next_framework_settings.DEFAULT_PAGE_ROUTERS
+    next_pages = next_framework_settings.DEFAULT_PAGE_BACKENDS
     if not isinstance(next_pages, list):
         return [
             Error(
-                "NEXT_FRAMEWORK['DEFAULT_PAGE_ROUTERS'] must be a list of "
+                "NEXT_FRAMEWORK['DEFAULT_PAGE_BACKENDS'] must be a list of "
                 "configuration dictionaries.",
                 obj=settings,
                 id="next.E001",
@@ -244,7 +300,7 @@ def check_next_pages_configuration(*_args, **_kwargs) -> list[CheckMessage]:
     if len(next_pages) == 0:
         return [
             Error(
-                "NEXT_FRAMEWORK['DEFAULT_PAGE_ROUTERS'] must contain at least one "
+                "NEXT_FRAMEWORK['DEFAULT_PAGE_BACKENDS'] must contain at least one "
                 "router entry (configure the file router or another backend).",
                 obj=settings,
                 id="next.E022",
@@ -257,6 +313,53 @@ def check_next_pages_configuration(*_args, **_kwargs) -> list[CheckMessage]:
         if isinstance(config, dict):  # only validate fields if structure is valid
             errors.extend(_validate_config_fields(config, i))
 
+    return errors
+
+
+_COMPONENT_BACKEND_SETTINGS_KEY = "DEFAULT_COMPONENT_BACKENDS"
+
+
+def _validate_single_component_backend(
+    config: dict,
+    index: int,
+) -> list[CheckMessage]:
+    """Validate required keys and types for one merged component backend dict."""
+    prefix = f"NEXT_FRAMEWORK['{_COMPONENT_BACKEND_SETTINGS_KEY}'][{index}]"
+    errors: list[CheckMessage] = [
+        Error(
+            f"{prefix} must specify {key}.",
+            obj=settings,
+            id="next.E031",
+        )
+        for key in ("BACKEND", "DIRS", "COMPONENTS_DIR")
+        if key not in config
+    ]
+    if errors:
+        return errors
+    if not isinstance(config["BACKEND"], str):
+        errors.append(
+            Error(
+                f"{prefix}.BACKEND must be a string.",
+                obj=settings,
+                id="next.E032",
+            ),
+        )
+    if not isinstance(config["DIRS"], list):
+        errors.append(
+            Error(
+                f"{prefix}.DIRS must be a list.",
+                obj=settings,
+                id="next.E032",
+            ),
+        )
+    if not isinstance(config["COMPONENTS_DIR"], str):
+        errors.append(
+            Error(
+                f"{prefix}.COMPONENTS_DIR must be a string.",
+                obj=settings,
+                id="next.E027",
+            ),
+        )
     return errors
 
 
@@ -278,7 +381,31 @@ def check_next_components_configuration(*_args, **_kwargs) -> list[CheckMessage]
             ),
         ]
 
-    return []
+    if len(backends) == 0:
+        return [
+            Error(
+                "NEXT_FRAMEWORK['DEFAULT_COMPONENT_BACKENDS'] must contain at least "
+                "one component backend entry.",
+                obj=settings,
+                id="next.E033",
+            ),
+        ]
+
+    errors: list[CheckMessage] = []
+    for i, config in enumerate(backends):
+        if not isinstance(config, dict):
+            errors.append(
+                Error(
+                    f"NEXT_FRAMEWORK['{_COMPONENT_BACKEND_SETTINGS_KEY}'][{i}] "
+                    "must be a dictionary.",
+                    obj=settings,
+                    id="next.E002",
+                ),
+            )
+            continue
+        errors.extend(_validate_single_component_backend(config, i))
+
+    return errors
 
 
 @register(Tags.compatibility)
@@ -291,7 +418,7 @@ def check_pages_structure(*_args, **_kwargs) -> list[CheckMessage]:
     if router_manager is None:
         return init_errors + warnings
 
-    for router in router_manager._routers:
+    for router in router_manager._backends:
         try:
             if hasattr(router, "app_dirs") and router.app_dirs:
                 _check_app_pages(router, errors, warnings)
@@ -497,7 +624,7 @@ def check_page_functions(*_args, **_kwargs) -> list[CheckMessage]:
     if router_manager is None:
         return init_errors
 
-    for router in router_manager._routers:
+    for router in router_manager._backends:
         try:
             if hasattr(router, "app_dirs") and router.app_dirs:
                 _check_app_page_functions(router, errors, warnings)
@@ -698,15 +825,8 @@ def check_layout_templates(*_args, **_kwargs) -> list[CheckMessage]:
     if router_manager is None:
         return init_errors + warnings
 
-    for router in router_manager._routers:
-        if not hasattr(router, "_scan_pages_directory"):
-            continue
-
-        pages_dir = _get_pages_directory(router)
-        if not pages_dir:
-            continue
-
-        for _url_path, page_path in router._scan_pages_directory(pages_dir):
+    for router in router_manager._backends:
+        for _url_path, page_path in _iter_scanned_page_pairs(router):
             layout_file = page_path.parent / "layout.djx"
             if not layout_file.exists():
                 continue
@@ -743,15 +863,8 @@ def check_duplicate_url_parameters(*_args, **_kwargs) -> list[CheckMessage]:
 
     parser = URLPatternParser()
 
-    for router in router_manager._routers:
-        if not hasattr(router, "_scan_pages_directory"):
-            continue
-
-        pages_dir = _get_pages_directory(router)
-        if not pages_dir:
-            continue
-
-        for url_path, page_path in router._scan_pages_directory(pages_dir):
+    for router in router_manager._backends:
+        for url_path, page_path in _iter_scanned_page_pairs(router):
             if not page_path.exists():
                 continue
 
@@ -830,6 +943,18 @@ def _get_pages_directory(router: RouterBackend) -> Path | None:
     return _get_first_root_pages_path(file_router) or (p if p.exists() else None)
 
 
+def _iter_scanned_page_pairs(
+    router: RouterBackend,
+) -> Iterator[tuple[str, Path]]:
+    """``(url_path, page_path)`` from the file router's page tree when scannable."""
+    if not hasattr(router, "_scan_pages_directory"):
+        return
+    pages_dir = _get_pages_directory(router)
+    if not pages_dir:
+        return
+    yield from router._scan_pages_directory(pages_dir)
+
+
 def _check_context_function(
     func_name: str,
     func: Callable[..., Any],
@@ -874,14 +999,7 @@ def _check_router_context_functions(router: RouterBackend) -> list[CheckMessage]
     """All ``page.py`` modules under one router's pages tree."""
     errors: list[CheckMessage] = []
 
-    if not hasattr(router, "_scan_pages_directory"):
-        return errors
-
-    pages_dir = _get_pages_directory(router)
-    if not pages_dir:
-        return errors
-
-    for _url_path, page_path in router._scan_pages_directory(pages_dir):
+    for _url_path, page_path in _iter_scanned_page_pairs(router):
         if not page_path.exists():
             continue
 
@@ -903,7 +1021,7 @@ def check_context_functions(*_args, **_kwargs) -> list[CheckMessage]:
         return init_errors
 
     errors: list[CheckMessage] = []
-    for router in router_manager._routers:
+    for router in router_manager._backends:
         router_errors = _check_router_context_functions(router)
         errors.extend(router_errors)
 
@@ -923,7 +1041,7 @@ def check_url_patterns(*_args, **_kwargs) -> list[CheckMessage]:
     # collect all URL patterns
     all_patterns: list[tuple[str, str]] = []  # (pattern, source)
 
-    for router in router_manager._routers:
+    for router in router_manager._backends:
         try:
             if hasattr(router, "app_dirs") and router.app_dirs:
                 _collect_app_patterns(router, all_patterns)

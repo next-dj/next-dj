@@ -30,13 +30,14 @@ class NextFrameworkSettings:
     """Lazy merged view of ``NEXT_FRAMEWORK`` keys defined in ``DEFAULTS``."""
 
     DEFAULTS: ClassVar[dict[str, Any]] = {
-        "DEFAULT_PAGE_ROUTERS": [
+        "DEFAULT_PAGE_BACKENDS": [
             {
                 "BACKEND": "next.urls.FileRouterBackend",
+                "DIRS": [],
                 "APP_DIRS": True,
                 "PAGES_DIR": "pages",
                 "OPTIONS": {
-                    "COMPONENTS_DIR": "_components",
+                    "context_processors": [],
                 },
             },
         ],
@@ -44,11 +45,8 @@ class NextFrameworkSettings:
         "DEFAULT_COMPONENT_BACKENDS": [
             {
                 "BACKEND": "next.components.FileComponentsBackend",
-                "APP_DIRS": True,
-                "OPTIONS": {
-                    "COMPONENTS_DIR": "_components",
-                    "PAGES_DIR": "pages",
-                },
+                "DIRS": [],
+                "COMPONENTS_DIR": "_components",
             },
         ],
     }
@@ -86,9 +84,10 @@ class NextFrameworkSettings:
         return self._merged_cache
 
     def _build_flat_merged(self, user: dict[str, Any] | None) -> dict[str, Any]:
-        if not user:
-            return copy.deepcopy(self.DEFAULTS)
         out = copy.deepcopy(self.DEFAULTS)
+        if not user:
+            return out
+        user = dict(user)
         for key in self.DEFAULTS:
             if key not in user:
                 continue
@@ -96,7 +95,7 @@ class NextFrameworkSettings:
             if key == "URL_NAME_TEMPLATE" and isinstance(raw, str):
                 out[key] = raw
             elif key in (
-                "DEFAULT_PAGE_ROUTERS",
+                "DEFAULT_PAGE_BACKENDS",
                 "DEFAULT_COMPONENT_BACKENDS",
             ) and isinstance(raw, list):
                 out[key] = copy.deepcopy(raw)
@@ -110,7 +109,7 @@ class NextFrameworkSettings:
             allowed = ", ".join(sorted(self.DEFAULTS))
             msg = f"Invalid Next framework setting: {attr!r}. Allowed keys: {allowed}."
             raise AttributeError(msg)
-        val: Any = self._merged()[attr]
+        val = self._merged()[attr]
         self._attr_value_cache[attr] = val
         return val
 

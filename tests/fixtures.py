@@ -10,14 +10,14 @@ from django.test import Client
 
 from next.conf import NextFrameworkSettings, next_framework_settings
 from next.pages import (
-    ContextManager,
     DjxTemplateLoader,
     LayoutManager,
     Page,
+    PageContextRegistry,
     PythonTemplateLoader,
 )
+from next.server import NextStatReloader
 from next.urls import URLPatternParser
-from next.utils import NextStatReloader
 from tests.support import (
     _full_resolver,
     _minimal_resolver,
@@ -80,8 +80,8 @@ def djx_template_loader():
 
 @pytest.fixture()
 def context_manager():
-    """Create a ContextManager instance for testing."""
-    return ContextManager()
+    """Create a PageContextRegistry instance for testing."""
+    return PageContextRegistry(None)
 
 
 @pytest.fixture()

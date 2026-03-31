@@ -16,14 +16,8 @@ Backends and settings
 Components are provided by backends, similar to the page router. In Django settings, use the top-level dict ``NEXT_FRAMEWORK`` with the key **``DEFAULT_COMPONENT_BACKENDS``**: a list of backend configs. Each item is a dict that is passed unchanged into the backend class constructor:
 
 - ``BACKEND`` (str) — dotted import path of the backend class (default for the built-in file backend is ``"next.components.FileComponentsBackend"``).
-- ``APP_DIRS`` (bool, default ``True`` for ``FileComponentsBackend``) — when true, scan every installed app’s ``pages`` tree (see ``PAGES_DIR``) for folders named like ``COMPONENTS_DIR`` and register components there.
-- ``OPTIONS`` (dict) — backend-specific. For ``FileComponentsBackend`` the keys below are read.
-
-**``OPTIONS`` for ``FileComponentsBackend``**
-
-- ``PAGES_DIR`` (str, default ``"pages"``) — directory name under each app package where the pages tree lives (used with ``APP_DIRS``).
-- ``COMPONENTS_DIR`` (str, default ``"_components"``) — folder name to look for **under** each pages root when scanning apps (e.g. ``myapp/pages/_components/``). Use the same value in the file router’s ``OPTIONS`` (``NEXT_FRAMEWORK["DEFAULT_PAGE_ROUTERS"]``) so URLs skip that folder.
-- ``COMPONENTS_DIRS`` (list of paths or ``Path`` objects) — directories registered as **global** component roots (visible from every template). Only entries whose paths exist are used.
+- ``COMPONENTS_DIR`` (str, default ``"_components"`` in framework defaults) — folder name used when the shared page tree walk in ``next.urls`` reaches a components directory and when resolving skips on the file router. Match the value in ``DEFAULT_PAGE_BACKENDS`` so URLs do not treat that folder as a route segment.
+- ``DIRS`` (list) — extra filesystem directories registered as **global** component roots (visible from every template). Entries are split into real paths and segment names the same way as page ``DIRS``; only existing directory paths are used. App and root page trees do not need to be listed here because the same walk that builds URL patterns registers component folders there.
 - You may list **several backends** in ``DEFAULT_COMPONENT_BACKENDS``. Earlier entries win when the same component name appears twice.
 
 ``component.py`` modules are always loaded with the framework’s built-in :class:`~next.components.ModuleLoader`.
@@ -39,12 +33,8 @@ Minimal example:
        "DEFAULT_COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
-               "APP_DIRS": True,
-               "OPTIONS": {
-                   "COMPONENTS_DIR": "_components",
-                   "PAGES_DIR": "pages",
-                   "COMPONENTS_DIRS": [str(BASE_DIR / "root_components")],
-               },
+               "DIRS": [str(BASE_DIR / "root_components")],
+               "COMPONENTS_DIR": "_components",
            },
        ],
    }
@@ -61,24 +51,20 @@ Full example with every key shown (values are illustrative. Remove or adjust wha
        "DEFAULT_COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
-               "APP_DIRS": True,
-               "OPTIONS": {
-                   "PAGES_DIR": "pages",
-                   "COMPONENTS_DIR": "_components",
-                   "COMPONENTS_DIRS": [
-                       str(BASE_DIR / "root_components"),
-                   ],
-               },
+               "DIRS": [
+                   str(BASE_DIR / "root_components"),
+               ],
+               "COMPONENTS_DIR": "_components",
            },
            # {
            #     "BACKEND": "myapp.backends.MyComponentsBackend",
-           #     "APP_DIRS": False,
-           #     "OPTIONS": {},
+           #     "DIRS": [],
+           #     "COMPONENTS_DIR": "_components",
            # },
        ],
    }
 
-Custom backends are plain classes referenced by dotted path in ``BACKEND``. Each backend receives the **full** config dict for that list entry (``BACKEND``, ``APP_DIRS``, ``OPTIONS``, and any extra keys you add) and reads what it needs.
+Custom backends are plain classes referenced by dotted path in ``BACKEND``. Each backend receives the **full** config dict for that list entry and reads what it needs.
 
 Types of components
 -------------------
@@ -185,7 +171,7 @@ This API is similar to ``next.pages.context`` but designed specifically for comp
 Scope
 -----
 
-- **Root components** (from ``COMPONENTS_DIRS`` / ``COMPONENTS_DIR``) are visible from every template.
+- **Root components** (from extra ``DIRS`` roots and the ``COMPONENTS_DIR`` name under app pages) are visible from every template.
 - **App/local components** (from ``_components`` under a pages directory) are visible only to templates under that directory (that page and its nested routes). Sibling branches do not see each other’s local components.
 
 So for a template at ``pages/about/team/template.djx``, visible components are: root components, ``pages/_components``, and ``pages/about/_components``. Components under e.g. ``pages/blog/_components`` are not visible there.

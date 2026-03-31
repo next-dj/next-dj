@@ -100,7 +100,7 @@ Django Setup
 .. code-block:: python
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_ROUTERS": [
+       "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "PAGES_DIR": "pages",

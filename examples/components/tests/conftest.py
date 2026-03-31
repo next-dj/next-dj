@@ -22,9 +22,18 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 if not settings.configured:
     django.setup()
 
+_ExamplePagesLoadedState = {"done": False}
+
+
+def _eager_load_example_pages() -> None:
+    """Import page modules so routes, bracket pages, and form actions are registered."""
+    if _ExamplePagesLoadedState["done"]:
+        return
+
     authors_page = example_root / "myapp" / "pages" / "authors" / "[int:id]" / "page.py"
     spec = importlib.util.spec_from_file_location("myapp_authors_page", authors_page)
     authors_mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
     spec.loader.exec_module(authors_mod)
 
     for sub in ("edit", "details"):
@@ -32,7 +41,37 @@ if not settings.configured:
         name = f"myapp_posts_bracket_{sub}"
         spec = importlib.util.spec_from_file_location(name, path)
         mod = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
         spec.loader.exec_module(mod)
+
+    for rel, mod_name in (
+        (
+            "myapp/pages/account/login/page.py",
+            "myapp_account_login_page",
+        ),
+        (
+            "myapp/pages/account/register/page.py",
+            "myapp_account_register_page",
+        ),
+        (
+            "myapp/pages/account/profile/page.py",
+            "myapp_account_profile_page",
+        ),
+        (
+            "myapp/pages/posts/create/page.py",
+            "myapp_posts_create_page",
+        ),
+    ):
+        path = example_root / rel
+        spec = importlib.util.spec_from_file_location(mod_name, path)
+        extra_mod = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(extra_mod)
+
+    _ExamplePagesLoadedState["done"] = True
+
+
+_eager_load_example_pages()
 
 
 @pytest.fixture()

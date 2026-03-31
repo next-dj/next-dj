@@ -2,7 +2,7 @@ from django.utils import autoreload
 from django.utils.autoreload import autoreload_started
 
 from next.pages import get_pages_directories_for_watch
-from next.utils import NextStatReloader
+from next.server import NextStatReloader
 
 
 class TestNextFrameworkConfig:

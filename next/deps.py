@@ -267,11 +267,11 @@ class DependencyResolver:
         """Resolve like ``resolve`` but accept a loose kwargs mapping."""
         self._ensure_providers()
 
-        # Convert legacy dict context to ResolutionContext
+        # Accept a plain mapping and build ResolutionContext
         reserved = self.EXPLICIT_RESOLVE_KEYS
         url_kwargs = {k: v for k, v in context.items() if k not in reserved}
 
-        # Handle legacy dict-based cache
+        # Support dict or DependencyCache for _cache
         cache_obj = context.get("_cache")
         if isinstance(cache_obj, dict):
             cache = DependencyCache(backing_dict=cache_obj)

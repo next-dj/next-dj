@@ -105,11 +105,13 @@ Configure the file router in your Django settings (``NEXT_FRAMEWORK``):
 .. code-block:: python
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_ROUTERS": [
+       "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "PAGES_DIR": "pages",
                "APP_DIRS": True,  # Scan Django app directories
+               "DIRS": [],
+               "COMPONENTS_DIR": "_components",
                "OPTIONS": {
                    "context_processors": [
                        "myapp.context_processors.global_context",
@@ -120,17 +122,19 @@ Configure the file router in your Django settings (``NEXT_FRAMEWORK``):
    }
 
 **APP_DIRS**: Whether to scan Django app directories (default: True)
-**context_processors**: List of context processor paths for global template variables
+**DIRS**: Extra filesystem roots for pages (path-like entries); see below.
+**COMPONENTS_DIR**: Folder name skipped for URL scanning (e.g. ``"_components"``).
+**context_processors**: List of context processor paths for global template variables (inside ``OPTIONS``)
 
 Root and App Pages (Like Staticfiles)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Resolution works like Django's static files:
 
-- **Project-level directories** — Use ``OPTIONS.PAGES_DIRS`` (list of paths) or ``OPTIONS.PAGES_DIR`` (single path). These are the same idea as ``STATICFILES_DIRS``: directories at the project root that contain ``page.py`` / ``template.djx`` and optionally ``layout.djx`` for a global layout.
-- **App directories** — With ``APP_DIRS: True``, each installed app's ``pages/`` directory is scanned (like each app's ``static/`` folder).
+- **Project-level directories** — List absolute or project-relative paths in ``DIRS``. These behave like ``STATICFILES_DIRS``: each entry must exist on disk as a directory; they contain ``page.py`` / ``template.djx`` and optionally ``layout.djx`` for a global layout.
+- **App directories** — With ``APP_DIRS: True``, each installed app's ``pages/`` directory is scanned (like each app's ``static/`` folder). The subdirectory name comes from top-level ``PAGES_DIR`` (default ``"pages"``).
 
-You can use both in one backend: set ``APP_DIRS: True`` and add ``PAGES_DIRS`` or ``PAGES_DIR`` in ``OPTIONS``. URL patterns are then built in this order: first from app pages, then from root directories. If the same URL pattern is defined in both an app and a root directory, ``python manage.py check`` reports an error (``next.E015``).
+You can use both in one backend: set ``APP_DIRS: True`` and add path roots to ``DIRS``. URL patterns are then built in this order: first from app pages, then from each root directory in ``DIRS``. If the same URL pattern is defined in both an app and a root directory, ``python manage.py check`` reports an error (``next.E015``).
 
 .. code-block:: python
 
@@ -138,47 +142,51 @@ You can use both in one backend: set ``APP_DIRS: True`` and add ``PAGES_DIRS`` o
    BASE_DIR = Path(__file__).resolve().parent.parent
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_ROUTERS": [
+       "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "PAGES_DIR": "pages",
                "APP_DIRS": True,
+               "DIRS": [str(BASE_DIR / "root_pages")],
+               "COMPONENTS_DIR": "_components",
                "OPTIONS": {
-                   "PAGES_DIRS": [str(BASE_DIR / "root_pages")],
                    "context_processors": [...],
                },
            },
        ],
    }
 
-**PAGES_DIRS**: List of absolute (or project-relative) paths to root-level pages directories.
-**PAGES_DIR**: Single path to one root-level pages directory (alternative to ``PAGES_DIRS``).
+**DIRS**: List of extra root-level pages directories (in addition to app trees when ``APP_DIRS`` is true).
 
 Component folder and file routing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A directory whose name is set as the components folder (e.g. ``OPTIONS.COMPONENTS_DIR``, default ``"_components"``) is **not** used for file-based routing and does not create URL segments. The router skips that directory when scanning for ``page.py`` and ``template.djx``. Only the configured name is skipped (not all directories starting with an underscore). See :doc:`components` for the components system.
+The top-level ``COMPONENTS_DIR`` string (default ``"_components"``) sets the folder name that is **not** used for file-based routing and does not create URL segments. The router skips that directory when scanning for ``page.py`` and ``template.djx``. Only the configured name is skipped (not all directories starting with an underscore). See :doc:`components` for the components system.
 
 Multiple Configurations
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-next.dj supports multiple router entries in ``NEXT_FRAMEWORK["DEFAULT_PAGE_ROUTERS"]``, allowing you to have different routing strategies for different parts of your application:
+next.dj supports multiple router entries in ``NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"]``, allowing you to have different routing strategies for different parts of your application:
 
 .. code-block:: python
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_ROUTERS": [
+       "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "PAGES_DIR": "pages",
                "APP_DIRS": True,
-               "OPTIONS": {},
+               "DIRS": [],
+               "COMPONENTS_DIR": "_components",
+               "OPTIONS": {"context_processors": []},
            },
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "PAGES_DIR": "admin_pages",
                "APP_DIRS": True,
-               "OPTIONS": {},
+               "DIRS": [],
+               "COMPONENTS_DIR": "_components",
+               "OPTIONS": {"context_processors": []},
            },
        ],
    }
@@ -215,7 +223,7 @@ Validation Checks
 The system includes comprehensive validation checks to prevent configuration errors:
 
 **Configuration Validation** (``check_next_pages_configuration``):
-- Validates ``NEXT_FRAMEWORK`` (including ``DEFAULT_PAGE_ROUTERS``) structure
+- Validates ``NEXT_FRAMEWORK`` (including ``DEFAULT_PAGE_BACKENDS``) structure
 - Checks for required fields (BACKEND)
 - Validates backend types and option structures
 - Ensures all configured backends can be instantiated

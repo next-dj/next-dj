@@ -37,13 +37,13 @@ Router list shape, backends, and ``FileRouterBackend`` fields.
      - Meaning
      - Level
    * - ``next.E001``
-     - ``NEXT_FRAMEWORK`` or ``DEFAULT_PAGE_ROUTERS`` has wrong top-level type
+     - ``NEXT_FRAMEWORK`` or ``DEFAULT_PAGE_BACKENDS`` has wrong top-level type
      - Error
    * - ``next.E002``
-     - ``DEFAULT_PAGE_ROUTERS[i]`` must be a dict
+     - ``DEFAULT_PAGE_BACKENDS[i]`` must be a dict
      - Error
    * - ``next.E003``
-     - ``DEFAULT_PAGE_ROUTERS[i]`` must declare ``BACKEND``
+     - ``DEFAULT_PAGE_BACKENDS[i]`` must declare ``BACKEND``
      - Error
    * - ``next.E004``
      - Unknown ``BACKEND`` string
@@ -52,13 +52,13 @@ Router list shape, backends, and ``FileRouterBackend`` fields.
      - Wrong types for ``APP_DIRS`` / ``OPTIONS`` on file router
      - Error
    * - ``next.E022``
-     - ``DEFAULT_PAGE_ROUTERS`` must contain at least one entry
+     - ``DEFAULT_PAGE_BACKENDS`` must contain at least one entry
      - Error
    * - ``next.E023``
      - ``DEFAULT_COMPONENT_BACKENDS`` must be a list
      - Error
    * - ``next.E024``–``E027``
-     - Missing or invalid ``PAGES_DIR`` / ``APP_DIRS`` / ``OPTIONS`` for file router
+     - Missing or invalid ``PAGES_DIR`` / ``APP_DIRS`` / ``DIRS`` / ``COMPONENTS_DIR`` / ``OPTIONS`` for file router
      - Error
 
 **What to do:** Fix ``NEXT_FRAMEWORK`` in settings (see :doc:`../guide/file-router`).
@@ -191,7 +191,7 @@ See :doc:`../guide/context`.
 
 Flat top-level keys (see :mod:`next.conf`):
 
-* ``DEFAULT_PAGE_ROUTERS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``OPTIONS``, …).
+* ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``COMPONENTS_DIR``, ``OPTIONS``, …).
 * ``URL_NAME_TEMPLATE`` — Python format string for URL names (default ``page_{name}``).
 * ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts.
 

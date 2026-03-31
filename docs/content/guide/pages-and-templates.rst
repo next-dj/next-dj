@@ -79,23 +79,27 @@ How Layout Inheritance Works
 Multiple router entries
 -----------------------
 
-next.dj supports multiple entries in ``NEXT_FRAMEWORK["DEFAULT_PAGE_ROUTERS"]``, allowing you to have different layout hierarchies for different parts of your application:
+next.dj supports multiple entries in ``NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"]``, allowing you to have different layout hierarchies for different parts of your application:
 
 .. code-block:: python
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_ROUTERS": [
+       "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "PAGES_DIR": "pages",
                "APP_DIRS": True,
-               "OPTIONS": {},
+               "DIRS": [],
+               "COMPONENTS_DIR": "_components",
+               "OPTIONS": {"context_processors": []},
            },
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "PAGES_DIR": "admin_pages",
                "APP_DIRS": True,
-               "OPTIONS": {},
+               "DIRS": [],
+               "COMPONENTS_DIR": "_components",
+               "OPTIONS": {"context_processors": []},
            },
        ],
    }
@@ -108,13 +112,11 @@ This allows you to have:
 Root Layout for Entire Site
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A site-wide layout is provided the same way as root-level pages: via **PAGES_DIRS** or **PAGES_DIR** in the same backend (see :doc:`file-router`). Add a directory (e.g. ``root_pages``) that contains ``layout.djx``. It can contain only that file (no ``page.py``) and will be used as an additional layout for all app pages. If the directory also has its own pages, they are served as root-level URLs. Duplicate URL patterns with app pages cause a check error (``next.E015``).
+A site-wide layout is provided the same way as root-level pages: add path roots to **``DIRS``** on the file router backend (see :doc:`file-router`). The **``PAGES_DIR``** key is only the name of the app subdirectory (e.g. ``"pages"``), not a list of project roots. Add a directory (e.g. ``root_pages``) that contains ``layout.djx``. It can contain only that file (no ``page.py``) and will be used as an additional layout for all app pages. If the directory also has its own pages, they are served as root-level URLs. Duplicate URL patterns with app pages cause a check error (``next.E015``).
 
 .. code-block:: python
 
-   OPTIONS: {
-       "PAGES_DIRS": [str(BASE_DIR / "root_pages")],
-   }
+   "DIRS": [str(BASE_DIR / "root_pages")],
 
 .. code-block:: html
 

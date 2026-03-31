@@ -36,25 +36,26 @@ class TestNextFrameworkSettingsDjangoIntegration:
         """Empty or invalid NEXT_FRAMEWORK keeps the default file router backend."""
         with override_settings(NEXT_FRAMEWORK=next_framework):  # type: ignore[arg-type]
             next_framework_settings.reload()
-            assert next_framework_settings.DEFAULT_PAGE_ROUTERS[0]["BACKEND"] == (
+            assert next_framework_settings.DEFAULT_PAGE_BACKENDS[0]["BACKEND"] == (
                 "next.urls.FileRouterBackend"
             )
 
     def test_default_page_routers_replaces_default_list_entirely(self) -> None:
-        """Providing DEFAULT_PAGE_ROUTERS replaces the default list."""
+        """Providing DEFAULT_PAGE_BACKENDS replaces the default list."""
         custom = [
             {
                 "BACKEND": "next.urls.FileRouterBackend",
                 "PAGES_DIR": "custom_pages",
                 "APP_DIRS": False,
+                "DIRS": [],
                 "OPTIONS": {},
             },
         ]
-        with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": custom}):
+        with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": custom}):
             next_framework_settings.reload()
-            assert custom == next_framework_settings.DEFAULT_PAGE_ROUTERS
+            assert custom == next_framework_settings.DEFAULT_PAGE_BACKENDS
             assert (
-                next_framework_settings.DEFAULT_PAGE_ROUTERS[0]["PAGES_DIR"]
+                next_framework_settings.DEFAULT_PAGE_BACKENDS[0]["PAGES_DIR"]
                 == "custom_pages"
             )
 
@@ -65,28 +66,24 @@ class TestNextFrameworkSettingsDjangoIntegration:
                 "DEFAULT_COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
-                        "APP_DIRS": True,
-                        "OPTIONS": {
-                            "COMPONENTS_DIR": "_components",
-                            "PAGES_DIR": "pages",
-                            "COMPONENTS_DIRS": ["/tmp/x"],
-                        },
+                        "DIRS": ["/tmp/x"],
+                        "COMPONENTS_DIR": "_components",
                     },
                 ],
             },
         ):
             next_framework_settings.reload()
             assert (
-                next_framework_settings.DEFAULT_PAGE_ROUTERS[0]["PAGES_DIR"] == "pages"
+                next_framework_settings.DEFAULT_PAGE_BACKENDS[0]["PAGES_DIR"] == "pages"
             )
-            assert next_framework_settings.DEFAULT_COMPONENT_BACKENDS[0]["OPTIONS"][
-                "COMPONENTS_DIRS"
-            ] == ["/tmp/x"]
+            assert next_framework_settings.DEFAULT_COMPONENT_BACKENDS[0]["DIRS"] == [
+                "/tmp/x",
+            ]
 
     @pytest.mark.parametrize(
         "bad_attr",
         ["NOT_A_KEY", "FOO", "PAGES", ""],
-        ids=["unknown_upper", "unknown_short", "legacy_pages", "empty_string"],
+        ids=["unknown_upper", "unknown_short", "old_key_name", "empty_string"],
     )
     def test_unknown_attribute_raises(self, bad_attr: str) -> None:
         """Only top level keys from DEFAULTS are valid attributes."""
@@ -94,21 +91,21 @@ class TestNextFrameworkSettingsDjangoIntegration:
             getattr(next_framework_settings, bad_attr)
 
     def test_only_url_name_template_overridden(self) -> None:
-        """Setting only URL_NAME_TEMPLATE keeps default DEFAULT_PAGE_ROUTERS."""
+        """Setting only URL_NAME_TEMPLATE keeps default page backends."""
         with override_settings(
             NEXT_FRAMEWORK={"URL_NAME_TEMPLATE": "view_{name}"},
         ):
             next_framework_settings.reload()
             assert next_framework_settings.URL_NAME_TEMPLATE == "view_{name}"
             assert (
-                NextFrameworkSettings.DEFAULTS["DEFAULT_PAGE_ROUTERS"]
-                == next_framework_settings.DEFAULT_PAGE_ROUTERS
+                NextFrameworkSettings.DEFAULTS["DEFAULT_PAGE_BACKENDS"]
+                == next_framework_settings.DEFAULT_PAGE_BACKENDS
             )
 
     @pytest.mark.parametrize(
         ("next_framework", "setting_name"),
         [
-            ({"DEFAULT_PAGE_ROUTERS": "invalid"}, "DEFAULT_PAGE_ROUTERS"),
+            ({"DEFAULT_PAGE_BACKENDS": "invalid"}, "DEFAULT_PAGE_BACKENDS"),
             ({"URL_NAME_TEMPLATE": 123}, "URL_NAME_TEMPLATE"),
         ],
         ids=["invalid_routers_type", "invalid_url_name_template"],
@@ -134,7 +131,7 @@ class TestNextFrameworkSettingsFlatMerge:
         [
             (None, 1),
             ({}, 1),
-            ({"DEFAULT_PAGE_ROUTERS": []}, 0),
+            ({"DEFAULT_PAGE_BACKENDS": []}, 0),
         ],
         ids=["none_user", "empty_user_dict", "explicit_empty_routers"],
     )
@@ -144,9 +141,9 @@ class TestNextFrameworkSettingsFlatMerge:
         user: dict[str, Any] | None,
         expected_routers_len: int,
     ) -> None:
-        """DEFAULT_PAGE_ROUTERS length follows the merged user value."""
+        """DEFAULT_PAGE_BACKENDS length follows the merged user value."""
         merged = fresh_next_framework_settings._build_flat_merged(user)
-        assert len(merged["DEFAULT_PAGE_ROUTERS"]) == expected_routers_len
+        assert len(merged["DEFAULT_PAGE_BACKENDS"]) == expected_routers_len
 
     def test_build_flat_merge_empty_component_backends(
         self,

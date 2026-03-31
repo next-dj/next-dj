@@ -20,11 +20,11 @@ from next.deps import DependencyResolver
 from next.pages import (
     Context,
     ContextByDefaultProvider,
-    ContextManager,
     DjxTemplateLoader,
     LayoutManager,
     LayoutTemplateLoader,
     Page,
+    PageContextRegistry,
     PythonTemplateLoader,
     _get_context_processors,
     _import_context_processor,
@@ -33,11 +33,11 @@ from next.pages import (
     get_template_djx_paths_for_watch,
     page,
 )
+from next.server import NextStatReloader
 from next.urls import (
     FileRouterBackend,
     URLPatternParser,
 )
-from next.utils import NextStatReloader
 from tests.support import (
     default_page_router_config,
     file_router_config_entry,
@@ -53,7 +53,7 @@ class TestPage:
     def test_init(self, page_instance) -> None:
         """Test Page initialization."""
         assert page_instance._template_registry == {}
-        assert isinstance(page_instance._context_manager, ContextManager)
+        assert isinstance(page_instance._context_manager, PageContextRegistry)
         assert len(page_instance._template_loaders) == 3
         # check that all expected loaders are present
         loader_types = [type(loader) for loader in page_instance._template_loaders]
@@ -858,17 +858,17 @@ class TestContextMarker:
         assert provider.resolve(param, ctx) is None
 
 
-class TestContextManager:
-    """Test cases for ContextManager."""
+class TestPageContextRegistry:
+    """Test cases for PageContextRegistry."""
 
     def test_init(self, context_manager) -> None:
-        """Test ContextManager initialization."""
+        """Test PageContextRegistry initialization."""
         assert context_manager._context_registry == {}
 
     def test_get_resolver_returns_injected_resolver(self) -> None:
         """When resolver is injected, _get_resolver() returns it."""
         r = DependencyResolver()
-        cm = ContextManager(resolver=r)
+        cm = PageContextRegistry(resolver=r)
         assert cm._get_resolver() is r
 
     @pytest.mark.parametrize(
@@ -1926,7 +1926,7 @@ class TestLayoutTemplateLoader:
 
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_ROUTERS": default_page_router_config(tmp_path)
+                "DEFAULT_PAGE_BACKENDS": default_page_router_config(tmp_path)
             },
         ):
             next_framework_settings.reload()
@@ -1940,7 +1940,7 @@ class TestLayoutTemplateLoader:
         loader = LayoutTemplateLoader()
 
         mock_nf = SimpleNamespace(
-            DEFAULT_PAGE_ROUTERS="not-a-list",
+            DEFAULT_PAGE_BACKENDS="not-a-list",
             URL_NAME_TEMPLATE="page_{name}",
         )
         with patch("next.pages.next_framework_settings", mock_nf):
@@ -1974,7 +1974,7 @@ class TestLayoutTemplateLoader:
         """Test _get_additional_layout_files with different configuration scenarios."""
         loader = LayoutTemplateLoader()
 
-        with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": config}):
+        with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": config}):
             next_framework_settings.reload()
             result = loader._get_additional_layout_files()
 
@@ -2011,28 +2011,33 @@ class TestLayoutTemplateLoader:
         loader = LayoutTemplateLoader()
 
         if test_case == "with_pages_dir":
-            config["OPTIONS"]["PAGES_DIR"] = str(tmp_path)
-            expected_list = [Path(tmp_path)]
+            config["DIRS"] = [str(tmp_path)]
+            expected_list = [Path(tmp_path).resolve()]
 
         result = loader._get_pages_dirs_for_config(config)
         assert result == expected_list
 
-    def test_get_pages_dirs_for_config_pages_dirs_not_list(self, tmp_path) -> None:
-        """Test _get_pages_dirs_for_config when PAGES_DIRS is not a list returns []."""
+    def test_get_pages_dirs_for_config_empty_when_dirs_missing(self, tmp_path) -> None:
+        """Missing ``DIRS`` behaves like an empty list."""
         loader = LayoutTemplateLoader()
-        config = {
-            "OPTIONS": {"PAGES_DIRS": "not-a-list"},
-        }
-        result = loader._get_pages_dirs_for_config(config)
+        result = loader._get_pages_dirs_for_config({})
         assert result == []
 
-    def test_get_pages_dirs_for_config_pages_dirs_list(self, tmp_path) -> None:
-        """Test _get_pages_dirs_for_config when PAGES_DIRS is a list returns paths."""
+    def test_get_pages_dirs_for_config_string_base_dir(self, tmp_path: Path) -> None:
+        """String ``BASE_DIR`` is normalized like in the file router."""
         loader = LayoutTemplateLoader()
-        config = {"OPTIONS": {"PAGES_DIRS": [str(tmp_path)]}}
+        with patch("next.pages.settings") as mock_settings:
+            mock_settings.BASE_DIR = str(tmp_path)
+            out = loader._get_pages_dirs_for_config({"DIRS": []})
+        assert out == []
+
+    def test_get_pages_dirs_for_config_dirs_list(self, tmp_path) -> None:
+        """Existing directory paths in ``DIRS`` are resolved."""
+        loader = LayoutTemplateLoader()
+        config = {"DIRS": [str(tmp_path)]}
         result = loader._get_pages_dirs_for_config(config)
         assert len(result) == 1
-        assert result[0] == Path(tmp_path)
+        assert result[0] == Path(tmp_path).resolve()
 
     @pytest.mark.parametrize(
         (
@@ -2111,7 +2116,7 @@ class TestLayoutTemplateLoader:
 
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_ROUTERS": default_page_router_config(tmp_path)
+                "DEFAULT_PAGE_BACKENDS": default_page_router_config(tmp_path)
             },
         ):
             next_framework_settings.reload()
@@ -2134,7 +2139,7 @@ class TestLayoutTemplateLoader:
             tmp_path
         )
 
-        with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": config}):
+        with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": config}):
             next_framework_settings.reload()
             result = loader._get_additional_layout_files()
 
@@ -2164,7 +2169,7 @@ class TestLayoutTemplateLoader:
 
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_ROUTERS": default_page_router_config(parent_dir)
+                "DEFAULT_PAGE_BACKENDS": default_page_router_config(parent_dir)
             },
         ):
             next_framework_settings.reload()
@@ -2199,7 +2204,7 @@ class TestLayoutTemplateLoader:
 
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_ROUTERS": default_page_router_config(additional_dir),
+                "DEFAULT_PAGE_BACKENDS": default_page_router_config(additional_dir),
             },
         ):
             next_framework_settings.reload()
@@ -2560,7 +2565,7 @@ class TestContextProcessors:
     def test_get_context_processors_empty_config(self, page_instance) -> None:
         """Test _get_context_processors with empty ``ROUTERS`` list."""
         with override_settings(
-            NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": []},
+            NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": []},
             TEMPLATES=[],
         ):
             next_framework_settings.reload()
@@ -2568,8 +2573,8 @@ class TestContextProcessors:
             assert processors == []
 
     def test_get_context_processors_routers_not_list(self, page_instance) -> None:
-        """When ``DEFAULT_PAGE_ROUTERS`` is not a list, treat as no router config."""
-        mock_nf = SimpleNamespace(DEFAULT_PAGE_ROUTERS={})
+        """When ``DEFAULT_PAGE_BACKENDS`` is not a list, treat as no router config."""
+        mock_nf = SimpleNamespace(DEFAULT_PAGE_BACKENDS={})
         with (
             patch("next.pages.next_framework_settings", mock_nf),
             override_settings(TEMPLATES=[]),
@@ -2581,7 +2586,7 @@ class TestContextProcessors:
         """Test _get_context_processors with routers but no context_processors."""
         config = [file_router_config_entry(app_dirs=True)]
         with override_settings(
-            NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": config},
+            NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": config},
             TEMPLATES=[],
         ):
             next_framework_settings.reload()
@@ -2619,7 +2624,7 @@ class TestContextProcessors:
 
             with override_settings(
                 TEMPLATES=templates_config,
-                NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": next_pages_config},
+                NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": next_pages_config},
             ):
                 next_framework_settings.reload()
                 processors = _get_context_processors()
@@ -2663,7 +2668,7 @@ class TestContextProcessors:
             mock_import.side_effect = [next_pages_processor, template_processor]
             with override_settings(
                 TEMPLATES=templates_config,
-                NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": next_pages_config},
+                NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": next_pages_config},
             ):
                 next_framework_settings.reload()
                 processors = _get_context_processors()
@@ -2694,7 +2699,7 @@ class TestContextProcessors:
             patch("next.pages.import_string", return_value=shared_processor),
             override_settings(
                 TEMPLATES=templates_config,
-                NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": next_pages_config},
+                NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": next_pages_config},
             ),
         ):
             next_framework_settings.reload()
@@ -2708,7 +2713,7 @@ class TestContextProcessors:
         """With empty TEMPLATES and no router processors, result is empty."""
         with override_settings(
             TEMPLATES=[],
-            NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": []},
+            NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": []},
         ):
             next_framework_settings.reload()
             result = _get_context_processors()
@@ -2724,7 +2729,7 @@ class TestContextProcessors:
         ]
         with override_settings(
             TEMPLATES=templates_config,
-            NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": []},
+            NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": []},
         ):
             next_framework_settings.reload()
             result = _get_context_processors()
@@ -2756,7 +2761,7 @@ class TestContextProcessors:
             ]
 
             with override_settings(
-                NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": config},
+                NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": config},
                 TEMPLATES=[],
             ):
                 next_framework_settings.reload()
@@ -2780,7 +2785,7 @@ class TestContextProcessors:
         ]
 
         with (
-            override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_ROUTERS": config}),
+            override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": config}),
             patch("next.pages.import_string") as mock_import,
             patch("next.pages.logger.warning") as mock_warning,
         ):
@@ -3106,18 +3111,18 @@ class TestLayoutTemplateWatchReload:
 
         with (
             patch(
-                "next.utils.get_pages_directories_for_watch",
+                "next.server.get_pages_directories_for_watch",
                 return_value=[Path("/fake/pages")],
             ),
             patch(
-                "next.utils._scan_pages_directory",
+                "next.server.scan_pages_tree",
                 side_effect=lambda _: iter([("simple", page_under_layout)]),
             ),
             patch(
-                "next.utils.get_layout_djx_paths_for_watch",
+                "next.server.get_layout_djx_paths_for_watch",
                 side_effect=layout_side_effect,
             ),
-            patch("next.utils.get_template_djx_paths_for_watch", return_value=set()),
+            patch("next.server.get_template_djx_paths_for_watch", return_value=set()),
             patch.object(reloader, "snapshot_files", return_value=iter([])),
             patch.object(reloader, "notify_file_changed") as mock_notify,
         ):
@@ -3139,18 +3144,18 @@ class TestLayoutTemplateWatchReload:
 
         with (
             patch(
-                "next.utils.get_pages_directories_for_watch",
+                "next.server.get_pages_directories_for_watch",
                 return_value=[Path("/fake/pages")],
             ),
             patch(
-                "next.utils._scan_pages_directory",
+                "next.server.scan_pages_tree",
                 side_effect=lambda _: iter([("simple", page_under_layout)]),
             ),
             patch(
-                "next.utils.get_layout_djx_paths_for_watch",
+                "next.server.get_layout_djx_paths_for_watch",
                 side_effect=layout_side_effect,
             ),
-            patch("next.utils.get_template_djx_paths_for_watch", return_value=set()),
+            patch("next.server.get_template_djx_paths_for_watch", return_value=set()),
             patch.object(reloader, "snapshot_files", return_value=iter([])),
             patch.object(reloader, "notify_file_changed") as mock_notify,
         ):
@@ -3170,11 +3175,11 @@ class TestLayoutTemplateWatchReload:
             return {deleted_template} if call_count[0] == 1 else set()
 
         with (
-            patch("next.utils.get_pages_directories_for_watch", return_value=[]),
-            patch("next.utils._scan_pages_directory", return_value=iter([])),
-            patch("next.utils.get_layout_djx_paths_for_watch", return_value=set()),
+            patch("next.server.get_pages_directories_for_watch", return_value=[]),
+            patch("next.server.scan_pages_tree", return_value=iter([])),
+            patch("next.server.get_layout_djx_paths_for_watch", return_value=set()),
             patch(
-                "next.utils.get_template_djx_paths_for_watch",
+                "next.server.get_template_djx_paths_for_watch",
                 side_effect=template_side_effect,
             ),
             patch.object(reloader, "snapshot_files", return_value=iter([])),

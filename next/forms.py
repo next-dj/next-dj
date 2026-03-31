@@ -31,6 +31,7 @@ from django.views.decorators.http import require_http_methods
 
 from .deps import DDependencyBase, RegisteredParameterProvider, resolver
 from .pages import page
+from .utils import caller_source_path
 
 
 # Custom BaseForm and BaseModelForm with get_initial support
@@ -237,23 +238,106 @@ def _make_uid(file_path: Path, action_name: str) -> str:
 
 def _get_caller_path(back_count: int = 1) -> Path:
     """Path of the module that called into us. Skips frames from this file."""
-    frame = inspect.currentframe()
-    msg = "Could not determine caller file path"
-    # Step back `back_count` frames (e.g. past decorator)
-    for _ in range(back_count):
-        if not frame or not frame.f_back:
-            raise RuntimeError(msg)
-        frame = frame.f_back
-    # Walk up until we leave our own forms.py
-    for _ in range(15):
-        if not frame:
-            break
-        if (fpath := frame.f_globals.get("__file__")) and not fpath.endswith(
-            "forms.py"
-        ):
-            return Path(fpath)
-        frame = frame.f_back
-    raise RuntimeError(msg)
+    return caller_source_path(
+        back_count=back_count,
+        max_walk=15,
+        skip_while_filename_endswith=("forms.py",),
+    )
+
+
+def _url_kwargs_from_post(request: HttpRequest) -> dict[str, object]:
+    """Parse ``_url_param_*`` hidden fields from POST."""
+    out: dict[str, object] = {}
+    if not hasattr(request, "POST"):
+        return out
+    for key, value in request.POST.items():
+        if not key.startswith("_url_param_"):
+            continue
+        param_name = key.replace("_url_param_", "")
+        if isinstance(value, str):
+            try:
+                out[param_name] = int(value)
+            except ValueError:
+                out[param_name] = value
+        else:
+            out[param_name] = value
+    return out
+
+
+def _url_kwargs_from_resolver_or_post(request: HttpRequest) -> dict[str, object]:
+    """URL kwargs from resolver match, else from POST hidden fields."""
+    resolver_match = getattr(request, "resolver_match", None)
+    if resolver_match and getattr(resolver_match, "kwargs", None):
+        return dict(resolver_match.kwargs)
+    if getattr(request, "method", None) == "POST" and hasattr(request, "POST"):
+        return _url_kwargs_from_post(request)
+    return {}
+
+
+def _form_from_initial_data(
+    form_class: type[django_forms.Form],
+    initial_data: object,
+) -> django_forms.Form:
+    """Build an unbound form from ``get_initial`` result (dict or model instance)."""
+    meta = getattr(initial_data, "_meta", None)
+    is_model_instance = meta is not None and hasattr(meta, "model")
+    if is_model_instance:
+        if issubclass(form_class, BaseModelForm):
+            return form_class(instance=initial_data)
+        msg = "instance parameter only supported for ModelForm"
+        raise TypeError(msg)
+    return form_class(initial=cast("dict[str, Any] | None", initial_data))
+
+
+def _form_action_context_callable(
+    form_class: type[django_forms.Form],
+) -> Callable[[HttpRequest], types.SimpleNamespace]:
+    """Return a callable that builds a form instance for GET error rendering."""
+
+    def context_func(request: HttpRequest) -> types.SimpleNamespace:
+        if not hasattr(form_class, "get_initial"):
+            msg = f"Form class {form_class} must have get_initial method"
+            raise TypeError(msg)
+        url_kwargs = _url_kwargs_from_resolver_or_post(request)
+        dep_cache: dict[str, Any] = {}
+        dep_stack: list[str] = []
+        resolved = resolver.resolve_dependencies(
+            form_class.get_initial,
+            request=request,
+            _cache=dep_cache,
+            _stack=dep_stack,
+            **url_kwargs,
+        )
+        initial_data = form_class.get_initial(**resolved)
+        form_instance = _form_from_initial_data(form_class, initial_data)
+        return types.SimpleNamespace(form=form_instance)
+
+    return context_func
+
+
+def _bind_form_for_post(
+    form_class: type[django_forms.Form],
+    request: HttpRequest,
+    initial_data: object,
+) -> django_forms.Form:
+    """Bound form for POST validation using initial/instance from ``get_initial``."""
+    files = request.FILES if hasattr(request, "FILES") else None
+    meta = getattr(initial_data, "_meta", None)
+    is_model_instance = meta is not None and hasattr(meta, "model")
+    if is_model_instance:
+        if issubclass(form_class, BaseModelForm):
+            return form_class(
+                request.POST,
+                files,
+                instance=initial_data,
+            )
+        msg = "instance parameter only supported for ModelForm"
+        raise TypeError(msg)
+    return form_class(
+        request.POST,
+        files,
+        initial=cast("dict[str, Any] | None", initial_data),
+    )
 
 
 class RegistryFormActionBackend(FormActionBackend):
@@ -264,7 +348,7 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry: dict[str, ActionMeta] = {}
         self._uid_to_name: dict[str, str] = {}
 
-    def register_action(  # noqa: C901
+    def register_action(
         self,
         name: str,
         handler: Callable[..., Any],
@@ -283,57 +367,10 @@ class RegistryFormActionBackend(FormActionBackend):
             "uid": uid,
         }
         if opts.form_class is not None:
-            form_class = opts.form_class
-
-            def context_func(request: HttpRequest) -> types.SimpleNamespace:
-                if not hasattr(form_class, "get_initial"):
-                    msg = f"Form class {form_class} must have get_initial method"
-                    raise TypeError(msg)
-                url_kwargs: dict[str, object] = {}
-                resolver_match = getattr(request, "resolver_match", None)
-                if resolver_match and getattr(resolver_match, "kwargs", None):
-                    url_kwargs = dict(resolver_match.kwargs)
-                elif getattr(request, "method", None) == "POST" and hasattr(
-                    request, "POST"
-                ):
-                    for key, value in request.POST.items():
-                        if key.startswith("_url_param_"):
-                            param_name = key.replace("_url_param_", "")
-                            if isinstance(value, str) and value.isdigit():
-                                url_kwargs[param_name] = int(value)
-                            else:
-                                url_kwargs[param_name] = value
-                dep_cache: dict[str, Any] = {}
-                dep_stack: list[str] = []
-                resolved = resolver.resolve_dependencies(
-                    form_class.get_initial,
-                    request=request,
-                    _cache=dep_cache,
-                    _stack=dep_stack,
-                    **url_kwargs,
-                )
-                initial_data = form_class.get_initial(**resolved)
-                # Check if initial_data is a model instance (for ModelForm)
-                # Django models have _meta attribute
-                has_meta = hasattr(initial_data, "_meta")
-                is_model_instance = has_meta and hasattr(initial_data._meta, "model")
-                if is_model_instance:
-                    # It's a model instance, use it as instance parameter
-                    # Only ModelForm supports instance parameter
-                    if issubclass(form_class, BaseModelForm):
-                        form_instance = form_class(instance=initial_data)
-                    else:
-                        msg = "instance parameter only supported for ModelForm"
-                        raise TypeError(msg)
-                else:
-                    # It's a dict or other data, use as initial parameter
-                    form_instance = form_class(initial=initial_data)  # type: ignore[assignment]
-                return types.SimpleNamespace(form=form_instance)
-
             page._context_manager.register_context(
                 fp,
                 name,
-                context_func,
+                _form_action_context_callable(opts.form_class),
                 inherit_context=False,
             )
 
@@ -398,7 +435,7 @@ class _FormActionDispatch:
     """Shared POST pipeline and response shaping for backends."""
 
     @staticmethod
-    def dispatch(  # noqa: C901, PLR0912
+    def dispatch(
         backend: FormActionBackend,
         request: HttpRequest,
         action_name: str,
@@ -411,39 +448,61 @@ class _FormActionDispatch:
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
 
-        # Extract URL parameters from hidden form fields (passed from file routing)
-        url_kwargs: dict[str, object] = {}
-        for key, value in request.POST.items():
-            if key.startswith("_url_param_"):
-                param_name = key.replace("_url_param_", "")
-                # Try to convert to int if it looks like a number
-                # POST values are always strings, but mypy sees str | list[object]
-                if isinstance(value, str):
-                    try:
-                        url_kwargs[param_name] = int(value)
-                    except ValueError:
-                        url_kwargs[param_name] = value
-                else:
-                    url_kwargs[param_name] = value
-
+        url_kwargs = _url_kwargs_from_post(request)
         dep_cache: dict[str, Any] = {}
         dep_stack: list[str] = []
+
         if form_class is None:
-            resolved = resolver.resolve_dependencies(
+            return _FormActionDispatch._dispatch_handler_only(
                 handler,
-                request=request,
-                _cache=dep_cache,
-                _stack=dep_stack,
-                **url_kwargs,
-            )
-            return _FormActionDispatch.ensure_http_response(
-                _normalize_handler_response(handler(**resolved)),
-                request=request,
+                request,
+                url_kwargs,
+                dep_cache,
+                dep_stack,
             )
 
-        # Get initial data or instance from form_class.get_initial
-        # This allows ModelForm to receive instance for updating existing objects
-        # form_class is guaranteed to have get_initial from BaseForm/BaseModelForm
+        return _FormActionDispatch._dispatch_with_form(
+            backend,
+            request,
+            action_name,
+            handler,
+            form_class,
+            url_kwargs,
+            dep_cache,
+            dep_stack,
+        )
+
+    @staticmethod
+    def _dispatch_handler_only(
+        handler: Callable[..., Any],
+        request: HttpRequest,
+        url_kwargs: dict[str, object],
+        dep_cache: dict[str, Any],
+        dep_stack: list[str],
+    ) -> HttpResponse:
+        resolved = resolver.resolve_dependencies(
+            handler,
+            request=request,
+            _cache=dep_cache,
+            _stack=dep_stack,
+            **url_kwargs,
+        )
+        return _FormActionDispatch.ensure_http_response(
+            _normalize_handler_response(handler(**resolved)),
+            request=request,
+        )
+
+    @staticmethod
+    def _dispatch_with_form(  # noqa: PLR0913
+        backend: FormActionBackend,
+        request: HttpRequest,
+        action_name: str,
+        handler: Callable[..., Any],
+        form_class: type[django_forms.Form],
+        url_kwargs: dict[str, object],
+        dep_cache: dict[str, Any],
+        dep_stack: list[str],
+    ) -> HttpResponse:
         if not hasattr(form_class, "get_initial"):
             msg = f"Form class {form_class} must have get_initial method"
             raise TypeError(msg)
@@ -455,29 +514,7 @@ class _FormActionDispatch:
             **url_kwargs,
         )
         initial_data = form_class.get_initial(**resolved)
-
-        # Check if initial_data is a model instance (for ModelForm)
-        has_meta = hasattr(initial_data, "_meta")
-        is_model_instance = has_meta and hasattr(initial_data._meta, "model")
-        if is_model_instance:
-            # It's a model instance, use it as instance parameter
-            # Only ModelForm supports instance parameter
-            if issubclass(form_class, BaseModelForm):
-                form = form_class(
-                    request.POST,
-                    request.FILES if hasattr(request, "FILES") else None,
-                    instance=initial_data,
-                )
-            else:
-                msg = "instance parameter only supported for ModelForm"
-                raise TypeError(msg)
-        else:
-            # It's a dict or other data, use as initial parameter
-            form = form_class(
-                request.POST,
-                request.FILES if hasattr(request, "FILES") else None,
-                initial=initial_data,
-            )
+        form = _bind_form_for_post(form_class, request, initial_data)
         if not form.is_valid():
             return _FormActionDispatch.form_response(
                 backend, request, action_name, form, None
@@ -555,21 +592,7 @@ class _FormActionDispatch:
         if not template_str:
             return form.as_p() if form else ""
 
-        # Extract URL parameters from POST data for context functions
-        url_kwargs: dict[str, object] = {}
-        if hasattr(request, "POST"):
-            for key, value in request.POST.items():
-                if key.startswith("_url_param_"):
-                    param_name = key.replace("_url_param_", "")
-                    # Try to convert to int if it looks like a number
-                    # POST values are always strings, but mypy sees str | list[object]
-                    if isinstance(value, str):
-                        try:
-                            url_kwargs[param_name] = int(value)
-                        except ValueError:
-                            url_kwargs[param_name] = value
-                    else:
-                        url_kwargs[param_name] = value
+        url_kwargs = _url_kwargs_from_post(request)
 
         # Build context with form errors
         # Pass URL kwargs to context functions, same as during normal page rendering

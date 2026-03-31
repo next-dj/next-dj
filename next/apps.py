@@ -12,13 +12,13 @@ class NextFrameworkConfig(AppConfig):
 
     def ready(self) -> None:
         """Swap ``StatReloader``, ensure tag builtins, watch pages trees."""
-        # Deferred imports to avoid circular deps (next.urls/next.utils) and
+        # Deferred imports to avoid circular deps (next.urls/next.server) and
         # because autoreload is only needed when wiring the reloader.
         from django.utils import autoreload  # noqa: PLC0415
         from django.utils.autoreload import autoreload_started  # noqa: PLC0415
 
         from next.pages import get_pages_directories_for_watch  # noqa: PLC0415
-        from next.utils import NextStatReloader  # noqa: PLC0415
+        from next.server import NextStatReloader  # noqa: PLC0415
 
         autoreload.StatReloader = NextStatReloader  # type: ignore[misc]
 

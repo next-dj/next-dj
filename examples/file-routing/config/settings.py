@@ -67,22 +67,25 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_ROUTERS": [
+    "DEFAULT_PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "PAGES_DIR": "pages",
             "APP_DIRS": True,
+            "DIRS": [],
+            "COMPONENTS_DIR": "_components",
             "OPTIONS": {
-                "COMPONENTS_DIR": "_components",
+                "context_processors": [],
             },
         },
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "PAGES_DIR": "pages",
             "APP_DIRS": False,
+            "DIRS": [str(BASE_DIR / "root_pages")],
+            "COMPONENTS_DIR": "_components",
             "OPTIONS": {
-                "COMPONENTS_DIR": "_components",
-                "PAGES_DIR": str(BASE_DIR / "root_pages"),
+                "context_processors": [],
             },
         },
     ],

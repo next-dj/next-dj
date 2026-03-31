@@ -25,6 +25,8 @@ from django.utils.module_loading import import_string
 
 from .conf import next_framework_settings
 from .deps import DependencyResolver, RegisteredParameterProvider, resolver
+from .filesystem import classify_dirs_entries, resolve_base_dir
+from .utils import caller_source_path
 
 
 if TYPE_CHECKING:
@@ -129,7 +131,7 @@ def _import_context_processor(
 
 def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
     """Load merged ``context_processors`` from routers and ``TEMPLATES``."""
-    configs = next_framework_settings.DEFAULT_PAGE_ROUTERS
+    configs = next_framework_settings.DEFAULT_PAGE_BACKENDS
     if not isinstance(configs, list):
         configs = []
     from_next = [
@@ -154,9 +156,11 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
 
 def get_pages_directories_for_watch() -> list[Path]:
     """Absolute pages roots to watch for autoreload."""
-    from next.urls import FileRouterBackend, RouterFactory  # noqa: PLC0415
+    # Import here: ``next.urls`` imports this module; importing ``RouterFactory``
+    # from ``next.urls`` at module level in ``pages`` would run before ``page`` exists.
+    from next.urls import RouterFactory  # noqa: PLC0415
 
-    configs = next_framework_settings.DEFAULT_PAGE_ROUTERS
+    configs = next_framework_settings.DEFAULT_PAGE_BACKENDS
     if not isinstance(configs, list):
         return []
     seen: set[Path] = set()
@@ -171,14 +175,15 @@ def get_pages_directories_for_watch() -> list[Path]:
                 "error creating backend for watch dirs from config %s", config
             )
             continue
-        if not isinstance(backend, FileRouterBackend):
+        if not RouterFactory.is_filesystem_discovery_router(backend):
             continue
+        fs_backend: Any = backend
         for p in itertools.chain(
-            (p.resolve() for p in backend._get_root_pages_paths()),
+            (p.resolve() for p in fs_backend._get_root_pages_paths()),
             (
                 a.resolve()
-                for app_name in backend._get_installed_apps()
-                if (a := backend._get_app_pages_path(app_name))
+                for app_name in fs_backend._get_installed_apps()
+                if (a := fs_backend._get_app_pages_path(app_name))
             ),
         ):
             if p not in seen:
@@ -309,8 +314,8 @@ class LayoutTemplateLoader(TemplateLoader):
         return layout_files or None
 
     def _get_additional_layout_files(self) -> list[Path]:
-        """Root-level ``layout.djx`` from router ``PAGES_*`` options."""
-        configs = next_framework_settings.DEFAULT_PAGE_ROUTERS or []
+        """Root-level ``layout.djx`` from each page backend ``DIRS`` path root."""
+        configs = next_framework_settings.DEFAULT_PAGE_BACKENDS or []
         if not isinstance(configs, list):
             configs = []
         candidates = (
@@ -323,17 +328,12 @@ class LayoutTemplateLoader(TemplateLoader):
         return list(dict.fromkeys(candidates))
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
-        """Candidate roots from one router ``OPTIONS`` block."""
-        options = config.get("OPTIONS", {})
-        if "PAGES_DIRS" in options:
-            dirs = options["PAGES_DIRS"]
-            if isinstance(dirs, (list, tuple)):
-                return [p if isinstance(p, Path) else Path(p) for p in dirs]
-            return []
-        if "PAGES_DIR" in options:
-            p = options["PAGES_DIR"]
-            return [p if isinstance(p, Path) else Path(p)]
-        return []
+        """Candidate roots from one router ``DIRS`` entry (path-like only)."""
+        path_roots, _ = classify_dirs_entries(
+            list(config.get("DIRS") or []),
+            resolve_base_dir(),
+        )
+        return list(path_roots)
 
     def _wrap_in_template_block(self, file_path: Path) -> str:
         """Page body wrapped in ``{% block template %}`` when needed."""
@@ -400,7 +400,7 @@ class LayoutManager:
         self._layout_registry.clear()
 
 
-class ContextManager:
+class PageContextRegistry:
     """Registers per-``page.py`` context callables and merges their output."""
 
     def __init__(
@@ -520,7 +520,7 @@ class Page:
         self._template_registry: dict[Path, str] = {}
         self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
         self._resolver: DependencyResolver | None = None
-        self._context_manager = ContextManager(None)
+        self._context_manager = PageContextRegistry(None)
         self._layout_manager = LayoutManager()
         self._template_loaders = [
             PythonTemplateLoader(),
@@ -538,24 +538,11 @@ class Page:
 
     def _get_caller_path(self, back_count: int = 1) -> Path:
         """Filesystem path of the caller outside ``pages.py`` (for ``@context``)."""
-        frame = inspect.currentframe()
-        for _ in range(back_count):
-            if not frame or not frame.f_back:
-                msg = "Could not determine caller file path"
-                raise RuntimeError(msg)
-            frame = frame.f_back
-
-        # skip over this module to find the actual caller
-        for _ in range(10):  # Prevent infinite loops
-            if not frame:
-                break
-            file_path = frame.f_globals.get("__file__")
-            if file_path and not file_path.endswith("pages.py"):
-                return Path(file_path)
-            frame = frame.f_back
-
-        msg = "Could not determine caller file path"
-        raise RuntimeError(msg)
+        return caller_source_path(
+            back_count=back_count,
+            max_walk=10,
+            skip_while_filename_endswith=("pages.py",),
+        )
 
     def context(
         self,

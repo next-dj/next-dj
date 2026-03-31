@@ -194,7 +194,7 @@ Replacing the resolver
 
 By default, context and form resolution use the global ``resolver`` from
 ``next.deps``. To use a custom resolver, create a ``DependencyResolver``
-instance (with optional providers) and pass it to ``ContextManager(resolver=...)``.
+instance (with optional providers) and pass it to ``PageContextRegistry(resolver=...)``.
 The ``Page`` instance uses the global resolver unless wired with a context
 manager that was given a custom resolver.
 

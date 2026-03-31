@@ -36,15 +36,32 @@ File-based URL pattern generation and router backends.
    :undoc-members:
    :show-inheritance:
 
-Utils (next.utils)
-------------------
+Server (next.server)
+--------------------
 
-Development server reloader that watches route/layout/template set changes. See :doc:`/content/guide/autoreload` for how autoreload works.
+``runserver`` integration: :class:`~next.server.NextStatReloader` watches route and ``.djx`` set changes. See :doc:`/content/guide/autoreload`.
 
-.. automodule:: next.utils
+.. automodule:: next.server
    :members:
    :undoc-members:
    :show-inheritance:
+
+Filesystem (next.filesystem)
+----------------------------
+
+Shared ``DIRS`` path classification for page routers and component backends.
+
+.. automodule:: next.filesystem
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Utils (next.utils)
+------------------
+
+Small reusable helpers not tied to the HTTP server or routing (module is intentionally minimal; add shared utilities here as needed).
+
+.. automodule:: next.utils
 
 Checks (next.checks)
 --------------------
@@ -77,9 +94,9 @@ NEXT_FRAMEWORK
 
 Single dictionary in Django settings. Top-level keys (each optional beyond defaults):
 
-* ``DEFAULT_PAGE_ROUTERS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``OPTIONS``, …). See :doc:`/content/guide/file-router`.
+* ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``COMPONENTS_DIR``, ``OPTIONS``, …). See :doc:`/content/guide/file-router`.
 * ``URL_NAME_TEMPLATE`` — format string for URL pattern names (default ``page_{name}``).
-* ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts (``BACKEND``, ``APP_DIRS``, ``OPTIONS``, …). See :doc:`/content/guide/components`.
+* ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts (``BACKEND``, ``DIRS``, ``COMPONENTS_DIR``, …). See :doc:`/content/guide/components`.
 
 .. code-block:: python
 
@@ -88,11 +105,13 @@ Single dictionary in Django settings. Top-level keys (each optional beyond defau
    BASE_DIR = Path(__file__).resolve().parent.parent
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_ROUTERS": [
+       "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "PAGES_DIR": "pages",
                "APP_DIRS": True,
+               "DIRS": [],
+               "COMPONENTS_DIR": "_components",
                "OPTIONS": {
                    "context_processors": [
                        "myapp.context_processors.global_context",
@@ -103,12 +122,8 @@ Single dictionary in Django settings. Top-level keys (each optional beyond defau
        "DEFAULT_COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
-               "APP_DIRS": True,
-               "OPTIONS": {
-                   "COMPONENTS_DIR": "_components",
-                   "PAGES_DIR": "pages",
-                   "COMPONENTS_DIRS": [str(BASE_DIR / "root_components")],
-               },
+               "DIRS": [str(BASE_DIR / "root_components")],
+               "COMPONENTS_DIR": "_components",
            },
        ],
    }
