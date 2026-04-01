@@ -681,10 +681,12 @@ class _LazyUrlPatterns(list):
         return len(self._patterns())
 
     @overload
-    def __getitem__(self, key: SupportsIndex, /) -> URLPattern | URLResolver: ...
+    def __getitem__(self, key: SupportsIndex, /) -> URLPattern | URLResolver:
+        raise NotImplementedError
 
     @overload
-    def __getitem__(self, key: slice, /) -> list[URLPattern | URLResolver]: ...
+    def __getitem__(self, key: slice, /) -> list[URLPattern | URLResolver]:
+        raise NotImplementedError
 
     def __getitem__(
         self, key: SupportsIndex | slice, /

@@ -5,11 +5,11 @@ import pytest
 from django.test import override_settings
 from django.utils.autoreload import StatReloader
 
-import next.server as next_server_mod
 from next.conf import next_framework_settings
 from next.server import (
     NextStatReloader,
     _dedupe_watch_specs,
+    _registered_extra_watch_specs,
     get_framework_filesystem_roots_for_linking,
     iter_all_autoreload_watch_specs,
     iter_default_autoreload_watch_specs,
@@ -100,16 +100,15 @@ class TestServerAutoreloadWatchApi:
         try:
             register_autoreload_watch_spec(root, "**/plugin.py")
             register_autoreload_watch_spec(root, "**/plugin.py")
-            with patch.object(
-                next_server_mod,
-                "iter_default_autoreload_watch_specs",
+            with patch(
+                "next.server.iter_default_autoreload_watch_specs",
                 return_value=[],
             ):
                 specs = iter_all_autoreload_watch_specs()
             matches = [x for x in specs if x == (root, "**/plugin.py")]
             assert len(matches) == 1
         finally:
-            next_server_mod._registered_extra_watch_specs.clear()
+            _registered_extra_watch_specs.clear()
 
     def test_get_framework_filesystem_roots_for_linking_returns_paths(self) -> None:
         """Linking helper returns a sorted list of paths."""

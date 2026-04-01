@@ -30,11 +30,13 @@ logger = logging.getLogger(__name__)
 
 @runtime_checkable
 class FilesystemWatchContributor(Protocol):
-    """Yield (root, glob) pairs for ``StatReloader.watch_dir``."""
+    """Yield (root, glob) pairs for ``StatReloader.watch_dir``.
+
+    Each tuple is a filesystem root and a glob pattern relative to that root.
+    """
 
     def iter_watch_specs(self) -> Iterable[tuple[Path, str]]:
-        """Each item is a root path and a glob pattern relative to that root."""
-        ...
+        """Yield ``(root, glob)`` pairs for ``StatReloader.watch_dir``."""
 
 
 _registered_extra_watch_specs: list[tuple[Path, str]] = []
