@@ -71,6 +71,8 @@ def test_home_lists_posts_and_header(client) -> None:
     assert "Articles" in text
     assert "Blog" in text
     assert "Components demo" in text
+    assert "Root scope badge" in text
+    assert "DIRS root" in text
     assert "Alpha" in text
     assert "writer" in text
     assert "/authors/" in text
@@ -561,6 +563,41 @@ def test_create_post_anonymous_redirects(client) -> None:
             "simple",
             id="draft_banner_from_post_create",
         ),
+        pytest.param(
+            "layout_template",
+            "root_scope_badge",
+            "found",
+            "composite",
+            id="root_scope_badge_from_layout",
+        ),
+        pytest.param(
+            "home_template",
+            "root_scope_badge",
+            "found",
+            "composite",
+            id="root_scope_badge_from_home_same_tree_root",
+        ),
+        pytest.param(
+            "post_create_template",
+            "root_scope_badge",
+            "found",
+            "composite",
+            id="root_scope_badge_visible_from_nested_posts_route",
+        ),
+        pytest.param(
+            "home_template",
+            "dirs_root_note",
+            "found",
+            "simple",
+            id="dirs_root_note_from_dirs_config",
+        ),
+        pytest.param(
+            "post_create_template",
+            "dirs_root_note",
+            "found",
+            "simple",
+            id="dirs_root_note_visible_from_nested_route",
+        ),
     ],
 )
 def test_get_component_resolves_by_template_scope(
@@ -604,8 +641,52 @@ def test_load_component_template_version_stamp(layout_template: Path) -> None:
     assert "next-dj" in source
 
 
+@pytest.mark.django_db()
+@pytest.mark.parametrize(
+    "path",
+    ["/", "/account/login/", "/account/register/"],
+    ids=["home", "login", "register"],
+)
+def test_root_scope_badge_in_layout_on_public_pages(client, path: str) -> None:
+    """Components in pages/_components at tree root are visible from layout.djx."""
+    response = client.get(path)
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert "Root scope badge" in body
+    assert 'data-testid="root-scope-corner"' in body
+    assert 'data-testid="dirs-root-note"' in body
+
+
+def test_dirs_root_note_filesystem_path_is_extra_root(layout_template: Path) -> None:
+    """Components from DEFAULT_COMPONENT_BACKENDS DIRS use the configured root path."""
+    info = get_component("dirs_root_note", layout_template)
+    assert info is not None
+    assert info.is_simple is True
+    resolved_root = (example_root / "root_components").resolve()
+    assert info.scope_root.resolve() == resolved_root
+    assert info.template_path is not None
+    assert info.template_path.resolve() == resolved_root / "dirs_root_note.djx"
+
+
+def test_render_root_scope_badge_from_layout_path(layout_template: Path) -> None:
+    """root_scope_badge resolves for a template file in the pages root directory."""
+    info = get_component("root_scope_badge", layout_template)
+    assert info is not None
+    html = render_component(info, {})
+    assert "Root scope badge" in html
+
+
 def test_example_includes_expected_component_artifacts() -> None:
     """Stable disk layout for documented demos (simple, composite, branch scope)."""
+    assert (
+        example_root
+        / "myapp"
+        / "pages"
+        / "_components"
+        / "root_scope_badge"
+        / "component.djx"
+    ).exists()
+    assert (example_root / "root_components" / "dirs_root_note.djx").exists()
     assert (
         example_root / "myapp" / "pages" / "_components" / "post_card" / "component.djx"
     ).exists()

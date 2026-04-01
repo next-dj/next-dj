@@ -8,7 +8,7 @@ Components let you reuse template fragments (cards, headers, profiles) with prop
 Component folder and file routing
 ---------------------------------
 
-The directory name used for components (e.g. ``_components``) is configured in the **file router** and in the **component backends**. That directory does **not** create URL segments: the file router skips it when scanning for ``page.py`` and ``template.djx``. Only this configured name is skipped (not every directory that starts with an underscore). See :doc:`file-router` for the routing side.
+The directory name used for components (e.g. ``_components``) is set on **``DEFAULT_COMPONENT_BACKENDS``** as ``COMPONENTS_DIR``. The file router reads that same string when building URL scans so the folder is skipped and does **not** become a route segment. You may set ``COMPONENTS_DIR`` on a single ``DEFAULT_PAGE_BACKENDS`` entry only when that router must use a different folder name than the first component backend. Only this configured name is skipped (not every directory that starts with an underscore). See :doc:`file-router` for the routing side.
 
 Backends and settings
 ---------------------
@@ -16,7 +16,7 @@ Backends and settings
 Components are provided by backends, similar to the page router. In Django settings, use the top-level dict ``NEXT_FRAMEWORK`` with the key **``DEFAULT_COMPONENT_BACKENDS``**: a list of backend configs. Each item is a dict that is passed unchanged into the backend class constructor:
 
 - ``BACKEND`` (str) — dotted import path of the backend class (default for the built-in file backend is ``"next.components.FileComponentsBackend"``).
-- ``COMPONENTS_DIR`` (str, default ``"_components"`` in framework defaults) — folder name used when the shared page tree walk in ``next.urls`` reaches a components directory and when resolving skips on the file router. Match the value in ``DEFAULT_PAGE_BACKENDS`` so URLs do not treat that folder as a route segment.
+- ``COMPONENTS_DIR`` (str, default ``"_components"`` in framework defaults) — folder name under each page tree where components are discovered and the name the file router skips during URL discovery. The router copies this value from the first component backend dict unless you override ``COMPONENTS_DIR`` on that page router entry.
 - ``DIRS`` (list) — extra filesystem directories registered as **global** component roots (visible from every template). Entries are split into real paths and segment names the same way as page ``DIRS``; only existing directory paths are used. App and root page trees do not need to be listed here because the same walk that builds URL patterns registers component folders there.
 - You may list **several backends** in ``DEFAULT_COMPONENT_BACKENDS``. Earlier entries win when the same component name appears twice.
 
@@ -65,6 +65,45 @@ Full example with every key shown (values are illustrative. Remove or adjust wha
    }
 
 Custom backends are plain classes referenced by dotted path in ``BACKEND``. Each backend receives the **full** config dict for that list entry and reads what it needs.
+
+Several roots in ``DEFAULT_PAGE_BACKENDS`` ``DIRS``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You may list more than one filesystem root under ``NEXT_FRAMEWORK`` ``DEFAULT_PAGE_BACKENDS`` ``DIRS``. Each entry that resolves to an existing directory is a separate page tree and is walked the same way as a single root setup. Set ``COMPONENTS_DIR`` once under ``DEFAULT_COMPONENT_BACKENDS`` unless a page backend entry needs its own override. The file router then skips that folder name when scanning routes.
+
+Components that live in ``<root>/<COMPONENTS_DIR>/`` at the top of a tree use the empty route scope for name resolution. That level is one shared namespace across all those roots. You must not reuse the same component name in the root component folder of two different roots. Running ``python manage.py check`` surfaces that situation as ``next.E034`` and lists the paths that collide.
+
+Using the same component name at the empty route scope and again under a nested route scope within one tree is also invalid. ``manage.py check`` reports that case as ``next.E020``. Development autoreload still registers a separate ``component.py`` glob for each root together with ``COMPONENTS_DIR`` so file changes continue to restart the runserver from every tree.
+
+Example with two roots and a short components folder name:
+
+.. code-block:: python
+
+   from pathlib import Path
+
+   BASE_DIR = Path(__file__).resolve().parent.parent
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_PAGE_BACKENDS": [
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "PAGES_DIR": "pages",
+               "APP_DIRS": False,
+               "DIRS": [
+                   str(BASE_DIR / "custom"),
+                   str(BASE_DIR / "pages"),
+               ],
+               "OPTIONS": {},
+           },
+       ],
+       "DEFAULT_COMPONENT_BACKENDS": [
+           {
+               "BACKEND": "next.components.FileComponentsBackend",
+               "DIRS": [],
+               "COMPONENTS_DIR": "_",
+           },
+       ],
+   }
 
 Types of components
 -------------------
@@ -236,7 +275,8 @@ For tests, tooling, or custom code you can call the same stack the template tags
 Checks
 ------
 
-- **Duplicate component names** — Within the same scope, no two components may share the same name. ``manage.py check`` reports an error (e.g. ``next.E020``) with the conflicting paths.
+- **Duplicate component names** — Within one page tree the same logical name cannot be registered twice at overlapping route scopes. Running ``manage.py check`` emits ``next.E020`` with the paths involved.
+- **Duplicate names across page roots** — The same name cannot appear in the root ``COMPONENTS_DIR`` of two different ``DIRS`` roots. ``manage.py check`` emits ``next.E034`` with each conflicting tree and path.
 - **No page context in component.py** — ``component.py`` must not use context from ``next.pages``. Use component context from ``next.components`` only. Reported by check (e.g. ``next.E021``).
 
 .. _components-example-project:

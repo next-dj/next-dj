@@ -6,7 +6,13 @@ import pytest
 from django.test import override_settings
 from pytest_lazy_fixtures import lf
 
+from next.checks import (
+    check_next_components_configuration,
+    check_next_framework_unknown_top_level_keys,
+    check_next_pages_configuration,
+)
 from next.conf import NextFrameworkSettings, next_framework_settings, perform_import
+from next.urls import RouterBackend, RouterFactory
 
 
 class TestLazyFixtureWiring:
@@ -179,3 +185,91 @@ class TestFlatNextFrameworkBehavior:
             assert next_framework_settings._coverage_probe == 1
         finally:
             del next_framework_settings._coverage_probe
+
+
+class TestNextFrameworkChecksUnknownKeys:
+    """System checks reject keys that are not part of the supported schema."""
+
+    def test_next_framework_top_level_unknown_key(self) -> None:
+        """NEXT_FRAMEWORK must not contain keys outside framework defaults."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": True,
+                        "DIRS": [],
+                        "OPTIONS": {},
+                    },
+                ],
+                "NOT_A_FRAMEWORK_KEY": True,
+            },
+        ):
+            next_framework_settings.reload()
+            errors = check_next_framework_unknown_top_level_keys()
+        assert any(e.id == "next.E035" for e in errors)
+
+    def test_file_router_entry_unknown_key(self) -> None:
+        """FileRouterBackend dicts only allow documented top-level keys."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": True,
+                        "DIRS": [],
+                        "OPTIONS": {},
+                        "made_up_option": True,
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            errors = check_next_pages_configuration()
+        assert any(e.id == "next.E035" for e in errors)
+
+    def test_component_backend_unknown_key(self) -> None:
+        """Component backend dicts only allow BACKEND, DIRS, and COMPONENTS_DIR."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                        "extra_key": 1,
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            errors = check_next_components_configuration()
+        assert any(e.id == "next.E035" for e in errors)
+
+    def test_non_file_router_entry_only_backend_key(self) -> None:
+        """Non-file router entries must not carry extra configuration keys."""
+        backend_path = "conf_test_checks.MinimalRouter"
+
+        class MinimalRouter(RouterBackend):
+            def generate_urls(self) -> list:
+                return []
+
+        RouterFactory.register_backend(backend_path, MinimalRouter)
+        try:
+            with override_settings(
+                NEXT_FRAMEWORK={
+                    "DEFAULT_PAGE_BACKENDS": [
+                        {
+                            "BACKEND": backend_path,
+                            "PAGES_DIR": "pages",
+                        },
+                    ],
+                },
+            ):
+                next_framework_settings.reload()
+                errors = check_next_pages_configuration()
+        finally:
+            RouterFactory._backends.pop(backend_path, None)
+        assert any(e.id == "next.E035" for e in errors)

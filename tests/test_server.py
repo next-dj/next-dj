@@ -146,6 +146,46 @@ class TestServerAutoreloadWatchApi:
         assert all(".djx" not in g for _, g in specs)
         assert any(g == "**/component.py" and p == comp_root for p, g in specs)
 
+    def test_iter_default_watches_component_py_under_each_page_root(
+        self, tmp_path: Path
+    ) -> None:
+        """Each directory root in page DIRS gets a component.py glob for COMPONENTS_DIR."""
+        custom = tmp_path / "custom"
+        pages_tree = tmp_path / "pages_tree"
+        custom.mkdir()
+        pages_tree.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [
+                            str(custom.resolve()),
+                            str(pages_tree.resolve()),
+                        ],
+                        "COMPONENTS_DIR": "_",
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            specs = iter_default_autoreload_watch_specs()
+        next_framework_settings.reload()
+        expected_glob = "**/_/**/component.py"
+        for root in (custom.resolve(), pages_tree.resolve()):
+            matches = [(p, g) for p, g in specs if p == root and g == expected_glob]
+            assert len(matches) == 1
+
 
 class TestDjxNotInStatReloaderGlobMatches:
     """``.djx`` files are not among paths matched by next's ``watch_dir`` globs."""

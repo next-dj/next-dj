@@ -14,6 +14,7 @@ from django.test import RequestFactory, override_settings
 import next.components as next_components_mod
 from next.checks import (
     check_component_py_no_pages_context,
+    check_cross_root_component_name_conflicts,
     check_duplicate_component_names,
 )
 from next.components import (
@@ -485,6 +486,61 @@ class TestChecks:
         with patch_checks_components_manager(fake_backend):
             errors = check_duplicate_component_names()
         assert any(e.id == "next.E020" for e in errors)
+
+    def test_check_duplicate_component_names_root_and_nested_scope(
+        self, tmp_path: Path
+    ) -> None:
+        """Same name at root route scope and under a nested route is rejected."""
+        root = tmp_path.resolve()
+        (tmp_path / "a.djx").write_text("a")
+        (tmp_path / "b.djx").write_text("b")
+        fake_backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
+        fake_backend._registry.register(
+            ComponentInfo("card", root, "", tmp_path / "a.djx", None, True)
+        )
+        fake_backend._registry.register(
+            ComponentInfo("card", root, "blog", tmp_path / "b.djx", None, True)
+        )
+        fake_backend._loaded = True
+        with patch_checks_components_manager(fake_backend):
+            errors = check_duplicate_component_names()
+        assert any(e.id == "next.E020" for e in errors)
+
+    def test_check_cross_root_component_name_conflicts_empty_single_tree(
+        self, tmp_path: Path
+    ) -> None:
+        """One page tree can reuse a name only under different route scopes."""
+        root = tmp_path.resolve()
+        (tmp_path / "a.djx").write_text("a")
+        fake_backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
+        fake_backend._registry.register(
+            ComponentInfo("card", root, "", tmp_path / "a.djx", None, True)
+        )
+        fake_backend._loaded = True
+        with patch_checks_components_manager(fake_backend):
+            assert check_cross_root_component_name_conflicts() == []
+
+    def test_check_cross_root_component_name_conflicts_reports(
+        self, tmp_path: Path
+    ) -> None:
+        """Same root-level name on two page trees is rejected."""
+        custom = (tmp_path / "custom").resolve()
+        pages = (tmp_path / "pages").resolve()
+        custom.mkdir()
+        pages.mkdir()
+        (custom / "c.djx").write_text("x")
+        (pages / "c.djx").write_text("y")
+        fake_backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
+        fake_backend._registry.register(
+            ComponentInfo("hero", custom, "", custom / "c.djx", None, True)
+        )
+        fake_backend._registry.register(
+            ComponentInfo("hero", pages, "", pages / "c.djx", None, True)
+        )
+        fake_backend._loaded = True
+        with patch_checks_components_manager(fake_backend):
+            errors = check_cross_root_component_name_conflicts()
+        assert any(e.id == "next.E034" for e in errors)
 
     def test_check_component_py_no_pages_context_reports_import(
         self, tmp_path: Path
@@ -1101,6 +1157,8 @@ class TestComponentVisibilityResolver:
         r1 = res.resolve_visible(tmpl)
         r2 = res.resolve_visible(tmpl)
         assert r1 == r2
+        assert "c" in r1
+        assert r1["c"].name == "c"
         res.clear_cache()
         assert res._path_cache == {}
 
@@ -1164,6 +1222,19 @@ class TestComponentVisibilityResolver:
             )
             is None
         )
+
+    def test_compute_relative_parts_template_at_scope_root(
+        self, tmp_path: Path
+    ) -> None:
+        """Template directory equals scope_root yields a single empty route prefix."""
+        reg = ComponentRegistry()
+        res = ComponentVisibilityResolver(reg)
+        pages = tmp_path / "pages"
+        pages.mkdir()
+        tmpl = pages / "template.djx"
+        tmpl.write_text("x")
+        parts = res._compute_relative_parts(tmpl.resolve(), pages.resolve())
+        assert parts == [""]
 
 
 class TestComponentRenderers:

@@ -59,7 +59,6 @@ if not settings.configured:
                     "PAGES_DIR": "pages",
                     "APP_DIRS": False,
                     "DIRS": [str(project_root / "tests" / "pages")],
-                    "COMPONENTS_DIR": "_components",
                     "OPTIONS": {},
                 },
             ],

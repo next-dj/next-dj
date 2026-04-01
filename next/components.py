@@ -498,6 +498,8 @@ class ComponentVisibilityResolver:
             template_dir = template_path.parent
             rel = template_dir.relative_to(scope_root)
             parts = rel.parts
+            if not parts:
+                return [""]
             return ["/".join(parts[:i]) if i else "" for i in range(len(parts), -1, -1)]
         except ValueError:
             return None

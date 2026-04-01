@@ -6,12 +6,13 @@ This example demonstrates next-dj **components** in a small **blog** app (Englis
 
 | Technique | Where |
 |-----------|--------|
-| Simple `.djx` | `root_components/footer.djx` |
+| Simple `.djx` | `root_components/footer.djx`, `dirs_root_note.djx` (``DIRS`` root, rendered from ``layout.djx`` so template path context exists) |
 | Composite (`component.djx` only) | `post_card/`, `author_chip/` under `pages/_components/` |
 | `@context("key")` + unkeyed `@context` (dict merge) | `root_components/header/component.py` |
 | `render()` in `component.py` (Python HTML) | `root_components/server_time/` (nested in header) |
 | Inline `component = "..."` (no `component.djx`) | `root_components/version_stamp/component.py` (in footer) |
 | Branch scope (`pages/.../_components/` only under that subtree) | `pages/posts/_components/draft_banner.djx` on create/edit |
+| Root `layout.djx` as call site | `root_scope_badge` (`pages/_components/`) and `dirs_root_note` (`root_components/` via ``DIRS``). Use the layout for nested `{% component %}` so ``current_template_path`` is set. |
 | Slots + nested `{% component %}` | Home `template.djx` (`author_chip` inside `post_card`) |
 
 ## What This Example Demonstrates
@@ -20,7 +21,7 @@ This example demonstrates next-dj **components** in a small **blog** app (Englis
 - **Composite components** — folder with `component.djx` and/or `component.py`. `component.py` can register **component context** via `from next.components import context` and `@context` / `@context("key")` (similar to `next.pages.context`).
 - **Slots** — `{% component "post_card" %} ... {% slot "title" %} ... {% endslot %} ...` because `{% component %}` props are string literals only. Slots carry dynamic values from loops.
 - **author_chip** — small composite: default circular avatar (first letter of login) via `{% set_slot "avatar" %}`, plus a `login` slot for the username. Used inside `post_card` meta and on the post detail header.
-- **Root components** (`root_components/`) visible from every template. **`pages/_components/`** is shared across all templates under `pages/`. **`pages/posts/_components/`** is only for templates under the `posts/` branch (see `draft_banner`).
+- **Root components** (`root_components/`) are wired through ``NEXT_FRAMEWORK["DEFAULT_COMPONENT_BACKENDS"][0]["DIRS"]``. Simple **dirs_root_note** only exists to show that this tree is not under ``myapp/pages/``. Other files there (header, footer, version_stamp, server_time) are the real demo. Everything in that folder is visible from every template. **`pages/_components/`** is shared across all templates under `pages/`. **`root_scope_badge`** lives there and renders from **`layout.djx`** in the same directory as `page.py`, which matches the “root template + root `_components` subtree” case. **`pages/posts/_components/`** is only for templates under the `posts/` branch (see `draft_banner`).
 - **Layout** — `layout.djx` wraps pages. Global **header** is a composite with `@context("user")`, merged branding keys, and a nested **server_time** component using `render()`.
 - **Forms** — `@forms.action()` for register, login, create post, update post. ModelForm + `get_initial()` for edit.
 - **Auth** — login/register pages, `LogoutView` at `/account/logout/`, middleware requiring login for `/posts/create/` and `/posts/<id>/edit/`.
@@ -43,6 +44,7 @@ components/
 │       ├── page.py              # Home: @context page_obj + Paginator
 │       ├── template.djx         # Article list + post_card slots + pagination
 │       ├── _components/
+│       │   ├── root_scope_badge/  # Composite: layout.djx uses this from pages root (corner case)
 │       │   ├── post_card/       # Composite: title, meta (author + date), actions
 │       │   └── author_chip/     # Avatar (initial) + login slot
 │       ├── account/login/       # LoginForm + @forms.action("login")
@@ -52,10 +54,11 @@ components/
 │           │   └── draft_banner.djx
 │           ├── create/
 │           └── [int:id]/details/ | edit/
-├── root_components/
+├── root_components/             # Registered via NEXT_FRAMEWORK DEFAULT_COMPONENT_BACKENDS DIRS
 │   ├── header/                  # Composite: context + nested server_time
 │   ├── server_time/             # render() only (no component.djx)
 │   ├── version_stamp/           # component = "..." string only
+│   ├── dirs_root_note.djx       # Simple: proves DIRS root (not under myapp/pages/)
 │   └── footer.djx
 ├── pytest.ini
 ├── manage.py

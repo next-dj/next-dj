@@ -191,7 +191,7 @@ See :doc:`../guide/context`.
 
 Flat top-level keys (see :mod:`next.conf`):
 
-* ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``COMPONENTS_DIR``, ``OPTIONS``, …).
+* ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, …). Optional ``COMPONENTS_DIR`` overrides the folder name taken from ``DEFAULT_COMPONENT_BACKENDS``.
 * ``URL_NAME_TEMPLATE`` — Python format string for URL names (default ``page_{name}``).
 * ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts.
 

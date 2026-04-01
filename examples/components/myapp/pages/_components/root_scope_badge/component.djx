@@ -1,0 +1,2 @@
+<span class="badge text-bg-info">Root scope badge</span>
+<span class="text-muted ms-1">Layout sees pages/_components from the tree root.</span>

@@ -24,7 +24,7 @@ from django.core.checks import (
 from django.utils.module_loading import import_string
 
 from .components import ComponentsManager, FileComponentsBackend
-from .conf import next_framework_settings
+from .conf import NextFrameworkSettings, next_framework_settings
 from .pages import _load_python_module
 from .urls import (
     FileRouterBackend,
@@ -90,6 +90,48 @@ def _validate_config_structure(
 FILE_ROUTER_BACKEND = "next.urls.FileRouterBackend"
 
 _PAGE_BACKEND_SETTINGS_KEY = "DEFAULT_PAGE_BACKENDS"
+
+_FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset(
+    {
+        "BACKEND",
+        "APP_DIRS",
+        "COMPONENTS_DIR",
+        "DIRS",
+        "OPTIONS",
+        "PAGES_DIR",
+    }
+)
+
+_NON_FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND"})
+
+_FILE_COMPONENT_BACKEND_CONFIG_KEYS = frozenset(
+    {
+        "BACKEND",
+        "COMPONENTS_DIR",
+        "DIRS",
+    }
+)
+
+
+def _errors_for_unknown_keys(
+    config: dict[str, Any],
+    *,
+    allowed: frozenset[str],
+    prefix: str,
+) -> list[CheckMessage]:
+    """Return errors when ``config`` contains keys outside ``allowed``."""
+    unknown = sorted(k for k in config if k not in allowed)
+    if not unknown:
+        return []
+    unknown_fmt = ", ".join(repr(k) for k in unknown)
+    allowed_fmt = ", ".join(sorted(allowed))
+    return [
+        Error(
+            f"{prefix} has unknown keys {unknown_fmt}. Allowed keys are {allowed_fmt}.",
+            obj=settings,
+            id="next.E035",
+        ),
+    ]
 
 
 def _router_backend_path_is_valid(backend_path: str) -> bool:
@@ -215,7 +257,30 @@ def _validate_file_router_backend_fields(  # noqa: C901, PLR0912
             )
             break
 
+    errors.extend(
+        _errors_for_unknown_keys(
+            config,
+            allowed=_FILE_ROUTER_PAGE_CONFIG_KEYS,
+            prefix=rf_routers,
+        ),
+    )
     return errors
+
+
+@register(Tags.compatibility)
+def check_next_framework_unknown_top_level_keys(
+    *_args, **_kwargs
+) -> list[CheckMessage]:
+    """Reject keys under ``NEXT_FRAMEWORK`` that are not defined in defaults."""
+    raw = getattr(settings, "NEXT_FRAMEWORK", None)
+    if raw is None or not isinstance(raw, dict):
+        return []
+    allowed = frozenset(NextFrameworkSettings.DEFAULTS.keys())
+    return _errors_for_unknown_keys(
+        raw,
+        allowed=allowed,
+        prefix="NEXT_FRAMEWORK",
+    )
 
 
 def _validate_config_fields(config: dict, index: int) -> list[CheckMessage]:
@@ -235,6 +300,19 @@ def _validate_config_fields(config: dict, index: int) -> list[CheckMessage]:
 
     if backend == FILE_ROUTER_BACKEND:
         errors.extend(_validate_file_router_backend_fields(config, index))
+    elif (
+        backend is not None
+        and isinstance(backend, str)
+        and _router_backend_path_is_valid(backend)
+    ):
+        rf = f"NEXT_FRAMEWORK['{_PAGE_BACKEND_SETTINGS_KEY}'][{index}]"
+        errors.extend(
+            _errors_for_unknown_keys(
+                config,
+                allowed=_NON_FILE_ROUTER_PAGE_CONFIG_KEYS,
+                prefix=rf,
+            ),
+        )
 
     return errors
 
@@ -360,6 +438,13 @@ def _validate_single_component_backend(
                 id="next.E027",
             ),
         )
+    errors.extend(
+        _errors_for_unknown_keys(
+            config,
+            allowed=_FILE_COMPONENT_BACKEND_CONFIG_KEYS,
+            prefix=prefix,
+        ),
+    )
     return errors
 
 
@@ -1203,6 +1288,56 @@ def check_duplicate_component_names(*_args, **_kwargs) -> list[CheckMessage]:
                         id="next.E020",
                     ),
                 )
+    return errors
+
+
+@register(Tags.compatibility)
+def check_cross_root_component_name_conflicts(*_args, **_kwargs) -> list[CheckMessage]:
+    """Reject one component name in the root route scope on more than one page tree.
+
+    Several directory roots may appear under DEFAULT_PAGE_BACKENDS DIRS. Components
+    registered with an empty route scope under COMPONENTS_DIR at the root of each
+    tree share one namespace. The same logical name must not appear in two trees
+    at that level.
+    """
+    errors: list[CheckMessage] = []
+    configs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+    if not isinstance(configs, list) or not configs:
+        return errors
+    manager = ComponentsManager()
+    manager._reload_config()
+    for backend in manager._backends:
+        if not isinstance(backend, FileComponentsBackend):
+            continue
+        backend._ensure_loaded()
+        by_name: dict[str, dict[Path, str]] = {}
+        for info in backend._registry:
+            if (info.scope_relative or "").strip():
+                continue
+            root = info.scope_root.resolve()
+            path_str = str(info.template_path or info.module_path or "")
+            roots_for_name = by_name.setdefault(info.name, {})
+            roots_for_name.setdefault(root, path_str)
+        for name, roots_map in sorted(by_name.items()):
+            if len(roots_map) <= 1:
+                continue
+            details = ". ".join(
+                f"{root}: {path_str or '?'}"
+                for root, path_str in sorted(
+                    roots_map.items(),
+                    key=lambda item: str(item[0]),
+                )
+            )
+            errors.append(
+                Error(
+                    f'Component name "{name}" uses the shared root namespace on more '
+                    f"than one page tree. Each distinct directory root in "
+                    f"NEXT_FRAMEWORK DEFAULT_PAGE_BACKENDS DIRS must expose unique "
+                    f"names at the root route scope. Locations: {details}.",
+                    obj=settings,
+                    id="next.E034",
+                ),
+            )
     return errors
 
 

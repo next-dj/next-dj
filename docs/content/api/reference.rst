@@ -94,7 +94,7 @@ NEXT_FRAMEWORK
 
 Single dictionary in Django settings. Top-level keys (each optional beyond defaults):
 
-* ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``COMPONENTS_DIR``, ``OPTIONS``, …). See :doc:`/content/guide/file-router`.
+* ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, …). Optional ``COMPONENTS_DIR`` overrides the skip folder name from the first ``DEFAULT_COMPONENT_BACKENDS`` entry. See :doc:`/content/guide/file-router`.
 * ``URL_NAME_TEMPLATE`` — format string for URL pattern names (default ``page_{name}``).
 * ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts (``BACKEND``, ``DIRS``, ``COMPONENTS_DIR``, …). See :doc:`/content/guide/components`.
 
@@ -111,7 +111,6 @@ Single dictionary in Django settings. Top-level keys (each optional beyond defau
                "PAGES_DIR": "pages",
                "APP_DIRS": True,
                "DIRS": [],
-               "COMPONENTS_DIR": "_components",
                "OPTIONS": {
                    "context_processors": [
                        "myapp.context_processors.global_context",
