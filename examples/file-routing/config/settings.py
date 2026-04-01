@@ -74,7 +74,6 @@ NEXT_FRAMEWORK = {
             "APP_DIRS": True,
             # App trees under each installed app's pages/, plus extra filesystem roots
             "DIRS": [str(BASE_DIR / "root_pages")],
-            "COMPONENTS_DIR": "_components",
             "OPTIONS": {
                 "context_processors": [],
             },

@@ -25,10 +25,10 @@ Implementation
   In :file:`next/apps.py`, ``autoreload.StatReloader`` is replaced with :class:`next.server.NextStatReloader`. This happens at app load, before the reloader instance is created, so ``runserver`` uses the next.dj reloader.
 
 * **Registration of watch dirs**  
-  The signal :py:data:`django.utils.autoreload.autoreload_started` is connected to a handler that calls :func:`next.server.iter_all_autoreload_watch_specs` and, for each ``(path, glob)`` pair, ``sender.watch_dir(path, glob)``. Built-in specs cover pages and filesystem components; third-party code can add pairs with :func:`next.server.register_autoreload_watch_spec`.
+  The signal :py:data:`django.utils.autoreload.autoreload_started` is connected to a handler that calls :func:`next.server.iter_all_autoreload_watch_specs` and, for each ``(path, glob)`` pair, ``sender.watch_dir(path, glob)``. Built-in specs cover pages and filesystem components. Third-party code can add pairs with :func:`next.server.register_autoreload_watch_spec`.
 
 * **NextStatReloader**  
-  In :file:`next/server.py`, :class:`NextStatReloader` subclasses :class:`django.utils.autoreload.StatReloader`. Its :meth:`~NextStatReloader.tick` generator recomputes the route set and compares it to the previous tick (calling ``notify_file_changed`` when routes are added or removed), then delegates to the parent's tick (mtime loop and sleep). That route set includes virtual pages backed by ``template.djx``, so **creating or deleting** a file that adds or removes such a route still restarts the process so URLconf can be rebuilt. Pure **edits** to an existing ``.djx`` (or new ``layout.djx`` / component ``.djx`` that do not change discovered routes) do not go through this comparison; they are picked up via mtime when templates render.
+  In :file:`next/server.py`, :class:`NextStatReloader` subclasses :class:`django.utils.autoreload.StatReloader`. Its :meth:`~NextStatReloader.tick` generator recomputes the route set and compares it to the previous tick (calling ``notify_file_changed`` when routes are added or removed), then delegates to the parent's tick (mtime loop and sleep). That route set includes virtual pages backed by ``template.djx``. **Creating or deleting** a file that adds or removes such a route still restarts the process so URLconf can be rebuilt. Pure **edits** to an existing ``.djx`` (or new ``layout.djx`` / component ``.djx`` that do not change discovered routes) do not go through this comparison. They are picked up via mtime when templates render.
 
 * **Linking / tooling**  
   :func:`next.server.get_framework_filesystem_roots_for_linking` returns sorted pages roots plus component ``DIRS`` roots for editors or other tools that need a single list of canonical paths.
@@ -38,7 +38,7 @@ Limitations
 
 * Only applies when using Django's development server (e.g. ``runserver``). Production servers (gunicorn, uWSGI, etc.) do not use this reloader.
 * Reload is process restart. There is no in-process hot reload of URLconf.
-* Saving **changes inside** an existing ``.djx`` does not use the file watcher and does not restart the process; the next request reloads that template when its mtime changes (see :doc:`pages-and-templates`).
+* Saving **changes inside** an existing ``.djx`` does not use the file watcher and does not restart the process. The next request reloads that template when its mtime changes (see :doc:`pages-and-templates`).
 * Adding or removing a **virtual route** (for example a new or deleted standalone ``template.djx`` that the file router exposes as a URL) **does** restart the server, because the route set changes and URL patterns must be rebuilt—not because ``.djx`` is glob-watched, but because of the route comparison above.
 
 Next

@@ -230,6 +230,26 @@ class TestNextFrameworkChecksUnknownKeys:
             errors = check_next_pages_configuration()
         assert any(e.id == "next.E035" for e in errors)
 
+    def test_file_router_rejects_components_dir_key(self) -> None:
+        """``COMPONENTS_DIR`` belongs on component backends, not page router dicts."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": True,
+                        "DIRS": [],
+                        "OPTIONS": {},
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            errors = check_next_pages_configuration()
+        assert any(e.id == "next.E035" for e in errors)
+
     def test_component_backend_unknown_key(self) -> None:
         """Component backend dicts only allow BACKEND, DIRS, and COMPONENTS_DIR."""
         with override_settings(

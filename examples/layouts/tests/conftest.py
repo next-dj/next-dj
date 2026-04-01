@@ -56,7 +56,6 @@ if not settings.configured:
                     "DIRS": [
                         str(project_root / "examples" / "layouts" / "root_pages"),
                     ],
-                    "COMPONENTS_DIR": "_components",
                     "OPTIONS": {
                         "context_processors": [
                             "django.template.context_processors.request",

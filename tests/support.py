@@ -194,10 +194,8 @@ def patch_checks_components_manager(
     mock_ns = next_framework_settings_for_checks(
         backends=[
             {
-                "BACKEND": "x",
+                "BACKEND": "next.components.FileComponentsBackend",
                 "DIRS": [],
-                "APP_DIRS": True,
-                "PAGES_DIR": "pages",
                 "COMPONENTS_DIR": "_components",
             },
         ],

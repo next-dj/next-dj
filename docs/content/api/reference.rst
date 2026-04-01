@@ -39,19 +39,9 @@ File-based URL pattern generation and router backends.
 Server (next.server)
 --------------------
 
-``runserver`` integration: :class:`~next.server.NextStatReloader` watches the route set and Python entrypoints; ``.djx`` files are not watched. See :doc:`/content/guide/autoreload`.
+``runserver`` integration: :class:`~next.server.NextStatReloader` watches the route set and Python entrypoints. ``.djx`` files are not watched. See :doc:`/content/guide/autoreload`.
 
 .. automodule:: next.server
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Filesystem (next.filesystem)
-----------------------------
-
-Shared ``DIRS`` path classification for page routers and component backends.
-
-.. automodule:: next.filesystem
    :members:
    :undoc-members:
    :show-inheritance:
@@ -59,9 +49,12 @@ Shared ``DIRS`` path classification for page routers and component backends.
 Utils (next.utils)
 ------------------
 
-Small reusable helpers not tied to the HTTP server or routing (module is intentionally minimal; add shared utilities here as needed).
+Small reusable helpers not tied to the HTTP server or routing. The module is intentionally minimal. Add shared utilities here as needed.
 
 .. automodule:: next.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
 
 Checks (next.checks)
 --------------------
@@ -94,7 +87,7 @@ NEXT_FRAMEWORK
 
 Single dictionary in Django settings. Top-level keys (each optional beyond defaults):
 
-* ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, …). Optional ``COMPONENTS_DIR`` overrides the skip folder name from the first ``DEFAULT_COMPONENT_BACKENDS`` entry. See :doc:`/content/guide/file-router`.
+* ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, …). The file router’s skip-folder name always comes from ``DEFAULT_COMPONENT_BACKENDS`` (``COMPONENTS_DIR`` on the first entry). See :doc:`/content/guide/file-router`.
 * ``URL_NAME_TEMPLATE`` — format string for URL pattern names (default ``page_{name}``).
 * ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts (``BACKEND``, ``DIRS``, ``COMPONENTS_DIR``, …). See :doc:`/content/guide/components`.
 

@@ -54,7 +54,6 @@ if not settings.configured:
                     "PAGES_DIR": "pages",
                     "APP_DIRS": True,
                     "DIRS": [],
-                    "COMPONENTS_DIR": "_components",
                     "OPTIONS": {
                         "context_processors": [],
                     },

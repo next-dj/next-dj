@@ -165,7 +165,6 @@ class TestServerAutoreloadWatchApi:
                             str(custom.resolve()),
                             str(pages_tree.resolve()),
                         ],
-                        "COMPONENTS_DIR": "_",
                         "OPTIONS": {},
                     },
                 ],
@@ -193,7 +192,7 @@ class TestDjxNotInStatReloaderGlobMatches:
     def test_glob_matched_paths_exclude_djx_alongside_page_and_components(
         self, tmp_path: Path
     ) -> None:
-        """Mimic production globs under a pages root; no ``.djx`` is glob-matched."""
+        """Mimic production globs under a pages root. No ``.djx`` is glob-matched."""
         pages = tmp_path / "pages"
         home = pages / "home"
         home.mkdir(parents=True)
@@ -235,8 +234,8 @@ class TestDjxNotInStatReloaderGlobMatches:
 
         monkeypatch.setattr(reloader, "notify_file_changed", record_notify)
 
-        # Restrict the parent StatReloader snapshot to ``page.py`` only; real runserver
-        # also skips ``.djx`` because it is not matched by next's ``watch_dir`` globs.
+        # Restrict the parent StatReloader snapshot to ``page.py`` only.
+        # Real runserver also skips ``.djx`` because it is not matched by next's ``watch_dir`` globs.
         with (
             patch("next.server.get_pages_directories_for_watch", return_value=[]),
             patch("next.server.scan_pages_tree", return_value=iter([])),

@@ -21,8 +21,7 @@ from django.utils.functional import SimpleLazyObject
 
 from .conf import import_class_cached, next_framework_settings
 from .deps import DependencyCache, resolver
-from .filesystem import classify_dirs_entries, resolve_base_dir
-from .utils import caller_source_path
+from .utils import caller_source_path, classify_dirs_entries, resolve_base_dir
 
 
 if TYPE_CHECKING:

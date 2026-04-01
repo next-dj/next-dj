@@ -85,7 +85,7 @@ components/
 
 ## How It Works
 
-1. **File router** — Directories named `_components` are skipped for URL segments (`COMPONENTS_DIR` in `NEXT_FRAMEWORK` router and component options).
+1. **File router** — Directories named `_components` are skipped for URL segments (same name as `COMPONENTS_DIR` on `DEFAULT_COMPONENT_BACKENDS`).
 
 2. **Component scope** — Templates resolve components from root dirs plus `_components` folders on the path from the pages root down to the template. A folder `pages/posts/_components/` is visible only under `pages/posts/...`, not from `pages/template.djx` at the root of the tree.
 

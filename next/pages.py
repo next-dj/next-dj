@@ -25,8 +25,7 @@ from django.utils.module_loading import import_string
 
 from .conf import next_framework_settings
 from .deps import DependencyResolver, RegisteredParameterProvider, resolver
-from .filesystem import classify_dirs_entries, resolve_base_dir
-from .utils import caller_source_path
+from .utils import caller_source_path, classify_dirs_entries, resolve_base_dir
 
 
 if TYPE_CHECKING:

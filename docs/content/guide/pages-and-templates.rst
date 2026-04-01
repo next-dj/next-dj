@@ -90,7 +90,6 @@ next.dj supports multiple entries in ``NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"]``
                "PAGES_DIR": "pages",
                "APP_DIRS": True,
                "DIRS": [],
-               "COMPONENTS_DIR": "_components",
                "OPTIONS": {"context_processors": []},
            },
            {
@@ -98,7 +97,6 @@ next.dj supports multiple entries in ``NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"]``
                "PAGES_DIR": "admin_pages",
                "APP_DIRS": True,
                "DIRS": [],
-               "COMPONENTS_DIR": "_components",
                "OPTIONS": {"context_processors": []},
            },
        ],

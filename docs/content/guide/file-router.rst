@@ -111,7 +111,6 @@ Configure the file router in your Django settings (``NEXT_FRAMEWORK``):
                "PAGES_DIR": "pages",
                "APP_DIRS": True,  # Scan Django app directories
                "DIRS": [],
-               "COMPONENTS_DIR": "_components",
                "OPTIONS": {
                    "context_processors": [
                        "myapp.context_processors.global_context",
@@ -122,16 +121,17 @@ Configure the file router in your Django settings (``NEXT_FRAMEWORK``):
    }
 
 **APP_DIRS**: Whether to scan Django app directories (default: True)
-**DIRS**: Extra filesystem roots for pages (path-like entries); see below.
-**COMPONENTS_DIR**: Folder name skipped for URL scanning (e.g. ``"_components"``).
+**DIRS**: Extra filesystem roots for pages (path-like entries). See below.
 **context_processors**: List of context processor paths for global template variables (inside ``OPTIONS``)
+
+The folder name skipped during URL scanning (so it does not become a route segment) is ``COMPONENTS_DIR`` on ``DEFAULT_COMPONENT_BACKENDS`` (see :doc:`components`), not on each page router entry.
 
 Root and App Pages (Like Staticfiles)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Resolution works like Django's static files:
 
-- **Project-level directories** — List absolute or project-relative paths in ``DIRS``. These behave like ``STATICFILES_DIRS``: each entry must exist on disk as a directory; they contain ``page.py`` / ``template.djx`` and optionally ``layout.djx`` for a global layout.
+- **Project-level directories** — List absolute or project-relative paths in ``DIRS``. These behave like ``STATICFILES_DIRS``. Each entry must exist on disk as a directory. Each root contains ``page.py`` / ``template.djx`` and optionally ``layout.djx`` for a global layout.
 - **App directories** — With ``APP_DIRS: True``, each installed app's ``pages/`` directory is scanned (like each app's ``static/`` folder). The subdirectory name comes from top-level ``PAGES_DIR`` (default ``"pages"``).
 
 You can use both in one backend: set ``APP_DIRS: True`` and add path roots to ``DIRS``. URL patterns are then built in this order: first from app pages, then from each root directory in ``DIRS``. If the same URL pattern is defined in both an app and a root directory, ``python manage.py check`` reports an error (``next.E015``).
@@ -148,7 +148,6 @@ You can use both in one backend: set ``APP_DIRS: True`` and add path roots to ``
                "PAGES_DIR": "pages",
                "APP_DIRS": True,
                "DIRS": [str(BASE_DIR / "root_pages")],
-               "COMPONENTS_DIR": "_components",
                "OPTIONS": {
                    "context_processors": [...],
                },
@@ -161,7 +160,7 @@ You can use both in one backend: set ``APP_DIRS: True`` and add path roots to ``
 Component folder and file routing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The top-level ``COMPONENTS_DIR`` string (default ``"_components"``) sets the folder name that is **not** used for file-based routing and does not create URL segments. The router skips that directory when scanning for ``page.py`` and ``template.djx``. Only the configured name is skipped (not all directories starting with an underscore). See :doc:`components` for the components system.
+The ``COMPONENTS_DIR`` value on ``DEFAULT_COMPONENT_BACKENDS`` (default ``"_components"`` in framework defaults) sets the folder name that is **not** used for file-based routing and does not create URL segments. The file router uses that same string when scanning for ``page.py`` and ``template.djx``. Only the configured name is skipped (not all directories starting with an underscore). See :doc:`components` for the components system.
 
 Multiple Configurations
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -177,7 +176,6 @@ next.dj supports multiple router entries in ``NEXT_FRAMEWORK["DEFAULT_PAGE_BACKE
                "PAGES_DIR": "pages",
                "APP_DIRS": True,
                "DIRS": [],
-               "COMPONENTS_DIR": "_components",
                "OPTIONS": {"context_processors": []},
            },
            {
@@ -185,7 +183,6 @@ next.dj supports multiple router entries in ``NEXT_FRAMEWORK["DEFAULT_PAGE_BACKE
                "PAGES_DIR": "admin_pages",
                "APP_DIRS": True,
                "DIRS": [],
-               "COMPONENTS_DIR": "_components",
                "OPTIONS": {"context_processors": []},
            },
        ],

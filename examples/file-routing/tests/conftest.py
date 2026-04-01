@@ -54,7 +54,6 @@ if not settings.configured:
                     "DIRS": [
                         str(project_root / "examples" / "file-routing" / "root_pages"),
                     ],
-                    "COMPONENTS_DIR": "_components",
                     "OPTIONS": {
                         "context_processors": [],
                     },

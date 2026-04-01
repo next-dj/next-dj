@@ -95,7 +95,6 @@ _FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset(
     {
         "BACKEND",
         "APP_DIRS",
-        "COMPONENTS_DIR",
         "DIRS",
         "OPTIONS",
         "PAGES_DIR",
@@ -158,15 +157,6 @@ def _validate_file_router_backend_fields(  # noqa: C901, PLR0912
                 f"{rf_routers}.DIRS must be a list.",
                 obj=settings,
                 id="next.E006",
-            ),
-        )
-
-    if "COMPONENTS_DIR" in config and not isinstance(config["COMPONENTS_DIR"], str):
-        errors.append(
-            Error(
-                f"{rf_routers}.COMPONENTS_DIR must be a string.",
-                obj=settings,
-                id="next.E027",
             ),
         )
 
@@ -249,8 +239,8 @@ def _validate_file_router_backend_fields(  # noqa: C901, PLR0912
             errors.append(
                 Error(
                     f"{rf_routers}.OPTIONS contains unknown key {key!r}. "
-                    "OPTIONS only supports context_processors; use top-level DIRS and "
-                    "COMPONENTS_DIR for paths.",
+                    "OPTIONS only supports context_processors. "
+                    "Use top-level DIRS for extra page roots.",
                     obj=settings,
                     id="next.E006",
                 ),

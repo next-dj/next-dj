@@ -47,7 +47,7 @@ class TestFileRouterBackend:
     def mock_settings(self):
         """Patch ``settings`` in both ``urls`` and ``filesystem`` (``resolve_base_dir``)."""
         mock = Mock()
-        with patch("next.urls.settings", mock), patch("next.filesystem.settings", mock):
+        with patch("next.urls.settings", mock), patch("next.utils.settings", mock):
             yield mock
 
     @pytest.fixture()
@@ -526,14 +526,13 @@ class TestRouterFactory:
             "PAGES_DIR": "pages",
             "APP_DIRS": True,
             "DIRS": [],
-            "COMPONENTS_DIR": "_components",
             "OPTIONS": {},
         }
         mock_s = Mock()
         with (
             patch("next.urls.settings", mock_s),
             patch(
-                "next.filesystem.settings",
+                "next.utils.settings",
                 mock_s,
             ),
         ):
@@ -548,14 +547,13 @@ class TestRouterFactory:
             "PAGES_DIR": "pages",
             "APP_DIRS": True,
             "DIRS": [],
-            "COMPONENTS_DIR": "_components",
             "OPTIONS": None,
         }
         mock_s = Mock()
         with (
             patch("next.urls.settings", mock_s),
             patch(
-                "next.filesystem.settings",
+                "next.utils.settings",
                 mock_s,
             ),
         ):
@@ -652,28 +650,26 @@ class TestRouterFactory:
     def test_resolve_components_folder_name_from_first_component_backend(
         self,
     ) -> None:
-        """Page config may omit COMPONENTS_DIR when merged component defaults supply it."""
+        """Skip-folder name comes from the first ``DEFAULT_COMPONENT_BACKENDS`` entry."""
         with patch("next.urls.next_framework_settings") as nfs:
             nfs.DEFAULT_COMPONENT_BACKENDS = [{"COMPONENTS_DIR": "custom_comp"}]
-            assert (
-                FileRouterBackend._resolve_components_folder_name({}) == "custom_comp"
-            )
+            assert FileRouterBackend._resolve_components_folder_name() == "custom_comp"
 
     def test_resolve_components_folder_name_raises_when_unavailable(self) -> None:
         """Missing COMPONENTS_DIR and no valid component backend entry raises KeyError."""
         with patch("next.urls.next_framework_settings") as nfs:
             nfs.DEFAULT_COMPONENT_BACKENDS = []
             with pytest.raises(KeyError, match="COMPONENTS_DIR"):
-                FileRouterBackend._resolve_components_folder_name({})
+                FileRouterBackend._resolve_components_folder_name()
 
     def test_resolve_components_folder_name_raises_when_first_entry_invalid(
         self,
     ) -> None:
-        """First component backend dict must contain COMPONENTS_DIR when page omits it."""
+        """First component backend dict must contain COMPONENTS_DIR."""
         with patch("next.urls.next_framework_settings") as nfs:
             nfs.DEFAULT_COMPONENT_BACKENDS = [{}]
             with pytest.raises(KeyError, match="COMPONENTS_DIR"):
-                FileRouterBackend._resolve_components_folder_name({})
+                FileRouterBackend._resolve_components_folder_name()
 
     def test_is_filesystem_discovery_router_class_requires_tree_api(self) -> None:
         """Router subclasses must expose the filesystem page-tree hooks on the class."""
@@ -967,7 +963,7 @@ class TestGlobalInstances:
         with (
             patch("next.urls.settings", mock_s),
             patch(
-                "next.filesystem.settings",
+                "next.utils.settings",
                 mock_s,
             ),
         ):
@@ -996,7 +992,7 @@ class TestGlobalInstances:
         with (
             patch("next.urls.settings", mock_s),
             patch(
-                "next.filesystem.settings",
+                "next.utils.settings",
                 mock_s,
             ),
             patch.object(router, "_get_app_pages_path") as mock_get_path,
@@ -1300,7 +1296,6 @@ class TestGetPagesDirectoriesForWatch:
                             "PAGES_DIR": "pages",
                             "APP_DIRS": True,
                             "DIRS": [],
-                            "COMPONENTS_DIR": "_components",
                             "OPTIONS": {},
                         },
                     ],
@@ -1345,7 +1340,7 @@ class TestIterPagesRootsWithComponentsFolderNames:
                 assert iter_pages_roots_with_components_folder_names() == []
 
     def test_swallows_backend_creation_error(self) -> None:
-        """Invalid backend is skipped; valid entry still contributes pairs."""
+        """Invalid backend is skipped. A valid entry still contributes pairs."""
         with override_settings(
             NEXT_FRAMEWORK={
                 "DEFAULT_PAGE_BACKENDS": [
@@ -1357,7 +1352,6 @@ class TestIterPagesRootsWithComponentsFolderNames:
                         "DIRS": [
                             str(Path(__file__).parent.parent / "tests" / "pages"),
                         ],
-                        "COMPONENTS_DIR": "_components",
                         "OPTIONS": {},
                     },
                 ],

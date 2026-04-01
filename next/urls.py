@@ -21,9 +21,9 @@ from django.urls import URLPattern, URLResolver
 
 from .conf import import_class_cached, next_framework_settings
 from .deps import DDependencyBase, RegisteredParameterProvider
-from .filesystem import classify_dirs_entries, resolve_base_dir
 from .forms import form_action_manager
 from .pages import page
+from .utils import classify_dirs_entries, resolve_base_dir
 
 
 logger = logging.getLogger(__name__)
@@ -250,11 +250,11 @@ class FileRouterBackend(RouterBackend):
         self._url_parser = URLPatternParser()
 
     @staticmethod
-    def _resolve_components_folder_name(config: dict[str, Any]) -> str:
-        """Folder name to skip in URL scans; page config or first component backend."""
-        raw = config.get("COMPONENTS_DIR")
-        if raw is not None:
-            return str(raw)
+    def _resolve_components_folder_name() -> str:
+        """Folder name to skip in URL scans.
+
+        Taken from the first ``DEFAULT_COMPONENT_BACKENDS`` entry.
+        """
         cbs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
         _components_key = "COMPONENTS_DIR"
         if not isinstance(cbs, list) or not cbs:
@@ -584,7 +584,7 @@ class RouterFactory:
                 raw_opts = {}
             dirs_list = list(config.get("DIRS") or [])
             path_roots, segment_names = classify_dirs_entries(dirs_list, base_dir)
-            components_dir = FileRouterBackend._resolve_components_folder_name(config)
+            components_dir = FileRouterBackend._resolve_components_folder_name()
             skip_names = frozenset({components_dir, *segment_names})
             narrow_opts = _narrow_file_router_options(raw_opts)
             return backend_class(

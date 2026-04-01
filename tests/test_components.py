@@ -134,7 +134,7 @@ class TestFileComponentsBackend:
     def test_string_base_dir_normalized_for_discovery(self, tmp_path: Path) -> None:
         """``BASE_DIR`` as str is converted to ``Path`` for ``DIRS`` resolution."""
         (tmp_path / "nest").mkdir()
-        with patch("next.filesystem.settings") as mock_settings:
+        with patch("next.utils.settings") as mock_settings:
             mock_settings.BASE_DIR = str(tmp_path)
             roots = component_extra_roots_from_config({"DIRS": ["nest"]})
         assert roots == [(tmp_path / "nest").resolve()]
@@ -144,7 +144,7 @@ class TestFileComponentsBackend:
     ) -> None:
         """``BASE_DIR`` as str is normalized when resolving ``DIRS``."""
         (tmp_path / "c").mkdir()
-        with patch("next.filesystem.settings") as mock_settings:
+        with patch("next.utils.settings") as mock_settings:
             mock_settings.BASE_DIR = str(tmp_path)
             FileComponentsBackend({**_MIN_FILE_COMPONENTS, "DIRS": ["c"]})
 
@@ -1719,7 +1719,6 @@ class TestGetComponentPathsForWatch:
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
-                        "COMPONENTS_DIR": "_components",
                         "OPTIONS": {},
                     },
                 ],
@@ -1751,11 +1750,16 @@ class TestGetComponentPathsForWatch:
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
-                        "COMPONENTS_DIR": "_components",
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
             },
         ):
             next_framework_settings.reload()
@@ -1821,7 +1825,6 @@ class TestGetComponentPathsForWatch:
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
-                        "COMPONENTS_DIR": "_components",
                         "OPTIONS": {},
                     },
                 ],
@@ -1848,11 +1851,16 @@ class TestGetComponentPathsForWatch:
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
-                        "COMPONENTS_DIR": "_components",
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
             },
         ):
             next_framework_settings.reload()
@@ -1874,11 +1882,16 @@ class TestGetComponentPathsForWatch:
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
-                        "COMPONENTS_DIR": "_components",
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
             },
         ):
             next_framework_settings.reload()
@@ -1959,11 +1972,16 @@ class TestGetComponentPathsForWatch:
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
-                        "COMPONENTS_DIR": "_components",
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
             },
         ):
             next_framework_settings.reload()
@@ -1975,7 +1993,7 @@ class TestGetComponentPathsForWatch:
         next_framework_settings.reload()
 
     def test_skips_glob_match_that_is_not_a_directory(self, tmp_path: Path) -> None:
-        """Glob can match a file named like ``COMPONENTS_DIR``; it is ignored."""
+        """Glob can match a file named like ``COMPONENTS_DIR``. That match is ignored."""
         pages_root = tmp_path / "pages"
         fake = pages_root / "seg" / "_components"
         fake.parent.mkdir(parents=True)
@@ -1988,11 +2006,16 @@ class TestGetComponentPathsForWatch:
                         "PAGES_DIR": "pages",
                         "APP_DIRS": False,
                         "DIRS": [str(pages_root)],
-                        "COMPONENTS_DIR": "_components",
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
             },
         ):
             next_framework_settings.reload()

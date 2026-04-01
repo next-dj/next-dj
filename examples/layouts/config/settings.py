@@ -81,7 +81,6 @@ NEXT_FRAMEWORK = {
             "PAGES_DIR": "pages",
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "root_pages")],
-            "COMPONENTS_DIR": "_components",
             "OPTIONS": {
                 "context_processors": [
                     "django.template.context_processors.request",
