@@ -85,7 +85,13 @@ class HttpRequestProvider(RegisteredParameterProvider):
                 if hints.get(param.name) is HttpRequest:
                     return True
             except (NameError, TypeError, AttributeError, ValueError):
-                pass
+                logger.debug(
+                    "Failed to resolve type hints for %r "
+                    "when checking HttpRequest parameter %s",
+                    func,
+                    param.name,
+                    exc_info=True,
+                )
         origin = get_origin(param.annotation)
         return origin is None and param.annotation is HttpRequest
 
