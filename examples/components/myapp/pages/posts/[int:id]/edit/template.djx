@@ -1,5 +1,5 @@
 <h1 class="h3 mb-4">Edit post</h1>
-{% component "draft_banner" %}{% endcomponent %}
+{% component "draft_banner" %}
 {% form @action="update_post" %}
     <div class="mb-3">
         <label class="form-label" for="id_title">Title</label>
