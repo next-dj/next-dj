@@ -65,4 +65,4 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# NEXT_FRAMEWORK omitted: framework defaults (DEFAULT_PAGE_ROUTERS, URL_NAME_TEMPLATE, etc.) apply as-is.
+# NEXT_FRAMEWORK omitted: framework defaults (DEFAULT_PAGE_BACKENDS, URL_NAME_TEMPLATE, etc.) apply as-is.

@@ -1,6 +1,6 @@
 """Resolve callable parameters from the current request and template context.
 
-Inspects signatures and fills parameters from ``request``, URL kwargs, forms, and
+Inspect signatures and fill parameters from ``request``, URL kwargs, forms, and
 registered providers. New markers should subclass ``DDependencyBase`` for typing.
 """
 
@@ -77,15 +77,15 @@ class DependencyCache:
         self._in_progress.discard(key)
 
     def mark_in_progress(self, key: str) -> None:
-        """Begin resolving ``key`` (cycle detection)."""
+        """Begin resolving the key for cycle detection."""
         self._in_progress.add(key)
 
     def unmark_in_progress(self, key: str) -> None:
-        """Clear in-progress state for ``key``."""
+        """Clear in-progress state for the key."""
         self._in_progress.discard(key)
 
     def is_in_progress(self, key: str) -> bool:
-        """Whether ``key`` is mid-resolution."""
+        """Return True while the key is mid-resolution."""
         return key in self._in_progress
 
     def __len__(self) -> int:
@@ -150,7 +150,7 @@ class DependencyResolver:
             self._providers_loaded = True
 
     def _should_skip_parameter(self, param: inspect.Parameter) -> bool:
-        """Skip ``self``/``cls`` and variadic parameters."""
+        """Skip ``self`` / ``cls`` and variadic parameters."""
         return param.name in ("self", "cls") or param.kind in (
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
@@ -170,7 +170,7 @@ class DependencyResolver:
     def register_dependency(
         self, name: str, callable_dep: Callable[..., Any]
     ) -> Callable[..., Any]:
-        r"""Register a callable as a dependency by name.
+        """Register a callable as a dependency by name.
 
         Inject with ``Depends("name")``.
         """
@@ -180,7 +180,7 @@ class DependencyResolver:
     def dependency(
         self, name: str
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        r"""``@resolver.dependency("name")`` shorthand for ``register_dependency``."""
+        """``@resolver.dependency("name")`` shorthand for ``register_dependency``."""
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             self.register_dependency(name, func)
@@ -267,11 +267,11 @@ class DependencyResolver:
         """Resolve like ``resolve`` but accept a loose kwargs mapping."""
         self._ensure_providers()
 
-        # Convert legacy dict context to ResolutionContext
+        # Accept a plain mapping and build ResolutionContext
         reserved = self.EXPLICIT_RESOLVE_KEYS
         url_kwargs = {k: v for k, v in context.items() if k not in reserved}
 
-        # Handle legacy dict-based cache
+        # Support dict or DependencyCache for _cache
         cache_obj = context.get("_cache")
         if isinstance(cache_obj, dict):
             cache = DependencyCache(backing_dict=cache_obj)
@@ -397,12 +397,12 @@ class RegisteredParameterProvider(ABC):
 class Depends:
     """Mark a parameter as a dependency to be resolved by the resolver.
 
-    Use as a default parameter value:
+    Use as a default parameter value.
 
-    - ``Depends("name")``: resolve a registered dependency by name
-    - ``Depends(callable)``: call a dependency factory with DI-resolved args
-    - ``Depends(value)``: inject a constant value
-    - ``Depends()``: resolve by parameter name (shorthand for ``Depends("param_name")``)
+    ``Depends("name")`` resolves a registered dependency by name.
+    ``Depends(callable)`` calls a factory with DI-resolved arguments.
+    ``Depends(value)`` injects a constant.
+    ``Depends()`` resolves by parameter name.
     """
 
     dependency: object | None = None

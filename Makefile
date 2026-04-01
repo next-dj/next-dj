@@ -29,7 +29,7 @@ test-examples: # run tests for examples with coverage
 	@set -e; \
 	missing_tests=0; \
 	for example_dir in examples/*/; do \
-		if [ -d "$$example_dir" ]; then \
+		if [ -d "$$example_dir" ] && [ -f "$$example_dir/manage.py" ]; then \
 			if [ ! -d "$$example_dir/tests" ] && [ ! -f "$$example_dir/tests.py" ]; then \
 				missing_tests=1; \
 			fi; \
@@ -41,7 +41,7 @@ test-examples: # run tests for examples with coverage
 		exit 1; \
 	fi; \
 	for example_dir in examples/*/; do \
-		if [ -d "$$example_dir" ]; then \
+		if [ -d "$$example_dir" ] && [ -f "$$example_dir/manage.py" ]; then \
 			if [ -d "$$example_dir/tests" ]; then \
 				cd "$$example_dir" && uv run pytest tests/ -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing; \
 				cd - > /dev/null; \

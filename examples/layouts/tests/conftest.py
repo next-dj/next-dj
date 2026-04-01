@@ -48,18 +48,15 @@ if not settings.configured:
             },
         ],
         NEXT_FRAMEWORK={
-            "DEFAULT_PAGE_ROUTERS": [
+            "DEFAULT_PAGE_BACKENDS": [
                 {
                     "BACKEND": "next.urls.FileRouterBackend",
                     "PAGES_DIR": "pages",
                     "APP_DIRS": True,
+                    "DIRS": [
+                        str(project_root / "examples" / "layouts" / "root_pages"),
+                    ],
                     "OPTIONS": {
-                        "COMPONENTS_DIR": "_components",
-                        "PAGES_DIRS": [
-                            str(
-                                project_root / "examples" / "layouts" / "root_pages",
-                            ),
-                        ],
                         "context_processors": [
                             "django.template.context_processors.request",
                             "django.contrib.auth.context_processors.auth",

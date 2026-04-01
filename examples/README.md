@@ -11,7 +11,7 @@ A basic example showcasing the core file-based routing functionality with differ
 - Simple pages without parameters
 - Parameterized routes with type hints
 - Wildcard argument handling
-- Both app-specific and root-level routing
+- App `pages/` trees plus extra roots via `DIRS` (e.g. `root_pages/`) in one router entry
 
 **Best for:** Understanding the fundamentals of next-dj routing
 
@@ -95,7 +95,7 @@ Use the `components` example for a small blog with simple/composite components, 
 - Admin integration: `pages` example
 - Template inheritance: `layouts` example
 - Context processors: `layouts` example
-- UI frameworks integration: `layouts` example
+- Bootstrap layout and static assets: `layouts` example
 - Form actions and ModelForm: `forms` example
 - Create/edit flows with URL params: `forms` example
 - Components, slots, scope, blog + forms: `components` example

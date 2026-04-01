@@ -1,31 +1,27 @@
-"""Discover and render ``.djx`` components for templates."""
+"""Discover and render DJX components for templates."""
 
 from __future__ import annotations
 
 import contextlib
 import importlib.util
 import inspect
+import itertools
 import logging
 from abc import ABC, abstractmethod
 from collections import OrderedDict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 from django.middleware.csrf import get_token
 from django.template import Context as DjangoTemplateContext, Template
 from django.utils.functional import SimpleLazyObject
 
-from .conf import NextFrameworkSettings, import_class_cached, next_framework_settings
+from .conf import import_class_cached, next_framework_settings
 from .deps import DependencyCache, resolver
-
-
-_default_components_entry = NextFrameworkSettings.DEFAULTS[
-    "DEFAULT_COMPONENT_BACKENDS"
-][0]
-_default_components_options: dict[str, Any] = _default_components_entry["OPTIONS"]
+from .utils import caller_source_path, classify_dirs_entries, resolve_base_dir
 
 
 if TYPE_CHECKING:
@@ -43,9 +39,11 @@ __all__ = [
     "ContextFunction",
     "FileComponentsBackend",
     "component",
+    "component_extra_roots_from_config",
     "components_manager",
     "context",
     "get_component",
+    "get_component_paths_for_watch",
     "load_component_template",
     "render_component",
 ]
@@ -183,6 +181,8 @@ class ComponentRegistry:
 class ComponentScanner:
     """Scan one folder for ``.djx`` files and composite component directories."""
 
+    DEFAULT_COMPONENTS_DIR_NAME: str = "_components"
+
     def __init__(
         self,
         components_dir: str | None = None,
@@ -192,7 +192,7 @@ class ComponentScanner:
         self._components_dir = (
             components_dir
             if components_dir is not None
-            else _default_components_options["COMPONENTS_DIR"]
+            else self.DEFAULT_COMPONENTS_DIR_NAME
         )
         self._module_loader = module_loader or ModuleLoader()
 
@@ -266,59 +266,134 @@ class ComponentScanner:
         )
 
 
-class ComponentRootDiscovery:
-    """Finds pages trees and explicit component directories from settings."""
+def component_extra_roots_from_config(config: Mapping[str, Any]) -> list[Path]:
+    """Return existing directory paths from the config DIRS entry."""
+    base_dir = resolve_base_dir()
+    dirs_list = list(config.get("DIRS") or [])
+    path_roots, _ = classify_dirs_entries(dirs_list, base_dir)
+    return [p for p in path_roots if p.exists()]
 
-    def __init__(self, pages_dir: str | None = None) -> None:
-        self._pages_dir = (
-            pages_dir
-            if pages_dir is not None
-            else _default_components_options["PAGES_DIR"]
+
+def _paths_from_component_info(info: ComponentInfo) -> set[Path]:
+    """Return resolved filesystem paths that define one component."""
+    out: set[Path] = set()
+    if info.template_path is not None:
+        with contextlib.suppress(OSError):
+            out.add(info.template_path.resolve())
+    if info.module_path is not None:
+        with contextlib.suppress(OSError):
+            out.add(info.module_path.resolve())
+    return out
+
+
+def _collect_paths_for_one_pages_root(
+    scanner: ComponentScanner,
+    comp_name: str,
+    root: Path,
+) -> set[Path]:
+    """Gather component paths under one pages tree root."""
+    result: set[Path] = set()
+    try:
+        for path in root.glob(f"**/{comp_name}"):
+            if not path.is_dir():
+                continue
+            try:
+                rel_parent = path.parent.relative_to(root)
+            except ValueError:
+                continue
+            scope_relative = "/".join(rel_parent.parts) if rel_parent.parts else ""
+            for info in scanner.scan_directory(path, root, scope_relative):
+                result |= _paths_from_component_info(info)
+    except OSError as e:
+        logger.debug(
+            "Cannot scan %s for component dirs %s: %s",
+            root,
+            comp_name,
+            e,
         )
+    return result
 
-    def discover_app_roots(self) -> Sequence[Path]:
-        roots: list[Path] = []
-        for app_name in self._get_installed_apps():
-            pages_path = self._get_app_pages_path(app_name)
-            if pages_path is not None:
-                roots.append(pages_path.resolve())
-        return roots
 
-    def discover_component_roots(self, options: Mapping[str, Any]) -> Sequence[Path]:
-        roots: list[Path] = []
+def _collect_component_paths_under_page_trees() -> set[Path]:
+    """Collect component paths from page backends without mutating registries."""
+    from next.urls import RouterFactory  # noqa: PLC0415
 
-        if "COMPONENTS_DIRS" in options:
-            dirs = options["COMPONENTS_DIRS"]
-            if isinstance(dirs, (list, tuple)):
-                for item in dirs:
-                    path = Path(item) if not isinstance(item, Path) else item
-                    if path.exists():
-                        roots.append(path.resolve())
-            return roots
-
-        if "COMPONENTS_DIR" in options:
-            path = options["COMPONENTS_DIR"]
-            path = Path(path) if not isinstance(path, Path) else path
-            if path.exists():
-                roots.append(path.resolve())
-
-        return roots
-
-    def _get_installed_apps(self) -> Iterable[str]:
-        for app in getattr(settings, "INSTALLED_APPS", []):
-            if not app.startswith("django."):
-                yield app
-
-    def _get_app_pages_path(self, app_name: str) -> Path | None:
+    result: set[Path] = set()
+    page_configs = next_framework_settings.DEFAULT_PAGE_BACKENDS
+    if not isinstance(page_configs, list):
+        return result
+    for config in page_configs:
+        if not isinstance(config, dict):
+            continue
         try:
-            app_module = __import__(app_name, fromlist=[""])
-            if app_module.__file__ is None:
-                return None
-            app_path = Path(app_module.__file__).parent
-            pages_path = app_path / self._pages_dir
-            return pages_path if pages_path.exists() else None
-        except (ImportError, AttributeError):
-            return None
+            backend = RouterFactory.create_backend(config)
+        except Exception:
+            logger.exception(
+                "error creating page backend for component autoreload scan %s",
+                config,
+            )
+            continue
+        if not RouterFactory.is_filesystem_discovery_router(backend):
+            continue
+        fs_backend: Any = backend
+        comp_name = str(fs_backend._components_folder_name)
+        scanner = ComponentScanner(comp_name)
+        for root in itertools.chain(
+            (p.resolve() for p in fs_backend._get_root_pages_paths()),
+            (
+                a.resolve()
+                for app_name in fs_backend._get_installed_apps()
+                if (a := fs_backend._get_app_pages_path(app_name))
+            ),
+        ):
+            result |= _collect_paths_for_one_pages_root(scanner, comp_name, root)
+    return result
+
+
+def _collect_component_paths_from_backend_dirs() -> set[Path]:
+    """Collect paths from component backend DIRS entries only."""
+    result: set[Path] = set()
+    comp_configs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+    if not isinstance(comp_configs, list):
+        return result
+    for config in comp_configs:
+        if not isinstance(config, dict):
+            continue
+        try:
+            backend = ComponentsFactory.create_backend(config)
+        except Exception:
+            logger.exception(
+                "error creating component backend for autoreload scan %s", config
+            )
+            continue
+        if not isinstance(backend, FileComponentsBackend):
+            continue
+        scanner = ComponentScanner(
+            backend.components_dir,
+            module_loader=ModuleLoader(),
+        )
+        for root in component_extra_roots_from_config(config):
+            try:
+                for info in scanner.scan_directory(root, root, ""):
+                    result |= _paths_from_component_info(info)
+            except OSError as e:
+                logger.debug(
+                    "Cannot scan component root %s: %s",
+                    root,
+                    e,
+                )
+    return result
+
+
+def get_component_paths_for_watch() -> set[Path]:
+    """Return filesystem paths that matter for the development component reloader.
+
+    This performs a read-only scan. It does not mutate the components manager or
+    router registration state.
+    """
+    page_paths = _collect_component_paths_under_page_trees()
+    extra_paths = _collect_component_paths_from_backend_dirs()
+    return page_paths | extra_paths
 
 
 class ComponentVisibilityResolver:
@@ -422,6 +497,8 @@ class ComponentVisibilityResolver:
             template_dir = template_path.parent
             rel = template_dir.relative_to(scope_root)
             parts = rel.parts
+            if not parts:
+                return [""]
             return ["/".join(parts[:i]) if i else "" for i in range(len(parts), -1, -1)]
         except ValueError:
             return None
@@ -533,27 +610,11 @@ class ComponentContextManager:
         self._registry = ComponentContextRegistry()
 
     def _get_caller_path(self, back_count: int = 1) -> Path:
-        frame = inspect.currentframe()
-        for _ in range(back_count):
-            if not frame or not frame.f_back:
-                msg = "Could not determine caller file path"
-                raise RuntimeError(msg)
-            frame = frame.f_back
-
-        for _ in range(10):
-            if not frame:
-                break
-            raw = frame.f_globals.get("__file__")
-            if isinstance(raw, str) and raw.endswith(".py"):
-                path = Path(raw).resolve()
-                if path.name == "components.py" and path.parent.name == "next":
-                    frame = frame.f_back
-                    continue
-                return path
-            frame = frame.f_back
-
-        msg = "Could not determine caller file path: no __file__ in caller frames"
-        raise RuntimeError(msg)
+        return caller_source_path(
+            back_count=back_count,
+            max_walk=10,
+            skip_framework_file=("components.py", "next"),
+        )
 
     def context(
         self,
@@ -793,21 +854,12 @@ class ComponentsBackend(ABC):
 
 
 class FileComponentsBackend(ComponentsBackend):
-    """Loads components from ``_components`` folders and optional global dirs."""
+    """Load components from ``DIRS`` and from the filesystem walk in ``next.urls``."""
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Parse ``APP_DIRS`` and ``OPTIONS``."""
-        options = config.get("OPTIONS")
-        if not isinstance(options, dict):
-            options = {}
-        self.options = options
-        self.components_dir = str(
-            options.get(
-                "COMPONENTS_DIR",
-                _default_components_options["COMPONENTS_DIR"],
-            ),
-        )
-        self.app_dirs = bool(config.get("APP_DIRS", True))
+        """Build registry and scanner from merged ``COMPONENTS_DIR`` / ``DIRS``."""
+        self.components_dir = str(config["COMPONENTS_DIR"])
+        self._extra_component_roots = component_extra_roots_from_config(config)
 
         self._registry = ComponentRegistry()
         self._module_loader = ModuleLoader()
@@ -815,10 +867,6 @@ class FileComponentsBackend(ComponentsBackend):
             self.components_dir,
             module_loader=self._module_loader,
         )
-        pages_dir = str(
-            options.get("PAGES_DIR", _default_components_options["PAGES_DIR"]),
-        )
-        self._root_discovery = ComponentRootDiscovery(pages_dir)
         self._visibility_resolver = ComponentVisibilityResolver(self._registry)
 
         self._loaded = False
@@ -830,35 +878,9 @@ class FileComponentsBackend(ComponentsBackend):
         self._loaded = True
 
     def _discover_and_register_all(self) -> None:
-        if self.app_dirs:
-            for pages_root in self._root_discovery.discover_app_roots():
-                self._discover_in_pages_root(pages_root)
-
-        for comp_root in self._root_discovery.discover_component_roots(self.options):
+        for comp_root in self._extra_component_roots:
             self._registry.mark_as_root(comp_root)
             self._discover_in_component_root(comp_root)
-
-    def _discover_in_pages_root(self, pages_root: Path) -> None:
-        try:
-            pattern = self.components_dir
-            for path in pages_root.rglob(pattern):
-                if not path.is_dir():
-                    continue
-
-                parent = path.parent
-                try:
-                    scope_relative = parent.relative_to(pages_root).as_posix()
-                    if scope_relative == ".":
-                        scope_relative = ""
-                except ValueError:
-                    scope_relative = ""
-
-                components = self._scanner.scan_directory(
-                    path, pages_root, scope_relative
-                )
-                self._registry.register_many(components)
-        except OSError as e:
-            logger.debug("Cannot discover components under %s: %s", pages_root, e)
 
     def _discover_in_component_root(self, component_root: Path) -> None:
         components = self._scanner.scan_directory(component_root, component_root, "")
@@ -881,6 +903,25 @@ class FileComponentsBackend(ComponentsBackend):
         """Full visibility map for ``template_path``."""
         self._ensure_loaded()
         return self._visibility_resolver.resolve_visible(template_path)
+
+
+def register_components_folder_from_router_walk(
+    folder: Path,
+    pages_root: Path,
+    scope_relative: str,
+) -> None:
+    """Register components for one folder discovered during the URL tree walk."""
+    key = folder.resolve()
+    seen = components_manager._walk_registered_folders
+    if key in seen:
+        return
+    seen.add(key)
+    components_manager._ensure_backends()
+    for backend in components_manager._backends:
+        if isinstance(backend, FileComponentsBackend):
+            found = backend._scanner.scan_directory(folder, pages_root, scope_relative)
+            backend._registry.register_many(found)
+            return
 
 
 class DummyBackend(ComponentsBackend):
@@ -934,7 +975,7 @@ class ComponentsFactory:
     @classmethod
     def create_backend(cls, config: dict[str, Any]) -> ComponentsBackend:
         """Single backend from one config dict (``BACKEND`` class path)."""
-        backend_path = config.get("BACKEND", _default_components_entry["BACKEND"])
+        backend_path = config.get("BACKEND", "next.components.FileComponentsBackend")
         backend_class = import_class_cached(backend_path)
         return cast("ComponentsBackend", backend_class(config))
 
@@ -945,6 +986,7 @@ class ComponentsManager:
     def __init__(self) -> None:
         """Prepare an empty backend list and load settings on first access."""
         self._backends: list[ComponentsBackend] = []
+        self._walk_registered_folders: set[Path] = set()
         self._template_loader: ComponentTemplateLoader | None = None
         self._component_renderer: ComponentRenderer | None = None
 
@@ -979,6 +1021,7 @@ class ComponentsManager:
     def _reload_config(self) -> None:
         self._reset_render_pipeline()
         self._backends.clear()
+        self._walk_registered_folders.clear()
         configs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
         if not isinstance(configs, list):
             return

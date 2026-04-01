@@ -85,7 +85,7 @@ def test_checks(check_function) -> None:
 
 
 def test_global_layout_from_root_pages(client) -> None:
-    """Test that app pages use global layout from root_pages/layout.djx (PAGES_DIRS)."""
+    """Test that app pages use global layout from root_pages/layout.djx (``DIRS``)."""
     response = client.get("/")
     assert response.status_code == 200
     content = response.content.decode()

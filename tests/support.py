@@ -20,7 +20,7 @@ from next.urls import DUrl, FileRouterBackend, HttpRequestProvider, UrlKwargsPro
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable
 
-    from next.utils import NextStatReloader
+    from next.server import NextStatReloader
 
 
 def build_mock_http_request(
@@ -129,8 +129,8 @@ def next_framework_settings_for_checks(*, backends: list) -> object:
     """Stand-in for ``next_framework_settings`` in checks tests."""
     return SimpleNamespace(
         DEFAULT_COMPONENT_BACKENDS=backends,
-        DEFAULT_PAGE_ROUTERS=list(
-            NextFrameworkSettings.DEFAULTS["DEFAULT_PAGE_ROUTERS"]
+        DEFAULT_PAGE_BACKENDS=list(
+            NextFrameworkSettings.DEFAULTS["DEFAULT_PAGE_BACKENDS"],
         ),
         URL_NAME_TEMPLATE=NextFrameworkSettings.DEFAULTS["URL_NAME_TEMPLATE"],
     )
@@ -138,11 +138,10 @@ def next_framework_settings_for_checks(*, backends: list) -> object:
 
 def next_framework_settings_for_checks_backends_value(backends: object) -> object:
     """Stand-in when ``DEFAULT_COMPONENT_BACKENDS`` is not a list (or None)."""
+    default_pages = list(NextFrameworkSettings.DEFAULTS["DEFAULT_PAGE_BACKENDS"])
     return SimpleNamespace(
         DEFAULT_COMPONENT_BACKENDS=backends,
-        DEFAULT_PAGE_ROUTERS=list(
-            NextFrameworkSettings.DEFAULTS["DEFAULT_PAGE_ROUTERS"]
-        ),
+        DEFAULT_PAGE_BACKENDS=default_pages,
         URL_NAME_TEMPLATE=NextFrameworkSettings.DEFAULTS["URL_NAME_TEMPLATE"],
     )
 
@@ -167,7 +166,7 @@ def patch_checks_router_manager(
         mock_mgr = MagicMock()
         mock_router = MagicMock()
         mock_grm.return_value = (mock_mgr, [])
-        mock_mgr._routers = [mock_router]
+        mock_mgr._backends = [mock_router]
         mock_router.pages_dir = "pages"
         mock_router.app_dirs = True
         mock_router._scan_pages_directory.return_value = routes
@@ -182,7 +181,7 @@ def patch_checks_router_manager_with_routers(
 ) -> Generator[MagicMock, None, None]:
     """Patch ``_get_router_manager`` so the manager exposes the given routers list."""
     mock_mgr = MagicMock()
-    mock_mgr._routers = list(routers)
+    mock_mgr._backends = list(routers)
     with patch("next.checks._get_router_manager", return_value=(mock_mgr, [])):
         yield mock_mgr
 
@@ -193,7 +192,13 @@ def patch_checks_components_manager(
 ) -> Generator[MagicMock, None, None]:
     """Patch ``next.checks`` settings and ``ComponentsManager`` with fake backends."""
     mock_ns = next_framework_settings_for_checks(
-        backends=[{"BACKEND": "x", "OPTIONS": {}}],
+        backends=[
+            {
+                "BACKEND": "next.components.FileComponentsBackend",
+                "DIRS": [],
+                "COMPONENTS_DIR": "_components",
+            },
+        ],
     )
     with (
         patch("next.checks.next_framework_settings", mock_ns),
@@ -262,31 +267,15 @@ def _full_resolver() -> DependencyResolver:
 def route_watch_layer_patches(
     *,
     get_pages_directories_for_watch,
-    _scan_pages_directory,
-    template_paths_side_effect=None,
+    scan_pages_tree,
 ):
-    """Apply the usual ``next.utils`` patches around route discovery for ``tick()`` tests."""
-    if template_paths_side_effect is not None:
-        template_patch = patch(
-            "next.utils.get_template_djx_paths_for_watch",
-            side_effect=template_paths_side_effect,
-        )
-    else:
-        template_patch = patch(
-            "next.utils.get_template_djx_paths_for_watch",
-            return_value=set(),
-        )
+    """Apply the usual ``next.server`` patches around route discovery for ``tick()`` tests."""
     with (
         patch(
-            "next.utils.get_pages_directories_for_watch",
+            "next.server.get_pages_directories_for_watch",
             get_pages_directories_for_watch,
         ),
-        patch("next.utils._scan_pages_directory", _scan_pages_directory),
-        patch(
-            "next.utils.get_layout_djx_paths_for_watch",
-            return_value=set(),
-        ),
-        template_patch,
+        patch("next.server.scan_pages_tree", scan_pages_tree),
     ):
         yield
 
@@ -309,7 +298,7 @@ def tick_scenario_route_set_grows(reloader: NextStatReloader):
     with (
         route_watch_layer_patches(
             get_pages_directories_for_watch=watch_side_effect,
-            _scan_pages_directory=scan_side_effect,
+            scan_pages_tree=scan_side_effect,
         ),
         patch.object(reloader, "snapshot_files", return_value=iter([])),
         patch.object(reloader, "notify_file_changed") as mock_notify,
@@ -325,7 +314,7 @@ def tick_scenario_no_notify_first_tick(reloader: NextStatReloader):
     with (
         route_watch_layer_patches(
             get_pages_directories_for_watch=lambda: [fake_dir],
-            _scan_pages_directory=lambda _p: iter([("home", fake_page)]),
+            scan_pages_tree=lambda _p: iter([("home", fake_page)]),
         ),
         patch.object(reloader, "snapshot_files", return_value=iter([])),
         patch.object(reloader, "notify_file_changed") as mock_notify,
@@ -345,7 +334,7 @@ def tick_scenario_route_set_unchanged(reloader: NextStatReloader):
     with (
         route_watch_layer_patches(
             get_pages_directories_for_watch=lambda: [fake_dir],
-            _scan_pages_directory=route_iter,
+            scan_pages_tree=route_iter,
         ),
         patch.object(reloader, "snapshot_files", return_value=iter([])),
         patch.object(reloader, "notify_file_changed") as mock_notify,
@@ -358,38 +347,12 @@ def tick_scenario_watch_raises(reloader: NextStatReloader):
     """If ``get_pages_directories_for_watch`` raises, the tick still runs."""
     with (
         patch(
-            "next.utils.get_pages_directories_for_watch",
+            "next.server.get_pages_directories_for_watch",
             side_effect=ValueError("bad"),
         ),
-        patch("next.utils.get_layout_djx_paths_for_watch", return_value=set()),
-        patch("next.utils.get_template_djx_paths_for_watch", return_value=set()),
         patch.object(reloader, "snapshot_files", return_value=iter([])),
     ):
         yield
-
-
-@contextmanager
-def tick_scenario_template_set_changes(reloader: NextStatReloader):
-    """Template watch set grows on second tick."""
-    fake_dir = Path("/fake")
-    fake_page = fake_dir / "page.py"
-    fake_template = Path("/fake/pages/foo/template.djx").resolve()
-    call_count = [0]
-
-    def templates_side_effect():
-        call_count[0] += 1
-        return set() if call_count[0] == 1 else {fake_template}
-
-    with (
-        route_watch_layer_patches(
-            get_pages_directories_for_watch=lambda: [fake_dir],
-            _scan_pages_directory=lambda _p: iter([("home", fake_page)]),
-            template_paths_side_effect=templates_side_effect,
-        ),
-        patch.object(reloader, "snapshot_files", return_value=iter([])),
-        patch.object(reloader, "notify_file_changed") as mock_notify,
-    ):
-        yield mock_notify, fake_template
 
 
 @contextmanager
@@ -407,7 +370,7 @@ def tick_scenario_mtime_change(reloader: NextStatReloader):
     with (
         route_watch_layer_patches(
             get_pages_directories_for_watch=list,
-            _scan_pages_directory=lambda _p: iter([]),
+            scan_pages_tree=lambda _p: iter([]),
         ),
         patch.object(reloader, "snapshot_files", side_effect=snapshot_side_effect),
         patch.object(reloader, "notify_file_changed") as mock_notify,
@@ -420,7 +383,6 @@ TICK_SCENARIOS: dict[str, object] = {
     "no_notify_first_tick": tick_scenario_no_notify_first_tick,
     "route_set_unchanged": tick_scenario_route_set_unchanged,
     "watch_raises": tick_scenario_watch_raises,
-    "template_set_changes": tick_scenario_template_set_changes,
     "mtime_change": tick_scenario_mtime_change,
 }
 
@@ -449,22 +411,25 @@ def file_router_config_entry(
     *,
     pages_dir: Path | str | None = None,
     app_dirs: bool = False,
+    dirs: list[object] | None = None,
     options: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """One ``DEFAULT_PAGE_ROUTERS`` dict for ``FileRouterBackend`` in page/layout tests."""
+    """One ``DEFAULT_PAGE_BACKENDS`` entry for ``FileRouterBackend`` in page/layout tests."""
     opts = dict(options or {})
+    dirs_list: list[object] = list(dirs) if dirs is not None else []
     if pages_dir is not None and not app_dirs:
-        opts.setdefault("PAGES_DIR", str(pages_dir))
+        dirs_list = [pages_dir, *dirs_list]
     return {
         "BACKEND": "next.urls.FileRouterBackend",
         "PAGES_DIR": "pages",
         "APP_DIRS": app_dirs,
+        "DIRS": dirs_list,
         "OPTIONS": opts,
     }
 
 
 def default_page_router_config(pages_dir: Path | str) -> list[dict[str, object]]:
-    """Single-router list pointing ``PAGES_DIR`` option at ``pages_dir`` (``APP_DIRS`` false)."""
+    """Single-router list with ``DIRS`` containing ``pages_dir`` (``APP_DIRS`` false)."""
     return [file_router_config_entry(pages_dir=pages_dir)]
 
 
@@ -515,6 +480,5 @@ __all__ = [
     "tick_scenario_no_notify_first_tick",
     "tick_scenario_route_set_grows",
     "tick_scenario_route_set_unchanged",
-    "tick_scenario_template_set_changes",
     "tick_scenario_watch_raises",
 ]

@@ -73,12 +73,8 @@ NEXT_FRAMEWORK = {
     "DEFAULT_COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
-            "APP_DIRS": True,
-            "OPTIONS": {
-                "COMPONENTS_DIR": "_components",
-                "PAGES_DIR": "pages",
-                "COMPONENTS_DIRS": [str(BASE_DIR / "root_components")],
-            },
+            "DIRS": [str(BASE_DIR / "root_components")],
+            "COMPONENTS_DIR": "_components",
         },
     ],
 }

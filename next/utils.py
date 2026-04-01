@@ -1,91 +1,136 @@
-"""Store utils for next-dj framework."""
+"""Filesystem path helpers."""
 
-import logging
-from collections.abc import Generator
+from __future__ import annotations
+
+import inspect
 from pathlib import Path
+from typing import Any
 
-from django.utils.autoreload import StatReloader
-
-from .pages import (
-    get_layout_djx_paths_for_watch,
-    get_pages_directories_for_watch,
-    get_template_djx_paths_for_watch,
-)
-from .urls import _scan_pages_directory
+from django.conf import settings
 
 
-logger = logging.getLogger(__name__)
+def resolve_base_dir() -> Path | None:
+    """Return ``settings.BASE_DIR`` as a ``pathlib.Path``, or ``None``."""
+    raw = getattr(settings, "BASE_DIR", None)
+    if isinstance(raw, Path):
+        return raw
+    if isinstance(raw, str):
+        return Path(raw)
+    return None
 
 
-class NextStatReloader(StatReloader):
-    """Triggers reload when page routes or ``.djx`` sets change, not only mtimes."""
+def _classify_one_dir_entry(
+    item: Path,
+    base_dir: Path | None,
+) -> tuple[str, Path | str | None]:
+    if item.is_absolute():
+        if item.exists() and item.is_dir():
+            return "path", item
+        return "segment", item.name
 
-    def __init__(self) -> None:
-        """Baseline sets for routes, layouts, and templates."""
-        super().__init__()
-        self._previous_routes: set[tuple[str, Path]] | None = None
-        self._previous_layouts: set[Path] | None = None
-        self._previous_templates: set[Path] | None = None
+    s = str(item).replace("\\", "/")
+    if "/" in s:
+        if base_dir is not None:
+            cand = (base_dir / item).resolve()
+            if cand.exists() and cand.is_dir():
+                return "path", cand
+        return "segment", Path(s).name or None
 
-    def _check_routes(self, current: set[tuple[str, Path]]) -> None:
-        """Ping autoreload when the discovered route set differs."""
-        prev = self._previous_routes
-        if prev is None or current == prev:
-            self._previous_routes = current
-            return
-        diff = (current - prev) or (prev - current)
-        if diff:
-            self.notify_file_changed(next(iter(diff))[1])
-        self._previous_routes = current
+    if base_dir is not None:
+        cand = base_dir / item
+        if cand.exists() and cand.is_dir():
+            return "path", cand.resolve()
 
-    def _check_layouts(
-        self, current: set[Path], current_routes: set[tuple[str, Path]]
-    ) -> None:
-        """Ping when layout files change for affected routes."""
-        prev = self._previous_layouts
-        if prev is None or current == prev:
-            self._previous_layouts = current
-            return
-        layout_diff = (current - prev) or (prev - current)
-        for p in layout_diff:
-            layout_dir = p.parent
-            for _, file_path in current_routes:
-                try:
-                    if file_path.is_relative_to(layout_dir):
-                        self.notify_file_changed(p)
-                        self._previous_layouts = current
-                        return
-                except ValueError:
+    return "segment", item.name
+
+
+def classify_dirs_entries(
+    entries: list[Any] | tuple[Any, ...] | None,
+    base_dir: Path | None,
+) -> tuple[list[Path], frozenset[str]]:
+    """Split ``DIRS`` into directory roots and URL segment names (file router)."""
+    path_roots: list[Path] = []
+    segments: set[str] = set()
+    if not entries:
+        return path_roots, frozenset()
+
+    for raw in entries:
+        if raw is None:
+            continue
+        item = Path(raw) if not isinstance(raw, Path) else raw
+        s = str(item)
+        if not s or s == ".":
+            continue
+
+        kind, value = _classify_one_dir_entry(item, base_dir)
+        if kind == "path" and isinstance(value, Path):
+            path_roots.append(value.resolve())
+        elif kind == "segment" and isinstance(value, str) and value:
+            segments.add(value)
+
+    return path_roots, frozenset(segments)
+
+
+def caller_source_path(  # noqa: C901, PLR0912
+    *,
+    back_count: int = 1,
+    max_walk: int = 15,
+    skip_while_filename_endswith: tuple[str, ...] | None = None,
+    skip_framework_file: tuple[str, str] | None = None,
+) -> Path:
+    """Resolve ``Path`` of the caller module's ``__file__`` for decorator registration.
+
+    ``back_count`` is how many frames to step up before scanning. Use this to skip
+    past a decorator wrapper.
+
+    For pages and forms pass ``skip_while_filename_endswith``, for example
+    ``("pages.py",)``. Walk frames until ``__file__`` is missing or no longer ends
+    with one of those suffixes. Then return that path.
+
+    For components pass ``skip_framework_file`` as ``(basename, parent_dir_name)``,
+    for example ``("components.py", "next")``. Only ``str`` paths ending in ``.py``
+    are considered. The resolved framework module path is skipped.
+    """
+    if skip_while_filename_endswith is not None and skip_framework_file is not None:
+        msg = "Specify only one of skip_while_filename_endswith or skip_framework_file"
+        raise ValueError(msg)
+    if skip_while_filename_endswith is None and skip_framework_file is None:
+        msg = "Specify skip_while_filename_endswith or skip_framework_file"
+        raise ValueError(msg)
+
+    frame = inspect.currentframe()
+    err_plain = "Could not determine caller file path"
+    err_components = f"{err_plain}: no __file__ in caller frames"
+
+    for _ in range(back_count):
+        if not frame or not frame.f_back:
+            raise RuntimeError(err_plain)
+        frame = frame.f_back
+
+    if skip_while_filename_endswith is not None:
+        suffixes = skip_while_filename_endswith
+        for _ in range(max_walk):
+            if not frame:
+                break
+            raw = frame.f_globals.get("__file__")
+            if raw and isinstance(raw, str):
+                if any(raw.endswith(sfx) for sfx in suffixes):
+                    frame = frame.f_back
                     continue
-        self._previous_layouts = current
+                return Path(raw)
+            frame = frame.f_back
+        raise RuntimeError(err_plain)
 
-    def _check_templates(self, current: set[Path]) -> None:
-        """Ping when any ``template.djx`` set changes."""
-        prev = self._previous_templates
-        if prev is None or current == prev:
-            self._previous_templates = current
-            return
-        diff = (current - prev) or (prev - current)
-        if diff:
-            self.notify_file_changed(next(iter(diff)))
-        self._previous_templates = current
-
-    def tick(self) -> Generator[None, None, None]:
-        """Compare route/layout/template sets, then run ``StatReloader.tick``."""
-        parent_ticker = super().tick()
-        while True:
-            try:
-                routes = {
-                    (url_path, file_path.resolve())
-                    for pages_path in get_pages_directories_for_watch()
-                    for url_path, file_path in _scan_pages_directory(pages_path)
-                }
-                layouts = get_layout_djx_paths_for_watch()
-                templates = get_template_djx_paths_for_watch()
-            except (OSError, ImportError, ValueError) as e:
-                logger.debug("next route/layout/template set check skipped: %s", e)
-            else:
-                self._check_routes(routes)
-                self._check_layouts(layouts, routes)
-                self._check_templates(templates)
-            yield next(parent_ticker)
+    base, parent = skip_framework_file  # type: ignore[misc]
+    for _ in range(max_walk):
+        if not frame:
+            break
+        raw = frame.f_globals.get("__file__")
+        if isinstance(raw, str) and raw.endswith(".py"):
+            path = Path(raw).resolve()
+            if path.name == base and path.parent.name == parent:
+                frame = frame.f_back
+                continue
+            return path
+        frame = frame.f_back
+    raise RuntimeError(err_components)

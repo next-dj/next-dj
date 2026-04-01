@@ -194,7 +194,7 @@ Replacing the resolver
 
 By default, context and form resolution use the global ``resolver`` from
 ``next.deps``. To use a custom resolver, create a ``DependencyResolver``
-instance (with optional providers) and pass it to ``ContextManager(resolver=...)``.
+instance (with optional providers) and pass it to ``PageContextRegistry(resolver=...)``.
 The ``Page`` instance uses the global resolver unless wired with a context
 manager that was given a custom resolver.
 
@@ -207,4 +207,4 @@ see :ref:`dependency-injection-api`.
 Next
 ----
 
-:doc:`autoreload` — How the development server reloads when you change pages and templates.
+:doc:`autoreload` — How ``runserver`` reloads (Python entrypoints, route set, and why ``.djx`` is not glob-watched).

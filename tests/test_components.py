@@ -3,16 +3,18 @@ import inspect
 import textwrap
 import types
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django.template import Context, Template
 from django.template.base import TemplateSyntaxError
-from django.test import RequestFactory
+from django.test import RequestFactory, override_settings
 
 import next.components as next_components_mod
 from next.checks import (
     check_component_py_no_pages_context,
+    check_cross_root_component_name_conflicts,
     check_duplicate_component_names,
 )
 from next.components import (
@@ -21,7 +23,6 @@ from next.components import (
     ComponentInfo,
     ComponentRegistry,
     ComponentRenderer,
-    ComponentRootDiscovery,
     ComponentScanner,
     ComponentsFactory,
     ComponentsManager,
@@ -35,16 +36,26 @@ from next.components import (
     SimpleComponentRenderer,
     _inject_component_context,
     component,
+    component_extra_roots_from_config,
     components_manager,
     get_component,
+    get_component_paths_for_watch,
     load_component_template,
+    register_components_folder_from_router_walk,
     render_component,
 )
+from next.conf import next_framework_settings
 from tests.support import (
     next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
     next_framework_settings_for_checks_backends_value as _next_framework_settings_for_checks_backends_value,
     patch_checks_components_manager,
 )
+
+
+_MIN_FILE_COMPONENTS: dict[str, object] = {
+    "DIRS": [],
+    "COMPONENTS_DIR": "_components",
+}
 
 
 class TestComponentsModuleExports:
@@ -79,21 +90,21 @@ class TestFileComponentsBackend:
     """Tests for FileComponentsBackend discovery and resolution."""
 
     def test_collect_visible_empty_when_no_roots(self) -> None:
-        """With app_dirs=False and no root dirs, no components are visible."""
-        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
+        """With empty ``DIRS`` and no registry data, no components are visible."""
+        backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
         visible = backend.collect_visible_components(Path("/tmp/some/template.djx"))
         assert visible == {}
 
     def test_get_component_returns_none_when_empty(self) -> None:
         """get_component returns None when no backends have it."""
-        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
+        backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
         assert backend.get_component("card", Path("/tmp/template.djx")) is None
 
     def test_discover_in_component_root_simple(self, tmp_path: Path) -> None:
         """Root component dir: .djx files are discovered as simple components."""
         (tmp_path / "header.djx").write_text("<header>Hi</header>")
         backend = FileComponentsBackend(
-            {"APP_DIRS": False, "OPTIONS": {"COMPONENTS_DIR": str(tmp_path)}},
+            {**_MIN_FILE_COMPONENTS, "DIRS": [str(tmp_path)]},
         )
         backend._ensure_loaded()
         assert len(backend._registry) == 1
@@ -110,7 +121,7 @@ class TestFileComponentsBackend:
         (tmp_path / "profile").mkdir()
         (tmp_path / "profile" / "component.djx").write_text("<div>profile</div>")
         backend = FileComponentsBackend(
-            {"APP_DIRS": False, "OPTIONS": {"COMPONENTS_DIR": str(tmp_path)}},
+            {**_MIN_FILE_COMPONENTS, "DIRS": [str(tmp_path)]},
         )
         backend._ensure_loaded()
         assert len(backend._registry) == 1
@@ -120,46 +131,35 @@ class TestFileComponentsBackend:
         assert not info.is_simple
         assert info.template_path == tmp_path / "profile" / "component.djx"
 
-    def test_discover_under_app_root_finds_components_dir(self, tmp_path: Path) -> None:
-        """``_components`` under a pages root is scanned when app roots supply that path."""
-        (tmp_path / "_components").mkdir()
-        (tmp_path / "_components" / "card.djx").write_text("<div>card</div>")
-        backend = FileComponentsBackend(
-            {"APP_DIRS": True, "OPTIONS": {}},
-        )
-        with patch.object(
-            backend._root_discovery, "discover_app_roots", return_value=[tmp_path]
-        ):
-            backend._ensure_loaded()
-        assert len(backend._registry) == 1
-        components = list(backend._registry)
-        assert components[0].name == "card"
+    def test_string_base_dir_normalized_for_discovery(self, tmp_path: Path) -> None:
+        """``BASE_DIR`` as str is converted to ``Path`` for ``DIRS`` resolution."""
+        (tmp_path / "nest").mkdir()
+        with patch("next.utils.settings") as mock_settings:
+            mock_settings.BASE_DIR = str(tmp_path)
+            roots = component_extra_roots_from_config({"DIRS": ["nest"]})
+        assert roots == [(tmp_path / "nest").resolve()]
 
-    def test_get_root_component_roots_from_options(self, tmp_path: Path) -> None:
-        """ComponentRootDiscovery returns paths from COMPONENTS_DIRS or COMPONENTS_DIR."""
-        backend = FileComponentsBackend(
-            {
-                "APP_DIRS": False,
-                "OPTIONS": {"COMPONENTS_DIRS": ["/nonexistent/root"]},
-            },
-        )
-        roots = backend._root_discovery.discover_component_roots(backend.options)
-        assert roots == []
+    def test_file_components_backend_normalizes_string_base_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """``BASE_DIR`` as str is normalized when resolving ``DIRS``."""
+        (tmp_path / "c").mkdir()
+        with patch("next.utils.settings") as mock_settings:
+            mock_settings.BASE_DIR = str(tmp_path)
+            FileComponentsBackend({**_MIN_FILE_COMPONENTS, "DIRS": ["c"]})
 
-        backend2 = FileComponentsBackend(
-            {
-                "APP_DIRS": False,
-                "OPTIONS": {"COMPONENTS_DIR": str(tmp_path)},
-            },
-        )
-        roots2 = backend2._root_discovery.discover_component_roots(backend2.options)
-        assert len(roots2) == 1
-        assert roots2[0] == tmp_path.resolve()
+    def test_discover_component_roots_from_dirs(self, tmp_path: Path) -> None:
+        """``component_extra_roots_from_config`` returns existing paths from ``DIRS``."""
+        assert component_extra_roots_from_config({"DIRS": ["/nonexistent/root"]}) == []
+
+        roots = component_extra_roots_from_config({"DIRS": [str(tmp_path)]})
+        assert len(roots) == 1
+        assert roots[0] == tmp_path.resolve()
 
     def test_root_components_visible_from_any_path(self, tmp_path: Path) -> None:
         """Root component roots are visible from any template path."""
         (tmp_path / "global.djx").write_text("<div>global</div>")
-        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
+        backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
 
         # Register component directly in the new registry
         info = ComponentInfo(
@@ -182,7 +182,7 @@ class TestFileComponentsBackend:
         comp_dir = tmp_path / "pages" / "about" / "_components"
         comp_dir.mkdir(parents=True)
         (comp_dir / "card.djx").write_text("<div>card</div>")
-        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
+        backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
 
         # Register component directly in the new registry
         info = ComponentInfo(
@@ -207,25 +207,27 @@ class TestComponentsFactory:
     """Tests for ComponentsFactory."""
 
     def test_create_backend_file_default(self) -> None:
-        """Create FileComponentsBackend with default config."""
-        config = {"BACKEND": "next.components.FileComponentsBackend"}
+        """Create FileComponentsBackend with merged-style keys."""
+        config = {
+            "BACKEND": "next.components.FileComponentsBackend",
+            "DIRS": [],
+            "COMPONENTS_DIR": "_components",
+        }
         backend = ComponentsFactory.create_backend(config)
         assert isinstance(backend, FileComponentsBackend)
         assert backend.components_dir == "_components"
-        assert backend.app_dirs is True
 
-    def test_create_backend_file_with_options(self) -> None:
-        """Create FileComponentsBackend with OPTIONS."""
+    def test_create_backend_file_with_component_dirs(self) -> None:
+        """Create FileComponentsBackend with ``COMPONENTS_DIR`` and empty ``DIRS``."""
         config = {
             "BACKEND": "next.components.FileComponentsBackend",
-            "APP_DIRS": False,
-            "OPTIONS": {"COMPONENTS_DIR": "components", "PAGES_DIR": "views"},
+            "DIRS": [],
+            "COMPONENTS_DIR": "components",
         }
         backend = ComponentsFactory.create_backend(config)
         assert isinstance(backend, FileComponentsBackend)
         assert backend.components_dir == "components"
-        assert backend.app_dirs is False
-        assert backend.options.get("PAGES_DIR") == "views"
+        assert backend._extra_component_roots == []
 
     def test_create_backend_unknown_raises(self) -> None:
         """Unknown backend class path raises ImportError."""
@@ -274,6 +276,36 @@ class TestComponentsManager:
             mgr._reload_config()
         assert isinstance(mgr.template_loader, ComponentTemplateLoader)
         assert isinstance(mgr.component_renderer, ComponentRenderer)
+
+
+class TestRegisterComponentsFolderFromRouterWalk:
+    """``register_components_folder_from_router_walk`` wiring."""
+
+    def test_registers_scanned_components_on_backend(self, tmp_path: Path) -> None:
+        """Each folder is scanned into the first file components backend registry."""
+        components_manager._walk_registered_folders.clear()
+        components_manager._backends.clear()
+        backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
+        components_manager._backends.append(backend)
+        folder = tmp_path / "_components"
+        folder.mkdir()
+        (folder / "z.djx").write_text("z")
+        register_components_folder_from_router_walk(folder, tmp_path, "")
+        names = [c.name for c in backend._registry.get_all()]
+        assert "z" in names
+
+    def test_second_call_skips_same_resolved_folder(self, tmp_path: Path) -> None:
+        """Repeated registration for the same path is ignored."""
+        components_manager._walk_registered_folders.clear()
+        components_manager._backends.clear()
+        backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
+        components_manager._backends.append(backend)
+        folder = tmp_path / "_components"
+        folder.mkdir()
+        (folder / "a.djx").write_text("a")
+        register_components_folder_from_router_walk(folder, tmp_path, "")
+        register_components_folder_from_router_walk(folder, tmp_path, "")
+        assert len(list(backend._registry.get_all())) == 1
 
 
 class TestGetComponent:
@@ -440,7 +472,7 @@ class TestChecks:
         """check_duplicate_component_names reports when same name in same scope."""
         (tmp_path / "a.djx").write_text("a")
         (tmp_path / "b.djx").write_text("b")
-        fake_backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
+        fake_backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
 
         # Register duplicates using new registry
         fake_backend._registry.register(
@@ -455,12 +487,67 @@ class TestChecks:
             errors = check_duplicate_component_names()
         assert any(e.id == "next.E020" for e in errors)
 
+    def test_check_duplicate_component_names_root_and_nested_scope(
+        self, tmp_path: Path
+    ) -> None:
+        """Same name at root route scope and under a nested route is rejected."""
+        root = tmp_path.resolve()
+        (tmp_path / "a.djx").write_text("a")
+        (tmp_path / "b.djx").write_text("b")
+        fake_backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
+        fake_backend._registry.register(
+            ComponentInfo("card", root, "", tmp_path / "a.djx", None, True)
+        )
+        fake_backend._registry.register(
+            ComponentInfo("card", root, "blog", tmp_path / "b.djx", None, True)
+        )
+        fake_backend._loaded = True
+        with patch_checks_components_manager(fake_backend):
+            errors = check_duplicate_component_names()
+        assert any(e.id == "next.E020" for e in errors)
+
+    def test_check_cross_root_component_name_conflicts_empty_single_tree(
+        self, tmp_path: Path
+    ) -> None:
+        """One page tree can reuse a name only under different route scopes."""
+        root = tmp_path.resolve()
+        (tmp_path / "a.djx").write_text("a")
+        fake_backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
+        fake_backend._registry.register(
+            ComponentInfo("card", root, "", tmp_path / "a.djx", None, True)
+        )
+        fake_backend._loaded = True
+        with patch_checks_components_manager(fake_backend):
+            assert check_cross_root_component_name_conflicts() == []
+
+    def test_check_cross_root_component_name_conflicts_reports(
+        self, tmp_path: Path
+    ) -> None:
+        """Same root-level name on two page trees is rejected."""
+        custom = (tmp_path / "custom").resolve()
+        pages = (tmp_path / "pages").resolve()
+        custom.mkdir()
+        pages.mkdir()
+        (custom / "c.djx").write_text("x")
+        (pages / "c.djx").write_text("y")
+        fake_backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
+        fake_backend._registry.register(
+            ComponentInfo("hero", custom, "", custom / "c.djx", None, True)
+        )
+        fake_backend._registry.register(
+            ComponentInfo("hero", pages, "", pages / "c.djx", None, True)
+        )
+        fake_backend._loaded = True
+        with patch_checks_components_manager(fake_backend):
+            errors = check_cross_root_component_name_conflicts()
+        assert any(e.id == "next.E034" for e in errors)
+
     def test_check_component_py_no_pages_context_reports_import(
         self, tmp_path: Path
     ) -> None:
         """check_component_py_no_pages_context reports when component.py imports context from next.pages."""
         (tmp_path / "component.py").write_text("from next.pages import context\n")
-        fake_backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
+        fake_backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
 
         # Register component using new registry
         fake_backend._registry.register(
@@ -996,77 +1083,29 @@ class TestComponentScanner:
         assert scanner.scan_directory(tmp_path, tmp_path, "") == []
 
 
-class TestComponentRootDiscovery:
-    """ComponentRootDiscovery configuration and app paths."""
+class TestComponentExtraRootsFromConfig:
+    """``component_extra_roots_from_config`` accepts several ``DIRS`` forms."""
 
-    def test_components_dirs_tuple_and_path_instances(self, tmp_path: Path) -> None:
-        """COMPONENTS_DIRS accepts tuple and Path elements."""
+    def test_dirs_tuple_and_path_instances(self, tmp_path: Path) -> None:
+        """``DIRS`` accepts tuple and Path elements."""
         a = tmp_path / "a"
         b = tmp_path / "b"
         a.mkdir()
         b.mkdir()
-        disc = ComponentRootDiscovery()
-        r1 = disc.discover_component_roots({"COMPONENTS_DIRS": (a, b)})
+        r1 = component_extra_roots_from_config({"DIRS": (a, b)})
         assert len(r1) == 2
-        r2 = disc.discover_component_roots(
-            {"COMPONENTS_DIRS": [str(b.resolve()), Path(str(a))]},
+        r2 = component_extra_roots_from_config(
+            {"DIRS": [str(b.resolve()), Path(str(a))]},
         )
         assert {Path(p).resolve() for p in r2} == {a.resolve(), b.resolve()}
         missing = tmp_path / "nope"
         assert not missing.exists()
-        r3 = disc.discover_component_roots(
-            {"COMPONENTS_DIRS": [str(a.resolve()), str(missing)]},
+        r3 = component_extra_roots_from_config(
+            {"DIRS": [str(a.resolve()), str(missing)]},
         )
         assert r3 == [a.resolve()]
 
-        disc2 = ComponentRootDiscovery()
-        assert disc2.discover_component_roots({"COMPONENTS_DIR": str(missing)}) == []
-
-    def test_get_installed_apps_skips_django_prefix(self) -> None:
-        """_get_installed_apps yields only apps not starting with django."""
-        disc = ComponentRootDiscovery()
-        with patch("next.components.settings") as m:
-            m.INSTALLED_APPS = ["django.contrib.admin", "myapp", "django.foo"]
-            assert list(disc._get_installed_apps()) == ["myapp"]
-
-    def test_get_app_pages_path_import_error_returns_none(self) -> None:
-        """_get_app_pages_path returns None when __import__ fails."""
-        disc = ComponentRootDiscovery()
-        with patch("builtins.__import__", side_effect=ImportError("no")):
-            assert disc._get_app_pages_path("missing.app") is None
-
-    def test_get_app_pages_path_none_file_returns_none(self) -> None:
-        """When app module has __file__ None, pages path is None."""
-        disc = ComponentRootDiscovery()
-        mod = types.ModuleType("x")
-        mod.__file__ = None
-        with patch("builtins.__import__", return_value=mod):
-            assert disc._get_app_pages_path("x") is None
-
-    def test_discover_app_roots_appends_when_pages_exists(self, tmp_path: Path) -> None:
-        """discover_app_roots collects resolved paths when _get_app_pages_path finds one."""
-        disc = ComponentRootDiscovery()
-        pages = tmp_path / "pages"
-        pages.mkdir()
-        with (
-            patch.object(disc, "_get_installed_apps", return_value=["myapp"]),
-            patch.object(disc, "_get_app_pages_path", return_value=pages),
-        ):
-            roots = disc.discover_app_roots()
-        assert roots == [pages.resolve()]
-
-    def test_get_app_pages_path_missing_pages_dir_returns_none(
-        self, tmp_path: Path
-    ) -> None:
-        """When pages subdirectory does not exist, return None."""
-        disc = ComponentRootDiscovery()
-        app_pkg = tmp_path / "myapp"
-        app_pkg.mkdir()
-        (app_pkg / "__init__.py").write_text("")
-        mod = types.ModuleType("myapp")
-        mod.__file__ = str(app_pkg / "__init__.py")
-        with patch("builtins.__import__", return_value=mod):
-            assert disc._get_app_pages_path("myapp") is None
+        assert component_extra_roots_from_config({"DIRS": [str(missing)]}) == []
 
 
 class TestComponentVisibilityResolver:
@@ -1118,6 +1157,8 @@ class TestComponentVisibilityResolver:
         r1 = res.resolve_visible(tmpl)
         r2 = res.resolve_visible(tmpl)
         assert r1 == r2
+        assert "c" in r1
+        assert r1["c"].name == "c"
         res.clear_cache()
         assert res._path_cache == {}
 
@@ -1181,6 +1222,19 @@ class TestComponentVisibilityResolver:
             )
             is None
         )
+
+    def test_compute_relative_parts_template_at_scope_root(
+        self, tmp_path: Path
+    ) -> None:
+        """Template directory equals scope_root yields a single empty route prefix."""
+        reg = ComponentRegistry()
+        res = ComponentVisibilityResolver(reg)
+        pages = tmp_path / "pages"
+        pages.mkdir()
+        tmpl = pages / "template.djx"
+        tmpl.write_text("x")
+        parts = res._compute_relative_parts(tmpl.resolve(), pages.resolve())
+        assert parts == [""]
 
 
 class TestComponentRenderers:
@@ -1334,76 +1388,6 @@ class TestComponentRenderers:
         assert "<b>" in html
 
 
-class TestFileComponentsBackendDiscovery:
-    """FileComponentsBackend internal discovery branches."""
-
-    def test_discover_pages_relative_valueerror_sets_empty_scope(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """ValueError from relative_to yields empty scope_relative."""
-        pages = tmp_path / "pages"
-        comp = pages / "sec" / "_components"
-        comp.mkdir(parents=True)
-        (comp / "a.djx").write_text("a")
-        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
-        calls: dict[str, int] = {"n": 0}
-        orig_rt = Path.relative_to
-        simulated_rel = ValueError("simulated")
-
-        def flaky_relative_to(
-            self: Path, other: Path, *args: object, **kwargs: object
-        ) -> Path:
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise simulated_rel
-            return orig_rt(self, other, *args, **kwargs)
-
-        monkeypatch.setattr(Path, "relative_to", flaky_relative_to)
-        backend._discover_in_pages_root(pages.resolve())
-        names = [c.name for c in backend._registry.get_all()]
-        assert "a" in names
-
-    def test_discover_pages_rglob_oserror(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """OSError from rglob is logged and discovery stops."""
-        pages = tmp_path / "pages"
-        pages.mkdir()
-        pages_resolved = pages.resolve()
-        orig_rglob = Path.rglob
-        denied = OSError("denied")
-
-        def bad_rglob(self: Path, pattern: str) -> object:
-            if self.resolve() == pages_resolved:
-                raise denied
-            return orig_rglob(self, pattern)
-
-        monkeypatch.setattr(Path, "rglob", bad_rglob)
-        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
-        backend._discover_in_pages_root(pages.resolve())
-        assert len(backend._registry) == 0
-
-
-class TestFileComponentsBackendDiscoveryEdgeCases:
-    """Discovery edge cases for ``FileComponentsBackend``."""
-
-    def test_discover_skips_when_components_name_is_file(self, tmp_path: Path) -> None:
-        """A file named like the components dir is ignored during discovery."""
-        pages = tmp_path / "pages"
-        pages.mkdir()
-        (pages / "_components").write_text("not a directory")
-        backend = FileComponentsBackend({"APP_DIRS": False, "OPTIONS": {}})
-        backend._discover_in_pages_root(pages.resolve())
-        assert len(backend._registry) == 0
-
-    def test_options_not_dict_treated_as_empty(self) -> None:
-        """Non-dict ``OPTIONS`` is replaced with an empty dict."""
-        b = FileComponentsBackend(
-            {"APP_DIRS": False, "OPTIONS": "invalid"},
-        )
-        assert b.options == {}
-
-
 class TestComponentsFactoryManager:
     """ComponentsFactory import path and ComponentsManager branches."""
 
@@ -1412,7 +1396,6 @@ class TestComponentsFactoryManager:
         b = ComponentsFactory.create_backend(
             {
                 "BACKEND": "next.components.DummyBackend",
-                "APP_DIRS": True,
                 "OPTIONS": {"marker": 7},
             },
         )
@@ -1439,11 +1422,8 @@ class TestComponentsFactoryManager:
                 None,
                 {
                     "BACKEND": "next.components.FileComponentsBackend",
-                    "APP_DIRS": True,
-                    "OPTIONS": {
-                        "COMPONENTS_DIR": "_components",
-                        "PAGES_DIR": "pages",
-                    },
+                    "DIRS": [],
+                    "COMPONENTS_DIR": "_components",
                 },
             ],
         )
@@ -1458,11 +1438,8 @@ class TestComponentsFactoryManager:
             [
                 {
                     "BACKEND": "next.components.BoomBackend",
-                    "APP_DIRS": True,
-                    "OPTIONS": {
-                        "COMPONENTS_DIR": "_components",
-                        "PAGES_DIR": "pages",
-                    },
+                    "DIRS": [],
+                    "COMPONENTS_DIR": "_components",
                 },
             ],
         )
@@ -1714,3 +1691,358 @@ class TestComponentContextManagerFrames:
         funcs = mgr.get_functions(script.resolve())
         assert len(funcs) == 1
         assert funcs[0].key == "slot"
+
+
+class TestGetComponentPathsForWatch:
+    """``get_component_paths_for_watch`` mirrors discovery without mutating managers."""
+
+    def test_empty_when_backend_settings_not_lists(self) -> None:
+        """Return empty sets when ``DEFAULT_*_BACKENDS`` are not lists."""
+        mock_nf = SimpleNamespace(
+            DEFAULT_PAGE_BACKENDS="not-a-list",
+            DEFAULT_COMPONENT_BACKENDS="not-a-list",
+        )
+        with patch("next.components.next_framework_settings", mock_nf):
+            assert get_component_paths_for_watch() == set()
+
+    def test_collects_composite_under_pages_tree(self, tmp_path: Path) -> None:
+        """Paths include ``component.djx`` under ``COMPONENTS_DIR`` in a pages tree."""
+        pages_root = tmp_path / "pages"
+        comp_dir = pages_root / "_components" / "widget"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "component.djx").write_text("<span/>")
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            paths = get_component_paths_for_watch()
+        next_framework_settings.reload()
+        assert (comp_dir / "component.djx").resolve() in paths
+
+    def test_includes_module_path_for_py_only_composite(self, tmp_path: Path) -> None:
+        """Composite with only ``component.py`` (string template) adds that path."""
+        pages_root = tmp_path / "pages"
+        comp_dir = pages_root / "_components" / "modonly"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "component.py").write_text('component = "<b/>"\n')
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            paths = get_component_paths_for_watch()
+        next_framework_settings.reload()
+        assert (comp_dir / "component.py").resolve() in paths
+
+    def test_skips_non_dict_page_config(self) -> None:
+        """Non-dict ``DEFAULT_PAGE_BACKENDS`` entries are ignored."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": ["not-dict"],
+                "DEFAULT_COMPONENT_BACKENDS": [],
+            },
+        ):
+            next_framework_settings.reload()
+            assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_skips_non_dict_component_config(self) -> None:
+        """Non-dict ``DEFAULT_COMPONENT_BACKENDS`` entries are ignored."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": ["bad"],
+            },
+        ):
+            next_framework_settings.reload()
+            assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_collects_simple_djx_in_extra_root(self, tmp_path: Path) -> None:
+        """Extra component root picks up top-level ``.djx`` simple components."""
+        root = tmp_path / "extra"
+        root.mkdir()
+        (root / "solo.djx").write_text("x")
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [str(root)],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            paths = get_component_paths_for_watch()
+        next_framework_settings.reload()
+        assert (root / "solo.djx").resolve() in paths
+
+    def test_swallows_page_backend_create_error(self, tmp_path: Path) -> None:
+        """Invalid page backend config is skipped after logging."""
+        pages_root = tmp_path / "pages"
+        pages_root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch(
+                "next.urls.RouterFactory.create_backend",
+                side_effect=ValueError("bad config"),
+            ):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_glob_oserror_swallowed_for_pages_scan(self, tmp_path: Path) -> None:
+        """OSError from ``Path.glob`` while finding component dirs is handled."""
+        pages_root = tmp_path / "pages"
+        pages_root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch.object(Path, "glob", side_effect=OSError("glob fail")):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_relative_to_valueerror_skips_component_dir(self, tmp_path: Path) -> None:
+        """When ``relative_to`` fails, that ``_components`` folder is skipped."""
+        pages_root = tmp_path / "pages"
+        comp_dir = pages_root / "_components" / "w"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "component.djx").write_text("x")
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch.object(Path, "relative_to", side_effect=ValueError("outside")):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_swallows_component_backend_create_error(self) -> None:
+        """Failure to build a component backend is skipped."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch(
+                "next.components.ComponentsFactory.create_backend",
+                side_effect=RuntimeError("boom"),
+            ):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_skips_non_file_component_backend(self) -> None:
+        """Non-``FileComponentsBackend`` entries do not contribute paths."""
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.DummyBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_oserror_scanning_extra_root(self, tmp_path: Path) -> None:
+        """OSError when listing an extra component root is handled."""
+        root = tmp_path / "r"
+        root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [str(root)],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch.object(Path, "iterdir", side_effect=OSError("read")):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_skips_non_filesystem_page_router(self, tmp_path: Path) -> None:
+        """Non-filesystem discovery routers do not run the pages-tree scan."""
+        pages_root = tmp_path / "pages"
+        pages_root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch(
+                "next.urls.RouterFactory.is_filesystem_discovery_router",
+                return_value=False,
+            ):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_skips_glob_match_that_is_not_a_directory(self, tmp_path: Path) -> None:
+        """Glob can match a file named like ``COMPONENTS_DIR``. That match is ignored."""
+        pages_root = tmp_path / "pages"
+        fake = pages_root / "seg" / "_components"
+        fake.parent.mkdir(parents=True)
+        fake.write_text("not a directory")
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [
+                    {
+                        "BACKEND": "next.urls.FileRouterBackend",
+                        "PAGES_DIR": "pages",
+                        "APP_DIRS": False,
+                        "DIRS": [str(pages_root)],
+                        "OPTIONS": {},
+                    },
+                ],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()
+
+    def test_oserror_from_scan_directory_on_extra_root(self, tmp_path: Path) -> None:
+        """OSError raised while scanning an extra component root is handled."""
+        root = tmp_path / "root"
+        root.mkdir()
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_PAGE_BACKENDS": [],
+                "DEFAULT_COMPONENT_BACKENDS": [
+                    {
+                        "BACKEND": "next.components.FileComponentsBackend",
+                        "DIRS": [str(root)],
+                        "COMPONENTS_DIR": "_components",
+                    },
+                ],
+            },
+        ):
+            next_framework_settings.reload()
+            with patch.object(
+                ComponentScanner,
+                "scan_directory",
+                side_effect=OSError("scan"),
+            ):
+                assert get_component_paths_for_watch() == set()
+        next_framework_settings.reload()

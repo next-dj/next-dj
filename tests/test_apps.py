@@ -2,7 +2,7 @@ from django.utils import autoreload
 from django.utils.autoreload import autoreload_started
 
 from next.pages import get_pages_directories_for_watch
-from next.utils import NextStatReloader
+from next.server import NextStatReloader
 
 
 class TestNextFrameworkConfig:
@@ -26,3 +26,15 @@ class TestNextFrameworkConfig:
         assert len(next_watch_calls) == len(pages_dirs)
         for path in pages_dirs:
             assert any(p == path and g == "**/page.py" for p, g in watch_calls)
+
+    def test_autoreload_started_never_registers_djx_globs(self) -> None:
+        """``watch_dir`` patterns from next must not match ``.djx`` (lazy templates)."""
+        watch_calls: list[tuple[object, str]] = []
+
+        class MockSender:
+            def watch_dir(self, path, glob):
+                watch_calls.append((path, glob))
+
+        autoreload_started.send(sender=MockSender())
+        for _path, glob in watch_calls:
+            assert ".djx" not in glob, f"unexpected djx glob: {glob!r}"

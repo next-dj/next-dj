@@ -48,14 +48,14 @@ if not settings.configured:
             },
         ],
         NEXT_FRAMEWORK={
-            "DEFAULT_PAGE_ROUTERS": [
+            "DEFAULT_PAGE_BACKENDS": [
                 {
                     "BACKEND": "next.urls.FileRouterBackend",
                     "PAGES_DIR": "pages",
                     "APP_DIRS": True,
+                    "DIRS": [],
                     "OPTIONS": {
-                        "COMPONENTS_DIR": "_components",
-                        "PAGES_DIR": "catalog/pages",
+                        "context_processors": [],
                     },
                 },
             ],

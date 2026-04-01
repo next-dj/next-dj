@@ -1,6 +1,6 @@
 """Provide merged ``settings.NEXT_FRAMEWORK`` with framework ``DEFAULTS``.
 
-Caches imported classes until ``NextFrameworkSettings.reload()`` clears caches.
+Imported classes stay cached until ``NextFrameworkSettings.reload()`` clears caches.
 """
 
 from __future__ import annotations
@@ -30,13 +30,14 @@ class NextFrameworkSettings:
     """Lazy merged view of ``NEXT_FRAMEWORK`` keys defined in ``DEFAULTS``."""
 
     DEFAULTS: ClassVar[dict[str, Any]] = {
-        "DEFAULT_PAGE_ROUTERS": [
+        "DEFAULT_PAGE_BACKENDS": [
             {
                 "BACKEND": "next.urls.FileRouterBackend",
+                "DIRS": [],
                 "APP_DIRS": True,
                 "PAGES_DIR": "pages",
                 "OPTIONS": {
-                    "COMPONENTS_DIR": "_components",
+                    "context_processors": [],
                 },
             },
         ],
@@ -44,11 +45,8 @@ class NextFrameworkSettings:
         "DEFAULT_COMPONENT_BACKENDS": [
             {
                 "BACKEND": "next.components.FileComponentsBackend",
-                "APP_DIRS": True,
-                "OPTIONS": {
-                    "COMPONENTS_DIR": "_components",
-                    "PAGES_DIR": "pages",
-                },
+                "DIRS": [],
+                "COMPONENTS_DIR": "_components",
             },
         ],
     }
@@ -86,9 +84,10 @@ class NextFrameworkSettings:
         return self._merged_cache
 
     def _build_flat_merged(self, user: dict[str, Any] | None) -> dict[str, Any]:
-        if not user:
-            return copy.deepcopy(self.DEFAULTS)
         out = copy.deepcopy(self.DEFAULTS)
+        if not user:
+            return out
+        user = dict(user)
         for key in self.DEFAULTS:
             if key not in user:
                 continue
@@ -96,21 +95,21 @@ class NextFrameworkSettings:
             if key == "URL_NAME_TEMPLATE" and isinstance(raw, str):
                 out[key] = raw
             elif key in (
-                "DEFAULT_PAGE_ROUTERS",
+                "DEFAULT_PAGE_BACKENDS",
                 "DEFAULT_COMPONENT_BACKENDS",
             ) and isinstance(raw, list):
                 out[key] = copy.deepcopy(raw)
         return out
 
     def __getattr__(self, attr: str) -> Any:  # noqa: ANN401
-        """Return merged value for known ``DEFAULTS`` keys."""
+        """Return merged values for keys that exist in ``DEFAULTS``."""
         if attr in self._attr_value_cache:
             return self._attr_value_cache[attr]
         if attr not in self.DEFAULTS:
             allowed = ", ".join(sorted(self.DEFAULTS))
             msg = f"Invalid Next framework setting: {attr!r}. Allowed keys: {allowed}."
             raise AttributeError(msg)
-        val: Any = self._merged()[attr]
+        val = self._merged()[attr]
         self._attr_value_cache[attr] = val
         return val
 
@@ -129,7 +128,7 @@ class NextFrameworkSettings:
 
 
 def perform_import(val: Any, setting_name: str) -> Any:  # noqa: ANN401
-    """Resolve ``val`` when it is a dotted path (see ``IMPORT_STRINGS``)."""
+    """Resolve ``val`` when it is a dotted import path (see ``IMPORT_STRINGS``)."""
     if val is None or not isinstance(val, str):
         return val
     try:

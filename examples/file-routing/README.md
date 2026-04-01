@@ -9,7 +9,7 @@ This example showcases the fundamental concept of next-dj: automatic URL pattern
 - **Automatic URL pattern generation** from directory structure
 - **Parameterized routes** with type hints and wildcard arguments
 - **Template rendering** with context management
-- **Multiple routing strategies** (app-specific and root-level pages)
+- **App pages and extra roots in one router** — `APP_DIRS` scans each app’s `pages/`, and `DIRS` adds filesystem roots such as `root_pages/` (see `config/settings.py`)
 
 The example includes various page types to illustrate different routing scenarios and parameter handling approaches.
 
@@ -58,7 +58,7 @@ file-routing/
 
 ## How It Works
 
-The example uses next-dj's file-based routing system:
+The example uses next-dj's file-based routing system. A single `FileRouterBackend` entry uses `APP_DIRS: True` and lists `root_pages` in `DIRS`, so app routes are registered first and project-level pages under `root_pages/` are added next.
 
 1. **Directory Scanning**: The system scans configured directories for `page.py` files
 2. **URL Pattern Generation**: File paths are converted to Django URL patterns using special syntax:
@@ -75,9 +75,9 @@ The example uses next-dj's file-based routing system:
 
 ### Prerequisites
 
-- Python 3.8+
-- Django 4.0+
-- next-dj package installed
+- Python 3.11+ (see the root `pyproject.toml`)
+- Django 4.2+ (supported range in the main project)
+- next-dj installed
 
 ### Setup
 

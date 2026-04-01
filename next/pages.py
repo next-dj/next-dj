@@ -1,8 +1,8 @@
-"""Build views and templates from ``page.py`` files under each app's pages tree.
+"""Build views and templates from page modules under each app pages tree.
 
-Registers templates from a module-level ``template`` string or ``template.djx``,
-composes ``layout.djx`` parents, merges context functions, and exposes URL wiring
-through the page API.
+Templates may come from a module template string or from template.djx files. Layout
+chains use layout.djx. Context helpers merge into the render context. The page API
+exposes URL wiring for the file router.
 """
 
 import contextlib
@@ -25,6 +25,7 @@ from django.utils.module_loading import import_string
 
 from .conf import next_framework_settings
 from .deps import DependencyResolver, RegisteredParameterProvider, resolver
+from .utils import caller_source_path, classify_dirs_entries, resolve_base_dir
 
 
 if TYPE_CHECKING:
@@ -38,16 +39,13 @@ _CONTEXT_DEFAULT_UNSET: object = object()
 
 @dataclass(frozen=True, slots=True)
 class Context:
-    """Mark a parameter as a value read from page/layout ``context_data``.
+    """Mark a page or layout parameter default so the value comes from context_data.
 
-    Use as a default parameter value:
-
-    - ``Context("key")``: read ``context_data["key"]``
-    - ``Context()``: read ``context_data[param.name]``
-    - ``Context(callable)``: call a factory with DI-resolved args
-    - ``Context(value)``: inject a constant value
-    - ``Context("key", default=...)``: fallback when key is missing
-    - ``Context(default=...)``: fallback when param.name key is missing
+    Use Context as the default value of a parameter. A string source reads that key.
+    An empty Context reads context_data using the parameter name. A callable source
+    is called with dependency-injected arguments. Any other object is injected as a
+    constant. The default= keyword supplies a fallback when the context key is
+    missing.
     """
 
     source: object | None = None
@@ -55,18 +53,18 @@ class Context:
 
 
 class ContextByDefaultProvider(RegisteredParameterProvider):
-    """Fills parameters whose default is a ``Context(...)`` marker."""
+    """Resolve parameters that use a Context instance as their default."""
 
     def __init__(self, resolver: DependencyResolver) -> None:
-        """Keep a resolver for callable ``Context`` sources."""
+        """Store the dependency resolver for callable Context sources."""
         self._resolver = resolver
 
     def can_handle(self, param: inspect.Parameter, _context: object) -> bool:
-        """Whether ``param.default`` is a ``Context`` instance."""
+        """Return True when the parameter default is a Context instance."""
         return isinstance(param.default, Context)
 
     def resolve(self, param: inspect.Parameter, context: object) -> object:
-        """Value from ``context_data``, a callable, or a constant per the marker."""
+        """Resolve the value from context_data, a callable, or a constant."""
         marker = param.default
         if not isinstance(marker, Context):
             return None
@@ -100,15 +98,15 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
 
 
 class ContextByNameProvider(RegisteredParameterProvider):
-    """Injects ``context_data[param.name]`` when that key exists."""
+    """Inject context_data values when the parameter name is already a key."""
 
     def can_handle(self, param: inspect.Parameter, context: object) -> bool:
-        """Whether ``context_data`` already defines this parameter name."""
+        """Return True when context_data already contains this parameter name."""
         context_data = getattr(context, "context_data", {}) or {}
         return param.name in context_data
 
     def resolve(self, param: inspect.Parameter, context: object) -> object:
-        """Return ``context_data[param.name]``."""
+        """Return the value stored under the parameter name in context_data."""
         context_data = getattr(context, "context_data", {}) or {}
         return context_data[param.name]
 
@@ -116,7 +114,7 @@ class ContextByNameProvider(RegisteredParameterProvider):
 def _import_context_processor(
     processor_path: str,
 ) -> Callable[[Any], dict[str, Any]] | None:
-    """Import a context processor callable or return ``None``."""
+    """Import a context processor callable or return None if import fails."""
     try:
         processor = import_string(processor_path)
         # type check to ensure it's a callable
@@ -128,8 +126,8 @@ def _import_context_processor(
 
 
 def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
-    """Load merged ``context_processors`` from routers and ``TEMPLATES``."""
-    configs = next_framework_settings.DEFAULT_PAGE_ROUTERS
+    """Load merged context processors from Next routers and from Django TEMPLATES."""
+    configs = next_framework_settings.DEFAULT_PAGE_BACKENDS
     if not isinstance(configs, list):
         configs = []
     from_next = [
@@ -153,10 +151,12 @@ def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
 
 
 def get_pages_directories_for_watch() -> list[Path]:
-    """Absolute pages roots to watch for autoreload."""
-    from next.urls import FileRouterBackend, RouterFactory  # noqa: PLC0415
+    """Return absolute page tree roots that the autoreloader should consider."""
+    # Import RouterFactory inside the function to avoid a circular import chain
+    # between forms, pages, and urls.
+    from next.urls import RouterFactory  # noqa: PLC0415
 
-    configs = next_framework_settings.DEFAULT_PAGE_ROUTERS
+    configs = next_framework_settings.DEFAULT_PAGE_BACKENDS
     if not isinstance(configs, list):
         return []
     seen: set[Path] = set()
@@ -171,14 +171,15 @@ def get_pages_directories_for_watch() -> list[Path]:
                 "error creating backend for watch dirs from config %s", config
             )
             continue
-        if not isinstance(backend, FileRouterBackend):
+        if not RouterFactory.is_filesystem_discovery_router(backend):
             continue
+        fs_backend: Any = backend
         for p in itertools.chain(
-            (p.resolve() for p in backend._get_root_pages_paths()),
+            (p.resolve() for p in fs_backend._get_root_pages_paths()),
             (
                 a.resolve()
-                for app_name in backend._get_installed_apps()
-                if (a := backend._get_app_pages_path(app_name))
+                for app_name in fs_backend._get_installed_apps()
+                if (a := fs_backend._get_app_pages_path(app_name))
             ),
         ):
             if p not in seen:
@@ -187,8 +188,47 @@ def get_pages_directories_for_watch() -> list[Path]:
     return result
 
 
+def iter_pages_roots_with_components_folder_names() -> list[tuple[Path, str]]:
+    """List distinct page root and components folder name pairs for autoreload globs."""
+    from next.urls import RouterFactory  # noqa: PLC0415
+
+    configs = next_framework_settings.DEFAULT_PAGE_BACKENDS
+    if not isinstance(configs, list):
+        return []
+    seen: set[tuple[Path, str]] = set()
+    result: list[tuple[Path, str]] = []
+    for config in configs:
+        if not isinstance(config, dict):
+            continue
+        try:
+            backend = RouterFactory.create_backend(config)
+        except Exception:
+            logger.exception(
+                "error creating backend for components watch globs from config %s",
+                config,
+            )
+            continue
+        if not RouterFactory.is_filesystem_discovery_router(backend):
+            continue
+        fs_backend: Any = backend
+        comp_name = str(fs_backend._components_folder_name)
+        for p in itertools.chain(
+            (p.resolve() for p in fs_backend._get_root_pages_paths()),
+            (
+                a.resolve()
+                for app_name in fs_backend._get_installed_apps()
+                if (a := fs_backend._get_app_pages_path(app_name))
+            ),
+        ):
+            key = (p, comp_name)
+            if key not in seen:
+                seen.add(key)
+                result.append((p, comp_name))
+    return result
+
+
 def get_layout_djx_paths_for_watch() -> set[Path]:
-    """Every ``layout.djx`` under configured pages trees (autoreload)."""
+    """Return every ``layout.djx`` path under page trees (autoreload checks)."""
     result: set[Path] = set()
     for pages_path in get_pages_directories_for_watch():
         try:
@@ -200,7 +240,7 @@ def get_layout_djx_paths_for_watch() -> set[Path]:
 
 
 def get_template_djx_paths_for_watch() -> set[Path]:
-    """Every ``template.djx`` under configured pages trees (autoreload)."""
+    """Return every ``template.djx`` path under page trees (autoreload checks)."""
     result: set[Path] = set()
     for pages_path in get_pages_directories_for_watch():
         try:
@@ -309,8 +349,8 @@ class LayoutTemplateLoader(TemplateLoader):
         return layout_files or None
 
     def _get_additional_layout_files(self) -> list[Path]:
-        """Root-level ``layout.djx`` from router ``PAGES_*`` options."""
-        configs = next_framework_settings.DEFAULT_PAGE_ROUTERS or []
+        """Root-level ``layout.djx`` from each page backend ``DIRS`` path root."""
+        configs = next_framework_settings.DEFAULT_PAGE_BACKENDS or []
         if not isinstance(configs, list):
             configs = []
         candidates = (
@@ -323,17 +363,12 @@ class LayoutTemplateLoader(TemplateLoader):
         return list(dict.fromkeys(candidates))
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
-        """Candidate roots from one router ``OPTIONS`` block."""
-        options = config.get("OPTIONS", {})
-        if "PAGES_DIRS" in options:
-            dirs = options["PAGES_DIRS"]
-            if isinstance(dirs, (list, tuple)):
-                return [p if isinstance(p, Path) else Path(p) for p in dirs]
-            return []
-        if "PAGES_DIR" in options:
-            p = options["PAGES_DIR"]
-            return [p if isinstance(p, Path) else Path(p)]
-        return []
+        """Candidate roots from one router ``DIRS`` entry (path-like only)."""
+        path_roots, _ = classify_dirs_entries(
+            list(config.get("DIRS") or []),
+            resolve_base_dir(),
+        )
+        return list(path_roots)
 
     def _wrap_in_template_block(self, file_path: Path) -> str:
         """Page body wrapped in ``{% block template %}`` when needed."""
@@ -400,7 +435,7 @@ class LayoutManager:
         self._layout_registry.clear()
 
 
-class ContextManager:
+class PageContextRegistry:
     """Registers per-``page.py`` context callables and merges their output."""
 
     def __init__(
@@ -520,7 +555,7 @@ class Page:
         self._template_registry: dict[Path, str] = {}
         self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
         self._resolver: DependencyResolver | None = None
-        self._context_manager = ContextManager(None)
+        self._context_manager = PageContextRegistry(None)
         self._layout_manager = LayoutManager()
         self._template_loaders = [
             PythonTemplateLoader(),
@@ -538,24 +573,11 @@ class Page:
 
     def _get_caller_path(self, back_count: int = 1) -> Path:
         """Filesystem path of the caller outside ``pages.py`` (for ``@context``)."""
-        frame = inspect.currentframe()
-        for _ in range(back_count):
-            if not frame or not frame.f_back:
-                msg = "Could not determine caller file path"
-                raise RuntimeError(msg)
-            frame = frame.f_back
-
-        # skip over this module to find the actual caller
-        for _ in range(10):  # Prevent infinite loops
-            if not frame:
-                break
-            file_path = frame.f_globals.get("__file__")
-            if file_path and not file_path.endswith("pages.py"):
-                return Path(file_path)
-            frame = frame.f_back
-
-        msg = "Could not determine caller file path"
-        raise RuntimeError(msg)
+        return caller_source_path(
+            back_count=back_count,
+            max_walk=10,
+            skip_while_filename_endswith=("pages.py",),
+        )
 
     def context(
         self,

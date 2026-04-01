@@ -53,11 +53,12 @@ if not settings.configured:
         USE_TZ=True,
         TIME_ZONE="UTC",
         NEXT_FRAMEWORK={
-            "DEFAULT_PAGE_ROUTERS": [
+            "DEFAULT_PAGE_BACKENDS": [
                 {
                     "BACKEND": "next.urls.FileRouterBackend",
-                    "PAGES_DIR": str(project_root / "tests" / "pages"),
+                    "PAGES_DIR": "pages",
                     "APP_DIRS": False,
+                    "DIRS": [str(project_root / "tests" / "pages")],
                     "OPTIONS": {},
                 },
             ],

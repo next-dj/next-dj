@@ -5,20 +5,21 @@ from django.conf import settings
 
 
 class NextFrameworkConfig(AppConfig):
-    """Wires autoreload, template tag builtins, and page directory watches."""
+    """Connect autoreload, template tag builtins, and filesystem watches."""
 
     name = "next"
     verbose_name = "Next Django Framework"
 
     def ready(self) -> None:
-        """Swap ``StatReloader``, ensure tag builtins, watch pages trees."""
-        # Deferred imports to avoid circular deps (next.urls/next.utils) and
-        # because autoreload is only needed when wiring the reloader.
+        """Replace StatReloader, register tag builtins, and attach directory watches."""
+        # Deferred imports avoid circular imports between next.urls and next.server.
         from django.utils import autoreload  # noqa: PLC0415
         from django.utils.autoreload import autoreload_started  # noqa: PLC0415
 
-        from next.pages import get_pages_directories_for_watch  # noqa: PLC0415
-        from next.utils import NextStatReloader  # noqa: PLC0415
+        from next.server import (  # noqa: PLC0415
+            NextStatReloader,
+            iter_all_autoreload_watch_specs,
+        )
 
         autoreload.StatReloader = NextStatReloader  # type: ignore[misc]
 
@@ -28,8 +29,8 @@ class NextFrameworkConfig(AppConfig):
                 builtins.append(mod)
         settings.TEMPLATES[0].setdefault("OPTIONS", {})["builtins"] = builtins
 
-        def watch_pages(sender: object, **_: object) -> None:
-            for p in get_pages_directories_for_watch():
-                sender.watch_dir(p, "**/page.py")  # type: ignore[attr-defined]
+        def watch_next_filesystem(sender: object, **_: object) -> None:
+            for path, glob in iter_all_autoreload_watch_specs():
+                sender.watch_dir(path, glob)  # type: ignore[attr-defined]
 
-        autoreload_started.connect(watch_pages)
+        autoreload_started.connect(watch_next_filesystem)
