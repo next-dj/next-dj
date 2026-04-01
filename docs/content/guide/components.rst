@@ -67,7 +67,7 @@ Full example with every key shown (values are illustrative. Remove or adjust wha
 Custom backends are plain classes referenced by dotted path in ``BACKEND``. Each backend receives the **full** config dict for that list entry and reads what it needs.
 
 Several roots in ``DEFAULT_PAGE_BACKENDS`` ``DIRS``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You may list more than one filesystem root under ``NEXT_FRAMEWORK`` ``DEFAULT_PAGE_BACKENDS`` ``DIRS``. Each entry that resolves to an existing directory is a separate page tree and is walked the same way as a single root setup. Set ``COMPONENTS_DIR`` once under ``DEFAULT_COMPONENT_BACKENDS`` unless a page backend entry needs its own override. The file router then skips that folder name when scanning routes.
 
