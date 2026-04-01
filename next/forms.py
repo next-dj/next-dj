@@ -15,11 +15,13 @@ from pathlib import Path
 from typing import Any, TypedDict, TypeVar, cast, get_args, get_origin
 
 from django import forms as django_forms
+from django.conf import settings
 from django.forms.forms import BaseForm as DjangoBaseForm, DeclarativeFieldsMetaclass
 from django.forms.models import BaseModelForm as DjangoBaseModelForm, ModelFormMetaclass
 from django.http import (
     HttpRequest,
     HttpResponse,
+    HttpResponseBadRequest,
     HttpResponseNotAllowed,
     HttpResponseNotFound,
     HttpResponseRedirect,
@@ -29,7 +31,12 @@ from django.urls import URLPattern, path, reverse
 from django.urls.exceptions import NoReverseMatch
 from django.views.decorators.http import require_http_methods
 
-from .deps import DDependencyBase, RegisteredParameterProvider, resolver
+from .deps import (
+    RESERVED_KEYS,
+    DDependencyBase,
+    RegisteredParameterProvider,
+    resolver,
+)
 from .pages import page
 from .utils import caller_source_path
 
@@ -174,20 +181,18 @@ FORM_ACTION_REVERSE_NAME = "next:form_action"
 
 
 class ActionMeta(TypedDict, total=False):
-    """Per-action data."""
+    """Per-action data stored in the registry backend."""
 
     handler: Callable[..., Any]
     form_class: type[django_forms.Form] | None
-    file_path: Path
     uid: str
 
 
 @dataclass
 class FormActionOptions:
-    """Options for @action decorator."""
+    """Options passed to ``register_action`` (used by the ``@action`` decorator)."""
 
     form_class: type[django_forms.Form] | None = None
-    file_path: Path | None = None
 
 
 class FormActionBackend(ABC):
@@ -225,15 +230,43 @@ class FormActionBackend(ABC):
         action_name: str,  # noqa: ARG002
         form: django_forms.Form | None,  # noqa: ARG002
         template_fragment: str | None = None,  # noqa: ARG002
+        *,
+        page_file_path: Path | None = None,  # noqa: ARG002
     ) -> str:
         """Override this method to provide custom HTML for validation errors."""
         return ""
 
 
-def _make_uid(file_path: Path, action_name: str) -> str:
-    """Stable short id from file path and action name."""
-    raw = f"{file_path!s}:{action_name}".encode()
+def _make_uid(action_name: str) -> str:
+    """Stable short id from the action name (must be unique across the project)."""
+    raw = f"next.form.action:{action_name}".encode()
     return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def validated_next_form_page_path(request: HttpRequest) -> Path | None:  # noqa: PLR0911
+    """Return a trusted ``page.py`` path from POST ``_next_form_page``, or None."""
+    if not hasattr(request, "POST"):
+        return None
+    raw = request.POST.get("_next_form_page")
+    if not raw or not isinstance(raw, str):
+        return None
+    raw_stripped = raw.strip()
+    if not raw_stripped:
+        return None
+    try:
+        p = Path(raw_stripped).resolve()
+    except OSError:
+        return None
+    if p.name != "page.py" or not p.is_file():
+        return None
+    base = getattr(settings, "BASE_DIR", None)
+    if base is None:
+        return None
+    try:
+        p.relative_to(Path(base).resolve())
+    except ValueError:
+        return None
+    return p
 
 
 def _get_caller_path(back_count: int = 1) -> Path:
@@ -245,6 +278,11 @@ def _get_caller_path(back_count: int = 1) -> Path:
     )
 
 
+def _filter_reserved_url_kwargs(url_kwargs: dict[str, object]) -> dict[str, object]:
+    """Drop keys that collide with DI names used by ``resolve_dependencies``."""
+    return {k: v for k, v in url_kwargs.items() if k not in RESERVED_KEYS}
+
+
 def _url_kwargs_from_post(request: HttpRequest) -> dict[str, object]:
     """Parse ``_url_param_*`` hidden fields from POST."""
     out: dict[str, object] = {}
@@ -254,6 +292,8 @@ def _url_kwargs_from_post(request: HttpRequest) -> dict[str, object]:
         if not key.startswith("_url_param_"):
             continue
         param_name = key.replace("_url_param_", "")
+        if param_name in RESERVED_KEYS:
+            continue
         if isinstance(value, str):
             try:
                 out[param_name] = int(value)
@@ -268,7 +308,7 @@ def _url_kwargs_from_resolver_or_post(request: HttpRequest) -> dict[str, object]
     """URL kwargs from resolver match, else from POST hidden fields."""
     resolver_match = getattr(request, "resolver_match", None)
     if resolver_match and getattr(resolver_match, "kwargs", None):
-        return dict(resolver_match.kwargs)
+        return _filter_reserved_url_kwargs(dict(resolver_match.kwargs))
     if getattr(request, "method", None) == "POST" and hasattr(request, "POST"):
         return _url_kwargs_from_post(request)
     return {}
@@ -355,24 +395,15 @@ class RegistryFormActionBackend(FormActionBackend):
         *,
         options: FormActionOptions | None = None,
     ) -> None:
-        """Store action and form/initial. Registers context when form set."""
+        """Store handler, optional form class, and stable uid for the action name."""
         opts = options or FormActionOptions()
-        fp = opts.file_path or _get_caller_path(2)
-        uid = _make_uid(fp, name)
+        uid = _make_uid(name)
         self._uid_to_name[uid] = name
         self._registry[name] = {
             "handler": handler,
             "form_class": opts.form_class,
-            "file_path": fp,
             "uid": uid,
         }
-        if opts.form_class is not None:
-            page._context_manager.register_context(
-                fp,
-                name,
-                _form_action_context_callable(opts.form_class),
-                inherit_context=False,
-            )
 
     def get_action_url(self, action_name: str) -> str:
         """Reverse URL for a registered name."""
@@ -413,10 +444,22 @@ class RegistryFormActionBackend(FormActionBackend):
         action_name: str,
         form: django_forms.Form | None,
         template_fragment: str | None = None,
+        *,
+        page_file_path: Path | None = None,
     ) -> str:
-        """Default fragment renderer."""
+        """Render validation-error HTML for a page module path."""
+        path = page_file_path
+        if path is None:
+            path = validated_next_form_page_path(request)
+        if path is None:
+            return ""
         return _FormActionDispatch.render_form_fragment(
-            self, request, action_name, form, template_fragment
+            self,
+            request,
+            action_name,
+            form,
+            template_fragment,
+            path,
         )
 
 
@@ -543,9 +586,16 @@ class _FormActionDispatch:
         form: django_forms.Form | None,
         template_fragment: str | None,
     ) -> HttpResponse:
-        """``HttpResponse`` around the error fragment."""
+        """Full-page HTML for invalid form submission."""
+        page_path = validated_next_form_page_path(request)
+        if page_path is None:
+            return HttpResponseBadRequest("Missing or invalid _next_form_page")
         html = backend.render_form_fragment(
-            request, action_name, form, template_fragment
+            request,
+            action_name,
+            form,
+            template_fragment,
+            page_file_path=page_path,
         )
         return HttpResponse(html)
 
@@ -571,21 +621,21 @@ class _FormActionDispatch:
         return HttpResponse(response)
 
     @staticmethod
-    def render_form_fragment(
+    def render_form_fragment(  # noqa: PLR0913
         backend: FormActionBackend,
         request: HttpRequest,
         action_name: str,
         form: django_forms.Form | None,
         template_fragment: str | None,  # noqa: ARG004
+        page_file_path: Path,
     ) -> str:
-        """Full page template with bound form errors."""
+        """Full page template with bound form errors for ``page_file_path``."""
         meta = backend.get_meta(action_name)
         if not meta:
             return form.as_p() if form else ""
 
-        file_path = meta["file_path"]
+        file_path = page_file_path
 
-        # Load full template with layout
         if file_path not in page._template_registry:
             page._load_template_for_file(file_path)
         template_str = page._template_registry.get(file_path)
@@ -650,10 +700,16 @@ class FormActionManager:
         action_name: str,
         form: django_forms.Form | None,
         template_fragment: str | None = None,
+        *,
+        page_file_path: Path | None = None,
     ) -> str:
         """Delegate to first backend."""
         return self._backends[0].render_form_fragment(
-            request, action_name, form, template_fragment
+            request,
+            action_name,
+            form,
+            template_fragment,
+            page_file_path=page_file_path,
         )
 
     @property
@@ -670,14 +726,27 @@ def action(
     *,
     form_class: type[django_forms.Form] | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Register form action handler."""
+    """Register a named form action. Action names must be unique in the project."""
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        opts = FormActionOptions(
-            form_class=form_class,
-            file_path=_get_caller_path(2),
-        )
+        opts = FormActionOptions(form_class=form_class)
         form_action_manager.register_action(name, func, options=opts)
         return func
 
     return decorator
+
+
+def build_form_namespace_for_action(
+    action_name: str,
+    request: HttpRequest,
+) -> types.SimpleNamespace | None:
+    """Build the ``SimpleNamespace(form=...)`` used by ``{% form %}`` when lazy."""
+    for backend in form_action_manager._backends:
+        meta = backend.get_meta(action_name)
+        if meta is None:
+            continue
+        fc = meta.get("form_class")
+        if fc is None:
+            return None
+        return _form_action_context_callable(fc)(request)
+    return None

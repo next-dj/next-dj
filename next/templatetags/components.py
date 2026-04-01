@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 from django import template
 from django.template.base import Node, NodeList, Parser, Token
@@ -25,41 +26,12 @@ _END_COMPONENT = ("endcomponent", "/component")
 _END_SLOT = ("endslot", "/slot")
 _END_SET_SLOT = ("endset_slot", "/set_slot")
 
+# Slot collection uses this key during parent `{% component %}` body render
+_INTERNAL_CONTEXT_KEYS = frozenset({"_component_slots"})
+
 
 def _strip_quotes(raw: str) -> str:
     return raw.strip("'\"").strip()
-
-
-def _parse_literal_props(bits: list[str], start: int = 2) -> dict[str, str]:
-    """Turn ``key="value"`` tokens from the tag into a flat string dict."""
-    props: dict[str, str] = {}
-    for part in bits[start:]:
-        if "=" not in part:
-            continue
-        key, _, val = part.partition("=")
-        props[key.strip()] = _strip_quotes(val)
-    return props
-
-
-def _template_path_from_context(context: template.Context) -> Path | None:
-    """Return a resolved path from ``current_template_path``, or ``None``."""
-    raw = context.get("current_template_path")
-    if raw is None:
-        return None
-    if isinstance(raw, Path):
-        path = raw
-    elif isinstance(raw, str):
-        path = Path(raw)
-    else:
-        return None
-    return path.resolve()
-
-
-def _merge_slots_into_context(base: dict[str, str], slots: dict[str, str]) -> None:
-    """Add ``slot_<name>`` and ``<name>`` keys for each slot body."""
-    for slot_name, content in slots.items():
-        base[f"slot_{slot_name}"] = content
-        base[slot_name] = content
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,9 +92,22 @@ class ComponentNode(Node):
         self.props = props
         self.nodelist = nodelist
 
+    def _template_path_from_context(self, context: template.Context) -> Path | None:
+        """Return a resolved path from ``current_template_path``, or ``None``."""
+        raw = context.get("current_template_path")
+        if raw is None:
+            return None
+        if isinstance(raw, Path):
+            path = raw
+        elif isinstance(raw, str):
+            path = Path(raw)
+        else:
+            return None
+        return path.resolve()
+
     def render(self, context: template.Context) -> str:
         """Merge props, slots, and children, then render the component."""
-        path = _template_path_from_context(context)
+        path = self._template_path_from_context(context)
         if path is None:
             return ""
 
@@ -139,11 +124,19 @@ class ComponentNode(Node):
                 else:
                     child_chunks.append(node.render(context))
 
-        render_ctx: dict[str, str] = dict(self.props)
+        parent_flat = dict(cast("dict[str, Any]", context.flatten()))
+        for key in _INTERNAL_CONTEXT_KEYS:
+            parent_flat.pop(key, None)
+        render_ctx: dict[str, Any] = {**parent_flat, **self.props}
         render_ctx["children"] = "".join(child_chunks)
-        _merge_slots_into_context(render_ctx, slots)
 
-        request = context.get("request")
+        for slot_name, content in slots.items():
+            render_ctx[f"slot_{slot_name}"] = content
+            render_ctx[slot_name] = content
+
+        request = render_ctx.get("request")
+        if request is None:
+            request = context.get("request")
         return render_component(info, render_ctx, request=request)
 
 
@@ -174,7 +167,12 @@ def do_component(parser: Parser, token: Token) -> ComponentNode:
     if not name:
         msg = "{% component %} tag requires a quoted component name"
         raise template.TemplateSyntaxError(msg)
-    props = _parse_literal_props(bits)
+    props: dict[str, str] = {}
+    for part in bits[2:]:
+        if "=" not in part:
+            continue
+        key, _, val = part.partition("=")
+        props[key.strip()] = _strip_quotes(val)
     nodelist = parser.parse(_END_COMPONENT)
     parser.delete_first_token()
     return ComponentNode(name=name, props=props, nodelist=nodelist)

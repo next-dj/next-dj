@@ -34,3 +34,10 @@ class NextFrameworkConfig(AppConfig):
                 sender.watch_dir(path, glob)  # type: ignore[attr-defined]
 
         autoreload_started.connect(watch_next_filesystem)
+
+        from next.components import components_manager  # noqa: PLC0415
+
+        components_manager._ensure_backends()
+        for backend in components_manager._backends:
+            if hasattr(backend, "import_all_component_modules"):
+                backend.import_all_component_modules()

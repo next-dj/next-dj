@@ -30,6 +30,12 @@ def _eager_load_example_pages() -> None:
     if _ExamplePagesLoadedState["done"]:
         return
 
+    home_page = example_root / "myapp" / "pages" / "page.py"
+    spec_home = importlib.util.spec_from_file_location("myapp_pages_home", home_page)
+    home_mod = importlib.util.module_from_spec(spec_home)
+    assert spec_home.loader is not None
+    spec_home.loader.exec_module(home_mod)
+
     authors_page = example_root / "myapp" / "pages" / "authors" / "[int:id]" / "page.py"
     spec = importlib.util.spec_from_file_location("myapp_authors_page", authors_page)
     authors_mod = importlib.util.module_from_spec(spec)

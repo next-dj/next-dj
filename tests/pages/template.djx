@@ -1,0 +1,1 @@
+{% block template %}<p>test page</p>{{ form }}{% endblock %}

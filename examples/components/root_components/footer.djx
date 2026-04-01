@@ -1,6 +1,7 @@
 <footer class="border-top mt-auto py-3 bg-white">
-    <div class="container text-muted small d-flex flex-wrap align-items-center">
+    <div class="container text-muted small d-flex flex-wrap align-items-center gap-3">
         <span>&copy; {% now "Y" %} Blog</span>
+        {% component "newsletter_subscribe" %}{% endcomponent %}
         {% component "version_stamp" %}{% endcomponent %}
     </div>
 </footer>

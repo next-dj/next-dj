@@ -50,6 +50,7 @@ if not settings.configured:
         ],
         ROOT_URLCONF="next.urls",
         SECRET_KEY="test-secret-key",  # noqa: S106
+        BASE_DIR=project_root,
         USE_TZ=True,
         TIME_ZONE="UTC",
         NEXT_FRAMEWORK={

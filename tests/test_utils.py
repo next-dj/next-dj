@@ -1,6 +1,15 @@
+from unittest.mock import patch
+
 import pytest
 
-from next.utils import caller_source_path
+from next.utils import caller_source_path, resolve_base_dir
+
+
+def test_resolve_base_dir_non_path_non_str_returns_none() -> None:
+    """When ``BASE_DIR`` is neither Path nor str, return None."""
+    with patch("next.utils.settings") as mock_settings:
+        mock_settings.BASE_DIR = object()
+        assert resolve_base_dir() is None
 
 
 def test_caller_source_path_requires_one_mode() -> None:
