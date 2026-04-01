@@ -135,11 +135,11 @@ Put a single file next to your pages tree, for example ``myapp/pages/_components
 
    <article class="card">{{ title }}</article>
 
-Call it from a template in scope (``template.djx``, ``layout.djx``, or another component) using the block form:
+Call it from a template in scope (``template.djx``, ``layout.djx``, or another component) using the **void** form (no closing tag):
 
 .. code-block:: django
 
-   {% component "card" title="Hello" %}{% endcomponent %}
+   {% component "card" title="Hello" %}
 
 The first argument is the component name (file stem). Remaining bits on the opening tag are static ``key="value"`` props (see :ref:`components-props-literals`).
 
@@ -225,28 +225,37 @@ Template syntax
 Props are literal strings
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Everything after the component name on ``{% component %}`` is parsed as ``name="value"`` tokens with **static** string values. You cannot pass a template variable there (for example ``title={{ post.title }}`` is not supported). Pass dynamic page data through **slots**, nested template content that the component template renders with ``{% set_slot %}``, or through variables added by ``@context`` in ``component.py``. The ``examples/components/`` project uses slots for list-driven content (see :ref:`components-example-project`).
+Everything after the component name on ``{% component %}`` / ``{% #component %}`` is parsed as ``name="value"`` tokens with **static** string values. You cannot pass a template variable there (for example ``title={{ post.title }}`` is not supported). Pass dynamic page data through **slots**, nested template content that the component template renders with ``{% #set_slot %}``, or through variables added by ``@context`` in ``component.py``. The ``examples/components/`` project uses slots for list-driven content (see :ref:`components-example-project`).
 
 **Invoking a component**
 
-- Without body: ``{% component "card" title="Post 1" description="First post" %} {% endcomponent %}``
-- With slots: put ``{% slot "name" %} ... {% endslot %}`` inside the component block. The component template can render them with ``{% set_slot "name" %} ... {% endset_slot %}`` (with optional default content between the tags).
+- **Void** (no inner markup): ``{% component "card" title="Post 1" description="First post" %}`` — the line ends the tag; there is **no** closing tag.
+- **Block** (slots or nested components): open with ``{% #component "name" ... %}`` and close with ``{% /component %}``. Inside, use:
 
-Components are available in ``template.djx`` and ``layout.djx`` without a ``{% load %}`` (they are in builtins). Use the same block form (with ``{% endcomponent %}``) even when there is no body.
+  - ``{% #slot "name" %}`` … ``{% /slot %}`` for slot bodies with markup, or
+  - ``{% slot "name" %}`` as a **short** form for an **empty** slot (name only).
 
-**Defining slots in the component template**
+- In the component template, define insertion points with ``{% #set_slot "name" %}`` … ``{% /set_slot %}``. Content between the tags is the default when the caller does not pass that slot. If there is **no** default body, use the void form ``{% set_slot "name" %}`` (same idea as short ``{% slot "name" %}`` at the call site).
 
-- ``{% set_slot "avatar" %}`` … ``{% endset_slot %}`` — place where slot content is inserted. The content between the tags is the default if the slot is not provided.
+Components are available in ``template.djx`` and ``layout.djx`` without a ``{% load %}`` (they are in builtins).
+
+**Nesting**
+
+You may nest void and block components without a fixed depth limit. Resolution uses ``current_template_path`` from the page (and is forwarded while rendering inner components) so **scope** matches the page tree (see Scope above).
 
 Example (call site):
 
 .. code-block:: html
 
    {% component "profile" username="Admin" %}
-     {% slot "avatar" %}
-       <img src="/avatar.png" alt="Avatar" />
-     {% endslot %}
-   {% endcomponent %}
+   <div class="card-list">
+     {% #component "card" title="Post 1" description="First" %}
+       {% #slot "image" %}
+         <img src="/x.png" alt="" />
+       {% /slot %}
+       {% slot "footer" %}
+     {% /component %}
+   </div>
 
 Example (component template ``_components/profile/component.djx``):
 
@@ -254,9 +263,9 @@ Example (component template ``_components/profile/component.djx``):
 
    <div class="profile">
      <div class="avatar">
-       {% set_slot "avatar" %}
+       {% #set_slot "avatar" %}
          <span class="badge">{{ username.0 }}</span>
-       {% endset_slot %}
+       {% /set_slot %}
      </div>
      <div class="info">{{ username }}</div>
    </div>
@@ -284,4 +293,4 @@ Checks
 Example project
 ----------------
 
-The ``examples/components/`` project shows a realistic setup: composite **header** with ``@context("user")`` and navigation, **footer** as a simple ``.djx`` file, **post cards** with slots inside a loop, and root versus branch-scoped ``_components``. See its ``README.md`` and ``tests.py`` in the repository.
+The ``examples/components/`` project shows a realistic setup: composite **header** with ``@context("user")`` and navigation, **footer** as a simple ``.djx`` file, **post cards** with ``{% #component %}`` / ``{% #slot %}`` inside a loop, a reusable **card** component, **recommendations** with ``@context``, and root versus branch-scoped ``_components``. See its ``README.md`` and ``tests.py`` in the repository.

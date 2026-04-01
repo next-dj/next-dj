@@ -1,0 +1,14 @@
+<section class="mt-5 pt-4 border-top" aria-labelledby="rec-heading">
+    <h2 id="rec-heading" class="h5 mb-3">Recommended</h2>
+    <div class="row g-3">
+        {% for item in recommendation_items %}
+            <div class="col-md-6 col-lg-4">
+                {% #component "card" %}
+                    {% #slot "title" %}<a href="{{ item.get_absolute_url }}" class="text-decoration-none text-reset">{{ item.title }}</a>{% /slot %}
+                    {% #slot "body" %}<p class="text-muted small mb-0">{{ item.created_at|date:"M j, Y" }}</p>{% /slot %}
+                    {% #slot "actions" %}<a class="btn btn-outline-primary btn-sm" href="{{ item.get_absolute_url }}">View</a>{% /slot %}
+                {% /component %}
+            </div>
+        {% endfor %}
+    </div>
+</section>

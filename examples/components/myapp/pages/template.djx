@@ -7,21 +7,21 @@
 <div class="row g-3">
     {% for post in page %}
         <div class="col-md-6">
-            {% component "post_card" %}
-                {% slot "title" %}{{ post.title }}{% endslot %}
-                {% slot "meta" %}
+            {% #component "post_card" %}
+                {% #slot "title" %}{{ post.title }}{% /slot %}
+                {% #slot "meta" %}
                     <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 text-muted">
-                        {% component "author_chip" %}
-                            {% slot "profile_url" %}/authors/{{ post.author.id }}/{% endslot %}
-                            {% slot "login" %}{{ post.author.username }}{% endslot %}
-                        {% endcomponent %}
+                        {% #component "author_chip" %}
+                            {% #slot "profile_url" %}/authors/{{ post.author.id }}/{% /slot %}
+                            {% #slot "login" %}{{ post.author.username }}{% /slot %}
+                        {% /component %}
                         <time datetime="{{ post.created_at|date:'c' }}">{{ post.created_at|date:"M j, Y" }}</time>
                     </div>
-                {% endslot %}
-                {% slot "actions" %}
+                {% /slot %}
+                {% #slot "actions" %}
                     <a href="{{ post.get_absolute_url }}" class="btn btn-outline-primary btn-sm align-self-start">View</a>
-                {% endslot %}
-            {% endcomponent %}
+                {% /slot %}
+            {% /component %}
         </div>
     {% empty %}
         <p class="text-muted">No posts yet.</p>
@@ -46,3 +46,4 @@
         </ul>
     </nav>
 {% endif %}
+{% component "recommendations" %}

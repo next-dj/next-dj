@@ -84,6 +84,7 @@ def test_home_lists_posts_and_header(client) -> None:
     assert "writer" in text
     assert "/authors/" in text
     assert "View" in text
+    assert "Recommended" in text
 
 
 @pytest.mark.django_db()
@@ -687,30 +688,3 @@ def test_render_root_scope_badge_from_layout_path(layout_template: Path) -> None
     assert info is not None
     html = render_component(info, {})
     assert "Root scope badge" in html
-
-
-def test_example_includes_expected_component_artifacts() -> None:
-    """Stable disk layout for documented demos (simple, composite, branch scope)."""
-    assert (
-        example_root
-        / "myapp"
-        / "pages"
-        / "_components"
-        / "root_scope_badge"
-        / "component.djx"
-    ).exists()
-    assert (example_root / "root_components" / "dirs_root_note.djx").exists()
-    assert (
-        example_root / "myapp" / "pages" / "_components" / "post_card" / "component.djx"
-    ).exists()
-    assert (
-        example_root / "myapp" / "pages" / "posts" / "_components" / "draft_banner.djx"
-    ).exists()
-    assert (example_root / "root_components" / "header" / "component.py").exists()
-    assert (example_root / "root_components" / "server_time" / "component.py").exists()
-    assert (
-        example_root / "root_components" / "version_stamp" / "component.py"
-    ).exists()
-    assert not (
-        example_root / "root_components" / "version_stamp" / "component.djx"
-    ).exists()

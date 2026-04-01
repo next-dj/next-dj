@@ -6,10 +6,10 @@
         {% endif %}
     </div>
     <div class="d-flex flex-wrap align-items-center gap-3 mb-4 text-muted small">
-        {% component "author_chip" %}
-            {% slot "profile_url" %}/authors/{{ post.author.id }}/{% endslot %}
-            {% slot "login" %}{{ post.author.username }}{% endslot %}
-        {% endcomponent %}
+        {% #component "author_chip" %}
+            {% #slot "profile_url" %}/authors/{{ post.author.id }}/{% /slot %}
+            {% #slot "login" %}{{ post.author.username }}{% /slot %}
+        {% /component %}
         <time datetime="{{ post.created_at|date:'c' }}">Published {{ post.created_at|date:"F j, Y, P" }}</time>
     </div>
     <div class="post-content mb-5">
@@ -21,21 +21,21 @@
     <div class="row g-3">
         {% for item in recommended %}
             <div class="col-md-4">
-                {% component "post_card" %}
-                    {% slot "title" %}{{ item.title }}{% endslot %}
-                    {% slot "meta" %}
+                {% #component "post_card" %}
+                    {% #slot "title" %}{{ item.title }}{% /slot %}
+                    {% #slot "meta" %}
                         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 text-muted">
-                            {% component "author_chip" %}
-                                {% slot "profile_url" %}/authors/{{ item.author.id }}/{% endslot %}
-                                {% slot "login" %}{{ item.author.username }}{% endslot %}
-                            {% endcomponent %}
+                            {% #component "author_chip" %}
+                                {% #slot "profile_url" %}/authors/{{ item.author.id }}/{% /slot %}
+                                {% #slot "login" %}{{ item.author.username }}{% /slot %}
+                            {% /component %}
                             <time datetime="{{ item.created_at|date:'c' }}">{{ item.created_at|date:"M j, Y" }}</time>
                         </div>
-                    {% endslot %}
-                    {% slot "actions" %}
+                    {% /slot %}
+                    {% #slot "actions" %}
                         <a href="{{ item.get_absolute_url }}" class="btn btn-outline-primary btn-sm align-self-start">View</a>
-                    {% endslot %}
-                {% endcomponent %}
+                    {% /slot %}
+                {% /component %}
             </div>
         {% empty %}
             <p class="text-muted small">No other posts.</p>

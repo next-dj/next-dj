@@ -1,0 +1,7 @@
+<div class="card h-100 border-0 shadow-sm">
+    <div class="card-body d-flex flex-column">
+        <h2 class="card-title h5">{% set_slot "title" %}</h2>
+        <div class="flex-grow-1 small">{% set_slot "body" %}</div>
+        <div class="mt-auto pt-1">{% set_slot "actions" %}</div>
+    </div>
+</div>

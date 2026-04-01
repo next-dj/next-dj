@@ -1,20 +1,28 @@
-"""Template tags for next-dj components (``{% component %}``, slots).
+"""Template tags for next-dj components (void/block ``{% component %}``, slots).
 
-Resolve from ``current_template_path``, collect nested ``{% slot %}`` blocks, and
-pass props and slot HTML to the renderer.
+Resolve from ``current_template_path``, collect nested ``{% #slot %}`` /
+``{% slot %}`` blocks, and pass props and slot HTML to the renderer.
+
+In component templates, use ``{% #set_slot %}`` … ``{% /set_slot %}`` or the
+short void ``{% set_slot "name" %}`` when there is no default slot body.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 from django import template
+from django.template import base as template_base
 from django.template.base import Node, NodeList, Parser, Token
 
 from next.components import get_component, render_component
 
+
+# Allow line breaks inside ``{% ... %}`` (multiline tag bodies).
+template_base.tag_re = re.compile(template_base.tag_re.pattern, re.DOTALL)
 
 register = template.Library()
 
@@ -22,11 +30,14 @@ _COMPONENT_NAME_INDEX = 1
 _SLOT_ARG_COUNT = 2
 _COMPONENT_MIN_BITS = 2
 
-_END_COMPONENT = ("endcomponent", "/component")
-_END_SLOT = ("endslot", "/slot")
-_END_SET_SLOT = ("endset_slot", "/set_slot")
+_END_BLOCK_COMPONENT = ("/component",)
+_END_BLOCK_SLOT = ("/slot",)
+_END_BLOCK_SET_SLOT = ("/set_slot",)
 
-# Slot collection uses this key during parent `{% component %}` body render
+_SHORT_SLOT_EMPTY_NAME = "{% slot %} tag requires a quoted slot name"
+_SHORT_SET_SLOT_EMPTY_NAME = "{% set_slot %} tag requires a quoted slot name"
+
+# Slot collection uses this key during parent ``{% #component %}`` body render
 _INTERNAL_CONTEXT_KEYS = frozenset({"_component_slots"})
 
 
@@ -34,9 +45,20 @@ def _strip_quotes(raw: str) -> str:
     return raw.strip("'\"").strip()
 
 
+def _parse_literal_props(bits: list[str], start: int) -> dict[str, str]:
+    """Parse ``key="value"`` pairs from tag bits starting at *start*."""
+    props: dict[str, str] = {}
+    for part in bits[start:]:
+        if "=" not in part:
+            continue
+        key, _, val = part.partition("=")
+        props[key.strip()] = _strip_quotes(val)
+    return props
+
+
 @dataclass(frozen=True, slots=True)
 class _NamedBlockSpec:
-    """Arguments shared by ``{% slot %}`` and ``{% set_slot %}`` compilation."""
+    """Arguments shared by ``{% #slot %}`` and ``{% #set_slot %}`` compilation."""
 
     end_tokens: tuple[str, ...]
     expected_bits: int
@@ -49,7 +71,7 @@ def _parse_one_named_block(
     token: Token,
     spec: _NamedBlockSpec,
 ) -> tuple[str, NodeList]:
-    """Parse ``tag "name"`` … ``end`` into a name and inner node list."""
+    """Parse ``tag "name"`` … ``/end`` into a name and inner node list."""
     bits = token.split_contents()
     if len(bits) != spec.expected_bits:
         raise template.TemplateSyntaxError(spec.wrong_arity_message)
@@ -62,7 +84,7 @@ def _parse_one_named_block(
 
 
 class SlotNode(Node):
-    """Renders the slot body and records it by name when under ``{% component %}``."""
+    """Renders the slot body and records it by name when under ``{% #component %}``."""
 
     def __init__(self, name: str, nodelist: NodeList) -> None:
         """Remember the slot name and nested nodes."""
@@ -128,6 +150,7 @@ class ComponentNode(Node):
         for key in _INTERNAL_CONTEXT_KEYS:
             parent_flat.pop(key, None)
         render_ctx: dict[str, Any] = {**parent_flat, **self.props}
+        render_ctx["current_template_path"] = path
         render_ctx["children"] = "".join(child_chunks)
 
         for slot_name, content in slots.items():
@@ -157,8 +180,8 @@ class SetSlotNode(Node):
 
 
 @register.tag(name="component")
-def do_component(parser: Parser, token: Token) -> ComponentNode:
-    """Compile ``{% component "name" … %}`` … ``{% endcomponent %}``."""
+def do_component(_parser: Parser, token: Token) -> ComponentNode:
+    """Compile void ``{% component "name" … %}`` (no body, no closing tag)."""
     bits = token.split_contents()
     if len(bits) < _COMPONENT_MIN_BITS:
         msg = "{% component %} tag requires at least a component name"
@@ -167,41 +190,79 @@ def do_component(parser: Parser, token: Token) -> ComponentNode:
     if not name:
         msg = "{% component %} tag requires a quoted component name"
         raise template.TemplateSyntaxError(msg)
-    props: dict[str, str] = {}
-    for part in bits[2:]:
-        if "=" not in part:
-            continue
-        key, _, val = part.partition("=")
-        props[key.strip()] = _strip_quotes(val)
-    nodelist = parser.parse(_END_COMPONENT)
+    props = _parse_literal_props(bits, 2)
+    return ComponentNode(name=name, props=props, nodelist=NodeList())
+
+
+@register.tag(name="#component")
+def do_block_component(parser: Parser, token: Token) -> ComponentNode:
+    """Compile ``{% #component "name" … %}`` … ``{% /component %}``."""
+    bits = token.split_contents()
+    if len(bits) < _COMPONENT_MIN_BITS:
+        msg = "{% #component %} tag requires at least a component name"
+        raise template.TemplateSyntaxError(msg)
+    name = _strip_quotes(bits[_COMPONENT_NAME_INDEX])
+    if not name:
+        msg = "{% #component %} tag requires a quoted component name"
+        raise template.TemplateSyntaxError(msg)
+    props = _parse_literal_props(bits, 2)
+    nodelist = parser.parse(_END_BLOCK_COMPONENT)
     parser.delete_first_token()
     return ComponentNode(name=name, props=props, nodelist=nodelist)
 
 
-_SLOT_SPEC = _NamedBlockSpec(
-    end_tokens=_END_SLOT,
+_BLOCK_SLOT_SPEC = _NamedBlockSpec(
+    end_tokens=_END_BLOCK_SLOT,
     expected_bits=_SLOT_ARG_COUNT,
-    empty_name_message="{% slot %} tag requires a quoted slot name",
-    wrong_arity_message="{% slot %} tag requires exactly one argument: slot name",
+    empty_name_message="{% #slot %} tag requires a quoted slot name",
+    wrong_arity_message="{% #slot %} tag requires exactly one argument: slot name",
 )
 
 _SET_SLOT_SPEC = _NamedBlockSpec(
-    end_tokens=_END_SET_SLOT,
+    end_tokens=_END_BLOCK_SET_SLOT,
     expected_bits=_SLOT_ARG_COUNT,
-    empty_name_message="{% set_slot %} tag requires a quoted slot name",
-    wrong_arity_message=("{% set_slot %} tag requires exactly one argument: slot name"),
+    empty_name_message="{% #set_slot %} tag requires a quoted slot name",
+    wrong_arity_message=(
+        "{% #set_slot %} tag requires exactly one argument: slot name"
+    ),
 )
 
 
-@register.tag(name="slot")
-def do_slot(parser: Parser, token: Token) -> SlotNode:
-    """Compile ``{% slot "name" %}`` … ``{% endslot %}``."""
-    name, nodelist = _parse_one_named_block(parser, token, _SLOT_SPEC)
+@register.tag(name="#slot")
+def do_block_slot(parser: Parser, token: Token) -> SlotNode:
+    """Compile ``{% #slot "name" %}`` … ``{% /slot %}``."""
+    name, nodelist = _parse_one_named_block(parser, token, _BLOCK_SLOT_SPEC)
     return SlotNode(name=name, nodelist=nodelist)
 
 
-@register.tag(name="set_slot")
-def do_set_slot(parser: Parser, token: Token) -> SetSlotNode:
-    """Compile ``{% set_slot "name" %}`` … ``{% endset_slot %}``."""
+@register.tag(name="slot")
+def do_short_slot(_parser: Parser, token: Token) -> SlotNode:
+    """Compile empty ``{% slot "name" %}`` (short slot, no body)."""
+    bits = token.split_contents()
+    if len(bits) != _SLOT_ARG_COUNT:
+        msg = "{% slot %} short form requires exactly one quoted slot name"
+        raise template.TemplateSyntaxError(msg)
+    name = _strip_quotes(bits[_COMPONENT_NAME_INDEX])
+    if not name:
+        raise template.TemplateSyntaxError(_SHORT_SLOT_EMPTY_NAME)
+    return SlotNode(name=name, nodelist=NodeList())
+
+
+@register.tag(name="#set_slot")
+def do_block_set_slot(parser: Parser, token: Token) -> SetSlotNode:
+    """Compile ``{% #set_slot "name" %}`` … ``{% /set_slot %}``."""
     name, nodelist = _parse_one_named_block(parser, token, _SET_SLOT_SPEC)
     return SetSlotNode(name=name, nodelist=nodelist)
+
+
+@register.tag(name="set_slot")
+def do_short_set_slot(_parser: Parser, token: Token) -> SetSlotNode:
+    """Compile empty ``{% set_slot "name" %}`` (no default body, no closing tag)."""
+    bits = token.split_contents()
+    if len(bits) != _SLOT_ARG_COUNT:
+        msg = "{% set_slot %} short form requires exactly one quoted slot name"
+        raise template.TemplateSyntaxError(msg)
+    name = _strip_quotes(bits[_COMPONENT_NAME_INDEX])
+    if not name:
+        raise template.TemplateSyntaxError(_SHORT_SET_SLOT_EMPTY_NAME)
+    return SetSlotNode(name=name, nodelist=NodeList())

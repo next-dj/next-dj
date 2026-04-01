@@ -696,7 +696,7 @@ class TestComponentContextManager:
 
 
 class TestComponentTag:
-    """Tests for {% component %} and {% endcomponent %} tags."""
+    """Tests for void ``{% component %}`` and block ``{% #component %}`` tags."""
 
     def test_component_tag_requires_name(self) -> None:
         """{% component %} without name raises TemplateSyntaxError."""
@@ -706,27 +706,38 @@ class TestComponentTag:
     def test_component_tag_requires_quoted_name(self) -> None:
         """{% component %} with empty quoted name raises."""
         with pytest.raises(TemplateSyntaxError, match="quoted"):
-            Template('{% load components %}{% component "" %}{% endcomponent %}')
+            Template('{% load components %}{% component "" %}')
+
+    def test_legacy_endcomponent_is_invalid(self) -> None:
+        """{% endcomponent %} is not a registered tag."""
+        with pytest.raises(TemplateSyntaxError, match="endcomponent"):
+            Template("{% load components %}{% endcomponent %}")
+
+    def test_block_component_requires_name_token(self) -> None:
+        """{% #component %} without a name raises."""
+        with pytest.raises(TemplateSyntaxError, match="#component"):
+            Template("{% load components %}{% #component %}")
+
+    def test_block_component_requires_non_empty_quoted_name(self) -> None:
+        """{% #component %} with empty quoted name raises."""
+        with pytest.raises(TemplateSyntaxError, match="quoted"):
+            Template('{% load components %}{% #component "" %}{% /component %}')
 
     def test_component_tag_renders_empty_without_path_in_context(self) -> None:
         """When current_template_path is missing, component renders empty."""
-        t = Template(
-            '{% load components %}{% component "card" title="Hi" %}{% endcomponent %}'
-        )
+        t = Template('{% load components %}{% component "card" title="Hi" %}')
         result = t.render(Context({}))
         assert result == ""
 
     def test_component_tag_renders_empty_when_path_not_str_or_path(self) -> None:
         """When current_template_path is not str/Path (e.g. int), component renders empty."""
-        t = Template('{% load components %}{% component "card" %}{% endcomponent %}')
+        t = Template('{% load components %}{% component "card" %}')
         result = t.render(Context({"current_template_path": 42}))
         assert result == ""
 
     def test_component_tag_renders_empty_when_component_not_found(self) -> None:
         """When component is not resolved, renders empty."""
-        t = Template(
-            '{% load components %}{% component "nonexistent" %}{% endcomponent %}'
-        )
+        t = Template('{% load components %}{% component "nonexistent" %}')
         with patch("next.templatetags.components.get_component", return_value=None):
             result = t.render(
                 Context({"current_template_path": "/app/pages/home/template.djx"}),
@@ -748,10 +759,7 @@ class TestComponentTag:
                 is_simple=True,
             ),
         ):
-            t = Template(
-                "{% load components %}"
-                '{% component "card" title="Hello" %}{% endcomponent %}'
-            )
+            t = Template('{% load components %}{% component "card" title="Hello" %}')
             result = t.render(
                 Context({"current_template_path": str(tmp_path / "template.djx")}),
             )
@@ -777,9 +785,7 @@ class TestComponentTag:
                 is_simple=True,
             ),
         ):
-            t = Template(
-                '{% load components %}{% component "banner" %}{% endcomponent %}'
-            )
+            t = Template('{% load components %}{% component "banner" %}')
             result = t.render(
                 Context(
                     {
@@ -808,8 +814,7 @@ class TestComponentTag:
             ),
         ):
             t = Template(
-                "{% load components %}"
-                '{% component "chip" title="from_prop" %}{% endcomponent %}'
+                '{% load components %}{% component "chip" title="from_prop" %}'
             )
             result = t.render(
                 Context(
@@ -829,11 +834,13 @@ class TestComponentTag:
             "get_component",
             return_value=None,
         ):
-            t = Template('{% load components %}{% component "c" %}{% endcomponent %}')
+            t = Template('{% load components %}{% component "c" %}')
             t.render(Context({"current_template_path": tmp_path / "t.djx"}))
 
-    def test_component_tag_with_slots_passes_slot_content(self, tmp_path: Path) -> None:
-        """When component body has {% slot %}, content is passed to component."""
+    def test_block_component_with_slots_passes_slot_content(
+        self, tmp_path: Path
+    ) -> None:
+        """When #component body has #slot, content is passed to component."""
         (tmp_path / "box.djx").write_text(
             '<div class="box">{{ slot_image }} {{ children }}</div>',
         )
@@ -851,10 +858,10 @@ class TestComponentTag:
         ):
             t = Template(
                 "{% load components %}"
-                '{% component "box" %}'
-                '{% slot "image" %}<img src="x"/>{% endslot %}'
+                '{% #component "box" %}'
+                '{% #slot "image" %}<img src="x"/>{% /slot %}'
                 "kids"
-                "{% endcomponent %}"
+                "{% /component %}"
             )
             result = t.render(
                 Context({"current_template_path": str(tmp_path / "template.djx")}),
@@ -877,10 +884,7 @@ class TestComponentTag:
                 is_simple=True,
             ),
         ):
-            t = Template(
-                "{% load components %}"
-                '{% component "card" title="My Title" %}{% endcomponent %}'
-            )
+            t = Template('{% load components %}{% component "card" title="My Title" %}')
             result = t.render(
                 Context({"current_template_path": str(tmp_path / "t.djx")}),
             )
@@ -902,89 +906,172 @@ class TestComponentTag:
             ),
         ):
             t = Template(
-                "{% load components %}"
-                '{% component "card" orphan title="Kept" %}{% endcomponent %}'
+                '{% load components %}{% component "card" orphan title="Kept" %}'
             )
             result = t.render(
                 Context({"current_template_path": str(tmp_path / "t.djx")}),
             )
         assert "Kept" in result
 
+    def test_nested_components_three_levels(self, tmp_path: Path) -> None:
+        """{% #component %} inside component.djx resolves nested names."""
+        (tmp_path / "inner.djx").write_text("<i>inner</i>")
+        (tmp_path / "mid.djx").write_text(
+            '{% #component "inner" %}{% /component %}',
+        )
+        (tmp_path / "outer.djx").write_text(
+            '{% #component "mid" %}{% /component %}',
+        )
 
-class TestSlotTag:
-    """Tests for {% slot %} and {% endslot %} tags."""
-
-    def test_slot_tag_requires_name(self) -> None:
-        """{% slot %} without name raises TemplateSyntaxError."""
-        with pytest.raises(TemplateSyntaxError, match="slot"):
-            Template(
-                "{% load components %}"
-                '{% component "c" %}{% slot %}{% endslot %}{% endcomponent %}'
+        def fake_get(name: str, _: Path) -> ComponentInfo | None:
+            mapping = {
+                "outer": tmp_path / "outer.djx",
+                "mid": tmp_path / "mid.djx",
+                "inner": tmp_path / "inner.djx",
+            }
+            p = mapping.get(name)
+            if p is None:
+                return None
+            return ComponentInfo(
+                name=name,
+                scope_root=tmp_path,
+                scope_relative="",
+                template_path=p,
+                module_path=None,
+                is_simple=True,
             )
 
-    def test_slot_tag_requires_exactly_one_arg(self) -> None:
-        """{% slot %} with 0 or 3 args raises."""
+        with patch.object(components_manager, "get_component", side_effect=fake_get):
+            t = Template(
+                "{% load components %}{% #component 'outer' %}{% /component %}",
+            )
+            result = t.render(
+                Context({"current_template_path": str(tmp_path / "page.djx")}),
+            )
+        assert "<i>inner</i>" in result
+
+    def test_orphan_slash_component_raises(self) -> None:
+        """{% /component %} without opening #component raises."""
+        with pytest.raises(TemplateSyntaxError, match="/component"):
+            Template("{% load components %}{% /component %}")
+
+
+class TestSlotTag:
+    """Tests for ``{% #slot %}``, ``{% /slot %}``, and short ``{% slot %}``."""
+
+    def test_block_slot_tag_requires_name(self) -> None:
+        """{% #slot %} without name raises TemplateSyntaxError."""
+        with pytest.raises(TemplateSyntaxError, match="#slot"):
+            Template(
+                "{% load components %}"
+                '{% #component "c" %}{% #slot %}{% /slot %}{% /component %}'
+            )
+
+    def test_block_slot_tag_requires_exactly_one_arg(self) -> None:
+        """{% #slot %} with wrong arity raises."""
         with pytest.raises(TemplateSyntaxError, match="exactly one"):
             Template(
                 "{% load components %}"
-                '{% component "c" %}{% slot "a" "b" %}{% endslot %}{% endcomponent %}'
+                '{% #component "c" %}{% #slot "a" "b" %}{% /slot %}{% /component %}'
             )
 
-    def test_slot_tag_requires_quoted_name(self) -> None:
-        """{% slot %} with empty name raises."""
+    def test_short_slot_requires_quoted_name(self) -> None:
+        """{% slot %} short form with empty name raises."""
         with pytest.raises(TemplateSyntaxError, match="quoted slot name"):
             Template(
-                "{% load components %}"
-                '{% component "c" %}{% slot "" %}{% endslot %}{% endcomponent %}'
+                '{% load components %}{% #component "c" %}{% slot "" %}{% /component %}'
             )
 
-    def test_slot_tag_parses(self) -> None:
-        r"""{% slot "x" %} ... {% endslot %} parses inside component."""
+    def test_short_slot_requires_exactly_one_name(self) -> None:
+        """{% slot %} short form with two names raises."""
+        with pytest.raises(TemplateSyntaxError, match="exactly one"):
+            Template(
+                "{% load components %}"
+                '{% #component "c" %}{% slot "a" "b" %}{% /component %}'
+            )
+
+    def test_block_slot_parses_inside_block_component(self) -> None:
+        """{% #slot %} … {% /slot %} parses inside {% #component %}."""
         t = Template(
             "{% load components %}"
-            '{% component "c" %}'
-            '{% slot "image" %}<img/>{% endslot %}'
-            "{% endcomponent %}"
+            '{% #component "c" %}'
+            '{% #slot "image" %}<img/>{% /slot %}'
+            "{% /component %}"
         )
         t.render(Context({"current_template_path": "/x"}))
 
-
-class TestSetSlotTag:
-    """Tests for {% set_slot %} and {% endset_slot %} tags."""
-
-    def test_set_slot_requires_name(self) -> None:
-        """{% set_slot %} without name raises TemplateSyntaxError."""
-        with pytest.raises(TemplateSyntaxError, match="set_slot"):
-            Template("{% load components %}{% set_slot %}fallback{% endset_slot %}")
-
-    def test_set_slot_requires_quoted_name(self) -> None:
-        """{% set_slot %} with empty quoted name raises."""
-        with pytest.raises(TemplateSyntaxError, match="quoted slot name"):
-            Template('{% load components %}{% set_slot "" %}x{% endset_slot %}')
-
-    def test_set_slot_renders_fallback_when_slot_empty(self) -> None:
-        r"""{% set_slot "x" %}fallback{% endset_slot %} renders fallback when slot not in context."""
+    def test_short_slot_parses_inside_block_component(self) -> None:
+        """{% slot "name" %} short form compiles inside {% #component %}."""
         t = Template(
             "{% load components %}"
-            '{% set_slot "avatar" %}<span>default</span>{% endset_slot %}'
+            '{% #component "c" %}{% slot "footer" %}{% /component %}'
+        )
+        t.render(Context({"current_template_path": "/x"}))
+
+    def test_orphan_slash_slot_raises(self) -> None:
+        """{% /slot %} without opening #slot raises."""
+        with pytest.raises(TemplateSyntaxError, match="/slot"):
+            Template("{% load components %}{% /slot %}")
+
+
+class TestSetSlotTag:
+    """Tests for ``{% #set_slot %}``, ``{% /set_slot %}``, and short ``{% set_slot %}``."""
+
+    def test_set_slot_requires_name(self) -> None:
+        """{% #set_slot %} without name raises TemplateSyntaxError."""
+        with pytest.raises(TemplateSyntaxError, match="#set_slot"):
+            Template("{% load components %}{% #set_slot %}fallback{% /set_slot %}")
+
+    def test_set_slot_requires_quoted_name(self) -> None:
+        """{% #set_slot %} with empty quoted name raises."""
+        with pytest.raises(TemplateSyntaxError, match="quoted slot name"):
+            Template('{% load components %}{% #set_slot "" %}x{% /set_slot %}')
+
+    def test_set_slot_renders_fallback_when_slot_empty(self) -> None:
+        r"""{% #set_slot %} renders fallback when slot not in context."""
+        t = Template(
+            "{% load components %}"
+            '{% #set_slot "avatar" %}<span>default</span>{% /set_slot %}'
         )
         result = t.render(Context({}))
         assert "<span>default</span>" in result
 
     def test_set_slot_renders_slot_content_when_in_context(self) -> None:
-        """{% set_slot %} renders slot_xxx from context when present."""
+        """{% #set_slot %} renders slot_xxx from context when present."""
         t = Template(
             "{% load components %}"
-            '{% set_slot "avatar" %}<span>default</span>{% endset_slot %}'
+            '{% #set_slot "avatar" %}<span>default</span>{% /set_slot %}'
         )
         result = t.render(Context({"slot_avatar": '<img src="x"/>'}))
         assert '<img src="x"/>' in result
 
-    def test_set_slot_uses_slash_end_tag(self) -> None:
-        """{% set_slot %} can be closed with {% /set_slot %}."""
-        t = Template('{% load components %}{% set_slot "x" %}fallback{% /set_slot %}')
-        result = t.render(Context({}))
-        assert "fallback" in result
+    def test_orphan_slash_set_slot_raises(self) -> None:
+        """{% /set_slot %} without opening #set_slot raises."""
+        with pytest.raises(TemplateSyntaxError, match="/set_slot"):
+            Template("{% load components %}{% /set_slot %}")
+
+    def test_short_set_slot_renders_empty_when_slot_missing(self) -> None:
+        """{% set_slot "x" %} void form has no default; empty when slot absent."""
+        t = Template('{% load components %}{% set_slot "label" %}')
+        assert t.render(Context({})) == ""
+
+    def test_short_set_slot_renders_slot_from_context(self) -> None:
+        """Short {% set_slot %} prefers injected slot HTML from context."""
+        t = Template('{% load components %}{% set_slot "avatar" %}')
+        result = t.render(Context({"slot_avatar": "<b>ok</b>"}))
+        assert "<b>ok</b>" in result
+
+    def test_short_set_slot_requires_exactly_one_name(self) -> None:
+        """{% set_slot %} short form with two names raises."""
+        with pytest.raises(TemplateSyntaxError, match="exactly one"):
+            Template(
+                '{% load components %}{% set_slot "a" "b" %}',
+            )
+
+    def test_short_set_slot_empty_name_raises(self) -> None:
+        """{% set_slot "" %} raises."""
+        with pytest.raises(TemplateSyntaxError, match="quoted slot name"):
+            Template('{% load components %}{% set_slot "" %}')
 
 
 class TestModuleCache:
