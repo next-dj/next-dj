@@ -622,6 +622,7 @@ class Page:
         context_data["current_template_path"] = (
             str(template_djx) if template_djx.exists() else str(file_path)
         )
+        context_data["current_page_module_path"] = str(file_path.resolve())
         context_data.update(kwargs)
         context_data.update(
             self._context_manager.collect_context(file_path, *args, **kwargs),

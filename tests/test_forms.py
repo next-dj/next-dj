@@ -1,4 +1,5 @@
 import inspect
+import pathlib
 import types
 from pathlib import Path
 from typing import ClassVar
@@ -10,6 +11,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.middleware.csrf import get_token
 from django.template import Context, TemplateSyntaxError
+from django.test import Client
 
 from next.forms import (
     BaseModelForm,
@@ -18,13 +20,28 @@ from next.forms import (
     FormActionOptions,
     ModelForm,
     RegistryFormActionBackend,
+    _form_action_context_callable,
     _FormActionDispatch,
     _get_caller_path,
+    _url_kwargs_from_post,
     action,
+    build_form_namespace_for_action,
     form_action_manager,
     page,
+    validated_next_form_page_path,
 )
 from next.templatetags.forms import _parse_form_tag_args
+
+
+PAGE_MODULE_FOR_FORM_TESTS = (
+    Path(__file__).resolve().parent / "pages" / "page.py"
+).resolve()
+
+
+@pytest.fixture()
+def client_no_csrf():
+    """Test client without CSRF checks (form action POSTs supply fields manually)."""
+    return Client(enforce_csrf_checks=False)
 
 
 class SimpleForm(Form):
@@ -106,29 +123,41 @@ class TestRenderFormFragment:
         assert html == ""
 
     def test_with_template_fragment(self, mock_http_request) -> None:
-        """Render form with given template fragment."""
+        """Render form using the page template for ``page_file_path``."""
         request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "test"})
-        fragment = "{{ form.name }}"
         html = form_action_manager.render_form_fragment(
-            request, "test_submit", form, template_fragment=fragment
+            request,
+            "test_submit",
+            form,
+            template_fragment=None,
+            page_file_path=PAGE_MODULE_FOR_FORM_TESTS,
         )
         assert "test" in html or "name" in html
 
     def test_with_form_only_no_template(self, mock_http_request) -> None:
-        """Render form without template returns string."""
+        """Render form via registry template for ``page_file_path`` returns HTML."""
         request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "x"})
         html = form_action_manager.render_form_fragment(
-            request, "test_submit", form, template_fragment=None
+            request,
+            "test_submit",
+            form,
+            template_fragment=None,
+            page_file_path=PAGE_MODULE_FOR_FORM_TESTS,
         )
         assert isinstance(html, str)
+        assert html.strip() != ""
 
     def test_form_none_no_template_returns_string(self, mock_http_request) -> None:
-        """Form None and no template still returns a string."""
+        """Form None still returns a string when a page template exists."""
         request = mock_http_request(method="GET")
         html = form_action_manager.render_form_fragment(
-            request, "test_submit", form=None, template_fragment=None
+            request,
+            "test_submit",
+            form=None,
+            template_fragment=None,
+            page_file_path=PAGE_MODULE_FOR_FORM_TESTS,
         )
         assert isinstance(html, str)
 
@@ -143,22 +172,28 @@ class TestRenderFormFragment:
     def test_renders_from_registry_template(
         self, mock_http_request, registry_template: str, output_mode: str
     ) -> None:
-        """Render fragment using template stored in page registry for the action file."""
+        """Render fragment using template stored in page registry for ``page_file_path``."""
         request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "a"})
         backend = form_action_manager.default_backend
         assert isinstance(backend, RegistryFormActionBackend)
-        meta = backend.get_meta("test_submit")
-        assert meta is not None
-        file_path = meta["file_path"]
+        file_path = PAGE_MODULE_FOR_FORM_TESTS
         original_registry = page._template_registry.copy()
         page._template_registry[file_path] = registry_template
         try:
             html = backend.render_form_fragment(
-                request, "test_submit", form, template_fragment=None
+                request,
+                "test_submit",
+                form,
+                template_fragment=None,
+                page_file_path=file_path,
             )
             if output_mode == "path":
-                assert str(file_path) in html
+                template_djx = file_path.parent / "template.djx"
+                expected_path = (
+                    str(template_djx) if template_djx.is_file() else str(file_path)
+                )
+                assert expected_path in html
             else:
                 assert "a" in html or "name" in html
         finally:
@@ -275,9 +310,9 @@ class TestFormActionDispatch:
 class TestDispatchViaClient:
     """Form action dispatch via Django test client."""
 
-    def test_unknown_uid_returns_404(self, client) -> None:
+    def test_unknown_uid_returns_404(self, client_no_csrf) -> None:
         """Unknown form uid returns 404."""
-        resp = client.get("/_next/form/unknown_uid_12345/")
+        resp = client_no_csrf.get("/_next/form/unknown_uid_12345/")
         assert resp.status_code == 404
 
     @pytest.mark.parametrize(
@@ -285,41 +320,66 @@ class TestDispatchViaClient:
         ["test_submit", "test_no_form"],
         ids=("with_form_class", "without_form_class"),
     )
-    def test_get_returns_405(self, client, action_name: str) -> None:
+    def test_get_returns_405(self, client_no_csrf, action_name: str) -> None:
         """GET form action URL returns 405 Method Not Allowed."""
         url = form_action_manager.get_action_url(action_name)
-        resp = client.get(url)
+        resp = client_no_csrf.get(url)
         assert resp.status_code == 405
 
-    def test_invalid_form_returns_200_with_errors(self, client) -> None:
-        """Invalid POST returns 200 with validation errors."""
+    def test_invalid_form_returns_200_with_errors(self, client_no_csrf) -> None:
+        """Invalid POST returns 200 with validation errors when _next_form_page is valid."""
         url = form_action_manager.get_action_url("test_submit")
-        resp = client.post(url, data={"name": ""}, follow=False)
+        resp = client_no_csrf.post(
+            url,
+            data={
+                "name": "",
+                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+            },
+            follow=False,
+        )
         assert resp.status_code == 200
         c = resp.content
         assert b"error" in c.lower() or b"required" in c.lower() or b"name" in c
 
-    def test_valid_form_calls_handler(self, client) -> None:
+    def test_invalid_form_without_next_page_returns_400(self, client_no_csrf) -> None:
+        """Invalid POST without _next_form_page returns 400."""
+        url = form_action_manager.get_action_url("test_submit")
+        resp = client_no_csrf.post(url, data={"name": ""}, follow=False)
+        assert resp.status_code == 400
+
+    def test_valid_form_calls_handler(self, client_no_csrf) -> None:
         """Valid POST calls handler and returns 200/204."""
         url = form_action_manager.get_action_url("test_submit")
-        resp = client.post(url, data={"name": "Alice", "email": ""}, follow=False)
+        resp = client_no_csrf.post(
+            url,
+            data={
+                "name": "Alice",
+                "email": "",
+                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+            },
+            follow=False,
+        )
         assert resp.status_code in (200, 204)
 
-    def test_redirect_action_returns_redirect(self, client) -> None:
+    def test_redirect_action_returns_redirect(self, client_no_csrf) -> None:
         """Redirect action returns 302 redirect."""
         url = form_action_manager.get_action_url("test_redirect")
-        resp = client.post(
+        resp = client_no_csrf.post(
             url,
-            data={"name": "Bob", "email": ""},
+            data={
+                "name": "Bob",
+                "email": "",
+                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+            },
             follow=False,
         )
         assert resp.status_code == 302
         assert resp.url == "/done/"
 
-    def test_no_form_action_post_returns_200(self, client) -> None:
+    def test_no_form_action_post_returns_200(self, client_no_csrf) -> None:
         """Action without form_class POST returns 200 and body."""
         url = form_action_manager.get_action_url("test_no_form")
-        resp = client.post(url, data={})
+        resp = client_no_csrf.post(url, data={})
         assert resp.status_code == 200
         assert b"ok" in resp.content
 
@@ -366,7 +426,14 @@ class TestFormTagRender:
         t = form_engine.from_string(
             '{% form @action="test_submit" %}{{ form.as_p }}{% endform %}'
         )
-        html = t.render(Context({"request": csrf_request}))
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
         assert "<form" in html
         assert "action=" in html
         assert 'method="post"' in html
@@ -377,7 +444,14 @@ class TestFormTagRender:
         t = form_engine.from_string(
             '{% form @action="test_submit" class="my-form" id="f1" %}x{% endform %}'
         )
-        html = t.render(Context({"request": csrf_request}))
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
         assert 'class="my-form"' in html
         assert 'id="f1"' in html
 
@@ -386,8 +460,35 @@ class TestFormTagRender:
     ) -> None:
         """Form includes csrfmiddlewaretoken when request in context."""
         t = form_engine.from_string('{% form @action="test_submit" %}x{% endform %}')
-        html = t.render(Context({"request": csrf_request}))
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
         assert "csrfmiddlewaretoken" in html
+
+    def test_includes_next_form_page_hidden(self, form_engine, csrf_request) -> None:
+        """Form includes _next_form_page from current_page_module_path."""
+        t = form_engine.from_string('{% form @action="test_submit" %}x{% endform %}')
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert "_next_form_page" in html
+        assert str(PAGE_MODULE_FOR_FORM_TESTS) in html
+
+    def test_requires_current_page_module_path(self, form_engine, csrf_request) -> None:
+        """Without current_page_module_path, {% form %} raises ImproperlyConfigured."""
+        t = form_engine.from_string('{% form @action="test_submit" %}x{% endform %}')
+        with pytest.raises(ImproperlyConfigured, match="current_page_module_path"):
+            t.render(Context({"request": csrf_request}))
 
     def test_unknown_action_renders_empty_action_url(
         self, form_engine, csrf_request
@@ -396,7 +497,14 @@ class TestFormTagRender:
         t = form_engine.from_string(
             '{% form @action="nonexistent_action_xyz" %}z{% endform %}'
         )
-        html = t.render(Context({"request": csrf_request}))
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
         assert 'action=""' in html or "action=''" in html
         assert "<form" in html
 
@@ -417,6 +525,7 @@ class TestFormTagRender:
         context = Context(
             {
                 "request": csrf_request,
+                "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
                 "test_submit": types.SimpleNamespace(form=form_instance),
             }
         )
@@ -435,6 +544,7 @@ class TestFormTagRender:
         context = Context(
             {
                 "request": csrf_request,
+                "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
                 "test_submit": types.SimpleNamespace(form=form_instance),
             }
         )
@@ -467,6 +577,7 @@ class TestFormTagRender:
         context = Context(
             {
                 "request": request,
+                "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
                 "test_submit": types.SimpleNamespace(form=SimpleForm()),
             }
         )
@@ -533,7 +644,7 @@ class TestBaseFormGetInitial:
         assert result == {}
 
     def test_form_class_without_get_initial_raises_error_in_context(self) -> None:
-        """Test that form class without get_initial raises TypeError when context is accessed."""
+        """Form class without get_initial raises TypeError when lazy context runs."""
         backend = RegistryFormActionBackend()
 
         # Create a form class that doesn't inherit from BaseForm
@@ -545,25 +656,17 @@ class TestBaseFormGetInitial:
         ) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
-        # Register action with form class that doesn't have get_initial
         backend.register_action(
             "test_action",
             handler,
             options=FormActionOptions(form_class=CustomDjangoForm),
         )
 
-        # The error should occur when context_func is called via page context
         request = HttpRequest()
-        meta = backend.get_meta("test_action")
-        assert meta is not None
-        file_path = meta["file_path"]
+        assert backend.get_meta("test_action") is not None
 
-        # Try to get context through page context manager - this will trigger the error
-        # The context_func was registered, so calling collect_context will trigger it
         with pytest.raises(TypeError, match="must have get_initial method"):
-            page._context_manager.collect_context(
-                file_path, request, action_name="test_action"
-            )
+            _form_action_context_callable(CustomDjangoForm)(request)
 
     def test_form_with_model_instance_but_not_modelform_raises_error(self) -> None:
         """Test that using instance parameter with non-ModelForm raises TypeError."""
@@ -587,23 +690,13 @@ class TestBaseFormGetInitial:
             "test_action", handler, options=FormActionOptions(form_class=CustomForm)
         )
 
-        # Try to get context - this will trigger the error when trying to use instance
         request = HttpRequest()
-        meta = backend.get_meta("test_action")
-        assert meta is not None
-        file_path = meta["file_path"]
+        assert backend.get_meta("test_action") is not None
 
-        # Real call to collect_context - this will trigger the error in context_func
-        # context_func is registered with key="test_action", so it will be called
-        # when collect_context runs and processes registered context functions
-        # Access the context key to trigger the function
-        context_registry = page._context_manager._context_registry.get(file_path, {})
-        assert "test_action" in context_registry
-        func, _ = context_registry["test_action"]
         with pytest.raises(
             TypeError, match="instance parameter only supported for ModelForm"
         ):
-            func(request)  # This will trigger the error
+            _form_action_context_callable(CustomForm)(request)
 
     def test_post_with_non_string_value_in_dispatch(self, mock_http_request) -> None:
         """Test that POST values that are not strings are handled correctly in dispatch."""
@@ -677,19 +770,12 @@ class TestBaseFormGetInitial:
             "test_action", handler, options=FormActionOptions(form_class=TestModelForm)
         )
 
-        # Get context - this will call context_func which creates form with instance
         request = HttpRequest()
-        meta = backend.get_meta("test_action")
-        assert meta is not None
-        file_path = meta["file_path"]
+        assert backend.get_meta("test_action") is not None
 
-        # Call collect_context to trigger context_func
-        context_registry = page._context_manager._context_registry.get(file_path, {})
-        if "test_action" in context_registry:
-            func, _ = context_registry["test_action"]
-            result = func(request)  # This should create form with instance (line 255)
-            assert hasattr(result, "form")
-            assert result.form is not None
+        result = _form_action_context_callable(TestModelForm)(request)
+        assert hasattr(result, "form")
+        assert result.form is not None
 
     def test_context_func_gets_url_kwargs_from_post_when_no_resolver_match(
         self,
@@ -712,16 +798,11 @@ class TestBaseFormGetInitial:
             handler,
             options=FormActionOptions(form_class=FormWithId),
         )
-        meta = backend.get_meta("post_params_action")
-        assert meta is not None
-        file_path = meta["file_path"]
+        assert backend.get_meta("post_params_action") is not None
         request = HttpRequest()
         request.method = "POST"
         request.POST = {"_url_param_id": "42"}
-        context_registry = page._context_manager._context_registry.get(file_path, {})
-        assert "post_params_action" in context_registry
-        func, _ = context_registry["post_params_action"]
-        result = func(request)
+        result = _form_action_context_callable(FormWithId)(request)
         assert hasattr(result, "form")
         assert result.form.initial.get("name") == "from-42"
 
@@ -744,16 +825,11 @@ class TestBaseFormGetInitial:
             handler,
             options=FormActionOptions(form_class=FormWithId),
         )
-        meta = backend.get_meta("resolver_params_action")
-        assert meta is not None
-        file_path = meta["file_path"]
+        assert backend.get_meta("resolver_params_action") is not None
         request = HttpRequest()
         request.resolver_match = MagicMock()
         request.resolver_match.kwargs = {"id": 7}
-        context_registry = page._context_manager._context_registry.get(file_path, {})
-        assert "resolver_params_action" in context_registry
-        func, _ = context_registry["resolver_params_action"]
-        result = func(request)
+        result = _form_action_context_callable(FormWithId)(request)
         assert result.form.initial.get("name") == "resolver-7"
 
     def test_context_func_post_url_param_non_digit_string(self) -> None:
@@ -775,15 +851,11 @@ class TestBaseFormGetInitial:
             handler,
             options=FormActionOptions(form_class=FormWithSlug),
         )
-        meta = backend.get_meta("slug_action")
-        assert meta is not None
-        file_path = meta["file_path"]
+        assert backend.get_meta("slug_action") is not None
         request = HttpRequest()
         request.method = "POST"
         request.POST = {"_url_param_slug": "my-slug"}
-        context_registry = page._context_manager._context_registry.get(file_path, {})
-        func, _ = context_registry["slug_action"]
-        result = func(request)
+        result = _form_action_context_callable(FormWithSlug)(request)
         assert result.form.initial.get("slug") == "my-slug"
 
     def test_dispatch_with_modelform_returning_instance(
@@ -909,11 +981,10 @@ class TestBaseFormGetInitial:
         def handler(_request: HttpRequest, _form: TestForm) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
-        test_file = Path(__file__).parent / "test_file.py"
         backend.register_action(
             "test_action",
             handler,
-            options=FormActionOptions(form_class=TestForm, file_path=test_file),
+            options=FormActionOptions(form_class=TestForm),
         )
 
         mock_post = MagicMock()
@@ -922,18 +993,22 @@ class TestBaseFormGetInitial:
         ]
         request = mock_http_request(POST=mock_post)
 
-        # Pre-populate template registry
-        meta = backend.get_meta("test_action")
-        assert meta is not None
-        file_path = meta["file_path"]
+        file_path = PAGE_MODULE_FOR_FORM_TESTS
+        original_registry = page._template_registry.copy()
         page._template_registry[file_path] = "{{ form.name }}"
-
-        # Real call to render_form_fragment - this will cover lines 478-479 (non-string branch)
-        form = TestForm(initial={"name": "test"})
-        html = backend.render_form_fragment(
-            request, "test_action", form, template_fragment=None
-        )
-        assert isinstance(html, str)
+        try:
+            form = TestForm(initial={"name": "test"})
+            html = backend.render_form_fragment(
+                request,
+                "test_action",
+                form,
+                template_fragment=None,
+                page_file_path=file_path,
+            )
+            assert isinstance(html, str)
+        finally:
+            page._template_registry.clear()
+            page._template_registry.update(original_registry)
 
     def test_render_form_fragment_with_string_post_value_not_int(
         self, mock_http_request
@@ -947,11 +1022,10 @@ class TestBaseFormGetInitial:
         def handler(_request: HttpRequest, _form: TestForm) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
-        test_file = Path(__file__).parent / "test_file.py"
         backend.register_action(
             "test_action",
             handler,
-            options=FormActionOptions(form_class=TestForm, file_path=test_file),
+            options=FormActionOptions(form_class=TestForm),
         )
 
         mock_post = MagicMock()
@@ -960,18 +1034,22 @@ class TestBaseFormGetInitial:
         ]
         request = mock_http_request(POST=mock_post)
 
-        # Pre-populate template registry
-        meta = backend.get_meta("test_action")
-        assert meta is not None
-        file_path = meta["file_path"]
+        file_path = PAGE_MODULE_FOR_FORM_TESTS
+        original_registry = page._template_registry.copy()
         page._template_registry[file_path] = "{{ form.name }}"
-
-        # Real call to render_form_fragment - this will cover lines 474-477 (ValueError branch)
-        form = TestForm(initial={"name": "test"})
-        html = backend.render_form_fragment(
-            request, "test_action", form, template_fragment=None
-        )
-        assert isinstance(html, str)
+        try:
+            form = TestForm(initial={"name": "test"})
+            html = backend.render_form_fragment(
+                request,
+                "test_action",
+                form,
+                template_fragment=None,
+                page_file_path=file_path,
+            )
+            assert isinstance(html, str)
+        finally:
+            page._template_registry.clear()
+            page._template_registry.update(original_registry)
 
     def test_dispatch_with_form_without_get_initial(self, mock_http_request) -> None:
         """Test that dispatch raises TypeError when form class doesn't have get_initial."""
@@ -1052,26 +1130,186 @@ class TestBaseFormGetInitial:
         def handler(_request: HttpRequest, _form: TestForm) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
-        test_file = Path(__file__).parent / "test_file.py"
         backend.register_action(
             "test_action",
             handler,
-            options=FormActionOptions(form_class=TestForm, file_path=test_file),
+            options=FormActionOptions(form_class=TestForm),
         )
 
         mock_post = MagicMock()
         mock_post.items.return_value = [("_url_param_test", ["list", "value"])]
         request = mock_http_request(POST=mock_post)
 
-        # Pre-populate template registry
-        meta = backend.get_meta("test_action")
-        assert meta is not None
-        file_path = meta["file_path"]
+        file_path = PAGE_MODULE_FOR_FORM_TESTS
+        original_registry = page._template_registry.copy()
         page._template_registry[file_path] = "{{ form.name }}"
+        try:
+            form = TestForm(initial={"name": "test"})
+            html = backend.render_form_fragment(
+                request,
+                "test_action",
+                form,
+                template_fragment=None,
+                page_file_path=file_path,
+            )
+            assert isinstance(html, str)
+        finally:
+            page._template_registry.clear()
+            page._template_registry.update(original_registry)
 
-        # Real call to render_form_fragment - this will cover the non-string handling code
-        form = TestForm(initial={"name": "test"})
-        html = backend.render_form_fragment(
-            request, "test_action", form, template_fragment=None
+
+class TestValidatedNextFormPagePath:
+    """``validated_next_form_page_path`` edge cases."""
+
+    def test_no_post_attr(self) -> None:
+        """Missing ``POST`` yields None."""
+
+        class NoPost:
+            pass
+
+        assert validated_next_form_page_path(NoPost()) is None  # type: ignore[arg-type]
+
+    def test_next_page_not_str(self) -> None:
+        """Non-string ``_next_form_page`` yields None."""
+        req = HttpRequest()
+        req.method = "POST"
+
+        class WeirdPost:
+            def get(self, _key: str, _default: object = None) -> object:
+                return 42
+
+        req.POST = WeirdPost()  # type: ignore[assignment]
+        assert validated_next_form_page_path(req) is None
+
+    def test_next_page_empty_after_strip(self) -> None:
+        """Whitespace-only ``_next_form_page`` yields None."""
+        req = HttpRequest()
+        req.method = "POST"
+        req.POST = {"_next_form_page": "   \n  "}
+        assert validated_next_form_page_path(req) is None
+
+    def test_resolve_raises_oserror(self, monkeypatch) -> None:
+        """``Path.resolve`` raising ``OSError`` yields None."""
+
+        def boom(self: pathlib.Path, *args: object, **kwargs: object) -> pathlib.Path:
+            msg = "boom"
+            raise OSError(msg)
+
+        monkeypatch.setattr(pathlib.Path, "resolve", boom)
+        req = HttpRequest()
+        req.method = "POST"
+        req.POST = {"_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS)}
+        assert validated_next_form_page_path(req) is None
+
+    def test_not_page_py(self, tmp_path) -> None:
+        """Filename other than ``page.py`` yields None."""
+        p = tmp_path / "foo.py"
+        p.write_text("x=1")
+        req = HttpRequest()
+        req.method = "POST"
+        req.POST = {"_next_form_page": str(p.resolve())}
+        assert validated_next_form_page_path(req) is None
+
+    def test_base_dir_none(self, monkeypatch) -> None:
+        """Missing ``settings.BASE_DIR`` yields None."""
+        req = HttpRequest()
+        req.method = "POST"
+        req.POST = {"_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS)}
+        monkeypatch.setattr("django.conf.settings.BASE_DIR", None)
+        assert validated_next_form_page_path(req) is None
+
+    def test_outside_base_dir(self, tmp_path, monkeypatch) -> None:
+        """Path outside ``BASE_DIR`` yields None."""
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        page_py = outside / "page.py"
+        page_py.write_text("# x")
+        req = HttpRequest()
+        req.method = "POST"
+        req.POST = {"_next_form_page": str(page_py.resolve())}
+        monkeypatch.setattr("django.conf.settings.BASE_DIR", tmp_path / "project")
+        assert validated_next_form_page_path(req) is None
+
+
+class TestUrlKwargsFromPostReserved:
+    """``_url_kwargs_from_post`` skips DI-reserved param names."""
+
+    def test_skips_url_param_request(self) -> None:
+        """``_url_param_request`` is not forwarded as ``request``."""
+        req = HttpRequest()
+        req.method = "POST"
+        req.POST = {"_url_param_request": "x", "_url_param_id": "7"}
+        out = _url_kwargs_from_post(req)
+        assert "request" not in out
+        assert out["id"] == 7
+
+
+class TestBuildFormNamespaceForAction:
+    """``build_form_namespace_for_action`` when action has no form class."""
+
+    def test_returns_none_for_action_without_form_class(
+        self, mock_http_request
+    ) -> None:
+        """Actions without ``form_class`` return None."""
+        req = mock_http_request(method="GET")
+        assert build_form_namespace_for_action("test_no_form", req) is None
+
+
+class TestFormDispatchRenderFragmentBranches:
+    """``_FormActionDispatch.render_form_fragment`` fallbacks."""
+
+    def test_unknown_action_uses_form_as_p(self, mock_http_request) -> None:
+        """Unknown action meta falls back to ``form.as_p()``."""
+        backend = RegistryFormActionBackend()
+
+        class F(Form):
+            name = forms.CharField(max_length=10)
+
+        def h(_request: HttpRequest, _form: F) -> HttpResponseRedirect:
+            return HttpResponseRedirect("/")
+
+        backend.register_action(
+            "only", handler=h, options=FormActionOptions(form_class=F)
         )
-        assert isinstance(html, str)
+        req = mock_http_request(method="GET")
+        form = F()
+        html = _FormActionDispatch.render_form_fragment(
+            backend,
+            req,
+            "missing_action",
+            form,
+            None,
+            PAGE_MODULE_FOR_FORM_TESTS,
+        )
+        assert html == form.as_p()
+
+    def test_empty_template_string_uses_form_as_p(self, mock_http_request) -> None:
+        """Empty template string in registry falls back to ``form.as_p()``."""
+        backend = RegistryFormActionBackend()
+
+        class F(Form):
+            name = forms.CharField(max_length=10)
+
+        def h(_request: HttpRequest, _form: F) -> HttpResponseRedirect:
+            return HttpResponseRedirect("/")
+
+        backend.register_action(
+            "frag", handler=h, options=FormActionOptions(form_class=F)
+        )
+        req = mock_http_request(method="GET")
+        form = F()
+        original = page._template_registry.copy()
+        page._template_registry[PAGE_MODULE_FOR_FORM_TESTS] = ""
+        try:
+            html = _FormActionDispatch.render_form_fragment(
+                backend,
+                req,
+                "frag",
+                form,
+                None,
+                PAGE_MODULE_FOR_FORM_TESTS,
+            )
+            assert html == form.as_p()
+        finally:
+            page._template_registry.clear()
+            page._template_registry.update(original)

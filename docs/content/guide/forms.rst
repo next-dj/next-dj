@@ -8,12 +8,12 @@ Overview
 
 The forms system in next.dj allows you to:
 
-- **Register form actions** using the ``@forms.action()`` decorator
-- **Automatically handle CSRF protection** - tokens are inserted automatically
-- **Integrate with file routing** - URL parameters are automatically passed to forms
-- **Use Django forms** - Full support for ``Form`` and ``ModelForm``
-- **Handle validation errors** - Forms are re-rendered with errors automatically
-- **Support multiple response types** - Redirects, HTTP responses, or None
+- **Register form actions** using the ``@forms.action()`` decorator (names must be unique project-wide)
+- **Automatically handle CSRF protection** — tokens are inserted automatically
+- **Integrate with file routing** — URL parameters are passed into ``get_initial``, handlers, and hidden fields
+- **Use Django forms** — full support for ``Form`` and ``ModelForm`` with ``get_initial()``
+- **Re-render invalid submissions** — the originating page is chosen from POST ``_next_form_page`` (see below)
+- **Lazy bound forms in templates** — if the context does not already expose ``<action_name>.form``, it is built from the action registry and the request
 
 Key Concepts
 ------------
@@ -66,7 +66,14 @@ Here's a minimal example of a form in next.dj:
        <button type="submit">Send Message</button>
    {% endform %}
 
-That's it! The form automatically includes CSRF protection and handles validation errors.
+That's it! The form automatically includes CSRF protection, the origin field ``_next_form_page``, and validation error re-rendering when the submission is invalid.
+
+Page context and ``{% form %}``
+--------------------------------
+
+File-based rendering sets **``current_page_module_path``** in the template context (absolute path to the current ``page.py``). The ``{% form %}`` tag **requires** this value. It emits a hidden field **``_next_form_page``** so that if validation fails, the framework can reload that page’s template and show errors. If **``_next_form_page``** is missing or does not point to a ``page.py`` under ``BASE_DIR``, the dispatcher responds with **400 Bad Request**.
+
+Register **``@forms.action``** in ``page.py`` or in a **``component.py``** next to ``component.djx``. Component modules under your configured component roots are imported during app startup so actions are registered without manual ``importlib`` hacks.
 
 Basic Usage
 -----------
@@ -171,12 +178,12 @@ Use the ``@forms.action()`` decorator to register form action handlers:
        # Process form data
        return HttpResponseRedirect("/success/")
 
-**Decorator Parameters:**
+**Decorator parameters:**
 
-- **``name``** (required): Unique action name used in templates
-- **``form_class``** (optional): Form class for validation. If omitted, handler receives only request
+- **``name``** (required): Unique action name used in templates and to build a stable form endpoint. Must not collide with another action in the project.
+- **``form_class``** (optional): Django form class implementing ``get_initial``. If omitted, the handler is invoked without a bound form (useful for non-form POST actions).
 
-**Handler Function Signature:**
+**Handler function signature:**
 
 Handlers receive only the arguments they declare (dependency injection). Declare
 ``request: HttpRequest``, ``form: MyForm`` (when using ``form_class``), and any
@@ -235,14 +242,15 @@ Use the ``{% form %}`` template tag to render forms:
        <button type="submit">Submit</button>
    {% endform %}
 
-**Automatic Features:**
+**Automatic behavior:**
 
-- **CSRF Token**: Automatically included as hidden field
-- **Method**: Always POST
-- **Action URL**: Automatically generated from action name
-- **URL Parameters**: Automatically included as hidden fields (from file routing)
+- **CSRF token** — included as a hidden field
+- **Method** — always POST
+- **Action URL** — resolved from the registered action (``/_next/form/<uid>/``)
+- **Origin** — hidden **``_next_form_page``** set from **``current_page_module_path``**
+- **URL parameters** — when the page URL has dynamic segments, matching kwargs are echoed as **``_url_param_<name>``** hidden fields (the ``uid`` used by the form endpoint is skipped)
 
-**Accessing Form in Template:**
+**Accessing the form in the template:**
 
 The form instance is available inside the ``{% form %}`` tag:
 
@@ -303,9 +311,9 @@ Handlers can return different types of responses:
        obj = form.save()
        return obj  # If obj has .url attribute, it's converted to redirect
 
-**Invalid Form Handling:**
+**Invalid form handling:**
 
-If the form is invalid, the handler is **not called**. Instead, the form is automatically re-rendered with validation errors using the same template and context as the original page.
+If the form is invalid, the handler is **not** called. The framework reads **``_next_form_page``** from POST, validates that path, rebuilds the page render context, injects the bound form and errors, and returns **200** with the full page HTML. A missing or untrusted **``_next_form_page``** yields **400**.
 
 Working with ModelForm
 ----------------------
@@ -439,38 +447,17 @@ Forms automatically receive URL parameters from file routing:
 
 **How URL Parameters Work:**
 
-1. URL parameters are extracted from ``request.resolver_match.kwargs``
-2. They are included as hidden fields in the form (``_url_param_<name>``)
-3. They are passed to ``get_initial()`` and handler functions
-4. They are available in context functions when re-rendering errors
+1. URL parameters are taken from ``request.resolver_match.kwargs`` on GET
+2. They are echoed as hidden fields (``_url_param_<name>``) on the form
+3. On POST they are merged from those hidden fields when the resolver has no kwargs
+4. They are passed into ``get_initial()`` and into dependency-injected handler parameters
 
-Context System
-~~~~~~~~~~~~~~
+Context and the bound form
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Forms are automatically registered in the context system:
+Form actions **do not** register extra entries on the page context registry. Inside ``{% form %}``, if the template context already contains **``create_todo``** (or your action name) as a namespace with a **``.form``** attribute, that instance is used. Otherwise the framework calls **``build_form_namespace_for_action``** for the action name and current request, which runs **``get_initial``** with URL parameters from the resolver or from **``_url_param_*``** on POST.
 
-**Automatic Context Registration:**
-
-When you register a form action with ``form_class``, the form is automatically available in templates:
-
-.. code-block:: python
-
-   @forms.action("create_todo", form_class=TodoForm)
-   def create_todo_handler(request: HttpRequest, form: TodoForm) -> HttpResponseRedirect:
-       form.save()
-       return HttpResponseRedirect("/")
-
-The form is available in templates as ``create_todo.form``:
-
-.. code-block:: html
-
-   {% form @action="create_todo" %}
-       {{ form.as_p }}
-   {% endform %}
-
-**Using Forms with Context Functions:**
-
-You can combine forms with context functions:
+You can combine forms with **``@context``** functions as usual:
 
 .. code-block:: python
 
@@ -580,129 +567,40 @@ Display messages in templates:
 Internal Architecture
 ---------------------
 
-Action Registration
-~~~~~~~~~~~~~~~~~~~
+Registration and UID
+~~~~~~~~~~~~~~~~~~~~
 
-When you use ``@forms.action()``, the following happens:
+When a module defining ``@forms.action`` is imported:
 
-1. **UID Generation**: A unique identifier (UID) is created from the file path and action name using SHA256 hash (first 16 characters)
+1. **UID** — A short stable id is derived from the action **name** (SHA-256 of a fixed prefix and the name; first 16 hex characters). The name must be unique across the project.
+2. **Registry** — ``RegistryFormActionBackend`` stores the handler, optional ``form_class``, and UID. Metadata does **not** include the declaring file path for dispatch or error rendering.
 
-2. **Registry Storage**: The action is stored in ``FormActionManager`` with:
-   - Handler function
-   - Form class (if provided)
-   - File path
-   - UID
+There is no automatic ``register_context`` for form actions on ``page.py``; bound forms for GET come from **``build_form_namespace_for_action``** inside ``{% form %}`` unless you provide the namespace yourself.
 
-3. **Context Registration**: If ``form_class`` is provided, a context function is automatically registered that:
-   - Calls ``form_class.get_initial()`` with request and URL parameters
-   - Creates form instance with initial data or model instance
-   - Returns form in a ``SimpleNamespace`` object
+URL pattern
+~~~~~~~~~~~
 
-**Example Registration Flow:**
-
-.. code-block:: python
-
-   # File: pages/contact/page.py
-   @forms.action("contact", form_class=ContactForm)
-   def contact_handler(request: HttpRequest, form: ContactForm) -> HttpResponseRedirect:
-       # This action is registered with:
-       # - name: "contact"
-       # - uid: hash("pages/contact/page.py:contact")[:16]
-       # - handler: contact_handler
-       # - form_class: ContactForm
-       # - file_path: Path("pages/contact/page.py")
-       pass
-
-URL Generation
-~~~~~~~~~~~~~~
-
-Form actions generate URL patterns automatically:
-
-**URL Pattern Format:**
-
-All form actions use a single URL pattern:
+All actions share one route shape:
 
 .. code-block:: text
 
    /_next/form/<str:uid>/
 
-**URL Resolution:**
+``form_action_manager.get_action_url("contact")`` resolves the correct path for a registered name.
 
-1. ``FormActionManager.generate_urls()`` creates URL patterns from all registered backends
-2. Each backend's ``generate_urls()`` returns a list of URL patterns
-3. The default backend (``RegistryFormActionBackend``) creates one pattern for all actions
-4. Actions are dispatched by UID, not by name
-
-**Getting Action URLs:**
-
-Use ``form_action_manager.get_action_url(action_name)`` to get the URL for an action:
-
-.. code-block:: python
-
-   from next.forms import form_action_manager
-
-   url = form_action_manager.get_action_url("contact")
-   # Returns: "/_next/form/abc123def4567890/"
-
-Request Handling
+Request handling
 ~~~~~~~~~~~~~~~~
 
-**GET Requests:**
+**GET** to ``/_next/form/<uid>/`` returns **405 Method Not Allowed**. Users never open that URL for browsing; the browser POSTs to it from your page.
 
-GET requests to form action URLs return ``405 Method Not Allowed``. Forms are displayed through the normal page rendering process using context functions.
+**POST** flow:
 
-**POST Request Flow:**
+1. Read URL-related kwargs from **``_url_param_*``** fields.
+2. Resolve **``get_initial``**, bind POST/FILES, run **``is_valid()``**.
+3. If **invalid**: validate **``_next_form_page``** in POST (must be an existing ``page.py`` under ``BASE_DIR``), load that page’s template, merge **``Page.build_render_context``** with the bound form and errors, return **200**. If **``_next_form_page``** is missing or invalid, return **400**.
+4. If **valid**: call the handler with dependency-injected arguments and normalize the return value (**``None``** → 204 when appropriate, strings and redirect-like objects coerced as documented in the code).
 
-1. **Extract URL Parameters**: URL parameters are extracted from hidden form fields (``_url_param_<name>``)
-
-2. **Get Initial Data**: If ``form_class`` is provided:
-   - Call ``form_class.get_initial(request, **url_kwargs)``
-   - Check if result is a model instance (has ``_meta.model`` attribute)
-   - If model instance: create form with ``instance=initial_data`` (ModelForm only)
-   - If dictionary: create form with ``initial=initial_data``
-
-3. **Validate Form**: Call ``form.is_valid()``
-
-4. **Handle Invalid Form**: If form is invalid:
-   - Load template from registry (same template as original page)
-   - Build context with form errors
-   - Pass URL parameters to context functions
-   - Render full page with errors
-   - Return 200 with rendered HTML
-
-5. **Handle Valid Form**: If form is valid:
-   - Call handler function with ``request, form, **url_kwargs``
-   - Normalize handler response
-   - Return appropriate HTTP response
-
-**Response Normalization:**
-
-Handler responses are normalized through ``_normalize_handler_response()``:
-
-- **None**: Returns 204 No Content (or re-renders form if backend/request available)
-- **HttpResponse**: Returns as-is
-- **str**: Wraps in HttpResponse
-- **Object with .url**: Converts to HttpResponseRedirect
-
-**Error Rendering:**
-
-When form validation fails:
-
-1. **Template Loading**: Load full template from ``page._template_registry`` using file_path
-
-2. **Context Building**: Build context with:
-   - All context functions (with URL parameters)
-   - Form instance with errors (under action name and as ``form``)
-   - Request object
-
-3. **Rendering**: Render template with context, showing form errors
-
-**Component Architecture:**
-
-- **``FormActionBackend``**: Abstract base class for form action backends
-- **``RegistryFormActionBackend``**: In-memory registry implementation (default)
-- **``FormActionManager``**: Manages multiple backends, aggregates URL patterns
-- **``_FormActionDispatch``**: Internal class handling dispatch logic and response normalization
+**Roles:** ``FormActionBackend`` / ``RegistryFormActionBackend``, ``FormActionManager``, and ``_FormActionDispatch`` implement the above.
 
 Examples
 --------
@@ -1056,7 +954,8 @@ Common Issues
 
 - Ensure ``next`` is in ``INSTALLED_APPS`` (the app registers the ``{% form %}`` tag as a template builtin). For a custom engine, add ``next.templatetags.forms`` to ``OPTIONS['builtins']`` or use ``{% load forms %}`` in the template.
 - Check that action name matches ``@action`` parameter
-- Verify form action is registered (check for import errors)
+- Verify the action module is imported (``page.py`` or ``component.py`` under configured roots)
+- Ensure **``current_page_module_path``** is in the template context; without it ``{% form %}`` raises **``django.core.exceptions.ImproperlyConfigured``**
 
 **CSRF token missing:**
 
@@ -1073,7 +972,8 @@ Common Issues
 
 - Check that form validation is working (add ``print(form.errors)``)
 - Verify template has error display (``{{ form.errors }}`` or ``{{ form.<field>.errors }}``)
-- Ensure form is re-rendered (check response status is 200, not redirect)
+- Ensure the POST includes a valid **``_next_form_page``** hidden field (same origin as when the page was rendered); otherwise you may get **400** instead of a 200 error page
+- Ensure response status is **200** for invalid submissions (not a redirect)
 
 **Handler not called:**
 

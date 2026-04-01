@@ -423,6 +423,15 @@ class TestPageHasTemplateAndLazyRender:
         assert page_file in page_instance._template_registry
         assert "Lazy" in result
 
+    def test_load_template_for_file_false_when_no_usable_template_source(
+        self, page_instance, tmp_path
+    ) -> None:
+        """_load_template_for_file skips loaders that yield no content and returns False."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("y = 1")
+        assert not page_instance._load_template_for_file(page_file)
+        assert page_file not in page_instance._template_registry
+
     def test_render_invalidates_cache_when_template_stale(
         self, page_instance, tmp_path
     ) -> None:

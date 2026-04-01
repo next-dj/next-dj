@@ -127,6 +127,7 @@ class DependencyResolver:
         self._dependency_callables: dict[str, Callable[..., Any]] = {}
         self._providers: list[ParameterProvider] = list(providers)
         self._providers_loaded = bool(providers)
+        self._resolve_call_stack: list[Callable[..., Any]] = []
 
     def _get_providers(self) -> list[ParameterProvider]:
         """Instantiate registered ``RegisteredParameterProvider`` subclasses."""
@@ -246,20 +247,24 @@ class DependencyResolver:
         """Keyword args for calling ``func`` from ``context``."""
         self._ensure_providers()
 
+        self._resolve_call_stack.append(func)
         try:
-            sig = inspect.signature(func)
-        except (ValueError, TypeError):
-            return {}
+            try:
+                sig = inspect.signature(func)
+            except (ValueError, TypeError):
+                return {}
 
-        result: dict[str, Any] = {}
-        for name, param in sig.parameters.items():
-            if self._should_skip_parameter(param):
-                continue
+            result: dict[str, Any] = {}
+            for name, param in sig.parameters.items():
+                if self._should_skip_parameter(param):
+                    continue
 
-            value = self._resolve_parameter(param, context)
-            result[name] = value
+                value = self._resolve_parameter(param, context)
+                result[name] = value
 
-        return result
+            return result
+        finally:
+            self._resolve_call_stack.pop()
 
     def resolve_dependencies(
         self, func: Callable[..., Any], **context: object

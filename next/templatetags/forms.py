@@ -14,7 +14,11 @@ from django.core.exceptions import ImproperlyConfigured
 from django.middleware.csrf import get_token
 from django.utils.html import escape, format_html
 
-from next.forms import form_action_manager
+from next.deps import RESERVED_KEYS
+from next.forms import build_form_namespace_for_action, form_action_manager
+
+
+_NEXT_FORM_PAGE = "_next_form_page"
 
 
 if TYPE_CHECKING:
@@ -140,21 +144,32 @@ class FormNode(template.Node):
             raise ImproperlyConfigured(msg)
         return cast("HttpRequest", request)
 
-    def _build_hidden_inputs(self, request: HttpRequest) -> str:
-        """Build CSRF hidden input and URL parameter inputs."""
+    def _build_hidden_inputs(
+        self,
+        request: HttpRequest,
+        *,
+        next_form_page: str | None,
+    ) -> str:
+        """Build CSRF, origin page, and URL parameter hidden inputs."""
         inputs = [
             format_html(
                 '<input type="hidden" name="csrfmiddlewaretoken" value="{}">',
                 get_token(request),
             )
         ]
+        if next_form_page:
+            inputs.append(
+                format_html(
+                    '<input type="hidden" name="{}" value="{}">',
+                    _NEXT_FORM_PAGE,
+                    escape(next_form_page),
+                )
+            )
 
-        # Add hidden inputs for URL parameters (from file routing)
-        # These will be passed to form handlers via POST data
         if request.resolver_match and request.resolver_match.kwargs:
             for key, value in request.resolver_match.kwargs.items():
-                # Skip uid parameter used by form action system
-                if key != "uid":
+                # Skip uid (form action URL) and names reserved for DI
+                if key != "uid" and key not in RESERVED_KEYS:
                     inputs.append(
                         format_html(
                             '<input type="hidden" name="_url_param_{}" value="{}">',
@@ -170,17 +185,28 @@ class FormNode(template.Node):
         request = self._get_request(context)
         builder = FormAttrsBuilder.from_config(self.config)
 
-        # Get form from context by action name
+        raw_page = context.get("current_page_module_path")
+        if not raw_page:
+            msg = (
+                "{% form %} requires 'current_page_module_path' in template context "
+                "(set when rendering file-based pages)."
+            )
+            raise ImproperlyConfigured(msg)
+        next_form_page = str(raw_page)
+
         form_obj = context.get(self.config.action_name)
         if form_obj and hasattr(form_obj, "form"):
             form_instance = form_obj.form
         else:
-            form_instance = None
+            built = build_form_namespace_for_action(self.config.action_name, request)
+            form_instance = built.form if built is not None else None
 
         opening_tag = builder.build_opening_tag()
-        hidden_inputs = self._build_hidden_inputs(request)
+        hidden_inputs = self._build_hidden_inputs(
+            request,
+            next_form_page=next_form_page,
+        )
 
-        # Push form as local variable (only available inside {% form %} tag)
         with context.push(form=form_instance):
             content = self.nodelist.render(context)
 

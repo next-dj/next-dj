@@ -881,6 +881,17 @@ class FileComponentsBackend(ComponentsBackend):
         for comp_root in self._extra_component_roots:
             self._registry.mark_as_root(comp_root)
             self._discover_in_component_root(comp_root)
+        self.import_all_component_modules()
+
+    def import_all_component_modules(self) -> None:
+        """Load each ``component.py`` so decorators such as ``@forms.action`` run."""
+        seen: set[Path] = set()
+        for info in self._registry.get_all():
+            mp = info.module_path
+            if mp is None or mp in seen:
+                continue
+            seen.add(mp)
+            self._module_loader.load(mp)
 
     def _discover_in_component_root(self, component_root: Path) -> None:
         components = self._scanner.scan_directory(component_root, component_root, "")
@@ -921,6 +932,9 @@ def register_components_folder_from_router_walk(
         if isinstance(backend, FileComponentsBackend):
             found = backend._scanner.scan_directory(folder, pages_root, scope_relative)
             backend._registry.register_many(found)
+            for info in found:
+                if info.module_path:
+                    backend._module_loader.load(info.module_path)
             return
 
 

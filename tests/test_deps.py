@@ -1,4 +1,6 @@
+import importlib.util
 import inspect
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -107,6 +109,34 @@ class TestHttpRequestProvider:
         param = inspect_parameter("request", HttpRequest)
         ctx = _ctx(request=request)
         assert provider.resolve(param, ctx) is request
+
+    def test_can_handle_when_get_type_hints_raises_falls_back(
+        self, tmp_path: Path
+    ) -> None:
+        """If ``get_type_hints`` raises, the except branch runs and fallback applies."""
+        mod_path = tmp_path / "bad_ann.py"
+        mod_path.write_text(
+            "from __future__ import annotations\n"
+            "def handler(request: DoesNotExist):\n"
+            "    pass\n",
+            encoding="utf-8",
+        )
+        spec = importlib.util.spec_from_file_location("bad_ann", mod_path)
+        assert spec is not None
+        assert spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        handler = mod.handler
+
+        provider = HttpRequestProvider()
+        req = HttpRequest()
+        ctx = _ctx(request=req)
+        param = inspect.signature(handler).parameters["request"]
+        resolver._resolve_call_stack.append(handler)
+        try:
+            assert provider.can_handle(param, ctx) is False
+        finally:
+            resolver._resolve_call_stack.pop()
 
 
 class TestUrlKwargsProvider:

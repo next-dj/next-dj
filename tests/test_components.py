@@ -307,6 +307,45 @@ class TestRegisterComponentsFolderFromRouterWalk:
         register_components_folder_from_router_walk(folder, tmp_path, "")
         assert len(list(backend._registry.get_all())) == 1
 
+    def test_loads_component_py_when_composite_has_module(self, tmp_path: Path) -> None:
+        """Router walk loads ``component.py`` for composite components (coverage)."""
+        components_manager._walk_registered_folders.clear()
+        components_manager._backends.clear()
+        backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
+        components_manager._backends.append(backend)
+        comp_dir = tmp_path / "_components" / "news"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "component.djx").write_text("<span>news</span>")
+        (comp_dir / "component.py").write_text("# module for news\n")
+        register_components_folder_from_router_walk(
+            tmp_path / "_components",
+            tmp_path,
+            "",
+        )
+        infos = [i for i in backend._registry.get_all() if i.name == "news"]
+        assert len(infos) == 1
+        assert infos[0].module_path is not None
+
+    def test_import_all_component_modules_loads_each_module_path(
+        self, tmp_path: Path
+    ) -> None:
+        """``import_all_component_modules`` executes ``module_loader.load`` per path."""
+        comp_py = tmp_path / "component.py"
+        comp_py.write_text("# registered component module\n")
+        djx = tmp_path / "c.djx"
+        djx.write_text("<div/>")
+        info = ComponentInfo(
+            name="c",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=djx,
+            module_path=comp_py,
+            is_simple=False,
+        )
+        backend = FileComponentsBackend(dict(_MIN_FILE_COMPONENTS))
+        backend._registry.register(info)
+        backend.import_all_component_modules()
+
 
 class TestGetComponent:
     """Tests for get_component()."""
@@ -718,6 +757,70 @@ class TestComponentTag:
             )
         assert 'class="card"' in result
         assert "Hello" in result
+
+    def test_component_tag_inherits_parent_template_context(
+        self, tmp_path: Path
+    ) -> None:
+        """Parent page context keys are visible inside the component template."""
+        (tmp_path / "banner.djx").write_text(
+            '<span class="banner">{{ page_var }}</span>'
+        )
+        with patch.object(
+            components_manager,
+            "get_component",
+            return_value=ComponentInfo(
+                name="banner",
+                scope_root=tmp_path,
+                scope_relative="",
+                template_path=tmp_path / "banner.djx",
+                module_path=None,
+                is_simple=True,
+            ),
+        ):
+            t = Template(
+                '{% load components %}{% component "banner" %}{% endcomponent %}'
+            )
+            result = t.render(
+                Context(
+                    {
+                        "current_template_path": str(tmp_path / "template.djx"),
+                        "page_var": "from_parent_page",
+                    },
+                ),
+            )
+        assert "from_parent_page" in result
+
+    def test_component_tag_prop_overrides_parent_context_key(
+        self, tmp_path: Path
+    ) -> None:
+        """Explicit tag props shadow parent context keys of the same name."""
+        (tmp_path / "chip.djx").write_text("<em>{{ title }}</em>")
+        with patch.object(
+            components_manager,
+            "get_component",
+            return_value=ComponentInfo(
+                name="chip",
+                scope_root=tmp_path,
+                scope_relative="",
+                template_path=tmp_path / "chip.djx",
+                module_path=None,
+                is_simple=True,
+            ),
+        ):
+            t = Template(
+                "{% load components %}"
+                '{% component "chip" title="from_prop" %}{% endcomponent %}'
+            )
+            result = t.render(
+                Context(
+                    {
+                        "current_template_path": str(tmp_path / "t.djx"),
+                        "title": "from_parent",
+                    },
+                ),
+            )
+        assert "from_prop" in result
+        assert "from_parent" not in result
 
     def test_component_tag_accepts_path_object_in_context(self, tmp_path: Path) -> None:
         """current_template_path in context can be a Path object."""

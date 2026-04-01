@@ -13,7 +13,16 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable, Iterator
 from pathlib import Path
-from typing import Any, ClassVar, SupportsIndex, TypeVar, get_args, get_origin, overload
+from typing import (
+    Any,
+    ClassVar,
+    SupportsIndex,
+    TypeVar,
+    get_args,
+    get_origin,
+    get_type_hints,
+    overload,
+)
 
 from django.conf import settings
 from django.http import HttpRequest
@@ -68,6 +77,15 @@ class HttpRequestProvider(RegisteredParameterProvider):
         """Return True when the parameter is ``HttpRequest`` and a request exists."""
         if getattr(context, "request", None) is None:
             return False
+        stack = getattr(self.resolver, "_resolve_call_stack", ())
+        if stack:
+            func = stack[-1]
+            try:
+                hints = get_type_hints(func)
+                if hints.get(param.name) is HttpRequest:
+                    return True
+            except (NameError, TypeError, AttributeError, ValueError):
+                pass
         origin = get_origin(param.annotation)
         return origin is None and param.annotation is HttpRequest
 

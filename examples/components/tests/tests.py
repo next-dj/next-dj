@@ -19,6 +19,13 @@ User = get_user_model()
 
 example_root = Path(__file__).resolve().parent.parent
 
+LOGIN_PAGE_PY = (
+    example_root / "myapp" / "pages" / "account" / "login" / "page.py"
+).resolve()
+REGISTER_PAGE_PY = (
+    example_root / "myapp" / "pages" / "account" / "register" / "page.py"
+).resolve()
+
 
 @pytest.fixture()
 def home_template() -> Path:
@@ -309,7 +316,11 @@ def test_login_invalid_password_returns_layout(client) -> None:
     login_action = form_action_manager.get_action_url("login")
     response = client.post(
         login_action,
-        {"username": "eve", "password": "wrong"},
+        {
+            "username": "eve",
+            "password": "wrong",
+            "_next_form_page": str(LOGIN_PAGE_PY),
+        },
     )
     assert response.status_code == 200
     body = response.content.decode()
@@ -411,6 +422,7 @@ def test_register_form_password_mismatch(client) -> None:
             "username": "test",
             "password1": "pass123",
             "password2": "different",
+            "_next_form_page": str(REGISTER_PAGE_PY),
         },
     )
     assert response.status_code == 200
@@ -479,6 +491,7 @@ def test_register_form_username_exists(client) -> None:
             "username": "existing",
             "password1": "newpass123",
             "password2": "newpass123",
+            "_next_form_page": str(REGISTER_PAGE_PY),
         },
     )
     assert response.status_code == 200
