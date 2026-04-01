@@ -12,7 +12,7 @@ A next-gen framework based on Django without the tears.
 """
 
 __title__ = "Next Django Framework"
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 __author__ = "paqstd-dev"
 
 VERSION = __version__
