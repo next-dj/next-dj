@@ -62,54 +62,77 @@ _KIND_JS = "js"
 
 @dataclass(frozen=True, slots=True)
 class StaticAsset:
-    """One CSS or JS file reference to include on the rendered page.
+    """One CSS or JS reference to include on the rendered page.
 
     A file asset originates from a co-located file on disk and has
     ``source_path`` set to its absolute filesystem path. An external asset
-    carries a raw URL supplied by a ``styles`` or ``scripts`` module variable
-    and has no ``source_path``.
+    carries a raw URL supplied by a ``styles`` / ``scripts`` module variable
+    or by ``{% use_style %}`` / ``{% use_script %}``. An inline asset comes
+    from a ``{% #use_style %}`` / ``{% #use_script %}`` block and stores its
+    pre-rendered HTML body in ``inline`` with ``url`` left empty. The
+    collector dedupes inline assets by body content so identical rendered
+    blocks (for example the same component rendered twice with the same
+    context) end up in the slot exactly once.
     """
 
     url: str
     kind: str
     source_path: Path | None = None
+    inline: str | None = None
 
 
 class StaticCollector:
     """Accumulate static asset references during a single page render.
 
     The collector is stored in template context under ``_static_collector`` so
-    that nested component rendering can append its own assets. Duplicate URLs
-    are ignored and insertion order follows the CSS-cascade convention: items
-    added with ``prepend=True`` (shared third-party dependencies declared with
-    ``{% use_style %}`` / ``{% use_script %}``) appear first in the order they
-    were registered, followed by co-located files and module-level lists in
-    nested depth-first render order.
+    that nested component rendering can append its own assets. Insertion
+    order follows the CSS-cascade convention: items added with
+    ``prepend=True`` (shared third-party dependencies declared with
+    ``{% use_style %}`` / ``{% use_script %}``) appear first in the order
+    they were registered, followed by co-located files, module-level lists
+    and inline blocks from ``{% #use_style %}`` / ``{% #use_script %}`` in
+    nested depth-first render order. URL-form entries dedupe by URL;
+    inline entries always append and dedupe by the rendered body itself, so
+    two blocks producing identical HTML collapse to one while blocks whose
+    template context resolves to different HTML stay distinct.
     """
 
     def __init__(self) -> None:
         """Create an empty collector with separate ordered lists for CSS and JS."""
         self._seen_urls: set[str] = set()
+        self._seen_inline: set[tuple[str, str]] = set()
         self._styles: list[StaticAsset] = []
         self._scripts: list[StaticAsset] = []
         self._styles_prepend_idx: int = 0
         self._scripts_prepend_idx: int = 0
 
     def add(self, asset: StaticAsset, *, prepend: bool = False) -> None:
-        """Append (or prepend) one asset unless its URL was already seen.
+        """Append (or prepend) one asset unless its dedup key was already seen.
 
         ``prepend=True`` inserts the asset at the current front of its list so
         that dependencies declared with ``{% use_style %}`` / ``{% use_script %}``
         appear before co-located files. Multiple prepended items keep their
-        registration order relative to each other.
+        registration order relative to each other. Inline assets always
+        append, and their dedup key is the rendered body paired with the
+        kind so two blocks producing identical HTML collapse to one entry
+        while blocks that interpolate different context into the body stay
+        distinct.
         """
-        if asset.url in self._seen_urls:
-            return
-        self._seen_urls.add(asset.url)
+        is_inline = asset.inline is not None
+        if is_inline:
+            key = (asset.kind, asset.inline or "")
+            if key in self._seen_inline:
+                return
+            self._seen_inline.add(key)
+        else:
+            if asset.url in self._seen_urls:
+                return
+            self._seen_urls.add(asset.url)
+        use_prepend = prepend and not is_inline
         if asset.kind == _KIND_CSS:
-            self._insert(self._styles, asset, prepend=prepend, kind=_KIND_CSS)
+            self._insert(self._styles, asset, prepend=use_prepend, kind=_KIND_CSS)
         elif asset.kind == _KIND_JS:
-            self._insert(self._scripts, asset, prepend=prepend, kind=_KIND_JS)
+            self._insert(self._scripts, asset, prepend=use_prepend, kind=_KIND_JS)
         else:
             logger.debug(
                 "Ignoring asset with unknown kind %r: %s", asset.kind, asset.url
@@ -589,19 +612,38 @@ class StaticManager:
         return html
 
     def _render_style_tags(self, collector: StaticCollector) -> str:
-        """Return concatenated CSS link tags for every collected style asset."""
+        """Return concatenated CSS tags for every collected style asset.
+
+        External and co-located assets are rendered by the active backend as
+        ``<link>`` tags. Inline assets emit their pre-rendered HTML body
+        verbatim, so developers can hoist ``<style>`` blocks, conditional
+        imports, or custom tags into the styles slot unmodified.
+        """
         self._ensure_backends()
         backend = self._backends[0]
         return "\n".join(
-            backend.render_link_tag(asset.url) for asset in collector.styles()
+            asset.inline
+            if asset.inline is not None
+            else backend.render_link_tag(asset.url)
+            for asset in collector.styles()
         )
 
     def _render_script_tags(self, collector: StaticCollector) -> str:
-        """Return concatenated JS script tags for every collected script asset."""
+        """Return concatenated JS tags for every collected script asset.
+
+        External and co-located assets are rendered by the active backend as
+        ``<script src="…">`` tags. Inline assets emit their pre-rendered HTML
+        body verbatim, so developers can hoist arbitrary ``<script>`` blocks
+        (including ``type="module"`` or ``type="text/babel"``) into the
+        scripts slot unmodified.
+        """
         self._ensure_backends()
         backend = self._backends[0]
         return "\n".join(
-            backend.render_script_tag(asset.url) for asset in collector.scripts()
+            asset.inline
+            if asset.inline is not None
+            else backend.render_script_tag(asset.url)
+            for asset in collector.scripts()
         )
 
     def _ensure_backends(self) -> None:

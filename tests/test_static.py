@@ -106,7 +106,7 @@ class TestStaticAsset:
     """``StaticAsset`` is a slotted, frozen dataclass with an optional source path."""
 
     def test_defaults(self) -> None:
-        """Only ``url`` and ``kind`` are required; ``source_path`` defaults to ``None``."""
+        """Only ``url`` and ``kind`` are required, ``source_path`` defaults to ``None``."""
         asset = StaticAsset(url=CSS_URL, kind="css")
         assert asset.url == CSS_URL
         assert asset.kind == "css"
@@ -205,6 +205,149 @@ class TestStaticCollector:
             "/dep2.css",
             "/own.css",
         ]
+
+    def test_dedup_across_append_then_prepend(self, collector: StaticCollector) -> None:
+        """A URL first appended is ignored on a later ``prepend=True`` call."""
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        collector.add(StaticAsset(url=CSS_URL, kind="css"), prepend=True)
+        assert [a.url for a in collector.styles()] == [CSS_URL]
+
+    def test_dedup_across_prepend_then_append(self, collector: StaticCollector) -> None:
+        """A URL first prepended is ignored on a later plain ``add`` call."""
+        collector.add(StaticAsset(url=CSS_URL, kind="css"), prepend=True)
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        assert [a.url for a in collector.styles()] == [CSS_URL]
+
+    def test_dedup_is_cross_source_path(self, collector: StaticCollector) -> None:
+        """Assets sharing a URL but different ``source_path`` values still dedup."""
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        collector.add(
+            StaticAsset(url=CSS_URL, kind="css", source_path=Path("/tmp/a.css"))
+        )
+        assert [a.url for a in collector.styles()] == [CSS_URL]
+
+    def test_dedup_is_kind_scoped(self, collector: StaticCollector) -> None:
+        """The seen-set is URL-keyed, so the same URL cannot live in both buckets."""
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        collector.add(StaticAsset(url=CSS_URL, kind="js"))
+        assert [a.url for a in collector.styles()] == [CSS_URL]
+        assert collector.scripts() == []
+
+
+class TestStaticCollectorInline:
+    """Inline assets from ``{% #use_style %}`` / ``{% #use_script %}`` blocks."""
+
+    def test_inline_script_appended(self, collector: StaticCollector) -> None:
+        """An inline JS asset lands in ``scripts`` with its body preserved."""
+        collector.add(StaticAsset(url="", kind="js", inline="console.log(1)"))
+        scripts = collector.scripts()
+        assert len(scripts) == 1
+        assert scripts[0].inline == "console.log(1)"
+        assert scripts[0].url == ""
+
+    def test_inline_style_appended(self, collector: StaticCollector) -> None:
+        """An inline CSS asset lands in ``styles`` with its body preserved."""
+        collector.add(StaticAsset(url="", kind="css", inline="body{color:red}"))
+        styles = collector.styles()
+        assert len(styles) == 1
+        assert styles[0].inline == "body{color:red}"
+
+    def test_identical_inline_bodies_dedupe(self, collector: StaticCollector) -> None:
+        """Two inline assets with identical rendered bodies collapse to one entry."""
+        collector.add(StaticAsset(url="", kind="js", inline="same()"))
+        collector.add(StaticAsset(url="", kind="js", inline="same()"))
+        assert len(collector.scripts()) == 1
+        assert collector.scripts()[0].inline == "same()"
+
+    def test_different_inline_bodies_kept_distinct(
+        self, collector: StaticCollector
+    ) -> None:
+        """Inline assets with different rendered bodies are kept independently."""
+        collector.add(StaticAsset(url="", kind="js", inline="one()"))
+        collector.add(StaticAsset(url="", kind="js", inline="two()"))
+        assert [a.inline for a in collector.scripts()] == ["one()", "two()"]
+
+    def test_inline_dedup_is_kind_scoped(self, collector: StaticCollector) -> None:
+        """Identical bodies in different kinds live in both buckets independently."""
+        collector.add(StaticAsset(url="", kind="css", inline="same"))
+        collector.add(StaticAsset(url="", kind="js", inline="same"))
+        assert [a.inline for a in collector.styles()] == ["same"]
+        assert [a.inline for a in collector.scripts()] == ["same"]
+
+    def test_inline_asset_ignores_prepend_flag(
+        self, collector: StaticCollector
+    ) -> None:
+        """``prepend=True`` is ignored for inline assets, they always append."""
+        collector.add(StaticAsset(url=JS_URL, kind="js"), prepend=True)
+        collector.add(StaticAsset(url="", kind="js", inline="inline()"), prepend=True)
+        scripts = collector.scripts()
+        assert scripts[0].url == JS_URL
+        assert scripts[-1].inline == "inline()"
+
+    def test_inline_and_url_assets_coexist(self, collector: StaticCollector) -> None:
+        """URL-form deps prepend, co-located files append, inline blocks append last."""
+        collector.add(StaticAsset(url="/dep.js", kind="js"), prepend=True)
+        collector.add(StaticAsset(url="/file.js", kind="js"))
+        collector.add(StaticAsset(url="", kind="js", inline="one()"))
+        collector.add(StaticAsset(url="", kind="js", inline="two()"))
+        scripts = collector.scripts()
+        assert [(a.url, a.inline) for a in scripts] == [
+            ("/dep.js", None),
+            ("/file.js", None),
+            ("", "one()"),
+            ("", "two()"),
+        ]
+
+    def test_inline_asset_with_unknown_kind_is_ignored(
+        self, collector: StaticCollector
+    ) -> None:
+        """Unknown kinds fall through the warning path even for inline assets."""
+        collector.add(StaticAsset(url="", kind="unknown", inline="data"))
+        assert collector.styles() == []
+        assert collector.scripts() == []
+
+
+class TestDiscoveryDedup:
+    """End-to-end dedup across discovery sources that share URLs."""
+
+    def test_same_module_url_on_two_components_kept_once(
+        self, tmp_path: Path, collector: StaticCollector
+    ) -> None:
+        """Two components listing the same CDN URL produce one collector entry."""
+        shared_cdn = "https://cdn.example.com/lib.js"
+        for name in ("alpha", "beta"):
+            comp_dir = tmp_path / "_components" / name
+            comp_dir.mkdir(parents=True)
+            (comp_dir / "component.djx").write_text(f"<div>{name}</div>")
+            module_path = comp_dir / "component.py"
+            module_path.write_text(f"scripts = [{shared_cdn!r}]\n")
+            info = ComponentInfo(
+                name=name,
+                scope_root=tmp_path,
+                scope_relative="",
+                template_path=comp_dir / "component.djx",
+                module_path=module_path,
+                is_simple=False,
+            )
+            AssetDiscovery(StaticManager()).discover_component_assets(info, collector)
+        assert [a.url for a in collector.scripts()] == [shared_cdn]
+
+    def test_same_component_rendered_twice_registers_once(
+        self,
+        composite_component: ComponentInfo,
+        collector: StaticCollector,
+        fresh_manager: StaticManager,
+    ) -> None:
+        """Invoking ``discover_component_assets`` twice collapses to a single entry."""
+        discovery = AssetDiscovery(fresh_manager)
+        discovery.discover_component_assets(composite_component, collector)
+        discovery.discover_component_assets(composite_component, collector)
+        style_urls = [a.url for a in collector.styles()]
+        script_urls = [a.url for a in collector.scripts()]
+        assert style_urls.count("https://cdn.example.com/extra.css") == 1
+        assert script_urls.count("https://cdn.example.com/extra.js") == 1
+        assert sum(u.endswith("/widget.css") for u in style_urls) == 1
+        assert sum(u.endswith("/widget.js") for u in script_urls) == 1
 
 
 class TestKindToExtension:
@@ -888,6 +1031,44 @@ class TestStaticManagerInject:
         out = fresh_manager.inject(html, collector)
         assert out == "<head></head><body></body>"
 
+    def test_inline_script_body_emitted_verbatim(
+        self, fresh_manager: StaticManager, collector: StaticCollector
+    ) -> None:
+        """Inline script bodies are written into the slot without any wrapping."""
+        body = '<script type="module">const x = 1;</script>'
+        collector.add(StaticAsset(url="", kind="js", inline=body))
+        html = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+        out = fresh_manager.inject(html, collector)
+        assert out == f"<body>{body}</body>"
+
+    def test_inline_style_body_emitted_verbatim(
+        self, fresh_manager: StaticManager, collector: StaticCollector
+    ) -> None:
+        """Inline style bodies are written into the slot without any wrapping."""
+        body = "<style>.x{color:red}</style>"
+        collector.add(StaticAsset(url="", kind="css", inline=body))
+        html = f"<head>{STYLES_PLACEHOLDER}</head>"
+        out = fresh_manager.inject(html, collector)
+        assert out == f"<head>{body}</head>"
+
+    def test_url_and_inline_interleave_in_order(
+        self, fresh_manager: StaticManager, collector: StaticCollector
+    ) -> None:
+        """Inline bodies append after URL deps and appear in registration order."""
+        collector.add(StaticAsset(url="/dep.js", kind="js"), prepend=True)
+        collector.add(StaticAsset(url="/file.js", kind="js"))
+        collector.add(StaticAsset(url="", kind="js", inline="<script>a()</script>"))
+        collector.add(StaticAsset(url="", kind="js", inline="<script>b()</script>"))
+        html = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+        out = fresh_manager.inject(html, collector)
+        slot_body = out.removeprefix("<body>").removesuffix("</body>")
+        assert slot_body == (
+            '<script src="/dep.js"></script>\n'
+            '<script src="/file.js"></script>\n'
+            "<script>a()</script>\n"
+            "<script>b()</script>"
+        )
+
 
 class TestStaticManagerPageRoots:
     """``_page_roots`` caches absolute page directories from page backends."""
@@ -1085,6 +1266,128 @@ class TestTemplateTags:
         tpl = Template("{% load next_static %}{% use_style url %}")
         tpl.render(Context({"_static_collector": collector, "url": bad_url}))
         assert collector.styles() == []
+
+    def test_block_use_script_captures_body_and_emits_nothing(
+        self, collector: StaticCollector
+    ) -> None:
+        """``{% #use_script %}`` records the body and emits no markup in place."""
+        tpl = Template(
+            "{% load next_static %}before"
+            "{% #use_script %}<script>inline()</script>{% /use_script %}"
+            "after"
+        )
+        output = tpl.render(Context({"_static_collector": collector}))
+        assert output == "beforeafter"
+        scripts = collector.scripts()
+        assert len(scripts) == 1
+        assert scripts[0].inline == "<script>inline()</script>"
+        assert scripts[0].url == ""
+
+    def test_block_use_style_captures_body_and_emits_nothing(
+        self, collector: StaticCollector
+    ) -> None:
+        """``{% #use_style %}`` records the body and emits no markup in place."""
+        tpl = Template(
+            "{% load next_static %}"
+            "{% #use_style %}<style>.a{color:red}</style>{% /use_style %}"
+        )
+        output = tpl.render(Context({"_static_collector": collector}))
+        assert output == ""
+        styles = collector.styles()
+        assert len(styles) == 1
+        assert styles[0].inline == "<style>.a{color:red}</style>"
+
+    def test_block_use_script_renders_body_with_context(
+        self, collector: StaticCollector
+    ) -> None:
+        """Block body is rendered against the active context, so vars are substituted."""
+        tpl = Template(
+            "{% load next_static %}"
+            "{% #use_script %}<script>id={{ widget_id }};</script>{% /use_script %}"
+        )
+        tpl.render(Context({"_static_collector": collector, "widget_id": "likes"}))
+        assert collector.scripts()[0].inline == "<script>id=likes;</script>"
+
+    def test_block_use_script_appends_after_url_deps(
+        self, collector: StaticCollector
+    ) -> None:
+        """Block form appends, URL form prepends. URL deps land before inline bodies."""
+        tpl = Template(
+            "{% load next_static %}"
+            '{% use_script "/cdn/react.js" %}'
+            "{% #use_script %}<script>boot()</script>{% /use_script %}"
+        )
+        tpl.render(Context({"_static_collector": collector}))
+        assert [(a.url, a.inline) for a in collector.scripts()] == [
+            ("/cdn/react.js", None),
+            ("", "<script>boot()</script>"),
+        ]
+
+    def test_block_use_script_blank_body_is_ignored(
+        self, collector: StaticCollector
+    ) -> None:
+        """A block body that renders to whitespace-only never reaches the collector."""
+        tpl = Template(
+            "{% load next_static %}{% #use_script %}   \n  {% /use_script %}"
+        )
+        tpl.render(Context({"_static_collector": collector}))
+        assert collector.scripts() == []
+
+    @pytest.mark.parametrize(
+        "tpl_src",
+        [
+            "{% load next_static %}"
+            "{% #use_script %}<script>x()</script>{% /use_script %}",
+            "{% load next_static %}"
+            "{% #use_style %}<style>.a{color:red}</style>{% /use_style %}",
+        ],
+        ids=["block_use_script", "block_use_style"],
+    )
+    def test_block_tags_without_collector_noop(self, tpl_src: str) -> None:
+        """Block tags are silent no-ops when no collector is in context."""
+        assert Template(tpl_src).render(Context()) == ""
+
+    def test_block_use_script_duplicate_bodies_dedupe(
+        self, collector: StaticCollector
+    ) -> None:
+        """Two block occurrences with identical rendered bodies collapse to one entry."""
+        tpl = Template(
+            "{% load next_static %}"
+            "{% #use_script %}<script>same()</script>{% /use_script %}"
+            "{% #use_script %}<script>same()</script>{% /use_script %}"
+        )
+        tpl.render(Context({"_static_collector": collector}))
+        assert len(collector.scripts()) == 1
+
+    def test_block_use_script_different_context_stays_distinct(
+        self, collector: StaticCollector
+    ) -> None:
+        """Blocks that interpolate different context into the body stay distinct."""
+        tpl = Template(
+            "{% load next_static %}"
+            "{% #use_script %}<script>mount('{{ id }}')</script>{% /use_script %}"
+        )
+        for instance_id in ("likes", "stars"):
+            tpl.render(Context({"_static_collector": collector, "id": instance_id}))
+        bodies = [a.inline for a in collector.scripts()]
+        assert bodies == [
+            "<script>mount('likes')</script>",
+            "<script>mount('stars')</script>",
+        ]
+
+    def test_block_use_script_same_context_dedups_across_renders(
+        self, collector: StaticCollector
+    ) -> None:
+        """The same block rendered repeatedly with the same context emits once."""
+        tpl = Template(
+            "{% load next_static %}"
+            "{% #use_script %}<script>boot('{{ id }}')</script>{% /use_script %}"
+        )
+        ctx = Context({"_static_collector": collector, "id": "shared"})
+        tpl.render(ctx)
+        tpl.render(ctx)
+        assert len(collector.scripts()) == 1
+        assert collector.scripts()[0].inline == "<script>boot('shared')</script>"
 
 
 class TestComponentTagIntegration:

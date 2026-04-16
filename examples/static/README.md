@@ -1,45 +1,187 @@
 # Static Assets Example
 
-Demonstrates co-located CSS and JS auto-collection and injection in next-dj, using **Bootstrap 5**, **Bootstrap Icons**, **Chart.js**, and two Google fonts as realistic third-party libraries.
+This example demonstrates next-dj's **static asset subsystem**: automatic discovery of co-located CSS/JS, module-level `styles`/`scripts` lists, the `{% use_style %}` / `{% use_script %}` template tags for shared layout dependencies, placeholder slots (`{% collect_styles %}` / `{% collect_scripts %}`), URL-based deduplication, and a dedicated `/_next/static/` serve route. Third-party libraries used as realistic fixtures: **Bootstrap 5**, **Bootstrap Icons**, **Chart.js**, **React 18 + ReactDOM + Babel standalone**, and two Google fonts (Inter, JetBrains Mono).
 
-## Where each asset is declared
+## Feature coverage (static)
 
-| Scope | Mechanism | Loads |
-| ----- | --------- | ----- |
-| Layout (`pages/layout.djx`) | `{% use_style %}` / `{% use_script %}` template tags | Bootstrap 5 CSS + JS -- shared by every page |
-| Home `page.py` (`styles`) | module-level list | Google Font *Inter* -- used by the home hero |
-| Dashboard `page.py` (`styles`) | module-level list | Google Font *JetBrains Mono* -- used for code blocks |
-| Widget `component.py` (`styles`) | module-level list | Bootstrap Icons -- used by the widget only |
-| Chart `component.py` (`scripts`) | module-level list | Chart.js -- used by the chart only |
-| `layout.css` / `layout.js` | co-located files | auto-picked up and served as `/_next/static/layout.css` etc. |
-| `template.css` / `template.js` | co-located files | auto-picked up and served as `/_next/static/index.css`, `/_next/static/dashboard.css` etc. |
-| `component.css` / `component.js` | co-located files | auto-picked up and served as `/_next/static/components/<name>.css`/`.js` |
+| Technique | Where |
+|-----------|-------|
+| `{% use_style %}` / `{% use_script %}` in layout | `pages/layout.djx` (Bootstrap CSS + JS, shared by every page) |
+| Module-level `styles` on a page | `pages/page.py` (Inter font), `pages/dashboard/page.py` (JetBrains Mono font) |
+| Module-level `styles` on a component | `pages/_components/widget/component.py` (Bootstrap Icons) |
+| Module-level `scripts` on a component | `pages/dashboard/_components/chart/component.py` (Chart.js) |
+| `{% use_script %}` declared from inside a component | `pages/_components/counter/component.djx` (React + ReactDOM + Babel) |
+| `{% #use_script %}` block form hoisting inline `<script>` | `pages/_components/counter/component.djx` (Babel mount block hoisted into scripts slot) |
+| Co-located `layout.css` / `layout.js` | `pages/layout.css`, `pages/layout.js` |
+| Co-located `template.css` / `template.js` | `pages/template.*`, `pages/dashboard/template.css` |
+| Co-located `component.css` / `component.js` | `_components/widget/component.*`, `_components/chart/component.*`, `_components/counter/component.css` |
+| Slots — `{% collect_styles %}` / `{% collect_scripts %}` | `pages/layout.djx` (head + before `</body>`) |
+| Cascade order (use_* → layout → page → component) | Asserted in `tests/tests.py` |
+| Deduplication by URL across repeated components | Counter rendered twice on the home page; React/ReactDOM/Babel emitted once |
+| `/_next/static/<file>` serve view | Delegates to `django.views.static.serve`; exercised in `tests/tests.py` |
 
-## Features shown
+## What This Example Demonstrates
 
-- `{% collect_styles %}` / `{% collect_scripts %}` slots in `layout.djx` replaced with every collected `<link>` / `<script>` after rendering.
-- `{% use_style "url" %}` / `{% use_script "url" %}` template tags for declaring external URLs directly from a layout or template.
-- `styles` / `scripts` list variables in both `page.py` and `component.py` for per-page or per-component dependencies.
-- Deduplication by URL: identical libraries declared by multiple layers appear only once.
-- Depth-first ordering: layout assets -> page template assets -> page.py external URLs -> component assets (files first, then module variables) in render order.
-- Co-located files are renamed by logical identity when served:
-  - `pages/layout.css` -> `/_next/static/layout.css`
-  - `pages/template.css` -> `/_next/static/index.css`
-  - `pages/dashboard/template.css` -> `/_next/static/dashboard.css`
-  - `pages/_components/widget/component.css` -> `/_next/static/components/widget.css`
-  - `pages/dashboard/_components/chart/component.js` -> `/_next/static/components/chart.js`
-- External URLs pass through as-is.
+- **Co-located assets.** Drop `layout.css` / `layout.js` next to `layout.djx`, `template.css` / `template.js` next to `template.djx`, and `component.css` / `component.js` next to `component.djx`. They are picked up automatically and served under `/_next/static/`.
+- **Module-level URLs.** Declare `styles = [...]` and `scripts = [...]` in any `page.py` or `component.py` for per-page or per-component third-party assets.
+- **Layout-wide dependencies via template tags.** `{% use_style "URL" %}` / `{% use_script "URL" %}` register shared libraries from the layout without hard-coding `<link>` / `<script>` tags; they land at the top of the collected list so child scopes can override them.
+- **Slot-based injection.** `{% collect_styles %}` (in `<head>`) and `{% collect_scripts %}` (before `</body>`) are post-render placeholders — a single pass at the end of `Page.render` replaces both.
+- **Cascade ordering.** `use_style`/`use_script` → layout files → template file → `page.py` module list → component files → `component.py` module list. Each level can override everything above it, mirroring the CSS cascade.
+- **Deduplication by URL.** Repeating the same component twice on a page emits each CDN URL exactly once. Declaring the same library in both the layout and a component also collapses to a single tag.
+- **Complex integrations.** The React counter composes Babel standalone + React 18 + ReactDOM, driven by a `<script type="text/babel">` block inside `component.djx` and `ReactDOM.createRoot(...).render(<Counter />)`. The three CDNs are declared via `{% use_script %}` directly in `component.djx`, and the inline Babel `<script>` is wrapped in `{% #use_script %}` … `{% /use_script %}` so it hoists into the `{% collect_scripts %}` slot at the end of `<body>` — the counter needs no `component.py` at all.
 
-## Run
+## Example Structure
+
+```
+static/
+├── config/                         # Django project (settings, urls)
+│   ├── __init__.py
+│   ├── settings.py                 # NEXT_FRAMEWORK, DEFAULT_STATIC_BACKENDS
+│   └── urls.py                     # include(next.urls)
+├── manage.py
+├── myapp/
+│   ├── __init__.py
+│   ├── apps.py
+│   └── pages/
+│       ├── layout.djx              # HTML shell, {% use_style %} Bootstrap, collect_* slots
+│       ├── layout.css              # Co-located layout styling
+│       ├── layout.js               # Co-located layout script
+│       ├── page.py                 # Home: Inter font, page_title context
+│       ├── template.djx            # Home body: hero + widget + two counter instances
+│       ├── template.css            # Home co-located CSS
+│       ├── template.js             # Home co-located JS
+│       ├── _components/
+│       │   ├── widget/
+│       │   │   ├── component.djx   # Bootstrap card + collapse
+│       │   │   ├── component.css
+│       │   │   ├── component.js
+│       │   │   └── component.py    # Bootstrap Icons module-level style
+│       │   └── counter/
+│       │       ├── component.djx   # {% use_script %} deps + {% #use_script %}-hoisted Babel mount
+│       │       └── component.css   # Button styling (no component.py needed)
+│       └── dashboard/
+│           ├── page.py             # Dashboard: JetBrains Mono font
+│           ├── template.djx        # Chart + copy on co-located CSS
+│           ├── template.css
+│           └── _components/
+│               └── chart/
+│                   ├── component.djx
+│                   ├── component.css
+│                   ├── component.js
+│                   └── component.py # Chart.js module-level script
+└── tests/
+    ├── __init__.py
+    ├── conftest.py                 # Client + home/dashboard HTML fixtures
+    └── tests.py                    # End-to-end assertions on injected tags
+```
+
+## Main Pieces
+
+**Layout** (`myapp/pages/layout.djx`): HTML shell with the Bootstrap CDN declared once via `{% use_style %}` / `{% use_script %}`, plus the two `{% collect_* %}` slots. Every page in the tree inherits these.
+
+**Home page** (`myapp/pages/page.py` + `template.djx`): declares the Inter font in its `styles` list, renders the `widget` composite, and mounts two `counter` instances (labels "Likes" and "Stars") to demonstrate dedup.
+
+**Dashboard page** (`myapp/pages/dashboard/page.py` + `template.djx`): declares the JetBrains Mono font and renders the `chart` composite with its Chart.js dependency.
+
+**Widget** (`myapp/pages/_components/widget/`): Bootstrap card with a collapse button; `component.py` pulls in Bootstrap Icons. Demonstrates co-located `.css`/`.js` plus a module-level `styles` list on the same component.
+
+**Chart** (`myapp/pages/dashboard/_components/chart/`): branch-scoped composite. `component.py` declares Chart.js via `scripts`, co-located `component.js` uses it to draw a bar chart.
+
+**Counter** (`myapp/pages/_components/counter/`): React 18 + Babel standalone integration without a `component.py`. The top of `component.djx` registers React, ReactDOM and Babel via `{% use_script %}` tags — they prepend to the script cascade just like the layout's Bootstrap dependency. The body renders a mount `<div>`, then splits the Babel payload into **two** `{% #use_script %}` blocks: one with the shared `Counter` component definition (no context, so every render produces byte-identical HTML and content-dedup collapses it to one entry) and one with the `ReactDOM.createRoot(...)` mount line using `{{ id }}` (different bytes per render, so each instance gets its own boot line). The co-located `component.css` styles the resulting button. Rendered twice on the home page, the counter produces: three CDN `<script>` tags (URL-dedupped to one each), one shared `Counter` definition block, and two per-instance mount blocks — three Babel blocks total, not four.
+
+## How It Works
+
+1. **Render phase.** `Page.render` builds a per-request `StaticCollector` and calls `AssetDiscovery.discover_page_assets` to pre-register layout, template, and `page.py` assets. The Django template renders next — layout `{% use_style %}` / `{% use_script %}` tags prepend to the collector; every `{% component %}` tag calls `discover_component_assets`, appending co-located component files and `component.py` module lists; every `{% #use_style %}` / `{% #use_script %}` block renders its body with the live context and appends it as an inline asset.
+
+2. **Inject phase.** The manager rewrites `<!-- next:styles -->` and `<!-- next:scripts -->` placeholders left by `{% collect_styles %}` / `{% collect_scripts %}` with concatenated `<link>` / `<script>` tags in cascade order.
+
+3. **Cascade order.** On the home page:
+
+   CSS
+
+   1. Bootstrap CSS (`use_style` from layout)
+   2. `/_next/static/layout.css`
+   3. `/_next/static/index.css` (template)
+   4. Google Font Inter (`pages/page.py` `styles`)
+   5. `/_next/static/components/widget.css`
+   6. Bootstrap Icons (`widget/component.py` `styles`)
+   7. `/_next/static/components/counter.css`
+
+   JS
+
+   1. Bootstrap JS (`use_script` from layout, prepended)
+   2. React, ReactDOM, Babel (`use_script` from `counter/component.djx`, prepended in registration order)
+   3. `/_next/static/layout.js`
+   4. `/_next/static/index.js`
+   5. `/_next/static/components/widget.js`
+   6. Counter's shared `Counter` component definition block (hoisted by `{% #use_script %}`, content-dedupped to one entry)
+   7. Counter's mount block for `id="likes"` (hoisted by `{% #use_script %}`)
+   8. Counter's mount block for `id="stars"` (hoisted by `{% #use_script %}`)
+
+   `use_script` URL declarations prepend (shared deps first); co-located `*.js` files append in render order; `{% #use_script %}` block bodies append last so inline boot code runs after every dependency and every co-located script has loaded.
+
+4. **Deduplication.** The collector uses two strategies:
+
+   - **URL-form assets** (co-located files, module lists, `use_style`/`use_script`) dedupe by URL, so rendering `counter` twice still emits React, ReactDOM and Babel exactly once.
+   - **Inline block bodies** (`{% #use_script %}` / `{% #use_style %}`) dedupe by rendered body. The counter exploits this by splitting its Babel payload in two: the shared `Counter` component definition has no per-instance context → identical bodies across renders → collapsed to one entry; the mount block interpolates `{{ id }}` → different bodies per render (`counter-likes` vs `counter-stars`) → both kept. Split your blocks along the "shared vs per-instance" axis to get the best of both worlds.
+
+5. **Serving.** `FileStaticBackend` registers each discovered file under a logical name (`/_next/static/<route>.css`, `/_next/static/components/<name>.css`). `static_serve_view` looks the name up and delegates to `django.views.static.serve`, which streams the file with correct `Content-Type` / `Last-Modified` / 304 handling.
+
+## Running the Example
+
+### Prerequisites
+
+- Python 3.11+
+- Django 5+
+- next-dj installed (editable from the repo root is fine)
+
+### Setup
 
 ```bash
 cd examples/static
+pip install django next-dj
+```
+
+There are no database migrations — the example is entirely rendering-driven.
+
+### Running the Server
+
+```bash
 python manage.py runserver
 ```
 
-Then visit:
+### URLs to Try
 
-- `http://localhost:8000/` -- home page with the Bootstrap + Bootstrap Icons widget, rendered in Inter.
-- `http://localhost:8000/dashboard/` -- dashboard subpage with the Chart.js bar chart, code blocks in JetBrains Mono.
+| URL | Description |
+|-----|-------------|
+| `/` | Home page: Bootstrap widget + two React/Babel counters |
+| `/dashboard/` | Dashboard page: Chart.js bar chart + JetBrains Mono code font |
+| `/_next/static/layout.css` | Example of a served co-located file |
+| `/_next/static/components/counter.css` | Counter's component CSS |
 
-Open the page source to see the injected `<link>` and `<script>` tags.
+Open the page source — you will see:
+
+- Bootstrap `<link>` first in `<head>` (layout `use_style`).
+- `/_next/static/layout.css`, the template CSS, and page-level font URLs following in cascade order.
+- Three `<script>` tags for React, ReactDOM and Babel, each appearing exactly **once** before the three `<script type="text/babel">` counter blocks (one shared `Counter` definition + two per-instance mounts), even though the counter component is rendered twice. The Babel blocks themselves live inside the `{% collect_scripts %}` slot (bottom of `<body>`) because they were wrapped in `{% #use_script %}` — not where the `<div>` mount point is drawn.
+
+### Running Tests
+
+From the repository root (use `--no-cov` to skip the core project's coverage gate when running only this example):
+
+```bash
+uv run pytest examples/static/tests/ -v --no-cov
+```
+
+From `examples/static/`:
+
+```bash
+cd examples/static
+uv run pytest tests/ -v --no-cov
+```
+
+The test suite renders the home and dashboard pages with Django's `Client`, verifies cascade order, counter mount points, dedup of the React CDNs, and the `/_next/static/` serve view.
+
+## Contributing
+
+Issues and PRs welcome via the main next-dj repository. Keep backward compatibility when changing examples.

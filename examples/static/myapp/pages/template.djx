@@ -8,5 +8,21 @@
             also ships co-located <code>template.css</code> / <code>template.js</code>.
         </p>
         {% component "widget" title="Bootstrap widget" %}
+        <div class="counter-strip mt-4">
+            <h2 class="h5 mb-3">React + Babel counter (two instances, one React load)</h2>
+            <p class="text-muted small mb-3">
+                The same composite component is rendered twice. React, ReactDOM
+                and Babel Standalone are declared via <code>{% verbatim %}{% use_script %}{% endverbatim %}</code>
+                right inside <code>component.djx</code> and URL-dedupped to one
+                tag each. The Babel payload is split into two
+                <code>{% verbatim %}{% #use_script %}{% endverbatim %}</code>
+                blocks: the <code>Counter</code> definition has no per-instance
+                context so content-dedup collapses it to one entry, while the
+                mount block interpolates <code>{% verbatim %}{{ id }}{% endverbatim %}</code>
+                and stays distinct per instance.
+            </p>
+            {% component "counter" id="likes" label="Likes" %}
+            {% component "counter" id="stars" label="Stars" %}
+        </div>
     </div>
 </section>

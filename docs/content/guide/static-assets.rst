@@ -21,7 +21,10 @@ The static subsystem covers three complementary use cases:
   for that page or component.
 - **Template tags.** Use ``{% use_style %}`` and ``{% use_script %}`` to
   register external assets directly from a layout or template — perfect for
-  shared third-party libraries like Bootstrap or Chart.js.
+  shared third-party libraries like Bootstrap or Chart.js. Their block forms
+  ``{% #use_style %}`` … ``{% /use_style %}`` and ``{% #use_script %}`` …
+  ``{% /use_script %}`` capture an inline ``<style>`` / ``<script>`` body
+  and hoist it straight into the corresponding slot.
 
 Two slots in your HTML drive the injection: ``{% collect_styles %}`` (in
 ``<head>``) and ``{% collect_scripts %}`` (just before ``</body>``). Everything
@@ -60,6 +63,9 @@ page- and component-specific rules can override them:
    depth-first render order.
 6. Module-level ``styles`` / ``scripts`` declared in ``component.py`` (right
    after that component's files).
+7. Inline blocks from ``{% #use_style %}`` / ``{% #use_script %}`` in
+   registration order, appended last so that inline boot code runs after
+   every dependency has loaded.
 
 The ordering mirrors normal CSS cascade: shared libraries flow in at the
 front, layout-wide styling sits above page-level styling, and component-level
@@ -256,6 +262,58 @@ declare site-wide third-party libraries in one place.
    without going through ``Page.render``). This makes them safe to drop into
    any reusable template.
 
+``{% #use_style %}`` / ``{% #use_script %}`` (block form)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The block form mirrors ``{% #component %}``: ``{% #use_script %}`` opens,
+``{% /use_script %}`` closes, and everything inside is **hoisted** into the
+``{% collect_scripts %}`` slot. The body is rendered with the current
+template context, so you can still interpolate ``{{ variable }}`` values
+from the page. The block emits **nothing** at the call site -- only the
+final scripts slot receives the captured HTML.
+
+.. code-block:: django
+
+   <div id="widget-{{ id }}"></div>
+
+   {% #use_script %}
+   <script type="module">
+       const el = document.getElementById("widget-{{ id }}");
+       el.dataset.boot = "ready";
+   </script>
+   {% /use_script %}
+
+After rendering, the ``<script type="module">`` block lives inside
+``{% collect_scripts %}`` together with every other JS asset, while the
+``<div>`` stays where the component drew it. The same pattern works for
+inline ``<style>`` via ``{% #use_style %}`` … ``{% /use_style %}``.
+
+Order and deduplication for inline blocks:
+
+- **Append, not prepend.** Unlike the URL form, block bodies are treated as
+  consumers of the earlier dependencies and always land *after* URL-form
+  ``use_script`` / ``use_style`` entries and after co-located ``*.js`` /
+  ``*.css`` files, in registration order.
+- **Content-based deduplication.** Each block's dedup key is its rendered
+  body. Two blocks whose templates produce byte-identical HTML collapse to
+  a single entry in the slot, even if they were written in different
+  components or rendered via different ``{% component %}`` invocations. If
+  a block interpolates variable context (``{{ id }}``, ``{{ label }}``),
+  the resulting HTML differs per render and both copies land in the slot.
+  Whitespace-only bodies are skipped.
+- **Verbatim emission.** The captured HTML is written into the slot as-is,
+  so you can include custom ``<script>`` attributes (``type="module"``,
+  ``type="text/babel"``, ``nonce="…"``, ``defer``) or whole ``<style>``
+  blocks without any wrapping done by the framework.
+
+.. tip::
+
+   Because inline blocks append, the natural layering is: layout ``use_*``
+   shared deps → component-level ``use_*`` deps → co-located ``layout.js``
+   / ``template.js`` / ``component.js`` → inline ``{% #use_script %}``
+   bodies. That matches the typical "load libraries, load code, then boot"
+   runtime order.
+
 Backends and settings
 ---------------------
 
@@ -439,6 +497,170 @@ exactly once.
    dependency in ``DOMContentLoaded`` (or a late-running event) so it executes
    after every ``<script>`` has finished loading.
 
+Complex integrations — React + Babel counter
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Nothing in the pipeline is tied to Bootstrap. Co-located files, module
+lists and ``{% use_script %}`` declarations compose cleanly with any
+third-party stack. The following composite component mounts a click counter
+written in JSX, compiled in the browser by ``@babel/standalone``, and
+rendered with React 18 -- and needs no ``component.py`` at all.
+
+Structure:
+
+.. code-block:: text
+
+   _components/counter/
+       component.djx
+       component.css
+
+``component.djx`` declares its dependencies via ``{% use_script %}`` right
+at the top, then renders the mount point. The Babel payload is split into
+**two** ``{% #use_script %}`` blocks so the content-based dedup can do its
+job per-chunk: the first block carries the shared ``Counter`` component
+definition (no per-instance context, so every render produces byte-identical
+HTML and collapses to a single entry), while the second block mounts one
+specific instance via ``{{ id }}`` (different bytes per render, so each
+instance gets its own boot line):
+
+.. code-block:: django
+
+   {% use_script "https://unpkg.com/react@18.3.1/umd/react.production.min.js" %}
+   {% use_script "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" %}
+   {% use_script "https://unpkg.com/@babel/standalone@7.24.7/babel.min.js" %}
+
+   <div class="counter-root" id="counter-{{ id }}" data-counter-label="{{ label }}"></div>
+
+   {% #use_script %}
+   <script type="text/babel" data-presets="react">
+       const { useState } = React;
+       window.Counter = function Counter({ label }) {
+           const [count, setCount] = useState(0);
+           return (
+               <button type="button" className="btn btn-outline-success"
+                       onClick={() => setCount(count + 1)}>
+                   {label}: {count}
+               </button>
+           );
+       };
+   </script>
+   {% /use_script %}
+
+   {% #use_script %}
+   <script type="text/babel" data-presets="react">
+       {
+           const mount = document.getElementById("counter-{{ id }}");
+           ReactDOM.createRoot(mount).render(
+               <Counter label={mount.dataset.counterLabel} />,
+           );
+       }
+   </script>
+   {% /use_script %}
+
+.. note::
+
+   A few browser-scope caveats when splitting a Babel payload across
+   ``{% #use_script %}`` blocks:
+
+   - **Cross-block sharing.** Each ``<script type="text/babel">`` tag is
+     compiled and executed by Babel Standalone in its own wrapper, so
+     top-level ``function Counter`` / ``const Counter`` declarations in
+     the first block are not visible to the second one. Attaching the
+     component to ``window`` (``window.Counter = function Counter(...)``)
+     promotes it to global scope, which the JSX transformer resolves
+     when it rewrites ``<Counter ... />`` into
+     ``React.createElement(Counter, ...)`` inside the mount block.
+   - **Avoid** ``data-type="module"``. It turns each block into an ES
+     module with its own fully isolated scope, which defeats the
+     ``window.Counter`` handshake. Plain ``<script type="text/babel">``
+     executes in global scope after Babel rewrites it to classic JS.
+   - **Wrap mount bodies in a block statement.** Without
+     ``data-type="module"`` every mount script shares the global scope,
+     so two ``const mount = ...`` lines (one per instance) would
+     redeclare the same variable and throw
+     ``SyntaxError: Can't create duplicate variable``. Wrapping the
+     mount body in ``{ ... }`` gives ``const``/``let`` a local block
+     scope while keeping ``Counter`` accessible from ``window``.
+   - **Production builds.** For production prefer a pre-bundled
+     ``component.js`` so the browser never sees ``@babel/standalone``
+     at all; the block-form ``{% #use_script %}`` is most useful during
+     development and for demos.
+
+Render the counter twice on a page — the three CDN URLs are emitted
+**once** (URL dedup), the shared ``Counter`` definition is emitted **once**
+(content dedup: both renders produce the same body), and each mount gets
+its own ``<script type="text/babel">`` body because ``{{ id }}`` interpolates
+differently per render (``counter-likes`` vs ``counter-stars``). Rendering
+the counter twice thus produces **three** Babel blocks in the scripts slot:
+one shared definition plus two per-instance mounts, in render order:
+
+.. code-block:: django
+
+   {% component "counter" id="likes" label="Likes" %}
+   {% component "counter" id="stars" label="Stars" %}
+
+No build tool, no bundler, no copy-paste of CDN URLs in the base layout --
+the component owns its dependencies directly from its template, and the
+collector handles dedup and ordering.
+
+.. tip::
+
+   Because ``use_script`` prepends, declaring React / ReactDOM / Babel
+   inside the component puts them at the top of the final ``<script>`` list
+   in registration order. A layout-level ``use_script`` for something like
+   Bootstrap JS still comes first, since it was registered earlier during
+   render.
+
+.. _static-dedup:
+
+Deduplication
+-------------
+
+The collector uses two dedup strategies depending on the asset shape:
+
+**URL-form assets** (co-located files, module-level ``styles`` / ``scripts``
+lists, ``{% use_style %}`` / ``{% use_script %}`` declarations) dedupe by
+URL. A second ``add()`` for the same URL is silently dropped, so:
+
+- Rendering the same component N times on a page emits each of its CDN URLs
+  exactly once.
+- Declaring the same library in multiple places (layout ``use_style``, a page
+  ``styles`` list, and a component ``styles`` list) produces a single
+  ``<link>`` — the first occurrence wins the slot.
+- Cascading between layers keeps working: dedup matches on the final URL
+  string, not on where the URL was registered.
+
+**Inline block assets** (``{% #use_style %}`` / ``{% #use_script %}``)
+dedupe by **rendered body content**. The rendered HTML itself becomes the
+dedup key (scoped per kind, so the same body could theoretically appear in
+both styles and scripts), so:
+
+- A block rendered twice with the same template context ends up in the slot
+  once.
+- A block that interpolates variable context (``{{ id }}``, ``{{ label }}``)
+  differs between renders and lands in the slot once per unique body — for
+  example, the counter component's Babel block contains
+  ``document.getElementById("counter-{{ id }}")`` so two mounts with
+  ``id=likes`` and ``id=stars`` produce two distinct ``<script>`` tags.
+- An author can intentionally write a "shared boot" block that does not
+  reference any context variable, so all component instances converge on
+  the same body and the boot script ships once.
+
+.. tip::
+
+   URL dedup is strictly by URL string. Two different URLs for the same
+   library (``…/bootstrap.min.css`` vs ``…/bootstrap.css``) are treated as
+   distinct assets and both will be included. Pick one canonical URL per
+   dependency and stick to it across the project.
+
+.. tip::
+
+   Inline dedup is strictly by the rendered body. Whitespace and attribute
+   order matter: ``<script src="a.js"></script>`` and
+   ``<script src="a.js" ></script>`` are considered different bodies. If
+   you want two components to share a single boot script, make sure the
+   block bodies render to the exact same bytes.
+
 Tips and gotchas
 ----------------
 
@@ -448,9 +670,11 @@ Tips and gotchas
 - **Placeholders are HTML comments.** ``<!-- next:styles -->`` and
   ``<!-- next:scripts -->`` are valid HTML, so a half-rendered page (rare,
   e.g. when a custom view bypasses ``Page.render``) still parses correctly.
-- **Deduplication is by URL.** Two assets that resolve to different URLs
-  (e.g. the same library at two different versions) are both included.
-  Stick to one canonical URL per dependency.
+- **Two dedup strategies.** URL-form assets dedupe by URL; inline blocks
+  dedupe by rendered body. See the :ref:`deduplication <static-dedup>`
+  section above. Two assets that resolve to different URLs (e.g. the same
+  library at two different versions) are both included — stick to one
+  canonical URL per dependency.
 - **``use_*`` lands at the top of the slot.** ``{% use_style %}`` and
   ``{% use_script %}`` are treated as shared dependencies and always appear
   before co-located files and module-level lists, regardless of where the tag
