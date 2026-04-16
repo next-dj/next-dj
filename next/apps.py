@@ -24,7 +24,11 @@ class NextFrameworkConfig(AppConfig):
         autoreload.StatReloader = NextStatReloader  # type: ignore[misc]
 
         builtins = list(settings.TEMPLATES[0].get("OPTIONS", {}).get("builtins", []))
-        for mod in ("next.templatetags.forms", "next.templatetags.components"):
+        for mod in (
+            "next.templatetags.forms",
+            "next.templatetags.components",
+            "next.templatetags.next_static",
+        ):
             if mod not in builtins:
                 builtins.append(mod)
         settings.TEMPLATES[0].setdefault("OPTIONS", {})["builtins"] = builtins

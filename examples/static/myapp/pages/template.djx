@@ -1,0 +1,12 @@
+<section class="home-hero card shadow-sm">
+    <div class="card-body">
+        <h1 class="card-title">{{ page_title }}</h1>
+        <p class="card-text text-muted">
+            This page pulls in Bootstrap 5 from <code>page.py</code>'s
+            <code>styles</code>/<code>scripts</code> lists. The widget below pulls
+            Bootstrap Icons through its own <code>component.py</code>. The template
+            also ships co-located <code>template.css</code> / <code>template.js</code>.
+        </p>
+        {% component "widget" title="Bootstrap widget" %}
+    </div>
+</section>

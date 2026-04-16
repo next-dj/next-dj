@@ -49,6 +49,12 @@ class NextFrameworkSettings:
                 "COMPONENTS_DIR": "_components",
             },
         ],
+        "DEFAULT_STATIC_BACKENDS": [
+            {
+                "BACKEND": "next.static.FileStaticBackend",
+                "OPTIONS": {},
+            },
+        ],
     }
 
     IMPORT_STRINGS: ClassVar[frozenset[str]] = frozenset()
@@ -59,7 +65,7 @@ class NextFrameworkSettings:
         self._attr_value_cache: dict[str, Any] = {}
 
     def reload(self) -> None:
-        """Drop caches and reload URL and component backends."""
+        """Drop caches and reload URL, component, and static backends."""
         self._merged_cache = None
         self._attr_value_cache.clear()
 
@@ -67,8 +73,10 @@ class NextFrameworkSettings:
 
         urls_mod = importlib.import_module("next.urls")
         components_mod = importlib.import_module("next.components")
+        static_mod = importlib.import_module("next.static")
         urls_mod.router_manager._reload_config()
         components_mod.components_manager._reload_config()
+        static_mod.static_manager._reload_config()
 
     def _raw_user(self) -> dict[str, Any] | None:
         raw = getattr(settings, USER_SETTING, None)
@@ -97,6 +105,7 @@ class NextFrameworkSettings:
             elif key in (
                 "DEFAULT_PAGE_BACKENDS",
                 "DEFAULT_COMPONENT_BACKENDS",
+                "DEFAULT_STATIC_BACKENDS",
             ) and isinstance(raw, list):
                 out[key] = copy.deepcopy(raw)
         return out

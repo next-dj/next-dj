@@ -137,6 +137,12 @@ class ComponentNode(Node):
         if info is None:
             return ""
 
+        collector = context.get("_static_collector")
+        if collector is not None and not info.is_simple:
+            from next.static import static_manager  # noqa: PLC0415
+
+            static_manager.discover_component_assets(info, collector)
+
         slots: dict[str, str] = {}
         child_chunks: list[str] = []
         with context.push(_component_slots=slots):

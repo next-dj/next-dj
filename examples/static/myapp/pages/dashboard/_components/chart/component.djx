@@ -1,0 +1,10 @@
+<div class="chart card">
+    <div class="card-body">
+        <h5 class="card-title mb-3">Monthly visits</h5>
+        <canvas
+            class="chart-canvas"
+            data-chart-labels="{{ labels|join:',' }}"
+            data-chart-values="{{ values|join:',' }}"
+        ></canvas>
+    </div>
+</div>

@@ -652,7 +652,14 @@ class Page:
         return context_data
 
     def render(self, file_path: Path, *args: object, **kwargs: object) -> str:
-        """Render with Django ``Template`` after reloading stale sources and context."""
+        """Render with Django ``Template`` after reloading stale sources and context.
+
+        A ``StaticCollector`` is placed in the template context before rendering
+        so that nested components can register their CSS and JS references. Once
+        the template has rendered, placeholder markers left by
+        ``{% collect_styles %}`` and ``{% collect_scripts %}`` are replaced with
+        actual ``<link>`` and ``<script>`` tags.
+        """
         if file_path not in self._template_registry or self._is_template_stale(
             file_path
         ):
@@ -662,7 +669,15 @@ class Page:
             self._record_template_source_mtimes(file_path)
         template_str = self._template_registry[file_path]
         context_data = self.build_render_context(file_path, *args, **kwargs)
-        return Template(template_str).render(DjangoTemplateContext(context_data))
+
+        from .static import StaticCollector, static_manager  # noqa: PLC0415
+
+        collector = StaticCollector()
+        static_manager.discover_page_assets(file_path, collector)
+        context_data["_static_collector"] = collector
+
+        html = Template(template_str).render(DjangoTemplateContext(context_data))
+        return static_manager.inject(html, collector)
 
     def _create_view_function(
         self,
