@@ -1,0 +1,23 @@
+<section class="card shadow-sm">
+    <div class="card-body">
+        <h1 class="card-title">Dashboard</h1>
+        <p class="card-text text-muted">
+            The chart below pulls <strong>Chart.js</strong> from its own
+            <code>component.py</code> <code>scripts</code> list. Bootstrap 5 is
+            inherited from the shared <code>page.py</code> on the home route but
+            is picked up per render, so the chart can rely on Bootstrap layout too.
+        </p>
+        <div class="row g-3">
+            <div class="col-md-8">
+                {% component "chart" %}
+            </div>
+            <div class="col-md-4">
+                <div class="alert alert-secondary h-100 mb-0">
+                    <strong>Tip.</strong> Co-located <code>template.css</code> styles
+                    the dashboard headline purple and is served from
+                    <code>/static/next/dashboard.css</code>.
+                </div>
+            </div>
+        </div>
+    </div>
+</section>

@@ -51,6 +51,13 @@ if not settings.configured:
         ROOT_URLCONF="next.urls",
         SECRET_KEY="test-secret-key",  # noqa: S106
         BASE_DIR=project_root,
+        STATIC_URL="/static/",
+        STORAGES={
+            "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+            "staticfiles": {
+                "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
+            },
+        },
         USE_TZ=True,
         TIME_ZONE="UTC",
         NEXT_FRAMEWORK={

@@ -1051,7 +1051,7 @@ class TestSetSlotTag:
             Template("{% load components %}{% /set_slot %}")
 
     def test_short_set_slot_renders_empty_when_slot_missing(self) -> None:
-        """{% set_slot "x" %} void form has no default; empty when slot absent."""
+        """{% set_slot "x" %} void form has no default, renders empty when slot absent."""
         t = Template('{% load components %}{% set_slot "label" %}')
         assert t.render(Context({})) == ""
 

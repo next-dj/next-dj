@@ -26,6 +26,20 @@ Scoped reusable template fragments, backends, and rendering helpers. See :doc:`/
    :undoc-members:
    :show-inheritance:
 
+Static assets (next.static)
+---------------------------
+
+Co-located CSS/JS discovery, staticfiles integration via
+``next.static.NextStaticFilesFinder``, and the ``{% collect_styles %}`` /
+``{% collect_scripts %}`` / ``{% use_style %}`` / ``{% use_script %}``
+template tags. See :doc:`/content/guide/static-assets`
+for usage, settings, and examples.
+
+.. automodule:: next.static
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 URLs and routing (next.urls)
 ----------------------------
 
@@ -90,6 +104,7 @@ Single dictionary in Django settings. Top-level keys (each optional beyond defau
 * ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, …). The file router’s skip-folder name always comes from ``DEFAULT_COMPONENT_BACKENDS`` (``COMPONENTS_DIR`` on the first entry). See :doc:`/content/guide/file-router`.
 * ``URL_NAME_TEMPLATE`` — format string for URL pattern names (default ``page_{name}``).
 * ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts (``BACKEND``, ``DIRS``, ``COMPONENTS_DIR``, …). See :doc:`/content/guide/components`.
+* ``DEFAULT_STATIC_BACKENDS`` — list of static backend dicts (``BACKEND``, ``OPTIONS``). The default backend resolves co-located CSS/JS through Django ``staticfiles_storage``. See :doc:`/content/guide/static-assets`.
 
 .. code-block:: python
 
@@ -116,6 +131,12 @@ Single dictionary in Django settings. Top-level keys (each optional beyond defau
                "BACKEND": "next.components.FileComponentsBackend",
                "DIRS": [str(BASE_DIR / "root_components")],
                "COMPONENTS_DIR": "_components",
+           },
+       ],
+       "DEFAULT_STATIC_BACKENDS": [
+           {
+               "BACKEND": "next.static.StaticFilesBackend",
+               "OPTIONS": {},
            },
        ],
    }

@@ -24,10 +24,20 @@ class NextFrameworkConfig(AppConfig):
         autoreload.StatReloader = NextStatReloader  # type: ignore[misc]
 
         builtins = list(settings.TEMPLATES[0].get("OPTIONS", {}).get("builtins", []))
-        for mod in ("next.templatetags.forms", "next.templatetags.components"):
+        for mod in (
+            "next.templatetags.forms",
+            "next.templatetags.components",
+            "next.templatetags.next_static",
+        ):
             if mod not in builtins:
                 builtins.append(mod)
         settings.TEMPLATES[0].setdefault("OPTIONS", {})["builtins"] = builtins
+
+        finder_path = "next.static.NextStaticFilesFinder"
+        configured_finders = list(getattr(settings, "STATICFILES_FINDERS", []))
+        if finder_path not in configured_finders:
+            configured_finders.append(finder_path)
+            settings.STATICFILES_FINDERS = configured_finders
 
         def watch_next_filesystem(sender: object, **_: object) -> None:
             for path, glob in iter_all_autoreload_watch_specs():

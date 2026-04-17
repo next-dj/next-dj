@@ -693,7 +693,10 @@ class _LazyUrlPatterns(list):
     """
 
     def _patterns(self) -> list[URLPattern | URLResolver]:
-        return [*list(router_manager), *list(form_action_manager)]
+        return [
+            *list(router_manager),
+            *list(form_action_manager),
+        ]
 
     def __iter__(self) -> Iterator[URLPattern | URLResolver]:
         return iter(self._patterns())

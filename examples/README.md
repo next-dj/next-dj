@@ -62,6 +62,21 @@ A **blog** sample (English UI) built on next-dj components: simple and composite
 
 **Best for:** Reusable UI fragments, slots, component scope, and combining components with forms and file-based routing
 
+### static
+A realistic showcase of next-dj's **static asset pipeline**: co-located CSS/JS, module-level `styles`/`scripts` lists, layout-wide dependencies via `{% use_style %}` / `{% use_script %}`, slot-based injection, cascade ordering, deduplication, and Django `staticfiles` integration (Manifest/S3 ready). Third-party stacks integrated: Bootstrap 5, Bootstrap Icons, Chart.js, and a React 18 + Babel standalone click counter.
+
+**Key Features:**
+- Co-located `layout.css`/`layout.js` (next to `layout.djx`), `template.css`/`template.js` (next to `template.djx`), and `component.css`/`component.js` (next to `component.djx`)
+- `styles = [...]` and `scripts = [...]` module-level lists in `page.py` and `component.py`
+- `{% use_style %}` / `{% use_script %}` template tags for shared layout deps (Bootstrap)
+- `{% collect_styles %}` / `{% collect_scripts %}` post-render injection slots
+- Cascade ordering: `use_*` → layout → page → component (child scopes can override parents)
+- Deduplication by URL — repeated components ship each CDN only once
+- Complex integration example: React + Babel standalone counter rendered twice via `ReactDOM.createRoot`
+- Co-located assets resolved via Django `staticfiles_storage` under `next/` namespace
+
+**Best for:** Wiring in CSS/JS without a bundler, integrating third-party libraries (including React/Babel), and understanding the cascade + dedup contract of the static subsystem
+
 ## Getting Started
 
 Each example includes its own README with detailed setup and running instructions. To get started:
@@ -88,6 +103,9 @@ Use the `forms` example to see form actions, ModelForm, and `{% form %}` with fi
 **If you're building reusable UI pieces:**
 Use the `components` example for a small blog with simple/composite components, slots, root scope, and forms-driven auth and posts.
 
+**If you're wiring up CSS / JS without a bundler:**
+Use the `static` example to see co-located assets, cascade ordering, deduplication, and a React + Babel integration.
+
 **If you're exploring specific features:**
 - Parameter handling: `file-routing` example
 - Database integration: `pages` example
@@ -95,10 +113,12 @@ Use the `components` example for a small blog with simple/composite components, 
 - Admin integration: `pages` example
 - Template inheritance: `layouts` example
 - Context processors: `layouts` example
-- Bootstrap layout and static assets: `layouts` example
+- Bootstrap layout (minimal): `layouts` example
 - Form actions and ModelForm: `forms` example
 - Create/edit flows with URL params: `forms` example
 - Components, slots, scope, blog + forms: `components` example
+- Co-located CSS/JS, `{% use_style %}`, cascade, dedup: `static` example
+- React + Babel integration without a bundler: `static` example
 
 ## Common Patterns
 

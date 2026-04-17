@@ -58,6 +58,12 @@ Features
 
       Get request and params where you need them, without threading through functions. Less glue code, faster iteration.
 
+   .. grid-item-card:: :octicon:`paintbrush` Static assets
+      :link: content/guide/static-assets
+      :link-type: doc
+
+      Drop CSS and JS next to pages and components. The framework discovers, deduplicates, and injects them in deterministic order — no manual ``<link>`` plumbing.
+
    .. grid-item-card:: :octicon:`sync` Development server
       :link: content/guide/autoreload
       :link-type: doc
@@ -91,6 +97,7 @@ Sponsors
    content/guide/context
    content/guide/forms
    content/guide/dependency-injection
+   content/guide/static-assets
    content/guide/autoreload
 
 .. toctree::
