@@ -23,6 +23,8 @@ from django.template.base import Node, NodeList
 from django.utils.safestring import mark_safe
 
 from next.static import (
+    _KIND_CSS,
+    _KIND_JS,
     SCRIPTS_PLACEHOLDER,
     STYLES_PLACEHOLDER,
     StaticAsset,
@@ -35,10 +37,6 @@ if TYPE_CHECKING:
 
 
 register = template.Library()
-
-
-_KIND_CSS = "css"
-_KIND_JS = "js"
 
 _END_BLOCK_USE_STYLE = ("/use_style",)
 _END_BLOCK_USE_SCRIPT = ("/use_script",)
@@ -90,14 +88,14 @@ class _InlineAssetNode(Node):
     """Render an inline asset body and push it onto the active collector.
 
     The block body is rendered with the current template context so inline
-    scripts and styles can still interpolate page variables. The collector
-    dedupes inline entries by the rendered body itself, so two blocks that
-    produce identical HTML (for example the same component rendered twice
-    with no context that leaks into the block) collapse to one entry, while
-    blocks that interpolate different values into the body stay distinct.
-    The node emits nothing in place, since the collector controls final
-    placement inside the matching ``{% collect_styles %}`` /
-    ``{% collect_scripts %}`` slot.
+    scripts and styles can still interpolate page variables. The rendered
+    body is stripped of leading and trailing whitespace before it reaches
+    the collector, so blank-only blocks are silently ignored. The collector
+    dedupes inline entries by the stripped body itself, so two blocks that
+    produce identical HTML collapse to one entry, while blocks that
+    interpolate different values into the body stay distinct. The node emits
+    nothing in place because the collector controls final placement inside
+    the matching collect_styles or collect_scripts slot.
     """
 
     def __init__(self, kind: str, nodelist: NodeList) -> None:

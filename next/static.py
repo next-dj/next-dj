@@ -1,15 +1,12 @@
 """Discover and inject co-located static assets for pages and components.
 
-Asset files are named after the ``.djx`` file they decorate and live in the
-same directory: ``template.css``/``template.js`` sit beside ``template.djx``,
-``layout.css``/``layout.js`` beside ``layout.djx``, and
-``component.css``/``component.js`` beside ``component.djx``. Pages and
-components may also declare ``styles`` and ``scripts`` list variables at
-module level (``page.py``/``component.py``). The collector gathers references
-during rendering and the manager injects them into placeholder slots emitted
-by the ``{% collect_styles %}`` and ``{% collect_scripts %}`` template tags.
-Public URLs are resolved by the configured static backend (Django staticfiles
-by default).
+Each ``.djx`` file may have a matching ``.css`` and ``.js`` file in the same
+directory. Pages and components may also declare ``styles`` and ``scripts``
+list variables in their Python modules. During rendering the collector gathers
+all referenced assets. After rendering, ``StaticManager.inject`` replaces the
+``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholders with the
+actual ``<link>`` and ``<script>`` tags. Public URLs are resolved through
+Django staticfiles.
 """
 
 from __future__ import annotations
@@ -28,10 +25,15 @@ from django.core.files.storage import Storage
 
 from . import pages
 from .conf import import_class_cached, next_framework_settings
+from .pages import (
+    get_layout_djx_paths_for_watch,
+    get_pages_directories_for_watch,
+    get_template_djx_paths_for_watch,
+)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
     from pathlib import Path
 
     from .components import ComponentInfo
@@ -61,19 +63,24 @@ _KIND_CSS = "css"
 _KIND_JS = "js"
 
 
+def _kind_to_extension(kind: str) -> str:
+    """Return the file extension for ``css`` or ``js`` kinds."""
+    if kind == _KIND_CSS:
+        return ".css"
+    if kind == _KIND_JS:
+        return ".js"
+    msg = f"Unsupported asset kind: {kind!r}"
+    raise ValueError(msg)
+
+
 @dataclass(frozen=True, slots=True)
 class StaticAsset:
-    """One CSS or JS reference to include on the rendered page.
+    """One CSS or JS asset reference collected during page rendering.
 
-    A file asset originates from a co-located file on disk and has
-    ``source_path`` set to its absolute filesystem path. An external asset
-    carries a raw URL supplied by a ``styles`` / ``scripts`` module variable
-    or by ``{% use_style %}`` / ``{% use_script %}``. An inline asset comes
-    from a ``{% #use_style %}`` / ``{% #use_script %}`` block and stores its
-    pre-rendered HTML body in ``inline`` with ``url`` left empty. The
-    collector dedupes inline assets by body content so identical rendered
-    blocks (for example the same component rendered twice with the same
-    context) end up in the slot exactly once.
+    For co-located disk files both ``url`` and ``source_path`` are set.
+    For external URLs such as CDN links only ``url`` is set.
+    For block-form ``{% #use_style %}`` and ``{% #use_script %}`` assets
+    ``inline`` holds the pre-rendered HTML body and ``url`` is empty.
     """
 
     url: str
@@ -85,21 +92,14 @@ class StaticAsset:
 class StaticCollector:
     """Accumulate static asset references during a single page render.
 
-    The collector is stored in template context under ``_static_collector`` so
-    that nested component rendering can append its own assets. Insertion
-    order follows the CSS-cascade convention: items added with
-    ``prepend=True`` (shared third-party dependencies declared with
-    ``{% use_style %}`` / ``{% use_script %}``) appear first in the order
-    they were registered, followed by co-located files, module-level lists
-    and inline blocks from ``{% #use_style %}`` / ``{% #use_script %}`` in
-    nested depth-first render order. URL-form entries dedupe by URL.
-    Inline entries always append and dedupe by the rendered body itself, so
-    two blocks producing identical HTML collapse to one while blocks whose
-    template context resolves to different HTML stay distinct.
+    URL-form assets deduplicate by URL. Inline assets deduplicate by rendered
+    body so identical blocks collapse to one entry. Assets added with
+    ``prepend=True`` appear before regular append entries within the same kind,
+    which keeps shared third-party dependencies at the front of the cascade.
     """
 
     def __init__(self) -> None:
-        """Create an empty collector with separate ordered lists for CSS and JS."""
+        """Return a collector ready to accept assets. All buckets start empty."""
         self._seen_urls: set[str] = set()
         self._seen_inline: set[tuple[str, str]] = set()
         self._styles: list[StaticAsset] = []
@@ -108,16 +108,12 @@ class StaticCollector:
         self._scripts_prepend_idx: int = 0
 
     def add(self, asset: StaticAsset, *, prepend: bool = False) -> None:
-        """Append (or prepend) one asset unless its dedup key was already seen.
+        """Add an asset unless its dedup key was already recorded.
 
-        ``prepend=True`` inserts the asset at the current front of its list so
-        that dependencies declared with ``{% use_style %}`` / ``{% use_script %}``
-        appear before co-located files. Multiple prepended items keep their
-        registration order relative to each other. Inline assets always
-        append, and their dedup key is the rendered body paired with the
-        kind so two blocks producing identical HTML collapse to one entry
-        while blocks that interpolate different context into the body stay
-        distinct.
+        Inline assets always append and are keyed by their rendered body.
+        URL-form assets are keyed by URL. When ``prepend=True``, URL-form
+        assets are inserted before existing append entries while keeping
+        registration order among prepended items.
         """
         is_inline = asset.inline is not None
         if is_inline:
@@ -163,12 +159,12 @@ class StaticCollector:
             target.append(asset)
 
     def styles(self) -> list[StaticAsset]:
-        """Return collected CSS assets in insertion order."""
-        return list(self._styles)
+        """Return collected CSS assets in insertion order. Callers must not mutate."""
+        return self._styles
 
     def scripts(self) -> list[StaticAsset]:
-        """Return collected JS assets in insertion order."""
-        return list(self._scripts)
+        """Return collected JS assets in insertion order. Callers must not mutate."""
+        return self._scripts
 
 
 class StaticBackend(ABC):
@@ -181,11 +177,11 @@ class StaticBackend(ABC):
         logical_name: str,
         kind: str,
     ) -> str:
-        """Register a co-located asset file and return the URL used to serve it.
+        """Register a co-located asset file and return its public URL.
 
-        ``logical_name`` is a slash-separated path without file extension, such
-        as ``"about"``, ``"components/card"``, or ``"guides/layout"``. The
-        backend appends the ``.css`` or ``.js`` extension based on ``kind``.
+        ``logical_name`` is a path without extension, such as ``"about"``,
+        ``"components/card"``, or ``"guides/layout"``. The backend appends
+        the appropriate extension based on ``kind``.
         """
 
     @abstractmethod
@@ -198,11 +194,10 @@ class StaticBackend(ABC):
 
 
 class StaticFilesBackend(StaticBackend):
-    """Resolve co-located assets through Django ``staticfiles_storage``.
+    """Resolve co-located asset URLs through Django staticfiles.
 
-    Files discovered by ``next.dj`` keep their logical identities (for example
-    ``blog/layout.css`` and ``components/card.js``), but public URLs are always
-    resolved by Django staticfiles so Manifest/S3/CDN settings apply uniformly.
+    All files use the ``next/`` namespace so manifest hashing, S3 storage,
+    and CDN configuration from Django settings apply automatically.
     """
 
     _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}">'
@@ -215,6 +210,7 @@ class StaticFilesBackend(StaticBackend):
         opts = cfg.get("OPTIONS") or {}
         self._css_tag = str(opts.get("css_tag") or self._DEFAULT_CSS_TAG)
         self._js_tag = str(opts.get("js_tag") or self._DEFAULT_JS_TAG)
+        self._url_cache: dict[str, str] = {}
 
     def _logical_static_path(self, logical_name: str, kind: str) -> str:
         extension = _kind_to_extension(kind)
@@ -228,14 +224,19 @@ class StaticFilesBackend(StaticBackend):
     ) -> str:
         """Return URL from Django staticfiles for ``next/<logical_name>.<ext>``."""
         path = self._logical_static_path(logical_name, kind)
+        cached = self._url_cache.get(path)
+        if cached is not None:
+            return cached
         try:
-            return str(staticfiles_storage.url(path))
+            url = str(staticfiles_storage.url(path))
         except ValueError as e:
             msg = (
                 f"Static asset {path!r} is missing from Django staticfiles manifest. "
                 "Run collectstatic and ensure next static finder is enabled."
             )
             raise RuntimeError(msg) from e
+        self._url_cache[path] = url
+        return url
 
     def render_link_tag(self, url: str) -> str:
         """Return a ``<link rel="stylesheet">`` tag for the given URL."""
@@ -246,6 +247,7 @@ class StaticFilesBackend(StaticBackend):
         return self._js_tag.format(url=url)
 
 
+# Inverse of _kind_to_extension. Maps file extension to kind string.
 _KIND_BY_EXTENSION = {
     ".css": _KIND_CSS,
     ".js": _KIND_JS,
@@ -255,11 +257,7 @@ _KIND_BY_EXTENSION = {
 def _find_page_root_for(path: Path, page_roots: tuple[Path, ...]) -> Path | None:
     parent = path.parent.resolve()
     for root in page_roots:
-        try:
-            parent.relative_to(root)
-        except ValueError:
-            continue
-        else:
+        if parent.is_relative_to(root):
             return root
     return None
 
@@ -284,7 +282,7 @@ def _collect_stem_static_files(
     logical_name: str,
     stem: str,
 ) -> None:
-    """Register ``{stem}.css`` / ``{stem}.js`` beside a djx file into ``out``."""
+    """Add {stem}.css and {stem}.js from the given directory to the output mapping."""
     for suffix, kind in _KIND_BY_EXTENSION.items():
         candidate = directory / f"{stem}{suffix}"
         if not candidate.exists():
@@ -295,12 +293,6 @@ def _collect_stem_static_files(
 
 def discover_colocated_static_assets() -> dict[str, Path]:
     """Map staticfiles logical paths to absolute source files on disk."""
-    from .pages import (  # noqa: PLC0415
-        get_layout_djx_paths_for_watch,
-        get_pages_directories_for_watch,
-        get_template_djx_paths_for_watch,
-    )
-
     out: dict[str, Path] = {}
     page_roots = tuple(root.resolve() for root in get_pages_directories_for_watch())
 
@@ -320,7 +312,9 @@ def discover_colocated_static_assets() -> dict[str, Path]:
         logical_name = _logical_layout_name(layout_dir, page_root)
         _collect_stem_static_files(out, layout_dir, logical_name, "layout")
 
-    # Imported lazily to avoid import-time cycles during Django app bootstrap.
+    # next.components relies on the Django app registry being ready. Importing it
+    # at module level would load it before AppConfig.ready() completes, so this
+    # import is deferred until the function is actually called.
     from .components import get_component_paths_for_watch  # noqa: PLC0415
 
     seen_component_dirs: set[Path] = set()
@@ -374,10 +368,14 @@ class NextStaticFilesFinder(BaseFinder):
         self._storage = _MappedSourceStorage(self._mapping)
 
     @overload
-    def find(self, path: str, find_all: Literal[False] = False) -> str | None: ...  # noqa: FBT002
+    def find(
+        self, path: str, find_all: Literal[False] = ...
+    ) -> str | None: ...  # pragma: no cover
 
     @overload
-    def find(self, path: str, find_all: Literal[True]) -> list[str]: ...
+    def find(
+        self, path: str, find_all: Literal[True]
+    ) -> list[str]: ...  # pragma: no cover
 
     def find(
         self,
@@ -405,16 +403,6 @@ class NextStaticFilesFinder(BaseFinder):
             yield logical_path, self._storage
 
 
-def _kind_to_extension(kind: str) -> str:
-    """Return the file extension for ``css`` or ``js`` kinds."""
-    if kind == _KIND_CSS:
-        return ".css"
-    if kind == _KIND_JS:
-        return ".js"
-    msg = f"Unsupported asset kind: {kind!r}"
-    raise ValueError(msg)
-
-
 class AssetDiscovery:
     """Detect co-located CSS and JS files and module-level asset list variables."""
 
@@ -426,20 +414,21 @@ class AssetDiscovery:
     _COMPONENT_JS: ClassVar[str] = "component.js"
 
     def __init__(self, backend_provider: StaticManager) -> None:
-        """Store the manager that owns the backend used for file registration."""
+        """Accept the manager used to resolve the active backend and page roots."""
         self._manager = backend_provider
+        self._module_list_cache: dict[Path, tuple[list[str], list[str]]] = {}
+        self._layout_dir_cache: dict[Path, list[Path]] = {}
 
     def discover_page_assets(
         self,
         file_path: Path,
         collector: StaticCollector,
     ) -> None:
-        """Collect layout, template, and module-level assets for a page module path.
+        """Collect layout, template, and module-level assets for a page file.
 
-        Layout assets are collected from the outermost layout down to the page
-        directory. Template assets are collected next so that inner styles can
-        override outer ones. Module-level ``styles`` and ``scripts`` from
-        ``page.py`` are appended last.
+        Assets are added from the outermost layout inward, then from the
+        template directory, then from the ``styles`` and ``scripts`` lists
+        declared in ``page.py``.
         """
         page_root = self._find_page_root(file_path)
         layout_dirs = self._find_layout_directories(file_path, page_root)
@@ -481,7 +470,7 @@ class AssetDiscovery:
         page_root: Path | None,
         collector: StaticCollector,
     ) -> None:
-        """Register ``layout.css``/``layout.js`` beside ``layout.djx``."""
+        """Register layout.css and layout.js found in the given directory."""
         logical_name = self._logical_name_for_layout(layout_dir, page_root)
         css_file = layout_dir / self._LAYOUT_CSS
         if css_file.exists():
@@ -496,7 +485,7 @@ class AssetDiscovery:
         page_root: Path | None,
         collector: StaticCollector,
     ) -> None:
-        """Register ``template.css``/``template.js`` beside ``template.djx``."""
+        """Register template.css and template.js found in the given directory."""
         logical_name = self._logical_name_for_template(template_dir, page_root)
         css_file = template_dir / self._TEMPLATE_CSS
         if css_file.exists():
@@ -511,12 +500,20 @@ class AssetDiscovery:
         collector: StaticCollector,
     ) -> None:
         """Read ``styles`` and ``scripts`` list variables from a Python module."""
-        module = pages._load_python_module(module_path)
-        if module is None:
-            return
-        for url in pages._read_string_list(module, "styles"):
+        cached = self._module_list_cache.get(module_path)
+        if cached is None:
+            module = pages._load_python_module(module_path)
+            if module is None:
+                self._module_list_cache[module_path] = ([], [])
+                return
+            styles = pages._read_string_list(module, "styles")
+            scripts = pages._read_string_list(module, "scripts")
+            self._module_list_cache[module_path] = (styles, scripts)
+            cached = (styles, scripts)
+        styles_list, scripts_list = cached
+        for url in styles_list:
             collector.add(StaticAsset(url=url, kind=_KIND_CSS))
-        for url in pages._read_string_list(module, "scripts"):
+        for url in scripts_list:
             collector.add(StaticAsset(url=url, kind=_KIND_JS))
 
     def _register_file(
@@ -556,8 +553,7 @@ class AssetDiscovery:
         """Return the page tree root that contains ``file_path``, if any."""
         resolved_parent = file_path.parent.resolve()
         for root in self._page_roots():
-            with contextlib.suppress(ValueError):
-                resolved_parent.relative_to(root)
+            if resolved_parent.is_relative_to(root):
                 return root
         return None
 
@@ -567,6 +563,9 @@ class AssetDiscovery:
         page_root: Path | None,
     ) -> list[Path]:
         """Walk up from the page directory and return layout dirs outermost first."""
+        cached = self._layout_dir_cache.get(file_path)
+        if cached is not None:
+            return cached
         directories: list[Path] = []
         current_dir = file_path.parent
         stop_at = page_root.resolve() if page_root is not None else None
@@ -579,7 +578,9 @@ class AssetDiscovery:
             if parent == current_dir:
                 break
             current_dir = parent
-        return list(reversed(directories))
+        result = list(reversed(directories))
+        self._layout_dir_cache[file_path] = result
+        return result
 
     def _logical_name_for_template(
         self,
@@ -619,7 +620,7 @@ class AssetDiscovery:
 
     def _page_roots(self) -> tuple[Path, ...]:
         """Return cached absolute page tree roots from the configured page backends."""
-        return self._manager._page_roots()
+        return self._manager.page_roots()
 
 
 class StaticsFactory:
@@ -643,14 +644,16 @@ class StaticsFactory:
 class StaticManager:
     """Coordinate static backends, asset discovery, and placeholder injection.
 
-    The manager loads backends from ``NEXT_FRAMEWORK['DEFAULT_STATIC_BACKENDS']``
-    on first use and owns a single ``AssetDiscovery`` instance. Static URLs are
-    resolved through Django staticfiles (see :class:`StaticFilesBackend`), not
-    through extra entries in ``next.urls``.
+    Backends are loaded lazily from ``NEXT_FRAMEWORK['DEFAULT_STATIC_BACKENDS']``
+    on first access. URL resolution is handled by ``StaticFilesBackend`` by
+    default, which delegates to Django staticfiles.
     """
 
     def __init__(self) -> None:
-        """Prepare empty backend list and discovery helper."""
+        """Return a manager in an unloaded state.
+
+        Backends are loaded on first access.
+        """
         self._backends: list[StaticBackend] = []
         self._discovery: AssetDiscovery | None = None
         self._cached_page_roots: tuple[Path, ...] | None = None
@@ -692,12 +695,12 @@ class StaticManager:
         self.discovery.discover_component_assets(info, collector)
 
     def inject(self, html: str, collector: StaticCollector) -> str:
-        """Replace style and script placeholders in rendered HTML with actual tags.
+        """Replace style and script placeholders in ``html`` with rendered tags.
 
-        Placeholders are inserted by the ``{% collect_styles %}`` and
-        ``{% collect_scripts %}`` template tags during the ``Template.render``
-        pass. This method runs after rendering is complete and every asset has
-        been recorded on the collector.
+        Placeholders are emitted by ``{% collect_styles %}`` and
+        ``{% collect_scripts %}`` during template rendering. A missing
+        placeholder is left unchanged. An empty collector replaces the
+        placeholder with an empty string.
         """
         if STYLES_PLACEHOLDER in html:
             html = html.replace(STYLES_PLACEHOLDER, self._render_style_tags(collector))
@@ -707,40 +710,30 @@ class StaticManager:
             )
         return html
 
-    def _render_style_tags(self, collector: StaticCollector) -> str:
-        """Return concatenated CSS tags for every collected style asset.
+    def _render_tags(
+        self,
+        assets: list[StaticAsset],
+        render_url: Callable[[str], str],
+    ) -> str:
+        """Return newline-joined HTML tags for the given assets.
 
-        External and co-located assets are rendered by the active backend as
-        ``<link>`` tags. Inline assets emit their pre-rendered HTML body
-        verbatim, so developers can hoist ``<style>`` blocks, conditional
-        imports, or custom tags into the styles slot unmodified.
+        Inline assets emit their body verbatim. URL-form assets are passed
+        to ``render_url`` to produce the appropriate tag string.
         """
-        self._ensure_backends()
-        backend = self._backends[0]
         return "\n".join(
-            asset.inline
-            if asset.inline is not None
-            else backend.render_link_tag(asset.url)
-            for asset in collector.styles()
+            asset.inline if asset.inline is not None else render_url(asset.url)
+            for asset in assets
         )
+
+    def _render_style_tags(self, collector: StaticCollector) -> str:
+        """Return CSS link tags and inline style bodies for all collected styles."""
+        backend = self.default_backend
+        return self._render_tags(collector.styles(), backend.render_link_tag)
 
     def _render_script_tags(self, collector: StaticCollector) -> str:
-        """Return concatenated JS tags for every collected script asset.
-
-        External and co-located assets are rendered by the active backend as
-        ``<script src="…">`` tags. Inline assets emit their pre-rendered HTML
-        body verbatim, so developers can hoist arbitrary ``<script>`` blocks
-        (including ``type="module"`` or ``type="text/babel"``) into the
-        scripts slot unmodified.
-        """
-        self._ensure_backends()
-        backend = self._backends[0]
-        return "\n".join(
-            asset.inline
-            if asset.inline is not None
-            else backend.render_script_tag(asset.url)
-            for asset in collector.scripts()
-        )
+        """Return script tags and inline script bodies for all collected scripts."""
+        backend = self.default_backend
+        return self._render_tags(collector.scripts(), backend.render_script_tag)
 
     def _ensure_backends(self) -> None:
         """Load configured backends on first access."""
@@ -767,11 +760,14 @@ class StaticManager:
         if not self._backends:
             self._backends.append(StaticFilesBackend())
 
-    def _page_roots(self) -> tuple[Path, ...]:
+    def page_roots(self) -> tuple[Path, ...]:
         """Return absolute page tree roots from configured page backends."""
         if self._cached_page_roots is not None:
             return self._cached_page_roots
         roots: list[Path] = []
+        # Imported here rather than at module level so that a missing attribute
+        # on next.pages (e.g. during partial test teardown) raises ImportError,
+        # which is the signal used to return an empty tuple instead of crashing.
         try:
             from .pages import get_pages_directories_for_watch  # noqa: PLC0415
         except ImportError:

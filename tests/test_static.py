@@ -8,20 +8,26 @@ import pytest
 from django.template import Context, Template
 from django.test import override_settings
 
-from next.components import ComponentInfo
+import next.pages as _next_pages_mod
+from next.components import ComponentInfo, components_manager
 from next.pages import _load_python_module, _read_string_list
 from next.static import (
     SCRIPTS_PLACEHOLDER,
     STYLES_PLACEHOLDER,
     AssetDiscovery,
+    NextStaticFilesFinder,
     StaticAsset,
     StaticBackend,
     StaticCollector,
     StaticFilesBackend,
     StaticManager,
     StaticsFactory,
+    _find_page_root_for,
     _kind_to_extension,
+    _logical_layout_name,
+    _MappedSourceStorage,
     discover_colocated_static_assets,
+    next_framework_settings,
     static_manager,
 )
 
@@ -34,44 +40,40 @@ CSS_URL = "https://example.com/a.css"
 JS_URL = "https://example.com/a.js"
 
 
+class _DeterministicBackend(StaticFilesBackend):
+    """Test backend with stable deterministic URLs for discovery-order checks."""
+
+    def register_file(
+        self,
+        _source_path: Path,
+        logical_name: str,
+        kind: str,
+    ) -> str:
+        extension = _kind_to_extension(kind)
+        return f"/static/next/{logical_name}{extension}"
+
+
 @pytest.fixture()
 def fresh_manager() -> StaticManager:
-    """Return a freshly instantiated ``StaticManager`` with no loaded backends."""
+    """Return a freshly instantiated StaticManager with no loaded backends."""
     return StaticManager()
 
 
 @pytest.fixture()
 def collector() -> StaticCollector:
-    """Return a fresh ``StaticCollector`` for each test."""
+    """Return a fresh StaticCollector for each test."""
     return StaticCollector()
 
 
 @pytest.fixture()
-def static_backend() -> StaticFilesBackend:
-    """Return a default ``StaticFilesBackend``."""
-    return StaticFilesBackend()
-
-
-@pytest.fixture()
 def file_backend() -> StaticBackend:
-    """Test backend with stable deterministic URLs for discovery-order checks."""
-
-    class _DeterministicBackend(StaticFilesBackend):
-        def register_file(
-            self,
-            _source_path: Path,
-            logical_name: str,
-            kind: str,
-        ) -> str:
-            extension = _kind_to_extension(kind)
-            return f"/static/next/{logical_name}{extension}"
-
+    """Return a DeterministicBackend for stable URL assertions in discovery tests."""
     return _DeterministicBackend()
 
 
 @pytest.fixture()
-def _reset_global_static_manager() -> Generator[None, None, None]:
-    """Reload the global ``static_manager`` backends after each test that mutates it."""
+def reset_global_static_manager() -> Generator[None, None, None]:
+    """Reload the global static_manager backends after each test that mutates it."""
     yield
     static_manager._backends.clear()
     static_manager._discovery = None
@@ -80,7 +82,7 @@ def _reset_global_static_manager() -> Generator[None, None, None]:
 
 @pytest.fixture()
 def simple_component(tmp_path: Path) -> ComponentInfo:
-    """Return a ``ComponentInfo`` pointing to a simple ``.djx`` template file."""
+    """Return a ComponentInfo pointing to a simple .djx template file."""
     template_path = tmp_path / "card.djx"
     template_path.write_text("<div>card</div>")
     return ComponentInfo(
@@ -95,7 +97,7 @@ def simple_component(tmp_path: Path) -> ComponentInfo:
 
 @pytest.fixture()
 def composite_component(tmp_path: Path) -> ComponentInfo:
-    """Return a composite ``ComponentInfo`` with co-located css/js/py siblings."""
+    """Return a composite ComponentInfo with co-located css/js/py siblings."""
     comp_dir = tmp_path / "_components" / "widget"
     comp_dir.mkdir(parents=True)
     template_path = comp_dir / "component.djx"
@@ -117,18 +119,34 @@ def composite_component(tmp_path: Path) -> ComponentInfo:
     )
 
 
+@pytest.fixture()
+def make_discovery():
+    """Return a factory that wires an AssetDiscovery to a given backend and page roots."""
+
+    def _factory(
+        backend: StaticBackend,
+        page_roots: tuple[Path, ...] = (),
+    ) -> tuple[AssetDiscovery, StaticManager]:
+        manager = StaticManager()
+        manager._backends = [backend]
+        manager._cached_page_roots = page_roots
+        return AssetDiscovery(manager), manager
+
+    return _factory
+
+
 class TestStaticAsset:
-    """``StaticAsset`` is a slotted, frozen dataclass with an optional source path."""
+    """StaticAsset is a slotted, frozen dataclass with an optional source path."""
 
     def test_defaults(self) -> None:
-        """Only ``url`` and ``kind`` are required, ``source_path`` defaults to ``None``."""
+        """Only url and kind are required. source_path defaults to None."""
         asset = StaticAsset(url=CSS_URL, kind="css")
         assert asset.url == CSS_URL
         assert asset.kind == "css"
         assert asset.source_path is None
 
     def test_explicit_source_path(self, tmp_path: Path) -> None:
-        """``source_path`` can carry the origin path for file-backed assets."""
+        """source_path can carry the origin path for file-backed assets."""
         asset = StaticAsset(url=CSS_URL, kind="css", source_path=tmp_path)
         assert asset.source_path == tmp_path
 
@@ -146,7 +164,7 @@ class TestStaticCollector:
         assert collector.scripts() == [js]
 
     def test_duplicate_url_is_ignored(self, collector: StaticCollector) -> None:
-        """A second ``add`` with the same URL does not grow any list."""
+        """A second add with the same URL does not grow any list."""
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
         assert len(collector.styles()) == 1
@@ -156,19 +174,17 @@ class TestStaticCollector:
         collector: StaticCollector,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """An asset whose ``kind`` is neither css nor js is ignored with a debug log."""
+        """An asset whose kind is neither css nor js is ignored with a debug log."""
         with caplog.at_level("DEBUG", logger="next.static"):
             collector.add(StaticAsset(url="weird://x", kind="weird"))
         assert collector.styles() == []
         assert collector.scripts() == []
         assert any("unknown kind" in rec.message for rec in caplog.records)
 
-    def test_accessors_return_copies(self, collector: StaticCollector) -> None:
-        """``styles`` and ``scripts`` return new lists so callers cannot mutate state."""
+    def test_accessors_return_same_list(self, collector: StaticCollector) -> None:
+        """Styles and scripts return the internal list directly for zero-copy reads."""
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
-        snapshot = collector.styles()
-        snapshot.clear()
-        assert collector.styles() == [StaticAsset(url=CSS_URL, kind="css")]
+        assert collector.styles() is collector.styles()
 
     def test_preserves_insertion_order(self, collector: StaticCollector) -> None:
         """Later unique URLs keep their relative order."""
@@ -178,7 +194,7 @@ class TestStaticCollector:
         assert [asset.url for asset in collector.styles()] == urls
 
     def test_prepend_moves_asset_to_front(self, collector: StaticCollector) -> None:
-        """``prepend=True`` inserts before previously appended items."""
+        """prepend=True inserts before previously appended items."""
         collector.add(StaticAsset(url="/own.css", kind="css"))
         collector.add(StaticAsset(url="/dep.css", kind="css"), prepend=True)
         assert [a.url for a in collector.styles()] == ["/dep.css", "/own.css"]
@@ -222,19 +238,19 @@ class TestStaticCollector:
         ]
 
     def test_dedup_across_append_then_prepend(self, collector: StaticCollector) -> None:
-        """A URL first appended is ignored on a later ``prepend=True`` call."""
+        """A URL first appended is ignored on a later prepend=True call."""
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
         collector.add(StaticAsset(url=CSS_URL, kind="css"), prepend=True)
         assert [a.url for a in collector.styles()] == [CSS_URL]
 
     def test_dedup_across_prepend_then_append(self, collector: StaticCollector) -> None:
-        """A URL first prepended is ignored on a later plain ``add`` call."""
+        """A URL first prepended is ignored on a later plain add call."""
         collector.add(StaticAsset(url=CSS_URL, kind="css"), prepend=True)
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
         assert [a.url for a in collector.styles()] == [CSS_URL]
 
     def test_dedup_is_cross_source_path(self, collector: StaticCollector) -> None:
-        """Assets sharing a URL but different ``source_path`` values still dedup."""
+        """Assets sharing a URL but different source_path values still dedup."""
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
         collector.add(
             StaticAsset(url=CSS_URL, kind="css", source_path=Path("/tmp/a.css"))
@@ -250,22 +266,29 @@ class TestStaticCollector:
 
 
 class TestStaticCollectorInline:
-    """Inline assets from ``{% #use_style %}`` / ``{% #use_script %}`` blocks."""
+    """Inline assets from block use_style and use_script tags."""
 
-    def test_inline_script_appended(self, collector: StaticCollector) -> None:
-        """An inline JS asset lands in ``scripts`` with its body preserved."""
-        collector.add(StaticAsset(url="", kind="js", inline="console.log(1)"))
-        scripts = collector.scripts()
-        assert len(scripts) == 1
-        assert scripts[0].inline == "console.log(1)"
-        assert scripts[0].url == ""
-
-    def test_inline_style_appended(self, collector: StaticCollector) -> None:
-        """An inline CSS asset lands in ``styles`` with its body preserved."""
-        collector.add(StaticAsset(url="", kind="css", inline="body{color:red}"))
-        styles = collector.styles()
-        assert len(styles) == 1
-        assert styles[0].inline == "body{color:red}"
+    @pytest.mark.parametrize(
+        ("kind", "body", "accessor"),
+        [
+            ("js", "console.log(1)", "scripts"),
+            ("css", "body{color:red}", "styles"),
+        ],
+        ids=["script", "style"],
+    )
+    def test_inline_asset_appended(
+        self,
+        collector: StaticCollector,
+        kind: str,
+        body: str,
+        accessor: str,
+    ) -> None:
+        """An inline asset lands in the matching bucket with its body preserved."""
+        collector.add(StaticAsset(url="", kind=kind, inline=body))
+        items = getattr(collector, accessor)()
+        assert len(items) == 1
+        assert items[0].inline == body
+        assert items[0].url == ""
 
     def test_identical_inline_bodies_dedupe(self, collector: StaticCollector) -> None:
         """Two inline assets with identical rendered bodies collapse to one entry."""
@@ -292,7 +315,7 @@ class TestStaticCollectorInline:
     def test_inline_asset_ignores_prepend_flag(
         self, collector: StaticCollector
     ) -> None:
-        """``prepend=True`` is ignored for inline assets, they always append."""
+        """prepend=True is ignored for inline assets so they always append."""
         collector.add(StaticAsset(url=JS_URL, kind="js"), prepend=True)
         collector.add(StaticAsset(url="", kind="js", inline="inline()"), prepend=True)
         scripts = collector.scripts()
@@ -353,7 +376,7 @@ class TestDiscoveryDedup:
         collector: StaticCollector,
         fresh_manager: StaticManager,
     ) -> None:
-        """Invoking ``discover_component_assets`` twice collapses to a single entry."""
+        """Invoking discover_component_assets twice collapses to a single entry."""
         discovery = AssetDiscovery(fresh_manager)
         discovery.discover_component_assets(composite_component, collector)
         discovery.discover_component_assets(composite_component, collector)
@@ -366,7 +389,7 @@ class TestDiscoveryDedup:
 
 
 class TestKindToExtension:
-    """``_kind_to_extension`` maps collector kinds to file extensions."""
+    """_kind_to_extension maps collector kinds to file extensions."""
 
     @pytest.mark.parametrize(
         ("kind", "expected"),
@@ -377,16 +400,16 @@ class TestKindToExtension:
         assert _kind_to_extension(kind) == expected
 
     def test_unknown_kind_raises(self) -> None:
-        """Passing an unsupported kind raises ``ValueError``."""
+        """Passing an unsupported kind raises ValueError."""
         with pytest.raises(ValueError, match="Unsupported asset kind"):
             _kind_to_extension("other")
 
 
 class TestLoadPythonModule:
-    """``_load_python_module`` loads arbitrary ``.py`` files by path."""
+    """_load_python_module loads arbitrary .py files by path."""
 
     def test_loads_module_exposing_attributes(self, tmp_path: Path) -> None:
-        """A valid ``.py`` file is executed and its attributes are accessible."""
+        """A valid .py file is executed and its attributes are accessible."""
         source = tmp_path / "mod.py"
         source.write_text("X = 1\nY = 'ok'\n")
         module = _load_python_module(source)
@@ -395,13 +418,13 @@ class TestLoadPythonModule:
         assert module.Y == "ok"
 
     def test_syntax_error_returns_none(self, tmp_path: Path) -> None:
-        """A broken source file logs a debug message and returns ``None``."""
+        """A broken source file logs a debug message and returns None."""
         source = tmp_path / "bad.py"
         source.write_text("def (")
         assert _load_python_module(source) is None
 
-    def test_missing_spec_returns_none(self, tmp_path: Path) -> None:
-        """When ``spec_from_file_location`` returns ``None`` the loader returns ``None``."""
+    def test_missing_spec_returns_none_without_raising(self, tmp_path: Path) -> None:
+        """When spec_from_file_location returns None the loader returns None and does not raise."""
         source = tmp_path / "mod.py"
         source.write_text("X = 1")
         with patch(
@@ -411,7 +434,7 @@ class TestLoadPythonModule:
 
 
 class TestReadStringList:
-    """``_read_string_list`` reads sanitized string lists from module attributes."""
+    """_read_string_list reads sanitized string lists from module attributes."""
 
     def test_list_of_strings(self) -> None:
         """A list of strings is returned intact as a list of strings."""
@@ -440,10 +463,10 @@ class TestReadStringList:
 
 
 class TestStaticFilesBackend:
-    """``StaticFilesBackend`` resolves URLs through staticfiles storage."""
+    """StaticFilesBackend resolves URLs through staticfiles storage."""
 
     def test_register_returns_staticfiles_url(self, tmp_path: Path) -> None:
-        """Registered URLs are resolved in the ``/static/next/...`` namespace."""
+        """Registered URLs are resolved in the /static/next/... namespace."""
         source = tmp_path / "thing.css"
         source.write_text("")
         backend = StaticFilesBackend()
@@ -470,16 +493,16 @@ class TestStaticFilesBackend:
 
 
 class TestStaticBackendABC:
-    """``StaticBackend`` is abstract and cannot be instantiated directly."""
+    """StaticBackend is abstract and cannot be instantiated directly."""
 
     def test_cannot_instantiate_abstract(self) -> None:
-        """Attempting to construct the ABC raises ``TypeError``."""
+        """Attempting to construct the ABC raises TypeError."""
         with pytest.raises(TypeError):
             StaticBackend()  # type: ignore[abstract]
 
 
 class TestStaticsFactory:
-    """``StaticsFactory`` constructs backend instances from config dicts."""
+    """StaticsFactory constructs backend instances from config dicts."""
 
     def test_default_backend_is_django_staticfiles_backend(self) -> None:
         """An empty config resolves to the Django staticfiles-backed backend."""
@@ -487,37 +510,27 @@ class TestStaticsFactory:
         assert isinstance(backend, StaticFilesBackend)
 
     def test_explicit_backend_path(self) -> None:
-        """An explicit ``BACKEND`` path instantiates the named class."""
+        """An explicit BACKEND path instantiates the named class."""
         backend = StaticsFactory.create_backend(
             {"BACKEND": "next.static.StaticFilesBackend", "OPTIONS": {}}
         )
         assert isinstance(backend, StaticFilesBackend)
 
     def test_non_backend_class_raises(self) -> None:
-        """A class that is not a ``StaticBackend`` subclass raises ``TypeError``."""
+        """A class that is not a StaticBackend subclass raises TypeError."""
         with pytest.raises(TypeError, match="is not a StaticBackend subclass"):
             StaticsFactory.create_backend({"BACKEND": "builtins.dict"})
 
 
 class TestAssetDiscoveryPageAssets:
-    """``AssetDiscovery.discover_page_assets`` walks layouts, templates, modules."""
-
-    def _make_discovery(
-        self,
-        file_backend: StaticFilesBackend,
-        page_roots: tuple[Path, ...] = (),
-    ) -> AssetDiscovery:
-        """Build a discovery helper wired to a ``StaticManager`` stub."""
-        manager = StaticManager()
-        manager._backends = [file_backend]
-        manager._cached_page_roots = page_roots
-        return AssetDiscovery(manager)
+    """AssetDiscovery.discover_page_assets walks layouts, templates, and modules."""
 
     def test_walks_nested_layouts_then_template_then_module(
         self,
         tmp_path: Path,
-        file_backend: StaticFilesBackend,
+        file_backend: StaticBackend,
         collector: StaticCollector,
+        make_discovery,
     ) -> None:
         """Outer-to-inner layout assets precede template and module-level lists."""
         page_root = tmp_path / "pages"
@@ -535,7 +548,7 @@ class TestAssetDiscoveryPageAssets:
             'styles = ["https://ext/inter.css"]\nscripts = ["https://ext/app.js"]\n'
         )
 
-        discovery = self._make_discovery(file_backend, (page_root.resolve(),))
+        discovery, _ = make_discovery(file_backend, (page_root.resolve(),))
         discovery.discover_page_assets(page_py, collector)
 
         style_urls = [asset.url for asset in collector.styles()]
@@ -555,8 +568,9 @@ class TestAssetDiscoveryPageAssets:
     def test_no_layout_directories_still_collects_template_and_module(
         self,
         tmp_path: Path,
-        file_backend: StaticFilesBackend,
+        file_backend: StaticBackend,
         collector: StaticCollector,
+        make_discovery,
     ) -> None:
         """When no layout exists discovery still collects template and module lists."""
         page_root = tmp_path / "pages"
@@ -565,7 +579,7 @@ class TestAssetDiscoveryPageAssets:
         page_py = page_root / "page.py"
         page_py.write_text('styles = ["https://ext/x.css"]\n')
 
-        discovery = self._make_discovery(file_backend, (page_root.resolve(),))
+        discovery, _ = make_discovery(file_backend, (page_root.resolve(),))
         discovery.discover_page_assets(page_py, collector)
 
         assert [asset.url for asset in collector.styles()] == [
@@ -576,13 +590,14 @@ class TestAssetDiscoveryPageAssets:
     def test_missing_page_py_skips_module_list_collection(
         self,
         tmp_path: Path,
-        file_backend: StaticFilesBackend,
+        file_backend: StaticBackend,
         collector: StaticCollector,
+        make_discovery,
     ) -> None:
-        """A non-existent ``page.py`` is silently skipped."""
+        """A non-existent page.py is silently skipped."""
         page_root = tmp_path / "pages"
         page_root.mkdir()
-        discovery = self._make_discovery(file_backend, (page_root.resolve(),))
+        discovery, _ = make_discovery(file_backend, (page_root.resolve(),))
         discovery.discover_page_assets(page_root / "page.py", collector)
         assert collector.styles() == []
         assert collector.scripts() == []
@@ -590,8 +605,9 @@ class TestAssetDiscoveryPageAssets:
     def test_layout_and_template_outside_page_root_use_fallback_names(
         self,
         tmp_path: Path,
-        file_backend: StaticFilesBackend,
+        file_backend: StaticBackend,
         collector: StaticCollector,
+        make_discovery,
     ) -> None:
         """Files outside any configured page root fall back to directory-based names."""
         strangedir = tmp_path / "strange"
@@ -602,7 +618,7 @@ class TestAssetDiscoveryPageAssets:
         page_py = strangedir / "page.py"
         page_py.write_text("")
 
-        discovery = self._make_discovery(file_backend, ())
+        discovery, _ = make_discovery(file_backend, ())
         discovery.discover_page_assets(page_py, collector)
 
         style_urls = [asset.url for asset in collector.styles()]
@@ -611,24 +627,17 @@ class TestAssetDiscoveryPageAssets:
 
 
 class TestAssetDiscoveryComponentAssets:
-    """``AssetDiscovery.discover_component_assets`` handles composite components."""
-
-    def _discovery(
-        self, backend: StaticFilesBackend
-    ) -> tuple[AssetDiscovery, StaticManager]:
-        """Build a ``StaticManager``/``AssetDiscovery`` pair wired to ``backend``."""
-        manager = StaticManager()
-        manager._backends = [backend]
-        return AssetDiscovery(manager), manager
+    """AssetDiscovery.discover_component_assets handles composite components."""
 
     def test_simple_component_is_ignored(
         self,
         simple_component: ComponentInfo,
-        file_backend: StaticFilesBackend,
+        file_backend: StaticBackend,
         collector: StaticCollector,
+        make_discovery,
     ) -> None:
         """Simple components have no co-located assets and are skipped."""
-        discovery, _ = self._discovery(file_backend)
+        discovery, _ = make_discovery(file_backend)
         discovery.discover_component_assets(simple_component, collector)
         assert collector.styles() == []
         assert collector.scripts() == []
@@ -636,11 +645,12 @@ class TestAssetDiscoveryComponentAssets:
     def test_composite_collects_css_js_and_module_lists(
         self,
         composite_component: ComponentInfo,
-        file_backend: StaticFilesBackend,
+        file_backend: StaticBackend,
         collector: StaticCollector,
+        make_discovery,
     ) -> None:
         """Composite components contribute co-located files and module lists."""
-        discovery, _ = self._discovery(file_backend)
+        discovery, _ = make_discovery(file_backend)
         discovery.discover_component_assets(composite_component, collector)
 
         style_urls = [asset.url for asset in collector.styles()]
@@ -657,8 +667,9 @@ class TestAssetDiscoveryComponentAssets:
     def test_composite_without_files_uses_only_module_lists(
         self,
         tmp_path: Path,
-        file_backend: StaticFilesBackend,
+        file_backend: StaticBackend,
         collector: StaticCollector,
+        make_discovery,
     ) -> None:
         """A composite that has no css/js files reads only the module lists."""
         comp_dir = tmp_path / "widget"
@@ -675,7 +686,7 @@ class TestAssetDiscoveryComponentAssets:
             module_path=module_path,
             is_simple=False,
         )
-        discovery, _ = self._discovery(file_backend)
+        discovery, _ = make_discovery(file_backend)
         discovery.discover_component_assets(info, collector)
         assert [a.url for a in collector.styles()] == ["https://a"]
         assert [a.url for a in collector.scripts()] == ["https://b"]
@@ -683,10 +694,11 @@ class TestAssetDiscoveryComponentAssets:
     def test_component_directory_falls_back_to_module_path_parent(
         self,
         tmp_path: Path,
-        file_backend: StaticFilesBackend,
+        file_backend: StaticBackend,
         collector: StaticCollector,
+        make_discovery,
     ) -> None:
-        """When ``template_path`` is ``None`` the directory is derived from the module path."""
+        """When template_path is None the directory is derived from the module path."""
         comp_dir = tmp_path / "widget"
         comp_dir.mkdir()
         module_path = comp_dir / "component.py"
@@ -700,7 +712,7 @@ class TestAssetDiscoveryComponentAssets:
             module_path=module_path,
             is_simple=False,
         )
-        discovery, _ = self._discovery(file_backend)
+        discovery, _ = make_discovery(file_backend)
         discovery.discover_component_assets(info, collector)
         style_urls = [a.url for a in collector.styles()]
         assert "/static/next/components/widget.css" in style_urls
@@ -709,8 +721,9 @@ class TestAssetDiscoveryComponentAssets:
     def test_component_with_no_paths_is_skipped(
         self,
         tmp_path: Path,
-        file_backend: StaticFilesBackend,
+        file_backend: StaticBackend,
         collector: StaticCollector,
+        make_discovery,
     ) -> None:
         """A composite with neither template nor module path contributes nothing."""
         info = ComponentInfo(
@@ -721,7 +734,7 @@ class TestAssetDiscoveryComponentAssets:
             module_path=None,
             is_simple=False,
         )
-        discovery, _ = self._discovery(file_backend)
+        discovery, _ = make_discovery(file_backend)
         discovery.discover_component_assets(info, collector)
         assert collector.styles() == []
         assert collector.scripts() == []
@@ -729,8 +742,9 @@ class TestAssetDiscoveryComponentAssets:
     def test_missing_module_path_skips_module_list_collection(
         self,
         tmp_path: Path,
-        file_backend: StaticFilesBackend,
+        file_backend: StaticBackend,
         collector: StaticCollector,
+        make_discovery,
     ) -> None:
         """A composite whose module path does not exist contributes only files."""
         comp_dir = tmp_path / "widget"
@@ -746,25 +760,24 @@ class TestAssetDiscoveryComponentAssets:
             module_path=comp_dir / "does-not-exist.py",
             is_simple=False,
         )
-        discovery, _ = self._discovery(file_backend)
+        discovery, _ = make_discovery(file_backend)
         discovery.discover_component_assets(info, collector)
         style_urls = [a.url for a in collector.styles()]
         assert style_urls == ["/static/next/components/widget.css"]
 
 
-class TestCollectModuleListsInternals:
-    """``_collect_module_lists`` short-circuits when the module cannot load."""
+class TestAssetDiscoveryInternals:
+    """Internal helpers of AssetDiscovery cover fallback and error paths."""
 
     def test_unloadable_module_is_silently_ignored(
         self,
         tmp_path: Path,
-        file_backend: StaticFilesBackend,
+        file_backend: StaticBackend,
         collector: StaticCollector,
+        make_discovery,
     ) -> None:
-        """A ``_load_python_module`` returning ``None`` leaves the collector empty."""
-        manager = StaticManager()
-        manager._backends = [file_backend]
-        discovery = AssetDiscovery(manager)
+        """A _load_python_module returning None leaves the collector empty."""
+        discovery, _ = make_discovery(file_backend)
         module_path = tmp_path / "page.py"
         module_path.write_text("X = 1")
         with patch("next.pages._load_python_module", return_value=None):
@@ -772,30 +785,22 @@ class TestCollectModuleListsInternals:
         assert collector.styles() == []
         assert collector.scripts() == []
 
-
-class TestAssetDiscoveryInternals:
-    """Internal helpers of ``AssetDiscovery`` cover fallback and error paths."""
-
-    def _discovery(self, backend: StaticFilesBackend) -> AssetDiscovery:
-        """Return a discovery helper wired to a blank manager and ``backend``."""
-        manager = StaticManager()
-        manager._backends = [backend]
-        return AssetDiscovery(manager)
-
     def test_register_file_failure_logs_and_skips_collector(
         self,
         tmp_path: Path,
         collector: StaticCollector,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Backend errors during ``register_file`` are logged and collector is untouched."""
+        """Backend errors during register_file are logged and the collector is untouched."""
 
         class _RaisingBackend(StaticFilesBackend):
             def register_file(self, source_path, logical_name, kind):
                 msg = "boom"
                 raise OSError(msg)
 
-        discovery = self._discovery(_RaisingBackend())
+        manager = StaticManager()
+        manager._backends = [_RaisingBackend()]
+        discovery = AssetDiscovery(manager)
         source = tmp_path / "x.css"
         source.write_text("")
         with caplog.at_level("DEBUG", logger="next.static"):
@@ -804,24 +809,24 @@ class TestAssetDiscoveryInternals:
         assert any("Failed to register" in rec.message for rec in caplog.records)
 
     def test_fallback_logical_name_for_empty_directory_name(
-        self, file_backend: StaticFilesBackend
+        self, file_backend: StaticBackend, make_discovery
     ) -> None:
-        """Directories with an empty ``name`` fall back to ``index``."""
-        discovery = self._discovery(file_backend)
+        """Directories with an empty name fall back to index."""
+        discovery, _ = make_discovery(file_backend)
         assert discovery._fallback_logical_name(Path("/")) == "index"
 
     def test_find_page_root_returns_none_when_outside(
-        self, tmp_path: Path, file_backend: StaticFilesBackend
+        self, tmp_path: Path, file_backend: StaticBackend, make_discovery
     ) -> None:
-        """``_find_page_root`` returns ``None`` for a path outside any root."""
-        discovery = self._discovery(file_backend)
+        """_find_page_root returns None for a path outside any configured root."""
+        discovery, _ = make_discovery(file_backend)
         assert discovery._find_page_root(tmp_path / "page.py") is None
 
     def test_logical_name_for_template_outside_root_uses_fallback(
-        self, tmp_path: Path, file_backend: StaticFilesBackend
+        self, tmp_path: Path, file_backend: StaticBackend, make_discovery
     ) -> None:
-        """A template directory outside ``page_root`` falls back to its name."""
-        discovery = self._discovery(file_backend)
+        """A template directory outside page_root falls back to its directory name."""
+        discovery, _ = make_discovery(file_backend)
         other = tmp_path / "somewhere"
         other.mkdir()
         (tmp_path / "root").mkdir()
@@ -829,10 +834,10 @@ class TestAssetDiscoveryInternals:
         assert name == "somewhere"
 
     def test_logical_name_for_layout_outside_root_uses_fallback(
-        self, tmp_path: Path, file_backend: StaticFilesBackend
+        self, tmp_path: Path, file_backend: StaticBackend, make_discovery
     ) -> None:
-        """A layout directory outside ``page_root`` falls back to ``<name>/layout``."""
-        discovery = self._discovery(file_backend)
+        """A layout directory outside page_root falls back to name/layout."""
+        discovery, _ = make_discovery(file_backend)
         other = tmp_path / "somewhere"
         other.mkdir()
         (tmp_path / "root").mkdir()
@@ -840,28 +845,28 @@ class TestAssetDiscoveryInternals:
         assert name == "somewhere/layout"
 
     def test_logical_name_for_layout_without_root(
-        self, tmp_path: Path, file_backend: StaticFilesBackend
+        self, tmp_path: Path, file_backend: StaticBackend, make_discovery
     ) -> None:
-        """Without a ``page_root`` the layout name falls back to ``<name>/layout``."""
-        discovery = self._discovery(file_backend)
+        """Without a page_root the layout name falls back to name/layout."""
+        discovery, _ = make_discovery(file_backend)
         layout_dir = tmp_path / "pages"
         layout_dir.mkdir()
         assert discovery._logical_name_for_layout(layout_dir, None) == "pages/layout"
 
     def test_logical_name_for_layout_at_page_root_returns_plain_layout(
-        self, tmp_path: Path, file_backend: StaticFilesBackend
+        self, tmp_path: Path, file_backend: StaticBackend, make_discovery
     ) -> None:
-        """When ``layout_dir == page_root`` the logical name is just ``layout``."""
-        discovery = self._discovery(file_backend)
+        """When layout_dir equals page_root the logical name is just layout."""
+        discovery, _ = make_discovery(file_backend)
         page_root = tmp_path / "pages"
         page_root.mkdir()
         assert discovery._logical_name_for_layout(page_root, page_root) == "layout"
 
     def test_find_layout_directories_stops_at_filesystem_root(
-        self, tmp_path: Path, file_backend: StaticFilesBackend
+        self, tmp_path: Path, file_backend: StaticBackend, make_discovery
     ) -> None:
-        """With no ``page_root`` the walk terminates at the filesystem root."""
-        discovery = self._discovery(file_backend)
+        """With no page_root the walk terminates at the filesystem root."""
+        discovery, _ = make_discovery(file_backend)
         leaf = tmp_path / "a" / "b"
         leaf.mkdir(parents=True)
         page_py = leaf / "page.py"
@@ -870,10 +875,10 @@ class TestAssetDiscoveryInternals:
 
 
 class TestStaticManagerLifecycle:
-    """``StaticManager`` manages backend loading and reload."""
+    """StaticManager manages backend loading and reload."""
 
     def test_len_reflects_backend_count(self, fresh_manager: StaticManager) -> None:
-        """``len`` returns the number of loaded backends."""
+        """Len returns the number of loaded backends."""
         with override_settings(
             NEXT_FRAMEWORK={
                 "DEFAULT_STATIC_BACKENDS": [
@@ -886,11 +891,11 @@ class TestStaticManagerLifecycle:
     def test_default_backend_triggers_lazy_load(
         self, fresh_manager: StaticManager
     ) -> None:
-        """Accessing ``default_backend`` loads configured backends on first access."""
+        """Accessing default_backend loads configured backends on first access."""
         assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
 
     def test_discovery_is_lazy_and_cached(self, fresh_manager: StaticManager) -> None:
-        """``discovery`` is created once and reused on subsequent access."""
+        """Discovery is created once and reused on subsequent access."""
         first = fresh_manager.discovery
         second = fresh_manager.discovery
         assert first is second
@@ -898,15 +903,15 @@ class TestStaticManagerLifecycle:
     def test_falls_back_to_file_backend_when_config_empty(
         self, fresh_manager: StaticManager
     ) -> None:
-        """An empty ``DEFAULT_STATIC_BACKENDS`` list keeps a default backend."""
+        """An empty DEFAULT_STATIC_BACKENDS list keeps a default backend."""
         with override_settings(NEXT_FRAMEWORK={"DEFAULT_STATIC_BACKENDS": []}):
             assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
 
     def test_ignores_non_list_configs(self, fresh_manager: StaticManager) -> None:
-        """A non-list ``DEFAULT_STATIC_BACKENDS`` value is coerced to an empty list."""
-        from next.static import next_framework_settings as conf  # noqa: PLC0415
-
-        conf._attr_value_cache["DEFAULT_STATIC_BACKENDS"] = "not-a-list"
+        """A non-list DEFAULT_STATIC_BACKENDS value is coerced to an empty list."""
+        next_framework_settings._attr_value_cache["DEFAULT_STATIC_BACKENDS"] = (
+            "not-a-list"
+        )
         assert isinstance(fresh_manager.default_backend, StaticFilesBackend)
 
     def test_ignores_non_dict_backend_entries(
@@ -945,7 +950,7 @@ class TestStaticManagerLifecycle:
         tmp_path: Path,
         collector: StaticCollector,
     ) -> None:
-        """``discover_page_assets`` forwards to the shared ``AssetDiscovery`` instance."""
+        """discover_page_assets forwards to the shared AssetDiscovery instance."""
         page_py = tmp_path / "page.py"
         page_py.write_text('styles = ["https://ext/a.css"]\n')
         fresh_manager.discover_page_assets(page_py, collector)
@@ -957,13 +962,13 @@ class TestStaticManagerLifecycle:
         composite_component: ComponentInfo,
         collector: StaticCollector,
     ) -> None:
-        """``discover_component_assets`` forwards to the shared ``AssetDiscovery``."""
+        """discover_component_assets forwards to the shared AssetDiscovery."""
         fresh_manager.discover_component_assets(composite_component, collector)
         assert any(a.url.endswith("components/widget.css") for a in collector.styles())
 
 
 class TestStaticManagerInject:
-    """``StaticManager.inject`` rewrites placeholders into rendered HTML."""
+    """StaticManager.inject rewrites placeholders into rendered HTML."""
 
     def test_injects_css_and_js_tags(
         self, fresh_manager: StaticManager, collector: StaticCollector
@@ -1035,7 +1040,7 @@ class TestStaticManagerInject:
 
 
 class TestStaticManagerPageRoots:
-    """``_page_roots`` caches absolute page directories from page backends."""
+    """page_roots caches absolute page directories from page backends."""
 
     def test_caches_value_after_first_call(
         self, fresh_manager: StaticManager, tmp_path: Path
@@ -1045,8 +1050,8 @@ class TestStaticManagerPageRoots:
             "next.pages.get_pages_directories_for_watch",
             return_value=[tmp_path],
         ) as mock_roots:
-            first = fresh_manager._page_roots()
-            second = fresh_manager._page_roots()
+            first = fresh_manager.page_roots()
+            second = fresh_manager.page_roots()
         assert first == (tmp_path.resolve(),)
         assert second is first
         assert mock_roots.call_count == 1
@@ -1054,20 +1059,18 @@ class TestStaticManagerPageRoots:
     def test_returns_empty_when_pages_module_import_fails(
         self, fresh_manager: StaticManager
     ) -> None:
-        """When ``next.pages`` cannot be imported the cache falls back to ``()``."""
-        import next.pages as next_pages  # noqa: PLC0415
-
-        original = next_pages.get_pages_directories_for_watch
+        """When next.pages cannot be imported the cache falls back to an empty tuple."""
+        original = _next_pages_mod.get_pages_directories_for_watch
         try:
-            del next_pages.get_pages_directories_for_watch
-            assert fresh_manager._page_roots() == ()
+            del _next_pages_mod.get_pages_directories_for_watch
+            assert fresh_manager.page_roots() == ()
         finally:
-            next_pages.get_pages_directories_for_watch = original
+            _next_pages_mod.get_pages_directories_for_watch = original
 
     def test_oserror_on_resolve_is_swallowed(
         self, fresh_manager: StaticManager
     ) -> None:
-        """A ``Path.resolve`` OSError is swallowed and the root is dropped."""
+        """A Path.resolve OSError is swallowed and the root is dropped."""
         bad = Path("/does/not/matter")
         real_resolve = Path.resolve
 
@@ -1081,67 +1084,70 @@ class TestStaticManagerPageRoots:
             patch("next.pages.get_pages_directories_for_watch", return_value=[bad]),
             patch.object(Path, "resolve", _resolve),
         ):
-            assert fresh_manager._page_roots() == ()
+            assert fresh_manager.page_roots() == ()
 
 
 class TestTemplateTags:
     """Template tag entry points are exercised through a real Django engine."""
 
-    @pytest.fixture()
-    def engine_template(self) -> type[Template]:
-        """Return the Django ``Template`` class with the static tag library loaded."""
-        return Template
+    @pytest.mark.parametrize(
+        ("tag", "placeholder"),
+        [
+            ("collect_styles", STYLES_PLACEHOLDER),
+            ("collect_scripts", SCRIPTS_PLACEHOLDER),
+        ],
+        ids=["styles", "scripts"],
+    )
+    def test_collect_tag_outputs_placeholder(self, tag: str, placeholder: str) -> None:
+        """The collect tag emits the matching raw placeholder string."""
+        tpl = Template(f"{{% load next_static %}}{{% {tag} %}}")
+        assert tpl.render(Context()) == placeholder
 
-    def test_collect_styles_outputs_placeholder(self) -> None:
-        """``{% collect_styles %}`` emits the raw styles placeholder."""
-        tpl = Template("{% load next_static %}{% collect_styles %}")
-        assert tpl.render(Context()) == STYLES_PLACEHOLDER
-
-    def test_collect_scripts_outputs_placeholder(self) -> None:
-        """``{% collect_scripts %}`` emits the raw scripts placeholder."""
-        tpl = Template("{% load next_static %}{% collect_scripts %}")
-        assert tpl.render(Context()) == SCRIPTS_PLACEHOLDER
-
-    def test_use_style_registers_url_and_renders_nothing(
-        self, collector: StaticCollector
+    @pytest.mark.parametrize(
+        ("tag", "url", "accessor"),
+        [
+            ("use_style", "/main.css", "styles"),
+            ("use_script", "/main.js", "scripts"),
+        ],
+        ids=["style", "script"],
+    )
+    def test_use_tag_registers_url_and_renders_nothing(
+        self,
+        collector: StaticCollector,
+        tag: str,
+        url: str,
+        accessor: str,
     ) -> None:
-        """``{% use_style url %}`` registers an asset and emits no markup."""
-        tpl = Template('{% load next_static %}{% use_style "/main.css" %}!')
+        """The use tag registers an asset on the collector and emits no markup."""
+        tpl = Template(f'{{% load next_static %}}{{% {tag} "{url}" %}}!')
         output = tpl.render(Context({"_static_collector": collector}))
         assert output == "!"
-        assert [a.url for a in collector.styles()] == ["/main.css"]
+        assert [a.url for a in getattr(collector, accessor)()] == [url]
 
-    def test_use_script_registers_url_and_renders_nothing(
-        self, collector: StaticCollector
+    @pytest.mark.parametrize(
+        ("tag", "existing_url", "dep_url", "kind", "accessor"),
+        [
+            ("use_style", "/static/next/layout.css", "/cdn/dep.css", "css", "styles"),
+            ("use_script", "/static/next/layout.js", "/cdn/dep.js", "js", "scripts"),
+        ],
+        ids=["style", "script"],
+    )
+    def test_use_tag_prepends_before_appended_files(
+        self,
+        collector: StaticCollector,
+        tag: str,
+        existing_url: str,
+        dep_url: str,
+        kind: str,
+        accessor: str,
     ) -> None:
-        """``{% use_script url %}`` registers an asset and emits no markup."""
-        tpl = Template('{% load next_static %}{% use_script "/main.js" %}!')
-        output = tpl.render(Context({"_static_collector": collector}))
-        assert output == "!"
-        assert [a.url for a in collector.scripts()] == ["/main.js"]
-
-    def test_use_style_prepends_before_appended_files(
-        self, collector: StaticCollector
-    ) -> None:
-        """``use_style`` lands before items appended by co-located discovery."""
-        collector.add(StaticAsset(url="/static/next/layout.css", kind="css"))
-        tpl = Template('{% load next_static %}{% use_style "/cdn/dep.css" %}')
+        """The use tag lands before items appended by co-located discovery."""
+        collector.add(StaticAsset(url=existing_url, kind=kind))
+        tpl = Template(f'{{% load next_static %}}{{% {tag} "{dep_url}" %}}')
         tpl.render(Context({"_static_collector": collector}))
-        assert [a.url for a in collector.styles()] == [
-            "/cdn/dep.css",
-            "/static/next/layout.css",
-        ]
-
-    def test_use_script_prepends_before_appended_files(
-        self, collector: StaticCollector
-    ) -> None:
-        """``use_script`` lands before items appended by co-located discovery."""
-        collector.add(StaticAsset(url="/static/next/layout.js", kind="js"))
-        tpl = Template('{% load next_static %}{% use_script "/cdn/dep.js" %}')
-        tpl.render(Context({"_static_collector": collector}))
-        assert [a.url for a in collector.scripts()] == [
-            "/cdn/dep.js",
-            "/static/next/layout.js",
+        assert [a.url for a in getattr(collector, accessor)()] == [
+            dep_url,
+            existing_url,
         ]
 
     @pytest.mark.parametrize(
@@ -1172,45 +1178,44 @@ class TestTemplateTags:
         collector: StaticCollector,
         bad_url: object,
     ) -> None:
-        """Non-string or empty URLs passed to ``use_style`` are ignored."""
+        """Non-string or empty URLs passed to use_style are ignored."""
         tpl = Template("{% load next_static %}{% use_style url %}")
         tpl.render(Context({"_static_collector": collector, "url": bad_url}))
         assert collector.styles() == []
 
-    def test_block_use_script_captures_body_and_emits_nothing(
-        self, collector: StaticCollector
+    @pytest.mark.parametrize(
+        ("open_tag", "close_tag", "body", "accessor"),
+        [
+            ("#use_script", "/use_script", "<script>inline()</script>", "scripts"),
+            ("#use_style", "/use_style", "<style>.a{color:red}</style>", "styles"),
+        ],
+        ids=["script", "style"],
+    )
+    def test_block_use_tag_captures_body_and_emits_nothing(
+        self,
+        collector: StaticCollector,
+        open_tag: str,
+        close_tag: str,
+        body: str,
+        accessor: str,
     ) -> None:
-        """``{% #use_script %}`` records the body and emits no markup in place."""
+        """The block form records the body and emits no markup in place."""
         tpl = Template(
-            "{% load next_static %}before"
-            "{% #use_script %}<script>inline()</script>{% /use_script %}"
+            f"{{% load next_static %}}before"
+            f"{{% {open_tag} %}}{body}{{% {close_tag} %}}"
             "after"
         )
         output = tpl.render(Context({"_static_collector": collector}))
         assert output == "beforeafter"
-        scripts = collector.scripts()
-        assert len(scripts) == 1
-        assert scripts[0].inline == "<script>inline()</script>"
-        assert scripts[0].url == ""
-
-    def test_block_use_style_captures_body_and_emits_nothing(
-        self, collector: StaticCollector
-    ) -> None:
-        """``{% #use_style %}`` records the body and emits no markup in place."""
-        tpl = Template(
-            "{% load next_static %}"
-            "{% #use_style %}<style>.a{color:red}</style>{% /use_style %}"
-        )
-        output = tpl.render(Context({"_static_collector": collector}))
-        assert output == ""
-        styles = collector.styles()
-        assert len(styles) == 1
-        assert styles[0].inline == "<style>.a{color:red}</style>"
+        items = getattr(collector, accessor)()
+        assert len(items) == 1
+        assert items[0].inline == body
+        assert items[0].url == ""
 
     def test_block_use_script_renders_body_with_context(
         self, collector: StaticCollector
     ) -> None:
-        """Block body is rendered against the active context, so vars are substituted."""
+        """Block body is rendered against the active context so vars are substituted."""
         tpl = Template(
             "{% load next_static %}"
             "{% #use_script %}<script>id={{ widget_id }};</script>{% /use_script %}"
@@ -1221,7 +1226,7 @@ class TestTemplateTags:
     def test_block_use_script_appends_after_url_deps(
         self, collector: StaticCollector
     ) -> None:
-        """Block form appends, URL form prepends. URL deps land before inline bodies."""
+        """Block form appends and URL form prepends so URL deps land before inline bodies."""
         tpl = Template(
             "{% load next_static %}"
             '{% use_script "/cdn/react.js" %}'
@@ -1301,17 +1306,15 @@ class TestTemplateTags:
 
 
 class TestComponentTagIntegration:
-    """The ``{% component %}`` tag forwards to ``static_manager`` for composites."""
+    """The component tag forwards to static_manager for composites."""
 
-    @pytest.mark.usefixtures("_reset_global_static_manager")
+    @pytest.mark.usefixtures("reset_global_static_manager")
     def test_component_render_discovers_assets_via_static_manager(
         self,
         composite_component: ComponentInfo,
         collector: StaticCollector,
     ) -> None:
         """Rendering a composite with a collector in context triggers discovery."""
-        from next.components import components_manager  # noqa: PLC0415
-
         static_manager._reload_config()
         with patch.object(
             components_manager,
@@ -1332,18 +1335,19 @@ class TestComponentTagIntegration:
 
 
 class TestStaticManagerGlobal:
-    """The module-level ``static_manager`` is a live ``StaticManager`` instance."""
+    """The module-level static_manager is a live StaticManager instance."""
 
     def test_is_static_manager_instance(self) -> None:
-        """The exported singleton is an instance of ``StaticManager``."""
+        """The exported singleton is an instance of StaticManager."""
         assert isinstance(static_manager, StaticManager)
 
 
+@pytest.mark.integration()
 class TestStaticfilesDiscovery:
     """Collected co-located files are exposed to Django staticfiles."""
 
     def test_discovers_page_and_component_assets(self, tmp_path: Path) -> None:
-        """Discovery maps co-located files into ``next/`` static namespace."""
+        """Discovery maps co-located files into the next/ static namespace."""
         pages_root = tmp_path / "pages"
         page_dir = pages_root / "blog"
         page_dir.mkdir(parents=True)
@@ -1386,8 +1390,6 @@ class TestStaticfilesFinderCoverage:
         self, tmp_path: Path
     ) -> None:
         """Paths outside configured page roots do not resolve a root."""
-        from next.static import _find_page_root_for  # noqa: PLC0415
-
         outside = tmp_path / "outside" / "template.djx"
         outside.parent.mkdir(parents=True)
         outside.write_text("")
@@ -1396,34 +1398,24 @@ class TestStaticfilesFinderCoverage:
         assert _find_page_root_for(outside, (root.resolve(),)) is None
 
     def test_logical_layout_name_for_root_layout(self, tmp_path: Path) -> None:
-        """Layout at the page tree root maps to the ``layout`` logical name."""
-        from next.static import _logical_layout_name  # noqa: PLC0415
-
+        """Layout at the page tree root maps to the layout logical name."""
         layout_dir = tmp_path / "pages"
         layout_dir.mkdir()
         assert _logical_layout_name(layout_dir, layout_dir) == "layout"
 
     def test_logical_layout_name_for_nested_layout(self, tmp_path: Path) -> None:
-        """Nested layout directories include their trail plus ``layout``."""
-        from next.static import _logical_layout_name  # noqa: PLC0415
-
+        """Nested layout directories include their trail plus layout."""
         page_root = tmp_path / "pages"
         nested = page_root / "blog"
         nested.mkdir(parents=True)
         assert _logical_layout_name(nested, page_root) == "blog/layout"
 
-    def test_discovery_skips_unknown_roots_and_dedups_component_dirs(
+    def test_discovery_skips_out_of_scope_templates_and_layouts(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Out-of-scope templates and duplicate component dirs are skipped."""
-        from next.static import discover_colocated_static_assets  # noqa: PLC0415
-
+        """Templates outside the page root and layouts with no root are not mapped."""
         page_root = tmp_path / "pages"
         page_root.mkdir()
-        in_scope = page_root / "blog"
-        in_scope.mkdir()
-        (in_scope / "template.djx").write_text("")
-        (in_scope / "template.css").write_text("")
 
         out_scope = tmp_path / "other"
         out_scope.mkdir()
@@ -1435,6 +1427,38 @@ class TestStaticfilesFinderCoverage:
         (layout_unknown / "layout.djx").write_text("")
         (layout_unknown / "layout.css").write_text("")
 
+        monkeypatch.setattr(
+            "next.static.get_pages_directories_for_watch",
+            lambda: [page_root],
+        )
+        monkeypatch.setattr(
+            "next.static.get_template_djx_paths_for_watch",
+            lambda: [out_scope / "template.djx"],
+        )
+        monkeypatch.setattr(
+            "next.static.get_layout_djx_paths_for_watch",
+            lambda: [layout_unknown / "layout.djx"],
+        )
+        monkeypatch.setattr(
+            "next.components.get_component_paths_for_watch",
+            set,
+        )
+
+        assets = discover_colocated_static_assets()
+        assert "next/other.css" not in assets
+        assert "next/layout-only/layout.css" not in assets
+
+    def test_discovery_includes_in_scope_templates_and_deduplicates_components(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """In-scope templates are mapped and duplicate component dirs are deduplicated."""
+        page_root = tmp_path / "pages"
+        page_root.mkdir()
+        in_scope = page_root / "blog"
+        in_scope.mkdir()
+        (in_scope / "template.djx").write_text("")
+        (in_scope / "template.css").write_text("")
+
         comp_dir = page_root / "_components" / "card"
         comp_dir.mkdir(parents=True)
         comp_file = comp_dir / "component.djx"
@@ -1442,16 +1466,16 @@ class TestStaticfilesFinderCoverage:
         (comp_dir / "component.css").write_text("")
 
         monkeypatch.setattr(
-            "next.pages.get_pages_directories_for_watch",
+            "next.static.get_pages_directories_for_watch",
             lambda: [page_root],
         )
         monkeypatch.setattr(
-            "next.pages.get_template_djx_paths_for_watch",
-            lambda: [in_scope / "template.djx", out_scope / "template.djx"],
+            "next.static.get_template_djx_paths_for_watch",
+            lambda: [in_scope / "template.djx"],
         )
         monkeypatch.setattr(
-            "next.pages.get_layout_djx_paths_for_watch",
-            lambda: [layout_unknown / "layout.djx"],
+            "next.static.get_layout_djx_paths_for_watch",
+            list,
         )
         monkeypatch.setattr(
             "next.components.get_component_paths_for_watch",
@@ -1460,14 +1484,10 @@ class TestStaticfilesFinderCoverage:
 
         assets = discover_colocated_static_assets()
         assert "next/blog.css" in assets
-        assert "next/other.css" not in assets
-        assert "next/layout-only/layout.css" not in assets
         assert "next/components/card.css" in assets
 
     def test_mapped_source_storage_exists_open_and_path(self, tmp_path: Path) -> None:
-        """Mapped storage delegates ``exists``, ``open``, and ``path`` to files."""
-        from next.static import _MappedSourceStorage  # noqa: PLC0415
-
+        """Mapped storage delegates exists, open, and path to files."""
         src = tmp_path / "x.css"
         src.write_text("body{}")
         storage = _MappedSourceStorage({"next/x.css": src})
@@ -1480,9 +1500,7 @@ class TestStaticfilesFinderCoverage:
     def test_finder_find_and_list_branches(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Finder ``find`` / ``list`` honor hits, misses, and ignore patterns."""
-        from next.static import NextStaticFilesFinder  # noqa: PLC0415
-
+        """Finder find and list honor hits, misses, and ignore patterns."""
         a = tmp_path / "a.css"
         b = tmp_path / "b.css"
         a.write_text("a")
