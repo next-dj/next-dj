@@ -1,6 +1,6 @@
 # Static Assets Example
 
-This example demonstrates next-dj's **static asset subsystem**: automatic discovery of co-located CSS/JS, module-level `styles`/`scripts` lists, the `{% use_style %}` / `{% use_script %}` template tags for shared layout dependencies, placeholder slots (`{% collect_styles %}` / `{% collect_scripts %}`), URL-based deduplication, and a dedicated `/_next/static/` serve route. Third-party libraries used as realistic fixtures: **Bootstrap 5**, **Bootstrap Icons**, **Chart.js**, **React 18 + ReactDOM + Babel standalone**, and two Google fonts (Inter, JetBrains Mono).
+This example demonstrates next-dj's **static asset subsystem**: automatic discovery of co-located CSS/JS, module-level `styles`/`scripts` lists, the `{% use_style %}` / `{% use_script %}` template tags for shared layout dependencies, placeholder slots (`{% collect_styles %}` / `{% collect_scripts %}`), URL-based deduplication, and Django staticfiles URL resolution. Third-party libraries used as realistic fixtures: **Bootstrap 5**, **Bootstrap Icons**, **Chart.js**, **React 18 + ReactDOM + Babel standalone**, and two Google fonts (Inter, JetBrains Mono).
 
 ## Feature coverage (static)
 
@@ -18,11 +18,11 @@ This example demonstrates next-dj's **static asset subsystem**: automatic discov
 | Slots — `{% collect_styles %}` / `{% collect_scripts %}` | `pages/layout.djx` (head + before `</body>`) |
 | Cascade order (use_* → layout → page → component) | Asserted in `tests/tests.py` |
 | Deduplication by URL across repeated components | Counter rendered twice on the home page; React/ReactDOM/Babel emitted once |
-| `/_next/static/<file>` serve view | Delegates to `django.views.static.serve`; exercised in `tests/tests.py` |
+| Staticfiles-backed URL resolution | URLs are emitted under `/static/next/...`; exercised in `tests/tests.py` |
 
 ## What This Example Demonstrates
 
-- **Co-located assets.** Drop `layout.css` / `layout.js` next to `layout.djx`, `template.css` / `template.js` next to `template.djx`, and `component.css` / `component.js` next to `component.djx`. They are picked up automatically and served under `/_next/static/`.
+- **Co-located assets.** Drop `layout.css` / `layout.js` next to `layout.djx`, `template.css` / `template.js` next to `template.djx`, and `component.css` / `component.js` next to `component.djx`. They are picked up automatically and resolved via Django staticfiles under `/static/next/...`.
 - **Module-level URLs.** Declare `styles = [...]` and `scripts = [...]` in any `page.py` or `component.py` for per-page or per-component third-party assets.
 - **Layout-wide dependencies via template tags.** `{% use_style "URL" %}` / `{% use_script "URL" %}` register shared libraries from the layout without hard-coding `<link>` / `<script>` tags; they land at the top of the collected list so child scopes can override them.
 - **Slot-based injection.** `{% collect_styles %}` (in `<head>`) and `{% collect_scripts %}` (before `</body>`) are post-render placeholders — a single pass at the end of `Page.render` replaces both.
@@ -100,20 +100,20 @@ static/
    CSS
 
    1. Bootstrap CSS (`use_style` from layout)
-   2. `/_next/static/layout.css`
-   3. `/_next/static/index.css` (template)
+   2. `/static/next/layout.css`
+   3. `/static/next/index.css` (template)
    4. Google Font Inter (`pages/page.py` `styles`)
-   5. `/_next/static/components/widget.css`
+   5. `/static/next/components/widget.css`
    6. Bootstrap Icons (`widget/component.py` `styles`)
-   7. `/_next/static/components/counter.css`
+   7. `/static/next/components/counter.css`
 
    JS
 
    1. Bootstrap JS (`use_script` from layout, prepended)
    2. React, ReactDOM, Babel (`use_script` from `counter/component.djx`, prepended in registration order)
-   3. `/_next/static/layout.js`
-   4. `/_next/static/index.js`
-   5. `/_next/static/components/widget.js`
+   3. `/static/next/layout.js`
+   4. `/static/next/index.js`
+   5. `/static/next/components/widget.js`
    6. Counter's shared `Counter` component definition block (hoisted by `{% #use_script %}`, content-dedupped to one entry)
    7. Counter's mount block for `id="likes"` (hoisted by `{% #use_script %}`)
    8. Counter's mount block for `id="stars"` (hoisted by `{% #use_script %}`)
@@ -125,7 +125,7 @@ static/
    - **URL-form assets** (co-located files, module lists, `use_style`/`use_script`) dedupe by URL, so rendering `counter` twice still emits React, ReactDOM and Babel exactly once.
    - **Inline block bodies** (`{% #use_script %}` / `{% #use_style %}`) dedupe by rendered body. The counter exploits this by splitting its Babel payload in two: the shared `Counter` component definition has no per-instance context → identical bodies across renders → collapsed to one entry; the mount block interpolates `{{ id }}` → different bodies per render (`counter-likes` vs `counter-stars`) → both kept. Split your blocks along the "shared vs per-instance" axis to get the best of both worlds.
 
-5. **Serving.** `FileStaticBackend` registers each discovered file under a logical name (`/_next/static/<route>.css`, `/_next/static/components/<name>.css`). `static_serve_view` looks the name up and delegates to `django.views.static.serve`, which streams the file with correct `Content-Type` / `Last-Modified` / 304 handling.
+5. **Staticfiles resolution.** `StaticFilesBackend` registers each discovered file under a logical name (`next/<route>.css`, `next/components/<name>.css`) and resolves final URLs through `staticfiles_storage.url(...)`.
 
 ## Running the Example
 
@@ -156,13 +156,13 @@ python manage.py runserver
 |-----|-------------|
 | `/` | Home page: Bootstrap widget + two React/Babel counters |
 | `/dashboard/` | Dashboard page: Chart.js bar chart + JetBrains Mono code font |
-| `/_next/static/layout.css` | Example of a served co-located file |
-| `/_next/static/components/counter.css` | Counter's component CSS |
+| `/static/next/layout.css` | Example of a co-located file URL |
+| `/static/next/components/counter.css` | Counter's component CSS |
 
 Open the page source — you will see:
 
 - Bootstrap `<link>` first in `<head>` (layout `use_style`).
-- `/_next/static/layout.css`, the template CSS, and page-level font URLs following in cascade order.
+- `/static/next/layout.css`, the template CSS, and page-level font URLs following in cascade order.
 - Three `<script>` tags for React, ReactDOM and Babel, each appearing exactly **once** before the three `<script type="text/babel">` counter blocks (one shared `Counter` definition + two per-instance mounts), even though the counter component is rendered twice. The Babel blocks themselves live inside the `{% collect_scripts %}` slot (bottom of `<body>`) because they were wrapped in `{% #use_script %}` — not where the `<div>` mount point is drawn.
 
 ### Running Tests
@@ -180,7 +180,7 @@ cd examples/static
 uv run pytest tests/ -v --no-cov
 ```
 
-The test suite renders the home and dashboard pages with Django's `Client`, verifies cascade order, counter mount points, dedup of the React CDNs, and the `/_next/static/` serve view.
+The test suite renders the home and dashboard pages with Django's `Client`, verifies cascade order, counter mount points, dedup of the React CDNs, and staticfiles-backed URL resolution.
 
 ## Contributing
 

@@ -33,6 +33,12 @@ class NextFrameworkConfig(AppConfig):
                 builtins.append(mod)
         settings.TEMPLATES[0].setdefault("OPTIONS", {})["builtins"] = builtins
 
+        finder_path = "next.static.NextStaticFilesFinder"
+        configured_finders = list(getattr(settings, "STATICFILES_FINDERS", []))
+        if finder_path not in configured_finders:
+            configured_finders.append(finder_path)
+            settings.STATICFILES_FINDERS = configured_finders
+
         def watch_next_filesystem(sender: object, **_: object) -> None:
             for path, glob in iter_all_autoreload_watch_specs():
                 sender.watch_dir(path, glob)  # type: ignore[attr-defined]

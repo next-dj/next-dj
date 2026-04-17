@@ -51,7 +51,7 @@ class NextFrameworkSettings:
         ],
         "DEFAULT_STATIC_BACKENDS": [
             {
-                "BACKEND": "next.static.FileStaticBackend",
+                "BACKEND": "next.static.StaticFilesBackend",
                 "OPTIONS": {},
             },
         ],

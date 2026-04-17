@@ -45,10 +45,9 @@ Rendering happens in two phases:
    and ``<!-- next:scripts -->``).
 2. **Inject phase.** After rendering finishes, the manager rewrites both
    placeholders with concatenated ``<link>`` and ``<script>`` tags built by
-   the active backend. Co-located files are registered in an in-memory
-   registry under ``/_next/static/`` and served by a single Django view that
-   delegates to ``django.views.static.serve`` (so you get streaming,
-   ``Content-Type`` detection, and 304 responses for free).
+   the active backend. In the default configuration, co-located files resolve
+   through Django ``staticfiles_storage`` under the ``next/`` namespace, so
+   ``collectstatic`` + Manifest + S3/CDN settings apply automatically.
 
 Ordering is **cascade-friendly** — generic dependencies come first so
 page- and component-specific rules can override them:
@@ -86,7 +85,7 @@ used automatically when the key is missing).
    NEXT_FRAMEWORK = {
        "DEFAULT_STATIC_BACKENDS": [
            {
-               "BACKEND": "next.static.FileStaticBackend",
+               "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {},
            },
        ],
@@ -143,13 +142,13 @@ The framework looks for **fixed file names** in three locations.
      - Logical URL
    * - Next to ``layout.djx``
      - ``layout.css``, ``layout.js``
-     - ``/_next/static/<route>/layout.{css,js}`` (or ``/_next/static/layout.{css,js}`` at the page root)
+     - ``next/<route>/layout.{css,js}`` (or ``next/layout.{css,js}`` at the page root)
    * - Next to ``template.djx``
      - ``template.css``, ``template.js``
-     - ``/_next/static/<route>.{css,js}`` (or ``/_next/static/index.{css,js}`` at the page root)
+     - ``next/<route>.{css,js}`` (or ``next/index.{css,js}`` at the page root)
    * - Next to ``component.djx`` / ``component.py``
      - ``component.css``, ``component.js``
-     - ``/_next/static/components/<name>.{css,js}``
+     - ``next/components/<name>.{css,js}``
 
 The naming is intentional: assets follow the **route** of the page they belong
 to (and the component **name** for components), not a hashed filesystem path.
@@ -158,13 +157,13 @@ This keeps URLs predictable and easy to debug.
 Examples:
 
 - ``myapp/pages/about/template.css`` →
-  ``/_next/static/about.css``
+  ``next/about.css`` (then hashed by manifest if enabled)
 - ``myapp/pages/blog/layout.djx`` + ``layout.js`` →
-  ``/_next/static/blog/layout.js``
+  ``next/blog/layout.js`` (then hashed by manifest if enabled)
 - ``myapp/pages/_components/card/component.css`` →
-  ``/_next/static/components/card.css``
+  ``next/components/card.css`` (then hashed by manifest if enabled)
 - ``myapp/pages/dashboard/_components/chart/component.js`` →
-  ``/_next/static/components/chart.js``
+  ``next/components/chart.js`` (then hashed by manifest if enabled)
 
 .. tip::
 
@@ -326,7 +325,7 @@ in the same shape as the page and component backends.
    NEXT_FRAMEWORK = {
        "DEFAULT_STATIC_BACKENDS": [
            {
-               "BACKEND": "next.static.FileStaticBackend",
+               "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {},
            },
        ],
@@ -335,8 +334,8 @@ in the same shape as the page and component backends.
 Each entry is a dict that is passed unchanged into the backend constructor:
 
 - ``BACKEND`` (str) — dotted import path of the backend class. Defaults to
-  ``"next.static.FileStaticBackend"``.
-- ``OPTIONS`` (dict) — backend-specific options. ``FileStaticBackend`` reads:
+  ``"next.static.StaticFilesBackend"``.
+- ``OPTIONS`` (dict) — backend-specific options. ``StaticFilesBackend`` reads:
 
   - ``css_tag`` (str) — format string for CSS link tags. ``{url}`` is
     substituted. Default: ``'<link rel="stylesheet" href="{url}">'``.
@@ -344,8 +343,8 @@ Each entry is a dict that is passed unchanged into the backend constructor:
     substituted. Default: ``'<script src="{url}"></script>'``.
 
 If ``DEFAULT_STATIC_BACKENDS`` is missing, empty, or contains no usable
-entries, the framework falls back to a default ``FileStaticBackend()`` so the
-slots and discovery still work.
+entries, the framework falls back to ``StaticFilesBackend()`` so static
+URLs still flow through Django staticfiles.
 
 Customizing tag templates
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -358,7 +357,7 @@ without writing a custom backend:
    NEXT_FRAMEWORK = {
        "DEFAULT_STATIC_BACKENDS": [
            {
-               "BACKEND": "next.static.FileStaticBackend",
+               "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {
                    "css_tag": '<link rel="stylesheet" href="{url}" crossorigin>',
                    "js_tag": '<script src="{url}" defer></script>',
@@ -367,31 +366,19 @@ without writing a custom backend:
        ],
    }
 
-URL serving (``/_next/static/``)
---------------------------------
+Staticfiles and collectstatic
+-----------------------------
 
-Co-located files are registered with a logical name when discovered and served
-by a single catch-all view at ``/_next/static/<file_path>``. The view is added
-to the URL conf automatically — there is nothing to wire up by hand.
+Co-located files are mapped into the ``next/`` namespace and resolved via
+``django.contrib.staticfiles.storage.staticfiles_storage.url(...)``.
+This means:
 
-Internally, ``static_serve_view`` looks the path up in the backend registry
-and delegates to ``django.views.static.serve``, so you get:
+- ``collectstatic`` sees the files through ``next.static.NextStaticFilesFinder``,
+- Manifest storages rewrite URLs to hashed file names,
+- S3/CDN backends return public bucket/CDN URLs in final HTML automatically.
 
-- correct ``Content-Type`` based on the file extension,
-- ``Last-Modified`` headers,
-- conditional GET (``304 Not Modified``) for ``If-Modified-Since`` requests,
-- streaming responses for large files.
-
-Unknown paths under ``/_next/static/`` return ``404``. The prefix mirrors the
-``/_next/form/`` route used by :doc:`forms` — anything under ``/_next/`` is
-internal framework infrastructure.
-
-.. tip::
-
-   The ``/_next/static/`` route is a development and small-deployment
-   convenience. For production at scale, run a custom backend that
-   ``register_file`` copies the file to your S3 bucket / CDN and returns the
-   public URL — see :ref:`static-custom-backends`.
+If a file is missing from the manifest, ``StaticFilesBackend`` raises a
+clear runtime error pointing to ``collectstatic``/finder setup.
 
 Practical walkthroughs
 ----------------------
@@ -446,8 +433,8 @@ Output (excerpt):
 
    <head>
        <link rel="stylesheet" href="https://cdn.jsdelivr.net/.../bootstrap.min.css">
-       <link rel="stylesheet" href="/_next/static/layout.css">
-       <link rel="stylesheet" href="/_next/static/dashboard.css">
+       <link rel="stylesheet" href="/static/next/layout.abcd1234.css">
+       <link rel="stylesheet" href="/static/next/dashboard.efgh5678.css">
        <link rel="stylesheet" href="https://fonts.googleapis.com/...">
    </head>
 
@@ -683,15 +670,13 @@ Tips and gotchas
   slot still works (the slot is rewritten **after** rendering), but for
   clarity keep your ``use_*`` calls near the top of the layout where the
   dependencies are conceptually declared.
-- **Static URLs change with the route.** ``/_next/static/<route>.css`` is
+- **Static URLs change with the route.** ``next/<route>.css`` is
   stable as long as the page route does not change. Renaming
   ``pages/blog/`` → ``pages/articles/`` will change ``template.css`` from
-  ``/_next/static/blog.css`` to ``/_next/static/articles.css``.
-- **Coexistence with Django's static system.** ``next.dj`` does not replace
-  ``django.contrib.staticfiles``. Continue to use ``{% load static %}`` and
-  the standard ``STATIC_URL`` for site-wide assets you want collected by
-  ``collectstatic``. The ``/_next/static/`` route is reserved for files
-  discovered by the framework.
+  ``next/blog.css`` to ``next/articles.css`` before manifest hashing.
+- **Unified with Django staticfiles.** ``next.dj`` co-located assets and
+  your regular ``{% static %}`` assets share the same ``collectstatic``
+  pipeline and the same storage backend.
 
 .. _static-custom-backends:
 
@@ -699,14 +684,13 @@ Custom backends
 ---------------
 
 A backend is any class that subclasses :class:`~next.static.StaticBackend`.
-The contract is small (four methods) and lets you swap how assets are
-rendered, where they are stored, and how URLs are produced.
+The contract is small (three methods) and lets you swap how assets are
+rendered and how URLs are produced (typically still via Django staticfiles).
 
 .. code-block:: python
 
    from typing import Any
 
-   from django.urls import URLPattern
    from next.static import StaticBackend
 
 
@@ -728,9 +712,6 @@ rendered, where they are stored, and how URLs are produced.
 
        def render_script_tag(self, url: str) -> str:
            return f'<script src="{url}" defer></script>'
-
-       def generate_urls(self) -> list[URLPattern]:
-           return []  # served by the CDN, not by Django
 
 Wire it up like any other backend:
 
@@ -754,16 +735,16 @@ The most useful entry points:
 - :class:`~next.static.StaticAsset` — frozen dataclass for one CSS/JS reference.
 - :class:`~next.static.StaticCollector` — per-render dedup-and-order helper.
 - :class:`~next.static.StaticBackend` — backend ABC (subclass for custom hosting).
-- :class:`~next.static.FileStaticBackend` — built-in backend that serves files
-  under ``/_next/static/``.
+- :class:`~next.static.StaticFilesBackend` — built-in backend that resolves
+  co-located assets through Django ``staticfiles_storage``.
 - :class:`~next.static.AssetDiscovery` — scans page/layout/component
   directories and module-level lists.
 - :class:`~next.static.StaticManager` — coordinates backends, discovery, and
   placeholder injection.
 - :data:`~next.static.static_manager` — module-level singleton used by
   :meth:`~next.pages.Page.render` and the static template tags.
-- :func:`~next.static.static_serve_view` — view registered at
-  ``/_next/static/<file_path>``.
+- :class:`~next.static.NextStaticFilesFinder` — staticfiles finder that exposes
+  co-located assets under the ``next/`` namespace for ``collectstatic``.
 
 Example project
 ---------------
@@ -773,5 +754,5 @@ with shared Bootstrap from ``{% use_style %}`` / ``{% use_script %}``, a home
 page with co-located ``template.css`` plus an Inter-font in ``page.py``, a
 dashboard page with its own ``template.css`` and JetBrains Mono font, two
 composite components (``widget`` with Bootstrap Icons and ``chart`` with
-Chart.js), and a full test suite that exercises the collector ordering,
-deduplication, and the ``/_next/static/`` view.
+Chart.js), and a full test suite that exercises collector ordering,
+deduplication, and staticfiles-based URL resolution.

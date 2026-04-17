@@ -8,31 +8,31 @@ components may also declare ``styles`` and ``scripts`` list variables at
 module level (``page.py``/``component.py``). The collector gathers references
 during rendering and the manager injects them into placeholder slots emitted
 by the ``{% collect_styles %}`` and ``{% collect_scripts %}`` template tags.
-Files are served via the ``/_next/static/`` route prefix.
+Public URLs are resolved by the configured static backend (Django staticfiles
+by default).
 """
 
 from __future__ import annotations
 
 import contextlib
-import importlib.util
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, overload
 
-from django.http import HttpRequest, HttpResponseNotFound
-from django.urls import URLPattern, path
-from django.views.static import serve as django_serve
+from django.contrib.staticfiles.finders import BaseFinder
+from django.contrib.staticfiles.storage import staticfiles_storage
+from django.contrib.staticfiles.utils import matches_patterns
+from django.core.files import File
+from django.core.files.storage import Storage
 
+from . import pages
 from .conf import import_class_cached, next_framework_settings
 
 
 if TYPE_CHECKING:
-    import types
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
     from pathlib import Path
-
-    from django.http.response import HttpResponseBase
 
     from .components import ComponentInfo
 
@@ -42,14 +42,15 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "AssetDiscovery",
-    "FileStaticBackend",
+    "NextStaticFilesFinder",
     "StaticAsset",
     "StaticBackend",
     "StaticCollector",
+    "StaticFilesBackend",
     "StaticManager",
     "StaticsFactory",
+    "discover_colocated_static_assets",
     "static_manager",
-    "static_serve_view",
 ]
 
 
@@ -91,8 +92,8 @@ class StaticCollector:
     ``{% use_style %}`` / ``{% use_script %}``) appear first in the order
     they were registered, followed by co-located files, module-level lists
     and inline blocks from ``{% #use_style %}`` / ``{% #use_script %}`` in
-    nested depth-first render order. URL-form entries dedupe by URL;
-    inline entries always append and dedupe by the rendered body itself, so
+    nested depth-first render order. URL-form entries dedupe by URL.
+    Inline entries always append and dedupe by the rendered body itself, so
     two blocks producing identical HTML collapse to one while blocks whose
     template context resolves to different HTML stay distinct.
     """
@@ -195,53 +196,46 @@ class StaticBackend(ABC):
     def render_script_tag(self, url: str) -> str:
         """Return an HTML script tag string for a JS asset URL."""
 
-    @abstractmethod
-    def generate_urls(self) -> list[URLPattern]:
-        """Return Django URL patterns that serve files registered by this backend."""
 
+class StaticFilesBackend(StaticBackend):
+    """Resolve co-located assets through Django ``staticfiles_storage``.
 
-@dataclass
-class _FileRegistryEntry:
-    """Mapping from a served path to an absolute filesystem path."""
-
-    source_path: Path
-
-
-class FileStaticBackend(StaticBackend):
-    """Serve co-located assets under the ``/_next/static/`` URL prefix.
-
-    Assets are renamed by their logical identity so that
-    ``_components/card/component.css`` becomes ``/_next/static/components/card.css``
-    and ``pages/about/template.css`` becomes ``/_next/static/about.css``. Files
-    are served by a single catch-all view backed by an in-memory registry.
+    Files discovered by ``next.dj`` keep their logical identities (for example
+    ``blog/layout.css`` and ``components/card.js``), but public URLs are always
+    resolved by Django staticfiles so Manifest/S3/CDN settings apply uniformly.
     """
-
-    URL_PREFIX: ClassVar[str] = "_next/static"
 
     _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}">'
     _DEFAULT_JS_TAG: ClassVar[str] = '<script src="{url}"></script>'
+    STATIC_NAMESPACE: ClassVar[str] = "next"
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
-        """Build the backend from an optional configuration dict with ``OPTIONS``."""
+        """Build the backend from optional ``OPTIONS`` tag template overrides."""
         cfg = config or {}
         opts = cfg.get("OPTIONS") or {}
         self._css_tag = str(opts.get("css_tag") or self._DEFAULT_CSS_TAG)
         self._js_tag = str(opts.get("js_tag") or self._DEFAULT_JS_TAG)
-        self._file_registry: dict[str, _FileRegistryEntry] = {}
+
+    def _logical_static_path(self, logical_name: str, kind: str) -> str:
+        extension = _kind_to_extension(kind)
+        return f"{self.STATIC_NAMESPACE}/{logical_name}{extension}"
 
     def register_file(
         self,
-        source_path: Path,
+        _source_path: Path,
         logical_name: str,
         kind: str,
     ) -> str:
-        """Register a file under ``logical_name.<kind>`` and return its served URL."""
-        extension = _kind_to_extension(kind)
-        relative = f"{logical_name}{extension}"
-        self._file_registry[relative] = _FileRegistryEntry(
-            source_path=source_path.resolve(),
-        )
-        return f"/{self.URL_PREFIX}/{relative}"
+        """Return URL from Django staticfiles for ``next/<logical_name>.<ext>``."""
+        path = self._logical_static_path(logical_name, kind)
+        try:
+            return str(staticfiles_storage.url(path))
+        except ValueError as e:
+            msg = (
+                f"Static asset {path!r} is missing from Django staticfiles manifest. "
+                "Run collectstatic and ensure next static finder is enabled."
+            )
+            raise RuntimeError(msg) from e
 
     def render_link_tag(self, url: str) -> str:
         """Return a ``<link rel="stylesheet">`` tag for the given URL."""
@@ -251,23 +245,164 @@ class FileStaticBackend(StaticBackend):
         """Return a ``<script>`` tag for the given URL."""
         return self._js_tag.format(url=url)
 
-    def generate_urls(self) -> list[URLPattern]:
-        """Return the single catch-all URL pattern for the serve view."""
-        return [
-            path(
-                f"{self.URL_PREFIX}/<path:file_path>",
-                static_serve_view,
-                name="next_static_serve",
-            ),
-        ]
 
-    def lookup(self, relative: str) -> _FileRegistryEntry | None:
-        """Return the registry entry for the given relative served path, if any."""
-        return self._file_registry.get(relative)
+_KIND_BY_EXTENSION = {
+    ".css": _KIND_CSS,
+    ".js": _KIND_JS,
+}
 
-    def clear_registry(self) -> None:
-        """Drop every registered file mapping."""
-        self._file_registry.clear()
+
+def _find_page_root_for(path: Path, page_roots: tuple[Path, ...]) -> Path | None:
+    parent = path.parent.resolve()
+    for root in page_roots:
+        try:
+            parent.relative_to(root)
+        except ValueError:
+            continue
+        else:
+            return root
+    return None
+
+
+def _logical_template_name(template_dir: Path, page_root: Path) -> str:
+    rel = template_dir.resolve().relative_to(page_root)
+    parts = rel.parts
+    return "/".join(parts) if parts else "index"
+
+
+def _logical_layout_name(layout_dir: Path, page_root: Path) -> str:
+    rel = layout_dir.resolve().relative_to(page_root)
+    parts = rel.parts
+    if parts:
+        return "/".join((*parts, "layout"))
+    return "layout"
+
+
+def _collect_stem_static_files(
+    out: dict[str, Path],
+    directory: Path,
+    logical_name: str,
+    stem: str,
+) -> None:
+    """Register ``{stem}.css`` / ``{stem}.js`` beside a djx file into ``out``."""
+    for suffix, kind in _KIND_BY_EXTENSION.items():
+        candidate = directory / f"{stem}{suffix}"
+        if not candidate.exists():
+            continue
+        static_path = f"next/{logical_name}{_kind_to_extension(kind)}"
+        out.setdefault(static_path, candidate.resolve())
+
+
+def discover_colocated_static_assets() -> dict[str, Path]:
+    """Map staticfiles logical paths to absolute source files on disk."""
+    from .pages import (  # noqa: PLC0415
+        get_layout_djx_paths_for_watch,
+        get_pages_directories_for_watch,
+        get_template_djx_paths_for_watch,
+    )
+
+    out: dict[str, Path] = {}
+    page_roots = tuple(root.resolve() for root in get_pages_directories_for_watch())
+
+    for template_path in get_template_djx_paths_for_watch():
+        page_root = _find_page_root_for(template_path, page_roots)
+        if page_root is None:
+            continue
+        template_dir = template_path.parent
+        logical_name = _logical_template_name(template_dir, page_root)
+        _collect_stem_static_files(out, template_dir, logical_name, "template")
+
+    for layout_path in get_layout_djx_paths_for_watch():
+        page_root = _find_page_root_for(layout_path, page_roots)
+        if page_root is None:
+            continue
+        layout_dir = layout_path.parent
+        logical_name = _logical_layout_name(layout_dir, page_root)
+        _collect_stem_static_files(out, layout_dir, logical_name, "layout")
+
+    # Imported lazily to avoid import-time cycles during Django app bootstrap.
+    from .components import get_component_paths_for_watch  # noqa: PLC0415
+
+    seen_component_dirs: set[Path] = set()
+    for component_source in get_component_paths_for_watch():
+        component_dir = component_source.parent.resolve()
+        if component_dir in seen_component_dirs:
+            continue
+        seen_component_dirs.add(component_dir)
+        logical_name = f"components/{component_dir.name}"
+        _collect_stem_static_files(out, component_dir, logical_name, "component")
+
+    return out
+
+
+class _MappedSourceStorage(Storage):
+    """Storage wrapper that serves files from an explicit path mapping."""
+
+    def __init__(self, mapping: dict[str, Path]) -> None:
+        self._mapping = mapping
+
+    def _resolve(self, name: str) -> Path:
+        if name not in self._mapping:
+            msg = f"Unknown static file: {name}"
+            raise FileNotFoundError(msg)
+        return self._mapping[name]
+
+    def exists(self, name: str) -> bool:
+        try:
+            return self._resolve(name).exists()
+        except FileNotFoundError:
+            return False
+
+    def open(self, name: str, mode: str = "rb") -> File:
+        path = self._resolve(name)
+        return File(path.open(mode))
+
+    def path(self, name: str) -> str:
+        return str(self._resolve(name))
+
+
+class NextStaticFilesFinder(BaseFinder):
+    """Finder that exposes next.dj co-located assets under ``next/`` namespace."""
+
+    def __init__(self) -> None:
+        """Initialize with empty storage until the first lookup."""
+        self._mapping: dict[str, Path] = {}
+        self._storage: _MappedSourceStorage = _MappedSourceStorage({})
+
+    def _refresh(self) -> None:
+        self._mapping = discover_colocated_static_assets()
+        self._storage = _MappedSourceStorage(self._mapping)
+
+    @overload
+    def find(self, path: str, find_all: Literal[False] = False) -> str | None: ...  # noqa: FBT002
+
+    @overload
+    def find(self, path: str, find_all: Literal[True]) -> list[str]: ...
+
+    def find(
+        self,
+        path: str,
+        find_all: bool = False,  # noqa: FBT001, FBT002
+    ) -> str | list[str] | None:
+        """Resolve ``path`` to an absolute filesystem path or list of paths."""
+        self._refresh()
+        source = self._mapping.get(path)
+        if source is None:
+            return [] if find_all else None
+        resolved = str(source)
+        return [resolved] if find_all else resolved
+
+    def list(
+        self,
+        ignore_patterns: Iterable[str] | None,
+    ) -> Iterator[tuple[str, Storage]]:
+        """Yield ``(relative_path, storage)`` pairs for ``collectstatic``."""
+        patterns = list(ignore_patterns) if ignore_patterns is not None else []
+        self._refresh()
+        for logical_path in sorted(self._mapping):
+            if matches_patterns(logical_path, patterns):
+                continue
+            yield logical_path, self._storage
 
 
 def _kind_to_extension(kind: str) -> str:
@@ -278,40 +413,6 @@ def _kind_to_extension(kind: str) -> str:
         return ".js"
     msg = f"Unsupported asset kind: {kind!r}"
     raise ValueError(msg)
-
-
-def _load_python_module(file_path: Path) -> types.ModuleType | None:
-    """Load a Python file as an anonymous module or return ``None`` on failure."""
-    try:
-        spec = importlib.util.spec_from_file_location(
-            f"next_static_module_{file_path.stem}", file_path
-        )
-        if spec is None or spec.loader is None:
-            return None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    except (ImportError, AttributeError, OSError, SyntaxError) as e:
-        logger.debug(
-            "Could not load module %s for static asset discovery: %s", file_path, e
-        )
-        return None
-    else:
-        return module
-
-
-def _read_string_list(module: types.ModuleType, attr: str) -> list[str]:
-    """Return a module-level string list attribute or an empty list."""
-    value = getattr(module, attr, None)
-    if not isinstance(value, (list, tuple)):
-        return []
-    return [str(item) for item in value if isinstance(item, str) and item]
-
-
-@dataclass
-class _DiscoveryRoots:
-    """Cached collection of page tree roots used to compute logical URL paths."""
-
-    roots: tuple[Path, ...] = field(default_factory=tuple)
 
 
 class AssetDiscovery:
@@ -410,12 +511,12 @@ class AssetDiscovery:
         collector: StaticCollector,
     ) -> None:
         """Read ``styles`` and ``scripts`` list variables from a Python module."""
-        module = _load_python_module(module_path)
+        module = pages._load_python_module(module_path)
         if module is None:
             return
-        for url in _read_string_list(module, "styles"):
+        for url in pages._read_string_list(module, "styles"):
             collector.add(StaticAsset(url=url, kind=_KIND_CSS))
-        for url in _read_string_list(module, "scripts"):
+        for url in pages._read_string_list(module, "scripts"):
             collector.add(StaticAsset(url=url, kind=_KIND_JS))
 
     def _register_file(
@@ -527,7 +628,7 @@ class StaticsFactory:
     @classmethod
     def create_backend(cls, config: dict[str, Any]) -> StaticBackend:
         """Instantiate the backend class named by ``config['BACKEND']``."""
-        backend_path = config.get("BACKEND", "next.static.FileStaticBackend")
+        backend_path = config.get("BACKEND", "next.static.StaticFilesBackend")
         backend_class = import_class_cached(backend_path)
         if not isinstance(backend_class, type) or not issubclass(
             backend_class, StaticBackend
@@ -543,8 +644,9 @@ class StaticManager:
     """Coordinate static backends, asset discovery, and placeholder injection.
 
     The manager loads backends from ``NEXT_FRAMEWORK['DEFAULT_STATIC_BACKENDS']``
-    on first use, owns a single ``AssetDiscovery`` instance, and yields URL
-    patterns contributed by each backend for ``_LazyUrlPatterns``.
+    on first use and owns a single ``AssetDiscovery`` instance. Static URLs are
+    resolved through Django staticfiles (see :class:`StaticFilesBackend`), not
+    through extra entries in ``next.urls``.
     """
 
     def __init__(self) -> None:
@@ -552,12 +654,6 @@ class StaticManager:
         self._backends: list[StaticBackend] = []
         self._discovery: AssetDiscovery | None = None
         self._cached_page_roots: tuple[Path, ...] | None = None
-
-    def __iter__(self) -> Iterator[URLPattern]:
-        """Yield URL patterns contributed by every backend in configuration order."""
-        self._ensure_backends()
-        for backend in self._backends:
-            yield from backend.generate_urls()
 
     def __len__(self) -> int:
         """Return the number of configured backends."""
@@ -669,7 +765,7 @@ class StaticManager:
                 continue
             self._backends.append(backend)
         if not self._backends:
-            self._backends.append(FileStaticBackend())
+            self._backends.append(StaticFilesBackend())
 
     def _page_roots(self) -> tuple[Path, ...]:
         """Return absolute page tree roots from configured page backends."""
@@ -689,28 +785,3 @@ class StaticManager:
 
 
 static_manager = StaticManager()
-
-
-def static_serve_view(
-    request: HttpRequest,
-    file_path: str,
-) -> HttpResponseBase:
-    """Serve a co-located static file registered by the ``FileStaticBackend``.
-
-    The registered filesystem path is handed to ``django.views.static.serve``
-    which handles streaming, Content-Type detection, and conditional GET via
-    Last-Modified and If-Modified-Since headers. A 404 response is returned
-    when the served path is not in the backend registry.
-    """
-    backend = static_manager.default_backend
-    if not isinstance(backend, FileStaticBackend):
-        return HttpResponseNotFound()
-    entry = backend.lookup(file_path)
-    if entry is None:
-        return HttpResponseNotFound()
-    source = entry.source_path
-    return django_serve(
-        request,
-        path=source.name,
-        document_root=str(source.parent),
-    )

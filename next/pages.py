@@ -266,6 +266,14 @@ def _load_python_module(file_path: Path) -> types.ModuleType | None:
         return module
 
 
+def _read_string_list(module: types.ModuleType, attr: str) -> list[str]:
+    """Return a module-level string sequence attribute or an empty list."""
+    value = getattr(module, attr, None)
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [str(item) for item in value if isinstance(item, str) and item]
+
+
 class TemplateLoader(ABC):
     """Pluggable source of template text for a ``page.py`` path."""
 

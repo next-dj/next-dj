@@ -63,7 +63,7 @@ A **blog** sample (English UI) built on next-dj components: simple and composite
 **Best for:** Reusable UI fragments, slots, component scope, and combining components with forms and file-based routing
 
 ### static
-A realistic showcase of next-dj's **static asset pipeline**: co-located CSS/JS, module-level `styles`/`scripts` lists, layout-wide dependencies via `{% use_style %}` / `{% use_script %}`, slot-based injection, cascade ordering, deduplication, and a dedicated `/_next/static/` serve route. Third-party stacks integrated: Bootstrap 5, Bootstrap Icons, Chart.js, and a React 18 + Babel standalone click counter.
+A realistic showcase of next-dj's **static asset pipeline**: co-located CSS/JS, module-level `styles`/`scripts` lists, layout-wide dependencies via `{% use_style %}` / `{% use_script %}`, slot-based injection, cascade ordering, deduplication, and Django `staticfiles` integration (Manifest/S3 ready). Third-party stacks integrated: Bootstrap 5, Bootstrap Icons, Chart.js, and a React 18 + Babel standalone click counter.
 
 **Key Features:**
 - Co-located `layout.css`/`layout.js` (next to `layout.djx`), `template.css`/`template.js` (next to `template.djx`), and `component.css`/`component.js` (next to `component.djx`)
@@ -73,7 +73,7 @@ A realistic showcase of next-dj's **static asset pipeline**: co-located CSS/JS, 
 - Cascade ordering: `use_*` → layout → page → component (child scopes can override parents)
 - Deduplication by URL — repeated components ship each CDN only once
 - Complex integration example: React + Babel standalone counter rendered twice via `ReactDOM.createRoot`
-- `/_next/static/` serve view that delegates to `django.views.static.serve`
+- Co-located assets resolved via Django `staticfiles_storage` under `next/` namespace
 
 **Best for:** Wiring in CSS/JS without a bundler, integrating third-party libraries (including React/Babel), and understanding the cascade + dedup contract of the static subsystem
 

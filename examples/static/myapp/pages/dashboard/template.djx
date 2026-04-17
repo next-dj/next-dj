@@ -15,7 +15,7 @@
                 <div class="alert alert-secondary h-100 mb-0">
                     <strong>Tip.</strong> Co-located <code>template.css</code> styles
                     the dashboard headline purple and is served from
-                    <code>/_next/static/dashboard.css</code>.
+                    <code>/static/next/dashboard.css</code>.
                 </div>
             </div>
         </div>

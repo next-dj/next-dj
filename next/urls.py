@@ -683,22 +683,19 @@ router_manager = RouterManager()
 
 
 class _LazyUrlPatterns(list):
-    """Defer expanding router, form, and static patterns until first use.
+    """Defer expanding router and form patterns until first use.
 
-    Avoids walking the tree at import time. Rebuilds from ``router_manager``,
-    ``form_action_manager``, and ``static_manager`` on each access.
+    Avoids walking the tree at import time. Rebuilds from ``router_manager`` and
+    ``form_action_manager`` on each access.
     Subclasses ``list`` so ``isinstance(urlpatterns, list)`` holds. Overrides
     ``__reversed__`` because the inherited empty internal buffer would break
     ``reversed(urlpatterns)`` in Django's URL resolver.
     """
 
     def _patterns(self) -> list[URLPattern | URLResolver]:
-        from .static import static_manager  # noqa: PLC0415
-
         return [
             *list(router_manager),
             *list(form_action_manager),
-            *list(static_manager),
         ]
 
     def __iter__(self) -> Iterator[URLPattern | URLResolver]:

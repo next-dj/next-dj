@@ -50,7 +50,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 NEXT_FRAMEWORK = {
     "DEFAULT_STATIC_BACKENDS": [
         {
-            "BACKEND": "next.static.FileStaticBackend",
+            "BACKEND": "next.static.StaticFilesBackend",
             "OPTIONS": {},
         },
     ],
