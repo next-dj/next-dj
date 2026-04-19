@@ -15,7 +15,7 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
         django-version: ["5.2"]
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - uses: ./.github/actions/setup-python-uv
       with:
         python-version: ${{ matrix.python-version }}
