@@ -28,6 +28,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
     from types import ModuleType
 
+    from .static import StaticCollector
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -534,6 +536,7 @@ class ContextFunction:
 
     func: Callable[..., Any]
     key: str | None
+    serialize: bool = False
 
 
 class ComponentContextRegistry:
@@ -547,6 +550,8 @@ class ComponentContextRegistry:
         component_path: Path,
         key: str | None,
         func: Callable[..., Any],
+        *,
+        serialize: bool = False,
     ) -> None:
         path = component_path.resolve()
 
@@ -571,7 +576,9 @@ class ComponentContextRegistry:
                 )
                 raise ValueError(msg)
 
-        component_registry[key] = ContextFunction(func=func, key=key)
+        component_registry[key] = ContextFunction(
+            func=func, key=key, serialize=serialize
+        )
 
     def get_functions(self, component_path: Path) -> Sequence[ContextFunction]:
         path = component_path.resolve()
@@ -619,16 +626,26 @@ class ComponentContextManager:
     def context(
         self,
         func_or_key: Callable[..., Any] | str | None = None,
+        *,
+        serialize: bool = False,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """Mark a function so it fills template variables for this component module."""
+        """Mark a function so it fills template variables for this component module.
+
+        Pass ``serialize=True`` to include the return value in ``Next.context``
+        so JavaScript code on the page can read it via ``window.Next.context``.
+        """
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             if callable(func_or_key):
                 caller_path = self._get_caller_path(2)
-                self._registry.register(caller_path, None, func_or_key)
+                self._registry.register(
+                    caller_path, None, func_or_key, serialize=serialize
+                )
             else:
                 caller_path = self._get_caller_path(1)
-                self._registry.register(caller_path, func_or_key, func)
+                self._registry.register(
+                    caller_path, func_or_key, func, serialize=serialize
+                )
             return func
 
         return decorator(func_or_key) if callable(func_or_key) else decorator
@@ -669,6 +686,8 @@ def _inject_component_context(
     if not ctx_funcs:
         return
 
+    collector: StaticCollector | None = context_data.get("_static_collector")
+
     cache = DependencyCache()
     stack: list[str] = []
 
@@ -685,8 +704,14 @@ def _inject_component_context(
             data = ctx_func.func(**resolved)
             if isinstance(data, dict):
                 context_data.update(data)
+                if ctx_func.serialize and collector is not None:
+                    for k, v in data.items():
+                        collector.add_js_context(k, v)
         else:
-            context_data[ctx_func.key] = ctx_func.func(**resolved)
+            result = ctx_func.func(**resolved)
+            context_data[ctx_func.key] = result
+            if ctx_func.serialize and collector is not None:
+                collector.add_js_context(ctx_func.key, result)
 
 
 class ComponentRenderStrategy(Protocol):

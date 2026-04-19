@@ -33,6 +33,7 @@ from next.pages import (
     get_template_djx_paths_for_watch,
     page,
 )
+from next.static import StaticCollector
 from next.urls import (
     FileRouterBackend,
     URLPatternParser,
@@ -116,11 +117,14 @@ class TestPage:
             expected_key
             in page_instance._context_manager._context_registry[context_temp_file]
         )
-        func_registered, inherit = page_instance._context_manager._context_registry[
-            context_temp_file
-        ][expected_key]
+        func_registered, inherit, serialize = (
+            page_instance._context_manager._context_registry[context_temp_file][
+                expected_key
+            ]
+        )
         assert func_registered == func
         assert inherit is False
+        assert serialize is False
 
     def test_context_decorator_with_inherit_context(
         self,
@@ -141,11 +145,12 @@ class TestPage:
             "inherited_key"
             in page_instance._context_manager._context_registry[context_temp_file]
         )
-        func, inherit = page_instance._context_manager._context_registry[
+        func, inherit, serialize = page_instance._context_manager._context_registry[
             context_temp_file
         ]["inherited_key"]
         assert func == get_inherited_value
         assert inherit is True
+        assert serialize is False
 
     def test_context_decorator_without_key_inherit_context(
         self,
@@ -167,11 +172,12 @@ class TestPage:
         assert (
             None in page_instance._context_manager._context_registry[context_temp_file]
         )
-        func, inherit = page_instance._context_manager._context_registry[
+        func, inherit, serialize = page_instance._context_manager._context_registry[
             context_temp_file
         ][None]
         assert func == get_context_data
         assert inherit is True
+        assert serialize is False
 
     @pytest.mark.parametrize(
         ("test_case", "template_str", "context_setup", "render_kwargs", "expected"),
@@ -543,11 +549,12 @@ class TestGlobalPageInstance:
 
         assert global_file_path in page._context_manager._context_registry
         assert "test_key" in page._context_manager._context_registry[global_file_path]
-        func, inherit = page._context_manager._context_registry[global_file_path][
-            "test_key"
-        ]
+        func, inherit, serialize = page._context_manager._context_registry[
+            global_file_path
+        ]["test_key"]
         assert func == test_function
         assert inherit is False
+        assert serialize is False
 
     @pytest.mark.parametrize(
         ("test_case", "frame_setup"),
@@ -906,10 +913,12 @@ class TestPageContextRegistry:
         assert context_manager._context_registry[test_file_path][key] == (
             func_return,
             False,
+            False,
         )
 
         result = context_manager.collect_context(test_file_path)
-        assert result == expected_result
+        assert result.context_data == expected_result
+        assert result.js_context == {}
 
     def test_collect_context_multiple_functions(
         self, context_manager, test_file_path
@@ -927,7 +936,11 @@ class TestPageContextRegistry:
 
         result = context_manager.collect_context(test_file_path)
 
-        assert result == {"key1": "value1", "key2": "value2", "key3": "value3"}
+        assert result.context_data == {
+            "key1": "value1",
+            "key2": "value2",
+            "key3": "value3",
+        }
 
     def test_collect_context_second_function_gets_first_via_param_name(
         self, context_manager, test_file_path
@@ -946,8 +959,8 @@ class TestPageContextRegistry:
 
         result = context_manager.collect_context(test_file_path)
 
-        assert result["custom_context_var"] == "12345"
-        assert result["landing"] == {
+        assert result.context_data["custom_context_var"] == "12345"
+        assert result.context_data["landing"] == {
             "title": "Landing",
             "custom_context_var": "12345",
         }
@@ -967,8 +980,8 @@ class TestPageContextRegistry:
 
         result = context_manager.collect_context(test_file_path)
 
-        assert result["by_name_key"] == "injected-by-name"
-        assert result["use_key"] == {"got": "injected-by-name"}
+        assert result.context_data["by_name_key"] == "injected-by-name"
+        assert result.context_data["use_key"] == {"got": "injected-by-name"}
 
     def test_collect_context_no_functions(
         self, context_manager, test_file_path
@@ -976,7 +989,8 @@ class TestPageContextRegistry:
         """Test collecting context when no functions are registered."""
         result = context_manager.collect_context(test_file_path)
 
-        assert result == {}
+        assert result.context_data == {}
+        assert result.js_context == {}
 
     def test_register_context_with_inherit_context(
         self,
@@ -997,11 +1011,12 @@ class TestPageContextRegistry:
 
         assert test_file_path in context_manager._context_registry
         assert "inherited_key" in context_manager._context_registry[test_file_path]
-        func, inherit = context_manager._context_registry[test_file_path][
+        func, inherit, serialize = context_manager._context_registry[test_file_path][
             "inherited_key"
         ]
         assert func == test_func
         assert inherit is True
+        assert serialize is False
 
     def test_collect_inherited_context(self, context_manager, tmp_path) -> None:
         """Test collecting inherited context from layout directories."""
@@ -1035,8 +1050,8 @@ class TestPageContextRegistry:
         # collect context for child page
         result = context_manager.collect_context(child_page_file)
 
-        assert "layout_var" in result
-        assert result["layout_var"] == "layout_value"
+        assert "layout_var" in result.context_data
+        assert result.context_data["layout_var"] == "layout_value"
 
     def test_collect_inherited_context_multiple_levels(
         self, context_manager, tmp_path
@@ -1086,10 +1101,10 @@ class TestPageContextRegistry:
         # collect context for child page
         result = context_manager.collect_context(child_page)
 
-        assert "root_var" in result
-        assert "sub_var" in result
-        assert result["root_var"] == "root_value"
-        assert result["sub_var"] == "sub_value"
+        assert "root_var" in result.context_data
+        assert "sub_var" in result.context_data
+        assert result.context_data["root_var"] == "root_value"
+        assert result.context_data["sub_var"] == "sub_value"
 
     def test_collect_inherited_context_no_layout(
         self, context_manager, tmp_path
@@ -1097,7 +1112,7 @@ class TestPageContextRegistry:
         """Test collecting context when no layout files exist."""
         page_file = tmp_path / "page.py"
         result = context_manager.collect_context(page_file)
-        assert result == {}
+        assert result.context_data == {}
 
     def test_collect_inherited_context_no_page_py(
         self, context_manager, tmp_path
@@ -1115,7 +1130,7 @@ class TestPageContextRegistry:
         child_page_file = child_dir / "page.py"
 
         result = context_manager.collect_context(child_page_file)
-        assert result == {}
+        assert result.context_data == {}
 
     def test_collect_inherited_context_inherit_false(
         self, context_manager, tmp_path
@@ -1151,7 +1166,7 @@ class TestPageContextRegistry:
         # collect context for child page
         result = context_manager.collect_context(child_page_file)
 
-        assert "layout_var" not in result
+        assert "layout_var" not in result.context_data
 
     def test_collect_inherited_context_dict_return(
         self, context_manager, tmp_path
@@ -1187,10 +1202,10 @@ class TestPageContextRegistry:
         # collect context for child page
         result = context_manager.collect_context(child_page_file)
 
-        assert "inherited_key1" in result
-        assert "inherited_key2" in result
-        assert result["inherited_key1"] == "value1"
-        assert result["inherited_key2"] == "value2"
+        assert "inherited_key1" in result.context_data
+        assert "inherited_key2" in result.context_data
+        assert result.context_data["inherited_key1"] == "value1"
+        assert result.context_data["inherited_key2"] == "value2"
 
 
 class TestDjxTemplateLoader:
@@ -3101,3 +3116,112 @@ class TestGetTemplateDjxPathsForWatch:
             mock_watch.return_value = [tmp_path]
             result = get_template_djx_paths_for_watch()
         assert result == set()
+
+
+class TestPageContextRegistrySerialize:
+    """PageContextRegistry propagates serialize=True through collect_context."""
+
+    @pytest.fixture()
+    def registry(self) -> PageContextRegistry:
+        """Return a fresh PageContextRegistry for each test."""
+        return PageContextRegistry()
+
+    @pytest.mark.parametrize("serialize", [True, False], ids=["serialized", "plain"])
+    def test_keyed_serialize_flag_controls_js_context(
+        self,
+        registry: PageContextRegistry,
+        tmp_path: Path,
+        serialize: bool,  # noqa: FBT001
+    ) -> None:
+        """A keyed context function with serialize controls js_context inclusion."""
+        path = tmp_path / "page.py"
+        registry.register_context(path, "my_key", lambda: "val", serialize=serialize)
+        result = registry.collect_context(path)
+        assert ("my_key" in result.js_context) == serialize
+
+    @pytest.mark.parametrize("serialize", [True, False], ids=["serialized", "plain"])
+    def test_dict_merge_serialize_flag_controls_js_context(
+        self,
+        registry: PageContextRegistry,
+        tmp_path: Path,
+        serialize: bool,  # noqa: FBT001
+    ) -> None:
+        """An unkeyed context function with serialize controls js_context inclusion."""
+        path = tmp_path / "page.py"
+        registry.register_context(path, None, lambda: {"k": "v"}, serialize=serialize)
+        result = registry.collect_context(path)
+        assert ("k" in result.js_context) == serialize
+
+    def test_serialize_keyed_value_stored(
+        self, registry: PageContextRegistry, tmp_path: Path
+    ) -> None:
+        """The keyed return value is accessible in js_context under the same key."""
+        path = tmp_path / "page.py"
+        registry.register_context(path, "title", lambda: "Home", serialize=True)
+        result = registry.collect_context(path)
+        assert result.js_context["title"] == "Home"
+
+    def test_serialize_dict_merge_values_stored(
+        self, registry: PageContextRegistry, tmp_path: Path
+    ) -> None:
+        """Dict-merge values are individually stored in js_context."""
+        path = tmp_path / "page.py"
+        registry.register_context(path, None, lambda: {"a": 1, "b": 2}, serialize=True)
+        result = registry.collect_context(path)
+        assert result.js_context == {"a": 1, "b": 2}
+
+    def test_serialize_first_wins_keyed(
+        self, registry: PageContextRegistry, tmp_path: Path
+    ) -> None:
+        """First registration of a key in js_context takes priority."""
+        path = tmp_path / "page.py"
+        registry.register_context(path, "k", lambda: "first", serialize=True)
+        registry.register_context(path, "k2", lambda: "second", serialize=True)
+        result = registry.collect_context(path)
+        assert result.js_context["k"] == "first"
+
+    def test_serialize_dict_merge_wins_over_later_keyed_same_jskey(
+        self, registry: PageContextRegistry, tmp_path: Path
+    ) -> None:
+        """Dict-merge runs before keyed functions, so it wins when both share a js_context key."""
+        path = tmp_path / "page.py"
+        registry.register_context(
+            path, None, lambda: {"shared": "from_dict"}, serialize=True
+        )
+        registry.register_context(path, "shared", lambda: "from_keyed", serialize=True)
+        result = registry.collect_context(path)
+        assert result.js_context["shared"] == "from_dict"
+
+    def test_js_context_empty_when_no_serialize(
+        self, registry: PageContextRegistry, tmp_path: Path
+    ) -> None:
+        """js_context is empty when no context function uses serialize=True."""
+        path = tmp_path / "page.py"
+        registry.register_context(path, "k", lambda: "v")
+        result = registry.collect_context(path)
+        assert result.js_context == {}
+
+    def test_js_context_seeded_into_collector_via_render_context(
+        self, registry: PageContextRegistry, tmp_path: Path
+    ) -> None:
+        """collect_context returns js_context that can be fed to a StaticCollector."""
+        path = tmp_path / "page.py"
+        registry.register_context(path, "page", lambda: "home", serialize=True)
+        result = registry.collect_context(path)
+        collector = StaticCollector()
+        for key, value in result.js_context.items():
+            collector.add_js_context(key, value)
+        assert collector.js_context()["page"] == "home"
+
+    def test_render_with_serialize_populates_next_init(
+        self, registry: PageContextRegistry, tmp_path: Path
+    ) -> None:
+        """Page.render merges js_context into the collector so Next._init gets it."""
+        page_inst = Page()
+        path = tmp_path / "page.py"
+        page_inst.register_template(path, "{{ title }}<!-- next:scripts -->")
+        page_inst._context_manager.register_context(
+            path, "title", lambda: "Hello", serialize=True
+        )
+        html = page_inst.render(path)
+        assert '"title":"Hello"' in html

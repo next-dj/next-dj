@@ -9,5 +9,9 @@ scripts: list[str] = []
 
 @context("page_title")
 def get_page_title() -> str:
-    """Static greeting used by the home page template."""
     return "Home"
+
+
+@context("page_meta", serialize=True)
+def get_page_meta() -> dict:
+    return {"page": "home", "version": "0.4"}

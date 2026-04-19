@@ -60,6 +60,7 @@ if not settings.configured:
         USE_TZ=True,
         TIME_ZONE="UTC",
         ALLOWED_HOSTS=["testserver"],
+        STATIC_URL="/static/",
     )
 
 if not apps.ready:

@@ -7,11 +7,19 @@ all referenced assets. After rendering, ``StaticManager.inject`` replaces the
 ``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholders with the
 actual ``<link>`` and ``<script>`` tags. Public URLs are resolved through
 Django staticfiles.
+
+The ``Next`` JavaScript object is automatically injected on every page.
+``StaticManager.inject`` prepends ``next.min.js`` as the first script and
+follows it with an inline init script that passes the serialized context.
+Context values opt into JavaScript exposure by using ``serialize=True`` on
+their ``@context`` decorator. The preload hint for ``next.min.js`` is injected
+before ``</head>`` so the browser downloads the file during HTML parsing.
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -22,6 +30,7 @@ from django.contrib.staticfiles.storage import staticfiles_storage
 from django.contrib.staticfiles.utils import matches_patterns
 from django.core.files import File
 from django.core.files.storage import Storage
+from django.core.serializers.json import DjangoJSONEncoder
 
 from . import pages
 from .conf import import_class_cached, next_framework_settings
@@ -44,6 +53,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "AssetDiscovery",
+    "NextScriptBuilder",
     "NextStaticFilesFinder",
     "StaticAsset",
     "StaticBackend",
@@ -58,6 +68,7 @@ __all__ = [
 
 STYLES_PLACEHOLDER = "<!-- next:styles -->"
 SCRIPTS_PLACEHOLDER = "<!-- next:scripts -->"
+HEAD_CLOSE = "</head>"
 
 _KIND_CSS = "css"
 _KIND_JS = "js"
@@ -89,6 +100,35 @@ class StaticAsset:
     inline: str | None = None
 
 
+class NextScriptBuilder:
+    """Builds the preload hint, script tag, and init script for the Next object.
+
+    Called by ``StaticManager`` during the inject phase to produce the three
+    HTML fragments that wire ``next.min.js`` into the page.
+    """
+
+    _PRELOAD_TEMPLATE: ClassVar[str] = '<link rel="preload" as="script" href="{url}">'
+    _SCRIPT_TAG_TEMPLATE: ClassVar[str] = '<script src="{url}"></script>'
+    _INIT_TEMPLATE: ClassVar[str] = "<script>Next._init({payload});</script>"
+
+    def __init__(self, next_js_url: str) -> None:
+        """Store the URL of the compiled next.min.js asset."""
+        self._url = next_js_url
+
+    def preload_link(self) -> str:
+        """Return the preload hint tag for early browser download."""
+        return self._PRELOAD_TEMPLATE.format(url=self._url)
+
+    def script_tag(self) -> str:
+        """Return the blocking script tag that executes next.min.js."""
+        return self._SCRIPT_TAG_TEMPLATE.format(url=self._url)
+
+    def init_script(self, js_context: dict[str, Any]) -> str:
+        """Return the inline script that passes the serialized context to Next._init."""
+        payload = json.dumps(js_context, cls=DjangoJSONEncoder, separators=(",", ":"))
+        return self._INIT_TEMPLATE.format(payload=payload)
+
+
 class StaticCollector:
     """Accumulate static asset references during a single page render.
 
@@ -106,6 +146,7 @@ class StaticCollector:
         self._scripts: list[StaticAsset] = []
         self._styles_prepend_idx: int = 0
         self._scripts_prepend_idx: int = 0
+        self._js_context: dict[str, Any] = {}
 
     def add(self, asset: StaticAsset, *, prepend: bool = False) -> None:
         """Add an asset unless its dedup key was already recorded.
@@ -165,6 +206,20 @@ class StaticCollector:
     def scripts(self) -> list[StaticAsset]:
         """Return collected JS assets in insertion order. Callers must not mutate."""
         return self._scripts
+
+    def add_js_context(self, key: str, value: Any) -> None:  # noqa: ANN401
+        """Add a key to the JavaScript context exposed via ``Next.context``.
+
+        First registration wins. Subsequent calls with the same key are
+        silently ignored so that page context always takes priority over
+        component context when both register the same key.
+        """
+        if key not in self._js_context:
+            self._js_context[key] = value
+
+    def js_context(self) -> dict[str, Any]:
+        """Return the accumulated JavaScript context. Callers must not mutate."""
+        return self._js_context
 
 
 class StaticBackend(ABC):
@@ -700,15 +755,35 @@ class StaticManager:
         Placeholders are emitted by ``{% collect_styles %}`` and
         ``{% collect_scripts %}`` during template rendering. A missing
         placeholder is left unchanged. An empty collector replaces the
-        placeholder with an empty string.
+        placeholder with an empty string. The ``next.min.js`` script and its
+        context init script are prepended before all user-collected scripts.
+        The preload hint for ``next.min.js`` is injected before ``</head>``.
         """
         if STYLES_PLACEHOLDER in html:
             html = html.replace(STYLES_PLACEHOLDER, self._render_style_tags(collector))
         if SCRIPTS_PLACEHOLDER in html:
-            html = html.replace(
-                SCRIPTS_PLACEHOLDER, self._render_script_tags(collector)
-            )
-        return html
+            next_scripts = self._render_next_scripts(collector)
+            user_scripts = self._render_script_tags(collector)
+            combined = next_scripts + user_scripts if user_scripts else next_scripts
+            html = html.replace(SCRIPTS_PLACEHOLDER, combined)
+        return self._inject_preload_hint(html)
+
+    def _next_script_builder(self) -> NextScriptBuilder:
+        url = staticfiles_storage.url("next/next.min.js")
+        return NextScriptBuilder(url)
+
+    def _render_next_scripts(self, collector: StaticCollector) -> str:
+        """Return the framework script tag followed by the context init script."""
+        builder = self._next_script_builder()
+        parts = [builder.script_tag(), builder.init_script(collector.js_context())]
+        return "\n".join(parts) + "\n"
+
+    def _inject_preload_hint(self, html: str) -> str:
+        """Insert the preload link for next.min.js immediately before </head>."""
+        if HEAD_CLOSE not in html:
+            return html
+        builder = self._next_script_builder()
+        return html.replace(HEAD_CLOSE, builder.preload_link() + "\n" + HEAD_CLOSE, 1)
 
     def _render_tags(
         self,

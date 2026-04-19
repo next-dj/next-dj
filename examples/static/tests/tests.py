@@ -53,3 +53,22 @@ def test_app_config_metadata() -> None:
 def test_home_and_dashboard_routes_render(client: Client) -> None:
     assert client.get("/").status_code == 200
     assert client.get("/dashboard/").status_code == 200
+
+
+def test_home_contains_next_min_js(home_html: str) -> None:
+    assert "next/next.min.js" in home_html
+
+
+def test_home_contains_next_init_with_page_meta(home_html: str) -> None:
+    assert "Next._init(" in home_html
+    assert '"page_meta"' in home_html
+    assert '"home"' in home_html
+
+
+def test_home_next_init_contains_theme(home_html: str) -> None:
+    assert '"theme"' in home_html
+    assert '"dark"' in home_html
+
+
+def test_home_preload_hint_before_head_close(home_html: str) -> None:
+    assert home_html.index('rel="preload"') < home_html.index("</head>")

@@ -1,0 +1,28 @@
+<div class="next-demo card mt-4 border-info">
+    <div class="card-header text-info fw-semibold">Next Object Demo</div>
+    <div class="card-body">
+        <p class="card-text text-muted small">
+            Values below are read from <code>window.Next.context</code> — serialized from
+            Python at render time. Page context wins over component context on key conflicts.
+        </p>
+        <dl class="row mb-0" id="next-demo-output">
+            <dt class="col-sm-3">page</dt>
+            <dd class="col-sm-9" id="next-demo-page">—</dd>
+            <dt class="col-sm-3">version</dt>
+            <dd class="col-sm-9" id="next-demo-version">—</dd>
+            <dt class="col-sm-3">theme</dt>
+            <dd class="col-sm-9" id="next-demo-theme">—</dd>
+        </dl>
+    </div>
+</div>
+
+{% #use_script %}
+<script>
+    (function () {
+        var ctx = window.Next.context;
+        document.getElementById("next-demo-page").textContent = ctx.page_meta ? ctx.page_meta.page : "—";
+        document.getElementById("next-demo-version").textContent = ctx.page_meta ? ctx.page_meta.version : "—";
+        document.getElementById("next-demo-theme").textContent = ctx.theme || "—";
+    })();
+</script>
+{% /use_script %}

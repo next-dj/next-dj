@@ -29,6 +29,7 @@ from next.components import (
     ComponentTemplateLoader,
     ComponentVisibilityResolver,
     CompositeComponentRenderer,
+    ContextFunction,
     DummyBackend,
     FileComponentsBackend,
     ModuleCache,
@@ -45,6 +46,7 @@ from next.components import (
     render_component,
 )
 from next.conf import next_framework_settings
+from next.static import StaticCollector
 from tests.support import (
     next_framework_settings_component_backends_list as _next_framework_settings_component_backends_list,
     next_framework_settings_for_checks_backends_value as _next_framework_settings_for_checks_backends_value,
@@ -2236,3 +2238,135 @@ class TestGetComponentPathsForWatch:
             ):
                 assert get_component_paths_for_watch() == set()
         next_framework_settings.reload()
+
+
+class TestContextFunctionSerialize:
+    """ContextFunction.serialize controls JavaScript context exposure."""
+
+    @pytest.mark.parametrize("serialize", [True, False])
+    def test_serialize_field_stored(self, serialize: bool) -> None:  # noqa: FBT001
+        """The serialize flag is preserved on the dataclass."""
+        fn = ContextFunction(func=dict, key=None, serialize=serialize)
+        assert fn.serialize == serialize
+
+    def test_serialize_defaults_to_false(self) -> None:
+        """When omitted, serialize defaults to False."""
+        fn = ContextFunction(func=dict, key=None)
+        assert fn.serialize is False
+
+
+class TestComponentContextRegistrySerialize:
+    """ComponentContextRegistry propagates serialize through register."""
+
+    def test_register_stores_serialize_true(self, tmp_path: Path) -> None:
+        """A function registered with serialize=True has the flag set."""
+        reg = ComponentContextRegistry()
+        path = (tmp_path / "component.py").resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        def get_val() -> str:
+            return "v"
+
+        reg.register(path, "key", get_val, serialize=True)
+        (fn,) = reg.get_functions(path)
+        assert fn.serialize is True
+
+    def test_register_default_serialize_false(self, tmp_path: Path) -> None:
+        """When serialize is not passed it defaults to False on the stored function."""
+        reg = ComponentContextRegistry()
+        path = (tmp_path / "component.py").resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        def get_val() -> str:
+            return "v"
+
+        reg.register(path, "key", get_val)
+        (fn,) = reg.get_functions(path)
+        assert fn.serialize is False
+
+
+class TestInjectComponentContextSerialize:
+    """_inject_component_context populates StaticCollector when serialize=True."""
+
+    def _setup(
+        self, tmp_path: Path
+    ) -> tuple[ComponentContextManager, ComponentInfo, Path]:
+        """Build a fresh manager, component.py path, and ComponentInfo."""
+        mgr = ComponentContextManager()
+        module_path = (tmp_path / "component.py").resolve()
+        module_path.parent.mkdir(parents=True, exist_ok=True)
+        template_path = module_path.parent / "component.djx"
+        template_path.write_text("<div></div>")
+        info = ComponentInfo(
+            name="demo",
+            scope_root=module_path.parent,
+            scope_relative="",
+            template_path=template_path,
+            module_path=module_path,
+            is_simple=False,
+        )
+        return mgr, info, module_path
+
+    def test_keyed_serialize_populates_collector(self, tmp_path: Path) -> None:
+        """A keyed context function with serialize=True writes to the collector."""
+        mgr, info, module_path = self._setup(tmp_path)
+
+        def get_theme() -> str:
+            return "dark"
+
+        mgr._registry.register(module_path, "theme", get_theme, serialize=True)
+
+        collector = StaticCollector()
+        context_data: dict = {"_static_collector": collector}
+        with patch("next.components.component", mgr):
+            _inject_component_context(info, context_data, None)
+
+        assert collector.js_context()["theme"] == "dark"
+
+    def test_dict_merge_serialize_populates_collector(self, tmp_path: Path) -> None:
+        """An unkeyed context function with serialize=True writes all keys to collector."""
+        mgr, info, module_path = self._setup(tmp_path)
+
+        def get_meta() -> dict:
+            return {"env": "prod", "version": "1"}
+
+        mgr._registry.register(module_path, None, get_meta, serialize=True)
+
+        collector = StaticCollector()
+        context_data: dict = {"_static_collector": collector}
+        with patch("next.components.component", mgr):
+            _inject_component_context(info, context_data, None)
+
+        assert collector.js_context()["env"] == "prod"
+        assert collector.js_context()["version"] == "1"
+
+    def test_serialize_false_does_not_populate_collector(self, tmp_path: Path) -> None:
+        """A context function without serialize=True does not touch the collector."""
+        mgr, info, module_path = self._setup(tmp_path)
+
+        def get_val() -> str:
+            return "value"
+
+        mgr._registry.register(module_path, "key", get_val, serialize=False)
+
+        collector = StaticCollector()
+        context_data: dict = {"_static_collector": collector}
+        with patch("next.components.component", mgr):
+            _inject_component_context(info, context_data, None)
+
+        assert collector.js_context() == {}
+
+    def test_serialize_without_collector_does_not_raise(self, tmp_path: Path) -> None:
+        """When no _static_collector is in context_data, serialize is silently skipped."""
+        mgr, info, module_path = self._setup(tmp_path)
+
+        def get_val() -> str:
+            return "value"
+
+        mgr._registry.register(module_path, "key", get_val, serialize=True)
+
+        context_data: dict = {}
+        with patch("next.components.component", mgr):
+            _inject_component_context(info, context_data, None)
+
+        assert context_data["key"] == "value"

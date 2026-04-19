@@ -9,7 +9,26 @@ permissions:
 
 jobs:
   test-examples:
-    uses: ./.github/workflows/test-matrix.yml
-    with:
-      test-command: "make test-examples"
-    secrets: inherit
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        django-version: ["5.2"]
+    steps:
+    - uses: actions/checkout@v5
+    - uses: ./.github/actions/setup-python-uv
+      with:
+        python-version: ${{ matrix.python-version }}
+        django-version: ${{ matrix.django-version }}
+        cache: "true"
+        cache-key-suffix: django-${{ matrix.django-version }}-py-${{ matrix.python-version }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+    - name: Install Node dependencies
+      run: npm ci
+    - name: Build next.min.js
+      run: npm run build:next
+    - name: Run example tests
+      run: make test-examples

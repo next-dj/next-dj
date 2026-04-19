@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+import decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -12,9 +14,11 @@ import next.pages as _next_pages_mod
 from next.components import ComponentInfo, components_manager
 from next.pages import _load_python_module, _read_string_list
 from next.static import (
+    HEAD_CLOSE,
     SCRIPTS_PLACEHOLDER,
     STYLES_PLACEHOLDER,
     AssetDiscovery,
+    NextScriptBuilder,
     NextStaticFilesFinder,
     StaticAsset,
     StaticBackend,
@@ -992,23 +996,28 @@ class TestStaticManagerInject:
         collector.add(StaticAsset(url="/a.css", kind="css"))
         assert fresh_manager.inject("<p>plain</p>", collector) == "<p>plain</p>"
 
-    def test_empty_collector_renders_empty_slots(
+    def test_empty_collector_renders_next_scripts_in_slot(
         self, fresh_manager: StaticManager, collector: StaticCollector
     ) -> None:
-        """An empty collector replaces placeholders with empty strings."""
+        """Even an empty collector injects the Next framework scripts into the slot."""
         html = f"<head>{STYLES_PLACEHOLDER}</head><body>{SCRIPTS_PLACEHOLDER}</body>"
         out = fresh_manager.inject(html, collector)
-        assert out == "<head></head><body></body>"
+        assert STYLES_PLACEHOLDER not in out
+        assert SCRIPTS_PLACEHOLDER not in out
+        assert "next.min.js" in out
+        assert "Next._init({})" in out
+        assert 'rel="preload"' in out
 
-    def test_inline_script_body_emitted_verbatim(
+    def test_inline_script_body_emitted_after_next_scripts(
         self, fresh_manager: StaticManager, collector: StaticCollector
     ) -> None:
-        """Inline script bodies are written into the slot without any wrapping."""
+        """Inline script bodies appear after the Next framework scripts in the slot."""
         body = '<script type="module">const x = 1;</script>'
         collector.add(StaticAsset(url="", kind="js", inline=body))
         html = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
         out = fresh_manager.inject(html, collector)
-        assert out == f"<body>{body}</body>"
+        assert body in out
+        assert out.index("next.min.js") < out.index("const x = 1")
 
     def test_inline_style_body_emitted_verbatim(
         self, fresh_manager: StaticManager, collector: StaticCollector
@@ -1018,25 +1027,26 @@ class TestStaticManagerInject:
         collector.add(StaticAsset(url="", kind="css", inline=body))
         html = f"<head>{STYLES_PLACEHOLDER}</head>"
         out = fresh_manager.inject(html, collector)
-        assert out == f"<head>{body}</head>"
+        assert body in out
+        assert STYLES_PLACEHOLDER not in out
 
     def test_url_and_inline_interleave_in_order(
         self, fresh_manager: StaticManager, collector: StaticCollector
     ) -> None:
-        """Inline bodies append after URL deps and appear in registration order."""
+        """User scripts follow Next framework scripts and appear in registration order."""
         collector.add(StaticAsset(url="/dep.js", kind="js"), prepend=True)
         collector.add(StaticAsset(url="/file.js", kind="js"))
         collector.add(StaticAsset(url="", kind="js", inline="<script>a()</script>"))
         collector.add(StaticAsset(url="", kind="js", inline="<script>b()</script>"))
         html = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
         out = fresh_manager.inject(html, collector)
-        slot_body = out.removeprefix("<body>").removesuffix("</body>")
-        assert slot_body == (
-            '<script src="/dep.js"></script>\n'
-            '<script src="/file.js"></script>\n'
-            "<script>a()</script>\n"
-            "<script>b()</script>"
-        )
+        # Next scripts always come first
+        next_pos = out.index("next.min.js")
+        dep_pos = out.index("/dep.js")
+        file_pos = out.index("/file.js")
+        inline_a_pos = out.index("<script>a()</script>")
+        inline_b_pos = out.index("<script>b()</script>")
+        assert next_pos < dep_pos < file_pos < inline_a_pos < inline_b_pos
 
 
 class TestStaticManagerPageRoots:
@@ -1516,3 +1526,157 @@ class TestStaticfilesFinderCoverage:
         listed = list(finder.list(["*b.css"]))
         assert len(listed) == 1
         assert listed[0][0] == "next/a.css"
+
+
+class TestStaticCollectorJsContext:
+    """StaticCollector.add_js_context accumulates the Next.context payload."""
+
+    def test_add_js_context_stores_value(self, collector: StaticCollector) -> None:
+        """A new key is stored in the js context dict."""
+        collector.add_js_context("page", "home")
+        assert collector.js_context()["page"] == "home"
+
+    def test_add_js_context_first_wins(self, collector: StaticCollector) -> None:
+        """First registration wins. Subsequent calls with the same key are ignored."""
+        collector.add_js_context("key", "first")
+        collector.add_js_context("key", "second")
+        assert collector.js_context()["key"] == "first"
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ({"nested": True}, {"nested": True}),
+            ("string", "string"),
+            (42, 42),
+            ([1, 2], [1, 2]),
+        ],
+        ids=["dict", "string", "int", "list"],
+    )
+    def test_add_js_context_value_types(
+        self, collector: StaticCollector, value: object, expected: object
+    ) -> None:
+        """Any JSON-serializable type can be stored in js_context."""
+        collector.add_js_context("k", value)
+        assert collector.js_context()["k"] == expected
+
+    def test_js_context_isolated_from_assets(self, collector: StaticCollector) -> None:
+        """Adding to js_context does not affect the CSS or JS asset lists."""
+        collector.add_js_context("k", "v")
+        assert collector.scripts() == []
+        assert collector.styles() == []
+
+    def test_js_context_multiple_keys(self, collector: StaticCollector) -> None:
+        """Multiple distinct keys are all stored."""
+        collector.add_js_context("a", 1)
+        collector.add_js_context("b", 2)
+        assert collector.js_context() == {"a": 1, "b": 2}
+
+    def test_js_context_empty_by_default(self, collector: StaticCollector) -> None:
+        """A fresh collector has an empty js_context."""
+        assert collector.js_context() == {}
+
+
+class TestNextScriptBuilder:
+    """NextScriptBuilder produces correct preload, script, and init fragments."""
+
+    @pytest.fixture()
+    def builder(self) -> NextScriptBuilder:
+        """Return a builder wired to a deterministic URL."""
+        return NextScriptBuilder("/static/next/next.min.js")
+
+    def test_preload_link_contains_rel_and_as(self, builder: NextScriptBuilder) -> None:
+        """The preload hint has the correct rel and as attributes."""
+        link = builder.preload_link()
+        assert 'rel="preload"' in link
+        assert 'as="script"' in link
+        assert "/static/next/next.min.js" in link
+
+    def test_script_tag_contains_url(self, builder: NextScriptBuilder) -> None:
+        """The script tag references the next.min.js URL."""
+        tag = builder.script_tag()
+        assert 'src="/static/next/next.min.js"' in tag
+
+    @pytest.mark.parametrize(
+        ("ctx", "expected_fragment"),
+        [
+            ({}, "{}"),
+            ({"k": "v"}, '"k":"v"'),
+            ({"n": 1}, '"n":1'),
+        ],
+        ids=["empty", "string_value", "int_value"],
+    )
+    def test_init_script_serialization(
+        self, builder: NextScriptBuilder, ctx: dict, expected_fragment: str
+    ) -> None:
+        """The init script contains correctly serialized JSON."""
+        script = builder.init_script(ctx)
+        assert expected_fragment in script
+        assert script.startswith("<script>Next._init(")
+        assert script.endswith(";</script>")
+
+    def test_init_script_django_json_encoder(self, builder: NextScriptBuilder) -> None:
+        """DjangoJSONEncoder handles datetime and Decimal without error."""
+        ctx = {
+            "dt": datetime.datetime(2024, 1, 15, tzinfo=datetime.UTC),
+            "dec": decimal.Decimal("3.14"),
+        }
+        script = builder.init_script(ctx)
+        assert "2024-01-15" in script
+        assert "3.14" in script
+
+
+class TestStaticManagerNextInjection:
+    """StaticManager.inject wires the Next object into every page."""
+
+    def test_preload_injected_before_head_close(
+        self, fresh_manager: StaticManager, collector: StaticCollector
+    ) -> None:
+        """The preload link is inserted immediately before </head>."""
+        html = f"<html><head></head><body>{SCRIPTS_PLACEHOLDER}</body></html>"
+        result = fresh_manager.inject(html, collector)
+        assert result.index('rel="preload"') < result.index(HEAD_CLOSE)
+
+    def test_preload_uses_correct_url(
+        self, fresh_manager: StaticManager, collector: StaticCollector
+    ) -> None:
+        """The preload link references next.min.js via staticfiles."""
+        html = f"<head></head>{SCRIPTS_PLACEHOLDER}"
+        result = fresh_manager.inject(html, collector)
+        assert "next.min.js" in result
+
+    def test_no_head_tag_skips_preload(
+        self, fresh_manager: StaticManager, collector: StaticCollector
+    ) -> None:
+        """When the HTML has no </head> the preload hint is not injected."""
+        result = fresh_manager.inject(SCRIPTS_PLACEHOLDER, collector)
+        assert 'rel="preload"' not in result
+
+    def test_next_script_precedes_init_script(
+        self, fresh_manager: StaticManager, collector: StaticCollector
+    ) -> None:
+        """The next.min.js script tag comes before the Next._init call."""
+        result = fresh_manager.inject(SCRIPTS_PLACEHOLDER, collector)
+        assert result.index("next.min.js") < result.index("Next._init")
+
+    def test_next_scripts_precede_user_scripts(
+        self, fresh_manager: StaticManager, collector: StaticCollector
+    ) -> None:
+        """User JS scripts always follow the Next framework scripts."""
+        collector.add(StaticAsset(url="/user.js", kind="js"))
+        result = fresh_manager.inject(SCRIPTS_PLACEHOLDER, collector)
+        assert result.index("next.min.js") < result.index("/user.js")
+
+    def test_init_script_contains_js_context(
+        self, fresh_manager: StaticManager, collector: StaticCollector
+    ) -> None:
+        """The init script payload reflects the accumulated js_context."""
+        collector.add_js_context("page", "home")
+        result = fresh_manager.inject(SCRIPTS_PLACEHOLDER, collector)
+        assert '"page":"home"' in result
+
+    def test_init_script_empty_context(
+        self, fresh_manager: StaticManager, collector: StaticCollector
+    ) -> None:
+        """An empty js_context produces Next._init({}) in the output."""
+        result = fresh_manager.inject(SCRIPTS_PLACEHOLDER, collector)
+        assert "Next._init({})" in result

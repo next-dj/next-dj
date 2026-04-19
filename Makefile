@@ -17,6 +17,8 @@ help: # show this help message
 	@echo "  docs            - build documentation"
 	@echo "  docs-serve      - build and serve documentation"
 	@echo "  docs-clean      - clean documentation build"
+	@echo "  build-js        - compile next.ts to next.min.js via esbuild"
+	@echo "  test-js         - run JavaScript unit tests with vitest"
 	@echo "  docs-linkcheck  - check documentation links"
 
 install: # install the package (editable) using the lockfile
@@ -24,6 +26,7 @@ install: # install the package (editable) using the lockfile
 
 test: # run tests with 100% coverage requirement
 	uv run pytest tests/ -n auto --cov=next --cov-report=html --cov-report=term-missing --cov-fail-under=100
+	npm run test:js
 
 test-examples: # run tests for examples with coverage
 	@set -e; \
@@ -55,10 +58,12 @@ test-examples: # run tests for examples with coverage
 lint: # run linting with ruff
 	uv run ruff check next/ tests/ examples/ --fix
 	uv run ruff format --check next/ tests/ examples/
+	npm run lint:js
 
-format: # format code with ruff
+format:
 	uv run ruff check next/ tests/ examples/ --fix
 	uv run ruff format next/ tests/ examples/
+	npm run format:check
 
 type-check: # run type checking with mypy
 	uv run mypy next/
@@ -73,7 +78,8 @@ clean: # clean build artifacts
 	find . -type d -name __pycache__ -delete
 	find . -type f -name "*.pyc" -delete
 
-build: # build the package
+build:
+	npm run build:next
 	uv build
 
 pre-commit-install: # install pre-commit hooks
@@ -85,6 +91,9 @@ pre-commit-run: # run pre-commit on all files
 ci: # run all CI checks locally with 100% coverage
 	make lint
 	make type-check
+	make build-js
+	make lint-js
+	make test-js
 	make test
 	make test-examples
 

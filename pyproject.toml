@@ -68,6 +68,13 @@ path = "next/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["next"]
+exclude = [
+    "next/static/next/next.ts",
+    "next/static/next/next.test.ts",
+]
+
+[tool.hatch.build.targets.wheel.force-include]
+"next/static/next/next.min.js" = "next/static/next/next.min.js"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -78,14 +85,17 @@ include = [
     "pyproject.toml",
 ]
 exclude = [
+    "next/static/next/next.test.ts",
     "examples/",
     "docs/",
     "tests/",
     ".github/",
     ".gitignore",
     "Makefile",
-    "MANIFEST.in",
 ]
+
+[tool.hatch.build.targets.sdist.force-include]
+"next/static/next/next.min.js" = "next/static/next/next.min.js"
 
 [tool.pytest.ini_options]
 python_files = ["test_*.py", "*_test.py", "tests.py"]

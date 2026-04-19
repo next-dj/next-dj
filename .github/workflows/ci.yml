@@ -66,6 +66,25 @@ jobs:
       - name: Check documentation links
         run: uv run sphinx-build -b linkcheck docs docs/_build
 
+  test-js:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+    - name: Install Node dependencies
+      run: npm ci
+    - name: Check TypeScript formatting (Prettier)
+      run: npm run format:check
+    - name: Lint TypeScript (ESLint)
+      run: npm run lint:js
+    - name: Build next.min.js
+      run: npm run build:next
+    - name: Run JavaScript unit tests
+      run: npm run test:js
+
   dependency-review:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'

@@ -207,6 +207,30 @@ The decorator automatically detects the component file (no need to pass ``__file
 
 This API is similar to ``next.pages.context`` but designed specifically for components. The framework uses dependency injection to resolve function parameters (``request``, ``form``, URL kwargs, etc.).
 
+**Exposing component context to JavaScript**
+
+Pass ``serialize=True`` to also expose the value through ``window.Next.context``:
+
+.. code-block:: python
+
+   from next.components import context
+
+   @context("theme", serialize=True)
+   def get_theme() -> str:
+       return "dark"
+
+The same flag works on both import styles — ``from next.components import context``
+and ``from next.components import component`` followed by ``@component.context(...)``
+— because the two names refer to the same object.
+
+.. code-block:: javascript
+
+   // component.js or any {% #use_script %} body
+   const theme = window.Next.context.theme;  // "dark"
+
+See :ref:`next-object` in the static-assets guide for the full injection
+mechanism, conflict resolution rules, and TypeScript declarations.
+
 Scope
 -----
 

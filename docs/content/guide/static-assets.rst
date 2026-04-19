@@ -746,6 +746,151 @@ The most useful entry points:
 - :class:`~next.static.NextStaticFilesFinder` — staticfiles finder that exposes
   co-located assets under the ``next/`` namespace for ``collectstatic``.
 
+.. _next-object:
+
+The Next object and JavaScript context
+---------------------------------------
+
+next.dj automatically injects a global ``Next`` class on every rendered page.
+No template changes are required — the class is wired in by the inject phase
+alongside the rest of the static pipeline.
+
+JavaScript code running on the page can read Python-side context values
+through ``window.Next.context``. The object is frozen and immutable from
+script scope.
+
+How it is injected
+~~~~~~~~~~~~~~~~~~
+
+When ``{% collect_scripts %}`` is processed, the inject phase unconditionally
+prepends two tags ahead of all user-level scripts:
+
+.. code-block:: html
+
+   <script src="/static/next/next.min.js"></script>
+   <script>Next._init({"page": "home", "theme": "dark"});</script>
+
+The ``next.min.js`` tag is a plain synchronous ``<script>`` — no ``defer`` or
+``async`` — so the ``Next`` class is fully defined by the time ``Next._init``
+runs. As a further optimisation, a ``<link rel="preload" as="script">`` hint
+for the same file is inserted immediately before ``</head>``:
+
+.. code-block:: html
+
+   <head>
+       ...
+       <link rel="preload" as="script" href="/static/next/next.min.js">
+   </head>
+
+This gives the browser an early download signal while the rest of the page
+continues to render.
+
+Exposing Python values via ``serialize=True``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default context functions only populate the Django template context. To
+also expose a value to JavaScript, add ``serialize=True`` to the decorator:
+
+**Page context** (``page.py``):
+
+.. code-block:: python
+
+   from next.pages import context
+
+   @context("page_meta", serialize=True)
+   def get_page_meta() -> dict:
+       return {"page": "home", "version": "1.0"}
+
+**Component context** (``component.py``):
+
+.. code-block:: python
+
+   from next.components import context
+
+   @context("theme", serialize=True)
+   def get_theme() -> str:
+       return "dark"
+
+Both forms accept any JSON-serialisable value — dicts, lists, strings,
+numbers, booleans. Values are serialised with ``DjangoJSONEncoder``, which
+handles ``datetime``, ``Decimal``, ``UUID``, and Django lazy strings in
+addition to the standard JSON types.
+
+Unkeyed context functions (decorated with ``@context`` without a key) merge
+every key from the returned dict into the JavaScript context individually.
+
+The result in the rendered HTML:
+
+.. code-block:: html
+
+   <script>Next._init({"page_meta":{"page":"home","version":"1.0"},"theme":"dark"});</script>
+
+Reading context in JavaScript
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``window.Next.context`` returns a frozen copy of the serialised context. It
+is synchronously available by the time any ``{% #use_script %}`` body or
+co-located ``component.js`` / ``template.js`` runs because ``next.min.js``
+executes before all user scripts.
+
+**Vanilla JS:**
+
+.. code-block:: javascript
+
+   const { page_meta, theme } = window.Next.context;
+   console.log(page_meta.page, theme); // "home" "dark"
+
+**React** (inside a ``{% #use_script %}`` block):
+
+.. code-block:: jsx
+
+   function PageBadge() {
+       const ctx = window.Next.context;
+       return React.createElement("span", null, ctx.page_meta?.page || "");
+   }
+   ReactDOM.createRoot(document.getElementById("badge")).render(
+       React.createElement(PageBadge)
+   );
+
+No ``useEffect`` or lifecycle hook is needed — the data is available
+synchronously before your scripts run.
+
+**TypeScript** — declare the global so the compiler is happy:
+
+.. code-block:: typescript
+
+   declare const Next: { context: Readonly<Record<string, unknown>> };
+
+Key conflict resolution
+~~~~~~~~~~~~~~~~~~~~~~~
+
+When a page context function and a component context function both register
+the same key, **the first registration wins**. Page context functions are
+collected before component context functions, so page values always take
+priority over component values for the same key:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Registration order
+     - Effect
+   * - Page ``@context(serialize=True)`` first
+     - Page value is kept; component value for the same key is silently dropped.
+   * - Component ``@context(serialize=True)`` first
+     - Component value is kept; a later page value for the same key is dropped.
+
+In practice, page context is always resolved before any component context on
+the same page, so page values reliably win whenever both layers use the same
+key.
+
+.. tip::
+
+   Use distinct key names (or nest values under a prefixed dict) whenever a
+   page and one of its components both need to publish JavaScript state. That
+   avoids the first-wins rule entirely and keeps each layer's data
+   self-contained.
+
 Example project
 ---------------
 
@@ -754,5 +899,7 @@ with shared Bootstrap from ``{% use_style %}`` / ``{% use_script %}``, a home
 page with co-located ``template.css`` plus an Inter-font in ``page.py``, a
 dashboard page with its own ``template.css`` and JetBrains Mono font, two
 composite components (``widget`` with Bootstrap Icons and ``chart`` with
-Chart.js), and a full test suite that exercises collector ordering,
-deduplication, and staticfiles-based URL resolution.
+Chart.js), a ``next-demo`` component that reads ``window.Next.context`` in a
+plain ``<script>`` block, and a full test suite that exercises collector
+ordering, deduplication, staticfiles-based URL resolution, and JavaScript
+context injection.
