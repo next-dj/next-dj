@@ -135,5 +135,4 @@ GitHub.sublime-settings
 .history
 
 # js
-*.min.js
 node_modules

@@ -1,4 +1,4 @@
-.PHONY: help install test lint format type-check clean build docs docs-serve docs-clean docs-linkcheck
+.PHONY: help install test lint format type-check clean build docs docs-serve docs-clean docs-linkcheck build-js test-js lint-js format-js format-js-check
 
 help: # show this help message
 	@echo "Available commands:"
@@ -19,14 +19,30 @@ help: # show this help message
 	@echo "  docs-clean      - clean documentation build"
 	@echo "  build-js        - compile next.ts to next.min.js via esbuild"
 	@echo "  test-js         - run JavaScript unit tests with vitest"
+	@echo "  lint-js         - lint TypeScript files with ESLint"
+	@echo "  format-js       - format TypeScript files with Prettier"
 	@echo "  docs-linkcheck  - check documentation links"
+
+build-js: # compile next/static/next/next.ts to next.min.js via esbuild
+	npm run build:next
+
+test-js: # run JavaScript unit tests with vitest
+	npm run test:js
+
+lint-js: # lint TypeScript files with ESLint
+	npm run lint:js
+
+format-js: # format TypeScript files with Prettier (auto-fix)
+	npm run format
+
+format-js-check: # check TypeScript formatting without writing (CI)
+	npm run format:check
 
 install: # install the package (editable) using the lockfile
 	uv sync --locked --no-dev
 
 test: # run tests with 100% coverage requirement
 	uv run pytest tests/ -n auto --cov=next --cov-report=html --cov-report=term-missing --cov-fail-under=100
-	npm run test:js
 
 test-examples: # run tests for examples with coverage
 	@set -e; \
@@ -58,12 +74,10 @@ test-examples: # run tests for examples with coverage
 lint: # run linting with ruff
 	uv run ruff check next/ tests/ examples/ --fix
 	uv run ruff format --check next/ tests/ examples/
-	npm run lint:js
 
-format:
+format: # format code with ruff
 	uv run ruff check next/ tests/ examples/ --fix
 	uv run ruff format next/ tests/ examples/
-	npm run format:check
 
 type-check: # run type checking with mypy
 	uv run mypy next/
@@ -78,8 +92,7 @@ clean: # clean build artifacts
 	find . -type d -name __pycache__ -delete
 	find . -type f -name "*.pyc" -delete
 
-build:
-	npm run build:next
+build: build-js # build the package (compiles next.ts first)
 	uv build
 
 pre-commit-install: # install pre-commit hooks
@@ -93,6 +106,7 @@ ci: # run all CI checks locally with 100% coverage
 	make type-check
 	make build-js
 	make lint-js
+	make format-js-check
 	make test-js
 	make test
 	make test-examples

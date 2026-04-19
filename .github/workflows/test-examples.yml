@@ -22,13 +22,5 @@ jobs:
         django-version: ${{ matrix.django-version }}
         cache: "true"
         cache-key-suffix: django-${{ matrix.django-version }}-py-${{ matrix.python-version }}
-    - uses: actions/setup-node@v4
-      with:
-        node-version: '22'
-        cache: 'npm'
-    - name: Install Node dependencies
-      run: npm ci
-    - name: Build next.min.js
-      run: npm run build:next
     - name: Run example tests
       run: make test-examples
