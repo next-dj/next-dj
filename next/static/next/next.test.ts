@@ -4,6 +4,11 @@ import "./next";
 type NextStatic = {
   context: Readonly<Record<string, unknown>>;
   _init(context: Record<string, unknown>): void;
+  on(
+    event: "ready" | "context-updated",
+    listener: (payload: Record<string, unknown>) => void,
+  ): () => void;
+  use<T>(plugin: (next: NextStatic) => T): T;
 };
 
 const win = globalThis as unknown as { Next: NextStatic };
@@ -99,5 +104,93 @@ describe("window.Next", () => {
 
   it("exposes a _init method", () => {
     expect(typeof win.Next._init).toBe("function");
+  });
+
+  it("exposes an on method", () => {
+    expect(typeof win.Next.on).toBe("function");
+  });
+
+  it("exposes a use method", () => {
+    expect(typeof win.Next.use).toBe("function");
+  });
+});
+
+describe("Next.on", () => {
+  beforeEach(() => {
+    win.Next._init({});
+  });
+
+  it("fires the ready listener on _init", () => {
+    let called = 0;
+    win.Next.on("ready", () => {
+      called += 1;
+    });
+    win.Next._init({ page: "home" });
+    expect(called).toBe(1);
+  });
+
+  it("fires the context-updated listener on _init", () => {
+    const received: Array<Record<string, unknown>> = [];
+    win.Next.on("context-updated", (payload) => {
+      received.push(payload);
+    });
+    win.Next._init({ user: "alice" });
+    expect(received).toHaveLength(1);
+    expect(received[0]).toEqual({ user: "alice" });
+  });
+
+  it("supports multiple listeners on the same event", () => {
+    let a = 0;
+    let b = 0;
+    win.Next.on("ready", () => {
+      a += 1;
+    });
+    win.Next.on("ready", () => {
+      b += 1;
+    });
+    win.Next._init({});
+    expect(a).toBe(1);
+    expect(b).toBe(1);
+  });
+
+  it("returns an unsubscribe function that stops future dispatches", () => {
+    let called = 0;
+    const off = win.Next.on("ready", () => {
+      called += 1;
+    });
+    win.Next._init({});
+    off();
+    win.Next._init({});
+    expect(called).toBe(1);
+  });
+});
+
+describe("Next.use", () => {
+  beforeEach(() => {
+    win.Next._init({});
+  });
+
+  it("calls the plugin with the Next namespace", () => {
+    let seen: unknown = null;
+    win.Next.use((next) => {
+      seen = next;
+    });
+    expect(seen).toBe(win.Next);
+  });
+
+  it("returns the plugin's return value", () => {
+    const result = win.Next.use(() => "hello");
+    expect(result).toBe("hello");
+  });
+
+  it("lets plugins subscribe to events", () => {
+    let triggered = false;
+    win.Next.use((next) => {
+      next.on("ready", () => {
+        triggered = true;
+      });
+    });
+    win.Next._init({});
+    expect(triggered).toBe(true);
   });
 });

@@ -22,14 +22,9 @@ from django import template
 from django.template.base import Node, NodeList
 from django.utils.safestring import mark_safe
 
-from next.static import (
-    _KIND_CSS,
-    _KIND_JS,
-    SCRIPTS_PLACEHOLDER,
-    STYLES_PLACEHOLDER,
-    StaticAsset,
-    StaticCollector,
-)
+from next.static import StaticAsset, StaticCollector
+from next.static.assets import _KIND_CSS, _KIND_JS
+from next.static.collector import SCRIPTS_PLACEHOLDER, STYLES_PLACEHOLDER
 
 
 if TYPE_CHECKING:

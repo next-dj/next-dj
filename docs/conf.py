@@ -18,6 +18,7 @@ if not settings.configured:
         INSTALLED_APPS=[
             'django.contrib.contenttypes',
             'django.contrib.auth',
+            'django.contrib.staticfiles',
             'next',
         ],
         TEMPLATES=[
@@ -31,6 +32,7 @@ if not settings.configured:
         ],
         USE_TZ=True,
         SECRET_KEY='dummy-key-for-docs',
+        STATIC_URL='/static/',
     )
     django.setup()
 
@@ -63,7 +65,7 @@ autodoc_default_options = {
     "member-order": "bysource",
     "special-members": "__init__",
     "undoc-members": True,
-    "exclude-members": "__weakref__",
+    "exclude-members": "__weakref__,staticfiles_storage",
 }
 
 # autosummary configuration

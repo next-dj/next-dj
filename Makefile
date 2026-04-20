@@ -1,4 +1,4 @@
-.PHONY: help install test lint format type-check clean build docs docs-serve docs-clean docs-linkcheck build-js test-js lint-js format-js format-js-check
+.PHONY: help install test lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js lint-js format-js format-js-check
 
 help: # show this help message
 	@echo "Available commands:"
@@ -17,13 +17,17 @@ help: # show this help message
 	@echo "  docs            - build documentation"
 	@echo "  docs-serve      - build and serve documentation"
 	@echo "  docs-clean      - clean documentation build"
+	@echo "  install-js      - install JS toolchain via npm ci"
 	@echo "  build-js        - compile next.ts to next.min.js via esbuild"
 	@echo "  test-js         - run JavaScript unit tests with vitest"
 	@echo "  lint-js         - lint TypeScript files with ESLint"
 	@echo "  format-js       - format TypeScript files with Prettier"
 	@echo "  docs-linkcheck  - check documentation links"
 
-build-js: # compile next/static/next/next.ts to next.min.js via esbuild
+install-js: # install JS toolchain via npm ci
+	npm ci
+
+build-js: install-js # compile next/static/next/next.ts to next.min.js via esbuild
 	npm run build:next
 
 test-js: # run JavaScript unit tests with vitest
@@ -92,7 +96,7 @@ clean: # clean build artifacts
 	find . -type d -name __pycache__ -delete
 	find . -type f -name "*.pyc" -delete
 
-build: build-js # build the package (compiles next.ts first)
+build: # build the package (hatch custom hook compiles next.ts via npm)
 	uv build
 
 pre-commit-install: # install pre-commit hooks
@@ -113,6 +117,7 @@ ci: # run all CI checks locally with 100% coverage
 
 dev-setup: # setup development environment
 	uv sync --locked --dev
+	make build-js
 	make pre-commit-install
 
 docs: # build documentation

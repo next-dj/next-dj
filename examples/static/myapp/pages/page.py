@@ -15,3 +15,8 @@ def get_page_title() -> str:
 @context("page_meta", serialize=True)
 def get_page_meta() -> dict:
     return {"page": "home", "version": "0.4"}
+
+
+@context("theme", inherit_context=True, serialize=True)
+def get_theme() -> str:
+    return "dark"

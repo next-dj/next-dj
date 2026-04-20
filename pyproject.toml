@@ -66,8 +66,12 @@ docs = [
 source = "code"
 path = "next/__init__.py"
 
+[tool.hatch.build.hooks.custom]
+path = "build_hooks.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["next"]
+artifacts = ["next/static/next/next.min.js"]
 exclude = [
     "next/static/next/next.ts",
     "next/static/next/next.test.ts",
@@ -80,7 +84,11 @@ include = [
     "LICENSE",
     "CONTRIBUTING.md",
     "pyproject.toml",
+    "build_hooks.py",
+    "package.json",
+    "package-lock.json",
 ]
+artifacts = ["next/static/next/next.min.js"]
 exclude = [
     "next/static/next/next.test.ts",
     "examples/",
@@ -148,7 +156,10 @@ exclude = [
     "migrations",
 
     # Project annotation file
-    "next/__init__.py"
+    "next/__init__.py",
+
+    # Sphinx configuration
+    "docs/conf.py",
 ]
 
 [tool.ruff.lint]
@@ -182,8 +193,10 @@ ignore = [
 "**/{test*,conftest}.py" = [
     "ANN001", "ANN201", "ANN202",
     "ARG001", "ARG002", "ARG005",
-    "S101", "D100",
-    "PLR2004", "PLR0913", "S108", "E501", "FBT003",
+    "S101", "S106", "D100", "D101", "D102", "D103", "D104", "D105", "D107",
+    "PLR2004", "PLR0913", "PLC0415", "PT011",
+    "S108", "E501", "FBT003",
+    "TC001", "TC002",
 ]
 "**/migrations/**/*.py" = ["F401", "PLR0913"]
 

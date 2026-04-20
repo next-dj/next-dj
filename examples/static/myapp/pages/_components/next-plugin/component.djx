@@ -1,0 +1,25 @@
+<div class="next-plugin card mt-4 border-warning">
+    <div class="card-header text-warning fw-semibold">Next plugin demo</div>
+    <div class="card-body">
+        <p class="card-text text-muted small">
+            <code>Next.on('ready', …)</code> is a public hook fired after
+            <code>Next._init</code> seeds the page context. This component
+            wires a plugin via <code>Next.use()</code> that subscribes to the
+            hook and writes the received payload into the element below.
+        </p>
+        <pre class="next-plugin-out" id="next-plugin-out">(waiting for ready)</pre>
+    </div>
+</div>
+
+{% #use_script %}
+<script>
+    (function () {
+        window.Next.use(function (Next) {
+            Next.on('ready', function (ctx) {
+                var out = document.getElementById('next-plugin-out');
+                out.textContent = JSON.stringify(ctx, null, 2);
+            });
+        });
+    })();
+</script>
+{% /use_script %}

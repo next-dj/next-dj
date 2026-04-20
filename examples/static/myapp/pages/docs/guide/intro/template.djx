@@ -1,0 +1,8 @@
+<h1>Nested layouts</h1>
+<p>
+    This page lives at <code>docs/guide/intro</code>. It picks up three
+    layout chains in order: root &rarr; <code>docs/</code> &rarr;
+    <code>docs/guide/</code>. Each layer contributes its own CSS that is
+    collected in outer-to-inner order, so the cascade flows naturally from
+    shell &rarr; section &rarr; subsection.
+</p>

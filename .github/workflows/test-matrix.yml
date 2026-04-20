@@ -42,6 +42,14 @@ jobs:
         django-version: ${{ matrix.django-version }}
         cache: "true"
         cache-key-suffix: django-${{ matrix.django-version }}-py-${{ matrix.python-version }}
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 24
+        cache: 'npm'
+    - name: Install Node dependencies
+      run: npm ci
+    - name: Build next.min.js
+      run: npm run build:next
     - name: Verify Django version
       run: |
         uv run python -c 'import django; print(f"Django version: {django.get_version()}")'

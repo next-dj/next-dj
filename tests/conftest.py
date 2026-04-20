@@ -49,7 +49,7 @@ if not settings.configured:
             "django.middleware.clickjacking.XFrameOptionsMiddleware",
         ],
         ROOT_URLCONF="next.urls",
-        SECRET_KEY="test-secret-key",  # noqa: S106
+        SECRET_KEY="test-secret-key",
         BASE_DIR=project_root,
         STATIC_URL="/static/",
         STORAGES={

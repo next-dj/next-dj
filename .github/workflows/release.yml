@@ -16,16 +16,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-python-uv
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: 24
           cache: 'npm'
       - name: Install Node dependencies
         run: npm ci
+      - name: Build next.min.js
+        run: npm run build:next
       - name: Run tests
         run: |
           make test
       - name: Build source and wheel distributions
+        env:
+          NEXT_DJ_SKIP_JS_BUILD: "1"
         run: |
           make build
       - name: Check distributions

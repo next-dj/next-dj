@@ -839,6 +839,40 @@ class TestComponentTag:
             t = Template('{% load components %}{% component "c" %}')
             t.render(Context({"current_template_path": tmp_path / "t.djx"}))
 
+    def test_component_tag_triggers_static_discovery_for_composite(
+        self, tmp_path: Path
+    ) -> None:
+        """A composite component render triggers default_manager discovery."""
+        (tmp_path / "card.djx").write_text('<div class="card">ok</div>')
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=False,
+        )
+        collector = StaticCollector()
+        with (
+            patch.object(components_manager, "get_component", return_value=info),
+            patch(
+                "next.templatetags.components.default_manager.discover_component_assets"
+            ) as spy,
+        ):
+            t = Template('{% load components %}{% component "card" %}')
+            t.render(
+                Context(
+                    {
+                        "current_template_path": str(tmp_path / "template.djx"),
+                        "_static_collector": collector,
+                    },
+                ),
+            )
+        spy.assert_called_once()
+        (called_info, called_collector) = spy.call_args.args
+        assert called_info is info
+        assert called_collector is collector
+
     def test_block_component_with_slots_passes_slot_content(
         self, tmp_path: Path
     ) -> None:

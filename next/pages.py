@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
@@ -724,17 +724,17 @@ class Page:
         template_str = self._template_registry[file_path]
         context_data = self.build_render_context(file_path, *args, **kwargs)
 
-        from .static import StaticCollector, static_manager  # noqa: PLC0415
+        from .static import StaticCollector, default_manager  # noqa: PLC0415
 
         collector = StaticCollector()
         js_context: dict[str, object] = context_data.pop("_next_js_context", {})  # type: ignore[assignment]
         for js_key, js_value in js_context.items():
             collector.add_js_context(js_key, js_value)
-        static_manager.discover_page_assets(file_path, collector)
+        default_manager.discover_page_assets(file_path, collector)
         context_data["_static_collector"] = collector
 
         html = Template(template_str).render(DjangoTemplateContext(context_data))
-        return static_manager.inject(html, collector)
+        return cast("str", default_manager.inject(html, collector, page_path=file_path))
 
     def _create_view_function(
         self,

@@ -50,8 +50,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 NEXT_FRAMEWORK = {
     "DEFAULT_STATIC_BACKENDS": [
         {
-            "BACKEND": "next.static.StaticFilesBackend",
-            "OPTIONS": {},
+            "BACKEND": "myapp.custom_backend.AttributedStaticFilesBackend",
+            "OPTIONS": {
+                "css_tag": '<link rel="stylesheet" href="{url}" crossorigin="anonymous">',
+                "defer": True,
+                "crossorigin": "anonymous",
+            },
         },
     ],
 }
