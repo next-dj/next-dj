@@ -8,6 +8,7 @@ a Django path pattern. Bracket syntax `[name]` maps to `<str:name>`,
 from __future__ import annotations
 
 import re
+from typing import ClassVar
 
 
 def _coerce_url_value(value: str, hint: type) -> object:
@@ -39,10 +40,8 @@ class URLPatternParser:
     page-tree scanner.
     """
 
-    def __init__(self) -> None:
-        """Compile matchers for `[name]`, `[type:name]`, and `[[args]]`."""
-        self._param_pattern = re.compile(r"\[([^\[\]]+)\]")
-        self._args_pattern = re.compile(r"\[\[([^\[\]]+)\]\]")
+    _param_pattern: ClassVar[re.Pattern[str]] = re.compile(r"\[([^\[\]]+)\]")
+    _args_pattern: ClassVar[re.Pattern[str]] = re.compile(r"\[\[([^\[\]]+)\]\]")
 
     def parse_url_pattern(self, url_path: str) -> tuple[str, dict[str, str]]:
         """Return the Django path string and parameter names for `url_path`."""
@@ -80,14 +79,11 @@ class URLPatternParser:
             return param_name.strip(), type_name.strip()
         return param_str.strip(), "str"
 
+    _name_sep_pattern: ClassVar[re.Pattern[str]] = re.compile(r"[/\[\]:\-_]+")
+
     def prepare_url_name(self, url_path: str) -> str:
         """Python-safe name for `reverse` from a filesystem-style `url_path`."""
-        clean_name = url_path.replace("/", "_")
-        clean_name = re.sub(r"[\[\]]", "_", clean_name)
-        clean_name = clean_name.replace(":", "_")
-        clean_name = clean_name.replace("-", "_")
-        clean_name = re.sub(r"_+", "_", clean_name)
-        return clean_name.strip("_")
+        return self._name_sep_pattern.sub("_", url_path).strip("_")
 
 
 default_url_parser: URLPatternParser = URLPatternParser()

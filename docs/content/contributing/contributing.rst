@@ -70,7 +70,7 @@ Tests mirror this layout:
    * - ``tests/site_pages/``
      - Sample pages directory registered as ``DIRS`` in the test ``NEXT_FRAMEWORK`` config.
    * - ``tests/benchmarks/``
-     - Micro-benchmarks. **Opt-in**; excluded from the default run via ``--ignore=tests/benchmarks``.
+     - Micro-benchmarks covering every ``next/<area>/`` module. **Opt-in** via the ``perf`` marker; excluded from the default run with ``--ignore=tests/benchmarks``. See Benchmarks_.
    * - ``tests/<area>/``
      - Per-module tests matching ``next/<area>/``. Add new tests here.
 
@@ -110,8 +110,8 @@ Tests
      - Vitest unit tests for ``next/static/next/next.ts``.
    * - ``uv run pytest tests/ -n auto``
      - Fast iteration without coverage flags.
-   * - ``uv run pytest tests/benchmarks --benchmark-only --no-cov``
-     - Opt-in benchmark run. Numbers are only comparable on the same machine.
+   * - ``make bench``
+     - Opt-in micro-benchmarks. Equivalent to ``uv run pytest tests/benchmarks -m perf --benchmark-only --no-cov --override-ini="addopts="``. See Benchmarks_.
 
 Lint, types, format
 ~~~~~~~~~~~~~~~~~~~
@@ -181,6 +181,7 @@ GitHub Actions (``.github/workflows/ci.yml``) additionally:
 - On pull requests: dependency review (``dependency-review`` job).
 - In CI, lint runs on **`next/` only**, plus a separate import-order pass with ``--select I``. Locally, ``make lint`` also covers ``tests/`` and ``examples/``. Keep those directories clean so you do not surprise reviewers.
 - The test matrix installs a specific Django with ``uv pip install "django==…"`` **after** installing the wheel. That override is intentional, not a broken lockfile.
+- A dedicated **Benchmarks** workflow (``.github/workflows/bench.yml``) runs on every PR and posts a comment comparing results against the ``main`` baseline stored in the ``gh-pages`` branch. Alerts fire at ``150%`` regression but never block the merge — they are informational. See Benchmarks_.
 
 Ruff uses ``select = ["ALL"]`` with ignores and per-file rules in ``pyproject.toml`` (line length 88, isort with ``known-first-party = ["next"]``, relaxed rules for ``examples/``, ``tests/``, and ``conftest.py``).
 
@@ -257,6 +258,57 @@ Coverage
 - ``[tool.coverage.paths]`` collapses ``next/`` and ``*/site-packages/next/`` so coverage works identically for editable and wheel-installed runs.
 - **Examples**: Each example must ship tests in ``tests/`` or ``tests.py``. ``make test-examples`` does **not** enforce ``--cov-fail-under=100``. Aim for full coverage anyway; reviewers may ask you to close gaps.
 
+.. _Benchmarks:
+
+Benchmarks
+~~~~~~~~~~
+
+Micro-benchmarks in ``tests/benchmarks/`` guard the hot paths in every ``next/<area>/`` module against silent regressions. After each significant core change we expect a bench pass to keep the baseline honest — framework work pays a compounding cost, so even sub-microsecond regressions matter at scale.
+
+Running locally
+^^^^^^^^^^^^^^^
+
+- ``make bench`` — runs all benchmarks with the ``perf`` marker. First comparison should use ``--benchmark-save=before``, then apply your change and ``--benchmark-save=after``. JSON files land under ``.benchmarks/``.
+- Benchmarks are **excluded from** ``make test`` (ignored via ``addopts``) and auto-marked ``perf`` by ``tests/benchmarks/conftest.py`` — no need to decorate tests yourself.
+- Numbers are **only comparable on the same machine**. Do not cite local deltas in the PR; the CI workflow below does the machine-stable comparison.
+
+CI integration
+^^^^^^^^^^^^^^
+
+The Benchmarks workflow (``.github/workflows/bench.yml``) runs on every PR and every push to ``main``:
+
+- On ``main``: writes a baseline into ``gh-pages`` under ``dev/bench/``.
+- On PRs: runs the same benchmarks and posts a comment with side-by-side deltas against the baseline. Alerts at ``150%`` regression are informational — the workflow never blocks merges.
+- Uses a single Python/Django version (3.13 / latest) so cross-matrix noise does not pollute comparisons.
+
+Adding a benchmark
+^^^^^^^^^^^^^^^^^^
+
+1. Mirror the ``next/<area>/`` layout: put the file at ``tests/benchmarks/<area>/test_bench_<topic>.py``.
+2. Set the group via ``@pytest.mark.benchmark(group="<area>.<aspect>")`` — one bar chart per group in the PR comment.
+3. Reuse scaffolding: tree builders in ``tests/benchmarks/factories.py``, shared fixtures from ``tests/fixtures.py`` (loaded automatically).
+4. Cover **both cold and warm** cases when the code has a cache (e.g. ``mtime_hit``, ``resolve_cached``). Deltas on hit paths are where regressions hide.
+5. Keep each round cheap. A single bench should complete well under a second so the whole suite stays near a minute.
+
+Interpreting the numbers
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+- Trust **Min** and **Median** for comparisons — ``Max`` is almost always a GC pause, not a signal.
+- If ``StdDev > Median``, the measurement is inherently noisy (GC, lazy rebuild). Cite **Min** only for those cases.
+- ``Rounds × Iterations`` tells you how much the harness amortised the measurement — higher is more stable.
+- Units (``ns`` / ``μs`` / ``ms``) are per-group and auto-scaled; only rows within the same group table are directly comparable.
+
+When to run
+^^^^^^^^^^^
+
+Always run ``make bench`` locally when your change touches:
+
+- ``next/server/autoreload.py``, ``next/components/registry.py``, ``next/static/discovery.py``, ``next/pages/loaders.py``, ``next/pages/manager.py``, ``next/urls/{parser,backends}.py``, ``next/conf/settings.py``, or ``next/components/backends.py``.
+- Any caching or invalidation logic.
+- Any code in a hot render, autoreload, or URL-generation path.
+
+Non-hot paths (checks, one-shot app startup code, templatetag glue) do not need a local bench pass — the CI comment covers that.
+
 .. _Examples:
 
 Examples
@@ -297,6 +349,7 @@ Checklist
 - [ ] TS changes: ``next.min.js`` rebuilt (``make build-js``) and vitest tests updated
 - [ ] Example + tests when adding public API or behavior users copy from ``examples/``
 - [ ] Docs updated when behavior or usage changes
+- [ ] ``make bench`` checked locally when touching a hot path (see Benchmarks_); confirm the PR bench comment before requesting review
 - [ ] Link issues with ``Fixes #123`` / ``Closes #123`` when applicable
 
 Branches

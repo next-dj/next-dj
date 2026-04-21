@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from django.utils.autoreload import StatReloader
@@ -22,6 +21,7 @@ from next.urls.dispatcher import scan_pages_tree
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+    from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
@@ -30,33 +30,35 @@ logger = logging.getLogger(__name__)
 def _tree_dir_signature(root: Path) -> tuple[float, int]:
     """Return `(max mtime, directory count)` across every subdirectory.
 
-    Walks directories with `os.scandir` and stats each one. Directory
-    mtimes change when their direct children are added, removed, or
-    renamed, which is exactly what the route set check needs to detect.
+    Walks directories with `os.scandir` and uses each `DirEntry`'s
+    cached stat, avoiding a second `Path.stat()` syscall per node.
     The entry count guards against two independent renames that happen
     to preserve the latest mtime.
     """
-    latest = 0.0
-    count = 0
+    try:
+        root_st = root.stat()
+    except OSError:
+        return (0.0, 0)
+    latest = root_st.st_mtime
+    count = 1
     stack: list[str] = [str(root)]
     while stack:
         current = stack.pop()
         try:
-            st = Path(current).stat()
+            scanner = os.scandir(current)
         except OSError:
             continue
-        latest = max(latest, st.st_mtime)
-        count += 1
-        try:
-            with os.scandir(current) as it:
-                for entry in it:
-                    try:
-                        if entry.is_dir(follow_symlinks=False):
-                            stack.append(entry.path)
-                    except OSError:
+        with scanner as it:
+            for entry in it:
+                try:
+                    if not entry.is_dir(follow_symlinks=False):
                         continue
-        except OSError:
-            continue
+                    st = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                latest = max(latest, st.st_mtime)
+                count += 1
+                stack.append(entry.path)
     return (latest, count)
 
 

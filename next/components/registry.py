@@ -103,6 +103,7 @@ class ComponentVisibilityResolver:
         self._scope_index: dict[Path, list[ComponentInfo]] = {}
         self._scope_index_registry_version = -1
         self._cached_registry_version = -1
+        self._resolved_path_cache: dict[Path, Path] = {}
 
     def _ensure_scope_index(self) -> None:
         if self._scope_index_registry_version == self._registry.version:
@@ -130,11 +131,17 @@ class ComponentVisibilityResolver:
 
     def resolve_visible(self, template_path: Path) -> Mapping[str, ComponentInfo]:
         """Return a mapping of visible component names for `template_path`."""
-        template_path = template_path.resolve()
+        cached_resolved = self._resolved_path_cache.get(template_path)
+        if cached_resolved is None:
+            cached_resolved = template_path.resolve()
+            self._resolved_path_cache[template_path] = cached_resolved
+        template_path = cached_resolved
 
         if self._cached_registry_version != self._registry.version:
             self._result_cache.clear()
             self._path_cache.clear()
+            self._resolved_path_cache.clear()
+            self._resolved_path_cache[template_path] = template_path
             self._scope_index_registry_version = -1
             self._cached_registry_version = self._registry.version
 

@@ -24,6 +24,7 @@ round of resolution on every logical-name lookup.
 from __future__ import annotations
 
 import logging
+import os
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -48,6 +49,27 @@ logger = logging.getLogger(__name__)
 
 _MODULE_LIST_CACHE_MAX_SIZE = 2048
 _LAYOUT_DIR_CACHE_MAX_SIZE = 2048
+
+
+def _rel_path_str(child: Path, root: Path) -> str | None:
+    """Return the forward-slashed path of `child` relative to `root`.
+
+    Both operands must already be resolved absolute paths. Returns an
+    empty string when `child == root`, and `None` when `child` is not
+    nested under `root`. Skips the per-segment work of
+    `Path.relative_to().parts`.
+    """
+    child_str = os.fspath(child)
+    root_str = os.fspath(root)
+    if child_str == root_str:
+        return ""
+    prefix = root_str + os.sep
+    if not child_str.startswith(prefix):  # pragma: no cover
+        return None
+    rel = child_str[len(prefix) :]
+    if os.sep != "/":  # pragma: no cover
+        rel = rel.replace(os.sep, "/")
+    return rel
 
 
 @runtime_checkable
@@ -164,12 +186,10 @@ class PathResolver:
         """
         if page_root is None:
             return self._fallback(template_dir)
-        try:
-            rel = template_dir.relative_to(page_root)
-        except ValueError:  # pragma: no cover
+        rel = _rel_path_str(template_dir, page_root)
+        if rel is None:  # pragma: no cover
             return self._fallback(template_dir)
-        parts = rel.parts
-        return "/".join(parts) if parts else "index"
+        return rel or "index"
 
     def logical_name_for_layout(
         self,
@@ -183,14 +203,10 @@ class PathResolver:
         """
         if page_root is None:
             return f"{self._fallback(layout_dir)}/layout"
-        try:
-            rel = layout_dir.relative_to(page_root)
-        except ValueError:  # pragma: no cover
+        rel = _rel_path_str(layout_dir, page_root)
+        if rel is None:  # pragma: no cover
             return f"{self._fallback(layout_dir)}/layout"
-        parts = rel.parts
-        if parts:
-            return "/".join((*parts, "layout"))
-        return "layout"
+        return f"{rel}/layout" if rel else "layout"
 
     @staticmethod
     def _fallback(directory: Path) -> str:
