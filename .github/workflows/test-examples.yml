@@ -20,6 +20,7 @@ jobs:
         sparse-checkout: |
           pyproject.toml
           uv.lock
+          build_hooks.py
           Makefile
           examples
           .github
