@@ -58,11 +58,11 @@ class BackendProvider(Protocol):
     @property
     def default_backend(self) -> StaticBackend:
         """Return the primary backend used for file registration."""
-        ...
+        raise NotImplementedError
 
     def page_roots(self) -> tuple[Path, ...]:
         """Return the configured page-tree roots as resolved absolute paths."""
-        ...
+        raise NotImplementedError
 
 
 class StemRegistry:

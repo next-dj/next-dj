@@ -1,7 +1,7 @@
 name: Test Examples
 
 on:
-  pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -16,19 +16,27 @@ jobs:
         django-version: ["5.2"]
     steps:
     - uses: actions/checkout@v6
+      with:
+        sparse-checkout: |
+          pyproject.toml
+          uv.lock
+          Makefile
+          examples
+          .github
+        sparse-checkout-cone-mode: false
+    - name: Download prebuilt wheel
+      uses: actions/download-artifact@v4
+      with:
+        name: next-dj-dist
+        path: dist
     - uses: ./.github/actions/setup-python-uv
       with:
         python-version: ${{ matrix.python-version }}
         django-version: ${{ matrix.django-version }}
         cache: "true"
         cache-key-suffix: django-${{ matrix.django-version }}-py-${{ matrix.python-version }}
-    - uses: actions/setup-node@v6
-      with:
-        node-version: 24
-        cache: 'npm'
-    - name: Install Node dependencies
-      run: npm ci
-    - name: Build next.min.js
-      run: npm run build:next
+        install-project: "false"
+    - name: Install next-dj from wheel
+      run: uv pip install --no-deps --force-reinstall dist/*.whl
     - name: Run example tests
       run: make test-examples

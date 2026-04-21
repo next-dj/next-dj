@@ -15,11 +15,42 @@ permissions:
   pull-requests: read
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 24
+        cache: 'npm'
+    - name: Install Node dependencies
+      run: npm ci
+    - name: Build next.min.js
+      run: npm run build:next
+    - uses: ./.github/actions/setup-python-uv
+    - name: Build wheel and sdist
+      env:
+        NEXT_DJ_SKIP_JS_BUILD: "1"
+      run: uv build
+    - name: Upload dist artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: next-dj-dist
+        path: dist/
+        retention-days: 1
+        if-no-files-found: error
+
   test:
+    needs: build
     uses: ./.github/workflows/test-matrix.yml
     with:
       test-command: "uv run pytest tests/ -v --junitxml=junit.xml --cov=next --cov-report=xml --cov-report=term-missing --cov-fail-under=100"
       upload-codecov: true
+    secrets: inherit
+
+  test-examples:
+    needs: build
+    uses: ./.github/workflows/test-examples.yml
     secrets: inherit
 
   lint:

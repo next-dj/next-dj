@@ -17,6 +17,10 @@ inputs:
     description: Suffix for cache key (e.g. django-5.2-py-3.12)
     required: false
     default: ""
+  install-project:
+    description: Install the local next-dj project via uv sync. Set to "false" when installing from a prebuilt wheel artifact.
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
@@ -32,7 +36,12 @@ runs:
         cache-suffix: ${{ inputs.cache-key-suffix }}
     - name: Install dependencies
       shell: bash
-      run: uv sync --locked --dev --python ${{ inputs.python-version }}
+      run: |
+        if [ "${{ inputs.install-project }}" = "false" ]; then
+          uv sync --locked --dev --no-install-project --python ${{ inputs.python-version }}
+        else
+          uv sync --locked --dev --python ${{ inputs.python-version }}
+        fi
     - name: Install Django ${{ inputs.django-version }} (matrix override for integration tests)
       if: inputs.django-version != ''
       shell: bash

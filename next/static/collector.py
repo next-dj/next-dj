@@ -52,7 +52,7 @@ class DedupStrategy(Protocol):
 
     def key(self, asset: StaticAsset) -> Hashable:
         """Return a hashable key identifying the asset for dedup."""
-        ...
+        raise NotImplementedError
 
 
 class UrlDedup:
@@ -119,7 +119,7 @@ class JsContextPolicy(Protocol):
         value: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
         """Merge a new entry into the existing mapping and return it."""
-        ...
+        raise NotImplementedError
 
 
 class FirstWinsPolicy:
