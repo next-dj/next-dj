@@ -22,7 +22,7 @@ class NextJsBuildHook(BuildHookInterface):
 
     def initialize(self, version: str, build_data: dict) -> None:  # noqa: ARG002
         """Run the npm build before Hatchling copies files into the artifact."""
-        if os.environ.get("NEXT_DJ_SKIP_JS_BUILD"):
+        if version == "editable" or os.environ.get("NEXT_DJ_SKIP_JS_BUILD"):
             return
 
         root = Path(self.root)
