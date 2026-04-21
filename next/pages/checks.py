@@ -211,7 +211,20 @@ def _check_missing_page_files(pages_path: Path, context: str) -> list[CheckMessa
             dir_name_str.startswith("[[") and dir_name_str.endswith("]]")
         ):
             page_file = item / "page.py"
-            if not page_file.exists():
+            layout_file = item / "layout.djx"
+            template_file = item / "template.djx"
+
+            if page_file.exists() or layout_file.exists() or template_file.exists():
+                continue
+
+            # Check if parameter directory has child routes
+            has_child_routes = False
+            for child in item.iterdir():
+                if child.is_dir() and (child / "page.py").exists():
+                    has_child_routes = True
+                    break
+
+            if not has_child_routes:
                 errors.append(
                     Error(
                         f"{context} pages: Parameter directory "

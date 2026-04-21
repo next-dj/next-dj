@@ -72,7 +72,6 @@ NEXT_FRAMEWORK = {
             "BACKEND": "myapp.custom_router.TaggedFileRouterBackend",
             "PAGES_DIR": "pages",
             "APP_DIRS": True,
-            # App trees under each installed app's pages/, plus extra filesystem roots
             "DIRS": [str(BASE_DIR / "root_pages")],
             "OPTIONS": {
                 "context_processors": [],

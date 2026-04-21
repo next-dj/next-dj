@@ -214,7 +214,20 @@ def _validate_config_fields(
             ),
         )
 
+    # Check if backend is FileRouterBackend or a subclass
+    is_file_router = False
     if backend == FILE_ROUTER_BACKEND:
+        is_file_router = True
+    elif backend is not None and isinstance(backend, str):
+        try:
+            backend_class = import_string(backend)
+            is_file_router = isinstance(backend_class, type) and issubclass(
+                backend_class, FileRouterBackend
+            )
+        except (ImportError, AttributeError):
+            pass
+
+    if is_file_router:
         errors.extend(_validate_file_router_backend_fields(config, index))
     elif (
         backend is not None
