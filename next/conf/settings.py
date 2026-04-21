@@ -56,6 +56,20 @@ class NextFrameworkSettings:
             self._merged_cache = self._build_flat_merged(self._raw_user())
         return self._merged_cache
 
+    _LIST_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "DEFAULT_PAGE_BACKENDS",
+            "DEFAULT_COMPONENT_BACKENDS",
+            "DEFAULT_STATIC_BACKENDS",
+        }
+    )
+    _BOOL_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "STRICT_CONTEXT",
+            "LAZY_COMPONENT_MODULES",
+        }
+    )
+
     def _build_flat_merged(self, user: dict[str, Any] | None) -> dict[str, Any]:
         out = copy.deepcopy(self.DEFAULTS)
         if not user:
@@ -67,12 +81,12 @@ class NextFrameworkSettings:
             raw = user[key]
             if key == "URL_NAME_TEMPLATE" and isinstance(raw, str):
                 out[key] = raw
-            elif key in (
-                "DEFAULT_PAGE_BACKENDS",
-                "DEFAULT_COMPONENT_BACKENDS",
-                "DEFAULT_STATIC_BACKENDS",
-            ) and isinstance(raw, list):
+            elif (key in self._LIST_KEYS and isinstance(raw, list)) or (
+                key == "NEXT_JS_OPTIONS" and isinstance(raw, dict)
+            ):
                 out[key] = copy.deepcopy(raw)
+            elif key in self._BOOL_KEYS:
+                out[key] = bool(raw)
         return out
 
     def __getattr__(self, attr: str) -> Any:  # noqa: ANN401

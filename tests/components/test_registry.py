@@ -10,11 +10,6 @@ from next.components import (
 )
 
 
-# ---------------------------------------------------------------------------
-# TestComponentRegistry
-# ---------------------------------------------------------------------------
-
-
 class TestComponentRegistry:
     """ComponentRegistry helpers and dunders."""
 
@@ -33,6 +28,26 @@ class TestComponentRegistry:
         assert len(reg) == 0
         assert not reg.is_root(root)
 
+    def test_component_info_resolves_scope_root_and_falls_back_on_oserror(
+        self, tmp_path: Path
+    ) -> None:
+        """`resolved_scope_root` falls back to the raw path when `resolve()` raises."""
+        root = tmp_path.resolve()
+        info = ComponentInfo("n", root, "", tmp_path / "n.djx", None, True)
+        assert info.resolved_scope_root == root
+
+        broken_root = MagicMock(spec=Path)
+        broken_root.resolve.side_effect = OSError
+        info2 = ComponentInfo(
+            "n",
+            broken_root,
+            "",
+            tmp_path / "n.djx",
+            None,
+            True,
+        )
+        assert info2.resolved_scope_root is broken_root
+
     def test_contains_is_indexed_by_name(self, tmp_path: Path) -> None:
         """Name lookup does not scan every row."""
         reg = ComponentRegistry()
@@ -43,11 +58,6 @@ class TestComponentRegistry:
             )
         assert "c49" in reg
         assert "missing" not in reg
-
-
-# ---------------------------------------------------------------------------
-# TestComponentScanner
-# ---------------------------------------------------------------------------
 
 
 class TestComponentScanner:
@@ -84,11 +94,6 @@ class TestComponentScanner:
         assert scanner.scan_directory(tmp_path, tmp_path, "") == []
 
 
-# ---------------------------------------------------------------------------
-# TestComponentExtraRootsFromConfig
-# ---------------------------------------------------------------------------
-
-
 class TestComponentExtraRootsFromConfig:
     """``component_extra_roots_from_config`` accepts several ``DIRS`` forms."""
 
@@ -112,11 +117,6 @@ class TestComponentExtraRootsFromConfig:
         assert r3 == [a.resolve()]
 
         assert component_extra_roots_from_config({"DIRS": [str(missing)]}) == []
-
-
-# ---------------------------------------------------------------------------
-# TestComponentVisibilityResolver
-# ---------------------------------------------------------------------------
 
 
 class TestComponentVisibilityResolver:
@@ -246,3 +246,35 @@ class TestComponentVisibilityResolver:
         tmpl.write_text("x")
         parts = res._compute_relative_parts(tmpl.resolve(), pages.resolve())
         assert parts == [""]
+
+    def test_result_and_path_cache_evict_oldest_when_full(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Exceeding the LRU size evicts the oldest entries for both caches."""
+        from next.components import registry as registry_mod
+
+        monkeypatch.setattr(registry_mod, "_VISIBILITY_CACHE_MAX_SIZE", 2)
+        reg = ComponentRegistry()
+        scope_root = (tmp_path / "scope").resolve()
+        scope_root.mkdir()
+        sub = scope_root / "area"
+        sub.mkdir()
+        # Two components share the same scope_root so a single `resolve_visible()`
+        # call queries `_get_relative_parts_cached` twice for that key: the second
+        # lookup hits the cache and exercises `move_to_end`.
+        reg.register(
+            ComponentInfo("c1", scope_root, "area", sub / "c1.djx", None, True),
+        )
+        reg.register(
+            ComponentInfo("c2", scope_root, "area", sub / "c2.djx", None, True),
+        )
+
+        res = ComponentVisibilityResolver(reg)
+        paths = [sub / f"t{i}.djx" for i in range(3)]
+        for p in paths:
+            p.write_text("x")
+            res.resolve_visible(p)
+
+        assert paths[0].resolve() not in res._result_cache
+        assert (paths[0].resolve(), scope_root) not in res._path_cache
+        assert paths[-1].resolve() in res._result_cache

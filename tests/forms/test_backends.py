@@ -1,3 +1,7 @@
+from unittest.mock import patch
+
+import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse
 
 from next.forms import (
@@ -52,6 +56,26 @@ class TestRegistryFormActionBackend:
         """Empty backend yields no URL patterns."""
         empty_backend = RegistryFormActionBackend()
         assert empty_backend.generate_urls() == []
+
+    def test_register_action_raises_on_uid_collision(self) -> None:
+        """Raise ImproperlyConfigured when two distinct names share a UID."""
+        backend = RegistryFormActionBackend()
+        backend.register_action("alpha", lambda: None)
+        with (
+            patch(
+                "next.forms.backends._make_uid",
+                return_value=backend._registry["alpha"]["uid"],
+            ),
+            pytest.raises(ImproperlyConfigured, match="UID collision"),
+        ):
+            backend.register_action("beta", lambda: None)
+
+    def test_register_action_reregistration_same_name_ok(self) -> None:
+        """Re-registering the same name (e.g. reload) does not raise."""
+        backend = RegistryFormActionBackend()
+        backend.register_action("alpha", lambda: None)
+        backend.register_action("alpha", lambda: None)
+        assert "alpha" in backend._registry
 
 
 class TestFormActionBackendAbstract:

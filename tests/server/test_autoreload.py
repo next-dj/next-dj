@@ -79,6 +79,51 @@ class TestNextStatReloader:
             assert payload is None
 
 
+class TestTreeDirSignature:
+    """`_tree_dir_signature` skips unreadable entries without raising."""
+
+    def test_missing_root_returns_zero_signature(self, tmp_path: Path) -> None:
+        """A root path that cannot be stat'd yields `(0.0, 0)`."""
+        from next.server.autoreload import _tree_dir_signature
+
+        assert _tree_dir_signature(tmp_path / "missing") == (0.0, 0)
+
+    def test_file_root_counts_itself_only(self, tmp_path: Path) -> None:
+        """Scandir on a regular file raises, so nothing is recursed into."""
+        from next.server.autoreload import _tree_dir_signature
+
+        file_root = tmp_path / "file.txt"
+        file_root.write_text("x")
+        latest, count = _tree_dir_signature(file_root)
+        assert count == 1
+        assert latest > 0
+
+    def test_is_dir_oserror_skips_entry(self, tmp_path: Path) -> None:
+        """A `DirEntry.is_dir` that raises is silently skipped."""
+        from unittest.mock import MagicMock, patch
+
+        from next.server.autoreload import _tree_dir_signature
+
+        (tmp_path / "inner").mkdir()
+
+        def raising_scandir(path):
+            class _CM:
+                def __enter__(_self) -> object:  # noqa: N805
+                    entry = MagicMock()
+                    entry.is_dir.side_effect = OSError
+                    return iter([entry])
+
+                def __exit__(_self, *_: object) -> bool:  # noqa: N805
+                    return False
+
+            return _CM()
+
+        with patch("next.server.autoreload.os.scandir", side_effect=raising_scandir):
+            latest, count = _tree_dir_signature(tmp_path)
+        assert count == 1
+        assert latest > 0
+
+
 class TestDjxNotInStatReloaderGlobMatches:
     """``.djx`` files are not among paths matched by next's ``watch_dir`` globs."""
 

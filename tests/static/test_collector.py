@@ -293,6 +293,16 @@ class TestJsContextPolicyIntegration:
         collector.add_js_context("k", "second")
         assert collector.js_context()["k"] == "second"
 
+    def test_rejects_non_json_serialisable_value(
+        self, collector: StaticCollector
+    ) -> None:
+        """Non-serialisable values raise at add time, not at inject time."""
+        import pytest
+
+        with pytest.raises(TypeError, match="not JSON-serialisable"):
+            collector.add_js_context("k", object())
+        assert "k" not in collector.js_context()
+
 
 class TestPlaceholderRegistry:
     """PlaceholderRegistry stores slot metadata keyed by slot name."""

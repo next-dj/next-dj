@@ -140,7 +140,10 @@ class StaticManager:
     def _next_script_builder(self) -> NextScriptBuilderType:
         if self._script_builder is None:
             url = str(staticfiles_storage.url(NEXT_JS_STATIC_PATH))
-            self._script_builder = NextScriptBuilder.from_options(url, {})
+            options = next_framework_settings.NEXT_JS_OPTIONS
+            if not isinstance(options, dict):  # pragma: no cover
+                options = {}
+            self._script_builder = NextScriptBuilder.from_options(url, options)
         return self._script_builder
 
     def _render_script_section(self, collector: StaticCollector) -> str:

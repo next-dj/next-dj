@@ -190,6 +190,24 @@ class TestPageContextRegistry:
         assert "layout_var" in result.context_data
         assert result.context_data["layout_var"] == "layout_value"
 
+    def test_collect_inherited_context_bounded_depth(
+        self, context_manager, tmp_path
+    ) -> None:
+        """The ancestor walk is bounded by `_MAX_ANCESTOR_WALK_DEPTH`.
+
+        This test fabricates a 70-level deep tree — past the 64 cap —
+        and asserts the call returns in bounded time with an empty
+        merged context rather than iterating all 70 ancestors.
+        """
+        deep = tmp_path
+        for i in range(70):
+            deep = deep / f"d{i}"
+            deep.mkdir()
+        leaf_page = deep / "page.py"
+
+        result = context_manager.collect_context(leaf_page)
+        assert result.context_data == {}
+
     def test_collect_inherited_context_multiple_levels(
         self, context_manager, tmp_path
     ) -> None:

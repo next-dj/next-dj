@@ -9,11 +9,6 @@ from next.components import ComponentInfo, components_manager
 from next.static import StaticCollector
 
 
-# ---------------------------------------------------------------------------
-# TestComponentTag
-# ---------------------------------------------------------------------------
-
-
 class TestComponentTag:
     """Tests for void ``{% component %}`` and block ``{% #component %}`` tags."""
 
@@ -309,11 +304,6 @@ class TestComponentTag:
             Template("{% load components %}{% /component %}")
 
 
-# ---------------------------------------------------------------------------
-# TestSlotTag
-# ---------------------------------------------------------------------------
-
-
 class TestSlotTag:
     """Tests for ``{% #slot %}``, ``{% /slot %}``, and short ``{% slot %}``."""
 
@@ -370,11 +360,6 @@ class TestSlotTag:
         """{% /slot %} without opening #slot raises."""
         with pytest.raises(TemplateSyntaxError, match="/slot"):
             Template("{% load components %}{% /slot %}")
-
-
-# ---------------------------------------------------------------------------
-# TestSetSlotTag
-# ---------------------------------------------------------------------------
 
 
 class TestSetSlotTag:

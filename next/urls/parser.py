@@ -90,4 +90,7 @@ class URLPatternParser:
         return clean_name.strip("_")
 
 
-__all__ = ["URLPatternParser"]
+default_url_parser: URLPatternParser = URLPatternParser()
+
+
+__all__ = ["URLPatternParser", "default_url_parser"]

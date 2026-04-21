@@ -36,43 +36,33 @@ if TYPE_CHECKING:
     )
 
 
-_LAZY_ATTRIBUTES: dict[str, tuple[str, str]] = {
-    "check_component_py_no_pages_context": (
-        "next.components.checks",
+_LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
+    "next.components.checks": (
         "check_component_py_no_pages_context",
-    ),
-    "check_cross_root_component_name_conflicts": (
-        "next.components.checks",
         "check_cross_root_component_name_conflicts",
-    ),
-    "check_duplicate_component_names": (
-        "next.components.checks",
         "check_duplicate_component_names",
-    ),
-    "check_next_components_configuration": (
-        "next.components.checks",
         "check_next_components_configuration",
     ),
-    "check_next_framework_unknown_top_level_keys": (
-        "next.conf.checks",
-        "check_next_framework_unknown_top_level_keys",
+    "next.conf.checks": ("check_next_framework_unknown_top_level_keys",),
+    "next.pages.checks": (
+        "_has_template_or_djx",
+        "check_context_functions",
+        "check_layout_templates",
+        "check_page_functions",
+        "check_pages_structure",
+        "check_request_in_context",
     ),
-    "check_context_functions": ("next.pages.checks", "check_context_functions"),
-    "check_layout_templates": ("next.pages.checks", "check_layout_templates"),
-    "check_page_functions": ("next.pages.checks", "check_page_functions"),
-    "check_pages_structure": ("next.pages.checks", "check_pages_structure"),
-    "check_request_in_context": ("next.pages.checks", "check_request_in_context"),
-    "_has_template_or_djx": ("next.pages.checks", "_has_template_or_djx"),
-    "_load_python_module": ("next.pages.loaders", "_load_python_module"),
-    "check_duplicate_url_parameters": (
-        "next.urls.checks",
+    "next.pages.loaders": ("_load_python_module",),
+    "next.urls.checks": (
         "check_duplicate_url_parameters",
-    ),
-    "check_next_pages_configuration": (
-        "next.urls.checks",
         "check_next_pages_configuration",
+        "check_url_patterns",
     ),
-    "check_url_patterns": ("next.urls.checks", "check_url_patterns"),
+}
+
+
+_LAZY_ATTRIBUTES: dict[str, str] = {
+    name: module for module, names in _LAZY_SOURCES_BY_MODULE.items() for name in names
 }
 
 
@@ -94,32 +84,13 @@ def register_all() -> None:
 
 def __getattr__(name: str) -> object:
     """Lazily resolve re-exports from the per-subpackage `checks` modules."""
-    target = _LAZY_ATTRIBUTES.get(name)
-    if target is None:
+    module_name = _LAZY_ATTRIBUTES.get(name)
+    if module_name is None:
         msg = f"module {__name__!r} has no attribute {name!r}"
         raise AttributeError(msg)
-    module_name, attr_name = target
     import importlib  # noqa: PLC0415
 
-    module = importlib.import_module(module_name)
-    return getattr(module, attr_name)
+    return getattr(importlib.import_module(module_name), name)
 
 
-__all__ = [
-    "_has_template_or_djx",
-    "_load_python_module",
-    "check_component_py_no_pages_context",
-    "check_context_functions",
-    "check_cross_root_component_name_conflicts",
-    "check_duplicate_component_names",
-    "check_duplicate_url_parameters",
-    "check_layout_templates",
-    "check_next_components_configuration",
-    "check_next_framework_unknown_top_level_keys",
-    "check_next_pages_configuration",
-    "check_page_functions",
-    "check_pages_structure",
-    "check_request_in_context",
-    "check_url_patterns",
-    "register_all",
-]
+__all__ = ["register_all", *sorted(_LAZY_ATTRIBUTES)]  # noqa: PLE0604

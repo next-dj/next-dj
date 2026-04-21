@@ -20,11 +20,6 @@ from tests.support import (
 )
 
 
-# ---------------------------------------------------------------------------
-# TestComponentsModuleExports
-# ---------------------------------------------------------------------------
-
-
 class TestComponentsModuleExports:
     """``next.components`` public API surface."""
 
@@ -32,11 +27,6 @@ class TestComponentsModuleExports:
         """Every name in ``__all__`` exists on the module."""
         for name in next_components_mod.__all__:
             assert hasattr(next_components_mod, name)
-
-
-# ---------------------------------------------------------------------------
-# TestComponentInfo
-# ---------------------------------------------------------------------------
 
 
 class TestComponentInfo:
@@ -56,11 +46,6 @@ class TestComponentInfo:
         assert info.is_simple
         assert info.template_path is not None
         assert info.module_path is None
-
-
-# ---------------------------------------------------------------------------
-# TestComponentInfoDunders
-# ---------------------------------------------------------------------------
 
 
 class TestComponentInfoDunders:
@@ -95,11 +80,6 @@ class TestComponentInfoDunders:
         assert a == d
         assert hash(a) == hash(d)
         assert a != object()
-
-
-# ---------------------------------------------------------------------------
-# TestFileComponentsBackend
-# ---------------------------------------------------------------------------
 
 
 class TestFileComponentsBackend:
@@ -229,11 +209,6 @@ class TestFileComponentsBackend:
         assert visible["card"].name == "card"
 
 
-# ---------------------------------------------------------------------------
-# TestComponentsFactory
-# ---------------------------------------------------------------------------
-
-
 class TestComponentsFactory:
     """Tests for ComponentsFactory."""
 
@@ -266,11 +241,6 @@ class TestComponentsFactory:
             ComponentsFactory.create_backend(
                 {"BACKEND": "next.components.UnknownBackend"}
             )
-
-
-# ---------------------------------------------------------------------------
-# TestComponentsFactoryManager
-# ---------------------------------------------------------------------------
 
 
 class TestComponentsFactoryManager:
@@ -371,11 +341,6 @@ class TestComponentsFactoryManager:
         assert mgr.get_component("n", Path("/t")) is hit
 
 
-# ---------------------------------------------------------------------------
-# TestModuleCache
-# ---------------------------------------------------------------------------
-
-
 class TestModuleCache:
     """ModuleCache LRU and dunder methods."""
 
@@ -414,11 +379,6 @@ class TestModuleCache:
         assert len(cache) == 0
 
 
-# ---------------------------------------------------------------------------
-# TestModuleLoader
-# ---------------------------------------------------------------------------
-
-
 class TestModuleLoader:
     """ModuleLoader disk paths and cache."""
 
@@ -453,11 +413,6 @@ class TestModuleLoader:
             return_value=spec,
         ):
             assert ModuleLoader(ModuleCache()).load(path) is None
-
-
-# ---------------------------------------------------------------------------
-# TestModuleLoaderDisk
-# ---------------------------------------------------------------------------
 
 
 class TestModuleLoaderDisk:

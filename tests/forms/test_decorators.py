@@ -18,6 +18,8 @@ from next.forms import (
     build_form_namespace_for_action,
     validated_next_form_page_path,
 )
+from next.forms.decorators import action as action_decorator
+from next.forms.manager import FormActionManager, form_action_manager
 
 
 PAGE_MODULE_FOR_FORM_TESTS = (
@@ -34,6 +36,49 @@ class TestBuildFormNamespaceForAction:
         """Actions without ``form_class`` return None."""
         req = mock_http_request(method="GET")
         assert build_form_namespace_for_action("test_no_form", req) is None
+
+
+class TestActionNamespacing:
+    """`@action(namespace=...)` stores keys as `namespace:name`."""
+
+    def test_namespace_prefixes_registered_name(self) -> None:
+        """Registered key is `namespace:name`, bare name does not resolve."""
+        manager = FormActionManager()
+        original_manager = form_action_manager._backends
+        form_action_manager._backends = manager._backends
+        try:
+
+            @action_decorator("save", namespace="billing")
+            def handler(_request: HttpRequest) -> HttpResponseRedirect:
+                return HttpResponseRedirect("/")
+
+            assert (
+                form_action_manager.default_backend.get_meta("billing:save") is not None
+            )
+            assert form_action_manager.default_backend.get_meta("save") is None
+        finally:
+            form_action_manager._backends = original_manager
+
+    def test_same_name_different_namespaces_coexist(self) -> None:
+        """Two apps can register `save` under different namespaces."""
+        manager = FormActionManager()
+        original = form_action_manager._backends
+        form_action_manager._backends = manager._backends
+        try:
+
+            @action_decorator("save", namespace="billing")
+            def billing_handler(_request: HttpRequest) -> HttpResponseRedirect:
+                return HttpResponseRedirect("/billing/")
+
+            @action_decorator("save", namespace="shipping")
+            def shipping_handler(_request: HttpRequest) -> HttpResponseRedirect:
+                return HttpResponseRedirect("/shipping/")
+
+            backend = form_action_manager.default_backend
+            assert backend.get_meta("billing:save") is not None
+            assert backend.get_meta("shipping:save") is not None
+        finally:
+            form_action_manager._backends = original
 
 
 class TestBaseFormGetInitial:

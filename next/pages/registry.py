@@ -29,6 +29,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_MAX_ANCESTOR_WALK_DEPTH = 64
+
+
 def get_layout_djx_paths_for_watch() -> set[Path]:
     """Return every `layout.djx` path under page trees."""
     result: set[Path] = set()
@@ -156,7 +159,10 @@ class PageContextRegistry:
         inherited_context = {}
         current_dir = file_path.parent
 
-        while current_dir != current_dir.parent:
+        for _ in range(_MAX_ANCESTOR_WALK_DEPTH):
+            if current_dir == current_dir.parent:
+                break
+
             layout_file = current_dir / "layout.djx"
             page_file = current_dir / "page.py"
 

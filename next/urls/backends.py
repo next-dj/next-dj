@@ -22,7 +22,7 @@ from next.pages import page
 from next.utils import classify_dirs_entries, resolve_base_dir
 
 from .dispatcher import FilesystemTreeDispatcher
-from .parser import URLPatternParser
+from .parser import default_url_parser
 
 
 if TYPE_CHECKING:
@@ -93,7 +93,8 @@ class FileRouterBackend(RouterBackend):
 
         self.options = _narrow_file_router_options(raw_opts)
         self._patterns_cache: dict[str, list[URLPattern | URLResolver]] = {}
-        self._url_parser = URLPatternParser()
+        self._app_pages_path_cache: dict[str, Path | None] = {}
+        self._url_parser = default_url_parser
 
     @staticmethod
     def _resolve_components_folder_name() -> str:
@@ -176,15 +177,20 @@ class FileRouterBackend(RouterBackend):
 
     def _get_app_pages_path(self, app_name: str) -> Path | None:
         """Return `<app>/pages_dir` when that directory exists."""
+        if app_name in self._app_pages_path_cache:
+            return self._app_pages_path_cache[app_name]
         try:
             app_module = __import__(app_name, fromlist=[""])
             if app_module.__file__ is None:
+                self._app_pages_path_cache[app_name] = None
                 return None
             app_path = Path(app_module.__file__).parent
             pages_path = app_path / self.pages_dir
-            return pages_path if pages_path.exists() else None
+            result = pages_path if pages_path.exists() else None
         except (ImportError, AttributeError):
-            return None
+            result = None
+        self._app_pages_path_cache[app_name] = result
+        return result
 
     def _get_root_pages_paths(self) -> list[Path]:
         """Return paths from `DIRS` plus optional `BASE_DIR` / `pages_dir`."""

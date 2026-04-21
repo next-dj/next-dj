@@ -188,7 +188,7 @@ def check_cross_root_component_name_conflicts(
         for info in backend._registry:
             if (info.scope_relative or "").strip():
                 continue
-            root = info.scope_root.resolve()
+            root = info.resolved_scope_root
             path_str = str(info.template_path or info.module_path or "")
             roots_for_name = by_name.setdefault(info.name, {})
             roots_for_name.setdefault(root, path_str)

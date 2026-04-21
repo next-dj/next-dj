@@ -10,11 +10,6 @@ from next.components.signals import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Generator fixtures — one per signal
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture()
 def capture_component_registered() -> Generator[list[dict[str, Any]], None, None]:
     """Capture ``component_registered`` signal events."""
@@ -60,11 +55,6 @@ def capture_component_rendered() -> Generator[list[dict[str, Any]], None, None]:
         component_rendered.disconnect(_listener)
 
 
-# ---------------------------------------------------------------------------
-# TestComponentSignalsAreDjangoSignals
-# ---------------------------------------------------------------------------
-
-
 class TestComponentSignalsAreDjangoSignals:
     """All three component signals expose the Django ``Signal`` interface."""
 
@@ -105,11 +95,6 @@ class TestComponentSignalsAreDjangoSignals:
         assert hasattr(component_rendered, "send")
 
 
-# ---------------------------------------------------------------------------
-# TestComponentRegisteredSignal
-# ---------------------------------------------------------------------------
-
-
 class TestComponentRegisteredSignal:
     """``component_registered`` wiring."""
 
@@ -146,11 +131,6 @@ class TestComponentRegisteredSignal:
         assert len(capture_component_registered) == 1
 
 
-# ---------------------------------------------------------------------------
-# TestComponentBackendLoadedSignal
-# ---------------------------------------------------------------------------
-
-
 class TestComponentBackendLoadedSignal:
     """``component_backend_loaded`` wiring."""
 
@@ -177,11 +157,6 @@ class TestComponentBackendLoadedSignal:
 
         component_backend_loaded.send(sender=_Backend)
         assert capture_component_backend_loaded[0]["sender"] is _Backend
-
-
-# ---------------------------------------------------------------------------
-# TestComponentRenderedSignal
-# ---------------------------------------------------------------------------
 
 
 class TestComponentRenderedSignal:

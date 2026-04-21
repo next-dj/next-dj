@@ -16,6 +16,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from next.conf import next_framework_settings
+from next.conf.signals import settings_reloaded
 from next.utils import classify_dirs_entries, resolve_base_dir
 
 
@@ -25,6 +26,9 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+_MAX_ANCESTOR_WALK_DEPTH = 64
 
 
 def _load_python_module(file_path: Path) -> types.ModuleType | None:
@@ -40,6 +44,44 @@ def _load_python_module(file_path: Path) -> types.ModuleType | None:
         return None
     else:
         return module
+
+
+_MODULE_MEMO: dict[Path, tuple[float, types.ModuleType | None]] = {}
+
+
+def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
+    """Return `_load_python_module(file_path)` memoised by mtime.
+
+    Different call sites (`PythonTemplateLoader.can_load`, `load_template`,
+    and `Page._create_regular_page_pattern`) previously executed the
+    module up to three times per URL dispatch. The memo keys by mtime so
+    that autoreload and template-stale detection still pick up edits.
+    """
+    try:
+        mtime = file_path.stat().st_mtime
+    except OSError:
+        _MODULE_MEMO.pop(file_path, None)
+        return _load_python_module(file_path)
+
+    cached = _MODULE_MEMO.get(file_path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+
+    module = _load_python_module(file_path)
+    _MODULE_MEMO[file_path] = (mtime, module)
+    return module
+
+
+_ADDITIONAL_LAYOUTS_CACHE: list[Path] | None = None
+
+
+def _reset_additional_layouts_cache(**_kwargs: object) -> None:
+    """Drop cached root-level `layout.djx` paths on settings reload."""
+    global _ADDITIONAL_LAYOUTS_CACHE  # noqa: PLW0603
+    _ADDITIONAL_LAYOUTS_CACHE = None
+
+
+settings_reloaded.connect(_reset_additional_layouts_cache)
 
 
 def _read_string_list(module: types.ModuleType, attr: str) -> list[str]:
@@ -67,12 +109,12 @@ class PythonTemplateLoader(TemplateLoader):
 
     def can_load(self, file_path: Path) -> bool:
         """Return whether the module loads and defines `template`."""
-        module = _load_python_module(file_path)
+        module = _load_python_module_memo(file_path)
         return module is not None and hasattr(module, "template")
 
     def load_template(self, file_path: Path) -> str | None:
         """Return `module.template` if the module exposes it."""
-        module = _load_python_module(file_path)
+        module = _load_python_module_memo(file_path)
         return getattr(module, "template", None) if module else None
 
 
@@ -113,7 +155,9 @@ class LayoutTemplateLoader(TemplateLoader):
         layout_files = []
         current_dir = file_path.parent
 
-        while current_dir != current_dir.parent:
+        for _ in range(_MAX_ANCESTOR_WALK_DEPTH):
+            if current_dir == current_dir.parent:
+                break
             layout_file = current_dir / "layout.djx"
             if layout_file.exists():
                 layout_files.append(layout_file)
@@ -128,6 +172,9 @@ class LayoutTemplateLoader(TemplateLoader):
 
     def _get_additional_layout_files(self) -> list[Path]:
         """Return root-level `layout.djx` files from each page backend `DIRS`."""
+        global _ADDITIONAL_LAYOUTS_CACHE  # noqa: PLW0603
+        if _ADDITIONAL_LAYOUTS_CACHE is not None:
+            return _ADDITIONAL_LAYOUTS_CACHE
         configs = next_framework_settings.DEFAULT_PAGE_BACKENDS or []
         if not isinstance(configs, list):
             configs = []
@@ -138,7 +185,9 @@ class LayoutTemplateLoader(TemplateLoader):
             for d in self._get_pages_dirs_for_config(c)
             if d.exists() and (layout := d / "layout.djx").exists()
         )
-        return list(dict.fromkeys(candidates))
+        result = list(dict.fromkeys(candidates))
+        _ADDITIONAL_LAYOUTS_CACHE = result
+        return result
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
         """Return candidate roots from one router `DIRS` entry (paths only)."""

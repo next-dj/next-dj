@@ -25,7 +25,7 @@ from .loaders import (
     LayoutManager,
     LayoutTemplateLoader,
     PythonTemplateLoader,
-    _load_python_module,
+    _load_python_module_memo,
 )
 from .processors import _get_context_processors
 from .registry import PageContextRegistry
@@ -149,12 +149,15 @@ class Page:
 
         context_processors = _get_context_processors()
         if request and context_processors:
+            strict = bool(getattr(next_framework_settings, "STRICT_CONTEXT", False))
             for processor in context_processors:
                 try:
                     processor_data = processor(request)
                     if isinstance(processor_data, dict):
                         context_data.update(processor_data)
                 except (TypeError, ValueError, AttributeError, KeyError) as e:
+                    if strict:
+                        raise
                     logger.warning(
                         "Error in context processor %s: %s",
                         processor.__name__,
@@ -287,7 +290,7 @@ class Page:
         clean_name: str,
     ) -> URLPattern | None:
         """Return the URL pattern for a real `page.py` with a template or `render`."""
-        module = _load_python_module(file_path)
+        module = _load_python_module_memo(file_path)
         if not module:
             return None
 

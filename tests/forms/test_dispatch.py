@@ -224,45 +224,6 @@ class TestFormDispatchRenderFragmentBranches:
             page._template_registry.clear()
             page._template_registry.update(original)
 
-    def test_post_with_non_string_value_in_dispatch(self, mock_http_request) -> None:
-        """Test that POST values that are not strings are handled correctly in dispatch."""
-        backend = RegistryFormActionBackend()
-
-        class TestForm(Form):
-            name = forms.CharField(max_length=100)
-
-        def handler(
-            _request: HttpRequest, _form: TestForm, **_kwargs: object
-        ) -> HttpResponseRedirect:
-            return HttpResponseRedirect("/")
-
-        backend.register_action(
-            "test_action", handler, options=FormActionOptions(form_class=TestForm)
-        )
-
-        mock_post = MagicMock()
-        mock_post.items.return_value = [
-            ("_url_param_test", ["list", "value"]),
-            ("name", "test"),
-        ]
-        request = mock_http_request(method="POST", POST=mock_post, FILES=None)
-
-        # Test the extraction logic directly to cover the non-string branch
-        url_kwargs: dict[str, object] = {}
-        for key, value in request.POST.items():
-            if key.startswith("_url_param_"):
-                param_name = key.replace("_url_param_", "")
-                if isinstance(value, str):
-                    try:
-                        url_kwargs[param_name] = int(value)
-                    except ValueError:
-                        url_kwargs[param_name] = value
-                else:
-                    url_kwargs[param_name] = value
-
-        # Verify non-string value was stored correctly
-        assert url_kwargs["test"] == ["list", "value"]
-
     def test_dispatch_with_modelform_returning_instance(
         self, mock_http_request
     ) -> None:
@@ -310,10 +271,15 @@ class TestFormDispatchRenderFragmentBranches:
         # Should succeed
         assert response.status_code == 302
 
-    def test_dispatch_with_non_string_post_value_real_call(
-        self, mock_http_request
+    @pytest.mark.parametrize(
+        "url_param_value",
+        [["list", "value"], "not_a_number"],
+        ids=["non_string", "string_not_int"],
+    )
+    def test_dispatch_survives_unusual_url_param_values(
+        self, mock_http_request, url_param_value
     ) -> None:
-        """Test dispatch handles non-string POST values in real call."""
+        """`dispatch` accepts url_param values that are not int-convertible strings."""
         backend = RegistryFormActionBackend()
 
         class TestForm(Form):
@@ -330,7 +296,7 @@ class TestFormDispatchRenderFragmentBranches:
 
         mock_post = MagicMock()
         mock_post.items.return_value = [
-            ("_url_param_test", ["list", "value"]),
+            ("_url_param_test", url_param_value),
             ("name", "test"),
         ]
         request = mock_http_request(method="POST", POST=mock_post, FILES=None)
@@ -338,46 +304,18 @@ class TestFormDispatchRenderFragmentBranches:
         meta = backend.get_meta("test_action")
         assert meta is not None
 
-        # Real call to dispatch - this will cover lines 357-358 (non-string branch)
         response = _FormActionDispatch.dispatch(backend, request, "test_action", meta)
-        # Should succeed
         assert response.status_code == 302
 
-    def test_dispatch_with_string_post_value_not_int(self, mock_http_request) -> None:
-        """Test dispatch handles string POST values that can't be converted to int."""
-        backend = RegistryFormActionBackend()
-
-        class TestForm(Form):
-            name = forms.CharField(max_length=100)
-
-        def handler(
-            _request: HttpRequest, _form: TestForm, **_kwargs: object
-        ) -> HttpResponseRedirect:
-            return HttpResponseRedirect("/")
-
-        backend.register_action(
-            "test_action", handler, options=FormActionOptions(form_class=TestForm)
-        )
-
-        mock_post = MagicMock()
-        mock_post.items.return_value = [
-            ("_url_param_test", "not_a_number"),
-            ("name", "test"),
-        ]
-        request = mock_http_request(method="POST", POST=mock_post, FILES=None)
-
-        meta = backend.get_meta("test_action")
-        assert meta is not None
-
-        # Real call to dispatch - this will cover lines 353-356 (ValueError branch)
-        response = _FormActionDispatch.dispatch(backend, request, "test_action", meta)
-        # Should succeed
-        assert response.status_code == 302
-
-    def test_render_form_fragment_with_non_string_post_value_real_call(
-        self, mock_http_request
+    @pytest.mark.parametrize(
+        "url_param_value",
+        [["list", "value"], "not_a_number"],
+        ids=["non_string", "string_not_int"],
+    )
+    def test_render_form_fragment_survives_unusual_url_param_values(
+        self, mock_http_request, url_param_value
     ) -> None:
-        """Test render_form_fragment handles non-string POST values in real call."""
+        """`render_form_fragment` handles url_param values that aren't int-convertible strings."""
         backend = RegistryFormActionBackend()
 
         class TestForm(Form):
@@ -393,50 +331,7 @@ class TestFormDispatchRenderFragmentBranches:
         )
 
         mock_post = MagicMock()
-        mock_post.items.return_value = [
-            ("_url_param_test", ["list", "value"]),
-        ]
-        request = mock_http_request(POST=mock_post)
-
-        file_path = PAGE_MODULE_FOR_FORM_TESTS
-        original_registry = page._template_registry.copy()
-        page._template_registry[file_path] = "{{ form.name }}"
-        try:
-            form = TestForm(initial={"name": "test"})
-            html = backend.render_form_fragment(
-                request,
-                "test_action",
-                form,
-                template_fragment=None,
-                page_file_path=file_path,
-            )
-            assert isinstance(html, str)
-        finally:
-            page._template_registry.clear()
-            page._template_registry.update(original_registry)
-
-    def test_render_form_fragment_with_string_post_value_not_int(
-        self, mock_http_request
-    ) -> None:
-        """Test render_form_fragment handles string POST values that can't be converted to int."""
-        backend = RegistryFormActionBackend()
-
-        class TestForm(Form):
-            name = forms.CharField(max_length=100)
-
-        def handler(_request: HttpRequest, _form: TestForm) -> HttpResponseRedirect:
-            return HttpResponseRedirect("/")
-
-        backend.register_action(
-            "test_action",
-            handler,
-            options=FormActionOptions(form_class=TestForm),
-        )
-
-        mock_post = MagicMock()
-        mock_post.items.return_value = [
-            ("_url_param_test", "not_a_number"),
-        ]
+        mock_post.items.return_value = [("_url_param_test", url_param_value)]
         request = mock_http_request(POST=mock_post)
 
         file_path = PAGE_MODULE_FOR_FORM_TESTS
@@ -524,42 +419,3 @@ class TestFormDispatchRenderFragmentBranches:
             TypeError, match="instance parameter only supported for ModelForm"
         ):
             _FormActionDispatch.dispatch(backend, request, "test_action", meta)
-
-    def test_render_form_fragment_with_non_string_post_value(
-        self, mock_http_request
-    ) -> None:
-        """Test render_form_fragment handles non-string POST values."""
-        backend = RegistryFormActionBackend()
-
-        class TestForm(Form):
-            name = forms.CharField(max_length=100)
-
-        def handler(_request: HttpRequest, _form: TestForm) -> HttpResponseRedirect:
-            return HttpResponseRedirect("/")
-
-        backend.register_action(
-            "test_action",
-            handler,
-            options=FormActionOptions(form_class=TestForm),
-        )
-
-        mock_post = MagicMock()
-        mock_post.items.return_value = [("_url_param_test", ["list", "value"])]
-        request = mock_http_request(POST=mock_post)
-
-        file_path = PAGE_MODULE_FOR_FORM_TESTS
-        original_registry = page._template_registry.copy()
-        page._template_registry[file_path] = "{{ form.name }}"
-        try:
-            form = TestForm(initial={"name": "test"})
-            html = backend.render_form_fragment(
-                request,
-                "test_action",
-                form,
-                template_fragment=None,
-                page_file_path=file_path,
-            )
-            assert isinstance(html, str)
-        finally:
-            page._template_registry.clear()
-            page._template_registry.update(original_registry)

@@ -14,7 +14,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, cast
 
-from next.conf import import_class_cached
+from next.conf import import_class_cached, next_framework_settings
 
 from .loading import ModuleLoader
 from .registry import ComponentRegistry, ComponentVisibilityResolver
@@ -78,7 +78,8 @@ class FileComponentsBackend(ComponentsBackend):
         for comp_root in self._extra_component_roots:
             self._registry.mark_as_root(comp_root)
             self._discover_in_component_root(comp_root)
-        self.import_all_component_modules()
+        if not bool(getattr(next_framework_settings, "LAZY_COMPONENT_MODULES", False)):
+            self.import_all_component_modules()
 
     def import_all_component_modules(self) -> None:
         """Load each `component.py` so decorators such as `@forms.action` run."""
@@ -102,7 +103,10 @@ class FileComponentsBackend(ComponentsBackend):
         """Return the named component visible from `template_path`."""
         self._ensure_loaded()
         visible = self.collect_visible_components(template_path)
-        return visible.get(name)
+        info = visible.get(name)
+        if info is not None and info.module_path is not None:
+            self._module_loader.load(info.module_path)
+        return info
 
     def collect_visible_components(
         self,

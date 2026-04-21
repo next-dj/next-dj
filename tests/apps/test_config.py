@@ -39,6 +39,68 @@ class TestNextFrameworkConfig:
             assert ".djx" not in glob, f"unexpected djx glob: {glob!r}"
 
 
+class TestAutoreloadInstallIdempotent:
+    """`install()` is safe to call repeatedly and logs unknown overrides."""
+
+    def test_second_install_is_noop(self) -> None:
+        from next.apps import autoreload as next_autoreload
+
+        before = autoreload.StatReloader
+        next_autoreload.install()
+        assert autoreload.StatReloader is before
+
+    def test_install_warns_on_incompatible_override(self, caplog) -> None:
+        from django.utils.autoreload import StatReloader as DjangoStatReloader
+
+        from next.apps import autoreload as next_autoreload
+
+        original = autoreload.StatReloader
+
+        class Unrelated:
+            pass
+
+        try:
+            autoreload.StatReloader = Unrelated  # type: ignore[misc]
+            with caplog.at_level("WARNING", logger="next.apps.autoreload"):
+                next_autoreload.install()
+            assert autoreload.StatReloader is Unrelated
+            assert any(
+                "not a StatReloader subclass" in rec.message for rec in caplog.records
+            )
+        finally:
+            autoreload.StatReloader = original  # type: ignore[misc]
+            assert issubclass(autoreload.StatReloader, DjangoStatReloader)
+
+    def test_uninstall_restores_original_and_disconnects(self) -> None:
+        """`uninstall()` puts back the previous `StatReloader` and detaches the signal."""
+        # Grab the true Django `StatReloader` class from `NextStatReloader.__bases__`
+        # because the module attribute has already been monkey-patched by `ready()`.
+        real_django_stat_reloader = NextStatReloader.__bases__[0]
+
+        from next.apps import autoreload as next_autoreload
+
+        class Placeholder(real_django_stat_reloader):  # type: ignore[misc,valid-type]
+            pass
+
+        original = autoreload.StatReloader
+        autoreload.StatReloader = Placeholder  # type: ignore[misc]
+        next_autoreload._ORIGINAL_STAT_RELOADER = None
+        next_autoreload._WATCHER_CONNECTED = False
+        try:
+            next_autoreload.install()
+            assert autoreload.StatReloader is NextStatReloader
+            assert next_autoreload._ORIGINAL_STAT_RELOADER is Placeholder
+            next_autoreload.uninstall()
+            assert autoreload.StatReloader is Placeholder
+            # Calling uninstall() a second time is a no-op (both guards fall through).
+            next_autoreload.uninstall()
+        finally:
+            autoreload.StatReloader = original  # type: ignore[misc]
+            next_autoreload._ORIGINAL_STAT_RELOADER = None
+            next_autoreload._WATCHER_CONNECTED = False
+            next_autoreload.install()
+
+
 class TestStaticfilesInstall:
     """``next.apps.staticfiles.install`` wires the static files finder."""
 

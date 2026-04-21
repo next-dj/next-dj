@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
+from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponseNotFound
 from django.urls import path, reverse
 from django.urls.exceptions import NoReverseMatch
@@ -43,6 +44,7 @@ class FormActionOptions:
     """Options passed to `register_action` (used by the `@action` decorator)."""
 
     form_class: type[django_forms.Form] | None = None
+    namespace: str | None = None
 
 
 class FormActionBackend(ABC):
@@ -105,6 +107,13 @@ class RegistryFormActionBackend(FormActionBackend):
         """Store handler, optional form class, and stable uid for the action name."""
         opts = options or FormActionOptions()
         uid = _make_uid(name)
+        existing = self._uid_to_name.get(uid)
+        if existing is not None and existing != name:
+            msg = (
+                f"Form action UID collision: {existing!r} and {name!r} both "
+                f"hash to {uid!r}. Rename one of them."
+            )
+            raise ImproperlyConfigured(msg)
         self._uid_to_name[uid] = name
         self._registry[name] = {
             "handler": handler,

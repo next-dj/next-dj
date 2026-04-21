@@ -16,9 +16,12 @@ the collector source.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+from django.core.serializers.json import DjangoJSONEncoder
 
 from .assets import _KIND_CSS, _KIND_JS, StaticAsset
 
@@ -366,7 +369,18 @@ class StaticCollector:
         return self._scripts
 
     def add_js_context(self, key: str, value: Any) -> None:  # noqa: ANN401
-        """Merge the value under the key through the JS-context policy."""
+        """Merge the value under the key through the JS-context policy.
+
+        Validates that `value` is serialisable by `DjangoJSONEncoder`
+        before merging. Surfacing the failure here, at the registration
+        site, gives a much better traceback than catching it at final
+        page inject time.
+        """
+        try:
+            json.dumps(value, cls=DjangoJSONEncoder)
+        except (TypeError, ValueError) as e:
+            msg = f"JS context value for key {key!r} is not JSON-serialisable: {e}"
+            raise TypeError(msg) from e
         self._js_context = self._js_policy.merge(self._js_context, key, value)
 
     def js_context(self) -> dict[str, Any]:

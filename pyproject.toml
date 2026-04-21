@@ -50,6 +50,7 @@ dev = [
     "twine==6.2.0",
     "pytest-xdist==3.8.0",
     "pytest-lazy-fixtures==1.4.0",
+    "pytest-benchmark==5.1.0",
 ]
 docs = [
     "sphinx==9.0.4",
@@ -114,6 +115,7 @@ addopts = [
     "--cov=next",
     "--cov-report=term-missing",
     "--cov-fail-under=100",
+    "--ignore=tests/benchmarks",
 ]
 
 [tool.coverage.run]

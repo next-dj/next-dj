@@ -25,11 +25,6 @@ from tests.support import (
 )
 
 
-# ---------------------------------------------------------------------------
-# TestComponentsManager
-# ---------------------------------------------------------------------------
-
-
 class TestComponentsManager:
     """Tests for ComponentsManager."""
 
@@ -69,11 +64,6 @@ class TestComponentsManager:
             mgr._reload_config()
         assert isinstance(mgr.template_loader, ComponentTemplateLoader)
         assert isinstance(mgr.component_renderer, ComponentRenderer)
-
-
-# ---------------------------------------------------------------------------
-# TestRegisterComponentsFolderFromRouterWalk
-# ---------------------------------------------------------------------------
 
 
 class TestRegisterComponentsFolderFromRouterWalk:
@@ -150,10 +140,37 @@ class TestRegisterComponentsFolderFromRouterWalk:
         backend._registry.register(info)
         backend.import_all_component_modules()
 
+    def test_lazy_component_modules_skips_eager_load(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """With ``LAZY_COMPONENT_MODULES=True`` modules load on resolve, not at discovery."""
+        root = tmp_path / "_components"
+        comp_dir = root / "lazy_c"
+        comp_dir.mkdir(parents=True)
+        (comp_dir / "component.py").write_text("# lazy\n")
+        (comp_dir / "component.djx").write_text("<div/>")
 
-# ---------------------------------------------------------------------------
-# TestGetComponent
-# ---------------------------------------------------------------------------
+        config = dict(min_component_config)
+        config["DIRS"] = [str(root)]
+
+        with override_settings(
+            NEXT_FRAMEWORK={
+                "DEFAULT_COMPONENT_BACKENDS": [config],
+                "LAZY_COMPONENT_MODULES": True,
+            },
+        ):
+            backend = FileComponentsBackend(config)
+            with patch.object(
+                backend._module_loader, "load", wraps=backend._module_loader.load
+            ) as load_spy:
+                backend._ensure_loaded()
+                pre_resolve_calls = load_spy.call_count
+                info = backend.get_component("lazy_c", comp_dir / "component.djx")
+                post_resolve_calls = load_spy.call_count
+
+        assert pre_resolve_calls == 0
+        assert info is not None
+        assert post_resolve_calls == 1
 
 
 class TestGetComponent:
@@ -165,11 +182,6 @@ class TestGetComponent:
             mock_mgr.get_component.return_value = None
             assert get_component("x", Path("/t")) is None
             mock_mgr.get_component.assert_called_once_with("x", Path("/t"))
-
-
-# ---------------------------------------------------------------------------
-# TestLoadComponentTemplate
-# ---------------------------------------------------------------------------
 
 
 class TestLoadComponentTemplate:
@@ -200,11 +212,6 @@ class TestLoadComponentTemplate:
             is_simple=True,
         )
         assert load_component_template(info) is None
-
-
-# ---------------------------------------------------------------------------
-# TestRenderComponent
-# ---------------------------------------------------------------------------
 
 
 class TestRenderComponent:
@@ -307,11 +314,6 @@ class TestRenderComponent:
             is_simple=True,
         )
         assert render_component(info, {}) == ""
-
-
-# ---------------------------------------------------------------------------
-# TestComponentRenderers
-# ---------------------------------------------------------------------------
 
 
 class TestComponentRenderers:
@@ -487,11 +489,6 @@ class TestComponentRenderers:
         assert "<b>" in html
 
 
-# ---------------------------------------------------------------------------
-# TestInjectComponentContext
-# ---------------------------------------------------------------------------
-
-
 class TestInjectComponentContext:
     """_inject_component_context early exits."""
 
@@ -503,11 +500,6 @@ class TestInjectComponentContext:
         data: dict[str, object] = {"keep": 1}
         _inject_component_context(info, data, None)
         assert data == {"keep": 1}
-
-
-# ---------------------------------------------------------------------------
-# TestGetComponentPathsForWatch
-# ---------------------------------------------------------------------------
 
 
 class TestGetComponentPathsForWatch:

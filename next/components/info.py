@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 
@@ -21,6 +21,15 @@ class ComponentInfo:
     template_path: Path | None
     module_path: Path | None
     is_simple: bool
+    resolved_scope_root: Path = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        """Freeze the resolved form of `scope_root` once at construction."""
+        try:
+            resolved = self.scope_root.resolve()
+        except OSError:
+            resolved = self.scope_root
+        object.__setattr__(self, "resolved_scope_root", resolved)
 
     @property
     def scope_key(self) -> tuple[str, Path, str]:

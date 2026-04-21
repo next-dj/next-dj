@@ -19,11 +19,6 @@ from next.components import (
 from next.static import StaticCollector
 
 
-# ---------------------------------------------------------------------------
-# TestComponentContextManager
-# ---------------------------------------------------------------------------
-
-
 class TestComponentContextManager:
     """Tests for ComponentContextManager."""
 
@@ -111,11 +106,6 @@ class TestComponentContextManager:
 
         component._registry.register(path, "x", stable)
         component._registry.register(path, "x", stable)
-
-
-# ---------------------------------------------------------------------------
-# TestComponentContextRegistryInternals
-# ---------------------------------------------------------------------------
 
 
 class TestComponentContextRegistryInternals:
@@ -242,11 +232,6 @@ class TestComponentContextRegistryInternals:
             reg.register(p, "slot", u2)
 
 
-# ---------------------------------------------------------------------------
-# TestComponentContextManagerFrames
-# ---------------------------------------------------------------------------
-
-
 class TestComponentContextManagerFrames:
     """How ComponentContextManager finds the caller's file."""
 
@@ -325,11 +310,6 @@ class TestComponentContextManagerFrames:
         assert funcs[0].key == "slot"
 
 
-# ---------------------------------------------------------------------------
-# TestContextFunctionSerialize
-# ---------------------------------------------------------------------------
-
-
 class TestContextFunctionSerialize:
     """ContextFunction.serialize controls JavaScript context exposure."""
 
@@ -347,11 +327,6 @@ class TestContextFunctionSerialize:
         """When omitted, serialize defaults to False."""
         fn = ContextFunction(func=dict, key=None)
         assert fn.serialize is False
-
-
-# ---------------------------------------------------------------------------
-# TestComponentContextRegistrySerialize
-# ---------------------------------------------------------------------------
 
 
 class TestComponentContextRegistrySerialize:
@@ -382,11 +357,6 @@ class TestComponentContextRegistrySerialize:
         reg.register(path, "key", get_val)
         (fn,) = reg.get_functions(path)
         assert fn.serialize is False
-
-
-# ---------------------------------------------------------------------------
-# TestInjectComponentContextSerialize
-# ---------------------------------------------------------------------------
 
 
 class TestInjectComponentContextSerialize:

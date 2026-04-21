@@ -9,7 +9,7 @@ from next.urls import (
     RouterBackend,
     RouterFactory,
 )
-from tests.support import file_router_backend_from_params, named_temp_py
+from tests.support import file_router_backend_from_params
 
 
 class TestRouterBackend:
@@ -154,6 +154,17 @@ class TestFileRouterBackend:
         ]
         apps = list(router._get_installed_apps())
         assert apps == ["myapp"]
+
+    def test_get_app_pages_path_returns_cached_entry_without_reimporting(
+        self, router
+    ) -> None:
+        """A second lookup returns the cached value without hitting `__import__`."""
+        sentinel = Path("/sentinel/pages")
+        router._app_pages_path_cache["cached_app"] = sentinel
+        with patch("builtins.__import__") as mock_import:
+            result = router._get_app_pages_path("cached_app")
+        assert result is sentinel
+        mock_import.assert_not_called()
 
     @pytest.mark.parametrize(
         ("test_case", "import_side_effect", "file_path", "expected_result"),
@@ -419,27 +430,24 @@ class TestFileRouterBackend:
                 assert len(pages) == 2
                 assert any("home" in str(page[0]) for page in pages)
 
-    def test_create_url_pattern_with_args_parameter(self) -> None:
+    def test_create_url_pattern_with_args_parameter(self, tmp_path) -> None:
         """View wrapper accepts args string when URL pattern includes [[args]]."""
         router = FileRouterBackend()
 
-        with (
-            named_temp_py(
-                "def render(request, **kwargs):\n    return 'response'"
-            ) as temp_file,
-            patch("next.urls.backends.page.render", return_value="mocked response"),
-        ):
-            pattern = page.create_url_pattern(
-                "test/[[args]]",
-                temp_file,
-                router._url_parser,
-            )
-            assert pattern is not None
+        page_py = tmp_path / "page.py"
+        page_py.write_text(
+            "def render(request, args):\n    return 'response-' + args\n"
+        )
 
-            if hasattr(pattern, "callback"):
-                view_func = pattern.callback
-                result = view_func(Mock(), args="arg1/arg2/arg3")
-                assert result is not None
+        pattern = page.create_url_pattern(
+            "test/[[args]]",
+            page_py,
+            router._url_parser,
+        )
+        assert pattern is not None
+        assert pattern.callback is not None
+        response = pattern.callback(Mock(), args="arg1/arg2/arg3")
+        assert response.content == b"response-arg1/arg2/arg3"
 
 
 class TestRouterFactory:

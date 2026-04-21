@@ -269,6 +269,51 @@ class TestAssetDiscoveryModuleLists:
         discovery.discover_page_assets(page_path, collector2)
         assert [a.url for a in collector2.styles()] == ["https://c.example/a.css"]
 
+    def test_module_list_and_layout_caches_evict_oldest(
+        self,
+        tmp_path: Path,
+        file_backend: StaticBackend,
+        monkeypatch,
+    ) -> None:
+        """Both module-list and layout-dir caches drop the oldest key past the limit."""
+        from next.static import discovery as discovery_mod
+
+        monkeypatch.setattr(discovery_mod, "_MODULE_LIST_CACHE_MAX_SIZE", 1)
+        monkeypatch.setattr(discovery_mod, "_LAYOUT_DIR_CACHE_MAX_SIZE", 1)
+
+        provider = _Provider(file_backend, (tmp_path.resolve(),))
+        discovery = AssetDiscovery(provider)
+        collector = StaticCollector()
+
+        # Two parseable pages exercise the happy-path eviction (line after the
+        # successful cache write). A third, broken page exercises the "module is
+        # None" eviction branch.
+        for i in range(2):
+            ok_dir = tmp_path / f"ok_{i}"
+            ok_dir.mkdir()
+            ok_page = ok_dir / "page.py"
+            ok_page.write_text(f'styles = ["https://c.example/a{i}.css"]\n')
+            discovery.discover_page_assets(ok_page, collector)
+
+        broken_dir = tmp_path / "broken"
+        broken_dir.mkdir()
+        broken_page = broken_dir / "page.py"
+        broken_page.write_text("this is not valid python =====\n")
+        discovery.discover_page_assets(broken_page, collector)
+
+        # Oldest module-list key evicted after exceeding max size.
+        assert len(discovery._module_list_cache) <= 1
+
+        # Layout-dir cache eviction runs once per page with layouts above it.
+        for i in range(3):
+            sub = tmp_path / f"layout_case_{i}"
+            sub.mkdir()
+            (sub / "layout.djx").write_text("<x/>")
+            page = sub / "page.py"
+            page.write_text("")
+            discovery._find_layout_directories(page.resolve(), tmp_path.resolve())
+        assert len(discovery._layout_dir_cache) <= 1
+
 
 class TestAssetDiscoveryComponents:
     def test_simple_component_yields_nothing(

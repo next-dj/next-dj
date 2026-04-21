@@ -74,19 +74,41 @@ def _url_kwargs_from_resolver_or_post(request: HttpRequest) -> dict[str, object]
     return {}
 
 
+def _is_model_instance(obj: object) -> bool:
+    """Return True when `obj` quacks like a Django model instance."""
+    meta = getattr(obj, "_meta", None)
+    return meta is not None and hasattr(meta, "model")
+
+
+def _build_form(
+    form_class: type[django_forms.Form],
+    initial_data: object,
+    *,
+    request: HttpRequest | None,
+) -> django_forms.Form:
+    """Build a form, bound to POST data when `request` is given."""
+    post_data = request.POST if request is not None else None
+    files = request.FILES if request is not None and hasattr(request, "FILES") else None
+    bound = request is not None
+    if _is_model_instance(initial_data):
+        if not issubclass(form_class, BaseModelForm):
+            msg = "instance parameter only supported for ModelForm"
+            raise TypeError(msg)
+        if bound:
+            return form_class(post_data, files, instance=initial_data)
+        return form_class(instance=initial_data)
+    initial = cast("dict[str, Any] | None", initial_data)
+    if bound:
+        return form_class(post_data, files, initial=initial)
+    return form_class(initial=initial)
+
+
 def _form_from_initial_data(
     form_class: type[django_forms.Form],
     initial_data: object,
 ) -> django_forms.Form:
     """Build an unbound form from `get_initial` result (dict or model instance)."""
-    meta = getattr(initial_data, "_meta", None)
-    is_model_instance = meta is not None and hasattr(meta, "model")
-    if is_model_instance:
-        if issubclass(form_class, BaseModelForm):
-            return form_class(instance=initial_data)
-        msg = "instance parameter only supported for ModelForm"
-        raise TypeError(msg)
-    return form_class(initial=cast("dict[str, Any] | None", initial_data))
+    return _build_form(form_class, initial_data, request=None)
 
 
 def _form_action_context_callable(
@@ -121,23 +143,7 @@ def _bind_form_for_post(
     initial_data: object,
 ) -> django_forms.Form:
     """Return a bound form for POST validation using initial or model instance."""
-    files = request.FILES if hasattr(request, "FILES") else None
-    meta = getattr(initial_data, "_meta", None)
-    is_model_instance = meta is not None and hasattr(meta, "model")
-    if is_model_instance:
-        if issubclass(form_class, BaseModelForm):
-            return form_class(
-                request.POST,
-                files,
-                instance=initial_data,
-            )
-        msg = "instance parameter only supported for ModelForm"
-        raise TypeError(msg)
-    return form_class(
-        request.POST,
-        files,
-        initial=cast("dict[str, Any] | None", initial_data),
-    )
+    return _build_form(form_class, initial_data, request=request)
 
 
 def _normalize_handler_response(

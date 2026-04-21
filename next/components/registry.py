@@ -13,6 +13,7 @@ from the registry and caches per-template results.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 
@@ -21,6 +22,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .info import ComponentInfo
+
+
+_VISIBILITY_CACHE_MAX_SIZE = 2048
 
 
 class ComponentRegistry:
@@ -90,8 +94,12 @@ class ComponentVisibilityResolver:
     def __init__(self, registry: ComponentRegistry) -> None:
         """Bind the resolver to a `ComponentRegistry` and allocate caches."""
         self._registry = registry
-        self._path_cache: dict[tuple[Path, Path], list[str] | None] = {}
-        self._result_cache: dict[Path, Mapping[str, ComponentInfo]] = {}
+        self._path_cache: OrderedDict[tuple[Path, Path], list[str] | None] = (
+            OrderedDict()
+        )
+        self._result_cache: OrderedDict[Path, Mapping[str, ComponentInfo]] = (
+            OrderedDict()
+        )
         self._scope_index: dict[Path, list[ComponentInfo]] = {}
         self._scope_index_registry_version = -1
         self._cached_registry_version = -1
@@ -101,8 +109,7 @@ class ComponentVisibilityResolver:
             return
         self._scope_index = {}
         for ci in self._registry.get_all():
-            root = ci.scope_root.resolve()
-            self._scope_index.setdefault(root, []).append(ci)
+            self._scope_index.setdefault(ci.resolved_scope_root, []).append(ci)
         self._scope_index_registry_version = self._registry.version
 
     def _candidate_components(self, template_path: Path) -> list[ComponentInfo]:
@@ -132,6 +139,7 @@ class ComponentVisibilityResolver:
             self._cached_registry_version = self._registry.version
 
         if template_path in self._result_cache:
+            self._result_cache.move_to_end(template_path)
             return self._result_cache[template_path]
 
         candidates: list[tuple[int, str, ComponentInfo]] = []
@@ -150,6 +158,8 @@ class ComponentVisibilityResolver:
                 seen.add(name)
 
         self._result_cache[template_path] = result
+        if len(self._result_cache) > _VISIBILITY_CACHE_MAX_SIZE:
+            self._result_cache.popitem(last=False)
         return result
 
     def _calculate_visibility_score(
@@ -171,11 +181,14 @@ class ComponentVisibilityResolver:
         self, template_path: Path, scope_root: Path
     ) -> list[str] | None:
         cache_key = (template_path, scope_root)
-        if cache_key not in self._path_cache:
-            self._path_cache[cache_key] = self._compute_relative_parts(
-                template_path, scope_root
-            )
-        return self._path_cache[cache_key]
+        if cache_key in self._path_cache:
+            self._path_cache.move_to_end(cache_key)
+            return self._path_cache[cache_key]
+        value = self._compute_relative_parts(template_path, scope_root)
+        self._path_cache[cache_key] = value
+        if len(self._path_cache) > _VISIBILITY_CACHE_MAX_SIZE:
+            self._path_cache.popitem(last=False)
+        return value
 
     def _compute_relative_parts(
         self, template_path: Path, scope_root: Path

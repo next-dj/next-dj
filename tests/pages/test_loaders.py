@@ -1030,6 +1030,34 @@ class TestContextProcessors:
             assert "good_value" in result
             mock_logger.warning.assert_called_once()
 
+    def test_strict_context_reraises_processor_error(
+        self, page_instance, tmp_path
+    ) -> None:
+        """`STRICT_CONTEXT=True` turns processor errors into hard failures."""
+        from typing import Never
+
+        import pytest
+
+        page_file = tmp_path / "page.py"
+        page_instance.register_template(page_file, "<h1>{{ title }}</h1>")
+
+        mock_request = HttpRequest()
+        mock_request.META = {}
+
+        def error_processor(request) -> Never:
+            msg = "boom"
+            raise ValueError(msg)
+
+        with (
+            override_settings(NEXT_FRAMEWORK={"STRICT_CONTEXT": True}),
+            patch(
+                "next.pages.manager._get_context_processors",
+                return_value=[error_processor],
+            ),
+            pytest.raises(ValueError, match="boom"),
+        ):
+            page_instance.render(page_file, mock_request, title="Test Title")
+
     def test_render_with_context_processor_non_dict_return(
         self,
         page_instance,
