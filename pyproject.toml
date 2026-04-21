@@ -128,7 +128,16 @@ omit = [
     "*/wsgi.py",
     "*/asgi.py",
     # core
-    "next/checks.py",
+    "*/next/checks.py",
+]
+
+# Collapse source-tree and site-packages paths so coverage reports, omits, and
+# the fail-under threshold behave identically whether the package is imported
+# from `next/` (editable/dev) or from a wheel installed into a venv (CI).
+[tool.coverage.paths]
+source = [
+    "next/",
+    "*/site-packages/next/",
 ]
 
 [tool.coverage.report]

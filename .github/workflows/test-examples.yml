@@ -19,25 +19,31 @@ jobs:
       with:
         sparse-checkout: |
           pyproject.toml
-          uv.lock
-          build_hooks.py
           Makefile
           examples
           .github
         sparse-checkout-cone-mode: false
-    - name: Download prebuilt wheel
+    - name: Download prebuilt wheel and requirements
       uses: actions/download-artifact@v4
       with:
         name: next-dj-dist
         path: dist
-    - uses: ./.github/actions/setup-python-uv
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-        django-version: ${{ matrix.django-version }}
-        cache: "true"
-        cache-key-suffix: django-${{ matrix.django-version }}-py-${{ matrix.python-version }}
-        install-project: "false"
-    - name: Install next-dj from wheel
-      run: uv pip install --no-deps --force-reinstall dist/*.whl
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        version: "0.11.2"
+    - name: Create venv and install wheel + dev requirements
+      run: |
+        uv venv --python ${{ matrix.python-version }}
+        uv pip install -r dist/requirements-dev.txt
+        uv pip install --no-deps --force-reinstall dist/*.whl
+    - name: Install Django ${{ matrix.django-version }}
+      run: uv pip install "django==${{ matrix.django-version }}"
     - name: Run example tests
+      env:
+        PYTEST: ${{ github.workspace }}/.venv/bin/pytest
       run: make test-examples
