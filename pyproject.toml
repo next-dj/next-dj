@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Next-gen framework for Django developers"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 keywords = ["django", "framework", "low-code", "frontend", "full-stack framework"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -22,7 +22,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -66,8 +65,19 @@ docs = [
 source = "code"
 path = "next/__init__.py"
 
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "build_hooks.py"
+
+[tool.hatch.build.targets.sdist.hooks.custom]
+path = "build_hooks.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["next"]
+artifacts = ["next/static/next/next.min.js"]
+exclude = [
+    "next/static/next/next.ts",
+    "next/static/next/next.test.ts",
+]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -76,15 +86,19 @@ include = [
     "LICENSE",
     "CONTRIBUTING.md",
     "pyproject.toml",
+    "build_hooks.py",
+    "package.json",
+    "package-lock.json",
 ]
+artifacts = ["next/static/next/next.min.js"]
 exclude = [
+    "next/static/next/next.test.ts",
     "examples/",
     "docs/",
     "tests/",
     ".github/",
     ".gitignore",
     "Makefile",
-    "MANIFEST.in",
 ]
 
 [tool.pytest.ini_options]
@@ -113,7 +127,16 @@ omit = [
     "*/wsgi.py",
     "*/asgi.py",
     # core
-    "next/checks.py",
+    "*/next/checks.py",
+]
+
+# Collapse source-tree and site-packages paths so coverage reports, omits, and
+# the fail-under threshold behave identically whether the package is imported
+# from `next/` (editable/dev) or from a wheel installed into a venv (CI).
+[tool.coverage.paths]
+source = [
+    "next/",
+    "*/site-packages/next/",
 ]
 
 [tool.coverage.report]
@@ -144,7 +167,10 @@ exclude = [
     "migrations",
 
     # Project annotation file
-    "next/__init__.py"
+    "next/__init__.py",
+
+    # Sphinx configuration
+    "docs/conf.py",
 ]
 
 [tool.ruff.lint]
@@ -178,8 +204,10 @@ ignore = [
 "**/{test*,conftest}.py" = [
     "ANN001", "ANN201", "ANN202",
     "ARG001", "ARG002", "ARG005",
-    "S101", "D100",
-    "PLR2004", "PLR0913", "S108", "E501", "FBT003",
+    "S101", "S106", "D100", "D101", "D102", "D103", "D104", "D105", "D107",
+    "PLR2004", "PLR0913", "PLC0415", "PT011",
+    "S108", "E501", "FBT003",
+    "TC001", "TC002",
 ]
 "**/migrations/**/*.py" = ["F401", "PLR0913"]
 

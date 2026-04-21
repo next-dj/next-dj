@@ -92,6 +92,28 @@ Use Django's context processors for global template variables:
            'DEBUG': settings.DEBUG,
        }
 
+Exposing context to JavaScript
+------------------------------
+
+Add ``serialize=True`` to any ``@context`` decorator to make its return value
+available in JavaScript via ``window.Next.context``:
+
+.. code-block:: python
+
+   @context("page_meta", serialize=True)
+   def get_page_meta() -> dict:
+       return {"page": "home", "version": "1.0"}
+
+.. code-block:: javascript
+
+   const { page_meta } = window.Next.context;
+
+The framework serialises the value with ``DjangoJSONEncoder`` and emits a
+``Next._init({...})`` inline script on every page — no template changes
+needed. See :ref:`next-object` in the static-assets guide for the full
+picture: injection mechanism, conflict resolution, TypeScript declarations,
+and component-level usage.
+
 Context Priority
 ----------------
 

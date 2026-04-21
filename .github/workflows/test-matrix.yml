@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       test-command:
-        description: Command to run tests
+        description: Command to run tests (run against the wheel-installed venv, do not use `uv run`)
         required: true
         type: string
       upload-codecov:
@@ -22,29 +22,55 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14"]
         django-version: ["4.2", "5.0", "5.1", "5.2", "6.0"]
         exclude:
-          # Django 6.0 requires Python >= 3.12
-          - python-version: "3.11"
-            django-version: "6.0"
           # Django 4.2 and 5.0 don't support Python 3.13
           - python-version: "3.13"
             django-version: "4.2"
           - python-version: "3.13"
             django-version: "5.0"
+          # Python 3.14 is only supported on Django 6.0+
+          - python-version: "3.14"
+            django-version: "4.2"
+          - python-version: "3.14"
+            django-version: "5.0"
+          - python-version: "3.14"
+            django-version: "5.1"
+          - python-version: "3.14"
+            django-version: "5.2"
 
     steps:
-    - uses: actions/checkout@v5
-    - uses: ./.github/actions/setup-python-uv
+    - uses: actions/checkout@v6
+      with:
+        sparse-checkout: |
+          pyproject.toml
+          tests
+          .github
+        sparse-checkout-cone-mode: false
+    - name: Download prebuilt wheel and requirements
+      uses: actions/download-artifact@v4
+      with:
+        name: next-dj-dist
+        path: dist
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-        django-version: ${{ matrix.django-version }}
-        cache: "true"
-        cache-key-suffix: django-${{ matrix.django-version }}-py-${{ matrix.python-version }}
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        version: "0.11.2"
+    - name: Create venv and install wheel + dev requirements
+      run: |
+        uv venv --python ${{ matrix.python-version }}
+        uv pip install -r dist/requirements-dev.txt
+        uv pip install --no-deps --force-reinstall dist/*.whl
+    - name: Install Django ${{ matrix.django-version }}
+      run: uv pip install "django==${{ matrix.django-version }}"
     - name: Verify Django version
       run: |
-        uv run python -c 'import django; print(f"Django version: {django.get_version()}")'
+        .venv/bin/python -c 'import django; print(f"Django version: {django.get_version()}")'
     - name: Run tests
       run: ${{ inputs.test-command }}
     - name: Upload coverage to Codecov

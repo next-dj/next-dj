@@ -1,0 +1,8 @@
+<article class="docs-wrapper">
+    <aside class="docs-side">
+        <p class="docs-crumb">Docs</p>
+    </aside>
+    <section class="docs-content">
+        {% block template %}{% endblock template %}
+    </section>
+</article>

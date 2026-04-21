@@ -131,7 +131,7 @@ static/
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - Django 5+
 - next-dj installed (editable from the repo root is fine)
 
@@ -154,8 +154,11 @@ python manage.py runserver
 
 | URL | Description |
 |-----|-------------|
-| `/` | Home page: Bootstrap widget + two React/Babel counters |
-| `/dashboard/` | Dashboard page: Chart.js bar chart + JetBrains Mono code font |
+| `/` | Home page: Bootstrap widget + two React/Babel counters + Next-plugin demo |
+| `/dashboard/` | Dashboard: Chart.js, unkeyed `@context`, `Depends("build_metadata")`, inherited theme via `Context("theme")` |
+| `/inline/` | Inline CSS/JS demo via `{% #use_style %}` / `{% #use_script %}` blocks |
+| `/docs/guide/intro/` | Three-level nested layout chain (root → `docs/` → `docs/guide/`) |
+| `/broken/` | Page with a missing asset — demonstrates the manifest-miss error path |
 | `/static/next/layout.css` | Example of a co-located file URL |
 | `/static/next/components/counter.css` | Counter's component CSS |
 
@@ -164,6 +167,28 @@ Open the page source — you will see:
 - Bootstrap `<link>` first in `<head>` (layout `use_style`).
 - `/static/next/layout.css`, the template CSS, and page-level font URLs following in cascade order.
 - Three `<script>` tags for React, ReactDOM and Babel, each appearing exactly **once** before the three `<script type="text/babel">` counter blocks (one shared `Counter` definition + two per-instance mounts), even though the counter component is rendered twice. The Babel blocks themselves live inside the `{% collect_scripts %}` slot (bottom of `<body>`) because they were wrapped in `{% #use_script %}` — not where the `<div>` mount point is drawn.
+
+### Running collectstatic
+
+The example ships the `NextStaticFilesFinder`, so Django's
+`collectstatic` command picks up every co-located `layout.*`,
+`template.*`, and `component.*` file and writes it under
+`STATIC_ROOT/next/…` with the logical route name. A dry-run never
+touches the filesystem and is safe to execute against a bare checkout:
+
+```bash
+cd examples/static
+uv run python manage.py collectstatic --noinput --dry-run --ignore='*.py'
+```
+
+`--ignore='*.py'` keeps the page / component / layout modules out of
+`STATIC_ROOT` — they live inside the app's `pages/` tree alongside the
+assets. In production combine the finder with
+`ManifestStaticFilesStorage` to get content-hashed URLs; the default
+`StaticFilesBackend` resolves those URLs transparently via
+`staticfiles_storage.url(...)`. When an asset is referenced but missing
+from the manifest the backend raises a descriptive `RuntimeError` —
+see `pages/broken/page.py` and the matching test in `tests/tests.py`.
 
 ### Running Tests
 
@@ -181,6 +206,77 @@ uv run pytest tests/ -v --no-cov
 ```
 
 The test suite renders the home and dashboard pages with Django's `Client`, verifies cascade order, counter mount points, dedup of the React CDNs, and staticfiles-backed URL resolution.
+
+## JavaScript Context with the Next Object
+
+next-dj automatically injects a global `Next` object on every page — no configuration needed. Mark specific context functions with `serialize=True` to expose their return values to JavaScript via `window.Next.context`.
+
+### How it works
+
+1. `{% collect_scripts %}` always emits `next.min.js` first, then an inline `Next._init({...})` call with all serialized values.
+2. `<link rel="preload" as="script">` for `next.min.js` is inserted automatically before `</head>` to prime the browser cache.
+3. `window.Next.context` is frozen — reads are safe, writes are silently ignored.
+
+### Page context (`page.py`)
+
+```python
+from next.pages import context
+
+@context("page_meta", serialize=True)
+def get_page_meta() -> dict:
+    return {"page": "home", "version": "0.4"}
+```
+
+### Component context (`component.py`)
+
+```python
+from next.components import context
+
+@context("theme", serialize=True)
+def get_theme() -> str:
+    return "dark"
+```
+
+### Vanilla JS access
+
+```js
+const ctx = window.Next.context;
+// ctx.page_meta.page  → "home"
+// ctx.theme           → "dark"
+```
+
+### React access
+
+```jsx
+function PageBadge() {
+    const ctx = window.Next.context;
+    return React.createElement("span", null, ctx.page_meta?.page || "");
+}
+ReactDOM.createRoot(document.getElementById("badge")).render(
+    React.createElement(PageBadge)
+);
+```
+
+`window.Next.context` is available synchronously when your scripts run — `next.min.js` is a blocking script tag and `Next._init` follows it immediately.
+
+### TypeScript declaration
+
+```typescript
+declare const Next: { context: Readonly<Record<string, unknown>> };
+```
+
+### Key conflict resolution
+
+When the same key is registered by both a page context and a component context, the **page value wins** (first-registration semantics). This mirrors CSS specificity: the outer scope (page) overrides the inner (component).
+
+| Source | Priority |
+|--------|----------|
+| Page `@context(serialize=True)` | Higher — registered first |
+| Component `@context(serialize=True)` | Lower — registered later |
+
+### Demo component
+
+The `next-demo` component in this example (`pages/_components/next-demo/`) reads `window.Next.context` in a plain `<script>` block and writes the values into a `<dl>` on the page. Open the home page source to see `Next._init({"page_meta": {"page": "home", ...}, "theme": "dark"})` in the scripts slot.
 
 ## Contributing
 

@@ -133,3 +133,7 @@ GitHub.sublime-settings
 !.vscode/launch.json 
 !.vscode/extensions.json 
 .history
+
+# js
+node_modules
+next/static/next/next.min.js

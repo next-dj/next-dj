@@ -19,7 +19,7 @@ from django.template import base as template_base
 from django.template.base import Node, NodeList, Parser, Token
 
 from next.components import get_component, render_component
-from next.static import static_manager
+from next.static import default_manager
 
 
 # Allow line breaks inside ``{% ... %}`` (multiline tag bodies).
@@ -140,7 +140,7 @@ class ComponentNode(Node):
 
         collector = context.get("_static_collector")
         if collector is not None and not info.is_simple:
-            static_manager.discover_component_assets(info, collector)
+            default_manager.discover_component_assets(info, collector)
 
         slots: dict[str, str] = {}
         child_chunks: list[str] = []

@@ -1,6 +1,6 @@
 {
-    "_comment": "Since there is no extension for djx yet, temporarily use the html hint for vscode",
-    "files.associations": {
-        "*.djx": "html"
-    }
+  "_comment": "Since there is no extension for djx yet, temporarily use the html hint for vscode",
+  "files.associations": {
+    "*.djx": "html"
+  }
 }

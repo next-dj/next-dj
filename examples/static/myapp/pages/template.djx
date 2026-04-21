@@ -8,6 +8,8 @@
             also ships co-located <code>template.css</code> / <code>template.js</code>.
         </p>
         {% component "widget" title="Bootstrap widget" %}
+        {% component "next-demo" %}
+        {% component "next-plugin" %}
         <div class="counter-strip mt-4">
             <h2 class="h5 mb-3">React + Babel counter (two instances, one React load)</h2>
             <p class="text-muted small mb-3">

@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
@@ -443,6 +443,19 @@ class LayoutManager:
         self._layout_registry.clear()
 
 
+@dataclass(frozen=True, slots=True)
+class ContextResult:
+    """Holds the template context dict and the JavaScript-serializable subset.
+
+    ``context_data`` contains all values to be merged into the Django template
+    context. ``js_context`` contains only the subset marked ``serialize=True``
+    and is later passed to ``Next._init`` via ``StaticCollector.add_js_context``.
+    """
+
+    context_data: dict[str, Any]
+    js_context: dict[str, Any]
+
+
 class PageContextRegistry:
     """Registers per-``page.py`` context callables and merges their output."""
 
@@ -453,7 +466,7 @@ class PageContextRegistry:
         """Initialize with an optional resolver and an empty registry."""
         self._context_registry: dict[
             Path,
-            dict[str | None, tuple[Callable[..., Any], bool]],
+            dict[str | None, tuple[Callable[..., Any], bool, bool]],
         ] = {}
         self._resolver = resolver
 
@@ -470,19 +483,30 @@ class PageContextRegistry:
         func: Callable[..., Any],
         *,
         inherit_context: bool = False,
+        serialize: bool = False,
     ) -> None:
         """Bind ``func`` to ``file_path``. Keyed vs dict-merge semantics by ``key``."""
-        self._context_registry.setdefault(file_path, {})[key] = (func, inherit_context)
+        self._context_registry.setdefault(file_path, {})[key] = (
+            func,
+            inherit_context,
+            serialize,
+        )
 
     def collect_context(
         self,
         file_path: Path,
         *args: object,
         **kwargs: object,
-    ) -> dict[str, Any]:
-        """Merge inherited layout context with this file's context callables."""
+    ) -> ContextResult:
+        """Merge inherited layout context with this file's context callables.
+
+        Returns a ``ContextResult`` that separates the full template context from
+        the JavaScript-serializable subset. The js_context uses first-registration
+        semantics so that page-level values always take priority over inherited ones.
+        """
         request = args[0] if args and isinstance(args[0], HttpRequest) else None
-        context_data = {}
+        context_data: dict[str, Any] = {}
+        js_context: dict[str, Any] = {}
         dep_cache: dict[str, Any] = {}
         dep_stack: list[str] = []
 
@@ -498,7 +522,7 @@ class PageContextRegistry:
             registry.items(),
             key=lambda item: (item[0] is not None, str(item[0] or "")),
         )
-        for key, (func, _) in ordered:
+        for key, (func, _, serialize) in ordered:
             resolved = self._get_resolver().resolve_dependencies(
                 func,
                 request=request,
@@ -507,12 +531,19 @@ class PageContextRegistry:
                 _context_data=context_data,
                 **kwargs,
             )
+            result = func(**resolved)
             if key is None:
-                context_data.update(func(**resolved))
+                context_data.update(result)
+                if serialize:
+                    for k, v in result.items():
+                        if k not in js_context:
+                            js_context[k] = v
             else:
-                context_data[key] = func(**resolved)
+                context_data[key] = result
+                if serialize and key not in js_context:
+                    js_context[key] = result
 
-        return context_data
+        return ContextResult(context_data=context_data, js_context=js_context)
 
     def _collect_inherited_context(
         self,
@@ -533,7 +564,7 @@ class PageContextRegistry:
 
             # if layout.djx exists, check for page.py with inheritable context
             if layout_file.exists() and page_file.exists():
-                for key, (func, inherit_context) in self._context_registry.get(
+                for key, (func, inherit_context, _) in self._context_registry.get(
                     page_file,
                     {},
                 ).items():
@@ -592,8 +623,13 @@ class Page:
         func_or_key: Callable[..., Any] | str | None = None,
         *,
         inherit_context: bool = False,
+        serialize: bool = False,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """Register keyed or dict-merge ``@context`` for the caller file."""
+        """Register keyed or dict-merge ``@context`` for the caller file.
+
+        Pass ``serialize=True`` to include the return value in ``Next.context``
+        so JavaScript code on the page can read it via ``window.Next.context``.
+        """
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             if callable(func_or_key):
@@ -604,6 +640,7 @@ class Page:
                     None,
                     func_or_key,
                     inherit_context=inherit_context,
+                    serialize=serialize,
                 )
             else:
                 # @context("key") usage - function result stored under key
@@ -613,6 +650,7 @@ class Page:
                     func_or_key,
                     func,
                     inherit_context=inherit_context,
+                    serialize=serialize,
                 )
             return func
 
@@ -624,7 +662,12 @@ class Page:
         *args: object,
         **kwargs: object,
     ) -> dict[str, object]:
-        """Build render context: path, kwargs, ``@context``, request, processors."""
+        """Build render context: path, kwargs, ``@context``, request, processors.
+
+        The returned dict includes ``_next_js_context`` holding the subset of
+        values marked ``serialize=True``. The caller (``render``) pops that key
+        and seeds the ``StaticCollector`` with it before creating the template context.
+        """
         context_data: dict[str, object] = {}
         template_djx = file_path.parent / "template.djx"
         context_data["current_template_path"] = (
@@ -632,9 +675,12 @@ class Page:
         )
         context_data["current_page_module_path"] = str(file_path.resolve())
         context_data.update(kwargs)
-        context_data.update(
-            self._context_manager.collect_context(file_path, *args, **kwargs),
+
+        context_result = self._context_manager.collect_context(
+            file_path, *args, **kwargs
         )
+        context_data.update(context_result.context_data)
+        context_data["_next_js_context"] = context_result.js_context
 
         request: HttpRequest | None = None
         if args and isinstance(args[0], HttpRequest):
@@ -678,14 +724,17 @@ class Page:
         template_str = self._template_registry[file_path]
         context_data = self.build_render_context(file_path, *args, **kwargs)
 
-        from .static import StaticCollector, static_manager  # noqa: PLC0415
+        from .static import StaticCollector, default_manager  # noqa: PLC0415
 
         collector = StaticCollector()
-        static_manager.discover_page_assets(file_path, collector)
+        js_context: dict[str, object] = context_data.pop("_next_js_context", {})  # type: ignore[assignment]
+        for js_key, js_value in js_context.items():
+            collector.add_js_context(js_key, js_value)
+        default_manager.discover_page_assets(file_path, collector)
         context_data["_static_collector"] = collector
 
         html = Template(template_str).render(DjangoTemplateContext(context_data))
-        return static_manager.inject(html, collector)
+        return cast("str", default_manager.inject(html, collector, page_path=file_path))
 
     def _create_view_function(
         self,

@@ -7,3 +7,17 @@ repos:
     rev: 0.11.2
     hooks:
       - id: uv-lock
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier
+        entry: npm run format:check
+        language: system
+        files: '\.(ts|mjs)$'
+        pass_filenames: false
+      - id: eslint
+        name: eslint
+        entry: npm run lint:js
+        language: system
+        files: '\.(ts|mjs)$'
+        pass_filenames: false

@@ -76,7 +76,7 @@ class NextFrameworkSettings:
         static_mod = importlib.import_module("next.static")
         urls_mod.router_manager._reload_config()
         components_mod.components_manager._reload_config()
-        static_mod.static_manager._reload_config()
+        static_mod.reset_default_manager()
 
     def _raw_user(self) -> dict[str, Any] | None:
         raw = getattr(settings, USER_SETTING, None)

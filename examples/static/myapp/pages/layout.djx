@@ -15,6 +15,9 @@
             <div class="navbar-nav">
                 <a class="nav-link" href="/">Home</a>
                 <a class="nav-link" href="/dashboard/">Dashboard</a>
+                <a class="nav-link" href="/inline/">Inline</a>
+                <a class="nav-link" href="/docs/guide/intro/">Nested layouts</a>
+                <a class="nav-link" href="/broken/">Broken asset</a>
             </div>
         </div>
     </nav>

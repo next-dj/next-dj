@@ -26,6 +26,7 @@ from django.utils.module_loading import import_string
 from .components import ComponentsManager, FileComponentsBackend
 from .conf import NextFrameworkSettings, next_framework_settings
 from .pages import _load_python_module
+from .static import checks as _static_checks  # noqa: F401 — register checks
 from .urls import (
     FileRouterBackend,
     RouterBackend,

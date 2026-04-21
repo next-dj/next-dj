@@ -15,17 +15,50 @@ permissions:
   pull-requests: read
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 24
+        cache: 'npm'
+    - name: Install Node dependencies
+      run: npm ci
+    - name: Build next.min.js
+      run: npm run build:next
+    - uses: ./.github/actions/setup-python-uv
+    - name: Build wheel and sdist
+      env:
+        NEXT_DJ_SKIP_JS_BUILD: "1"
+      run: uv build
+    - name: Export locked dev requirements
+      run: uv export --no-hashes --group dev --format requirements-txt --no-emit-project --output-file dist/requirements-dev.txt
+    - name: Upload dist artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: next-dj-dist
+        path: dist/
+        retention-days: 1
+        if-no-files-found: error
+
   test:
+    needs: build
     uses: ./.github/workflows/test-matrix.yml
     with:
-      test-command: "uv run pytest tests/ -v --junitxml=junit.xml --cov=next --cov-report=xml --cov-report=term-missing --cov-fail-under=100"
+      test-command: ".venv/bin/pytest tests/ -v --junitxml=junit.xml --cov=next --cov-report=xml --cov-report=term-missing --cov-fail-under=100"
       upload-codecov: true
+    secrets: inherit
+
+  test-examples:
+    needs: build
+    uses: ./.github/workflows/test-examples.yml
     secrets: inherit
 
   lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - uses: ./.github/actions/setup-python-uv
     - name: Lint with ruff
       run: uv run ruff check next/
@@ -37,7 +70,7 @@ jobs:
   type-check:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - uses: ./.github/actions/setup-python-uv
     - name: Type check with mypy
       run: uv run mypy next/
@@ -45,7 +78,7 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - uses: ./.github/actions/setup-python-uv
     - name: Check for typos
       run: uv run pre-commit run typos --all-files
@@ -57,7 +90,7 @@ jobs:
     env:
       DJANGO_SETTINGS_MODULE: django.conf.global_settings
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-python-uv
       - name: Install docs dependencies
         run: uv sync --locked --group docs
@@ -66,11 +99,30 @@ jobs:
       - name: Check documentation links
         run: uv run sphinx-build -b linkcheck docs docs/_build
 
+  test-js:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 24
+        cache: 'npm'
+    - name: Install Node dependencies
+      run: npm ci
+    - name: Check TypeScript formatting (Prettier)
+      run: npm run format:check
+    - name: Lint TypeScript (ESLint)
+      run: npm run lint:js
+    - name: Build next.min.js
+      run: npm run build:next
+    - name: Run JavaScript unit tests
+      run: npm run test:js
+
   dependency-review:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - uses: actions/dependency-review-action@v4
       with:
         fail-on-severity: moderate

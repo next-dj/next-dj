@@ -13,6 +13,7 @@ omit =
     */env/*
     ../../next/*
     ../../tests/*
+    */site-packages/*
 
 [report]
 exclude_lines =
@@ -26,3 +27,4 @@ exclude_lines =
     if __name__ == .__main__.:
     class .*\bProtocol\):
     @(abc\.)?abstractmethod
+    if TYPE_CHECKING:

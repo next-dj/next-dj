@@ -24,7 +24,7 @@ labels: ["bug"]
 
 ## Environment
 
-<!-- next.dj is tested on Python 3.11+. CI runs 3.11–3.14 against supported Django versions. Prefer reproducing with `make` / `uv run`, not a bare system Python. -->
+<!-- next.dj is tested on Python 3.12+. CI runs 3.12–3.14 against supported Django versions. Prefer reproducing with `make` / `uv run`, not a bare system Python. -->
 
 - next-dj version (e.g. PyPI release or git commit):
 - Python version:

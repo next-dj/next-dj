@@ -1,0 +1,22 @@
+{
+  "scripts": {
+    "build:next": "esbuild next/static/next/next.ts --bundle --minify --target=es2020 --outfile=next/static/next/next.min.js",
+    "test:js": "vitest run",
+    "lint:js": "eslint",
+    "lint:js:fix": "eslint --fix",
+    "format": "prettier --write \"next/static/next/*.ts\" \"vitest.config.ts\" \"eslint.config.mjs\"",
+    "format:check": "prettier --check \"next/static/next/*.ts\" \"vitest.config.ts\" \"eslint.config.mjs\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@vitest/coverage-v8": "^4.1.4",
+    "@vitest/eslint-plugin": "^1.6.16",
+    "esbuild": "^0.25",
+    "eslint": "^10.2.1",
+    "eslint-config-prettier": "^10.1.8",
+    "jsdom": "^29.0.2",
+    "prettier": "^3.8.3",
+    "typescript-eslint": "^8.58.2",
+    "vitest": "^4.1.4"
+  }
+}

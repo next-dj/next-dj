@@ -33,12 +33,13 @@ Co-located CSS/JS discovery, staticfiles integration via
 ``next.static.NextStaticFilesFinder``, and the ``{% collect_styles %}`` /
 ``{% collect_scripts %}`` / ``{% use_style %}`` / ``{% use_script %}``
 template tags. See :doc:`/content/guide/static-assets`
-for usage, settings, and examples.
+for usage, settings, and examples. ``next.static`` re-exports the public
+surface of its submodules; :doc:`/content/api/static` documents each
+submodule individually.
 
-.. automodule:: next.static
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. toctree::
+
+   static
 
 URLs and routing (next.urls)
 ----------------------------
