@@ -570,6 +570,43 @@ for the same file is inserted immediately before ``</head>``:
 This gives the browser an early download signal while the rest of the page
 continues to render.
 
+Controlling injection: ``NEXT_JS_OPTIONS``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default ``next.min.js`` is injected automatically. Override the behaviour
+through the ``NEXT_JS_OPTIONS`` dict in ``NEXT_FRAMEWORK``:
+
+.. code-block:: python
+
+   NEXT_FRAMEWORK = {
+       "NEXT_JS_OPTIONS": {
+           "policy": "auto",   # "auto" | "disabled" | "manual"
+           "preload_template": '<link rel="preload" as="script" href="{url}">',
+           "script_tag_template": '<script src="{url}"></script>',
+           "init_template": '<script>Next._init({payload});</script>',
+       },
+   }
+
+The ``policy`` key takes values from
+:class:`~next.static.ScriptInjectionPolicy`:
+
+- ``"auto"`` (default). The ``next.min.js`` ``<script>`` and the
+  ``Next._init(...)`` call are prepended to ``{% collect_scripts %}`` and a
+  ``<link rel="preload">`` hint is inserted in ``<head>``.
+- ``"disabled"``. Nothing is injected — no ``next.min.js`` tag, no
+  ``Next._init`` call, no preload hint. Use this for pure server-side-rendered
+  pages that do not rely on ``window.Next`` or on client-side context.
+- ``"manual"``. Auto-injection is skipped, but the fragments remain available
+  via :class:`~next.static.NextScriptBuilder` (``builder.preload_link()``,
+  ``builder.script_tag()``, ``builder.init_script(ctx)``) so templates or a
+  custom tag can emit them where needed.
+
+The three ``*_template`` keys override the default HTML fragments. The preload
+and script templates must contain ``{url}``; the init template must contain
+``{payload}`` (replaced with the JSON-serialised JS context). Policy values
+may be supplied as strings (``"auto"``/``"disabled"``/``"manual"``) or as
+``ScriptInjectionPolicy`` enum members directly.
+
 Exposing Python values via ``serialize=True``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

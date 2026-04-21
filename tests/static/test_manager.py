@@ -169,6 +169,29 @@ class TestInjectScriptsDisabled:
         assert "Next._init" not in out
         assert JS_URL in out
 
+    def test_next_js_options_setting_honored(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        """`NEXT_JS_OPTIONS` from user settings controls the injection policy."""
+        collector = StaticCollector()
+        collector.add(StaticAsset(url=JS_URL, kind="js"))
+        fresh_manager._ensure_backends()
+        with (
+            override_settings(
+                NEXT_FRAMEWORK={"NEXT_JS_OPTIONS": {"policy": "disabled"}}
+            ),
+            mock.patch(
+                "next.static.manager.staticfiles_storage.url",
+                return_value="/static/next/next.min.js",
+            ),
+        ):
+            html = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+            out = fresh_manager.inject(html, collector)
+
+        assert "/static/next/next.min.js" not in out
+        assert "Next._init" not in out
+        assert JS_URL in out
+
 
 class TestInjectPreloadHint:
     def test_preload_prepended_before_head_close(

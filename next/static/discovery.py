@@ -24,9 +24,11 @@ round of resolution on every logical-name lookup.
 from __future__ import annotations
 
 import logging
+import os
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from next import pages
+from next.pages import loaders as pages_loaders
 
 from .assets import _KIND_CSS, _KIND_JS, StaticAsset
 from .signals import asset_registered
@@ -43,6 +45,31 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+_MODULE_LIST_CACHE_MAX_SIZE = 2048
+_LAYOUT_DIR_CACHE_MAX_SIZE = 2048
+
+
+def _rel_path_str(child: Path, root: Path) -> str | None:
+    """Return the forward-slashed path of `child` relative to `root`.
+
+    Both operands must already be resolved absolute paths. Returns an
+    empty string when `child == root`, and `None` when `child` is not
+    nested under `root`. Skips the per-segment work of
+    `Path.relative_to().parts`.
+    """
+    child_str = os.fspath(child)
+    root_str = os.fspath(root)
+    if child_str == root_str:
+        return ""
+    prefix = root_str + os.sep
+    if not child_str.startswith(prefix):  # pragma: no cover
+        return None
+    rel = child_str[len(prefix) :]
+    if os.sep != "/":  # pragma: no cover
+        rel = rel.replace(os.sep, "/")
+    return rel
 
 
 @runtime_checkable
@@ -128,6 +155,7 @@ class PathResolver:
     ) -> None:
         """Store the page-roots provider callable consulted on every lookup."""
         self._provider = page_roots_provider
+        self._find_page_root_cache: dict[Path, Path | None] = {}
 
     def page_roots(self) -> tuple[Path, ...]:
         """Return the current tuple of page tree roots from the provider."""
@@ -135,10 +163,15 @@ class PathResolver:
 
     def find_page_root(self, path: Path) -> Path | None:
         """Return the page tree root that contains the path, or None."""
+        cached = self._find_page_root_cache.get(path)
+        if cached is not None or path in self._find_page_root_cache:
+            return cached
         resolved_parent = path.parent.resolve()
         for root in self.page_roots():
             if resolved_parent.is_relative_to(root):
+                self._find_page_root_cache[path] = root
                 return root
+        self._find_page_root_cache[path] = None
         return None
 
     def logical_name_for_template(
@@ -153,12 +186,10 @@ class PathResolver:
         """
         if page_root is None:
             return self._fallback(template_dir)
-        try:
-            rel = template_dir.relative_to(page_root)
-        except ValueError:  # pragma: no cover
+        rel = _rel_path_str(template_dir, page_root)
+        if rel is None:  # pragma: no cover
             return self._fallback(template_dir)
-        parts = rel.parts
-        return "/".join(parts) if parts else "index"
+        return rel or "index"
 
     def logical_name_for_layout(
         self,
@@ -172,14 +203,10 @@ class PathResolver:
         """
         if page_root is None:
             return f"{self._fallback(layout_dir)}/layout"
-        try:
-            rel = layout_dir.relative_to(page_root)
-        except ValueError:  # pragma: no cover
+        rel = _rel_path_str(layout_dir, page_root)
+        if rel is None:  # pragma: no cover
             return f"{self._fallback(layout_dir)}/layout"
-        parts = rel.parts
-        if parts:
-            return "/".join((*parts, "layout"))
-        return "layout"
+        return f"{rel}/layout" if rel else "layout"
 
     @staticmethod
     def _fallback(directory: Path) -> str:
@@ -207,8 +234,10 @@ class AssetDiscovery:
         self._provider = provider
         self._resolver = resolver or PathResolver(provider.page_roots)
         self._stems = stems or default_stems
-        self._module_list_cache: dict[Path, tuple[list[str], list[str]]] = {}
-        self._layout_dir_cache: dict[Path, list[Path]] = {}
+        self._module_list_cache: OrderedDict[Path, tuple[list[str], list[str]]] = (
+            OrderedDict()
+        )
+        self._layout_dir_cache: OrderedDict[Path, list[Path]] = OrderedDict()
 
     def discover_page_assets(
         self,
@@ -294,16 +323,22 @@ class AssetDiscovery:
         so the key is normalised here as a safety net.
         """
         cache_key = module_path if module_path.is_absolute() else module_path.resolve()
-        cached = self._module_list_cache.get(cache_key)
-        if cached is None:
-            module = pages._load_python_module(module_path)
+        if cache_key in self._module_list_cache:
+            self._module_list_cache.move_to_end(cache_key)
+            cached = self._module_list_cache[cache_key]
+        else:
+            module = pages_loaders._load_python_module(module_path)
             if module is None:
                 self._module_list_cache[cache_key] = ([], [])
+                if len(self._module_list_cache) > _MODULE_LIST_CACHE_MAX_SIZE:
+                    self._module_list_cache.popitem(last=False)
                 return
-            styles = pages._read_string_list(module, "styles")
-            scripts = pages._read_string_list(module, "scripts")
-            self._module_list_cache[cache_key] = (styles, scripts)
+            styles = pages_loaders._read_string_list(module, "styles")
+            scripts = pages_loaders._read_string_list(module, "scripts")
             cached = (styles, scripts)
+            self._module_list_cache[cache_key] = cached
+            if len(self._module_list_cache) > _MODULE_LIST_CACHE_MAX_SIZE:
+                self._module_list_cache.popitem(last=False)
         styles_list, scripts_list = cached
         for url in styles_list:
             collector.add(StaticAsset(url=url, kind=_KIND_CSS))
@@ -365,9 +400,9 @@ class AssetDiscovery:
         resolved, which lets this loop compare paths with `==` without
         issuing another filesystem call per iteration.
         """
-        cached = self._layout_dir_cache.get(file_path)
-        if cached is not None:
-            return cached
+        if file_path in self._layout_dir_cache:
+            self._layout_dir_cache.move_to_end(file_path)
+            return self._layout_dir_cache[file_path]
         directories: list[Path] = []
         current_dir = file_path.parent
         while True:
@@ -381,4 +416,6 @@ class AssetDiscovery:
             current_dir = parent
         result = list(reversed(directories))
         self._layout_dir_cache[file_path] = result
+        if len(self._layout_dir_cache) > _LAYOUT_DIR_CACHE_MAX_SIZE:
+            self._layout_dir_cache.popitem(last=False)
         return result

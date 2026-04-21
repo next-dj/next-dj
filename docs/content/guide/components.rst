@@ -22,6 +22,30 @@ Components are provided by backends, similar to the page router. In Django setti
 
 ``component.py`` modules are always loaded with the framework’s built-in :class:`~next.components.ModuleLoader`.
 
+Lazy module loading
+~~~~~~~~~~~~~~~~~~~
+
+By default ``FileComponentsBackend`` eagerly imports every discovered
+``component.py`` on startup so that decorators (``@context``, ``@action``) have
+registered their side effects before the first request. Large projects with
+hundreds of components may prefer to pay that cost only when a component is
+first resolved:
+
+.. code-block:: python
+
+   NEXT_FRAMEWORK = {
+       "LAZY_COMPONENT_MODULES": True,
+   }
+
+With lazy loading enabled, ``component.py`` is imported on the first call to
+``get_component(name, template_path)`` for that component and cached for the
+rest of the process lifetime. The filesystem scan (template discovery, scope
+tree) still runs at startup — only Python module execution is deferred.
+Actions or context processors defined in a deferred ``component.py`` are
+therefore **not** registered until that component renders at least once, which
+may matter for ``{% form %}`` tags that reference such actions on a page that
+does not include the component itself.
+
 Minimal example:
 
 .. code-block:: python
@@ -318,3 +342,35 @@ Example project
 ----------------
 
 The ``examples/components/`` project shows a realistic setup: composite **header** with ``@context("user")`` and navigation, **footer** as a simple ``.djx`` file, **post cards** with ``{% #component %}`` / ``{% #slot %}`` inside a loop, a reusable **card** component, **recommendations** with ``@context``, and root versus branch-scoped ``_components``. See its ``README.md`` and ``tests.py`` in the repository.
+
+Extension points
+----------------
+
+The components subsystem exposes four pluggable surfaces.
+
+* ``next.components.backends.ComponentsBackend`` is the abstract contract for sourcing component metadata. Subclass it to serve components from something other than the filesystem.
+* ``next.components.backends.FileComponentsBackend`` is the default implementation. Subclass it to keep the filesystem scan and add bookkeeping.
+* ``next.components.renderers.ComponentRenderStrategy`` is the protocol for swapping out how a single component is rendered. Register alternative strategies via ``ComponentsManager(strategies=...)``.
+* ``next.components.backends.ComponentsFactory`` reads ``DEFAULT_COMPONENT_BACKENDS`` and imports each ``BACKEND`` dotted path.
+
+Register a custom backend through the settings contract.
+
+.. code-block:: python
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_COMPONENT_BACKENDS": [
+           {
+               "BACKEND": "myapp.custom_backend.CountingFileComponentsBackend",
+               "DIRS": [],
+               "COMPONENTS_DIR": "_components",
+           },
+       ],
+   }
+
+The signals emitted by :mod:`next.components.signals` let external code observe component activity.
+
+* ``component_registered`` fires when a backend reports a new component.
+* ``component_backend_loaded`` fires after ``ComponentsFactory`` instantiates a backend.
+* ``component_rendered`` fires after a component finishes rendering.
+
+A worked example lives in ``examples/components/myapp/custom_backend.py``. See :doc:`extending` for the overall extension model.

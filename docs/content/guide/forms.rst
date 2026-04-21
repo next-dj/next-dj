@@ -182,6 +182,11 @@ Use the ``@forms.action()`` decorator to register form action handlers:
 
 - **``name``** (required): Unique action name used in templates and to build a stable form endpoint. Must not collide with another action in the project.
 - **``form_class``** (optional): Django form class implementing ``get_initial``. If omitted, the handler is invoked without a bound form (useful for non-form POST actions).
+- **``namespace``** (optional, keyword-only): Prefix added to ``name`` as ``"<namespace>:<name>"``. Useful when several apps ship actions with overlapping names (e.g. ``"save"``). The resulting namespaced name is what templates reference in ``@action="blog:save"``.
+
+**Action name collisions:**
+
+Two actions that hash to the same 16-character UID are a hard error: a system check raises ``django.core.exceptions.ImproperlyConfigured`` at startup naming both registered actions. Use a ``namespace=`` prefix (or rename one action) to resolve the collision. Plain name reuse without a collision is caught by the same check as a duplicate registration error.
 
 **Handler function signature:**
 
@@ -1024,6 +1029,30 @@ See Also
 - :doc:`context` - Context management
 - :doc:`pages-and-templates` - Template and layout system
 - `Django Forms Documentation <https://docs.djangoproject.com/en/stable/topics/forms/>`_ - Django forms reference
+
+Extension points
+----------------
+
+The forms subsystem exposes two pluggable surfaces.
+
+* ``next.forms.backends.FormActionBackend`` is the abstract contract for storing and dispatching actions. Subclass it to move the registry into a different store.
+* ``next.forms.backends.RegistryFormActionBackend`` is the default in-memory backend. Subclass it to audit, cache, or gate dispatch.
+
+Swap the backend through ``FormActionManager``.
+
+.. code-block:: python
+
+   from next.forms import FormActionManager
+
+   form_action_manager = FormActionManager(backends=[MyBackend()])
+
+The signals emitted by :mod:`next.forms.signals` let external code observe action lifecycle events.
+
+* ``action_registered`` fires when ``@action`` attaches a handler to a backend.
+* ``action_dispatched`` fires after a backend finishes dispatch for a request.
+* ``form_validation_failed`` fires after a submitted form fails validation.
+
+A worked example lives in ``examples/forms/todos/custom_backend.py``. See :doc:`extending` for the overall extension model.
 
 Next
 ----

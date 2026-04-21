@@ -99,6 +99,7 @@ Sponsors
    content/guide/dependency-injection
    content/guide/static-assets
    content/guide/autoreload
+   content/guide/extending
 
 .. toctree::
    :caption: API Reference

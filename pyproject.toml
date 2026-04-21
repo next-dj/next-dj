@@ -50,6 +50,7 @@ dev = [
     "twine==6.2.0",
     "pytest-xdist==3.8.0",
     "pytest-lazy-fixtures==1.4.0",
+    "pytest-benchmark==5.1.0",
 ]
 docs = [
     "sphinx==9.0.4",
@@ -107,6 +108,7 @@ testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "perf: performance benchmarks (opt-in, run with -m perf)",
 ]
 addopts = [
     "--strict-markers",
@@ -114,6 +116,7 @@ addopts = [
     "--cov=next",
     "--cov-report=term-missing",
     "--cov-fail-under=100",
+    "--ignore=tests/benchmarks",
 ]
 
 [tool.coverage.run]
@@ -127,7 +130,14 @@ omit = [
     "*/wsgi.py",
     "*/asgi.py",
     # core
-    "*/next/checks.py",
+    "*/next/checks/*",
+    "*/next/conf/checks.py",
+    "*/next/pages/checks.py",
+    "*/next/urls/checks.py",
+    "*/next/components/checks.py",
+    "*/next/forms/checks.py",
+    "*/next/deps/checks.py",
+    "*/next/server/checks.py",
 ]
 
 # Collapse source-tree and site-packages paths so coverage reports, omits, and
@@ -201,6 +211,10 @@ ignore = [
 "tests/__init__.py" = ["D104"]
 "tests/pages/__init__.py" = ["D104"]
 "tests/pages/*" = ["INP001", "D104"]
+"tests/site_pages/__init__.py" = ["D104"]
+"tests/site_pages/*" = ["INP001", "D104"]
+"tests/forms/__init__.py" = ["D104"]
+"tests/forms/*" = ["INP001", "D104"]
 "**/{test*,conftest}.py" = [
     "ANN001", "ANN201", "ANN202",
     "ARG001", "ARG002", "ARG005",

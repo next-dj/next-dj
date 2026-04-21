@@ -3,28 +3,25 @@
 API Reference
 =============
 
-This page documents all public classes, functions, and configuration for next.dj. In the guide we sometimes link to specific items (e.g. :class:`next.deps.Deps`, :meth:`next.pages.Page.get_context`) for details.
+This page is an index into the per-subsystem API pages. Each subsystem re-exports a narrow public surface from its submodules. For the full list of public names follow the link below each section.
 
 Pages (next.pages)
 ------------------
 
-Page rendering, template loaders, context and layout management.
+Page rendering, template loaders, context, and layout management. See :doc:`/content/guide/pages-and-templates` for a narrative walkthrough.
 
-.. automodule:: next.pages
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :exclude-members: resolver
+.. toctree::
+
+   pages
 
 Components (next.components)
 ----------------------------
 
 Scoped reusable template fragments, backends, and rendering helpers. See :doc:`/content/guide/components` for usage, settings, and examples.
 
-.. automodule:: next.components
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. toctree::
+
+   components
 
 Static assets (next.static)
 ---------------------------
@@ -33,9 +30,7 @@ Co-located CSS/JS discovery, staticfiles integration via
 ``next.static.NextStaticFilesFinder``, and the ``{% collect_styles %}`` /
 ``{% collect_scripts %}`` / ``{% use_style %}`` / ``{% use_script %}``
 template tags. See :doc:`/content/guide/static-assets`
-for usage, settings, and examples. ``next.static`` re-exports the public
-surface of its submodules; :doc:`/content/api/static` documents each
-submodule individually.
+for usage, settings, and examples.
 
 .. toctree::
 
@@ -44,22 +39,29 @@ submodule individually.
 URLs and routing (next.urls)
 ----------------------------
 
-File-based URL pattern generation and router backends.
+File-based URL pattern generation and router backends. See :doc:`/content/guide/file-router`.
 
-.. automodule:: next.urls
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. toctree::
+
+   urls
+
+Forms (next.forms)
+------------------
+
+Form action decorator, registry-backed dispatcher, and validation-error rendering helpers. See :doc:`/content/guide/forms`.
+
+.. toctree::
+
+   forms
 
 Server (next.server)
 --------------------
 
 ``runserver`` integration: :class:`~next.server.NextStatReloader` watches the route set and Python entrypoints. ``.djx`` files are not watched. See :doc:`/content/guide/autoreload`.
 
-.. automodule:: next.server
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. toctree::
+
+   server
 
 Utils (next.utils)
 ------------------
@@ -88,24 +90,43 @@ Dependency injection (next.deps)
 
 Dependency resolution and built-in providers for request, URL kwargs, and forms. Used in page context and form handlers (see :doc:`/content/guide/dependency-injection`).
 
-.. automodule:: next.deps
-   :members:
-   :undoc-members:
-   :show-inheritance:
-   :exclude-members: resolver
+.. toctree::
 
-Configuration
--------------
+   deps
+
+Configuration (next.conf)
+-------------------------
+
+Reads and caches ``settings.NEXT_FRAMEWORK`` and re-publishes the merged view through ``next_framework_settings``. Broadcasts ``settings_reloaded`` when Django raises ``setting_changed``.
+
+.. toctree::
+
+   conf
+
+App wiring (next.apps)
+----------------------
+
+``AppConfig`` that connects the framework into Django on startup.
+
+.. toctree::
+
+   apps
+
+Configuration reference
+-----------------------
 
 NEXT_FRAMEWORK
 ~~~~~~~~~~~~~~
 
 Single dictionary in Django settings. Top-level keys (each optional beyond defaults):
 
-* ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, …). The file router’s skip-folder name always comes from ``DEFAULT_COMPONENT_BACKENDS`` (``COMPONENTS_DIR`` on the first entry). See :doc:`/content/guide/file-router`.
-* ``URL_NAME_TEMPLATE`` — format string for URL pattern names (default ``page_{name}``).
-* ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts (``BACKEND``, ``DIRS``, ``COMPONENTS_DIR``, …). See :doc:`/content/guide/components`.
-* ``DEFAULT_STATIC_BACKENDS`` — list of static backend dicts (``BACKEND``, ``OPTIONS``). The default backend resolves co-located CSS/JS through Django ``staticfiles_storage``. See :doc:`/content/guide/static-assets`.
+* ``DEFAULT_PAGE_BACKENDS`` is a list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``). The file router's skip-folder name always comes from ``DEFAULT_COMPONENT_BACKENDS`` (``COMPONENTS_DIR`` on the first entry). See :doc:`/content/guide/file-router`.
+* ``URL_NAME_TEMPLATE`` is the format string for URL pattern names (default ``page_{name}``).
+* ``DEFAULT_COMPONENT_BACKENDS`` is a list of component backend dicts (``BACKEND``, ``DIRS``, ``COMPONENTS_DIR``). See :doc:`/content/guide/components`.
+* ``DEFAULT_STATIC_BACKENDS`` is a list of static backend dicts (``BACKEND``, ``OPTIONS``). The default backend resolves co-located CSS/JS through Django ``staticfiles_storage``. See :doc:`/content/guide/static-assets`.
+* ``NEXT_JS_OPTIONS`` is a dict passed to :class:`~next.static.NextScriptBuilder` to control injection of ``next.min.js``. Recognised keys are ``policy`` (``"auto"``/``"disabled"``/``"manual"`` or a :class:`~next.static.ScriptInjectionPolicy` member), ``preload_template``, ``script_tag_template``, and ``init_template``. See :doc:`/content/guide/static-assets`.
+* ``STRICT_CONTEXT`` (bool, default ``False``) promotes ``TypeError`` / ``ValueError`` / ``AttributeError`` / ``KeyError`` raised by Django context processors from a warning to a re-raise during page rendering. See :doc:`/content/guide/context`.
+* ``LAZY_COMPONENT_MODULES`` (bool, default ``False``) skips the eager import of every discovered ``component.py`` at startup. Modules are imported on first resolve of the component instead. See :doc:`/content/guide/components`.
 
 .. code-block:: python
 
@@ -141,5 +162,3 @@ Single dictionary in Django settings. Top-level keys (each optional beyond defau
            },
        ],
    }
-
-Implementation: :mod:`next.conf`.
