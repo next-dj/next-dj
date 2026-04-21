@@ -13,6 +13,7 @@ omit =
     */env/*
     ../../next/*
     ../../tests/*
+    */site-packages/*
 
 [report]
 exclude_lines =
