@@ -688,3 +688,22 @@ def test_render_root_scope_badge_from_layout_path(layout_template: Path) -> None
     assert info is not None
     html = render_component(info, {})
     assert "Root scope badge" in html
+
+
+def test_counting_backend_records_lookups(home_template: Path) -> None:
+    """The pluggable `CountingFileComponentsBackend` increments on every lookup."""
+    from myapp.custom_backend import CountingFileComponentsBackend
+
+    from next.components import components_manager
+
+    components_manager._ensure_backends()
+    backends = [
+        b
+        for b in components_manager._backends
+        if isinstance(b, CountingFileComponentsBackend)
+    ]
+    assert backends, "Custom backend must be picked up from NEXT_FRAMEWORK"
+    backend = backends[0]
+    before = backend.lookup_count
+    get_component("header", home_template)
+    assert backend.lookup_count > before

@@ -245,7 +245,7 @@ class TestComponentsManager:
     def test_get_component_empty_when_no_config(self) -> None:
         """When ``BACKENDS`` is empty, get_component returns None."""
         mock_ns = _next_framework_settings_component_backends_list([])
-        with patch("next.components.next_framework_settings", mock_ns):
+        with patch("next.components.manager.next_framework_settings", mock_ns):
             manager = ComponentsManager()
             manager._reload_config()
             assert manager.get_component("card", Path("/tmp/t.djx")) is None
@@ -253,7 +253,7 @@ class TestComponentsManager:
     def test_collect_visible_components_merges_backends(self) -> None:
         """collect_visible_components merges from all backends, first wins."""
         mock_ns = _next_framework_settings_component_backends_list([])
-        with patch("next.components.next_framework_settings", mock_ns):
+        with patch("next.components.manager.next_framework_settings", mock_ns):
             manager = ComponentsManager()
             manager._reload_config()
             assert manager.collect_visible_components(Path("/x")) == {}
@@ -265,7 +265,7 @@ class TestComponentsManager:
                 {"BACKEND": "next.components.NonexistentBackend", "OPTIONS": {}},
             ],
         )
-        with patch("next.components.next_framework_settings", mock_ns):
+        with patch("next.components.manager.next_framework_settings", mock_ns):
             manager = ComponentsManager()
             manager._reload_config()
             assert len(manager._backends) == 0
@@ -274,7 +274,7 @@ class TestComponentsManager:
         """Render pipeline uses ``ComponentTemplateLoader`` wrapping ``ModuleLoader``."""
         mgr = ComponentsManager()
         mock_ns = _next_framework_settings_component_backends_list([])
-        with patch("next.components.next_framework_settings", mock_ns):
+        with patch("next.components.manager.next_framework_settings", mock_ns):
             mgr._reload_config()
         assert isinstance(mgr.template_loader, ComponentTemplateLoader)
         assert isinstance(mgr.component_renderer, ComponentRenderer)
@@ -354,7 +354,7 @@ class TestGetComponent:
 
     def test_get_component_delegates_to_manager(self) -> None:
         """get_component uses components_manager."""
-        with patch("next.components.components_manager") as mock_mgr:
+        with patch("next.components.facade.components_manager") as mock_mgr:
             mock_mgr.get_component.return_value = None
             assert get_component("x", Path("/t")) is None
             mock_mgr.get_component.assert_called_once_with("x", Path("/t"))
@@ -498,13 +498,13 @@ class TestChecks:
     def test_check_duplicate_component_names_empty_when_no_config(self) -> None:
         """check_duplicate_component_names returns [] when backends is not a list."""
         mock_ns = _next_framework_settings_for_checks_backends_value(None)
-        with patch("next.checks.next_framework_settings", mock_ns):
+        with patch("next.components.checks.next_framework_settings", mock_ns):
             assert check_duplicate_component_names() == []
 
     def test_check_component_py_no_pages_context_empty_when_no_config(self) -> None:
         """check_component_py_no_pages_context returns [] when backends is not a list."""
         mock_ns = _next_framework_settings_for_checks_backends_value(None)
-        with patch("next.checks.next_framework_settings", mock_ns):
+        with patch("next.components.checks.next_framework_settings", mock_ns):
             assert check_component_py_no_pages_context() == []
 
     def test_check_duplicate_component_names_reports_duplicate(
@@ -1166,7 +1166,7 @@ class TestModuleLoader:
         path = tmp_path / "empty.py"
         path.write_text("pass\n")
         with patch(
-            "next.components.importlib.util.spec_from_file_location",
+            "next.components.loading.importlib.util.spec_from_file_location",
             return_value=None,
         ):
             loader = ModuleLoader(ModuleCache())
@@ -1178,7 +1178,7 @@ class TestModuleLoader:
         path.write_text("pass\n")
         spec = types.SimpleNamespace(loader=None)
         with patch(
-            "next.components.importlib.util.spec_from_file_location",
+            "next.components.loading.importlib.util.spec_from_file_location",
             return_value=spec,
         ):
             assert ModuleLoader(ModuleCache()).load(path) is None
@@ -1239,7 +1239,7 @@ class TestModuleLoaderDisk:
         p = tmp_path / "x.py"
         p.write_text("pass\n")
         with patch(
-            "next.components.importlib.util.spec_from_file_location",
+            "next.components.loading.importlib.util.spec_from_file_location",
             return_value=None,
         ):
             assert ModuleLoader(ModuleCache()).load(p) is None
@@ -1638,7 +1638,7 @@ class TestComponentsFactoryManager:
         """If ``DEFAULT_COMPONENT_BACKENDS`` is not a list, return early. Non-dict entries are skipped."""
         mgr = ComponentsManager()
         mock_ns = _next_framework_settings_component_backends_list("bad")
-        with patch("next.components.next_framework_settings", mock_ns):
+        with patch("next.components.manager.next_framework_settings", mock_ns):
             mgr._reload_config()
             assert mgr._backends == []
 
@@ -1653,7 +1653,7 @@ class TestComponentsFactoryManager:
                 },
             ],
         )
-        with patch("next.components.next_framework_settings", mock_ns2):
+        with patch("next.components.manager.next_framework_settings", mock_ns2):
             mgr2._reload_config()
             assert len(mgr2._backends) >= 1
 
@@ -1669,7 +1669,7 @@ class TestComponentsFactoryManager:
                 },
             ],
         )
-        with patch("next.components.next_framework_settings", mock_ns):
+        with patch("next.components.manager.next_framework_settings", mock_ns):
             mgr._reload_config()
         assert mgr._backends == []
 
@@ -1859,7 +1859,7 @@ class TestComponentContextManagerFrames:
         )
         mgr = ComponentContextManager()
         with (
-            patch("next.components.inspect.currentframe", return_value=start),
+            patch("next.utils.inspect.currentframe", return_value=start),
             pytest.raises(RuntimeError, match="no __file__ in caller frames"),
         ):
             mgr._get_caller_path(1)
@@ -1928,7 +1928,7 @@ class TestGetComponentPathsForWatch:
             DEFAULT_PAGE_BACKENDS="not-a-list",
             DEFAULT_COMPONENT_BACKENDS="not-a-list",
         )
-        with patch("next.components.next_framework_settings", mock_nf):
+        with patch("next.components.watch.next_framework_settings", mock_nf):
             assert get_component_paths_for_watch() == set()
 
     def test_collects_composite_under_pages_tree(self, tmp_path: Path) -> None:
@@ -2141,7 +2141,7 @@ class TestGetComponentPathsForWatch:
         ):
             next_framework_settings.reload()
             with patch(
-                "next.components.ComponentsFactory.create_backend",
+                "next.components.manager.ComponentsFactory.create_backend",
                 side_effect=RuntimeError("boom"),
             ):
                 assert get_component_paths_for_watch() == set()
@@ -2352,7 +2352,7 @@ class TestInjectComponentContextSerialize:
 
         collector = StaticCollector()
         context_data: dict = {"_static_collector": collector}
-        with patch("next.components.component", mgr):
+        with patch("next.components.renderers.component", mgr):
             _inject_component_context(info, context_data, None)
 
         assert collector.js_context()["theme"] == "dark"
@@ -2368,7 +2368,7 @@ class TestInjectComponentContextSerialize:
 
         collector = StaticCollector()
         context_data: dict = {"_static_collector": collector}
-        with patch("next.components.component", mgr):
+        with patch("next.components.renderers.component", mgr):
             _inject_component_context(info, context_data, None)
 
         assert collector.js_context()["env"] == "prod"
@@ -2385,7 +2385,7 @@ class TestInjectComponentContextSerialize:
 
         collector = StaticCollector()
         context_data: dict = {"_static_collector": collector}
-        with patch("next.components.component", mgr):
+        with patch("next.components.renderers.component", mgr):
             _inject_component_context(info, context_data, None)
 
         assert collector.js_context() == {}
@@ -2400,7 +2400,7 @@ class TestInjectComponentContextSerialize:
         mgr._registry.register(module_path, "key", get_val, serialize=True)
 
         context_data: dict = {}
-        with patch("next.components.component", mgr):
+        with patch("next.components.renderers.component", mgr):
             _inject_component_context(info, context_data, None)
 
         assert context_data["key"] == "value"

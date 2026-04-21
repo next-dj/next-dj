@@ -153,3 +153,30 @@ def test_example_pages_coverage(page_modules) -> None:
     result2 = main_page.custom_variable_2_context(request)
     assert isinstance(result2, str)
     assert "context without inherit_context=True" in result2
+
+
+def test_layout_stamp_provider_handles_named_parameter() -> None:
+    """`LayoutStampProvider` returns its fixed stamp for `layout_stamp` params."""
+    import inspect
+
+    from layouts.custom_provider import LayoutStampProvider
+
+    from next.deps import RegisteredParameterProvider, ResolutionContext
+    from next.deps.cache import DependencyCache
+
+    provider = LayoutStampProvider()
+    context = ResolutionContext(
+        request=None,
+        form=None,
+        url_kwargs={},
+        context_data={},
+        cache=DependencyCache(),
+    )
+
+    def _sample(layout_stamp: str, other: str) -> None: ...
+
+    params = inspect.signature(_sample).parameters
+    assert provider.can_handle(params["layout_stamp"], context) is True
+    assert provider.can_handle(params["other"], context) is False
+    assert provider.resolve(params["layout_stamp"], context) == "bootstrap-5.0"
+    assert LayoutStampProvider in RegisteredParameterProvider._registry

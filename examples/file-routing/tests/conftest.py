@@ -48,7 +48,7 @@ if not settings.configured:
         NEXT_FRAMEWORK={
             "DEFAULT_PAGE_BACKENDS": [
                 {
-                    "BACKEND": "next.urls.FileRouterBackend",
+                    "BACKEND": "myapp.custom_router.TaggedFileRouterBackend",
                     "PAGES_DIR": "pages",
                     "APP_DIRS": True,
                     "DIRS": [

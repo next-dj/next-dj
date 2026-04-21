@@ -6,23 +6,25 @@ import pytest
 from django.test import override_settings
 
 from next.conf import next_framework_settings
-from next.pages import (
+from next.pages import page
+from next.pages.watch import (
     get_pages_directories_for_watch,
     iter_pages_roots_with_components_folder_names,
-    page,
 )
 from next.urls import (
     FileRouterBackend,
     RouterBackend,
     RouterFactory,
     RouterManager,
-    _register_components_folder,
-    _scan_pages_directory,
-    classify_dirs_entries,
     router_manager,
-    scan_pages_tree,
     urlpatterns,
 )
+from next.urls.dispatcher import (
+    _register_components_folder,
+    _scan_pages_directory,
+    scan_pages_tree,
+)
+from next.utils import classify_dirs_entries
 from tests.support import file_router_backend_from_params, named_temp_py
 
 
@@ -47,7 +49,10 @@ class TestFileRouterBackend:
     def mock_settings(self):
         """Patch ``settings`` in both ``urls`` and ``filesystem`` (``resolve_base_dir``)."""
         mock = Mock()
-        with patch("next.urls.settings", mock), patch("next.utils.settings", mock):
+        with (
+            patch("next.urls.backends.settings", mock),
+            patch("next.utils.settings", mock),
+        ):
             yield mock
 
     @pytest.fixture()
@@ -213,7 +218,7 @@ class TestFileRouterBackend:
                 mock_import.return_value = mock_module
 
                 if file_path:
-                    with patch("next.urls.Path") as mock_path_class:
+                    with patch("next.urls.backends.Path") as mock_path_class:
                         mock_app_path = Mock()
                         mock_app_path.parent = Mock()
                         mock_pages_path = Mock()
@@ -260,7 +265,7 @@ class TestFileRouterBackend:
             mock_base = Mock()
             mock_base.__truediv__ = Mock(return_value=mock_pages_path)
             with patch(
-                "next.urls.resolve_base_dir",
+                "next.urls.backends.resolve_base_dir",
                 return_value=mock_base,
             ):
                 result = root_router._get_root_pages_paths()
@@ -387,7 +392,7 @@ class TestFileRouterBackend:
                 "_scan_pages_directory",
                 return_value=[("url1", "file1"), ("url2", "file2")],
             ),
-            patch("next.urls.page.create_url_pattern") as mock_create,
+            patch("next.urls.backends.page.create_url_pattern") as mock_create,
         ):
             mock_create.side_effect = ["pattern1", "pattern2"]
 
@@ -454,7 +459,7 @@ class TestFileRouterBackend:
             named_temp_py(
                 "def render(request, **kwargs):\n    return 'response'"
             ) as temp_file,
-            patch("next.urls.page.render", return_value="mocked response"),
+            patch("next.urls.backends.page.render", return_value="mocked response"),
         ):
             pattern = page.create_url_pattern(
                 "test/[[args]]",
@@ -530,7 +535,7 @@ class TestRouterFactory:
         }
         mock_s = Mock()
         with (
-            patch("next.urls.settings", mock_s),
+            patch("next.urls.backends.settings", mock_s),
             patch(
                 "next.utils.settings",
                 mock_s,
@@ -551,7 +556,7 @@ class TestRouterFactory:
         }
         mock_s = Mock()
         with (
-            patch("next.urls.settings", mock_s),
+            patch("next.urls.backends.settings", mock_s),
             patch(
                 "next.utils.settings",
                 mock_s,
@@ -651,13 +656,13 @@ class TestRouterFactory:
         self,
     ) -> None:
         """Skip-folder name comes from the first ``DEFAULT_COMPONENT_BACKENDS`` entry."""
-        with patch("next.urls.next_framework_settings") as nfs:
+        with patch("next.urls.backends.next_framework_settings") as nfs:
             nfs.DEFAULT_COMPONENT_BACKENDS = [{"COMPONENTS_DIR": "custom_comp"}]
             assert FileRouterBackend._resolve_components_folder_name() == "custom_comp"
 
     def test_resolve_components_folder_name_raises_when_unavailable(self) -> None:
         """Missing COMPONENTS_DIR and no valid component backend entry raises KeyError."""
-        with patch("next.urls.next_framework_settings") as nfs:
+        with patch("next.urls.backends.next_framework_settings") as nfs:
             nfs.DEFAULT_COMPONENT_BACKENDS = []
             with pytest.raises(KeyError, match="COMPONENTS_DIR"):
                 FileRouterBackend._resolve_components_folder_name()
@@ -666,7 +671,7 @@ class TestRouterFactory:
         self,
     ) -> None:
         """First component backend dict must contain COMPONENTS_DIR."""
-        with patch("next.urls.next_framework_settings") as nfs:
+        with patch("next.urls.backends.next_framework_settings") as nfs:
             nfs.DEFAULT_COMPONENT_BACKENDS = [{}]
             with pytest.raises(KeyError, match="COMPONENTS_DIR"):
                 FileRouterBackend._resolve_components_folder_name()
@@ -942,7 +947,7 @@ class TestGlobalInstances:
         render_module_path = tmp_path / "page.py"
         render_module_path.write_text(file_content)
 
-        with patch("next.urls.page.render", return_value=expected_result):
+        with patch("next.urls.backends.page.render", return_value=expected_result):
             pattern = page.create_url_pattern(
                 "test/[[args]]",
                 render_module_path,
@@ -961,7 +966,7 @@ class TestGlobalInstances:
         mock_s = Mock()
         mock_s.BASE_DIR = None
         with (
-            patch("next.urls.settings", mock_s),
+            patch("next.urls.backends.settings", mock_s),
             patch(
                 "next.utils.settings",
                 mock_s,
@@ -990,7 +995,7 @@ class TestGlobalInstances:
         mock_s = Mock()
         mock_s.INSTALLED_APPS = ["testapp1", "testapp2"]
         with (
-            patch("next.urls.settings", mock_s),
+            patch("next.urls.backends.settings", mock_s),
             patch(
                 "next.utils.settings",
                 mock_s,
@@ -1006,7 +1011,7 @@ class TestGlobalInstances:
                 mock_gen_patterns.return_value = ["pattern1", "pattern2"]
 
                 with patch(
-                    "next.urls.page.create_url_pattern",
+                    "next.urls.backends.page.create_url_pattern",
                     return_value="url_pattern",
                 ):
                     urls = router.generate_urls()
@@ -1082,9 +1087,9 @@ class TestGlobalInstances:
 
         with (
             named_temp_py('template = "Hello {{ name }}!"') as temp_file,
-            patch("next.urls.page.register_template"),
+            patch("next.urls.backends.page.register_template"),
             patch(
-                "next.urls.page.render",
+                "next.urls.backends.page.render",
                 return_value="Hello World!",
             ) as mock_render,
         ):
@@ -1114,9 +1119,9 @@ class TestGlobalInstances:
 
         with (
             named_temp_py('template = "Hello {{ name }}!"') as temp_file,
-            patch("next.urls.page.register_template"),
+            patch("next.urls.backends.page.register_template"),
             patch(
-                "next.urls.page.render",
+                "next.urls.backends.page.render",
                 return_value="Hello World!",
             ) as mock_render,
         ):
@@ -1144,9 +1149,9 @@ class TestGlobalInstances:
 
         with (
             named_temp_py('template = "Hello {{ name }}!"') as temp_file,
-            patch("next.urls.page.register_template"),
+            patch("next.urls.backends.page.register_template"),
             patch(
-                "next.urls.page.render",
+                "next.urls.backends.page.render",
                 return_value="Hello World!",
             ) as mock_render,
         ):
@@ -1210,7 +1215,7 @@ class TestRouterManagerNextPagesConfig:
     def test_non_list_default_page_backends_returns_empty_cached(self) -> None:
         """When ``DEFAULT_PAGE_BACKENDS`` is not a list, config is empty and cached."""
         mock_nf = SimpleNamespace(DEFAULT_PAGE_BACKENDS="not-a-list")
-        with patch("next.urls.next_framework_settings", mock_nf):
+        with patch("next.urls.manager.next_framework_settings", mock_nf):
             mgr = RouterManager()
             assert mgr._get_next_pages_config() == []
             assert mgr._get_next_pages_config() == []
@@ -1222,7 +1227,7 @@ class TestGetPagesDirectoriesForWatch:
     def test_returns_empty_when_routers_not_list(self) -> None:
         """When ``ROUTERS`` is not a list, returns []."""
         mock_nf = SimpleNamespace(DEFAULT_PAGE_BACKENDS={})
-        with patch("next.pages.next_framework_settings", mock_nf):
+        with patch("next.pages.watch.next_framework_settings", mock_nf):
             assert get_pages_directories_for_watch() == []
 
     def test_skips_non_dict_config(self) -> None:
@@ -1313,7 +1318,7 @@ class TestIterPagesRootsWithComponentsFolderNames:
     def test_returns_empty_when_backends_not_list(self) -> None:
         """When ``DEFAULT_PAGE_BACKENDS`` is not a list, return []."""
         mock_nf = SimpleNamespace(DEFAULT_PAGE_BACKENDS=None)
-        with patch("next.pages.next_framework_settings", mock_nf):
+        with patch("next.pages.watch.next_framework_settings", mock_nf):
             assert iter_pages_roots_with_components_folder_names() == []
 
     def test_skips_non_dict_config(self) -> None:
@@ -1420,7 +1425,7 @@ class TestScanPagesDirectory:
         def capture(folder: Path, root: Path, scope: str) -> None:
             calls.append((folder, root, scope))
 
-        with patch("next.urls._register_components_folder", capture):
+        with patch("next.urls.dispatcher._register_components_folder", capture):
             list(
                 scan_pages_tree(
                     tmp_path,

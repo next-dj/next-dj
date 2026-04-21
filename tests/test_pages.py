@@ -17,21 +17,19 @@ from next.checks import (
 )
 from next.conf import next_framework_settings
 from next.deps import DependencyResolver
-from next.pages import (
-    Context,
-    ContextByDefaultProvider,
+from next.pages import Context, Page, context, page
+from next.pages.context import ContextByDefaultProvider
+from next.pages.loaders import (
     DjxTemplateLoader,
     LayoutManager,
     LayoutTemplateLoader,
-    Page,
-    PageContextRegistry,
     PythonTemplateLoader,
-    _get_context_processors,
-    _import_context_processor,
-    context,
+)
+from next.pages.processors import _get_context_processors, _import_context_processor
+from next.pages.registry import (
+    PageContextRegistry,
     get_layout_djx_paths_for_watch,
     get_template_djx_paths_for_watch,
-    page,
 )
 from next.static import StaticCollector
 from next.urls import (
@@ -589,7 +587,7 @@ class TestGlobalPageInstance:
         self, page_instance, test_case, frame_setup
     ) -> None:
         """Test _get_caller_path error cases with parametrized test cases."""
-        with patch("next.pages.inspect.currentframe") as mock_frame:
+        with patch("next.pages.manager.inspect.currentframe") as mock_frame:
             frame_setup(mock_frame)
 
             with pytest.raises(
@@ -1966,7 +1964,7 @@ class TestLayoutTemplateLoader:
             DEFAULT_PAGE_BACKENDS="not-a-list",
             URL_NAME_TEMPLATE="page_{name}",
         )
-        with patch("next.pages.next_framework_settings", mock_nf):
+        with patch("next.pages.loaders.next_framework_settings", mock_nf):
             assert loader._get_additional_layout_files() == []
 
     @pytest.mark.parametrize(
@@ -2049,7 +2047,7 @@ class TestLayoutTemplateLoader:
     def test_get_pages_dirs_for_config_string_base_dir(self, tmp_path: Path) -> None:
         """String ``BASE_DIR`` is normalized like in the file router."""
         loader = LayoutTemplateLoader()
-        with patch("next.pages.settings") as mock_settings:
+        with patch("next.utils.settings") as mock_settings:
             mock_settings.BASE_DIR = str(tmp_path)
             out = loader._get_pages_dirs_for_config({"DIRS": []})
         assert out == []
@@ -2599,7 +2597,7 @@ class TestContextProcessors:
         """When ``DEFAULT_PAGE_BACKENDS`` is not a list, treat as no router config."""
         mock_nf = SimpleNamespace(DEFAULT_PAGE_BACKENDS={})
         with (
-            patch("next.pages.next_framework_settings", mock_nf),
+            patch("next.pages.processors.next_framework_settings", mock_nf),
             override_settings(TEMPLATES=[]),
         ):
             processors = _get_context_processors()
@@ -2642,7 +2640,7 @@ class TestContextProcessors:
 
         next_pages_config = [file_router_config_entry(app_dirs=True)]
 
-        with patch("next.pages.import_string") as mock_import:
+        with patch("next.pages.processors.import_string") as mock_import:
             mock_import.side_effect = [test_processor, auth_processor]
 
             with override_settings(
@@ -2687,7 +2685,7 @@ class TestContextProcessors:
             ),
         ]
 
-        with patch("next.pages.import_string") as mock_import:
+        with patch("next.pages.processors.import_string") as mock_import:
             mock_import.side_effect = [next_pages_processor, template_processor]
             with override_settings(
                 TEMPLATES=templates_config,
@@ -2719,7 +2717,7 @@ class TestContextProcessors:
             ),
         ]
         with (
-            patch("next.pages.import_string", return_value=shared_processor),
+            patch("next.pages.processors.import_string", return_value=shared_processor),
             override_settings(
                 TEMPLATES=templates_config,
                 NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": next_pages_config},
@@ -2768,7 +2766,7 @@ class TestContextProcessors:
             return {"another_var": "another_value"}
 
         # mock the import_string function to return our test processors
-        with patch("next.pages.import_string") as mock_import:
+        with patch("next.pages.processors.import_string") as mock_import:
             mock_import.side_effect = [test_processor, another_processor]
 
             config = [
@@ -2809,8 +2807,8 @@ class TestContextProcessors:
 
         with (
             override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": config}),
-            patch("next.pages.import_string") as mock_import,
-            patch("next.pages.logger.warning") as mock_warning,
+            patch("next.pages.processors.import_string") as mock_import,
+            patch("next.pages.processors.logger.warning") as mock_warning,
         ):
             next_framework_settings.reload()
             mock_import.side_effect = [
@@ -2828,7 +2826,7 @@ class TestContextProcessors:
 
     def test_import_context_processor_non_callable(self, page_instance) -> None:
         """Test _import_context_processor with non-callable import."""
-        with patch("next.pages.import_string") as mock_import:
+        with patch("next.pages.processors.import_string") as mock_import:
             mock_import.return_value = (
                 "not a callable"  # return string instead of function
             )
@@ -2850,7 +2848,9 @@ class TestContextProcessors:
             return {"request_var": "from_processor"}
 
         # mock _get_context_processors to return our test processor
-        with patch("next.pages._get_context_processors", return_value=[test_processor]):
+        with patch(
+            "next.pages.manager._get_context_processors", return_value=[test_processor]
+        ):
             result = page_instance.render(page_file, mock_request, title="Test Title")
 
             # should include both template variables and context processor variables
@@ -2868,7 +2868,9 @@ class TestContextProcessors:
             return {"request_var": "from_processor"}
 
         # mock _get_context_processors to return our test processor
-        with patch("next.pages._get_context_processors", return_value=[test_processor]):
+        with patch(
+            "next.pages.manager._get_context_processors", return_value=[test_processor]
+        ):
             result = page_instance.render(page_file, title="Test Title")
 
             # should only include template variables, not context processor variables
@@ -2886,7 +2888,7 @@ class TestContextProcessors:
         mock_request.META = {}
 
         # mock _get_context_processors to return empty list
-        with patch("next.pages._get_context_processors", return_value=[]):
+        with patch("next.pages.manager._get_context_processors", return_value=[]):
             result = page_instance.render(page_file, mock_request, title="Test Title")
 
             # uses regular Django Context for template
@@ -2913,10 +2915,10 @@ class TestContextProcessors:
         # mock _get_context_processors to return processors with one that errors
         with (
             patch(
-                "next.pages._get_context_processors",
+                "next.pages.manager._get_context_processors",
                 return_value=[error_processor, good_processor],
             ),
-            patch("next.pages.logger") as mock_logger,
+            patch("next.pages.manager.logger") as mock_logger,
         ):
             result = page_instance.render(
                 page_file,
@@ -2953,7 +2955,7 @@ class TestContextProcessors:
 
         # mock _get_context_processors to return processors with one that returns non-dict
         with patch(
-            "next.pages._get_context_processors",
+            "next.pages.manager._get_context_processors",
             return_value=[non_dict_processor, good_processor],
         ):
             result = page_instance.render(page_file, mock_request, title="Test Title")
@@ -3057,7 +3059,7 @@ class TestGetLayoutDjxPathsForWatch:
         (tmp_path / "a" / "layout.djx").write_text("<div>a</div>")
         (tmp_path / "a" / "b").mkdir()
         (tmp_path / "a" / "b" / "layout.djx").write_text("<div>b</div>")
-        with patch("next.pages.get_pages_directories_for_watch") as mock_watch:
+        with patch("next.pages.registry.get_pages_directories_for_watch") as mock_watch:
             mock_watch.return_value = [tmp_path]
             result = get_layout_djx_paths_for_watch()
         assert len(result) == 2
@@ -3067,7 +3069,7 @@ class TestGetLayoutDjxPathsForWatch:
 
     def test_returns_empty_when_no_layout_djx(self, tmp_path) -> None:
         """Returns empty set when no layout.djx under pages dirs."""
-        with patch("next.pages.get_pages_directories_for_watch") as mock_watch:
+        with patch("next.pages.registry.get_pages_directories_for_watch") as mock_watch:
             mock_watch.return_value = [tmp_path]
             result = get_layout_djx_paths_for_watch()
         assert result == set()
@@ -3075,7 +3077,7 @@ class TestGetLayoutDjxPathsForWatch:
     def test_swallows_oserror_on_rglob_layout(self, tmp_path) -> None:
         """When rglob raises OSError (e.g. permission), log and return partial result."""
         with (
-            patch("next.pages.get_pages_directories_for_watch") as mock_watch,
+            patch("next.pages.registry.get_pages_directories_for_watch") as mock_watch,
             patch.object(Path, "rglob", side_effect=OSError(13, "Permission denied")),
         ):
             mock_watch.return_value = [tmp_path]
@@ -3092,7 +3094,7 @@ class TestGetTemplateDjxPathsForWatch:
         (tmp_path / "x" / "template.djx").write_text("x")
         (tmp_path / "x" / "y").mkdir()
         (tmp_path / "x" / "y" / "template.djx").write_text("y")
-        with patch("next.pages.get_pages_directories_for_watch") as mock_watch:
+        with patch("next.pages.registry.get_pages_directories_for_watch") as mock_watch:
             mock_watch.return_value = [tmp_path]
             result = get_template_djx_paths_for_watch()
         assert len(result) == 2
@@ -3102,7 +3104,7 @@ class TestGetTemplateDjxPathsForWatch:
 
     def test_returns_empty_when_no_template_djx(self, tmp_path) -> None:
         """Returns empty set when no template.djx under pages dirs."""
-        with patch("next.pages.get_pages_directories_for_watch") as mock_watch:
+        with patch("next.pages.registry.get_pages_directories_for_watch") as mock_watch:
             mock_watch.return_value = [tmp_path]
             result = get_template_djx_paths_for_watch()
         assert result == set()
@@ -3110,7 +3112,7 @@ class TestGetTemplateDjxPathsForWatch:
     def test_swallows_oserror_on_rglob_template(self, tmp_path) -> None:
         """When rglob raises OSError (e.g. permission), log and return partial result."""
         with (
-            patch("next.pages.get_pages_directories_for_watch") as mock_watch,
+            patch("next.pages.registry.get_pages_directories_for_watch") as mock_watch,
             patch.object(Path, "rglob", side_effect=OSError(13, "Permission denied")),
         ):
             mock_watch.return_value = [tmp_path]

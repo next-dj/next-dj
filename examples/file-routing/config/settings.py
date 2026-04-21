@@ -69,7 +69,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 NEXT_FRAMEWORK = {
     "DEFAULT_PAGE_BACKENDS": [
         {
-            "BACKEND": "next.urls.FileRouterBackend",
+            "BACKEND": "myapp.custom_router.TaggedFileRouterBackend",
             "PAGES_DIR": "pages",
             "APP_DIRS": True,
             # App trees under each installed app's pages/, plus extra filesystem roots

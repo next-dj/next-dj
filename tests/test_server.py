@@ -8,12 +8,14 @@ from django.utils.autoreload import StatReloader
 from next.conf import next_framework_settings
 from next.server import (
     NextStatReloader,
-    _dedupe_watch_specs,
-    _registered_extra_watch_specs,
     get_framework_filesystem_roots_for_linking,
     iter_all_autoreload_watch_specs,
-    iter_default_autoreload_watch_specs,
     register_autoreload_watch_spec,
+)
+from next.server.watcher import (
+    _dedupe_watch_specs,
+    _registered_extra_watch_specs,
+    iter_default_autoreload_watch_specs,
 )
 
 
@@ -101,7 +103,7 @@ class TestServerAutoreloadWatchApi:
             register_autoreload_watch_spec(root, "**/plugin.py")
             register_autoreload_watch_spec(root, "**/plugin.py")
             with patch(
-                "next.server.iter_default_autoreload_watch_specs",
+                "next.server.watcher.iter_default_autoreload_watch_specs",
                 return_value=[],
             ):
                 specs = iter_all_autoreload_watch_specs()
@@ -237,8 +239,11 @@ class TestDjxNotInStatReloaderGlobMatches:
         # Restrict the parent StatReloader snapshot to ``page.py`` only.
         # Real runserver also skips ``.djx`` because it is not matched by next's ``watch_dir`` globs.
         with (
-            patch("next.server.get_pages_directories_for_watch", return_value=[]),
-            patch("next.server.scan_pages_tree", return_value=iter([])),
+            patch(
+                "next.server.autoreload.get_pages_directories_for_watch",
+                return_value=[],
+            ),
+            patch("next.server.autoreload.scan_pages_tree", return_value=iter([])),
             patch.object(
                 reloader,
                 "snapshot_files",

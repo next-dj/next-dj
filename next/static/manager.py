@@ -23,6 +23,7 @@ from django.contrib.staticfiles.storage import staticfiles_storage
 from django.utils.functional import LazyObject, empty
 
 from next.conf import next_framework_settings
+from next.conf.signals import settings_reloaded
 
 from .backends import StaticBackend, StaticFilesBackend, StaticsFactory
 from .collector import (
@@ -216,7 +217,7 @@ class StaticManager:
             return self._cached_page_roots
         roots: list[Path] = []
         try:
-            from next.pages import get_pages_directories_for_watch  # noqa: PLC0415
+            from next.pages.watch import get_pages_directories_for_watch  # noqa: PLC0415, I001
         except ImportError:  # pragma: no cover
             self._cached_page_roots = ()
             return self._cached_page_roots
@@ -245,8 +246,16 @@ default_manager: DefaultStaticManager = DefaultStaticManager()
 def reset_default_manager() -> None:
     """Drop the wrapped static manager so the next access rebuilds it.
 
-    Hooked into the `setting_changed` signal from `next.conf` so that
+    Hooked into the `settings_reloaded` signal from `next.conf` so that
     test code changing `NEXT_FRAMEWORK` via `override_settings` sees a
     fresh manager on the next access.
     """
     default_manager._wrapped = empty  # type: ignore[assignment]
+
+
+def _on_settings_reloaded(**_kwargs: object) -> None:
+    """Reset the default static manager when framework settings reload."""
+    reset_default_manager()
+
+
+settings_reloaded.connect(_on_settings_reloaded)

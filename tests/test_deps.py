@@ -7,25 +7,24 @@ import pytest
 from django.http import HttpRequest
 
 from next.deps import (
-    _IN_PROGRESS,
-    DependencyCache,
     DependencyCycleError,
     DependencyResolver,
     Depends,
-    DependsProvider,
-    ProviderRegistry,
     RegisteredParameterProvider,
     resolver,
 )
+from next.deps.cache import _IN_PROGRESS, DependencyCache
+from next.deps.markers import DependsProvider
+from next.deps.providers import ProviderRegistry
 from next.forms import DForm, FormProvider
-from next.pages import ContextByNameProvider
+from next.pages.context import ContextByNameProvider
 from next.urls import (
     DUrl,
     HttpRequestProvider,
     UrlByAnnotationProvider,
     UrlKwargsProvider,
-    _coerce_url_value,
 )
+from next.urls.parser import _coerce_url_value
 from tests.support import (
     COERCE_URL_VALUE_CASES,
     URL_BY_ANNOTATION_RESOLVE_CASES,

@@ -222,3 +222,14 @@ def test_example_pages_coverage(page_modules) -> None:
     _test_main_page_context_functions(main_page, request)
     _test_catalog_page_context_functions(catalog_page, request)
     _test_catalog_detail_page_context_functions(catalog_detail_page, request)
+
+
+def test_in_memory_template_loader_round_trips_source() -> None:
+    """`InMemoryTemplateLoader` resolves paths present in its source map only."""
+    from catalog.custom_loader import InMemoryTemplateLoader
+
+    loader = InMemoryTemplateLoader({"/virtual/page.py": "<p>hello</p>"})
+    assert loader.can_load(Path("/virtual/page.py")) is True
+    assert loader.load_template(Path("/virtual/page.py")) == "<p>hello</p>"
+    assert loader.can_load(Path("/missing/page.py")) is False
+    assert loader.load_template(Path("/missing/page.py")) is None

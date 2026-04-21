@@ -9,13 +9,9 @@ from django.template.engine import Engine
 from django.test import Client
 
 from next.conf import NextFrameworkSettings, next_framework_settings
-from next.pages import (
-    DjxTemplateLoader,
-    LayoutManager,
-    Page,
-    PageContextRegistry,
-    PythonTemplateLoader,
-)
+from next.pages import Page
+from next.pages.loaders import DjxTemplateLoader, LayoutManager, PythonTemplateLoader
+from next.pages.registry import PageContextRegistry
 from next.server import NextStatReloader
 from next.urls import URLPatternParser
 from tests.support import (
@@ -93,7 +89,7 @@ def layout_manager():
 @pytest.fixture()
 def mock_frame():
     """Mock inspect.currentframe for testing."""
-    with patch("next.pages.inspect.currentframe") as mock_frame:
+    with patch("next.pages.manager.inspect.currentframe") as mock_frame:
         yield mock_frame
 
 

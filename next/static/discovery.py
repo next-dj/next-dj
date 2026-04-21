@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from next import pages
+from next.pages import loaders as pages_loaders
 
 from .assets import _KIND_CSS, _KIND_JS, StaticAsset
 from .signals import asset_registered
@@ -296,12 +296,12 @@ class AssetDiscovery:
         cache_key = module_path if module_path.is_absolute() else module_path.resolve()
         cached = self._module_list_cache.get(cache_key)
         if cached is None:
-            module = pages._load_python_module(module_path)
+            module = pages_loaders._load_python_module(module_path)
             if module is None:
                 self._module_list_cache[cache_key] = ([], [])
                 return
-            styles = pages._read_string_list(module, "styles")
-            scripts = pages._read_string_list(module, "scripts")
+            styles = pages_loaders._read_string_list(module, "styles")
+            scripts = pages_loaders._read_string_list(module, "scripts")
             self._module_list_cache[cache_key] = (styles, scripts)
             cached = (styles, scripts)
         styles_list, scripts_list = cached

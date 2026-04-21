@@ -127,7 +127,14 @@ omit = [
     "*/wsgi.py",
     "*/asgi.py",
     # core
-    "*/next/checks.py",
+    "*/next/checks/*",
+    "*/next/conf/checks.py",
+    "*/next/pages/checks.py",
+    "*/next/urls/checks.py",
+    "*/next/components/checks.py",
+    "*/next/forms/checks.py",
+    "*/next/deps/checks.py",
+    "*/next/server/checks.py",
 ]
 
 # Collapse source-tree and site-packages paths so coverage reports, omits, and

@@ -291,3 +291,10 @@ def test_example_root_pages() -> None:
     assert response.status_code == 200
     content = response.content.decode()
     assert "Root Page" in content
+
+
+def test_custom_router_backend_contributes_info_route(client) -> None:
+    """The custom `TaggedFileRouterBackend` adds `/__router_info/` alongside pages."""
+    response = client.get("/__router_info/")
+    assert response.status_code == 200
+    assert "TaggedFileRouterBackend" in response.content.decode()

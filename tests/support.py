@@ -157,20 +157,28 @@ def patch_checks_router_manager(
     pages_directory: Path,
     scan_routes: Iterable[tuple[str, Path]],
 ) -> Generator[tuple[MagicMock, MagicMock, MagicMock], None, None]:
-    """Patch ``_get_router_manager`` and ``_get_pages_directory`` for page checks tests."""
+    """Patch `get_router_manager` and `get_pages_directory` for page checks tests."""
     routes = list(scan_routes)
+    mock_mgr = MagicMock()
+    mock_router = MagicMock()
+    mock_mgr._backends = [mock_router]
+    mock_router.pages_dir = "pages"
+    mock_router.app_dirs = True
+    mock_router._scan_pages_directory.return_value = routes
     with (
-        patch("next.checks._get_router_manager") as mock_grm,
-        patch("next.checks._get_pages_directory") as mock_get_pages_dir,
+        patch(
+            "next.pages.checks.get_router_manager",
+            return_value=(mock_mgr, []),
+        ),
+        patch(
+            "next.urls.checks.get_router_manager",
+            return_value=(mock_mgr, []),
+        ),
+        patch(
+            "next.checks.common.get_pages_directory",
+            return_value=pages_directory,
+        ) as mock_get_pages_dir,
     ):
-        mock_mgr = MagicMock()
-        mock_router = MagicMock()
-        mock_grm.return_value = (mock_mgr, [])
-        mock_mgr._backends = [mock_router]
-        mock_router.pages_dir = "pages"
-        mock_router.app_dirs = True
-        mock_router._scan_pages_directory.return_value = routes
-        mock_get_pages_dir.return_value = pages_directory
         yield mock_mgr, mock_router, mock_get_pages_dir
 
 
@@ -179,10 +187,19 @@ def patch_checks_router_manager_with_routers(
     *,
     routers: list[object],
 ) -> Generator[MagicMock, None, None]:
-    """Patch ``_get_router_manager`` so the manager exposes the given routers list."""
+    """Patch `get_router_manager` so the manager exposes the given routers list."""
     mock_mgr = MagicMock()
     mock_mgr._backends = list(routers)
-    with patch("next.checks._get_router_manager", return_value=(mock_mgr, [])):
+    with (
+        patch(
+            "next.pages.checks.get_router_manager",
+            return_value=(mock_mgr, []),
+        ),
+        patch(
+            "next.urls.checks.get_router_manager",
+            return_value=(mock_mgr, []),
+        ),
+    ):
         yield mock_mgr
 
 
@@ -190,7 +207,7 @@ def patch_checks_router_manager_with_routers(
 def patch_checks_components_manager(
     *fake_backends: object,
 ) -> Generator[MagicMock, None, None]:
-    """Patch ``next.checks`` settings and ``ComponentsManager`` with fake backends."""
+    """Patch components-check settings and `ComponentsManager` with fake backends."""
     mock_ns = next_framework_settings_for_checks(
         backends=[
             {
@@ -201,8 +218,8 @@ def patch_checks_components_manager(
         ],
     )
     with (
-        patch("next.checks.next_framework_settings", mock_ns),
-        patch("next.checks.ComponentsManager") as mock_manager_klass,
+        patch("next.components.checks.next_framework_settings", mock_ns),
+        patch("next.components.checks.ComponentsManager") as mock_manager_klass,
     ):
         mock_manager = mock_manager_klass.return_value
         mock_manager._reload_config = lambda: None
@@ -272,10 +289,10 @@ def route_watch_layer_patches(
     """Apply the usual ``next.server`` patches around route discovery for ``tick()`` tests."""
     with (
         patch(
-            "next.server.get_pages_directories_for_watch",
+            "next.server.autoreload.get_pages_directories_for_watch",
             get_pages_directories_for_watch,
         ),
-        patch("next.server.scan_pages_tree", scan_pages_tree),
+        patch("next.server.autoreload.scan_pages_tree", scan_pages_tree),
     ):
         yield
 
@@ -347,7 +364,7 @@ def tick_scenario_watch_raises(reloader: NextStatReloader):
     """If ``get_pages_directories_for_watch`` raises, the tick still runs."""
     with (
         patch(
-            "next.server.get_pages_directories_for_watch",
+            "next.server.autoreload.get_pages_directories_for_watch",
             side_effect=ValueError("bad"),
         ),
         patch.object(reloader, "snapshot_files", return_value=iter([])),

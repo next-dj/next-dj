@@ -72,7 +72,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 NEXT_FRAMEWORK = {
     "DEFAULT_COMPONENT_BACKENDS": [
         {
-            "BACKEND": "next.components.FileComponentsBackend",
+            "BACKEND": "myapp.custom_backend.CountingFileComponentsBackend",
             "DIRS": [str(BASE_DIR / "root_components")],
             "COMPONENTS_DIR": "_components",
         },

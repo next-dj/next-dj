@@ -201,3 +201,16 @@ def test_edit_page_module_has_action(client) -> None:
     assert hasattr(edit_page, "update_todo_handler")
     assert callable(edit_page.update_todo_handler)
     assert hasattr(edit_page, "TodoEditForm")
+
+
+def test_audited_backend_subclass_records_dispatches() -> None:
+    """`AuditedRegistryFormActionBackend` captures each UID sent to `dispatch`."""
+    from django.http import HttpRequest
+    from todos.custom_backend import AuditedRegistryFormActionBackend
+
+    backend = AuditedRegistryFormActionBackend()
+    request = HttpRequest()
+    request.method = "POST"
+    response = backend.dispatch(request, "unknown-uid")
+    assert response.status_code == 404
+    assert backend.dispatch_log == ["unknown-uid"]
