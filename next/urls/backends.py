@@ -10,7 +10,6 @@ dotted backend paths to classes and instantiates them from
 
 from __future__ import annotations
 
-import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -29,9 +28,6 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from django.urls import URLPattern, URLResolver
-
-
-logger = logging.getLogger(__name__)
 
 
 class RouterBackend(ABC):

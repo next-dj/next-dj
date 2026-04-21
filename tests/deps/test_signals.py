@@ -37,6 +37,7 @@ class TestProviderRegisteredSignal:
                 return None
 
         assert len(capture_provider_registered) == 1
+        assert capture_provider_registered[0]["sender"] is _TestProvider
 
     def test_sender_is_the_subclass(
         self, capture_provider_registered: list[dict[str, Any]]

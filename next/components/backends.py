@@ -10,7 +10,6 @@ through `import_class_cached`.
 
 from __future__ import annotations
 
-import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, cast
 
@@ -26,9 +25,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .info import ComponentInfo
-
-
-logger = logging.getLogger(__name__)
 
 
 class ComponentsBackend(ABC):

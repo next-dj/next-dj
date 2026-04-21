@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import inspect
-from typing import TypeVar, get_args, get_origin
+from typing import get_args, get_origin
 
 from next.deps import DDependencyBase, RegisteredParameterProvider
-
-
-_FormT = TypeVar("_FormT", bound=type)  # noqa: PYI018
 
 
 class DForm[FormT](DDependencyBase[FormT]):

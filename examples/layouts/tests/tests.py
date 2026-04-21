@@ -173,7 +173,8 @@ def test_layout_stamp_provider_handles_named_parameter() -> None:
         cache=DependencyCache(),
     )
 
-    def _sample(layout_stamp: str, other: str) -> None: ...
+    def _sample(layout_stamp: str, other: str) -> None:
+        pass
 
     params = inspect.signature(_sample).parameters
     assert provider.can_handle(params["layout_stamp"], context) is True

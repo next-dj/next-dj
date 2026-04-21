@@ -24,8 +24,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-EXPECTED_PARAMETER_PARTS = 2
-
 FILE_ROUTER_BACKEND = "next.urls.FileRouterBackend"
 
 _PAGE_BACKEND_SETTINGS_KEY = "DEFAULT_PAGE_BACKENDS"
@@ -315,7 +313,7 @@ def check_duplicate_url_parameters(
                 continue
 
             try:
-                _django_pattern, _parameters = parser.parse_url_pattern(url_path)
+                parser.parse_url_pattern(url_path)
                 duplicates = _get_duplicate_parameters(url_path, parser)
 
                 if duplicates:
