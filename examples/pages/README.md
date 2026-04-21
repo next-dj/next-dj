@@ -82,7 +82,7 @@ This approach separates template logic from Python code, making templates easier
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - Django 4.2+
 - next-dj installed
 

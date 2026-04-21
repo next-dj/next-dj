@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Next-gen framework for Django developers"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 keywords = ["django", "framework", "low-code", "frontend", "full-stack framework"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -22,7 +22,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",

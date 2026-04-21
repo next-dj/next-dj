@@ -4,7 +4,7 @@ Guidelines for code, tests, and pull requests. Read this before opening a PR.
 
 ## Prerequisites
 
-- Python 3.11+. See `requires-python` in `pyproject.toml`. CI runs 3.11–3.14 against supported Django versions.
+- Python 3.12+. See `requires-python` in `pyproject.toml`. CI runs 3.12–3.14 against supported Django versions.
 - [uv](https://docs.astral.sh/uv/)
 - Git
 

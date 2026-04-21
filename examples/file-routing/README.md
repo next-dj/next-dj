@@ -75,7 +75,7 @@ The example uses next-dj's file-based routing system. A single `FileRouterBacken
 
 ### Prerequisites
 
-- Python 3.11+ (see the root `pyproject.toml`)
+- Python 3.12+ (see the root `pyproject.toml`)
 - Django 4.2+ (supported range in the main project)
 - next-dj installed
 
