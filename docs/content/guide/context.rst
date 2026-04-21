@@ -263,6 +263,26 @@ Context function errors are handled gracefully:
            logger.error(f"Error in get_user_data: {e}")
            return {"user_name": "Unknown"}
 
+Strict mode
+~~~~~~~~~~~
+
+By default, a ``TypeError`` / ``ValueError`` / ``AttributeError`` / ``KeyError``
+raised while running a Django **context processor** is logged as a warning and
+the page continues to render with a partial context. In development this can
+mask real bugs. Enable strict mode to re-raise those exceptions so you see a
+proper traceback:
+
+.. code-block:: python
+
+   # settings.py
+   NEXT_FRAMEWORK = {
+       "STRICT_CONTEXT": True,
+   }
+
+Strict mode only changes behaviour for errors inside context processors — errors
+in ``@context``-decorated functions always propagate. Leave the flag off in
+production if you prefer lenient rendering.
+
 Context Caching
 ---------------
 

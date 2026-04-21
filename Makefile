@@ -1,4 +1,4 @@
-.PHONY: help install test lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js lint-js format-js format-js-check
+.PHONY: help install test bench lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js lint-js format-js format-js-check
 
 # Allow CI to point at a prebuilt venv's pytest (bypassing `uv run` and its sync step)
 PYTEST ?= uv run pytest
@@ -7,6 +7,7 @@ help: # show this help message
 	@echo "Available commands:"
 	@echo "  install         - sync runtime deps + project from uv.lock (no dev group)"
 	@echo "  test            - run tests in parallel with 100% coverage requirement"
+	@echo "  bench           - run performance benchmarks (opt-in, no coverage)"
 	@echo "  test-examples   - run tests for examples in parallel with coverage"
 	@echo "  lint            - run linting with ruff"
 	@echo "  format          - format code with ruff"
@@ -50,6 +51,9 @@ install: # install the package (editable) using the lockfile
 
 test: # run tests with 100% coverage requirement
 	uv run pytest tests/ -n auto --cov=next --cov-report=html --cov-report=term-missing --cov-fail-under=100
+
+bench: # run performance benchmarks (opt-in, no coverage, not ignored)
+	uv run pytest tests/benchmarks -m perf --benchmark-only --no-cov --override-ini="addopts="
 
 test-examples: # run tests for examples with coverage
 	@set -e; \

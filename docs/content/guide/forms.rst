@@ -182,6 +182,11 @@ Use the ``@forms.action()`` decorator to register form action handlers:
 
 - **``name``** (required): Unique action name used in templates and to build a stable form endpoint. Must not collide with another action in the project.
 - **``form_class``** (optional): Django form class implementing ``get_initial``. If omitted, the handler is invoked without a bound form (useful for non-form POST actions).
+- **``namespace``** (optional, keyword-only): Prefix added to ``name`` as ``"<namespace>:<name>"``. Useful when several apps ship actions with overlapping names (e.g. ``"save"``). The resulting namespaced name is what templates reference in ``@action="blog:save"``.
+
+**Action name collisions:**
+
+Two actions that hash to the same 16-character UID are a hard error: a system check raises ``django.core.exceptions.ImproperlyConfigured`` at startup naming both registered actions. Use a ``namespace=`` prefix (or rename one action) to resolve the collision. Plain name reuse without a collision is caught by the same check as a duplicate registration error.
 
 **Handler function signature:**
 

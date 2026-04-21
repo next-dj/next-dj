@@ -186,6 +186,22 @@ Context functions on pages
 **What to do:** Return a mapping from context helpers, or use ``@context("name")``.
 See :doc:`../guide/context`.
 
+Forms
+~~~~~
+
+Raised directly from :mod:`next.forms.backends` at registration time (``@forms.action``).
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Error
+     - Meaning
+   * - ``ImproperlyConfigured: Form action UID collision``
+     - Two distinct action names hash to the same 16-character UID. Rename one
+       of them, or pass ``namespace="…"`` on ``@forms.action`` to add a
+       disambiguating prefix. See :doc:`../guide/forms`.
+
 ``NEXT_FRAMEWORK`` keys (reference)
 ------------------------------------
 

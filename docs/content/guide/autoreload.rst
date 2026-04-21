@@ -21,11 +21,11 @@ What is watched
 Implementation
 --------------
 
-* **Patch in ``ready()``**  
-  In :file:`next/apps.py`, ``autoreload.StatReloader`` is replaced with :class:`next.server.NextStatReloader`. This happens at app load, before the reloader instance is created, so ``runserver`` uses the next.dj reloader.
+* **Patch in ``ready()``**
+  In :mod:`next.apps.autoreload`, ``install()`` swaps ``autoreload.StatReloader`` with :class:`next.server.NextStatReloader`. The swap is **idempotent** — calling ``install()`` again when the current class is already a ``NextStatReloader`` subclass is a no-op. The previous class is stashed in a module-level variable so tests and other packages can call ``uninstall()`` to restore it (and disconnect the watch-spec signal handler). If another package has already replaced ``StatReloader`` with something that is not a ``StatReloader`` subclass, ``install()`` logs a warning and leaves the foreign class in place rather than silently overwriting it.
 
-* **Registration of watch dirs**  
-  The signal :py:data:`django.utils.autoreload.autoreload_started` is connected to a handler that calls :func:`next.server.iter_all_autoreload_watch_specs` and, for each ``(path, glob)`` pair, ``sender.watch_dir(path, glob)``. Built-in specs cover pages and filesystem components. Third-party code can add pairs with :func:`next.server.register_autoreload_watch_spec`.
+* **Registration of watch dirs**
+  The signal :py:data:`django.utils.autoreload.autoreload_started` is connected to a handler that calls :func:`next.server.iter_all_autoreload_watch_specs` and, for each ``(path, glob)`` pair, ``sender.watch_dir(path, glob)``. The connection is also idempotent: ``install()`` only connects the receiver once, and ``uninstall()`` disconnects it. Built-in specs cover pages and filesystem components. Third-party code can add pairs with :func:`next.server.register_autoreload_watch_spec`.
 
 * **NextStatReloader**  
   In :file:`next/server.py`, :class:`NextStatReloader` subclasses :class:`django.utils.autoreload.StatReloader`. Its :meth:`~NextStatReloader.tick` generator recomputes the route set and compares it to the previous tick (calling ``notify_file_changed`` when routes are added or removed), then delegates to the parent's tick (mtime loop and sleep). That route set includes virtual pages backed by ``template.djx``. **Creating or deleting** a file that adds or removes such a route still restarts the process so URLconf can be rebuilt. Pure **edits** to an existing ``.djx`` (or new ``layout.djx`` / component ``.djx`` that do not change discovered routes) do not go through this comparison. They are picked up via mtime when templates render.

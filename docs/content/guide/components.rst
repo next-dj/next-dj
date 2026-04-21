@@ -22,6 +22,30 @@ Components are provided by backends, similar to the page router. In Django setti
 
 ``component.py`` modules are always loaded with the framework’s built-in :class:`~next.components.ModuleLoader`.
 
+Lazy module loading
+~~~~~~~~~~~~~~~~~~~
+
+By default ``FileComponentsBackend`` eagerly imports every discovered
+``component.py`` on startup so that decorators (``@context``, ``@action``) have
+registered their side effects before the first request. Large projects with
+hundreds of components may prefer to pay that cost only when a component is
+first resolved:
+
+.. code-block:: python
+
+   NEXT_FRAMEWORK = {
+       "LAZY_COMPONENT_MODULES": True,
+   }
+
+With lazy loading enabled, ``component.py`` is imported on the first call to
+``get_component(name, template_path)`` for that component and cached for the
+rest of the process lifetime. The filesystem scan (template discovery, scope
+tree) still runs at startup — only Python module execution is deferred.
+Actions or context processors defined in a deferred ``component.py`` are
+therefore **not** registered until that component renders at least once, which
+may matter for ``{% form %}`` tags that reference such actions on a page that
+does not include the component itself.
+
 Minimal example:
 
 .. code-block:: python
