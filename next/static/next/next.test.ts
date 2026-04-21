@@ -125,6 +125,7 @@ describe("Next.on", () => {
     win.Next.on("ready", () => {
       called += 1;
     });
+    called = 0;
     win.Next._init({ page: "home" });
     expect(called).toBe(1);
   });
@@ -148,6 +149,8 @@ describe("Next.on", () => {
     win.Next.on("ready", () => {
       b += 1;
     });
+    a = 0;
+    b = 0;
     win.Next._init({});
     expect(a).toBe(1);
     expect(b).toBe(1);
@@ -158,10 +161,29 @@ describe("Next.on", () => {
     const off = win.Next.on("ready", () => {
       called += 1;
     });
+    called = 0;
     win.Next._init({});
     off();
     win.Next._init({});
     expect(called).toBe(1);
+  });
+
+  it("fires ready immediately for listeners registered after _init", () => {
+    win.Next._init({ page: "home" });
+    let received: Record<string, unknown> | null = null;
+    win.Next.on("ready", (ctx) => {
+      received = ctx;
+    });
+    expect(received).toEqual({ page: "home" });
+  });
+
+  it("does not replay context-updated for late subscribers", () => {
+    win.Next._init({ page: "home" });
+    let called = 0;
+    win.Next.on("context-updated", () => {
+      called += 1;
+    });
+    expect(called).toBe(0);
   });
 });
 

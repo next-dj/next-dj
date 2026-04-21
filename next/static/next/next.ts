@@ -5,6 +5,7 @@ type NextPlugin<T> = (next: typeof Next) => T;
 class Next {
   static #context: Record<string, unknown> = {};
   static #listeners: Map<NextEvent, Set<NextListener>> = new Map();
+  static #ready = false;
 
   static get context(): Readonly<Record<string, unknown>> {
     return Object.freeze({ ...Next.#context });
@@ -12,6 +13,7 @@ class Next {
 
   static _init(context: Record<string, unknown>): void {
     Next.#context = context;
+    Next.#ready = true;
     Next.#dispatch("context-updated", context);
     Next.#dispatch("ready", context);
   }
@@ -23,6 +25,9 @@ class Next {
       Next.#listeners.set(event, bucket);
     }
     bucket.add(listener);
+    if (event === "ready" && Next.#ready) {
+      listener({ ...Next.#context });
+    }
     return () => {
       bucket!.delete(listener);
     };

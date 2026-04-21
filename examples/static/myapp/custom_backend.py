@@ -1,14 +1,3 @@
-"""Custom :class:`StaticBackend` demonstrating ``OPTIONS`` extensibility.
-
-The backend subclasses :class:`next.static.StaticFilesBackend` and reads a
-few extra attribute knobs from its ``OPTIONS`` mapping. Values flow through
-``NEXT_FRAMEWORK['DEFAULT_STATIC_BACKENDS']`` so templates themselves remain
-unchanged. The parent class already honors ``css_tag`` / ``js_tag`` format
-strings, but overriding :meth:`render_script_tag` shows how to derive an
-attribute set programmatically — useful when integrity hashes or defer flags
-depend on runtime state rather than a static format string.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
