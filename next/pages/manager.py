@@ -29,6 +29,7 @@ from .loaders import (
 )
 from .processors import _get_context_processors
 from .registry import PageContextRegistry
+from .signals import page_rendered, template_loaded
 
 
 if TYPE_CHECKING:
@@ -65,6 +66,7 @@ class Page:
     def register_template(self, file_path: Path, template_str: str) -> None:
         """Store rendered template source for `file_path`."""
         self._template_registry[file_path] = template_str
+        template_loaded.send(sender=Page, file_path=file_path)
 
     def _get_caller_path(self, back_count: int = 1) -> Path:
         """Return the filesystem path of the user caller outside this module."""
@@ -190,7 +192,11 @@ class Page:
         context_data["_static_collector"] = collector
 
         html = Template(template_str).render(DjangoTemplateContext(context_data))
-        return cast("str", default_manager.inject(html, collector, page_path=file_path))
+        result = cast(
+            "str", default_manager.inject(html, collector, page_path=file_path)
+        )
+        page_rendered.send(sender=Page, file_path=file_path)
+        return result
 
     def _create_view_function(
         self,

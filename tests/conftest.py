@@ -66,7 +66,7 @@ if not settings.configured:
                     "BACKEND": "next.urls.FileRouterBackend",
                     "PAGES_DIR": "pages",
                     "APP_DIRS": False,
-                    "DIRS": [str(project_root / "tests" / "pages")],
+                    "DIRS": [str(project_root / "tests" / "site_pages")],
                     "OPTIONS": {},
                 },
             ],
@@ -75,7 +75,7 @@ if not settings.configured:
     # Register form actions from test_forms before URLconf is loaded (django.setup()
     # Loads next.urls and builds urlpatterns. Actions must be in form_action_manager.
     # by then so that the form_action URL pattern is included).
-    import tests.test_forms  # noqa: F401
+    import tests.forms.actions  # noqa: F401
 
     django.setup()
 

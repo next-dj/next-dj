@@ -14,6 +14,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar, Protocol, runtime_checkable
 
+from .signals import provider_registered
+
 
 if TYPE_CHECKING:
     import inspect
@@ -46,6 +48,7 @@ class RegisteredParameterProvider(ABC):
         """Track concrete subclasses for lazy instantiation by the resolver."""
         super().__init_subclass__(**kwargs)
         RegisteredParameterProvider._registry.append(cls)
+        provider_registered.send(sender=cls)
 
     @abstractmethod
     def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:

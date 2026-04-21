@@ -17,6 +17,7 @@ from django.http import HttpRequest
 from next.deps import DependencyResolver, resolver
 
 from .context import ContextResult
+from .signals import context_registered
 from .watch import get_pages_directories_for_watch
 
 
@@ -86,6 +87,9 @@ class PageContextRegistry:
             func,
             inherit_context,
             serialize,
+        )
+        context_registered.send(
+            sender=PageContextRegistry, file_path=file_path, key=key
         )
 
     def collect_context(
