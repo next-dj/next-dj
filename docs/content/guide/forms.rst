@@ -1025,6 +1025,30 @@ See Also
 - :doc:`pages-and-templates` - Template and layout system
 - `Django Forms Documentation <https://docs.djangoproject.com/en/stable/topics/forms/>`_ - Django forms reference
 
+Extension points
+----------------
+
+The forms subsystem exposes two pluggable surfaces.
+
+* ``next.forms.backends.FormActionBackend`` is the abstract contract for storing and dispatching actions. Subclass it to move the registry into a different store.
+* ``next.forms.backends.RegistryFormActionBackend`` is the default in-memory backend. Subclass it to audit, cache, or gate dispatch.
+
+Swap the backend through ``FormActionManager``.
+
+.. code-block:: python
+
+   from next.forms import FormActionManager
+
+   form_action_manager = FormActionManager(backends=[MyBackend()])
+
+The signals emitted by :mod:`next.forms.signals` let external code observe action lifecycle events.
+
+* ``action_registered`` fires when ``@action`` attaches a handler to a backend.
+* ``action_dispatched`` fires after a backend finishes dispatch for a request.
+* ``form_validation_failed`` fires after a submitted form fails validation.
+
+A worked example lives in ``examples/forms/todos/custom_backend.py``. See :doc:`extending` for the overall extension model.
+
 Next
 ----
 

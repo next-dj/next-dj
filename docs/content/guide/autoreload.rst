@@ -41,6 +41,30 @@ Limitations
 * Saving **changes inside** an existing ``.djx`` does not use the file watcher and does not restart the process. The next request reloads that template when its mtime changes (see :doc:`pages-and-templates`).
 * Adding or removing a **virtual route** (for example a new or deleted standalone ``template.djx`` that the file router exposes as a URL) **does** restart the server, because the route set changes and URL patterns must be rebuilt—not because ``.djx`` is glob-watched, but because of the route comparison above.
 
+Extension points
+----------------
+
+The server subsystem exposes two pluggable surfaces for contributing watch specs.
+
+* ``next.server.watcher.FilesystemWatchContributor`` is the protocol used internally to collect watch specs. Implement it for tools that want to ship additional directories to the reloader.
+* ``next.server.watcher.register_autoreload_watch_spec`` registers a single ``(path, glob)`` pair without subclassing anything.
+
+Register a spec once at startup.
+
+.. code-block:: python
+
+   from pathlib import Path
+
+   from next.server import register_autoreload_watch_spec
+
+   register_autoreload_watch_spec(Path("/opt/myapp/content"), "**/*.md")
+
+The signal emitted by :mod:`next.server.signals` lets external code inspect the resolved watch set.
+
+* ``watch_specs_ready`` fires after the reloader resolves the full watch-spec list.
+
+See :doc:`extending` for the overall extension model.
+
 Next
 ----
 

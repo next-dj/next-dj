@@ -318,3 +318,35 @@ Example project
 ----------------
 
 The ``examples/components/`` project shows a realistic setup: composite **header** with ``@context("user")`` and navigation, **footer** as a simple ``.djx`` file, **post cards** with ``{% #component %}`` / ``{% #slot %}`` inside a loop, a reusable **card** component, **recommendations** with ``@context``, and root versus branch-scoped ``_components``. See its ``README.md`` and ``tests.py`` in the repository.
+
+Extension points
+----------------
+
+The components subsystem exposes four pluggable surfaces.
+
+* ``next.components.backends.ComponentsBackend`` is the abstract contract for sourcing component metadata. Subclass it to serve components from something other than the filesystem.
+* ``next.components.backends.FileComponentsBackend`` is the default implementation. Subclass it to keep the filesystem scan and add bookkeeping.
+* ``next.components.renderers.ComponentRenderStrategy`` is the protocol for swapping out how a single component is rendered. Register alternative strategies via ``ComponentsManager(strategies=...)``.
+* ``next.components.backends.ComponentsFactory`` reads ``DEFAULT_COMPONENT_BACKENDS`` and imports each ``BACKEND`` dotted path.
+
+Register a custom backend through the settings contract.
+
+.. code-block:: python
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_COMPONENT_BACKENDS": [
+           {
+               "BACKEND": "myapp.custom_backend.CountingFileComponentsBackend",
+               "DIRS": [],
+               "COMPONENTS_DIR": "_components",
+           },
+       ],
+   }
+
+The signals emitted by :mod:`next.components.signals` let external code observe component activity.
+
+* ``component_registered`` fires when a backend reports a new component.
+* ``component_backend_loaded`` fires after ``ComponentsFactory`` instantiates a backend.
+* ``component_rendered`` fires after a component finishes rendering.
+
+A worked example lives in ``examples/components/myapp/custom_backend.py``. See :doc:`extending` for the overall extension model.

@@ -204,6 +204,27 @@ API reference
 For the full API of the ``next.deps`` module (resolver, Deps, providers, protocol),
 see :ref:`dependency-injection-api`.
 
+Extension points
+----------------
+
+The dependency-injection layer exposes three pluggable surfaces.
+
+* ``next.deps.providers.ParameterProvider`` is the minimal protocol consumed by ``DependencyResolver``. Implement it for ad-hoc providers passed directly to a custom resolver.
+* ``next.deps.providers.RegisteredParameterProvider`` is the ABC used by built-in providers. Every concrete subclass auto-registers through ``__init_subclass__``, so importing the module that defines the subclass is enough to wire it into the resolver.
+* ``DependencyResolver.register_dependency`` binds a callable to a name so ``Depends("name")`` resolves it.
+
+Register a custom provider by importing the module that defines it.
+
+.. code-block:: python
+
+   from myapp.custom_provider import LayoutStampProvider  # noqa: F401 - import side-effect
+
+The signal emitted by :mod:`next.deps.signals` lets external code observe wiring events.
+
+* ``provider_registered`` fires when a ``RegisteredParameterProvider`` subclass joins the auto-registry.
+
+A worked example lives in ``examples/layouts/layouts/custom_provider.py``. See :doc:`extending` for the overall extension model.
+
 Next
 ----
 

@@ -362,6 +362,30 @@ Best Practices
 8. **Plan your layout hierarchy**: Design clear inheritance chains
 9. **Use multiple configurations**: Separate different sections of your application
 
+Extension points
+----------------
+
+The pages subsystem exposes one pluggable surface for loading template source.
+
+* ``next.pages.loaders.TemplateLoader`` is the abstract contract used by ``Page`` to read template source by path. The default stack resolves Python modules, ``.djx`` files, and layout chains. Subclass it to read sources from a database, a bundled archive, or an in-memory map.
+
+Attach a custom loader by passing it to the ``Page`` singleton at startup.
+
+.. code-block:: python
+
+   from next.pages import Page
+   from myapp.custom_loader import InMemoryTemplateLoader
+
+   page = Page(template_loaders=[InMemoryTemplateLoader({"/virtual/page.py": "..."})])
+
+The signals emitted by :mod:`next.pages.signals` let external code observe the rendering pipeline.
+
+* ``template_loaded`` fires when a loader returns source for a path.
+* ``context_registered`` fires when a context function is attached to a page.
+* ``page_rendered`` fires after a page finishes rendering.
+
+A worked example lives in ``examples/pages/catalog/custom_loader.py``. See :doc:`extending` for the overall extension model.
+
 Next
 ----
 

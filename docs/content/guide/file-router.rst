@@ -269,6 +269,36 @@ Best Practices
 5. **Follow naming conventions**: Use consistent directory and file names
 6. **Handle errors gracefully**: Always provide fallback data in context functions
 
+Extension points
+----------------
+
+The URL routing subsystem exposes three pluggable surfaces.
+
+* ``next.urls.backends.RouterBackend`` is the abstract contract for generating URL patterns. Subclass it to serve routes from a source other than the filesystem.
+* ``next.urls.backends.FileRouterBackend`` is the default implementation. Subclass it to keep the filesystem walk but augment the generated patterns.
+* ``next.urls.backends.RouterFactory.register_backend`` lets you map a custom dotted path to a backend class without editing the factory itself.
+
+Register a custom backend through the settings contract.
+
+.. code-block:: python
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_PAGE_BACKENDS": [
+           {
+               "BACKEND": "myapp.custom_router.TaggedFileRouterBackend",
+               "PAGES_DIR": "pages",
+               "APP_DIRS": True,
+           },
+       ],
+   }
+
+The signals emitted by :mod:`next.urls.signals` let external code observe routing decisions without subclassing.
+
+* ``route_registered`` fires when a backend yields a new URL pattern.
+* ``router_reloaded`` fires when the ``RouterManager`` rebuilds its pattern list after a settings change.
+
+A worked example lives in ``examples/file-routing/myapp/custom_router.py``. See :doc:`extending` for the overall extension model.
+
 Next
 ----
 
