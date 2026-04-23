@@ -23,6 +23,7 @@ media
 .idea/**/aws.xml
 
 # generated files
+.claude
 .idea/**/contentModel.xml
 
 # sensitive or high-churn files

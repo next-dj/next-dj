@@ -1,0 +1,11 @@
+{% block template %}
+<section class="space-y-4">
+  <h1 class="text-3xl font-bold">{{ greeting }}</h1>
+  <p class="text-slate-600">
+    Copy this folder, rename <code class="rounded bg-slate-100 px-1">myapp</code>,
+    and start building. The <code class="rounded bg-slate-100 px-1">_widgets</code>
+    directory is your components scope, <code class="rounded bg-slate-100 px-1">routes</code>
+    is your pages directory, and the settings module wires both.
+  </p>
+</section>
+{% endblock %}

@@ -97,6 +97,15 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry: dict[str, ActionMeta] = {}
         self._uid_to_name: dict[str, str] = {}
 
+    def clear_registry(self) -> None:
+        """Drop every registered action and reset the UID index.
+
+        Intended for test isolation. Use this to clear actions between
+        independent test sessions that register overlapping names.
+        """
+        self._registry.clear()
+        self._uid_to_name.clear()
+
     def register_action(
         self,
         name: str,
