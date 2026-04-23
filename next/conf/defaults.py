@@ -42,4 +42,5 @@ DEFAULTS: dict[str, Any] = {
     "NEXT_JS_OPTIONS": {},
     "STRICT_CONTEXT": False,
     "LAZY_COMPONENT_MODULES": False,
+    "JS_CONTEXT_SERIALIZER": None,
 }

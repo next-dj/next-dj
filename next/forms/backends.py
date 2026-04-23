@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 
 from .dispatch import _FormActionDispatch
 from .rendering import render_form_page_with_errors
+from .signals import action_registered
 from .uid import (
     FORM_ACTION_REVERSE_NAME,
     URL_NAME_FORM_ACTION,
@@ -129,6 +130,13 @@ class RegistryFormActionBackend(FormActionBackend):
             "form_class": opts.form_class,
             "uid": uid,
         }
+        action_registered.send(
+            sender=self.__class__,
+            action_name=name,
+            uid=uid,
+            form_class=opts.form_class,
+            namespace=opts.namespace,
+        )
 
     def get_action_url(self, action_name: str) -> str:
         """Return the reverse URL for a registered action name."""

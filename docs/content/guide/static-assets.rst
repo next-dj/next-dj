@@ -380,6 +380,15 @@ Each entry is a dict that is passed unchanged into the backend constructor:
     substituted. Default: ``'<link rel="stylesheet" href="{url}">'``.
   - ``js_tag`` (str). Format string for JS script tags. ``{url}`` is
     substituted. Default: ``'<script src="{url}"></script>'``.
+  - ``DEDUP_STRATEGY`` (str, optional). Dotted path to a class implementing
+    :class:`~next.static.collector.DedupStrategy`. Used by
+    :class:`~next.static.StaticCollector` to decide whether an asset is a
+    duplicate. Defaults to :class:`~next.static.collector.UrlDedup`.
+  - ``JS_CONTEXT_POLICY`` (str, optional). Dotted path to a class
+    implementing :class:`~next.static.collector.JsContextPolicy`. Used by
+    the collector to merge values registered through
+    :meth:`~next.static.StaticCollector.add_js_context`. Defaults to
+    :class:`~next.static.collector.FirstWinsPolicy`.
 
 If ``DEFAULT_STATIC_BACKENDS`` is missing, empty, or contains no usable
 entries, the framework falls back to ``StaticFilesBackend()`` so static
@@ -404,6 +413,63 @@ without writing a custom backend:
            },
        ],
    }
+
+Swapping collector strategies
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The collector's dedup and JS-context merge semantics are pluggable. Point
+``OPTIONS`` at dotted paths to swap strategies without subclassing.
+
+.. code-block:: python
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_STATIC_BACKENDS": [
+           {
+               "BACKEND": "next.static.StaticFilesBackend",
+               "OPTIONS": {
+                   "DEDUP_STRATEGY": "next.static.collector.HashContentDedup",
+                   "JS_CONTEXT_POLICY": "next.static.collector.DeepMergePolicy",
+               },
+           },
+       ],
+   }
+
+:class:`~next.static.collector.HashContentDedup` collapses assets whose file
+contents hash to the same value, which is useful behind manifest storage
+that emits multiple filenames for an identical file.
+:class:`~next.static.collector.DeepMergePolicy` merges nested dictionaries
+registered under the same JS-context key instead of keeping the first value.
+
+Pluggable JS-context serializer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Values registered through :meth:`~next.static.StaticCollector.add_js_context`
+and values returned from ``@context(serialize=True)`` callables are encoded
+by a :class:`~next.static.serializers.JsContextSerializer`. The default
+:class:`~next.static.serializers.JsonJsContextSerializer` uses Django's
+``DjangoJSONEncoder``. Applications that need pydantic, msgspec, or any
+other encoder can point ``JS_CONTEXT_SERIALIZER`` at a class that
+implements the protocol.
+
+.. code-block:: python
+
+   NEXT_FRAMEWORK = {
+       "JS_CONTEXT_SERIALIZER": (
+           "next.static.serializers.PydanticJsContextSerializer"
+       ),
+   }
+
+The protocol is a single ``dumps(value) -> str`` method. Framework-provided
+classes live in :mod:`next.static.serializers`:
+
+* :class:`~next.static.serializers.JsonJsContextSerializer` — default,
+  backed by ``DjangoJSONEncoder``.
+* :class:`~next.static.serializers.PydanticJsContextSerializer` — unwraps
+  ``pydantic.BaseModel`` instances through ``model_dump`` before encoding.
+
+Custom serializers can be injected into a single collector for tests
+through the ``js_serializer`` keyword argument on
+:class:`~next.static.StaticCollector`.
 
 .. _static-custom-backends:
 
@@ -933,7 +999,9 @@ without subclassing any of the static classes.
    * - :data:`~next.static.signals.html_injected`
      - :class:`~next.static.StaticManager`
      - ``html_before`` (``str``), ``html_after`` (``str``),
-       ``collector`` (:class:`~next.static.StaticCollector`).
+       ``collector`` (:class:`~next.static.StaticCollector`),
+       ``placeholders_replaced`` (``tuple[str, ...]``),
+       ``injected_bytes`` (``int``).
    * - :data:`~next.static.signals.backend_loaded`
      - Concrete backend class (subclass of
        :class:`~next.static.StaticBackend`)

@@ -87,6 +87,10 @@ class NextFrameworkSettings:
                 out[key] = copy.deepcopy(raw)
             elif key in self._BOOL_KEYS:
                 out[key] = bool(raw)
+            elif key == "JS_CONTEXT_SERIALIZER" and (
+                raw is None or isinstance(raw, str)
+            ):
+                out[key] = raw
         return out
 
     def __getattr__(self, attr: str) -> Any:  # noqa: ANN401

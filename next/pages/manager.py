@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import time
 from typing import TYPE_CHECKING, Any, cast
 
 from django.http import HttpRequest, HttpResponse
@@ -175,6 +176,7 @@ class Page:
         left by `{% collect_styles %}` and `{% collect_scripts %}` are
         replaced with actual `<link>` and `<script>` tags.
         """
+        start = time.perf_counter()
         if file_path not in self._template_registry or self._is_template_stale(
             file_path
         ):
@@ -185,9 +187,9 @@ class Page:
         template_str = self._template_registry[file_path]
         context_data = self.build_render_context(file_path, *args, **kwargs)
 
-        from next.static import StaticCollector, default_manager  # noqa: PLC0415
+        from next.static import default_manager  # noqa: PLC0415
 
-        collector = StaticCollector()
+        collector = default_manager.create_collector()
         js_context: dict[str, object] = context_data.pop("_next_js_context", {})  # type: ignore[assignment]
         for js_key, js_value in js_context.items():
             collector.add_js_context(js_key, js_value)
@@ -198,7 +200,15 @@ class Page:
         result = cast(
             "str", default_manager.inject(html, collector, page_path=file_path)
         )
-        page_rendered.send(sender=Page, file_path=file_path)
+        duration_ms = (time.perf_counter() - start) * 1000
+        page_rendered.send(
+            sender=Page,
+            file_path=file_path,
+            duration_ms=duration_ms,
+            styles_count=len(collector.styles()),
+            scripts_count=len(collector.scripts()),
+            context_keys=tuple(context_data.keys()),
+        )
         return result
 
     def _create_view_function(

@@ -16,7 +16,8 @@ is sealed. The sender is the collector. The keyword argument is
 
 The `html_injected` signal fires after placeholder replacement
 completes. The sender is the static manager. The keyword arguments
-are `html_before`, `html_after`, and `collector`.
+are `html_before`, `html_after`, `collector`, `placeholders_replaced`,
+and `injected_bytes`.
 
 The `backend_loaded` signal fires after the static factory
 instantiates a backend. The sender is the backend class. The keyword

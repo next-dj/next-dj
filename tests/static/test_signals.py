@@ -156,6 +156,17 @@ class TestHtmlInjectedSignal:
         assert event["html_before"] == html
         assert event["html_after"] == out
         assert event["collector"] is collector
+        assert event["placeholders_replaced"] == ("styles",)
+        assert event["injected_bytes"] == len(out) - len(html)
+
+    def test_reports_no_placeholders_when_html_has_none(
+        self,
+        fresh_manager: StaticManager,
+        capture_html_injected: list[dict[str, Any]],
+    ) -> None:
+        collector = StaticCollector()
+        fresh_manager.inject("<body/>", collector)
+        assert capture_html_injected[0]["placeholders_replaced"] == ()
 
 
 class TestBackendLoadedSignal:

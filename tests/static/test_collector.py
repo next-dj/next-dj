@@ -299,7 +299,7 @@ class TestJsContextPolicyIntegration:
         """Non-serialisable values raise at add time, not at inject time."""
         import pytest
 
-        with pytest.raises(TypeError, match="not JSON-serialisable"):
+        with pytest.raises(TypeError, match="not serialisable"):
             collector.add_js_context("k", object())
         assert "k" not in collector.js_context()
 

@@ -381,8 +381,12 @@ Attach a custom loader by passing it to the ``Page`` singleton at startup.
 The signals emitted by :mod:`next.pages.signals` let external code observe the rendering pipeline.
 
 * ``template_loaded`` fires when a loader returns source for a path.
+  Kwargs: ``file_path``.
 * ``context_registered`` fires when a context function is attached to a page.
+  Kwargs: ``file_path``, ``key``.
 * ``page_rendered`` fires after a page finishes rendering.
+  Kwargs: ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``,
+  ``context_keys``.
 
 A worked example lives in ``examples/pages/catalog/custom_loader.py``. See :doc:`extending` for the overall extension model.
 

@@ -15,10 +15,7 @@ the static manager emits those tags at all.
 from __future__ import annotations
 
 import enum
-import json
 from typing import TYPE_CHECKING, Any, ClassVar, Final
-
-from django.core.serializers.json import DjangoJSONEncoder
 
 
 if TYPE_CHECKING:
@@ -98,10 +95,15 @@ class NextScriptBuilder:
         return self._script_tag_template.format(url=self._url)
 
     def init_script(self, js_context: Mapping[str, Any]) -> str:
-        """Return the inline script that passes the context to `Next._init`."""
-        payload = json.dumps(
-            dict(js_context), cls=DjangoJSONEncoder, separators=(",", ":")
-        )
+        """Return the inline script that passes the context to `Next._init`.
+
+        Delegates serialisation to the configured `JsContextSerializer`
+        so the init payload honours the same encoding rules as values
+        registered through `StaticCollector.add_js_context`.
+        """
+        from .serializers import resolve_serializer  # noqa: PLC0415
+
+        payload = resolve_serializer().dumps(dict(js_context))
         return self._init_template.format(payload=payload)
 
     @classmethod

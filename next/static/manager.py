@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.utils.functional import LazyObject, empty
@@ -30,6 +30,7 @@ from .collector import (
     HEAD_CLOSE,
     SCRIPTS_PLACEHOLDER,
     STYLES_PLACEHOLDER,
+    StaticCollector,
 )
 from .discovery import AssetDiscovery, PathResolver
 from .scripts import NEXT_JS_STATIC_PATH, NextScriptBuilder, ScriptInjectionPolicy
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
     from next.components import ComponentInfo
 
     from .assets import StaticAsset
-    from .collector import StaticCollector
+    from .collector import DedupStrategy, JsContextPolicy
     from .scripts import NextScriptBuilder as NextScriptBuilderType
 
 
@@ -65,6 +66,8 @@ class StaticManager:
         self._discovery: AssetDiscovery | None = None
         self._cached_page_roots: tuple[Path, ...] | None = None
         self._script_builder: NextScriptBuilderType | None = None
+        self._dedup_factory: Callable[[], DedupStrategy] | None = None
+        self._js_policy_factory: Callable[[], JsContextPolicy] | None = None
 
     def __len__(self) -> int:
         """Return the number of configured backends, loading them if needed."""
@@ -126,6 +129,11 @@ class StaticManager:
         """
         collector_finalized.send(sender=collector, page_path=page_path)
         html_before = html
+        replaced: list[str] = []
+        if STYLES_PLACEHOLDER in html:
+            replaced.append("styles")
+        if SCRIPTS_PLACEHOLDER in html:
+            replaced.append("scripts")
         html = html.replace(STYLES_PLACEHOLDER, self._render_style_tags(collector))
         html = html.replace(SCRIPTS_PLACEHOLDER, self._render_script_section(collector))
         html = self._inject_preload_hint(html)
@@ -134,6 +142,8 @@ class StaticManager:
             html_before=html_before,
             html_after=html,
             collector=collector,
+            placeholders_replaced=tuple(replaced),
+            injected_bytes=len(html) - len(html_before),
         )
         return html
 
@@ -199,6 +209,8 @@ class StaticManager:
         self._discovery = None
         self._cached_page_roots = None
         self._script_builder = None
+        self._dedup_factory = None
+        self._js_policy_factory = None
         configs = next_framework_settings.DEFAULT_STATIC_BACKENDS
         if not isinstance(configs, list):  # pragma: no cover
             configs = []
@@ -213,6 +225,34 @@ class StaticManager:
             self._backends.append(backend)
         if not self._backends:
             self._backends.append(StaticFilesBackend())
+        self._resolve_collector_strategies()
+
+    def _resolve_collector_strategies(self) -> None:
+        """Read dedup and js-context policy dotted paths from the first backend."""
+        from next.conf import import_class_cached  # noqa: PLC0415
+
+        options = dict(self.default_backend.config.get("OPTIONS") or {})
+        dedup_path = options.get("DEDUP_STRATEGY")
+        policy_path = options.get("JS_CONTEXT_POLICY")
+        self._dedup_factory = (
+            cast("Callable[[], DedupStrategy]", import_class_cached(str(dedup_path)))
+            if dedup_path
+            else None
+        )
+        self._js_policy_factory = (
+            cast("Callable[[], JsContextPolicy]", import_class_cached(str(policy_path)))
+            if policy_path
+            else None
+        )
+
+    def create_collector(self) -> StaticCollector:
+        """Build a new `StaticCollector` wired with configured strategies."""
+        self._ensure_backends()
+        dedup = self._dedup_factory() if self._dedup_factory is not None else None
+        policy = (
+            self._js_policy_factory() if self._js_policy_factory is not None else None
+        )
+        return StaticCollector(dedup=dedup, js_context_policy=policy)
 
     def page_roots(self) -> tuple[Path, ...]:
         """Return absolute page-tree roots from configured page backends."""

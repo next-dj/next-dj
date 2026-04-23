@@ -1049,8 +1049,11 @@ Swap the backend through ``FormActionManager``.
 The signals emitted by :mod:`next.forms.signals` let external code observe action lifecycle events.
 
 * ``action_registered`` fires when ``@action`` attaches a handler to a backend.
+  Kwargs: ``action_name``, ``uid``, ``form_class``, ``namespace``.
 * ``action_dispatched`` fires after a backend finishes dispatch for a request.
+  Kwargs: ``action_name``, ``duration_ms``, ``response_status``.
 * ``form_validation_failed`` fires after a submitted form fails validation.
+  Kwargs: ``action_name``, ``error_count``, ``field_names``.
 
 A worked example lives in ``examples/forms/todos/custom_backend.py``. See :doc:`extending` for the overall extension model.
 

@@ -163,6 +163,22 @@ class TestPageRenderedSignal:
         assert "file_path" in capture_page_rendered[0]
         assert capture_page_rendered[0]["file_path"] == page_file
 
+    def test_event_contains_enriched_payload(
+        self, capture_page_rendered: list[dict[str, Any]], tmp_path: Path
+    ) -> None:
+        """The event carries duration_ms, styles/scripts counts, and context keys."""
+        page_inst = Page()
+        page_file = tmp_path / "page.py"
+        page_inst.register_template(page_file, "<p>{{ greeting }}</p>")
+        capture_page_rendered.clear()
+        page_inst.render(page_file, greeting="hi")
+        event = capture_page_rendered[0]
+        assert isinstance(event["duration_ms"], float)
+        assert event["duration_ms"] >= 0
+        assert event["styles_count"] == 0
+        assert event["scripts_count"] == 0
+        assert "greeting" in event["context_keys"]
+
     def test_does_not_fire_without_render(
         self, capture_page_rendered: list[dict[str, Any]], tmp_path: Path
     ) -> None:

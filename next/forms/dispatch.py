@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import types
 from typing import TYPE_CHECKING, Any, cast
 
@@ -16,6 +17,7 @@ from next.deps import RESERVED_KEYS, resolver
 from next.utils import caller_source_path
 
 from .base import BaseModelForm
+from .signals import action_dispatched, form_validation_failed
 from .uid import validated_next_form_page_path
 
 
@@ -182,6 +184,7 @@ class _FormActionDispatch:
             return _FormActionDispatch._dispatch_handler_only(
                 handler,
                 request,
+                action_name,
                 url_kwargs,
                 dep_cache,
                 dep_stack,
@@ -199,9 +202,10 @@ class _FormActionDispatch:
         )
 
     @staticmethod
-    def _dispatch_handler_only(
+    def _dispatch_handler_only(  # noqa: PLR0913
         handler: Callable[..., Any],
         request: HttpRequest,
+        action_name: str,
         url_kwargs: dict[str, object],
         dep_cache: dict[str, Any],
         dep_stack: list[str],
@@ -213,10 +217,20 @@ class _FormActionDispatch:
             _stack=dep_stack,
             **url_kwargs,
         )
-        return _FormActionDispatch.ensure_http_response(
-            _normalize_handler_response(handler(**resolved)),
+        start = time.perf_counter()
+        raw = handler(**resolved)
+        duration_ms = (time.perf_counter() - start) * 1000
+        response = _FormActionDispatch.ensure_http_response(
+            _normalize_handler_response(raw),
             request=request,
         )
+        action_dispatched.send(
+            sender=_FormActionDispatch,
+            action_name=action_name,
+            duration_ms=duration_ms,
+            response_status=response.status_code,
+        )
+        return response
 
     @staticmethod
     def _dispatch_with_form(  # noqa: PLR0913
@@ -242,6 +256,13 @@ class _FormActionDispatch:
         initial_data = form_class.get_initial(**resolved)
         form = _bind_form_for_post(form_class, request, initial_data)
         if not form.is_valid():
+            error_count = sum(len(errors) for errors in form.errors.values())
+            form_validation_failed.send(
+                sender=_FormActionDispatch,
+                action_name=action_name,
+                error_count=error_count,
+                field_names=tuple(form.errors.keys()),
+            )
             return _FormActionDispatch.form_response(
                 backend, request, action_name, form, None
             )
@@ -254,12 +275,22 @@ class _FormActionDispatch:
             _stack=dep_stack,
             **url_kwargs,
         )
-        return _FormActionDispatch.ensure_http_response(
-            _normalize_handler_response(handler(**resolved)),
+        start = time.perf_counter()
+        raw = handler(**resolved)
+        duration_ms = (time.perf_counter() - start) * 1000
+        response = _FormActionDispatch.ensure_http_response(
+            _normalize_handler_response(raw),
             request=request,
             action_name=action_name,
             backend=backend,
         )
+        action_dispatched.send(
+            sender=_FormActionDispatch,
+            action_name=action_name,
+            duration_ms=duration_ms,
+            response_status=response.status_code,
+        )
+        return response
 
     @staticmethod
     def form_response(
