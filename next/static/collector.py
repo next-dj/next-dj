@@ -21,13 +21,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from .assets import _KIND_CSS, _KIND_JS, StaticAsset
+from .serializers import JsContextSerializer, resolve_serializer
 
 
 if TYPE_CHECKING:
     from collections.abc import Hashable, Iterator
     from pathlib import Path
-
-    from .serializers import JsContextSerializer
 
 
 logger = logging.getLogger(__name__)
@@ -371,8 +370,6 @@ class StaticCollector:
 
     def _get_js_serializer(self) -> JsContextSerializer:
         if self._js_serializer is None:
-            from .serializers import resolve_serializer  # noqa: PLC0415
-
             self._js_serializer = resolve_serializer()
         return self._js_serializer
 

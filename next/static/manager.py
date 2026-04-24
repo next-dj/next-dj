@@ -22,8 +22,9 @@ from typing import TYPE_CHECKING, cast
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.utils.functional import LazyObject, empty
 
-from next.conf import next_framework_settings
+from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
+from next.pages.watch import get_pages_directories_for_watch
 
 from .backends import StaticBackend, StaticFilesBackend, StaticsFactory
 from .collector import (
@@ -235,8 +236,6 @@ class StaticManager:
 
     def _resolve_collector_strategies(self) -> None:
         """Read dedup and js-context policy dotted paths from the first backend."""
-        from next.conf import import_class_cached  # noqa: PLC0415
-
         options = dict(self.default_backend.config.get("OPTIONS") or {})
         dedup_path = options.get("DEDUP_STRATEGY")
         policy_path = options.get("JS_CONTEXT_POLICY")
@@ -265,11 +264,6 @@ class StaticManager:
         if self._cached_page_roots is not None:
             return self._cached_page_roots
         roots: list[Path] = []
-        try:
-            from next.pages.watch import get_pages_directories_for_watch  # noqa: PLC0415, I001
-        except ImportError:  # pragma: no cover
-            self._cached_page_roots = ()
-            return self._cached_page_roots
         for root in get_pages_directories_for_watch():
             with contextlib.suppress(OSError):
                 roots.append(root.resolve())

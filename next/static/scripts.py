@@ -17,6 +17,8 @@ from __future__ import annotations
 import enum
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
+from .serializers import resolve_serializer
+
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -101,8 +103,6 @@ class NextScriptBuilder:
         so the init payload honours the same encoding rules as values
         registered through `StaticCollector.add_js_context`.
         """
-        from .serializers import resolve_serializer  # noqa: PLC0415
-
         payload = resolve_serializer().dumps(dict(js_context))
         return self._init_template.format(payload=payload)
 

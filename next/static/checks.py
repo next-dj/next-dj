@@ -35,6 +35,7 @@ from django.core.checks import (
 from next.conf import import_class_cached, next_framework_settings
 
 from .backends import StaticBackend
+from .serializers import JsContextSerializer
 
 
 if TYPE_CHECKING:
@@ -201,8 +202,6 @@ def check_js_context_serializer(  # noqa: PLR0911
         instance = cls()
     except (TypeError, ImportError) as e:
         return [_w042(f"JS_CONTEXT_SERIALIZER {path!r} cannot be instantiated: {e}")]
-    from .serializers import JsContextSerializer  # noqa: PLC0415
-
     if not isinstance(instance, JsContextSerializer):
         return [
             _w042(

@@ -16,6 +16,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from django.core.serializers.json import DjangoJSONEncoder
 
+from next.conf import import_class_cached, next_framework_settings
+
 
 @runtime_checkable
 class JsContextSerializer(Protocol):
@@ -91,8 +93,6 @@ def resolve_serializer() -> JsContextSerializer:
     every call. Returning a fresh instance each time keeps the hot path
     free of caching edge cases during test overrides.
     """
-    from next.conf import import_class_cached, next_framework_settings  # noqa: PLC0415
-
     path = getattr(next_framework_settings, "JS_CONTEXT_SERIALIZER", None)
     if not path:
         return _default_serializer

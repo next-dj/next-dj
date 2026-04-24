@@ -34,15 +34,15 @@ class TestDiscoverColocatedAssets:
     def test_picks_up_template_and_layout_assets(self, pages_tree: Path) -> None:
         with (
             mock.patch(
-                "next.pages.watch.get_pages_directories_for_watch",
+                "next.static.finders.get_pages_directories_for_watch",
                 return_value=[pages_tree],
             ),
             mock.patch(
-                "next.pages.registry.get_template_djx_paths_for_watch",
+                "next.static.finders.get_template_djx_paths_for_watch",
                 return_value={pages_tree / "about" / "template.djx"},
             ),
             mock.patch(
-                "next.pages.registry.get_layout_djx_paths_for_watch",
+                "next.static.finders.get_layout_djx_paths_for_watch",
                 return_value={pages_tree / "layout.djx"},
             ),
             mock.patch(
@@ -67,15 +67,15 @@ class TestDiscoverColocatedAssets:
         (unrelated / "template.css").write_text("")
         with (
             mock.patch(
-                "next.pages.watch.get_pages_directories_for_watch",
+                "next.static.finders.get_pages_directories_for_watch",
                 return_value=[],
             ),
             mock.patch(
-                "next.pages.registry.get_template_djx_paths_for_watch",
+                "next.static.finders.get_template_djx_paths_for_watch",
                 return_value={unrelated / "template.djx"},
             ),
             mock.patch(
-                "next.pages.registry.get_layout_djx_paths_for_watch", return_value=set()
+                "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
                 "next.components.get_component_paths_for_watch",
@@ -91,15 +91,15 @@ class TestNextStaticFilesFinderFind:
         finder = NextStaticFilesFinder()
         with (
             mock.patch(
-                "next.pages.watch.get_pages_directories_for_watch",
+                "next.static.finders.get_pages_directories_for_watch",
                 return_value=[pages_tree],
             ),
             mock.patch(
-                "next.pages.registry.get_template_djx_paths_for_watch",
+                "next.static.finders.get_template_djx_paths_for_watch",
                 return_value={pages_tree / "about" / "template.djx"},
             ),
             mock.patch(
-                "next.pages.registry.get_layout_djx_paths_for_watch", return_value=set()
+                "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
                 "next.components.get_component_paths_for_watch",
@@ -114,15 +114,15 @@ class TestNextStaticFilesFinderFind:
         finder = NextStaticFilesFinder()
         with (
             mock.patch(
-                "next.pages.watch.get_pages_directories_for_watch",
+                "next.static.finders.get_pages_directories_for_watch",
                 return_value=[pages_tree],
             ),
             mock.patch(
-                "next.pages.registry.get_template_djx_paths_for_watch",
+                "next.static.finders.get_template_djx_paths_for_watch",
                 return_value=set(),
             ),
             mock.patch(
-                "next.pages.registry.get_layout_djx_paths_for_watch", return_value=set()
+                "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
                 "next.components.get_component_paths_for_watch",
@@ -135,15 +135,15 @@ class TestNextStaticFilesFinderFind:
         finder = NextStaticFilesFinder()
         with (
             mock.patch(
-                "next.pages.watch.get_pages_directories_for_watch",
+                "next.static.finders.get_pages_directories_for_watch",
                 return_value=[pages_tree],
             ),
             mock.patch(
-                "next.pages.registry.get_template_djx_paths_for_watch",
+                "next.static.finders.get_template_djx_paths_for_watch",
                 return_value={pages_tree / "about" / "template.djx"},
             ),
             mock.patch(
-                "next.pages.registry.get_layout_djx_paths_for_watch", return_value=set()
+                "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
                 "next.components.get_component_paths_for_watch",
@@ -160,15 +160,15 @@ class TestNextStaticFilesFinderList:
         finder = NextStaticFilesFinder()
         with (
             mock.patch(
-                "next.pages.watch.get_pages_directories_for_watch",
+                "next.static.finders.get_pages_directories_for_watch",
                 return_value=[pages_tree],
             ),
             mock.patch(
-                "next.pages.registry.get_template_djx_paths_for_watch",
+                "next.static.finders.get_template_djx_paths_for_watch",
                 return_value={pages_tree / "about" / "template.djx"},
             ),
             mock.patch(
-                "next.pages.registry.get_layout_djx_paths_for_watch",
+                "next.static.finders.get_layout_djx_paths_for_watch",
                 return_value={pages_tree / "layout.djx"},
             ),
             mock.patch(
@@ -185,15 +185,15 @@ class TestNextStaticFilesFinderList:
         finder = NextStaticFilesFinder()
         with (
             mock.patch(
-                "next.pages.watch.get_pages_directories_for_watch",
+                "next.static.finders.get_pages_directories_for_watch",
                 return_value=[pages_tree],
             ),
             mock.patch(
-                "next.pages.registry.get_template_djx_paths_for_watch",
+                "next.static.finders.get_template_djx_paths_for_watch",
                 return_value={pages_tree / "about" / "template.djx"},
             ),
             mock.patch(
-                "next.pages.registry.get_layout_djx_paths_for_watch", return_value=set()
+                "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
                 "next.components.get_component_paths_for_watch",
@@ -251,15 +251,15 @@ class TestCollectstaticIntegration:
         with (
             override_settings(STATIC_ROOT=str(static_root)),
             mock.patch(
-                "next.pages.watch.get_pages_directories_for_watch",
+                "next.static.finders.get_pages_directories_for_watch",
                 return_value=[pages_tree],
             ),
             mock.patch(
-                "next.pages.registry.get_template_djx_paths_for_watch",
+                "next.static.finders.get_template_djx_paths_for_watch",
                 return_value={pages_tree / "about" / "template.djx"},
             ),
             mock.patch(
-                "next.pages.registry.get_layout_djx_paths_for_watch",
+                "next.static.finders.get_layout_djx_paths_for_watch",
                 return_value={pages_tree / "layout.djx"},
             ),
             mock.patch(

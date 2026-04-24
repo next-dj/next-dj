@@ -8,6 +8,7 @@ application-wide singleton. `context` is a convenience alias for
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import logging
 import time
@@ -376,8 +377,6 @@ class Page:
 
     def _record_template_source_mtimes(self, file_path: Path) -> None:
         """Snapshot mtimes of template source files for stale detection."""
-        import contextlib  # noqa: PLC0415
-
         paths = self._get_template_source_paths(file_path)
         if not paths:
             return

@@ -18,6 +18,7 @@ from django.core.checks import (
 )
 
 from next.checks.common import get_router_manager, iter_scanned_page_pairs
+from next.conf import import_class_cached, next_framework_settings
 
 from .loaders import TemplateLoader, _load_python_module, build_registered_loaders
 
@@ -739,8 +740,6 @@ def check_template_loaders(
     **_kwargs: object,
 ) -> list[CheckMessage]:
     """Validate every `NEXT_FRAMEWORK['TEMPLATE_LOADERS']` entry."""
-    from next.conf import import_class_cached, next_framework_settings  # noqa: PLC0415
-
     try:
         configured = next_framework_settings.TEMPLATE_LOADERS
     except (AttributeError, ImportError):  # pragma: no cover

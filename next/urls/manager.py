@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, SupportsIndex, overload
 
 from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
+from next.forms import form_action_manager
 
 from .backends import RouterBackend, RouterFactory
 
@@ -103,8 +104,6 @@ class _LazyUrlPatterns(list):
     """
 
     def _patterns(self) -> list[URLPattern | URLResolver]:
-        from next.forms import form_action_manager  # noqa: PLC0415
-
         return [
             *list(router_manager),
             *list(form_action_manager),

@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from next.components import register_components_folder_from_router_walk
+
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable
@@ -57,7 +59,9 @@ class FilesystemTreeDispatcher:
                         self._register_components
                         and item.name == self._components_folder_name
                     ):
-                        _register_components_folder(item, tree_root, url_path)
+                        register_components_folder_from_router_walk(
+                            item, tree_root, url_path
+                        )
                     continue
                 dir_name = item.name
                 new_url_path = f"{url_path}/{dir_name}" if url_path else dir_name
@@ -101,21 +105,6 @@ def _scan_pages_directory(
         skip_dir_names,
         components_folder_name=components_folder_name,
         register_components=register_components,
-    )
-
-
-def _register_components_folder(
-    folder: Path,
-    pages_root: Path,
-    scope_relative: str,
-) -> None:
-    """Register one `_components` folder found during the file-router page walk."""
-    import next.components as components_mod  # noqa: PLC0415
-
-    components_mod.register_components_folder_from_router_walk(
-        folder,
-        pages_root,
-        scope_relative,
     )
 
 

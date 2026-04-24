@@ -9,6 +9,7 @@ this package.
 
 from __future__ import annotations
 
+import importlib
 from typing import TYPE_CHECKING
 
 
@@ -75,8 +76,6 @@ _LAZY_ATTRIBUTES: dict[str, str] = {
 
 def register_all() -> None:
     """Import each subpackage's `checks` module to register its hooks."""
-    import importlib  # noqa: PLC0415
-
     for module_name in (
         "next.conf.checks",
         "next.pages.checks",
@@ -95,8 +94,6 @@ def __getattr__(name: str) -> object:
     if module_name is None:
         msg = f"module {__name__!r} has no attribute {name!r}"
         raise AttributeError(msg)
-    import importlib  # noqa: PLC0415
-
     return getattr(importlib.import_module(module_name), name)
 
 

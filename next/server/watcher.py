@@ -17,6 +17,8 @@ from next.pages.watch import (
     iter_pages_roots_with_components_folder_names,
 )
 
+from .signals import watch_specs_ready
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -93,8 +95,6 @@ def iter_default_autoreload_watch_specs() -> list[tuple[Path, str]]:
 
 def iter_all_autoreload_watch_specs() -> list[tuple[Path, str]]:
     """Return default watch specs plus registered extras, deduplicated."""
-    from .signals import watch_specs_ready  # noqa: PLC0415
-
     specs = _dedupe_watch_specs(
         (*iter_default_autoreload_watch_specs(), *_registered_extra_watch_specs)
     )
