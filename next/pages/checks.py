@@ -392,18 +392,56 @@ def _check_page_functions_in_directory(
             )
             hard_error = True
 
-        if not hard_error and not _has_page_content(page_file):
-            warnings.append(
-                DjangoWarning(
-                    f"Page file {page_file} has no content: no template variable, "
-                    "no render function, no template.djx, and no layout.djx found. "
-                    "This page will not render anything.",
-                    obj=str(page_file),
-                    id="next.W002",
-                ),
-            )
+        if not hard_error:
+            shadow_warning = _check_body_source_conflicts(page_file)
+            if shadow_warning is not None:
+                warnings.append(shadow_warning)
+            if not _has_page_content(page_file):
+                warnings.append(
+                    DjangoWarning(
+                        f"Page file {page_file} has no content: no template "
+                        "variable, no render function, no template.djx, and "
+                        "no layout.djx found. This page will not render anything.",
+                        obj=str(page_file),
+                        id="next.W002",
+                    ),
+                )
 
     return errors, warnings
+
+
+_BODY_SOURCE_PRIORITY: tuple[str, ...] = ("render()", "template", "template.djx")
+
+
+def _active_body_sources(page_file: Path) -> list[str]:
+    """Return the body sources declared on `page_file` in priority order."""
+    module = _load_python_module(page_file)
+    sources: list[str] = []
+    if module is not None:
+        if callable(getattr(module, "render", None)):
+            sources.append("render()")
+        template_attr = getattr(module, "template", None)
+        if isinstance(template_attr, str):
+            sources.append("template")
+    if (page_file.parent / "template.djx").exists():
+        sources.append("template.djx")
+    return sources
+
+
+def _check_body_source_conflicts(page_file: Path) -> CheckMessage | None:
+    """Warn (`next.W043`) when more than one body source is declared for `page_file`."""
+    sources = _active_body_sources(page_file)
+    if len(sources) < 2:  # noqa: PLR2004
+        return None
+    winner = sources[0]
+    shadowed = ", ".join(sources[1:])
+    return DjangoWarning(
+        f"{page_file} declares multiple body sources: {', '.join(sources)}. "
+        f"{winner} takes priority; {shadowed} will not be used. "
+        "Priority order: render() > template > template.djx.",
+        obj=str(page_file),
+        id="next.W043",
+    )
 
 
 def _load_render_function(file_path: Path) -> object:

@@ -118,10 +118,19 @@ Directory segments, ``page.py``, ``render`` / template, and empty-page warning.
    * - ``next.W002``
      - ``page.py`` has no template, render, ``template.djx``, or ``layout.djx``
      - Warning
+   * - .. _check-next-w043:
+
+       ``next.W043``
+     - ``page.py`` declares more than one body source
+       (``render()`` / ``template`` / ``template.djx``).
+       Priority order: ``render() > template > template.djx``.
+       The lower-priority sources are silently dropped at render time.
+     - Warning
 
 **What to do:** Follow :doc:`../guide/file-router` and :doc:`../guide/pages-and-templates`.
 Add ``render`` or ``template`` / ``template.djx``. Fix bracket folder names. Use
-``layout.djx`` with the required block when using layouts.
+``layout.djx`` with the required block when using layouts. For W043, remove the
+redundant body sources so only the one you actually use remains on disk.
 
 URL patterns
 ~~~~~~~~~~~~

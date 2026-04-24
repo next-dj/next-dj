@@ -193,8 +193,10 @@ class TestFormDispatchRenderFragmentBranches:
         )
         assert html == form.as_p()
 
-    def test_empty_template_string_uses_form_as_p(self, mock_http_request) -> None:
-        """Empty template string in registry falls back to ``form.as_p()``."""
+    def test_empty_template_body_uses_form_as_p(
+        self, mock_http_request, tmp_path
+    ) -> None:
+        """A page.py with no body source and no ancestor layout falls back to ``form.as_p()``."""
         backend = RegistryFormActionBackend()
 
         class F(Form):
@@ -208,21 +210,18 @@ class TestFormDispatchRenderFragmentBranches:
         )
         req = mock_http_request(method="GET")
         form = F()
-        original = page._template_registry.copy()
-        page._template_registry[PAGE_MODULE_FOR_FORM_TESTS] = ""
-        try:
-            html = FormActionDispatch.render_form_fragment(
-                backend,
-                req,
-                "frag",
-                form,
-                None,
-                PAGE_MODULE_FOR_FORM_TESTS,
-            )
-            assert html == form.as_p()
-        finally:
-            page._template_registry.clear()
-            page._template_registry.update(original)
+        blank_page = tmp_path / "page.py"
+        blank_page.write_text("")
+
+        html = FormActionDispatch.render_form_fragment(
+            backend,
+            req,
+            "frag",
+            form,
+            None,
+            blank_page,
+        )
+        assert html == form.as_p()
 
     def test_dispatch_with_modelform_returning_instance(
         self, mock_http_request

@@ -52,16 +52,53 @@ Use separate template files for better organization:
    </body>
    </html>
 
-Template loading priority
--------------------------
+Page body sources and priority
+------------------------------
 
-The system tries to load templates in this order:
+A page supplies its body through one of three mechanisms. All three are composed through the ancestor ``layout.djx`` chain the same way, and the framework runs the context processors, ``StaticCollector``, and ``page_rendered`` signal exactly once per request regardless of which source produced the body.
 
-1. **Layout templates** (``layout.djx`` files) - highest priority
-2. **Python string templates** (``template`` attribute)
-3. **Template files** (``template.djx`` files)
+Priority (highest wins):
 
-This allows for flexible template organization and inheritance. ``.djx`` and layout content are loaded on **first render** of each page and then cached. If file mtime changes, the cache is invalidated and the template is reloaded on the next request (no server restart needed for content-only changes).
+1. ``render(request, ...)`` **function** on the page module.
+2. ``template = "..."`` **module attribute** (a plain string).
+3. Sibling ``template.djx`` file.
+
+When more than one source is declared on the same ``page.py``, the lower-priority ones are silently dropped at render time, and ``manage.py check`` emits a :ref:`next.W043 <check-next-w043>` warning pointing at the file.
+
+Render functions
+~~~~~~~~~~~~~~~~
+
+A ``render`` function receives DI-resolved arguments (request, URL kwargs, named dependencies) and decides what the page returns:
+
+.. code-block:: python
+
+   # screens/report/page.py
+   from django.http import HttpResponse, HttpResponseRedirect
+   from next.pages import context
+
+   @context("today")
+   def _today() -> str:
+       return "2026-04-25"
+
+   def render(request, today: str) -> str:
+       # String body — composed through the ancestor layout chain.
+       return f"<section>Report for {today}</section>"
+
+   def redirect(request) -> HttpResponseRedirect:
+       # Any HttpResponse subclass bypasses the layout and static pipeline.
+       return HttpResponseRedirect("/")
+
+Return-type contract:
+
+* ``str`` — treated as the page body. Layout composition, context processors, ``StaticCollector``, and ``page_rendered`` run as for ``template.djx`` and ``template``.
+* Any :class:`django.http.HttpResponse` (including :class:`~django.http.HttpResponseRedirect`, :class:`~django.http.StreamingHttpResponse`, :class:`~django.http.JsonResponse`, and your own subclasses) — returned verbatim. Layout and static pipeline are skipped. This is the escape hatch for redirects, JSON APIs, streaming, and anything else that is not a server-rendered HTML page.
+* Anything else (``None``, ``dict``, ``list``, …) — raises ``TypeError`` naming the file so mistakes surface immediately.
+
+Exceptions raised inside ``render()`` propagate to Django's request-handling stack unchanged.
+
+.. note::
+
+   ``Page.render`` (the programmatic API exposed to tests and tools) uses the static body sources only; it never invokes ``render()``. The unified view function that handles real HTTP requests invokes ``render()`` first and hands its string result to the same composition pipeline.
 
 Layout System
 -------------

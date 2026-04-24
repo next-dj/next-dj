@@ -1,0 +1,17 @@
+<section class="space-y-6">
+  <header class="space-y-1">
+    <h1 class="text-3xl font-bold">Latest posts</h1>
+    <p class="text-slate-600">Markdown files under <code class="rounded bg-slate-100 px-1">screens/posts/</code>. One folder = one route.</p>
+  </header>
+
+  <ul class="space-y-3">
+    {% for post in posts %}
+      <li class="rounded-lg border bg-white p-4 shadow-sm">
+        <a href="{% url post.url_name %}" class="text-lg font-semibold text-slate-900 hover:underline">
+          {{ post.title }}
+        </a>
+        <p class="mt-1 font-mono text-xs text-slate-500">/posts/{{ post.slug }}/</p>
+      </li>
+    {% endfor %}
+  </ul>
+</section>

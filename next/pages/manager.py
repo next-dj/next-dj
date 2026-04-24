@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from django.http import HttpRequest, HttpResponse
@@ -42,6 +43,20 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _BodyResolution:
+    """Per-request outcome of `Page._resolve_page_body`.
+
+    Either `body` is a string that will be composed through the layout
+    chain and rendered, or `http_response` is a Django response that is
+    returned verbatim (the `render()` escape hatch for redirects,
+    streaming responses, JSON, and anything else).
+    """
+
+    body: str | None = None
+    http_response: HttpResponse | None = None
 
 
 class Page:
@@ -167,24 +182,91 @@ class Page:
 
         return context_data
 
-    def render(self, file_path: Path, *args: object, **kwargs: object) -> str:
-        """Render the page with Django `Template`, static collector included.
+    def _load_static_body(
+        self,
+        file_path: Path,
+        module: types.ModuleType | None,
+    ) -> str:
+        """Return the static body for `file_path` without invoking `render()`.
 
-        A `StaticCollector` is placed in the template context before
-        rendering so that nested components can register CSS and JS
-        references. Once the template has rendered, placeholder markers
-        left by `{% collect_styles %}` and `{% collect_scripts %}` are
-        replaced with actual `<link>` and `<script>` tags.
+        Priority: `module.template` (when set to a non-`None` string)
+        wins over sibling `template.djx`. Returns `""` when no source
+        is present so an ancestor layout can still render with an empty
+        slot.
         """
-        start = time.perf_counter()
-        if file_path not in self._template_registry or self._is_template_stale(
-            file_path
-        ):
-            self._template_registry.pop(file_path, None)
-            self._template_source_mtimes.pop(file_path, None)
-            self._load_template_for_file(file_path)
-            self._record_template_source_mtimes(file_path)
-        template_str = self._template_registry[file_path]
+        if module is not None:
+            template_attr = getattr(module, "template", None)
+            if isinstance(template_attr, str):
+                return template_attr
+        template_djx = file_path.parent / "template.djx"
+        if template_djx.exists():
+            try:
+                return template_djx.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                return ""
+        return ""
+
+    def _resolve_page_body(
+        self,
+        file_path: Path,
+        module: types.ModuleType | None,
+        *args: object,
+        **kwargs: object,
+    ) -> _BodyResolution:
+        """Resolve the page body per-request.
+
+        Priority: `render()` > `template` attribute > sibling
+        `template.djx` > empty. `render()` may short-circuit by
+        returning any `HttpResponse` subclass (redirect, streaming,
+        JSON, …) — in that case the layout and static pipelines are
+        bypassed entirely.
+        """
+        if module is not None:
+            render_func = getattr(module, "render", None)
+            if callable(render_func):
+                return self._call_render_function(
+                    render_func, file_path, *args, **kwargs
+                )
+        return _BodyResolution(body=self._load_static_body(file_path, module))
+
+    def _call_render_function(
+        self,
+        render_func: Callable[..., object],
+        file_path: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> _BodyResolution:
+        """Invoke `render_func` with DI-resolved arguments and classify the result."""
+        request = args[0] if args and isinstance(args[0], HttpRequest) else None
+        dep_cache: dict[str, Any] = {}
+        dep_stack: list[str] = []
+        resolved = self._get_resolver().resolve_dependencies(
+            render_func,
+            request=request,
+            _cache=dep_cache,
+            _stack=dep_stack,
+            **kwargs,
+        )
+        result = render_func(**resolved)
+        if isinstance(result, HttpResponse):
+            return _BodyResolution(http_response=result)
+        if isinstance(result, str):
+            return _BodyResolution(body=result)
+        msg = (
+            f"page.py render() at {file_path} must return str or HttpResponse; "
+            f"got {type(result).__name__}."
+        )
+        raise TypeError(msg)
+
+    def _render_template_str(
+        self,
+        file_path: Path,
+        template_str: str,
+        start: float,
+        *args: object,
+        **kwargs: object,
+    ) -> str:
+        """Build context, render `template_str`, inject static assets, emit signal."""
         context_data = self.build_render_context(file_path, *args, **kwargs)
 
         from next.static import default_manager  # noqa: PLC0415
@@ -211,15 +293,58 @@ class Page:
         )
         return result
 
-    def _create_view_function(
+    def _render_composed(
+        self,
+        file_path: Path,
+        body: str,
+        *args: object,
+        **kwargs: object,
+    ) -> str:
+        """Compose `body` through layouts and render. No template-registry caching."""
+        start = time.perf_counter()
+        composed = self._layout_manager._layout_loader.compose_body(body, file_path)
+        return self._render_template_str(file_path, composed, start, *args, **kwargs)
+
+    def render(self, file_path: Path, *args: object, **kwargs: object) -> str:
+        """Render the page with Django `Template`, static collector included.
+
+        Uses the static body source (`template` attribute or sibling
+        `template.djx`) composed through the ancestor layout chain and
+        caches the composed template in `_template_registry`. Direct
+        callers of `Page.render` do **not** invoke `render()` — the
+        unified view handles that path so dynamic bodies skip the
+        registry cache.
+        """
+        start = time.perf_counter()
+        if file_path not in self._template_registry or self._is_template_stale(
+            file_path
+        ):
+            self._template_registry.pop(file_path, None)
+            self._template_source_mtimes.pop(file_path, None)
+            module = _load_python_module_memo(file_path)
+            body = self._load_static_body(file_path, module)
+            composed = self._layout_manager._layout_loader.compose_body(body, file_path)
+            self.register_template(file_path, composed)
+            self._record_template_source_mtimes(file_path)
+        template_str = self._template_registry[file_path]
+        return self._render_template_str(
+            file_path, template_str, start, *args, **kwargs
+        )
+
+    def _create_unified_view(
         self,
         file_path: Path,
         _parameters: dict[str, str],
+        module: types.ModuleType | None,
     ) -> Callable[..., HttpResponse]:
-        """Return a view callable that renders the page for this `file_path`."""
+        """Return a view that resolves the body, composes layouts, and renders."""
 
         def view(request: HttpRequest, **kwargs: object) -> HttpResponse:
-            content = self.render(file_path, request, **kwargs)
+            resolution = self._resolve_page_body(file_path, module, request, **kwargs)
+            if resolution.http_response is not None:
+                return resolution.http_response
+            body = resolution.body if resolution.body is not None else ""
+            content = self._render_composed(file_path, body, request, **kwargs)
             return HttpResponse(content)
 
         return view
@@ -239,24 +364,6 @@ class Page:
                 continue
             if loader.can_load(file_path):
                 return True
-        return False
-
-    def _load_template_for_file(self, file_path: Path) -> bool:
-        """Populate `_template_registry` from layout or inline loaders."""
-        if self._layout_manager.discover_layouts_for_template(file_path):
-            layout_template = self._layout_manager.get_layout_template(file_path)
-            if layout_template:
-                self.register_template(file_path, layout_template)
-                return True
-
-        for loader in self._template_loaders:
-            if isinstance(loader, LayoutTemplateLoader):
-                continue
-            if loader.can_load(file_path):
-                template_content = loader.load_template(file_path)
-                if template_content:
-                    self.register_template(file_path, template_content)
-                    return True
         return False
 
     def _get_template_source_paths(self, file_path: Path) -> list[Path]:
@@ -299,50 +406,18 @@ class Page:
         parameters: dict[str, str],
         clean_name: str,
     ) -> URLPattern | None:
-        """Return the URL pattern for a real `page.py` with a template or `render`."""
+        """Return the URL pattern for a real `page.py` that has any body source."""
         module = _load_python_module_memo(file_path)
-        if not module:
+        if module is None:
             return None
-
-        if self.has_template(file_path, module):
-            view = self._create_view_function(file_path, parameters)
-            return path(
-                django_pattern,
-                view,
-                name=next_framework_settings.URL_NAME_TEMPLATE.format(name=clean_name),
-            )
-
-        if (render_func := getattr(module, "render", None)) and callable(render_func):
-            view = self._create_render_wrapper(render_func)
-            return path(
-                django_pattern,
-                view,
-                name=next_framework_settings.URL_NAME_TEMPLATE.format(name=clean_name),
-            )
-
-        return None
-
-    def _create_render_wrapper(
-        self, render_func: Callable[..., HttpResponse | str]
-    ) -> Callable[..., HttpResponse]:
-        """Return a view that calls a user `render` with DI-resolved arguments."""
-
-        def view(request: HttpRequest, **kwargs: object) -> HttpResponse:
-            dep_cache: dict[str, Any] = {}
-            dep_stack: list[str] = []
-            resolved = self._get_resolver().resolve_dependencies(
-                render_func,
-                request=request,
-                _cache=dep_cache,
-                _stack=dep_stack,
-                **kwargs,
-            )
-            result = render_func(**resolved)
-            if isinstance(result, str):
-                return HttpResponse(result)
-            return result
-
-        return view
+        if not self._page_has_body_source(file_path, module):
+            return None
+        view = self._create_unified_view(file_path, parameters, module)
+        return path(
+            django_pattern,
+            view,
+            name=next_framework_settings.URL_NAME_TEMPLATE.format(name=clean_name),
+        )
 
     def _create_virtual_page_pattern(
         self,
@@ -352,14 +427,29 @@ class Page:
         clean_name: str,
     ) -> URLPattern | None:
         """Return the URL pattern for a template-only page without `page.py`."""
-        if self.has_template(file_path, module=None):
-            view = self._create_view_function(file_path, parameters)
-            return path(
-                django_pattern,
-                view,
-                name=next_framework_settings.URL_NAME_TEMPLATE.format(name=clean_name),
-            )
-        return None
+        if not self._page_has_body_source(file_path, module=None):
+            return None
+        view = self._create_unified_view(file_path, parameters, None)
+        return path(
+            django_pattern,
+            view,
+            name=next_framework_settings.URL_NAME_TEMPLATE.format(name=clean_name),
+        )
+
+    def _page_has_body_source(
+        self,
+        file_path: Path,
+        module: types.ModuleType | None,
+    ) -> bool:
+        """Return True when `file_path` can produce a body or layout body."""
+        if module is not None:
+            if callable(getattr(module, "render", None)):
+                return True
+            if isinstance(getattr(module, "template", None), str):
+                return True
+        if (file_path.parent / "template.djx").exists():
+            return True
+        return self._layout_manager._layout_loader.can_load(file_path)
 
     def create_url_pattern(
         self,

@@ -227,6 +227,122 @@ class TestMissingPageContentChecks:
                 assert "has no content" in warnings[0].msg
 
 
+class TestBodySourceConflicts:
+    """`check_page_functions` emits `next.W043` when two or more body sources coexist."""
+
+    @pytest.mark.parametrize(
+        (
+            "test_case",
+            "page_content",
+            "create_template_djx",
+            "expected_w043",
+            "expected_winner",
+            "expected_shadowed",
+        ),
+        [
+            (
+                "render_and_template_djx",
+                'def render(request, **kwargs):\n    return "x"',
+                True,
+                1,
+                "render()",
+                "template.djx",
+            ),
+            (
+                "render_and_template_attr",
+                'template = "x"\ndef render(request, **kwargs):\n    return "x"',
+                False,
+                1,
+                "render()",
+                "template",
+            ),
+            (
+                "template_attr_and_template_djx",
+                'template = "x"',
+                True,
+                1,
+                "template",
+                "template.djx",
+            ),
+            (
+                "all_three",
+                'template = "x"\ndef render(request, **kwargs):\n    return "x"',
+                True,
+                1,
+                "render()",
+                "template, template.djx",
+            ),
+            (
+                "only_render",
+                'def render(request, **kwargs):\n    return "x"',
+                False,
+                0,
+                None,
+                None,
+            ),
+            (
+                "only_template_attr",
+                'template = "x"',
+                False,
+                0,
+                None,
+                None,
+            ),
+            (
+                "only_template_djx",
+                "",
+                True,
+                0,
+                None,
+                None,
+            ),
+        ],
+        ids=[
+            "render_and_template_djx",
+            "render_and_template_attr",
+            "template_attr_and_template_djx",
+            "all_three",
+            "only_render",
+            "only_template_attr",
+            "only_template_djx",
+        ],
+    )
+    def test_w043_triggers_when_multiple_sources(
+        self,
+        tmp_path,
+        test_case,
+        page_content,
+        create_template_djx,
+        expected_w043,
+        expected_winner,
+        expected_shadowed,
+    ) -> None:
+        """Exercise the priority ordering and W043 payload."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text(page_content)
+        if create_template_djx:
+            (tmp_path / "template.djx").write_text("<h1>body</h1>")
+
+        class _FakeRouter:
+            app_dirs = True
+            pages_dir = "pages"
+
+            def _get_installed_apps(self) -> list[str]:
+                return ["app"]
+
+            def _get_app_pages_path(self, _app: str) -> Path:
+                return tmp_path
+
+        with patch_checks_router_manager_with_routers(routers=[_FakeRouter()]):
+            messages = check_page_functions(None)
+            w043 = [m for m in messages if m.id == "next.W043"]
+            assert len(w043) == expected_w043
+            if expected_w043:
+                msg = w043[0].msg
+                assert f"{expected_winner} takes priority" in msg
+                assert expected_shadowed in msg
+
+
 class TestDuplicateUrlParametersChecks:
     """Test cases for duplicate URL parameters checks."""
 

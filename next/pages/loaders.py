@@ -150,6 +150,27 @@ class LayoutTemplateLoader(TemplateLoader):
         template_content = self._wrap_in_template_block(file_path)
         return self._compose_layout_hierarchy(template_content, layout_files)
 
+    def compose_body(self, body: str, file_path: Path) -> str:
+        """Wrap `body` through the ancestor layout chain for `file_path`.
+
+        Returns `body` verbatim when no layouts apply. When a sibling
+        `layout.djx` exists the innermost layout owns the `{% block template %}`
+        slot, so `body` is substituted as-is. Otherwise `body` is wrapped in
+        a `{% block template %}` block before substitution so the ancestor
+        layout's placeholder remains a valid block.
+        """
+        layout_files = self._find_layout_files(file_path)
+        if not layout_files:
+            return body
+
+        sibling_layout = (file_path.parent / "layout.djx").exists()
+        wrapped = (
+            body
+            if sibling_layout
+            else f"{{% block template %}}{body}{{% endblock template %}}"
+        )
+        return self._compose_layout_hierarchy(wrapped, layout_files)
+
     def _find_layout_files(self, file_path: Path) -> list[Path] | None:
         """Return `layout.djx` paths from near to far plus global layouts."""
         layout_files = []

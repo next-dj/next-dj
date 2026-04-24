@@ -13,7 +13,7 @@ The example set is being rebuilt to showcase specific framework features in isol
 | # | Folder | Focus |
 |---|--------|-------|
 | 1 | [`shortener/`](shortener/) | File router + DI providers + LocMemCache + management command |
-| 2 | [`markdown-blog/`](markdown-blog/) | Custom `TemplateLoader`, `@context(serialize=True)`, nested layouts |
+| 2 | [`markdown-blog/`](markdown-blog/) | Markdown posts, nested layouts, `@context(serialize=True)`, context processor, co-located `component.js` |
 | 4 | [`feature-flags/`](feature-flags/) | Composite `feature_guard`, signal receivers, cache invalidation |
 
 More examples (3, 5, 6, 7, 8, 9, 10) are being added in subsequent PRs.

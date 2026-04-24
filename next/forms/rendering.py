@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from django.template import Context as DjangoTemplateContext, Template
 
 from next.pages import page
+from next.pages.loaders import _load_python_module_memo
 
 from .dispatch import _url_kwargs_from_post
 
@@ -37,10 +38,9 @@ def render_form_page_with_errors(  # noqa: PLR0913
         return form.as_p() if form else ""
 
     file_path = page_file_path
-
-    if file_path not in page._template_registry:
-        page._load_template_for_file(file_path)
-    template_str = page._template_registry.get(file_path)
+    module = _load_python_module_memo(file_path)
+    body = page._load_static_body(file_path, module)
+    template_str = page._layout_manager._layout_loader.compose_body(body, file_path)
     if not template_str:
         return form.as_p() if form else ""
 
