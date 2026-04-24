@@ -1,7 +1,0 @@
-<div class="newsletter-subscribe d-flex flex-wrap align-items-center gap-2 ms-md-auto" data-testid="newsletter-subscribe">
-    <span class="text-muted">Newsletter</span>
-    {% form @action="newsletter_subscribe" class="d-flex flex-wrap gap-1 align-items-center mb-0" %}
-        {{ form.email }}
-        <button type="submit" class="btn btn-sm btn-outline-primary">Subscribe</button>
-    {% endform %}
-</div>

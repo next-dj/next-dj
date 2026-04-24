@@ -1,0 +1,14 @@
+<section class="space-y-4">
+  <div class="flex items-center justify-between border-b pb-3">
+    <h1 class="text-2xl font-bold">Admin panel</h1>
+    <nav class="flex items-center gap-3 text-sm">
+      {% component "nav_link" url_name="next:page_admin" label="Links" %}
+      <span class="text-slate-300">·</span>
+      {% component "nav_link" url_name="next:page_admin_stats" label="Stats" %}
+      <span class="text-slate-300">·</span>
+      {% component "nav_link" url_name="next:page_" label="Back to app" %}
+    </nav>
+  </div>
+
+  {% block template %}{% endblock template %}
+</section>

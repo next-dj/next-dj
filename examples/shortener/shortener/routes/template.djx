@@ -1,0 +1,35 @@
+<section class="space-y-8">
+  <header class="space-y-2">
+    <h1 class="text-3xl font-bold">Shrink a link</h1>
+    <p class="text-slate-600">
+      Paste a URL, get a short slug, and every visit to
+      <code class="rounded bg-slate-100 px-1">/s/&lt;slug&gt;/</code> is counted
+      in LocMemCache. Run <code class="rounded bg-slate-100 px-1">manage.py flush_clicks</code>
+      to persist the counters.
+    </p>
+  </header>
+
+  {% form @action="create_link" class="space-y-3 rounded-xl border bg-white p-4 shadow-sm" %}
+    <label class="block text-sm font-medium text-slate-700" for="id_url">Long URL</label>
+    {{ form.url }}
+    {% if form.errors %}
+      <p class="text-sm text-rose-600">{{ form.url.errors|first }}</p>
+    {% endif %}
+    <button type="submit" class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+      Shorten
+    </button>
+  {% endform %}
+
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold">Latest shortened links</h2>
+    {% if recent_links %}
+      <ul class="space-y-2">
+        {% for link in recent_links %}
+          <li>{% component "link_card" %}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">No links yet. Create one above.</p>
+    {% endif %}
+  </section>
+</section>

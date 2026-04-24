@@ -1,4 +1,0 @@
-<div class="docs-guide">
-    <small class="docs-guide__tag">Guide</small>
-    {% block template %}{% endblock template %}
-</div>

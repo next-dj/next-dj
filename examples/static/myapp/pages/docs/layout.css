@@ -1,3 +1,0 @@
-.docs-wrapper { display: grid; grid-template-columns: 200px 1fr; gap: 1.5rem; }
-.docs-crumb { font-weight: 600; color: #4b5563; }
-.docs-content { padding-left: 1rem; border-left: 2px solid #e5e7eb; }
