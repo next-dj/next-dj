@@ -9,10 +9,10 @@ from django.http import HttpRequest, HttpResponseRedirect
 
 from next.forms import (
     Form,
+    FormActionDispatch,
     FormActionOptions,
     ModelForm,
     RegistryFormActionBackend,
-    _FormActionDispatch,
     _get_caller_path,
     form_action_manager,
     page,
@@ -25,7 +25,7 @@ PAGE_MODULE_FOR_FORM_TESTS = (
 
 
 class TestFormActionDispatch:
-    """_FormActionDispatch: _get_caller_path, context_func, ensure_http_response."""
+    """FormActionDispatch: _get_caller_path, context_func, ensure_http_response."""
 
     def test_get_caller_path_raises_when_no_frame(self) -> None:
         """_get_caller_path raises when frame is missing."""
@@ -52,7 +52,7 @@ class TestFormActionDispatch:
         self, response_val, kwargs, expected_status, assert_extra
     ) -> None:
         """ensure_http_response: None, str, redirect-like, unknown, empty url."""
-        resp = _FormActionDispatch.ensure_http_response(response_val, **kwargs)
+        resp = FormActionDispatch.ensure_http_response(response_val, **kwargs)
         assert resp.status_code == expected_status
         if assert_extra is not None:
             assert assert_extra(resp)
@@ -166,7 +166,7 @@ class TestDispatchViaClient:
 
 
 class TestFormDispatchRenderFragmentBranches:
-    """``_FormActionDispatch.render_form_fragment`` fallbacks."""
+    """``FormActionDispatch.render_form_fragment`` fallbacks."""
 
     def test_unknown_action_uses_form_as_p(self, mock_http_request) -> None:
         """Unknown action meta falls back to ``form.as_p()``."""
@@ -183,7 +183,7 @@ class TestFormDispatchRenderFragmentBranches:
         )
         req = mock_http_request(method="GET")
         form = F()
-        html = _FormActionDispatch.render_form_fragment(
+        html = FormActionDispatch.render_form_fragment(
             backend,
             req,
             "missing_action",
@@ -211,7 +211,7 @@ class TestFormDispatchRenderFragmentBranches:
         original = page._template_registry.copy()
         page._template_registry[PAGE_MODULE_FOR_FORM_TESTS] = ""
         try:
-            html = _FormActionDispatch.render_form_fragment(
+            html = FormActionDispatch.render_form_fragment(
                 backend,
                 req,
                 "frag",
@@ -267,7 +267,7 @@ class TestFormDispatchRenderFragmentBranches:
         assert meta is not None
 
         # Call dispatch - this will create form with instance (line 381)
-        response = _FormActionDispatch.dispatch(backend, request, "test_action", meta)
+        response = FormActionDispatch.dispatch(backend, request, "test_action", meta)
         # Should succeed
         assert response.status_code == 302
 
@@ -304,7 +304,7 @@ class TestFormDispatchRenderFragmentBranches:
         meta = backend.get_meta("test_action")
         assert meta is not None
 
-        response = _FormActionDispatch.dispatch(backend, request, "test_action", meta)
+        response = FormActionDispatch.dispatch(backend, request, "test_action", meta)
         assert response.status_code == 302
 
     @pytest.mark.parametrize(
@@ -381,7 +381,7 @@ class TestFormDispatchRenderFragmentBranches:
 
         # Real call to dispatch - this will trigger the error
         with pytest.raises(TypeError, match="must have get_initial method"):
-            _FormActionDispatch.dispatch(backend, request, "test_action", meta)
+            FormActionDispatch.dispatch(backend, request, "test_action", meta)
 
     def test_dispatch_with_form_returning_instance_but_not_modelform(
         self, mock_http_request
@@ -418,4 +418,4 @@ class TestFormDispatchRenderFragmentBranches:
         with pytest.raises(
             TypeError, match="instance parameter only supported for ModelForm"
         ):
-            _FormActionDispatch.dispatch(backend, request, "test_action", meta)
+            FormActionDispatch.dispatch(backend, request, "test_action", meta)

@@ -605,7 +605,7 @@ Request handling
 3. If **invalid**: validate **``_next_form_page``** in POST (must be an existing ``page.py`` under ``BASE_DIR``), load that page’s template, merge **``Page.build_render_context``** with the bound form and errors, return **200**. If **``_next_form_page``** is missing or invalid, return **400**.
 4. If **valid**: call the handler with dependency-injected arguments and normalize the return value (**``None``** → 204 when appropriate, strings and redirect-like objects coerced as documented in the code).
 
-**Roles:** ``FormActionBackend`` / ``RegistryFormActionBackend``, ``FormActionManager``, and ``_FormActionDispatch`` implement the above.
+**Roles:** ``FormActionBackend`` / ``RegistryFormActionBackend``, ``FormActionManager``, and ``FormActionDispatch`` implement the above.
 
 Examples
 --------

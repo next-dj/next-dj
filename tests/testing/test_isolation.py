@@ -1,5 +1,4 @@
-from unittest.mock import patch
-
+from next.components.manager import components_manager
 from next.forms import RegistryFormActionBackend, form_action_manager
 from next.testing import reset_components, reset_form_actions, reset_registries
 
@@ -44,27 +43,42 @@ class TestResetFormActions:
 
 
 class TestResetComponents:
-    """reset_components triggers manager._reload_config."""
+    """reset_components rebuilds the component backends list."""
 
-    def test_calls_reload_on_manager(self) -> None:
-        with patch(
-            "next.testing.isolation.components_manager._reload_config"
-        ) as reload:
+    def test_reset_forces_next_access_to_reload(self) -> None:
+        components_manager._ensure_backends()
+        original = list(components_manager._backends)
+        sentinel = object()
+        components_manager._backends.append(sentinel)
+        try:
             reset_components()
-        reload.assert_called_once_with()
+            components_manager._ensure_backends()
+            assert sentinel not in components_manager._backends
+        finally:
+            components_manager._backends = original
 
 
 class TestResetRegistries:
-    """reset_registries calls both helpers."""
+    """reset_registries clears form and component state in one call."""
 
-    def test_invokes_both(self) -> None:
-        with (
-            patch("next.testing.isolation.reset_form_actions") as a,
-            patch("next.testing.isolation.reset_components") as b,
-        ):
+    def test_clears_form_actions_and_reloads_components(self) -> None:
+        backend = form_action_manager.default_backend
+        saved_registry = dict(backend._registry)
+        saved_uids = dict(backend._uid_to_name)
+        components_manager._ensure_backends()
+        saved_components = list(components_manager._backends)
+        sentinel = object()
+        components_manager._backends.append(sentinel)
+        try:
             reset_registries()
-        a.assert_called_once_with()
-        b.assert_called_once_with()
+            assert backend._registry == {}
+            assert backend._uid_to_name == {}
+            components_manager._ensure_backends()
+            assert sentinel not in components_manager._backends
+        finally:
+            backend._registry.update(saved_registry)
+            backend._uid_to_name.update(saved_uids)
+            components_manager._backends = saved_components
 
 
 class _BackendWithoutClear:

@@ -2,15 +2,15 @@
 
 The `action_registered` signal fires after the backend stores a handler
 for a name. The sender is the backend class. The keyword arguments are
-`action_name`, `uid`, `form_class`, and `namespace`.
+`action_name`, `uid`, `form_class`, `namespace`, and `handler`.
 
 The `action_dispatched` signal fires after a handler runs and the
-response has been coerced. The sender is `_FormActionDispatch`. The
+response has been coerced. The sender is `FormActionDispatch`. The
 keyword arguments are `action_name`, `duration_ms`, and
 `response_status`.
 
 The `form_validation_failed` signal fires when the bound form fails
-validation during dispatch. The sender is `_FormActionDispatch`. The
+validation during dispatch. The sender is `FormActionDispatch`. The
 keyword arguments are `action_name`, `error_count`, and `field_names`.
 """
 

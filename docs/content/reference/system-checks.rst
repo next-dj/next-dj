@@ -202,6 +202,32 @@ Raised directly from :mod:`next.forms.backends` at registration time (``@forms.a
        of them, or pass ``namespace="…"`` on ``@forms.action`` to add a
        disambiguating prefix. See :doc:`../guide/forms`.
 
+Reported by ``manage.py check``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 50 15
+
+   * - Id
+     - Meaning
+     - Level
+   * - ``next.E040``
+     - Context processor in ``OPTIONS['context_processors']`` has no
+       ``request`` parameter
+     - Error
+   * - ``next.E041``
+     - Two ``@action`` calls register distinct handlers for the same action name
+     - Error
+   * - ``next.W042``
+     - ``NEXT_FRAMEWORK['JS_CONTEXT_SERIALIZER']`` does not resolve to a class
+       implementing the ``JsContextSerializer`` protocol
+     - Warning
+
+**What to do:** E040 — ensure context processor callables accept ``request``.
+E041 — rename one of the colliding handlers or add ``namespace="…"``. W042 —
+point ``JS_CONTEXT_SERIALIZER`` at a class providing ``dumps(value) -> str``,
+for example :class:`~next.static.serializers.JsonJsContextSerializer`.
+
 ``NEXT_FRAMEWORK`` keys (reference)
 ------------------------------------
 

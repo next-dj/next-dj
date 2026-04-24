@@ -164,6 +164,29 @@ For shared CDN assets such as Tailwind Play or React, call
 ``{% use_script %}`` in the root layout. The dedup strategy ensures the same
 URL is emitted only once no matter how many components reference it.
 
+Settings helpers
+----------------
+
+``next.conf.helpers`` keeps ``config/settings.py`` short. Use
+``extend_default_backend`` to override one entry of ``DEFAULT_PAGE_BACKENDS``,
+``DEFAULT_COMPONENT_BACKENDS`` or ``DEFAULT_STATIC_BACKENDS`` without
+re-specifying every key.
+
+.. code-block:: python
+
+   from next.conf import extend_default_backend
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_PAGE_BACKENDS": extend_default_backend(
+           "DEFAULT_PAGE_BACKENDS",
+           PAGES_DIR="routes",
+       ),
+       "DEFAULT_COMPONENT_BACKENDS": extend_default_backend(
+           "DEFAULT_COMPONENT_BACKENDS",
+           COMPONENTS_DIR="_widgets",
+       ),
+   }
+
 Further reading
 ---------------
 

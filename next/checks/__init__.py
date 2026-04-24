@@ -20,15 +20,18 @@ if TYPE_CHECKING:
         check_next_components_configuration,
     )
     from next.conf.checks import check_next_framework_unknown_top_level_keys
+    from next.forms.checks import check_form_action_collisions
     from next.pages.checks import (
         _has_template_or_djx,
         check_context_functions,
+        check_context_processor_signature,
         check_layout_templates,
         check_page_functions,
         check_pages_structure,
         check_request_in_context,
     )
     from next.pages.loaders import _load_python_module
+    from next.static.checks import check_js_context_serializer
     from next.urls.checks import (
         check_duplicate_url_parameters,
         check_next_pages_configuration,
@@ -44,15 +47,18 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_next_components_configuration",
     ),
     "next.conf.checks": ("check_next_framework_unknown_top_level_keys",),
+    "next.forms.checks": ("check_form_action_collisions",),
     "next.pages.checks": (
         "_has_template_or_djx",
         "check_context_functions",
+        "check_context_processor_signature",
         "check_layout_templates",
         "check_page_functions",
         "check_pages_structure",
         "check_request_in_context",
     ),
     "next.pages.loaders": ("_load_python_module",),
+    "next.static.checks": ("check_js_context_serializer",),
     "next.urls.checks": (
         "check_duplicate_url_parameters",
         "check_next_pages_configuration",

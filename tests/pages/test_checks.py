@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from django.test import override_settings
 
 from next.checks import (
     _has_template_or_djx,
@@ -12,6 +13,7 @@ from next.checks import (
     check_layout_templates,
     check_page_functions,
 )
+from next.pages.checks import check_context_processor_signature
 from tests.support import (
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
@@ -341,3 +343,128 @@ def get_context_data():
 
             errors = check_context_functions(None)
             assert len(errors) == 0
+
+
+def _processor_with_request(request):
+    return {}
+
+
+def _processor_without_request():
+    return {}
+
+
+class TestContextProcessorSignature:
+    """check_context_processor_signature warns when `request` is absent."""
+
+    def test_empty_settings_produces_no_errors(self) -> None:
+        errors = check_context_processor_signature()
+        assert errors == []
+
+    @override_settings(
+        NEXT_FRAMEWORK={
+            "DEFAULT_PAGE_BACKENDS": [
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "APP_DIRS": True,
+                    "DIRS": [],
+                    "PAGES_DIR": "pages",
+                    "OPTIONS": {
+                        "context_processors": [
+                            "tests.pages.test_checks._processor_with_request",
+                        ],
+                    },
+                },
+            ],
+        }
+    )
+    def test_processor_with_request_is_accepted(self) -> None:
+        errors = check_context_processor_signature()
+        assert errors == []
+
+    @override_settings(
+        NEXT_FRAMEWORK={
+            "DEFAULT_PAGE_BACKENDS": [
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "APP_DIRS": True,
+                    "DIRS": [],
+                    "PAGES_DIR": "pages",
+                    "OPTIONS": {
+                        "context_processors": [
+                            "tests.pages.test_checks._processor_without_request",
+                        ],
+                    },
+                },
+            ],
+        }
+    )
+    def test_processor_without_request_triggers_error(self) -> None:
+        errors = check_context_processor_signature()
+        assert len(errors) == 1
+        assert errors[0].id == "next.E040"
+        assert "request" in errors[0].msg
+
+    @override_settings(
+        NEXT_FRAMEWORK={
+            "DEFAULT_PAGE_BACKENDS": [
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "APP_DIRS": True,
+                    "DIRS": [],
+                    "PAGES_DIR": "pages",
+                    "OPTIONS": {
+                        "context_processors": [
+                            "tests.pages.nonexistent.missing_processor",
+                        ],
+                    },
+                },
+            ],
+        }
+    )
+    def test_unresolvable_processor_is_silently_skipped(self) -> None:
+        errors = check_context_processor_signature()
+        assert errors == []
+
+    @override_settings(
+        NEXT_FRAMEWORK={
+            "DEFAULT_PAGE_BACKENDS": [
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "APP_DIRS": True,
+                    "DIRS": [],
+                    "PAGES_DIR": "pages",
+                    "OPTIONS": {
+                        "context_processors": [
+                            123,  # non-string entry
+                        ],
+                    },
+                },
+            ],
+        }
+    )
+    def test_non_string_processor_entries_are_skipped(self) -> None:
+        errors = check_context_processor_signature()
+        assert errors == []
+
+    @override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": "not a list"})
+    def test_bad_settings_shape_is_tolerated(self) -> None:
+        errors = check_context_processor_signature()
+        assert errors == []
+
+    @override_settings(
+        NEXT_FRAMEWORK={
+            "DEFAULT_PAGE_BACKENDS": [
+                "not a dict",
+                {
+                    "BACKEND": "next.urls.FileRouterBackend",
+                    "APP_DIRS": True,
+                    "DIRS": [],
+                    "PAGES_DIR": "pages",
+                    "OPTIONS": {},
+                },
+            ],
+        }
+    )
+    def test_non_dict_backend_entries_are_skipped(self) -> None:
+        errors = check_context_processor_signature()
+        assert errors == []

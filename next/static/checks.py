@@ -15,6 +15,8 @@ Registered identifiers.
   than once in the configuration list.
 - `next.W031`. Warning raised when `OPTIONS['css_tag']` or
   `OPTIONS['js_tag']` does not contain the `{url}` placeholder.
+- `next.W042`. Warning raised when `JS_CONTEXT_SERIALIZER` is set but does
+  not resolve to a class implementing the `JsContextSerializer` protocol.
 """
 
 from __future__ import annotations
@@ -163,3 +165,49 @@ def check_static_backends(
     for index, config in enumerate(configs):
         messages.extend(_check_single_backend(config, index, seen))
     return messages
+
+
+def _w042(message: str) -> CheckMessage:
+    """Return a next.W042 warning tied to settings as the object."""
+    return DjangoWarning(message, obj=settings, id="next.W042")
+
+
+@register(Tags.compatibility)
+def check_js_context_serializer(  # noqa: PLR0911
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Validate that `JS_CONTEXT_SERIALIZER` resolves to a protocol implementation."""
+    raw_framework = getattr(settings, "NEXT_FRAMEWORK", {}) or {}
+    if not isinstance(raw_framework, dict):
+        return []
+    path = raw_framework.get("JS_CONTEXT_SERIALIZER")
+    if path is None or path == "":
+        return []
+    if not isinstance(path, str):
+        return [
+            _w042(
+                f"NEXT_FRAMEWORK['JS_CONTEXT_SERIALIZER'] must be a dotted path "
+                f"string, got {type(path).__name__!r}."
+            )
+        ]
+    try:
+        cls: Any = import_class_cached(path)
+    except ImportError as e:
+        return [_w042(f"Cannot import JS_CONTEXT_SERIALIZER {path!r}: {e}")]
+    if not isinstance(cls, type):
+        return [_w042(f"JS_CONTEXT_SERIALIZER {path!r} is not a class.")]
+    try:
+        instance = cls()
+    except (TypeError, ImportError) as e:
+        return [_w042(f"JS_CONTEXT_SERIALIZER {path!r} cannot be instantiated: {e}")]
+    from .serializers import JsContextSerializer  # noqa: PLC0415
+
+    if not isinstance(instance, JsContextSerializer):
+        return [
+            _w042(
+                f"JS_CONTEXT_SERIALIZER {path!r} does not implement the "
+                "JsContextSerializer protocol (needs a `dumps(value) -> str` method)."
+            )
+        ]
+    return []

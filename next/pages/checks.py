@@ -604,8 +604,69 @@ def check_context_functions(
     return errors
 
 
+@register(Tags.templates)
+def check_context_processor_signature(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when a configured context processor has no `request` parameter."""
+    errors: list[CheckMessage] = []
+    for backend_index, backend in _iter_page_backend_configs():
+        processors = backend.get("OPTIONS", {}).get("context_processors") or []
+        for processor_index, path in enumerate(processors):
+            if not isinstance(path, str):
+                continue
+            loc = (
+                f"NEXT_FRAMEWORK['DEFAULT_PAGE_BACKENDS'][{backend_index}]"
+                f".OPTIONS.context_processors[{processor_index}]"
+            )
+            message = _check_processor_request_parameter(path, loc)
+            if message is not None:
+                errors.append(message)
+    return errors
+
+
+def _iter_page_backend_configs() -> list[tuple[int, dict[str, Any]]]:
+    """Return indexed page backend dicts from `NEXT_FRAMEWORK`."""
+    raw = getattr(settings, "NEXT_FRAMEWORK", {}) or {}
+    backends = raw.get("DEFAULT_PAGE_BACKENDS", []) if isinstance(raw, dict) else []
+    return [
+        (idx, backend)
+        for idx, backend in enumerate(backends)
+        if isinstance(backend, dict)
+    ]
+
+
+def _check_processor_request_parameter(
+    processor_path: str,
+    location: str,
+) -> CheckMessage | None:
+    """Return an error when the callable at `processor_path` lacks `request`."""
+    try:
+        processor = importlib.import_module(processor_path.rsplit(".", 1)[0])
+    except (ImportError, ValueError):
+        return None
+    attr_name = processor_path.rsplit(".", 1)[-1]
+    callable_obj = getattr(processor, attr_name, None)
+    if not callable(callable_obj):
+        return None
+    try:
+        sig = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return None
+    if "request" in sig.parameters:
+        return None
+    return Error(
+        f"{location} points at {processor_path!r} which does not accept a "
+        "'request' parameter. Context processors must accept request.",
+        obj=settings,
+        id="next.E040",
+    )
+
+
 __all__ = [
     "check_context_functions",
+    "check_context_processor_signature",
     "check_layout_templates",
     "check_page_functions",
     "check_pages_structure",
