@@ -9,7 +9,7 @@ DEMO_FLAG_NAMES = ("beta_checkout", "dark_sidebar", "ai_suggestions")
 
 
 @context("demo_flags")
-def _demo_flags() -> list[dict[str, object]]:
+def demo_flags() -> list[dict[str, object]]:
     known = {f.name: f for f in Flag.objects.filter(name__in=DEMO_FLAG_NAMES)}
     return [
         {

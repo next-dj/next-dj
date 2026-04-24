@@ -252,12 +252,17 @@ Run validation checks:
 Examples
 --------
 
-See the ``examples/`` directory in the source code for complete working examples:
+See the ``examples/`` directory in the source repository for complete
+working projects:
 
-- **file-routing/**: Basic file-based routing examples
-- **pages/**: Page creation and template examples  
-- **layouts/**: Layout inheritance examples
-- **components/**: Component-based examples
+- ``examples/_template`` — minimal scaffold (routes, layout, template,
+  widget component).
+- ``examples/shortener`` — URL shortener with bracket segments
+  (``[slug]``) and nested ``admin/`` routes.
+- ``examples/markdown-blog`` — per-post pages under ``posts/<slug>/``
+  with a custom ``TemplateLoader``.
+- ``examples/feature-flags`` — admin panel with nested layouts and
+  form actions.
 
 Best Practices
 --------------
@@ -297,7 +302,7 @@ The signals emitted by :mod:`next.urls.signals` let external code observe routin
 * ``route_registered`` fires when a backend yields a new URL pattern.
 * ``router_reloaded`` fires when the ``RouterManager`` rebuilds its pattern list after a settings change.
 
-A worked example lives in ``examples/file-routing/myapp/custom_router.py``. See :doc:`extending` for the overall extension model.
+A worked inline ``TaggedFileRouterBackend`` example is in :doc:`extending` (section "Worked examples by subsystem").
 
 Next
 ----

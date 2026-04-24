@@ -74,7 +74,9 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Every example overrides PAGES_DIR and COMPONENTS_DIR to showcase the
-# convention. Pick names that fit your domain.
+# convention. Pick names that fit your domain. For single-key overrides,
+# `next.conf.extend_default_backend` is a shorter alternative — see
+# docs/content/guide/project-layout.rst (section "Settings helpers").
 NEXT_FRAMEWORK = {
     "DEFAULT_PAGE_BACKENDS": [
         {

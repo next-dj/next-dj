@@ -148,7 +148,7 @@ via **default parameter values**):
   (a callable registered with ``@resolver.dependency("name")``). Use for app-wide
   data (theme, config, current user) that is not tied to the page/layout hierarchy.
 
-**Example: subpage receiving layout global + parent context (see ``examples/layouts/``):**
+**Example: subpage receiving layout global + parent context:**
 
 .. code-block:: python
 

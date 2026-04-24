@@ -258,7 +258,7 @@ class BulkToggleForm(Form):
 
 
 @action("bulk_toggle", form_class=BulkToggleForm)
-def _bulk_toggle(form: BulkToggleForm) -> HttpResponseRedirect:
+def bulk_toggle(form: BulkToggleForm) -> HttpResponseRedirect:
     enabled = set(form.cleaned_data["enabled_names"])
     for flag in Flag.objects.all():
         should_be_on = flag.name in enabled

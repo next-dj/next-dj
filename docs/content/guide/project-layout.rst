@@ -20,8 +20,6 @@ File naming
 
    * - What
      - File
-   * - Custom backends (Router / Components / Forms / Static / TemplateLoader)
-     - ``backends.py``
    * - Custom dependency-injection providers
      - ``providers.py``
    * - Django context processors
@@ -30,14 +28,10 @@ File naming
      - ``receivers.py``
    * - Custom template loaders (when split out)
      - ``loaders.py``
-   * - Middleware
-     - ``middleware.py``
-   * - ``StaticCollector`` strategies (dedup or JS-context policy)
-     - ``static_policies.py``
-   * - Serializers for ``@context(serialize=True)`` payloads
-     - ``serializers.py``
    * - Cached queries and cache helpers
-     - ``queries.py``, ``cache.py``
+     - ``cache.py``
+   * - Cache-flush / maintenance metrics
+     - ``metrics.py``
    * - Django management commands
      - ``management/commands/``
 
@@ -81,36 +75,23 @@ one is deliberately different so the convention is visible.
    * - Example
      - Pages dir
      - Components dir
+   * - ``_template``
+     - ``routes``
+     - ``_widgets``
    * - ``shortener``
      - ``routes``
      - ``_widgets``
    * - ``markdown-blog``
      - ``screens``
      - ``_parts``
-   * - ``audit-forms``
-     - ``views``
-     - ``_blocks``
    * - ``feature-flags``
      - ``panels``
      - ``_chunks``
-   * - ``live-polls``
-     - ``screens``
-     - ``_widgets``
-   * - ``kanban``
-     - ``boards``
-     - ``_pieces``
-   * - ``multi-tenant``
-     - ``workspaces``
-     - ``_blocks``
-   * - ``search-catalog``
-     - ``storefront``
-     - ``_cards``
-   * - ``wiki``
-     - ``routes``
-     - ``_blocks``
-   * - ``observability``
-     - ``dashboards``
-     - ``_widgets``
+
+The directory names start with ``_`` so ``FileRouterBackend`` does not
+treat them as URL segments and ``FileComponentsBackend`` discovers them
+as a component scope. See
+``next/components/scanner.py:DEFAULT_COMPONENTS_DIR_NAME``.
 
 Shared root pages
 -----------------
@@ -190,10 +171,8 @@ re-specifying every key.
 Further reading
 ---------------
 
-``docs/content/guide/testing`` — how the test helpers use this layout.
-
-``docs/content/guide/components`` — component scoping rules and the
-``_widgets`` directory convention.
-
-``docs/content/guide/file-router`` — bracket segments and how ``routes``
-becomes the URL tree.
+- :doc:`testing` — how the test helpers use this layout.
+- :doc:`components` — component scoping rules and the ``_widgets``
+  directory convention.
+- :doc:`file-router` — bracket segments and how ``routes`` becomes the
+  URL tree.

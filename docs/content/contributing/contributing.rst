@@ -327,7 +327,7 @@ Each example under ``examples/`` should be self-contained, with a ``README.md``,
            ├── conftest.py
            └── test_*.py   # or tests/tests.py
 
-Use ``examples/file-routing/tests/conftest.py`` as the template for Django settings, ``INSTALLED_APPS``, and the ``client`` fixture.
+Use ``examples/_template/conftest.py`` as the canonical template for Django settings, ``INSTALLED_APPS``, and the ``client`` fixture.
 
 **New user-facing behavior** should normally include an example and tests. Small fixes or internal refactors may omit an example if maintainers agree in the PR.
 

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from blog import receivers
 from blog.loaders import MarkdownTemplateLoader
 from blog.markdown_template import (
     post_metadata,
@@ -7,6 +8,9 @@ from blog.markdown_template import (
     reading_minutes,
     render_markdown,
 )
+from blog.receivers import _detect_source, loader_hits
+
+from next.pages.signals import template_loaded
 
 
 class TestRenderMarkdown:
@@ -86,3 +90,29 @@ class TestMarkdownTemplateLoader:
 
     def test_source_path_none_when_missing(self, tmp_path: Path) -> None:
         assert MarkdownTemplateLoader().source_path(tmp_path / "page.py") is None
+
+
+class TestReceivers:
+    """`blog.receivers` observes the `template_loaded` signal."""
+
+    def setup_method(self) -> None:
+        """Clear the loader hits map before each test."""
+        receivers._loader_hits.clear()
+
+    def test_detect_source_markdown(self, tmp_path: Path) -> None:
+        (tmp_path / "template.md").write_text("# x")
+        assert _detect_source(tmp_path / "page.py").startswith("template.md")
+
+    def test_detect_source_djx(self, tmp_path: Path) -> None:
+        (tmp_path / "template.djx").write_text("<p>x</p>")
+        assert _detect_source(tmp_path / "page.py").startswith("template.djx")
+
+    def test_detect_source_inline(self, tmp_path: Path) -> None:
+        assert _detect_source(tmp_path / "page.py").startswith("page.py")
+
+    def test_on_template_loaded_records_hit(self, tmp_path: Path) -> None:
+        page_file = tmp_path / "page.py"
+        (tmp_path / "template.djx").write_text("<p>x</p>")
+        template_loaded.send(sender=None, file_path=page_file)
+        hits = loader_hits()
+        assert hits[str(page_file)].startswith("template.djx")

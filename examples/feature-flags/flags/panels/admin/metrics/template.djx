@@ -27,4 +27,15 @@
       <p class="text-sm text-slate-500">No renders recorded yet.</p>
     {% endif %}
   </div>
+
+  <div class="rounded-xl border bg-white p-4 shadow-sm">
+    <p class="text-xs uppercase tracking-wide text-slate-500">
+      <code class="rounded bg-slate-100 px-1">feature_guard</code> component renders
+    </p>
+    <p class="mt-1 text-3xl font-bold">{{ feature_guard_count }}</p>
+    <p class="mt-1 text-xs text-slate-500">
+      Driven by the <code class="rounded bg-slate-100 px-1">component_rendered</code>
+      signal, filtered to the <code>feature_guard</code> component.
+    </p>
+  </div>
 </section>

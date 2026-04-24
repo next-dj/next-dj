@@ -185,12 +185,12 @@ _POST = Path(__file__).parent / "template.md"
 
 
 @context("post", serialize=True)
-def _post() -> dict[str, str]:
+def post() -> dict[str, str]:
     return post_metadata(_POST)
 
 
 @context("reading_minutes")
-def _read() -> int:
+def read() -> int:
     return reading_minutes(read_post_body(_POST))
 ```
 

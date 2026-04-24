@@ -5,8 +5,8 @@ from __future__ import annotations
 import ast
 import importlib.util
 import inspect
-import types
-from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, cast, get_origin
 
 from django.conf import settings
 from django.core.checks import (
@@ -23,6 +23,7 @@ from .loaders import TemplateLoader, _load_python_module, build_registered_loade
 
 
 if TYPE_CHECKING:
+    import types
     from collections.abc import Callable
     from pathlib import Path
 
@@ -563,13 +564,29 @@ def _has_context_decorator_without_key(func: Callable[..., Any]) -> bool:
     return False
 
 
-def _get_function_result(func: Callable[..., Any]) -> object:
-    """Call `func()` with no args or with a stub when it needs arguments."""
-    try:
-        return func()
-    except TypeError:
-        stub = types.SimpleNamespace()
-        return func(stub)
+_DICT_ANNOTATION_NAMES = frozenset({"dict", "Dict", "Mapping", "MutableMapping"})
+
+
+def _annotation_is_dict_like(annotation: object) -> bool:
+    """Return True when the return annotation maps to a dict-like result."""
+    if annotation is inspect.Signature.empty:
+        return True
+    if annotation is dict or annotation is None:
+        return annotation is dict
+    origin = get_origin(annotation)
+    if origin is not None:
+        candidate: object = origin
+    else:
+        candidate = annotation
+    if isinstance(candidate, type):
+        try:
+            return issubclass(candidate, Mapping)
+        except TypeError:
+            return False
+    name = getattr(candidate, "_name", None) or getattr(candidate, "__name__", None)
+    if isinstance(name, str):
+        return name in _DICT_ANNOTATION_NAMES
+    return False
 
 
 def _check_context_function(
@@ -577,21 +594,29 @@ def _check_context_function(
     func: Callable[..., Any],
     page_path: Path,
 ) -> CheckMessage | None:
-    """Emit an error when keyless context callables do not produce a dict."""
+    """Emit an error when keyless context callables are not annotated dict-like.
+
+    The check is static: executing user code at ``manage.py check`` time
+    is expensive and can hit databases that have not been migrated yet.
+    Callables without a return annotation are accepted — the runtime
+    emits a clear ``TypeError`` on first render if the result is not a
+    mapping.
+    """
     try:
-        result = _get_function_result(func)
-        if not isinstance(result, dict):
-            return Error(
-                f"Context function '{func_name}' in {page_path} "
-                "must return a dictionary "
-                f"when used with @context decorator (without key). "
-                f"Got {type(result).__name__} instead.",
-                obj=str(page_path),
-                id="next.E029",
-            )
-    except (TypeError, AttributeError, OSError):
-        pass
-    return None
+        annotation = inspect.signature(func).return_annotation
+    except (TypeError, ValueError):
+        return None
+    if _annotation_is_dict_like(annotation):
+        return None
+    annotation_name = getattr(annotation, "__name__", None) or repr(annotation)
+    return Error(
+        f"Context function '{func_name}' in {page_path} "
+        "must return a dictionary "
+        f"when used with @context decorator (without key). "
+        f"Got return annotation {annotation_name} instead.",
+        obj=str(page_path),
+        id="next.E029",
+    )
 
 
 def _check_module_context_functions(

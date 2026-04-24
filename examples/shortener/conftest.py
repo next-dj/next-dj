@@ -1,3 +1,4 @@
+# Canonical scaffold: see docs/content/guide/testing.rst for the rationale.
 import os
 import sys
 from pathlib import Path

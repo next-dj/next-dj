@@ -60,9 +60,14 @@ Router list shape, backends, and ``FileRouterBackend`` fields.
    * - ``next.E024``–``E027``
      - Missing or invalid ``PAGES_DIR`` / ``APP_DIRS`` / ``DIRS`` / ``OPTIONS`` for file router
      - Error
+   * - ``next.E035``
+     - Unknown key in ``NEXT_FRAMEWORK`` or a backend entry
+     - Error
 
 **What to do:** Fix ``NEXT_FRAMEWORK`` in settings (see :doc:`../guide/file-router`).
 Use a valid backend path and required keys for ``next.urls.FileRouterBackend``.
+For E035, remove the unrecognised key — the check message includes the list
+of allowed keys.
 
 Templates and context processors
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -174,9 +179,64 @@ Components
    * - ``next.E021``
      - ``component.py`` must not import ``context`` from ``next.pages``
      - Error
+   * - ``next.E031``
+     - ``DEFAULT_COMPONENT_BACKENDS[i]`` is missing a required key
+       (``BACKEND`` / ``DIRS`` / ``COMPONENTS_DIR``)
+     - Error
+   * - ``next.E032``
+     - ``BACKEND`` must be a string, or ``DIRS`` must be a list, in
+       ``DEFAULT_COMPONENT_BACKENDS[i]``
+     - Error
+   * - ``next.E033``
+     - ``DEFAULT_COMPONENT_BACKENDS`` has a duplicate ``BACKEND`` dotted path
+     - Error
+   * - ``next.E034``
+     - Component name appears in the root ``COMPONENTS_DIR`` of two distinct
+       ``DIRS`` roots
+     - Error
 
 **What to do:** Rename or relocate components. Use ``next.components`` context APIs
-(see :doc:`../guide/components`).
+(see :doc:`../guide/components`). For E031–E033, fix the shape of each entry
+in ``DEFAULT_COMPONENT_BACKENDS``; for E034, rename or move one of the
+conflicting component folders so the root scope is unambiguous.
+
+Static assets
+~~~~~~~~~~~~~
+
+``DEFAULT_STATIC_BACKENDS`` validation and per-backend ``OPTIONS``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 50 15
+
+   * - Id
+     - Meaning
+     - Level
+   * - ``next.E036``
+     - Cannot import a ``BACKEND`` listed in ``DEFAULT_STATIC_BACKENDS``,
+       or ``DEFAULT_STATIC_BACKENDS`` itself cannot be read
+     - Error
+   * - ``next.E037``
+     - ``DEFAULT_STATIC_BACKENDS[i]`` is not a dict, its ``BACKEND`` is not
+       a string, or the imported class does not subclass
+       :class:`~next.static.StaticBackend`
+     - Error
+   * - ``next.E038``
+     - ``DEFAULT_STATIC_BACKENDS`` has a duplicate ``BACKEND`` dotted path
+     - Error
+   * - ``next.W030``
+     - ``DEFAULT_STATIC_BACKENDS`` is empty — the framework falls back to
+       :class:`~next.static.StaticFilesBackend`
+     - Warning
+   * - ``next.W031``
+     - ``OPTIONS['css_tag']`` or ``OPTIONS['js_tag']`` is missing the
+       ``{url}`` placeholder — rendered tags will not include the asset URL
+     - Warning
+
+**What to do:** Fix each ``DEFAULT_STATIC_BACKENDS`` entry so the
+``BACKEND`` imports to a :class:`~next.static.StaticBackend` subclass
+with unique dotted path. For W031, include ``{url}`` inside any custom
+``css_tag`` / ``js_tag`` template string.
 
 Context functions on pages
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

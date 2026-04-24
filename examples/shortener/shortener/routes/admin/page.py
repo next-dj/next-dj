@@ -7,7 +7,7 @@ from next.pages import context
 
 
 @context("recent_links", inherit_context=True)
-def _recent_links() -> list[Link]:
+def recent_links() -> list[Link]:
     return list(Link.objects.order_by("-clicks", "-created_at")[:10])
 
 

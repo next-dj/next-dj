@@ -160,9 +160,9 @@ Troubleshooting
    ``eager_load_pages`` inside a session-scoped fixture.
 
 **A second test in the same session raises ``ImproperlyConfigured: UID collision``.**
-   Two different action names hash to the same UID. Rename one of them.
-   ``form_action_manager.clear_registries()`` resets the session if you need a
-   clean slate.
+   Two different action names hash to the same UID. Rename one of them. Call
+   ``reset_form_actions()`` from :mod:`next.testing` if you need a clean slate
+   (or ``reset_registries()`` to drop every cached registry at once).
 
 **Tests that swap ``NEXT_FRAMEWORK`` settings ignore the new backend.**
    The component manager caches backends. Call ``reset_components`` (or

@@ -274,7 +274,7 @@ In a child page's context functions you can inject:
   ``@resolver.dependency("name")`` in the layout (or app) and inject it in child
   pages with ``Depends("name")``.
 
-Example (see ``examples/layouts/``):
+Example:
 
 .. code-block:: python
 
@@ -303,8 +303,10 @@ Example (see ``examples/layouts/``):
        return custom_variable
 
 Then in ``guides/template.djx`` you can use ``{{ layout_theme_data }}`` and
-``{{ parent_context_data }}``. For the full walkthrough, see :doc:`dependency-injection`
-(Context vs Depends) and the ``examples/layouts/`` source.
+``{{ parent_context_data }}``. For the full walkthrough, see
+:doc:`dependency-injection` (Context vs Depends). The
+``examples/feature-flags/flags/panels/admin/`` directory demonstrates
+a nested layout with inherited context in a working project.
 
 Layout Blocks
 -------------
@@ -419,10 +421,14 @@ Run validation checks:
 Examples
 --------
 
-See the ``examples/`` directory in the source code for complete working examples:
+See the ``examples/`` directory in the source repository for complete
+working projects:
 
-- **layouts/**: Layout inheritance examples with Bootstrap styling
-- **pages/**: Template usage examples
+- ``examples/_template`` — minimal page + layout + template scaffold.
+- ``examples/markdown-blog`` — ``posts/<slug>/`` pages backed by a
+  ``MarkdownTemplateLoader`` (registered via ``TEMPLATE_LOADERS``).
+- ``examples/feature-flags`` — nested layouts under ``admin/`` with
+  inherited context.
 
 Best Practices
 --------------
@@ -444,14 +450,10 @@ The pages subsystem exposes one pluggable surface for loading template source.
 
 * ``next.pages.loaders.TemplateLoader`` is the abstract contract used by ``Page`` to read template source by path. The default stack resolves Python modules, ``.djx`` files, and layout chains. Subclass it to read sources from a database, a bundled archive, or an in-memory map.
 
-Attach a custom loader by passing it to the ``Page`` singleton at startup.
-
-.. code-block:: python
-
-   from next.pages import Page
-   from myapp.custom_loader import InMemoryTemplateLoader
-
-   page = Page(template_loaders=[InMemoryTemplateLoader({"/virtual/page.py": "..."})])
+The canonical registration surface is the ``TEMPLATE_LOADERS`` key in
+``NEXT_FRAMEWORK`` (see above). A working example lives in
+``examples/markdown-blog/blog/loaders.py`` — ``MarkdownTemplateLoader``
+reads a sibling ``template.md`` and returns rendered HTML.
 
 The signals emitted by :mod:`next.pages.signals` let external code observe the rendering pipeline.
 
@@ -463,7 +465,7 @@ The signals emitted by :mod:`next.pages.signals` let external code observe the r
   Kwargs: ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``,
   ``context_keys``.
 
-A worked example lives in ``examples/pages/catalog/custom_loader.py``. See :doc:`extending` for the overall extension model.
+See :doc:`extending` for the overall extension model.
 
 Next
 ----

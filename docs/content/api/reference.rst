@@ -112,6 +112,28 @@ App wiring (next.apps)
 
    apps
 
+Testing helpers (next.testing)
+------------------------------
+
+Framework-agnostic helpers for tests: ``NextClient``, ``SignalRecorder``,
+registry-reset functions, and eager page loading. Works with pytest,
+``django.test.TestCase``, and stdlib ``unittest``. See :doc:`/content/guide/testing`.
+
+.. toctree::
+
+   testing
+
+Aggregated signals (next.signals)
+---------------------------------
+
+Flat re-export of every signal emitted by next.dj subsystems. Import
+from here when wiring multiple receivers without tracking which
+subsystem owns each signal.
+
+.. toctree::
+
+   signals
+
 Configuration reference
 -----------------------
 
@@ -127,6 +149,8 @@ Single dictionary in Django settings. Top-level keys (each optional beyond defau
 * ``NEXT_JS_OPTIONS`` is a dict passed to :class:`~next.static.NextScriptBuilder` to control injection of ``next.min.js``. Recognised keys are ``policy`` (``"auto"``/``"disabled"``/``"manual"`` or a :class:`~next.static.ScriptInjectionPolicy` member), ``preload_template``, ``script_tag_template``, and ``init_template``. See :doc:`/content/guide/static-assets`.
 * ``STRICT_CONTEXT`` (bool, default ``False``) promotes ``TypeError`` / ``ValueError`` / ``AttributeError`` / ``KeyError`` raised by Django context processors from a warning to a re-raise during page rendering. See :doc:`/content/guide/context`.
 * ``LAZY_COMPONENT_MODULES`` (bool, default ``False``) skips the eager import of every discovered ``component.py`` at startup. Modules are imported on first resolve of the component instead. See :doc:`/content/guide/components`.
+* ``TEMPLATE_LOADERS`` is a list of dotted paths to :class:`~next.pages.loaders.TemplateLoader` subclasses. Defaults to ``["next.pages.loaders.DjxTemplateLoader"]``. A user-provided list **replaces** the default, so include ``DjxTemplateLoader`` explicitly if you want ``.djx`` files to keep resolving. See :doc:`/content/guide/pages-and-templates`.
+* ``JS_CONTEXT_SERIALIZER`` is an optional dotted path to a class implementing the :class:`~next.static.serializers.JsContextSerializer` protocol (single ``dumps(value) -> str`` method). Values from ``@context(serialize=True)`` flow through this serializer into ``window.Next.context``. Defaults to ``None`` (uses the built-in JSON encoder). See :doc:`/content/guide/static-assets`.
 
 .. code-block:: python
 

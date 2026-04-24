@@ -113,7 +113,7 @@ Three patterns, each useful:
 
 ```python
 @context("recent_links")
-def _recent_links() -> list[Link]:
+def recent_links() -> list[Link]:
     return list(Link.objects.all()[:5])
 ```
 
@@ -124,7 +124,7 @@ Renders as `{{ recent_links }}` in the template.
 ```python
 # routes/admin/links/[slug]/page.py
 @context
-def _link_context(link: DLink[Link]) -> dict[str, object]:
+def link_context(link: DLink[Link]) -> dict[str, object]:
     return {
         "link": link,
         "cache_key": f"{CLICK_PREFIX}{link.slug}",
@@ -148,7 +148,7 @@ context("pending_clicks")(pending_clicks)
 
 ```python
 @context("recent_links", inherit_context=True)
-def _recent_links() -> list[Link]:
+def recent_links() -> list[Link]:
     return list(Link.objects.order_by("-clicks", "-created_at")[:10])
 ```
 
@@ -160,8 +160,8 @@ Declared once in [`admin/page.py`](shortener/routes/admin/page.py), available in
 
 ```python
 @action("create_link", form_class=CreateLinkForm)
-def _create_link(form: CreateLinkForm) -> HttpResponseRedirect:
-    Link.objects.create(slug=_generate_slug(), url=form.cleaned_data["url"])
+def create_link(form: CreateLinkForm) -> HttpResponseRedirect:
+    _create_link_with_unique_slug(form.cleaned_data["url"])
     return HttpResponseRedirect("/")
 ```
 

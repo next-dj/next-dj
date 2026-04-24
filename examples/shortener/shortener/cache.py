@@ -29,12 +29,24 @@ def pending_clicks() -> dict[str, int]:
 
 
 def flush_clicks() -> int:
-    """Transfer cached counters into the database and reset the cache."""
+    """Transfer cached counters into the database and reset the cache.
+
+    Uses atomic ``cache.decr`` so increments racing with the flush are
+    preserved: the snapshot delta is subtracted from the live counter,
+    and any subsequent bumps stay around for the next flush.
+    """
     pending = pending_clicks()
     if not pending:
         return 0
     with transaction.atomic():
         for slug, delta in pending.items():
             Link.objects.filter(slug=slug).update(clicks=F("clicks") + delta)
-    cache.delete_many([_key(slug) for slug in pending])
+    for slug, delta in pending.items():
+        key = _key(slug)
+        try:
+            remaining = cache.decr(key, delta)
+        except ValueError:
+            continue
+        if remaining <= 0:
+            cache.delete(key)
     return sum(pending.values())

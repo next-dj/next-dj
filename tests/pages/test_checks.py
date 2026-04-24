@@ -478,7 +478,27 @@ def get_context_data():
             assert len(errors) == 0
 
     def test_check_context_functions_invalid_return_type(self, tmp_path) -> None:
-        """Test check_context_functions with invalid return type."""
+        """Flag a keyless @context function annotated with a non-dict return."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("""
+from next.pages import context
+
+@context
+def get_context_data() -> str:
+    return "not a dict"
+        """)
+
+        with patch_checks_router_manager(
+            pages_directory=tmp_path,
+            scan_routes=[("test", page_file)],
+        ):
+            errors = check_context_functions(None)
+            assert len(errors) == 1
+            assert "must return a dictionary" in errors[0].msg
+            assert "str" in errors[0].msg
+
+    def test_check_context_functions_unannotated_skipped(self, tmp_path) -> None:
+        """Skip keyless @context functions with no return annotation."""
         page_file = tmp_path / "page.py"
         page_file.write_text("""
 from next.pages import context
@@ -493,9 +513,7 @@ def get_context_data():
             scan_routes=[("test", page_file)],
         ):
             errors = check_context_functions(None)
-            assert len(errors) == 1
-            assert "must return a dictionary" in errors[0].msg
-            assert "str" in errors[0].msg
+            assert errors == []
 
     def test_check_context_functions_with_key_not_checked(self, tmp_path) -> None:
         """Test check_context_functions ignores functions with key."""

@@ -6,7 +6,7 @@ from next.pages import context
 
 
 @context
-def _link_context(link: DLink[Link]) -> dict[str, object]:
+def link_context(link: DLink[Link]) -> dict[str, object]:
     return {
         "link": link,
         "cache_key": f"{CLICK_PREFIX}{link.slug}",

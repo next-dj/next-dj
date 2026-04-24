@@ -1055,7 +1055,11 @@ The signals emitted by :mod:`next.forms.signals` let external code observe actio
 * ``form_validation_failed`` fires after a submitted form fails validation.
   Kwargs: ``action_name``, ``error_count``, ``field_names``.
 
-A worked example lives in ``examples/forms/todos/custom_backend.py``. See :doc:`extending` for the overall extension model.
+Inline ``AuditedRegistryFormActionBackend`` and
+``CountingFileComponentsBackend`` snippets live in :doc:`extending`
+(section "Worked examples by subsystem"). Working ``@action`` handlers
+are in ``examples/shortener`` (``create_link`` form) and
+``examples/feature-flags`` (``bulk_toggle`` form).
 
 Next
 ----
