@@ -86,4 +86,8 @@ NEXT_FRAMEWORK = {
             "COMPONENTS_DIR": "_parts",
         },
     ],
+    "TEMPLATE_LOADERS": [
+        "blog.loaders.MarkdownTemplateLoader",
+        "next.pages.loaders.DjxTemplateLoader",
+    ],
 }

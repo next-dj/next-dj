@@ -61,6 +61,7 @@ class NextFrameworkSettings:
             "DEFAULT_PAGE_BACKENDS",
             "DEFAULT_COMPONENT_BACKENDS",
             "DEFAULT_STATIC_BACKENDS",
+            "TEMPLATE_LOADERS",
         }
     )
     _BOOL_KEYS: ClassVar[frozenset[str]] = frozenset(

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from blog.loaders import MarkdownTemplateLoader
 from blog.markdown_template import (
     post_metadata,
     read_post_body,
@@ -55,3 +56,33 @@ class TestReadingMinutes:
     def test_long_text_rounds(self) -> None:
         body = "word " * 500
         assert reading_minutes(body) == 2
+
+
+class TestMarkdownTemplateLoader:
+    """`MarkdownTemplateLoader` renders sibling `template.md` as HTML."""
+
+    def test_can_load_true_when_template_md_exists(self, tmp_path: Path) -> None:
+        (tmp_path / "template.md").write_text("# hi")
+        page_file = tmp_path / "page.py"
+        assert MarkdownTemplateLoader().can_load(page_file) is True
+
+    def test_can_load_false_when_missing(self, tmp_path: Path) -> None:
+        assert MarkdownTemplateLoader().can_load(tmp_path / "page.py") is False
+
+    def test_load_template_renders_markdown(self, tmp_path: Path) -> None:
+        (tmp_path / "template.md").write_text("# hi\n\nbody")
+        html = MarkdownTemplateLoader().load_template(tmp_path / "page.py")
+        assert "<h1>hi</h1>" in (html or "")
+
+    def test_load_template_returns_none_on_decode_error(self, tmp_path: Path) -> None:
+        md_file = tmp_path / "template.md"
+        md_file.write_bytes(b"\xff\xfe invalid utf-8")
+        assert MarkdownTemplateLoader().load_template(tmp_path / "page.py") is None
+
+    def test_source_path_returns_sibling_when_exists(self, tmp_path: Path) -> None:
+        md_file = tmp_path / "template.md"
+        md_file.write_text("# x")
+        assert MarkdownTemplateLoader().source_path(tmp_path / "page.py") == md_file
+
+    def test_source_path_none_when_missing(self, tmp_path: Path) -> None:
+        assert MarkdownTemplateLoader().source_path(tmp_path / "page.py") is None

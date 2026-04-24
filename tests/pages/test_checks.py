@@ -227,6 +227,67 @@ class TestMissingPageContentChecks:
                 assert "has no content" in warnings[0].msg
 
 
+class TestCheckTemplateLoaders:
+    """`check_template_loaders` validates `NEXT_FRAMEWORK['TEMPLATE_LOADERS']`."""
+
+    def _run(self) -> list:
+        from next.pages.checks import check_template_loaders
+
+        return list(check_template_loaders())
+
+    def _reset_loader_cache(self) -> None:
+        import next.pages.loaders as loaders_module
+
+        loaders_module._REGISTERED_LOADERS_CACHE = None
+
+    @override_settings(
+        NEXT_FRAMEWORK={
+            "TEMPLATE_LOADERS": ["next.pages.loaders.DjxTemplateLoader"],
+        }
+    )
+    def test_valid_default_is_clean(self) -> None:
+        from next.conf import next_framework_settings as s
+
+        s.reload()
+        self._reset_loader_cache()
+        assert self._run() == []
+
+    @override_settings(NEXT_FRAMEWORK={"TEMPLATE_LOADERS": [123]})
+    def test_non_string_entry_is_e042(self) -> None:
+        from next.conf import next_framework_settings as s
+
+        s.reload()
+        self._reset_loader_cache()
+        msgs = self._run()
+        assert len(msgs) == 1
+        assert msgs[0].id == "next.E042"
+        assert "dotted path string" in msgs[0].msg
+
+    @override_settings(NEXT_FRAMEWORK={"TEMPLATE_LOADERS": ["does.not.exist.Loader"]})
+    def test_unimportable_entry_is_e043(self) -> None:
+        from next.conf import next_framework_settings as s
+
+        s.reload()
+        self._reset_loader_cache()
+        msgs = self._run()
+        assert len(msgs) == 1
+        assert msgs[0].id == "next.E043"
+        assert "cannot be imported" in msgs[0].msg
+
+    @override_settings(
+        NEXT_FRAMEWORK={"TEMPLATE_LOADERS": ["next.pages.loaders.LayoutManager"]}
+    )
+    def test_non_subclass_entry_is_e043(self) -> None:
+        from next.conf import next_framework_settings as s
+
+        s.reload()
+        self._reset_loader_cache()
+        msgs = self._run()
+        assert len(msgs) == 1
+        assert msgs[0].id == "next.E043"
+        assert "not a TemplateLoader subclass" in msgs[0].msg
+
+
 class TestBodySourceConflicts:
     """`check_page_functions` emits `next.W043` when two or more body sources coexist."""
 

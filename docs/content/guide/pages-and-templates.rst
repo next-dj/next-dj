@@ -100,6 +100,44 @@ Exceptions raised inside ``render()`` propagate to Django's request-handling sta
 
    ``Page.render`` (the programmatic API exposed to tests and tools) uses the static body sources only; it never invokes ``render()``. The unified view function that handles real HTTP requests invokes ``render()`` first and hands its string result to the same composition pipeline.
 
+Custom template formats
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The sibling ``template.djx`` file is just one implementation of the ``TemplateLoader`` contract. Register additional loaders under ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to teach the framework about any file format you like. Each entry is a dotted path to a ``next.pages.loaders.TemplateLoader`` subclass. Loaders are consulted in the order they appear after the ``template`` module attribute is checked.
+
+.. code-block:: python
+
+   # myapp/loaders.py
+   from pathlib import Path
+   import markdown
+   from next.pages.loaders import TemplateLoader
+
+   class MarkdownTemplateLoader(TemplateLoader):
+       source_name = "template.md"
+
+       def can_load(self, file_path: Path) -> bool:
+           return (file_path.parent / "template.md").exists()
+
+       def load_template(self, file_path: Path) -> str | None:
+           md = (file_path.parent / "template.md").read_text(encoding="utf-8")
+           return markdown.markdown(md, extensions=["fenced_code"])
+
+       def source_path(self, file_path: Path) -> Path | None:
+           p = file_path.parent / "template.md"
+           return p if p.exists() else None
+
+.. code-block:: python
+
+   # settings.py
+   NEXT_FRAMEWORK = {
+       "TEMPLATE_LOADERS": [
+           "myapp.loaders.MarkdownTemplateLoader",
+           "next.pages.loaders.DjxTemplateLoader",
+       ],
+   }
+
+User-provided ``TEMPLATE_LOADERS`` **replaces** the default list (which is just ``DjxTemplateLoader``), so include ``DjxTemplateLoader`` explicitly if you still want sibling ``template.djx`` support. ``source_name`` is used by :ref:`next.W043 <check-next-w043>` to name the active source in conflict warnings; ``source_path`` feeds the stale-cache detector so edits to the backing file invalidate the composed template on the next request.
+
 Layout System
 -------------
 

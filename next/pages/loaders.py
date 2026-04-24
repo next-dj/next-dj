@@ -1,10 +1,16 @@
 """Template-text loaders and the layout composition engine.
 
-`TemplateLoader` is the abstract contract. `PythonTemplateLoader` reads
-from a `template` module attribute, `DjxTemplateLoader` reads from a
-sibling `template.djx`, and `LayoutTemplateLoader` composes outer
-`layout.djx` wrappers up the directory chain. `LayoutManager` caches
-composed layout strings per page path.
+`TemplateLoader` is the abstract contract. The page manager consults
+`module.template` directly and then iterates the loader chain built
+from `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`. The default chain contains
+only `DjxTemplateLoader`. `PythonTemplateLoader` is kept for projects
+that register it explicitly or rely on the legacy capability-detection
+code path. The manager does not call it by default.
+
+`DjxTemplateLoader` reads a sibling `template.djx`.
+`LayoutTemplateLoader` composes outer `layout.djx` wrappers up the
+directory chain. It is not registered through `TEMPLATE_LOADERS`.
+Layouts have their own dedicated path.
 """
 
 from __future__ import annotations
@@ -13,9 +19,10 @@ import contextlib
 import importlib.util
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from next.conf import next_framework_settings
+from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
 from next.utils import classify_dirs_entries, resolve_base_dir
 
@@ -93,7 +100,14 @@ def _read_string_list(module: types.ModuleType, attr: str) -> list[str]:
 
 
 class TemplateLoader(ABC):
-    """Pluggable source of template text for a `page.py` path."""
+    """Pluggable source of template text for a `page.py` path.
+
+    Subclasses set `source_name` to the filename they back. Typical
+    values are `"template.djx"` or `"template.md"`. The name is
+    surfaced in the `next.W043` body-source conflict check.
+    """
+
+    source_name: ClassVar[str] = ""
 
     @abstractmethod
     def can_load(self, file_path: Path) -> bool:
@@ -101,11 +115,24 @@ class TemplateLoader(ABC):
 
     @abstractmethod
     def load_template(self, file_path: Path) -> str | None:
-        """Return the template source, or `None` if unavailable."""
+        """Return the template source. Return `None` when unavailable."""
+
+    def source_path(self, file_path: Path) -> Path | None:
+        """Return the filesystem path this loader reads for `file_path`.
+
+        The page manager uses the result to snapshot file mtimes for
+        stale-cache detection. The default returns `None` for
+        non-file-based loaders. Subclasses override when they back a
+        sibling file.
+        """
+        _ = file_path
+        return None
 
 
 class PythonTemplateLoader(TemplateLoader):
     """Load from `page.py` when the module defines a `template` attribute."""
+
+    source_name: ClassVar[str] = "template"
 
     def can_load(self, file_path: Path) -> bool:
         """Return whether the module loads and defines `template`."""
@@ -121,6 +148,8 @@ class PythonTemplateLoader(TemplateLoader):
 class DjxTemplateLoader(TemplateLoader):
     """Load from a sibling `template.djx` next to `page.py`."""
 
+    source_name: ClassVar[str] = "template.djx"
+
     def can_load(self, file_path: Path) -> bool:
         """Return whether sibling `template.djx` exists."""
         return (file_path.parent / "template.djx").exists()
@@ -132,6 +161,11 @@ class DjxTemplateLoader(TemplateLoader):
             return djx_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return None
+
+    def source_path(self, file_path: Path) -> Path | None:
+        """Return the sibling `template.djx` path for stale-cache detection."""
+        djx_file = file_path.parent / "template.djx"
+        return djx_file if djx_file.exists() else None
 
 
 class LayoutTemplateLoader(TemplateLoader):
@@ -277,3 +311,55 @@ class LayoutManager:
     def clear_registry(self) -> None:
         """Drop all cached layout strings."""
         self._layout_registry.clear()
+
+
+_REGISTERED_LOADERS_CACHE: list[TemplateLoader] | None = None
+
+
+def build_registered_loaders() -> list[TemplateLoader]:
+    """Instantiate `TEMPLATE_LOADERS` dotted paths into `TemplateLoader` instances.
+
+    Entries that cannot be imported or are not `TemplateLoader` subclasses
+    are skipped with a debug-level log. `check_template_loaders` is the
+    user-visible report for the same misconfigurations. The result is
+    memoised and reset on `settings_reloaded`.
+    """
+    global _REGISTERED_LOADERS_CACHE  # noqa: PLW0603
+    if _REGISTERED_LOADERS_CACHE is not None:
+        return _REGISTERED_LOADERS_CACHE
+
+    configured = next_framework_settings.TEMPLATE_LOADERS
+    seen: set[type[TemplateLoader]] = set()
+    instances: list[TemplateLoader] = []
+    for entry in configured:
+        if not isinstance(entry, str):
+            logger.debug("Skipping non-string TEMPLATE_LOADERS entry: %r", entry)
+            continue
+        try:
+            cls = import_class_cached(entry)
+        except ImportError as e:
+            logger.debug("Cannot import TEMPLATE_LOADERS entry %r: %s", entry, e)
+            continue
+        if not isinstance(cls, type) or not issubclass(cls, TemplateLoader):
+            logger.debug(
+                "TEMPLATE_LOADERS entry %r is not a TemplateLoader subclass",
+                entry,
+            )
+            continue
+        if cls in seen:
+            logger.debug("Skipping duplicate TEMPLATE_LOADERS entry: %r", entry)
+            continue
+        seen.add(cls)
+        instances.append(cls())
+
+    _REGISTERED_LOADERS_CACHE = instances
+    return _REGISTERED_LOADERS_CACHE
+
+
+def _reset_registered_loaders_cache(**_kwargs: object) -> None:
+    """Drop cached loader instances on settings reload."""
+    global _REGISTERED_LOADERS_CACHE  # noqa: PLW0603
+    _REGISTERED_LOADERS_CACHE = None
+
+
+settings_reloaded.connect(_reset_registered_loaders_cache)

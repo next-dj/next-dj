@@ -56,6 +56,7 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
         "check_page_functions",
         "check_pages_structure",
         "check_request_in_context",
+        "check_template_loaders",
     ),
     "next.pages.loaders": ("_load_python_module",),
     "next.static.checks": ("check_js_context_serializer",),

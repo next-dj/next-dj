@@ -19,7 +19,7 @@ from django.core.checks import (
 
 from next.checks.common import get_router_manager, iter_scanned_page_pairs
 
-from .loaders import _load_python_module
+from .loaders import TemplateLoader, _load_python_module, build_registered_loaders
 
 
 if TYPE_CHECKING:
@@ -410,11 +410,14 @@ def _check_page_functions_in_directory(
     return errors, warnings
 
 
-_BODY_SOURCE_PRIORITY: tuple[str, ...] = ("render()", "template", "template.djx")
-
-
 def _active_body_sources(page_file: Path) -> list[str]:
-    """Return the body sources declared on `page_file` in priority order."""
+    """Return the body sources declared on `page_file` in priority order.
+
+    The priority order starts with `render()`, then the `template`
+    module attribute, and finally registered loaders in the order
+    declared under `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`. Each loader
+    reports its file name via `TemplateLoader.source_name`.
+    """
     module = _load_python_module(page_file)
     sources: list[str] = []
     if module is not None:
@@ -423,8 +426,11 @@ def _active_body_sources(page_file: Path) -> list[str]:
         template_attr = getattr(module, "template", None)
         if isinstance(template_attr, str):
             sources.append("template")
-    if (page_file.parent / "template.djx").exists():
-        sources.append("template.djx")
+    sources.extend(
+        loader.source_name
+        for loader in build_registered_loaders()
+        if loader.can_load(page_file) and loader.source_name
+    )
     return sources
 
 
@@ -438,7 +444,7 @@ def _check_body_source_conflicts(page_file: Path) -> CheckMessage | None:
     return DjangoWarning(
         f"{page_file} declares multiple body sources: {', '.join(sources)}. "
         f"{winner} takes priority; {shadowed} will not be used. "
-        "Priority order: render() > template > template.djx.",
+        "Priority order: render() > template > registered TEMPLATE_LOADERS.",
         obj=str(page_file),
         id="next.W043",
     )
@@ -461,7 +467,7 @@ def _load_render_function(file_path: Path) -> object:
 
 
 def _has_template_or_djx(file_path: Path) -> bool:
-    """Return True when `page.py` has `template` or a sibling `template.djx`."""
+    """Return True when a static body source (attribute or loader) backs `file_path`."""
     try:
         if (
             spec := importlib.util.spec_from_file_location("page_module", file_path)
@@ -474,15 +480,14 @@ def _has_template_or_djx(file_path: Path) -> bool:
         if hasattr(module, "template"):
             return True
 
-        djx_file = file_path.parent / "template.djx"
-        return djx_file.exists()
+        return any(loader.can_load(file_path) for loader in build_registered_loaders())
 
     except (ImportError, AttributeError, OSError, SyntaxError):
         return False
 
 
 def _has_page_content(page_path: Path) -> bool:
-    """Return True when `page.py` has `template`, `render`, or sibling djx files."""
+    """Return True when `page.py` has any body source or an ancestor layout."""
     module = _load_python_module(page_path)
     has_template = False
     has_render = False
@@ -491,13 +496,14 @@ def _has_page_content(page_path: Path) -> bool:
         has_template = hasattr(module, "template")
         has_render = hasattr(module, "render") and callable(module.render)
 
-    template_djx = page_path.parent / "template.djx"
-    has_template_djx = template_djx.exists()
+    has_loader_match = any(
+        loader.can_load(page_path) for loader in build_registered_loaders()
+    )
 
     layout_djx = page_path.parent / "layout.djx"
     has_layout_djx = layout_djx.exists()
 
-    return any([has_template, has_render, has_template_djx, has_layout_djx])
+    return any([has_template, has_render, has_loader_match, has_layout_djx])
 
 
 def _check_layout_file(layout_file: Path) -> CheckMessage | None:
@@ -702,6 +708,55 @@ def _check_processor_request_parameter(
     )
 
 
+@register(Tags.compatibility)
+def check_template_loaders(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Validate every `NEXT_FRAMEWORK['TEMPLATE_LOADERS']` entry."""
+    from next.conf import import_class_cached, next_framework_settings  # noqa: PLC0415
+
+    try:
+        configured = next_framework_settings.TEMPLATE_LOADERS
+    except (AttributeError, ImportError):  # pragma: no cover
+        return []
+
+    messages: list[CheckMessage] = []
+    for index, entry in enumerate(configured):
+        if not isinstance(entry, str):
+            messages.append(
+                Error(
+                    f"NEXT_FRAMEWORK['TEMPLATE_LOADERS'][{index}] must be a dotted "
+                    f"path string, got {type(entry).__name__!r}.",
+                    obj=settings,
+                    id="next.E042",
+                ),
+            )
+            continue
+        try:
+            cls = import_class_cached(entry)
+        except ImportError as exc:
+            messages.append(
+                Error(
+                    f"NEXT_FRAMEWORK['TEMPLATE_LOADERS'][{index}]={entry!r} "
+                    f"cannot be imported: {exc}.",
+                    obj=settings,
+                    id="next.E043",
+                ),
+            )
+            continue
+        if not isinstance(cls, type) or not issubclass(cls, TemplateLoader):
+            messages.append(
+                Error(
+                    f"NEXT_FRAMEWORK['TEMPLATE_LOADERS'][{index}]={entry!r} is "
+                    "not a TemplateLoader subclass.",
+                    obj=settings,
+                    id="next.E043",
+                ),
+            )
+    return messages
+
+
 __all__ = [
     "check_context_functions",
     "check_context_processor_signature",
@@ -709,4 +764,5 @@ __all__ = [
     "check_page_functions",
     "check_pages_structure",
     "check_request_in_context",
+    "check_template_loaders",
 ]

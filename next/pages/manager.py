@@ -23,11 +23,9 @@ from next.deps import DependencyResolver, resolver
 from next.utils import caller_source_path
 
 from .loaders import (
-    DjxTemplateLoader,
     LayoutManager,
-    LayoutTemplateLoader,
-    PythonTemplateLoader,
     _load_python_module_memo,
+    build_registered_loaders,
 )
 from .processors import _get_context_processors
 from .registry import PageContextRegistry
@@ -49,10 +47,11 @@ logger = logging.getLogger(__name__)
 class _BodyResolution:
     """Per-request outcome of `Page._resolve_page_body`.
 
-    Either `body` is a string that will be composed through the layout
-    chain and rendered, or `http_response` is a Django response that is
-    returned verbatim (the `render()` escape hatch for redirects,
-    streaming responses, JSON, and anything else).
+    `body` is a string that will be composed through the layout chain
+    and rendered. `http_response` is a Django response that is returned
+    verbatim. The framework uses the verbatim path as the `render()`
+    escape hatch for redirects, streaming responses, JSON, and anything
+    else.
     """
 
     body: str | None = None
@@ -63,17 +62,17 @@ class Page:
     """Coordinate template loading, context, layouts, rendering, and URL wiring."""
 
     def __init__(self) -> None:
-        """Initialise fresh registries and the default loader chain."""
+        """Initialise fresh registries and layout manager.
+
+        File-based template loaders are not held as an instance
+        attribute. The module-level `build_registered_loaders()` helper
+        caches them and invalidates on `settings_reloaded`.
+        """
         self._template_registry: dict[Path, str] = {}
         self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
         self._resolver: DependencyResolver | None = None
         self._context_manager = PageContextRegistry(None)
         self._layout_manager = LayoutManager()
-        self._template_loaders = [
-            PythonTemplateLoader(),
-            DjxTemplateLoader(),
-            LayoutTemplateLoader(),
-        ]
 
     def _get_resolver(self) -> DependencyResolver:
         """Return the shared `resolver` singleton."""
@@ -189,21 +188,21 @@ class Page:
     ) -> str:
         """Return the static body for `file_path` without invoking `render()`.
 
-        Priority: `module.template` (when set to a non-`None` string)
-        wins over sibling `template.djx`. Returns `""` when no source
-        is present so an ancestor layout can still render with an empty
-        slot.
+        The `module.template` attribute wins when set to a non-`None`
+        string. Otherwise the framework consults registered
+        `TemplateLoader` instances in the order declared under
+        `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`. The first loader that can
+        load the path returns the body. An empty string is returned
+        when no source is present so an ancestor layout can still
+        render with an empty slot.
         """
         if module is not None:
             template_attr = getattr(module, "template", None)
             if isinstance(template_attr, str):
                 return template_attr
-        template_djx = file_path.parent / "template.djx"
-        if template_djx.exists():
-            try:
-                return template_djx.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                return ""
+        for loader in build_registered_loaders():
+            if loader.can_load(file_path):
+                return loader.load_template(file_path) or ""
         return ""
 
     def _resolve_page_body(
@@ -215,11 +214,12 @@ class Page:
     ) -> _BodyResolution:
         """Resolve the page body per-request.
 
-        Priority: `render()` > `template` attribute > sibling
-        `template.djx` > empty. `render()` may short-circuit by
-        returning any `HttpResponse` subclass (redirect, streaming,
-        JSON, …) — in that case the layout and static pipelines are
-        bypassed entirely.
+        The resolution order is `render()`, then the `template` module
+        attribute, then the registered `TemplateLoader` chain, then an
+        empty body. `render()` may short-circuit by returning any
+        `HttpResponse` subclass such as a redirect, a streaming
+        response, or a JSON response. In that case the layout and
+        static pipelines are bypassed entirely.
         """
         if module is not None:
             render_func = getattr(module, "render", None)
@@ -300,20 +300,24 @@ class Page:
         *args: object,
         **kwargs: object,
     ) -> str:
-        """Compose `body` through layouts and render. No template-registry caching."""
+        """Compose `body` through layouts and render.
+
+        The template-registry cache is bypassed so dynamic bodies
+        produced by `render()` do not poison the cache.
+        """
         start = time.perf_counter()
         composed = self._layout_manager._layout_loader.compose_body(body, file_path)
         return self._render_template_str(file_path, composed, start, *args, **kwargs)
 
     def render(self, file_path: Path, *args: object, **kwargs: object) -> str:
-        """Render the page with Django `Template`, static collector included.
+        """Render the page with Django `Template` and the static collector.
 
-        Uses the static body source (`template` attribute or sibling
-        `template.djx`) composed through the ancestor layout chain and
-        caches the composed template in `_template_registry`. Direct
-        callers of `Page.render` do **not** invoke `render()` — the
-        unified view handles that path so dynamic bodies skip the
-        registry cache.
+        The static body source is the `template` attribute or any
+        registered file-based `TemplateLoader`. The result is composed
+        through the ancestor layout chain and cached in
+        `_template_registry`. Direct callers of `Page.render` do not
+        invoke `render()`. The unified view handles that path so
+        dynamic bodies skip the registry cache.
         """
         start = time.perf_counter()
         if file_path not in self._template_registry or self._is_template_stale(
@@ -352,25 +356,22 @@ class Page:
     def has_template(
         self, file_path: Path, module: types.ModuleType | None = None
     ) -> bool:
-        """Return whether any loader can supply a template for this path."""
+        """Return whether any source can supply a template for this path."""
         if self._layout_manager._layout_loader.can_load(file_path):
             return True
-        for loader in self._template_loaders:
-            if isinstance(loader, LayoutTemplateLoader):
-                continue
-            if isinstance(loader, PythonTemplateLoader):
-                if module is not None and hasattr(module, "template"):
-                    return True
-                continue
-            if loader.can_load(file_path):
-                return True
-        return False
+        if module is not None and hasattr(module, "template"):
+            return True
+        return any(loader.can_load(file_path) for loader in build_registered_loaders())
 
     def _get_template_source_paths(self, file_path: Path) -> list[Path]:
-        """Return `template.djx` and layout files that back this page."""
-        template_djx = file_path.parent / "template.djx"
+        """Return file-based loader source files and layout files behind this page."""
+        loader_paths: list[Path] = []
+        for loader in build_registered_loaders():
+            source = loader.source_path(file_path)
+            if source is not None:
+                loader_paths.append(source)
         layout_files = self._layout_manager._layout_loader._find_layout_files(file_path)
-        return ([template_djx] if template_djx.exists() else []) + (layout_files or [])
+        return loader_paths + (layout_files or [])
 
     def _record_template_source_mtimes(self, file_path: Path) -> None:
         """Snapshot mtimes of template source files for stale detection."""
@@ -447,7 +448,7 @@ class Page:
                 return True
             if isinstance(getattr(module, "template", None), str):
                 return True
-        if (file_path.parent / "template.djx").exists():
+        if any(loader.can_load(file_path) for loader in build_registered_loaders()):
             return True
         return self._layout_manager._layout_loader.can_load(file_path)
 

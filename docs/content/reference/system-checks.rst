@@ -231,11 +231,20 @@ Reported by ``manage.py check``:
      - ``NEXT_FRAMEWORK['JS_CONTEXT_SERIALIZER']`` does not resolve to a class
        implementing the ``JsContextSerializer`` protocol
      - Warning
+   * - ``next.E042``
+     - ``NEXT_FRAMEWORK['TEMPLATE_LOADERS']`` entry is not a dotted path string
+     - Error
+   * - ``next.E043``
+     - ``NEXT_FRAMEWORK['TEMPLATE_LOADERS']`` entry cannot be imported or
+       does not subclass ``next.pages.loaders.TemplateLoader``
+     - Error
 
 **What to do:** E040 — ensure context processor callables accept ``request``.
 E041 — rename one of the colliding handlers or add ``namespace="…"``. W042 —
 point ``JS_CONTEXT_SERIALIZER`` at a class providing ``dumps(value) -> str``,
-for example :class:`~next.static.serializers.JsonJsContextSerializer`.
+for example :class:`~next.static.serializers.JsonJsContextSerializer`. E042 /
+E043 — every entry in ``TEMPLATE_LOADERS`` must be a dotted path that imports
+to a :class:`~next.pages.loaders.TemplateLoader` subclass.
 
 ``NEXT_FRAMEWORK`` keys (reference)
 ------------------------------------
@@ -245,5 +254,6 @@ Flat top-level keys (see :mod:`next.conf`):
 * ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, …). The skip-folder name for routing comes from ``DEFAULT_COMPONENT_BACKENDS``, not from page router dicts.
 * ``URL_NAME_TEMPLATE`` — Python format string for URL names (default ``page_{name}``).
 * ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts.
+* ``TEMPLATE_LOADERS`` — list of dotted paths to :class:`~next.pages.loaders.TemplateLoader` subclasses. Defaults to ``["next.pages.loaders.DjxTemplateLoader"]``; user lists replace the default.
 
 Each key can be overridden independently. There is no nested ``PAGES`` / ``COMPONENTS`` namespace and no runtime hook for custom ``ModuleLoader`` classes.

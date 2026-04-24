@@ -39,6 +39,9 @@ DEFAULTS: dict[str, Any] = {
             "OPTIONS": {},
         },
     ],
+    "TEMPLATE_LOADERS": [
+        "next.pages.loaders.DjxTemplateLoader",
+    ],
     "NEXT_JS_OPTIONS": {},
     "STRICT_CONTEXT": False,
     "LAZY_COMPONENT_MODULES": False,

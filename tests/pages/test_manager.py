@@ -7,10 +7,9 @@ from django.http import HttpRequest
 from next.checks import _load_python_module
 from next.pages import Page, context, page
 from next.pages.loaders import (
-    DjxTemplateLoader,
     LayoutManager,
     LayoutTemplateLoader,
-    PythonTemplateLoader,
+    TemplateLoader,
 )
 from next.pages.registry import PageContextRegistry
 
@@ -22,12 +21,7 @@ class TestPage:
         """Test Page initialization."""
         assert page_instance._template_registry == {}
         assert isinstance(page_instance._context_manager, PageContextRegistry)
-        assert len(page_instance._template_loaders) == 3
-        # check that all expected loaders are present
-        loader_types = [type(loader) for loader in page_instance._template_loaders]
-        assert PythonTemplateLoader in loader_types
-        assert DjxTemplateLoader in loader_types
-        assert LayoutTemplateLoader in loader_types
+        assert isinstance(page_instance._layout_manager, LayoutManager)
 
     def test_register_template_direct(self, page_instance) -> None:
         """Test register_template method with direct file path."""
@@ -810,7 +804,7 @@ def _make_real_request() -> HttpRequest:
     return request
 
 
-class TestA8UnifiedViewBodyResolution:
+class TestUnifiedViewBodyResolution:
     """`_create_unified_view` resolves the body via render > template > template.djx."""
 
     @pytest.fixture(autouse=True)
@@ -1038,7 +1032,7 @@ class TestA8UnifiedViewBodyResolution:
         assert "</body></html>" in body
 
 
-class TestA8LoadStaticBody:
+class TestLoadStaticBodyEdgeCases:
     """`Page._load_static_body` edge cases."""
 
     def test_unreadable_template_djx_returns_empty(
@@ -1065,7 +1059,7 @@ class TestA8LoadStaticBody:
         assert page_instance.has_template(page_file, module=None) is True
 
 
-class TestA8LayoutComposeBody:
+class TestLayoutComposeBody:
     """`LayoutTemplateLoader.compose_body` is a pure string → string wrap."""
 
     def test_no_layouts_returns_body_verbatim(self, tmp_path) -> None:
@@ -1099,3 +1093,85 @@ class TestA8LayoutComposeBody:
         loader = LayoutTemplateLoader()
         result = loader.compose_body("<p>body</p>", page_file)
         assert result == "<section><p>body</p></section>"
+
+
+class _MdLoader(TemplateLoader):
+    """Test double: render sibling `template.md` as `<article>{body}</article>`."""
+
+    source_name = "template.md"
+
+    def can_load(self, file_path):
+        return (file_path.parent / "template.md").exists()
+
+    def load_template(self, file_path):
+        text = (file_path.parent / "template.md").read_text()
+        return f"<article>{text}</article>"
+
+    def source_path(self, file_path):
+        p = file_path.parent / "template.md"
+        return p if p.exists() else None
+
+
+class TestCustomTemplateLoaderIntegration:
+    """Custom `TemplateLoader` registered via `TEMPLATE_LOADERS` feeds `Page.render`."""
+
+    @pytest.fixture(autouse=True)
+    def _install_md_loader(self):
+        import next.pages.loaders as loaders_module
+
+        loaders_module._REGISTERED_LOADERS_CACHE = [_MdLoader()]
+        page._template_registry.clear()
+        page._template_source_mtimes.clear()
+        yield
+        loaders_module._REGISTERED_LOADERS_CACHE = None
+        page._template_registry.clear()
+        page._template_source_mtimes.clear()
+
+    def test_custom_loader_body_is_rendered_through_layout(
+        self, page_instance, tmp_path
+    ) -> None:
+        """A custom loader for `template.md` feeds `_load_static_body`."""
+        (tmp_path / "layout.djx").write_text(
+            "<html>{% block template %}{% endblock template %}</html>",
+        )
+        page_dir = tmp_path / "post"
+        page_dir.mkdir()
+        (page_dir / "template.md").write_text("hello")
+        page_file = page_dir / "page.py"
+        page_file.write_text("")
+
+        body = page_instance._load_static_body(page_file, None)
+        assert body == "<article>hello</article>"
+        html = page_instance.render(page_file)
+        assert "<html>" in html
+        assert "<article>hello</article>" in html
+
+    def test_module_template_beats_custom_loader(self, page_instance, tmp_path) -> None:
+        """`module.template` attribute still wins over any registered loader."""
+        (tmp_path / "template.md").write_text("ignored")
+        page_file = tmp_path / "page.py"
+        page_file.write_text('template = "from-attr"')
+
+        from next.pages.loaders import _load_python_module_memo
+
+        module = _load_python_module_memo(page_file)
+        body = page_instance._load_static_body(page_file, module)
+        assert body == "from-attr"
+
+    def test_has_template_picks_up_custom_loader(self, page_instance, tmp_path) -> None:
+        """`has_template` returns True when only a custom loader can load."""
+        (tmp_path / "template.md").write_text("hello")
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        assert page_instance.has_template(page_file, module=None) is True
+
+    def test_get_template_source_paths_uses_loader_source_path(
+        self, page_instance, tmp_path
+    ) -> None:
+        """Stale-cache detection reads `source_path` from the registered loader."""
+        md = tmp_path / "template.md"
+        md.write_text("body")
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        paths = page_instance._get_template_source_paths(page_file)
+        assert md in paths
