@@ -1,8 +1,10 @@
 from collections.abc import Generator
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from next.components import ComponentInfo, render_component
 from next.components.signals import (
     component_backend_loaded,
     component_registered,
@@ -195,3 +197,25 @@ class TestComponentRenderedSignal:
         component_rendered.send(sender=object, html="<a/>")
         component_rendered.send(sender=object, html="<b/>")
         assert len(capture_component_rendered) == 2
+
+    def test_render_component_emits_when_listener_connected(
+        self,
+        tmp_path: Path,
+        capture_component_rendered: list[dict[str, Any]],
+    ) -> None:
+        """``render_component`` fires ``component_rendered`` when a listener exists."""
+        template_path = tmp_path / "card.djx"
+        template_path.write_text("<h3>{{ title }}</h3>")
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=template_path,
+            module_path=None,
+            is_simple=True,
+        )
+        render_component(info, {"title": "Hello"})
+        assert len(capture_component_rendered) == 1
+        event = capture_component_rendered[0]
+        assert event["info"] is info
+        assert event["template_path"] == template_path

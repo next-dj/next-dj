@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
@@ -13,7 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-_action_fingerprints: dict[str, set[tuple[str, str]]] = defaultdict(set)
+_action_collisions: dict[str, set[tuple[str, str]]] = {}
 
 
 def _handler_fingerprint(handler: Callable[..., Any]) -> tuple[str, str]:
@@ -23,23 +22,30 @@ def _handler_fingerprint(handler: Callable[..., Any]) -> tuple[str, str]:
     return (str(module), str(qualname))
 
 
-def track_action_registration(
+def record_possible_collision(
     action_name: str,
-    handler: Callable[..., Any],
+    old_handler: Callable[..., Any],
+    new_handler: Callable[..., Any],
 ) -> None:
-    """Record a unique handler fingerprint for ``action_name``.
+    """Record a collision when a name is re-registered with a distinct handler.
 
-    Called directly by ``RegistryFormActionBackend.register_action`` so the
-    check has data to inspect without paying Django-signal-dispatch cost
-    on every registration. Public ``action_registered`` receivers are still
-    notified via the signal in the backend.
+    Called by `RegistryFormActionBackend.register_action` only on the
+    overwrite path, so the common first-registration case pays nothing.
+    Identity match (module reload of the exact same object) short-circuits
+    before the fingerprint comparison.
     """
-    _action_fingerprints[action_name].add(_handler_fingerprint(handler))
+    if old_handler is new_handler:
+        return
+    old_fp = _handler_fingerprint(old_handler)
+    new_fp = _handler_fingerprint(new_handler)
+    if old_fp == new_fp:
+        return
+    _action_collisions.setdefault(action_name, {old_fp}).add(new_fp)
 
 
-def clear_action_fingerprints() -> None:
+def clear_action_collisions() -> None:
     """Drop the collision-check state. Intended for test isolation."""
-    _action_fingerprints.clear()
+    _action_collisions.clear()
 
 
 @register(Tags.compatibility)
@@ -61,13 +67,12 @@ def check_form_action_collisions(
             obj=settings,
             id="next.E041",
         )
-        for name, fps in _action_fingerprints.items()
-        if len(fps) > 1
+        for name, fps in _action_collisions.items()
     ]
 
 
 __all__ = [
     "check_form_action_collisions",
-    "clear_action_fingerprints",
-    "track_action_registration",
+    "clear_action_collisions",
+    "record_possible_collision",
 ]

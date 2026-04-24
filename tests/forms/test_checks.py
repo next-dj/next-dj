@@ -4,16 +4,16 @@ import pytest
 
 from next.forms import RegistryFormActionBackend
 from next.forms.checks import (
-    _action_fingerprints,
+    _action_collisions,
     check_form_action_collisions,
 )
 
 
 @pytest.fixture(autouse=True)
-def _reset_fingerprint_cache():
-    _action_fingerprints.clear()
+def _reset_collision_cache():
+    _action_collisions.clear()
     yield
-    _action_fingerprints.clear()
+    _action_collisions.clear()
 
 
 def _distinct_handler(tag: str):
@@ -50,7 +50,7 @@ class TestFormActionCollisions:
 
     def test_tracker_is_not_signal_receiver(self) -> None:
         """``register_action`` must not pay signal-dispatch cost for the tracker."""
-        from next.forms.checks import _handler_fingerprint
+        from next.forms.checks import _handler_fingerprint, record_possible_collision
         from next.forms.signals import action_registered
 
         connected_names = {
@@ -59,7 +59,14 @@ class TestFormActionCollisions:
             for receiver in (ref(),)
             if receiver is not None
         }
-        assert "_track_action_registration" not in connected_names
-        # The tracker helper must still exist and remain callable from the
+        assert "record_possible_collision" not in connected_names
+        # The helpers must still exist and remain callable from the
         # backend's direct path.
         assert callable(_handler_fingerprint)
+        assert callable(record_possible_collision)
+
+    def test_first_registration_records_no_collision(self) -> None:
+        """Common case: a name registered once never touches the collision map."""
+        backend = RegistryFormActionBackend()
+        backend.register_action("only", _distinct_handler("x"))
+        assert _action_collisions == {}

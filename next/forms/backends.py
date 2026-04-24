@@ -12,7 +12,7 @@ from django.urls import path, reverse
 from django.urls.exceptions import NoReverseMatch
 from django.views.decorators.http import require_http_methods
 
-from .checks import track_action_registration
+from .checks import record_possible_collision
 from .dispatch import FormActionDispatch
 from .rendering import render_form_page_with_errors
 from .signals import action_registered
@@ -126,21 +126,22 @@ class RegistryFormActionBackend(FormActionBackend):
             )
             raise ImproperlyConfigured(msg)
         self._uid_to_name[uid] = name
+        previous = self._registry.get(name)
+        if previous is not None:
+            record_possible_collision(name, previous["handler"], handler)
         self._registry[name] = {
             "handler": handler,
             "form_class": opts.form_class,
             "uid": uid,
         }
-        track_action_registration(name, handler)
-        if action_registered.has_listeners(self.__class__):
-            action_registered.send(
-                sender=self.__class__,
-                action_name=name,
-                uid=uid,
-                form_class=opts.form_class,
-                namespace=opts.namespace,
-                handler=handler,
-            )
+        action_registered.send(
+            sender=self.__class__,
+            action_name=name,
+            uid=uid,
+            form_class=opts.form_class,
+            namespace=opts.namespace,
+            handler=handler,
+        )
 
     def get_action_url(self, action_name: str) -> str:
         """Return the reverse URL for a registered action name."""

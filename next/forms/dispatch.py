@@ -224,13 +224,12 @@ class FormActionDispatch:
             _normalize_handler_response(raw),
             request=request,
         )
-        if action_dispatched.has_listeners(FormActionDispatch):
-            action_dispatched.send(
-                sender=FormActionDispatch,
-                action_name=action_name,
-                duration_ms=duration_ms,
-                response_status=response.status_code,
-            )
+        action_dispatched.send(
+            sender=FormActionDispatch,
+            action_name=action_name,
+            duration_ms=duration_ms,
+            response_status=response.status_code,
+        )
         return response
 
     @staticmethod
@@ -257,7 +256,7 @@ class FormActionDispatch:
         initial_data = form_class.get_initial(**resolved)
         form = _bind_form_for_post(form_class, request, initial_data)
         if not form.is_valid():
-            if form_validation_failed.has_listeners(FormActionDispatch):
+            if form_validation_failed.receivers:
                 error_count = sum(len(errors) for errors in form.errors.values())
                 form_validation_failed.send(
                     sender=FormActionDispatch,
@@ -286,13 +285,12 @@ class FormActionDispatch:
             action_name=action_name,
             backend=backend,
         )
-        if action_dispatched.has_listeners(FormActionDispatch):
-            action_dispatched.send(
-                sender=FormActionDispatch,
-                action_name=action_name,
-                duration_ms=duration_ms,
-                response_status=response.status_code,
-            )
+        action_dispatched.send(
+            sender=FormActionDispatch,
+            action_name=action_name,
+            duration_ms=duration_ms,
+            response_status=response.status_code,
+        )
         return response
 
     @staticmethod

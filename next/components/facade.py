@@ -34,13 +34,11 @@ def render_component(
 ) -> str:
     """Render `info` to HTML using template context and an optional request."""
     html = components_manager.component_renderer.render(info, context_data, request)
-    sender = components_manager.__class__
-    if component_rendered.has_listeners(sender):
-        component_rendered.send(
-            sender=sender,
-            info=info,
-            template_path=getattr(info, "template_path", None),
-        )
+    component_rendered.send(
+        sender=components_manager.__class__,
+        info=info,
+        template_path=getattr(info, "template_path", None),
+    )
     return html
 
 

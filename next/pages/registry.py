@@ -91,10 +91,9 @@ class PageContextRegistry:
             inherit_context,
             serialize,
         )
-        if context_registered.has_listeners(PageContextRegistry):
-            context_registered.send(
-                sender=PageContextRegistry, file_path=file_path, key=key
-            )
+        context_registered.send(
+            sender=PageContextRegistry, file_path=file_path, key=key
+        )
 
     def collect_context(
         self,

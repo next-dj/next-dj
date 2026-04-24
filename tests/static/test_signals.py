@@ -11,7 +11,7 @@ from next.static import (
     StaticManager,
     StaticsFactory,
 )
-from next.static.collector import STYLES_PLACEHOLDER
+from next.static.collector import SCRIPTS_PLACEHOLDER, STYLES_PLACEHOLDER
 from next.static.signals import (
     asset_registered,
     backend_loaded,
@@ -167,6 +167,21 @@ class TestHtmlInjectedSignal:
         collector = StaticCollector()
         fresh_manager.inject("<body/>", collector)
         assert capture_html_injected[0]["placeholders_replaced"] == ()
+
+    def test_reports_both_placeholders_when_html_has_both(
+        self,
+        fresh_manager: StaticManager,
+        capture_html_injected: list[dict[str, Any]],
+    ) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url="https://cdn/a.css", kind="css"))
+        collector.add(StaticAsset(url="https://cdn/a.js", kind="js"))
+        html = f"<head>{STYLES_PLACEHOLDER}</head><body>{SCRIPTS_PLACEHOLDER}</body>"
+        fresh_manager.inject(html, collector)
+        assert capture_html_injected[0]["placeholders_replaced"] == (
+            "styles",
+            "scripts",
+        )
 
 
 class TestBackendLoadedSignal:
