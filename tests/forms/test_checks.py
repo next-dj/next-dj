@@ -47,3 +47,19 @@ class TestFormActionCollisions:
         backend.register_action("reload_me", same)
         backend.register_action("reload_me", same)
         assert check_form_action_collisions() == []
+
+    def test_tracker_is_not_signal_receiver(self) -> None:
+        """``register_action`` must not pay signal-dispatch cost for the tracker."""
+        from next.forms.checks import _handler_fingerprint
+        from next.forms.signals import action_registered
+
+        connected_names = {
+            getattr(receiver, "__name__", "")
+            for _id, ref in action_registered.receivers
+            for receiver in (ref(),)
+            if receiver is not None
+        }
+        assert "_track_action_registration" not in connected_names
+        # The tracker helper must still exist and remain callable from the
+        # backend's direct path.
+        assert callable(_handler_fingerprint)

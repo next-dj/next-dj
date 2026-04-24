@@ -372,11 +372,12 @@ class AssetDiscovery:
             return
         asset = StaticAsset(url=url, kind=kind, source_path=source_path.resolve())
         collector.add(asset)
-        asset_registered.send(
-            sender=asset,
-            collector=collector,
-            backend=backend,
-        )
+        if asset_registered.has_listeners(asset):
+            asset_registered.send(
+                sender=asset,
+                collector=collector,
+                backend=backend,
+            )
 
     def _component_directory(self, info: ComponentInfo) -> Path | None:
         """Return the directory that holds a composite component, or None."""

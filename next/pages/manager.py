@@ -81,7 +81,8 @@ class Page:
     def register_template(self, file_path: Path, template_str: str) -> None:
         """Store rendered template source for `file_path`."""
         self._template_registry[file_path] = template_str
-        template_loaded.send(sender=Page, file_path=file_path)
+        if template_loaded.has_listeners(Page):
+            template_loaded.send(sender=Page, file_path=file_path)
 
     def _get_caller_path(self, back_count: int = 1) -> Path:
         """Return the filesystem path of the user caller outside this module."""
@@ -282,15 +283,16 @@ class Page:
         result = cast(
             "str", default_manager.inject(html, collector, page_path=file_path)
         )
-        duration_ms = (time.perf_counter() - start) * 1000
-        page_rendered.send(
-            sender=Page,
-            file_path=file_path,
-            duration_ms=duration_ms,
-            styles_count=len(collector.styles()),
-            scripts_count=len(collector.scripts()),
-            context_keys=tuple(context_data.keys()),
-        )
+        if page_rendered.has_listeners(Page):
+            duration_ms = (time.perf_counter() - start) * 1000
+            page_rendered.send(
+                sender=Page,
+                file_path=file_path,
+                duration_ms=duration_ms,
+                styles_count=len(collector.styles()),
+                scripts_count=len(collector.scripts()),
+                context_keys=tuple(context_data.keys()),
+            )
         return result
 
     def _render_composed(

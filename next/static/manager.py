@@ -127,24 +127,34 @@ class StaticManager:
         `DISABLED`. The preload hint is injected before `</head>`
         under the same policy.
         """
-        collector_finalized.send(sender=collector, page_path=page_path)
+        if collector_finalized.has_listeners(collector):
+            collector_finalized.send(sender=collector, page_path=page_path)
         html_before = html
-        replaced: list[str] = []
-        if STYLES_PLACEHOLDER in html:
-            replaced.append("styles")
-        if SCRIPTS_PLACEHOLDER in html:
-            replaced.append("scripts")
-        html = html.replace(STYLES_PLACEHOLDER, self._render_style_tags(collector))
-        html = html.replace(SCRIPTS_PLACEHOLDER, self._render_script_section(collector))
-        html = self._inject_preload_hint(html)
-        html_injected.send(
-            sender=self,
-            html_before=html_before,
-            html_after=html,
-            collector=collector,
-            placeholders_replaced=tuple(replaced),
-            injected_bytes=len(html) - len(html_before),
-        )
+        if html_injected.has_listeners(self):
+            replaced: list[str] = []
+            if STYLES_PLACEHOLDER in html:
+                replaced.append("styles")
+            if SCRIPTS_PLACEHOLDER in html:
+                replaced.append("scripts")
+            html = html.replace(STYLES_PLACEHOLDER, self._render_style_tags(collector))
+            html = html.replace(
+                SCRIPTS_PLACEHOLDER, self._render_script_section(collector)
+            )
+            html = self._inject_preload_hint(html)
+            html_injected.send(
+                sender=self,
+                html_before=html_before,
+                html_after=html,
+                collector=collector,
+                placeholders_replaced=tuple(replaced),
+                injected_bytes=len(html) - len(html_before),
+            )
+        else:
+            html = html.replace(STYLES_PLACEHOLDER, self._render_style_tags(collector))
+            html = html.replace(
+                SCRIPTS_PLACEHOLDER, self._render_script_section(collector)
+            )
+            html = self._inject_preload_hint(html)
         return html
 
     def _next_script_builder(self) -> NextScriptBuilderType:

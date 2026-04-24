@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING, Any
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Tags, register
 
-from .signals import action_registered
-
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -25,19 +23,23 @@ def _handler_fingerprint(handler: Callable[..., Any]) -> tuple[str, str]:
     return (str(module), str(qualname))
 
 
-def _track_action_registration(
-    sender: object,  # noqa: ARG001
-    **kwargs: object,
+def track_action_registration(
+    action_name: str,
+    handler: Callable[..., Any],
 ) -> None:
-    """Record a unique handler fingerprint each time an action is registered."""
-    action_name = kwargs.get("action_name")
-    handler = kwargs.get("handler")
-    if not isinstance(action_name, str) or not callable(handler):
-        return
+    """Record a unique handler fingerprint for ``action_name``.
+
+    Called directly by ``RegistryFormActionBackend.register_action`` so the
+    check has data to inspect without paying Django-signal-dispatch cost
+    on every registration. Public ``action_registered`` receivers are still
+    notified via the signal in the backend.
+    """
     _action_fingerprints[action_name].add(_handler_fingerprint(handler))
 
 
-action_registered.connect(_track_action_registration)
+def clear_action_fingerprints() -> None:
+    """Drop the collision-check state. Intended for test isolation."""
+    _action_fingerprints.clear()
 
 
 @register(Tags.compatibility)
@@ -64,4 +66,8 @@ def check_form_action_collisions(
     ]
 
 
-__all__ = ["check_form_action_collisions"]
+__all__ = [
+    "check_form_action_collisions",
+    "clear_action_fingerprints",
+    "track_action_registration",
+]
