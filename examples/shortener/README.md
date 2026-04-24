@@ -359,12 +359,6 @@ What is tested:
 - `link_card` component renders `short_url` via `reverse`.
 - `Link.__str__` and the `flush_clicks()` no-op path (unit-level).
 
-## Forward-compat
-
-- **Partial rerender**: `create_link` returns `HttpResponseRedirect("/")`. Swapping for a fragment response will not touch the template or the POST contract.
-- **Suspense**: `_recent_links` is a single `@context` callable. Marking it lazy/async in a future release is a one-line change.
-- **React bridge**: The `link_card` component does not need `@context(serialize=True)` today, but the structure is ready — add the flag and the list becomes available in `window.Next.context`.
-
 ## Further reading
 
 - [next/urls/backends.py](../../next/urls/backends.py) — file router implementation.

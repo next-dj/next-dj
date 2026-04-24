@@ -1,0 +1,40 @@
+<section class="space-y-6">
+  <header class="space-y-2">
+    <h1 class="text-2xl font-bold">Guarded content demo</h1>
+    <p class="text-slate-600">
+      Each card below is a call to
+      <code class="rounded bg-slate-100 px-1">{% templatetag openblock %} component "feature_guard" flag_name="…" {% templatetag closeblock %}</code>.
+      When the flag is off the component's <code class="rounded bg-slate-100 px-1">render()</code>
+      returns an empty string, so the gated block collapses entirely.
+    </p>
+  </header>
+
+  <ul class="space-y-4">
+    {% for entry in demo_flags %}
+      <li class="rounded-xl border bg-white p-4 shadow-sm">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="font-medium">{{ entry.label }}</p>
+            <p class="text-xs text-slate-500"><code>{{ entry.name }}</code></p>
+          </div>
+          {% if entry.enabled %}
+            <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">on</span>
+          {% else %}
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">off</span>
+          {% endif %}
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold">Guarded content</h2>
+    {% component "feature_guard" flag_name="beta_checkout" %}
+    {% component "feature_guard" flag_name="dark_sidebar" %}
+    {% component "feature_guard" flag_name="ai_suggestions" %}
+    <p class="text-xs text-slate-500">
+      Flags that are off render nothing above. Toggle them on in the
+      <a class="underline" href="{% url 'next:page_admin' %}">admin</a> and refresh.
+    </p>
+  </section>
+</section>

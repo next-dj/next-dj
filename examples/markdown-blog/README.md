@@ -412,18 +412,6 @@ What is tested:
   `reading_minutes`, `MarkdownTemplateLoader` (can_load, load_template,
   source_path, decode-error fallback).
 
-## Forward-compat
-
-- **Partial rerender**: no forms here; GET-only rendering already uses the
-  unified view contract, so a future fragment response would be an additive
-  extension.
-- **Suspense**: `@context` callables are already lazy. Marking them async in a
-  future release would be a one-line annotation change — the import path and
-  registration call would not move.
-- **React bridge**: the share button already reads `window.Next.context.post`.
-  Swapping it for a React component consuming the same data will not touch the
-  Python side.
-
 ## Further reading
 
 - [next/pages/manager.py](../../next/pages/manager.py) — unified view, body

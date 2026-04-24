@@ -1,0 +1,30 @@
+<section class="space-y-4">
+  <div>
+    <h2 class="text-lg font-semibold">Render counters</h2>
+    <p class="text-sm text-slate-600">
+      A <code class="rounded bg-slate-100 px-1">page_rendered</code> receiver bumps a
+      counter in <code class="rounded bg-slate-100 px-1">LocMemCache</code> every time
+      a page finishes rendering. Counts reset when the process restarts.
+    </p>
+  </div>
+
+  <div class="rounded-xl border bg-white p-4 shadow-sm">
+    {% if render_counts %}
+      <table class="w-full text-sm">
+        <thead class="text-left text-slate-500">
+          <tr><th class="py-1">Page</th><th class="py-1">Renders</th></tr>
+        </thead>
+        <tbody>
+          {% for page, count in render_counts.items %}
+            <tr class="border-t">
+              <td class="py-1 font-mono">{{ page }}</td>
+              <td class="py-1">{{ count }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="text-sm text-slate-500">No renders recorded yet.</p>
+    {% endif %}
+  </div>
+</section>
