@@ -22,13 +22,16 @@ defaults:
     shell: bash
 
 env:
+  # Tuned for "fast enough on shared GitHub runners". Warmup eats one
+  # full pass per test, so 1000 iterations are plenty for branch /
+  # icache priming on CPython 3.13. Rounds = 10 keeps wall-clock under
+  # control while still giving stddev meaningful for the ×4 hard gate.
   BENCH_FLAGS: >-
     -m perf
     --benchmark-only
     --benchmark-warmup=on
-    --benchmark-warmup-iterations=10000
-    --benchmark-min-rounds=20
-    --benchmark-calibration-precision=10
+    --benchmark-warmup-iterations=1000
+    --benchmark-min-rounds=10
     --benchmark-disable-gc
     --benchmark-storage=file://./.benchmarks
     --benchmark-columns=mean,stddev,rounds
@@ -91,11 +94,25 @@ jobs:
       - name: Create base worktree
         run: git worktree add --detach ../base "${{ steps.shas.outputs.base }}"
 
+      # Most PRs target the same `main` SHA. Caching the BASE result by
+      # base-SHA + uv.lock hash means the second PR skips the BASE bench
+      # (and its `uv sync`) entirely.
+      - name: Cache BASE benchmark result
+        id: base_cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .benchmarks
+            bench-base.json
+          key: bench-base-${{ steps.shas.outputs.base }}-${{ hashFiles('../base/uv.lock') }}
+
       - name: Sync base dependencies
+        if: steps.base_cache.outputs.cache-hit != 'true'
         working-directory: ../base
         run: uv sync --locked --dev --python 3.13
 
       - name: Bench BASE
+        if: steps.base_cache.outputs.cache-hit != 'true'
         working-directory: ../base
         run: |
           set -o pipefail
@@ -106,33 +123,29 @@ jobs:
           cp -R .benchmarks/. "${{ github.workspace }}/.benchmarks/"
           cp bench-base.json "${{ github.workspace }}/bench-base.json"
 
+      # Skip head sync when uv.lock is unchanged (typical PR), otherwise
+      # the HEAD-side `uv sync` would just re-verify what's already there.
       - name: Sync head dependencies
-        run: uv sync --locked --dev --python 3.13
-
-      - name: Bench HEAD
         run: |
-          set -o pipefail
-          uv run pytest tests/benchmarks $BENCH_FLAGS \
-            --benchmark-save=head \
-            --benchmark-json=bench-head.json
+          set -euo pipefail
+          if ! diff -q uv.lock ../base/uv.lock >/dev/null 2>&1; then
+            uv sync --locked --dev --python 3.13
+          fi
 
-      - name: Render comparison table
-        run: |
-          set -o pipefail
-          uv run pytest-benchmark compare base head \
-            --columns=mean,stddev,rounds \
-            --sort=mean \
-            2>&1 | tee bench-compare.txt
-
-      - name: Apply hard-regression gate
+      # HEAD bench prints the comparison table itself (--benchmark-compare)
+      # and trips the hard gate via --benchmark-compare-fail. One pytest
+      # invocation does what used to take three steps.
+      - name: Bench HEAD and gate
         id: gate
         continue-on-error: true
         run: |
           set -o pipefail
           uv run pytest tests/benchmarks $BENCH_FLAGS \
-            --benchmark-disable \
+            --benchmark-save=head \
+            --benchmark-json=bench-head.json \
             --benchmark-compare=base \
-            --benchmark-compare-fail=mean:300%
+            --benchmark-compare-fail=mean:300% \
+            2>&1 | tee bench-compare.txt
 
       - name: Build comment body and pin PR number
         if: always()
