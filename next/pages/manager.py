@@ -254,7 +254,7 @@ class Page:
         if isinstance(result, str):
             return _BodyResolution(body=result)
         msg = (
-            f"page.py render() at {file_path} must return str or HttpResponse; "
+            f"page.py render() at {file_path} must return str or HttpResponse, "
             f"got {type(result).__name__}."
         )
         raise TypeError(msg)

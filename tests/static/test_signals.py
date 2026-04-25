@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from next.static import (
+    AssetDiscovery,
     StaticAsset,
     StaticCollector,
     StaticFilesBackend,
@@ -88,7 +89,6 @@ class TestAssetRegisteredSignal:
         file_backend: StaticFilesBackend,
         capture_asset_registered: list[dict[str, Any]],
     ) -> None:
-        from next.static import AssetDiscovery
 
         class _P:
             @property

@@ -668,7 +668,7 @@ The ``policy`` key takes values from
   custom tag can emit them where needed.
 
 The three ``*_template`` keys override the default HTML fragments. The preload
-and script templates must contain ``{url}``; the init template must contain
+and script templates must contain ``{url}``, while the init template must contain
 ``{payload}`` (replaced with the JSON-serialised JS context). Policy values
 may be supplied as strings (``"auto"``/``"disabled"``/``"manual"``) or as
 ``ScriptInjectionPolicy`` enum members directly.
@@ -1161,7 +1161,7 @@ pipeline:
 - ``examples/shortener`` — co-located ``template.css``/``template.js``
   on the root layout, Tailwind Play from ``{% use_script %}``.
 - ``examples/markdown-blog`` — per-post pages that expose a ``post``
-  object via ``@context(serialize=True)``; read through
+  object via ``@context(serialize=True)`` and read through
   ``window.Next.context.post`` in a page-level ``<script>``.
 - ``examples/feature-flags`` — composite ``feature_guard`` component
   with Python-side resolution and no component-level assets (showing

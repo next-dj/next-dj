@@ -48,7 +48,10 @@ class TestPost:
 
 
 class TestShareButton:
-    """The share button sits inside the nested layout and reads window.Next.context.post."""
+    """The share button sits inside the nested layout.
+
+    It reads `window.Next.context.post` to power the click handler.
+    """
 
     def test_share_button_renders_on_post_page(self, client) -> None:
         response = client.get("/posts/welcome/")

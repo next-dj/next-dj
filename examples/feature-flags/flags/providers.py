@@ -20,10 +20,11 @@ class DFlag[T](DDependencyBase[T]):
 
 
 class FlagProvider(RegisteredParameterProvider):
-    """Resolve `DFlag[...]` params by looking up `flag_name` in URL kwargs or template context.
+    """Resolve `DFlag[...]` parameters by looking up `flag_name`.
 
-    When the flag does not exist yet, a disabled placeholder instance is
-    returned so guard components can hide their content without raising.
+    The lookup runs against URL kwargs first, then template context. When the
+    flag does not exist yet, a disabled placeholder instance is returned so
+    guard components can hide their content without raising.
     """
 
     def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:

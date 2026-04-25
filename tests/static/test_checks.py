@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from django.core.checks import Error, Warning as DjangoWarning
+from django.core.checks.registry import registry
 from django.test import override_settings
 
-from next.static.checks import check_static_backends
+from next.static.checks import check_js_context_serializer, check_static_backends
 
 
 def _ids(messages: list) -> list[str]:
@@ -149,7 +150,6 @@ class TestChecksRegistered:
     """System checks discovery picks up check_static_backends."""
 
     def test_registered_under_compatibility_tag(self) -> None:
-        from django.core.checks.registry import registry
 
         ids = {getattr(c, "__name__", None) for c in registry.registered_checks}
         assert "check_static_backends" in ids
@@ -163,22 +163,15 @@ class TestJsContextSerializerCheck:
     """check_js_context_serializer validates the configured dotted path."""
 
     def test_passes_when_unset(self) -> None:
-        from next.static.checks import check_js_context_serializer
 
         assert check_js_context_serializer() == []
 
     def test_passes_when_framework_setting_is_not_a_dict(self) -> None:
-        from django.test import override_settings
-
-        from next.static.checks import check_js_context_serializer
 
         with override_settings(NEXT_FRAMEWORK=["not a dict"]):
             assert check_js_context_serializer() == []
 
     def test_passes_for_default_json_serializer(self) -> None:
-        from django.test import override_settings
-
-        from next.static.checks import check_js_context_serializer
 
         with override_settings(
             NEXT_FRAMEWORK={
@@ -190,9 +183,6 @@ class TestJsContextSerializerCheck:
             assert check_js_context_serializer() == []
 
     def test_warns_on_non_string_value(self) -> None:
-        from django.test import override_settings
-
-        from next.static.checks import check_js_context_serializer
 
         with override_settings(NEXT_FRAMEWORK={"JS_CONTEXT_SERIALIZER": 42}):
             messages = check_js_context_serializer()
@@ -200,9 +190,6 @@ class TestJsContextSerializerCheck:
         assert messages[0].id == "next.W042"
 
     def test_warns_on_import_error(self) -> None:
-        from django.test import override_settings
-
-        from next.static.checks import check_js_context_serializer
 
         with override_settings(
             NEXT_FRAMEWORK={"JS_CONTEXT_SERIALIZER": "tests.nonexistent.Missing"}
@@ -213,9 +200,6 @@ class TestJsContextSerializerCheck:
         assert "Cannot import" in messages[0].msg
 
     def test_warns_when_target_is_not_a_class(self) -> None:
-        from django.test import override_settings
-
-        from next.static.checks import check_js_context_serializer
 
         with override_settings(
             NEXT_FRAMEWORK={
@@ -228,9 +212,6 @@ class TestJsContextSerializerCheck:
         assert "not a class" in messages[0].msg
 
     def test_warns_when_instance_fails_protocol(self) -> None:
-        from django.test import override_settings
-
-        from next.static.checks import check_js_context_serializer
 
         with override_settings(
             NEXT_FRAMEWORK={
@@ -243,9 +224,6 @@ class TestJsContextSerializerCheck:
         assert "JsContextSerializer protocol" in messages[0].msg
 
     def test_warns_when_instance_cannot_be_constructed(self) -> None:
-        from django.test import override_settings
-
-        from next.static.checks import check_js_context_serializer
 
         with override_settings(
             NEXT_FRAMEWORK={"JS_CONTEXT_SERIALIZER": "tests.static.test_checks._Boom"}

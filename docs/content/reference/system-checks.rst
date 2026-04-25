@@ -197,7 +197,7 @@ Components
 
 **What to do:** Rename or relocate components. Use ``next.components`` context APIs
 (see :doc:`../guide/components`). For E031–E033, fix the shape of each entry
-in ``DEFAULT_COMPONENT_BACKENDS``; for E034, rename or move one of the
+in ``DEFAULT_COMPONENT_BACKENDS``, and for E034 rename or move one of the
 conflicting component folders so the root scope is unambiguous.
 
 Static assets
@@ -314,6 +314,6 @@ Flat top-level keys (see :mod:`next.conf`):
 * ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, …). The skip-folder name for routing comes from ``DEFAULT_COMPONENT_BACKENDS``, not from page router dicts.
 * ``URL_NAME_TEMPLATE`` — Python format string for URL names (default ``page_{name}``).
 * ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts.
-* ``TEMPLATE_LOADERS`` — list of dotted paths to :class:`~next.pages.loaders.TemplateLoader` subclasses. Defaults to ``["next.pages.loaders.DjxTemplateLoader"]``; user lists replace the default.
+* ``TEMPLATE_LOADERS`` — list of dotted paths to :class:`~next.pages.loaders.TemplateLoader` subclasses. Defaults to ``["next.pages.loaders.DjxTemplateLoader"]``, and user lists replace the default.
 
 Each key can be overridden independently. There is no nested ``PAGES`` / ``COMPONENTS`` namespace and no runtime hook for custom ``ModuleLoader`` classes.

@@ -2,12 +2,14 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Never
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django.http import HttpRequest
 from django.test import override_settings
 
+import next.pages.loaders as loaders_module
 from next.conf import next_framework_settings
 from next.pages.loaders import (
     DjxTemplateLoader,
@@ -223,7 +225,7 @@ def get_landing_data(*args, **kwargs):
         page_instance._context_manager.register_context(
             page_file,
             "landing",
-            lambda *args, **kwargs: {
+            lambda *_args, **_kwargs: {
                 "title": "Test Title",
                 "description": "Test Description",
             },
@@ -1000,8 +1002,6 @@ class TestContextProcessors:
 
     def test_render_with_context_processor_error(self, page_instance, tmp_path) -> None:
         """Test render method with context processor that raises an exception."""
-        from typing import Never
-
         page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1><p>{{ good_var }}</p>"
         page_instance.register_template(page_file, template_str)
@@ -1037,10 +1037,6 @@ class TestContextProcessors:
         self, page_instance, tmp_path
     ) -> None:
         """`STRICT_CONTEXT=True` turns processor errors into hard failures."""
-        from typing import Never
-
-        import pytest
-
         page_file = tmp_path / "page.py"
         page_instance.register_template(page_file, "<h1>{{ title }}</h1>")
 
@@ -1126,7 +1122,6 @@ class TestBuildRegisteredLoaders:
     """`build_registered_loaders` reads `TEMPLATE_LOADERS` and caches."""
 
     def _reset_cache(self) -> None:
-        import next.pages.loaders as loaders_module
 
         loaders_module._REGISTERED_LOADERS_CACHE = None
 
@@ -1175,7 +1170,6 @@ class TestBuildRegisteredLoaders:
 
     def test_settings_reload_resets_cache(self) -> None:
         build_registered_loaders()
-        import next.pages.loaders as loaders_module
 
         assert loaders_module._REGISTERED_LOADERS_CACHE is not None
         next_framework_settings.reload()

@@ -61,7 +61,7 @@ class TestPydanticJsContextSerializer:
             __builtins__["__import__"] if isinstance(__builtins__, dict) else __import__
         )
 
-        def blocked(name, *args, **kwargs):
+        def blocked(name, *args, **kwargs):  # noqa: ANN002, ANN003
             if name == "pydantic":
                 msg = "No module named 'pydantic'"
                 raise ImportError(msg)

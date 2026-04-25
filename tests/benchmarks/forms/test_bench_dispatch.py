@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from django import forms
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
 
 from next.forms import Form
 from next.forms.backends import FormActionOptions, RegistryFormActionBackend
@@ -61,11 +61,7 @@ class _BenchForm(Form):
     name = forms.CharField(max_length=32)
 
 
-def _ok_handler(
-    _request: HttpRequest,
-    _form: _BenchForm,
-    **_kwargs: object,
-) -> HttpResponseRedirect:
+def _ok_handler(**_kwargs: object) -> HttpResponseRedirect:
     return HttpResponseRedirect("/")
 
 

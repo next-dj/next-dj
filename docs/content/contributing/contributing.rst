@@ -70,7 +70,7 @@ Tests mirror this layout:
    * - ``tests/site_pages/``
      - Sample pages directory registered as ``DIRS`` in the test ``NEXT_FRAMEWORK`` config.
    * - ``tests/benchmarks/``
-     - Micro-benchmarks covering every ``next/<area>/`` module. **Opt-in** via the ``perf`` marker; excluded from the default run with ``--ignore=tests/benchmarks``. See Benchmarks_.
+     - Micro-benchmarks covering every ``next/<area>/`` module. **Opt-in** via the ``perf`` marker, excluded from the default run with ``--ignore=tests/benchmarks``. See Benchmarks_.
    * - ``tests/<area>/``
      - Per-module tests matching ``next/<area>/``. Add new tests here.
 
@@ -105,7 +105,7 @@ Tests
    * - ``make test``
      - Runs ``tests/`` with coverage. Fails if ``next/`` coverage is below 100%. Parallel (``pytest -n auto``). HTML report in ``htmlcov/``. Benchmarks skipped by default.
    * - ``make test-examples``
-     - Each example must have ``tests/`` or ``tests.py``; runs pytest with coverage per example (see Examples_).
+     - Each example must have ``tests/`` or ``tests.py``, and the workflow runs pytest with coverage per example (see Examples_).
    * - ``make test-js``
      - Vitest unit tests for ``next/static/next/next.ts``.
    * - ``uv run pytest tests/ -n auto``
@@ -248,7 +248,7 @@ Testing
 - Prefer ``@pytest.mark.parametrize`` for matrix-style cases over copy-pasted tests. ``tests/support/cases.py`` holds dataclass-based parametrize rows — reuse and extend them.
 - Use **`django.test.Client`** (the ``client`` fixture) for HTTP-level checks. Do not use the DRF API client unless the example explicitly adds DRF.
 - For deps/forms/urls internals, reuse ``dependency_resolver``, ``csrf_request``, ``form_engine``, and the helpers in ``tests/support/``.
-- The suite expects a pre-configured Django — do not call ``django.setup()`` yourself; ``tests/django_setup.py`` handles it.
+- The suite expects a pre-configured Django — do not call ``django.setup()`` yourself. ``tests/django_setup.py`` handles it.
 
 Coverage
 ~~~~~~~~
@@ -256,7 +256,7 @@ Coverage
 - **`next/`**: CI and ``make test`` enforce 100% line coverage via ``--cov-fail-under=100``.
 - Files under ``next/**/checks.py`` and ``next/checks/`` are **excluded** from coverage (see ``[tool.coverage.run] omit`` in ``pyproject.toml``). Do not chase coverage there.
 - ``[tool.coverage.paths]`` collapses ``next/`` and ``*/site-packages/next/`` so coverage works identically for editable and wheel-installed runs.
-- **Examples**: Each example must ship tests in ``tests/`` or ``tests.py``. ``make test-examples`` does **not** enforce ``--cov-fail-under=100``. Aim for full coverage anyway; reviewers may ask you to close gaps.
+- **Examples**: Each example must ship tests in ``tests/`` or ``tests.py``. ``make test-examples`` does **not** enforce ``--cov-fail-under=100``. Aim for full coverage anyway, since reviewers may ask you to close gaps.
 
 .. _Benchmarks:
 
@@ -270,7 +270,7 @@ Running locally
 
 - ``make bench`` — runs all benchmarks with the ``perf`` marker. First comparison should use ``--benchmark-save=before``, then apply your change and ``--benchmark-save=after``. JSON files land under ``.benchmarks/``.
 - Benchmarks are **excluded from** ``make test`` (ignored via ``addopts``) and auto-marked ``perf`` by ``tests/benchmarks/conftest.py`` — no need to decorate tests yourself.
-- Numbers are **only comparable on the same machine**. Do not cite local deltas in the PR; the CI workflow below does the machine-stable comparison.
+- Numbers are **only comparable on the same machine**. Do not cite local deltas in the PR — the CI workflow below does the machine-stable comparison.
 
 CI integration
 ^^^^^^^^^^^^^^
@@ -296,7 +296,7 @@ Interpreting the numbers
 - Trust **Min** and **Median** for comparisons — ``Max`` is almost always a GC pause, not a signal.
 - If ``StdDev > Median``, the measurement is inherently noisy (GC, lazy rebuild). Cite **Min** only for those cases.
 - ``Rounds × Iterations`` tells you how much the harness amortised the measurement — higher is more stable.
-- Units (``ns`` / ``μs`` / ``ms``) are per-group and auto-scaled; only rows within the same group table are directly comparable.
+- Units (``ns`` / ``μs`` / ``ms``) are per-group and auto-scaled, so only rows within the same group table are directly comparable.
 
 When to run
 ^^^^^^^^^^^
@@ -349,7 +349,7 @@ Checklist
 - [ ] TS changes: ``next.min.js`` rebuilt (``make build-js``) and vitest tests updated
 - [ ] Example + tests when adding public API or behavior users copy from ``examples/``
 - [ ] Docs updated when behavior or usage changes
-- [ ] ``make bench`` checked locally when touching a hot path (see Benchmarks_); confirm the PR bench comment before requesting review
+- [ ] ``make bench`` checked locally when touching a hot path (see Benchmarks_), and the PR bench comment confirmed before requesting review
 - [ ] Link issues with ``Fixes #123`` / ``Closes #123`` when applicable
 
 Branches
@@ -373,7 +373,7 @@ Use **draft** PRs for work in progress.
 Review
 ~~~~~~
 
-Maintainers check style with Ruff and mypy, review tests, and assess how the change fits ``next/``. They also consider backwards compatibility and deprecation when behavior changes. Response time depends on maintainer availability; this document does not define a fixed SLA.
+Maintainers check style with Ruff and mypy, review tests, and assess how the change fits ``next/``. They also consider backwards compatibility and deprecation when behavior changes. Response time depends on maintainer availability, and this document does not define a fixed SLA.
 
 Help
 ----

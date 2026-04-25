@@ -98,7 +98,7 @@ Exceptions raised inside ``render()`` propagate to Django's request-handling sta
 
 .. note::
 
-   ``Page.render`` (the programmatic API exposed to tests and tools) uses the static body sources only; it never invokes ``render()``. The unified view function that handles real HTTP requests invokes ``render()`` first and hands its string result to the same composition pipeline.
+   ``Page.render`` (the programmatic API exposed to tests and tools) uses the static body sources only and never invokes ``render()``. The unified view function that handles real HTTP requests invokes ``render()`` first and hands its string result to the same composition pipeline.
 
 Custom template formats
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -136,7 +136,7 @@ The sibling ``template.djx`` file is just one implementation of the ``TemplateLo
        ],
    }
 
-User-provided ``TEMPLATE_LOADERS`` **replaces** the default list (which is just ``DjxTemplateLoader``), so include ``DjxTemplateLoader`` explicitly if you still want sibling ``template.djx`` support. ``source_name`` is used by :ref:`next.W043 <check-next-w043>` to name the active source in conflict warnings; ``source_path`` feeds the stale-cache detector so edits to the backing file invalidate the composed template on the next request.
+User-provided ``TEMPLATE_LOADERS`` **replaces** the default list (which is just ``DjxTemplateLoader``), so include ``DjxTemplateLoader`` explicitly if you still want sibling ``template.djx`` support. ``source_name`` is used by :ref:`next.W043 <check-next-w043>` to name the active source in conflict warnings. ``source_path`` feeds the stale-cache detector so edits to the backing file invalidate the composed template on the next request.
 
 Layout System
 -------------

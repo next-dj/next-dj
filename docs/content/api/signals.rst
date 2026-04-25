@@ -5,7 +5,7 @@ Aggregated signals (next.signals)
 
 ``next.signals`` re-exports every signal emitted by next.dj subsystems
 so application code can import them from a single place. Each signal is
-also available from its owning subsystem's ``signals`` module; the two
+also available from its owning subsystem's ``signals`` module, and both
 import paths refer to the same :class:`django.dispatch.Signal` instance.
 
 Typical usage connects receivers in :meth:`AppConfig.ready`.

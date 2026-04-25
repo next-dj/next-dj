@@ -445,7 +445,7 @@ def _check_body_source_conflicts(page_file: Path) -> CheckMessage | None:
     shadowed = ", ".join(sources[1:])
     return DjangoWarning(
         f"{page_file} declares multiple body sources: {', '.join(sources)}. "
-        f"{winner} takes priority; {shadowed} will not be used. "
+        f"{winner} takes priority and {shadowed} will not be used. "
         "Priority order: render() > template > registered TEMPLATE_LOADERS.",
         obj=str(page_file),
         id="next.W043",

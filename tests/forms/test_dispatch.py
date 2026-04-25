@@ -4,7 +4,7 @@ from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django import forms
+from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 
 from next.forms import (
@@ -173,9 +173,9 @@ class TestFormDispatchRenderFragmentBranches:
         backend = RegistryFormActionBackend()
 
         class F(Form):
-            name = forms.CharField(max_length=10)
+            name = django_forms.CharField(max_length=10)
 
-        def h(_request: HttpRequest, _form: F) -> HttpResponseRedirect:
+        def h(request: HttpRequest, form: F) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(
@@ -200,9 +200,9 @@ class TestFormDispatchRenderFragmentBranches:
         backend = RegistryFormActionBackend()
 
         class F(Form):
-            name = forms.CharField(max_length=10)
+            name = django_forms.CharField(max_length=10)
 
-        def h(_request: HttpRequest, _form: F) -> HttpResponseRedirect:
+        def h(request: HttpRequest, form: F) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(
@@ -235,14 +235,14 @@ class TestFormDispatchRenderFragmentBranches:
         mock_model._meta.get_fields.return_value = []
 
         class TestModelForm(ModelForm):
-            name = forms.CharField(max_length=100)
+            name = django_forms.CharField(max_length=100)
 
             class Meta:
                 model = mock_model
                 fields: ClassVar[list[str]] = ["name"]
 
             @classmethod
-            def get_initial(cls, _request: HttpRequest) -> object:
+            def get_initial(cls, request: HttpRequest) -> object:
                 # Return a mock model instance
                 mock_instance = MagicMock()
                 mock_instance._meta = MagicMock()
@@ -250,7 +250,7 @@ class TestFormDispatchRenderFragmentBranches:
                 return mock_instance
 
         def handler(
-            _request: HttpRequest, _form: TestModelForm, **_kwargs: object
+            request: HttpRequest, form: TestModelForm, **_kwargs: object
         ) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
@@ -282,10 +282,10 @@ class TestFormDispatchRenderFragmentBranches:
         backend = RegistryFormActionBackend()
 
         class TestForm(Form):
-            name = forms.CharField(max_length=100)
+            name = django_forms.CharField(max_length=100)
 
         def handler(
-            _request: HttpRequest, _form: TestForm, **_kwargs: object
+            request: HttpRequest, form: TestForm, **_kwargs: object
         ) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
@@ -318,9 +318,9 @@ class TestFormDispatchRenderFragmentBranches:
         backend = RegistryFormActionBackend()
 
         class TestForm(Form):
-            name = forms.CharField(max_length=100)
+            name = django_forms.CharField(max_length=100)
 
-        def handler(_request: HttpRequest, _form: TestForm) -> HttpResponseRedirect:
+        def handler(request: HttpRequest, form: TestForm) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(
@@ -355,13 +355,11 @@ class TestFormDispatchRenderFragmentBranches:
         backend = RegistryFormActionBackend()
 
         # Create a form class that doesn't inherit from BaseForm
-        from django import forms as django_forms
-
         class CustomDjangoForm(django_forms.Form):
             name = django_forms.CharField(max_length=100)
 
         def handler(
-            _request: HttpRequest, _form: CustomDjangoForm
+            request: HttpRequest, form: CustomDjangoForm
         ) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
@@ -389,17 +387,17 @@ class TestFormDispatchRenderFragmentBranches:
         backend = RegistryFormActionBackend()
 
         class CustomForm(Form):
-            name = forms.CharField(max_length=100)
+            name = django_forms.CharField(max_length=100)
 
             @classmethod
-            def get_initial(cls, _request: HttpRequest) -> object:
+            def get_initial(cls, request: HttpRequest) -> object:
                 # Return a mock model instance
                 mock_instance = MagicMock()
                 mock_instance._meta = MagicMock()
                 mock_instance._meta.model = MagicMock()
                 return mock_instance
 
-        def handler(_request: HttpRequest, _form: CustomForm) -> HttpResponseRedirect:
+        def handler(request: HttpRequest, form: CustomForm) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(

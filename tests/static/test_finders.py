@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from io import StringIO
 from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
+from django.contrib.staticfiles.finders import get_finders
+from django.core.management import call_command
+from django.test import override_settings
 
 from next.static import NextStaticFilesFinder
 from next.static.finders import (
@@ -232,7 +236,6 @@ class TestCollectstaticIntegration:
     """E2E: --dry-run must enumerate next-namespace assets."""
 
     def test_finder_is_registered(self) -> None:
-        from django.contrib.staticfiles.finders import get_finders
 
         finders = list(get_finders())
         assert any(isinstance(f, NextStaticFilesFinder) for f in finders)
@@ -240,10 +243,6 @@ class TestCollectstaticIntegration:
     def test_collectstatic_dry_run_succeeds(
         self, pages_tree: Path, tmp_path: Path
     ) -> None:
-        from io import StringIO
-
-        from django.core.management import call_command
-        from django.test import override_settings
 
         static_root = tmp_path / "static_root"
         static_root.mkdir()

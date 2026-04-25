@@ -55,7 +55,7 @@ class TestGenerateSlugIntegrityRetry:
 
     def test_retries_until_unique(self) -> None:
         Link.objects.create(slug="abcdef", url="https://example.com/first")
-        # Force the first attempt to collide with the existing slug; the
+        # Force the first attempt to collide with the existing slug so the
         # retry uses the next random slug from `secrets.choice`.
         candidates = iter(["abcdef", "xyz123"])
         with mock.patch(

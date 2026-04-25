@@ -6,7 +6,7 @@ import pytest
 from django.http import HttpRequest
 
 from next.deps import DependencyResolver
-from next.pages import Context
+from next.pages import Context, Page
 from next.pages.context import ContextByDefaultProvider
 from next.pages.registry import PageContextRegistry
 from next.static import StaticCollector
@@ -510,8 +510,6 @@ class TestPageContextRegistrySerialize:
         self, registry, tmp_path
     ) -> None:
         """Page.render merges js_context into the collector so Next._init gets it."""
-        from next.pages import Page
-
         page_inst = Page()
         path = tmp_path / "page.py"
         page_inst.register_template(path, "{{ title }}<!-- next:scripts -->")

@@ -1,6 +1,6 @@
 import types
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -304,8 +304,6 @@ class TestComponentsFactoryManager:
 
     def test_manager_collect_visible_first_backend_wins(self) -> None:
         """Same component name from two backends: first backend wins."""
-        from unittest.mock import MagicMock
-
         mgr = ComponentsManager()
         info1 = ComponentInfo("a", Path("/"), "", None, None, True)
         info2 = ComponentInfo("a", Path("/b"), "", None, None, True)
@@ -319,8 +317,6 @@ class TestComponentsFactoryManager:
 
     def test_manager_get_component_none_from_all_backends(self) -> None:
         """get_component returns None when every backend returns None."""
-        from unittest.mock import MagicMock
-
         mgr = ComponentsManager()
         b = MagicMock()
         b.get_component.return_value = None
@@ -329,8 +325,6 @@ class TestComponentsFactoryManager:
 
     def test_manager_get_component_returns_first_hit(self) -> None:
         """get_component returns first non-None from backends."""
-        from unittest.mock import MagicMock
-
         mgr = ComponentsManager()
         hit = ComponentInfo("n", Path("/"), "", None, None, True)
         b1 = MagicMock()

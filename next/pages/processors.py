@@ -4,7 +4,7 @@ Context processors come from two sources. First, each entry in
 `NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"]` may list processors under
 `OPTIONS.context_processors`. Second, Django's `TEMPLATES` setting
 includes its own `OPTIONS.context_processors`. Both sources merge with
-Next-router entries taking precedence; duplicates are dropped.
+Next-router entries taking precedence and duplicates dropped.
 """
 
 from __future__ import annotations

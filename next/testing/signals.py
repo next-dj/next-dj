@@ -132,7 +132,9 @@ def capture_framework_signals() -> SignalRecorder:
     Handy when a test wants to verify that nothing unexpected fires
     without wiring each signal by hand.
     """
-    from next import signals as framework_signals
+    # Lazy-imported to keep `next.testing` from pulling in every framework
+    # subsystem at import time.
+    from next import signals as framework_signals  # noqa: PLC0415
 
     tracked = tuple(
         getattr(framework_signals, name) for name in framework_signals.__all__

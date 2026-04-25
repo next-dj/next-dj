@@ -11,7 +11,7 @@ from next.deps import (
     RegisteredParameterProvider,
     resolver,
 )
-from next.deps.cache import _IN_PROGRESS
+from next.deps.cache import _IN_PROGRESS, DependencyCache
 from next.urls import HttpRequestProvider, UrlKwargsProvider
 from tests.support import (
     _ctx,
@@ -90,7 +90,7 @@ class TestDependencyResolver:
 
         class C:
             @classmethod
-            def get_initial(cls, request: HttpRequest, id: int) -> dict:  # noqa: A002, ARG003
+            def get_initial(cls, request: HttpRequest, id: int) -> dict:  # noqa: A002
                 return {}
 
         r = _minimal_resolver()
@@ -320,8 +320,6 @@ class TestResolveWithTemplateContext:
 
     def test_uses_dependency_cache_instance_when_passed(self) -> None:
         """When _cache is a DependencyCache, that instance is used (values land in backing)."""
-        from next.deps.cache import DependencyCache
-
         r = DependencyResolver()
 
         def provide() -> str:

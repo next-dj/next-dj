@@ -31,7 +31,7 @@ class TestStaticAsset:
 
     def test_is_frozen(self) -> None:
         asset = StaticAsset(url=CSS_URL, kind="css")
-        with pytest.raises(Exception):  # noqa: B017
+        with pytest.raises(Exception):  # noqa: B017, PT011
             asset.url = "mutated"  # type: ignore[misc]
 
 

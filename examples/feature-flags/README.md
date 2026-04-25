@@ -228,7 +228,7 @@ def _state(flag: DFlag[Flag]) -> dict[str, str]:
 ```
 
 Two composites, two render strategies. `CompositeComponentRenderer` prefers
-`render()` when present; otherwise it loads the sibling `component.djx` and
+`render()` when present, otherwise it loads the sibling `component.djx` and
 evaluates `@component.context` callables before rendering. Both paths share
 the DI chain — `flag: DFlag[Flag]` works identically in each.
 

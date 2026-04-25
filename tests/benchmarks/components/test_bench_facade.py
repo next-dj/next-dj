@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from django.dispatch import Signal
 
 from next.components.info import ComponentInfo
 from next.components.signals import component_rendered
@@ -18,6 +17,8 @@ from next.components.signals import component_rendered
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from django.dispatch import Signal
 
 
 def _make_info(tmp_path: Path) -> ComponentInfo:

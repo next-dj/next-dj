@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -46,7 +47,6 @@ class TestNextScriptBuilderDefaults:
         assert out == '<script>Next._init({"user":"alice"});</script>'
 
     def test_init_script_serializes_django_types(self) -> None:
-        from decimal import Decimal
 
         builder = NextScriptBuilder(URL)
         out = builder.init_script({"price": Decimal("1.00")})

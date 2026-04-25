@@ -11,30 +11,25 @@ Django directly.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from django import forms as django_forms
 from django.forms.forms import BaseForm as DjangoBaseForm, DeclarativeFieldsMetaclass
 from django.forms.models import BaseModelForm as DjangoBaseModelForm, ModelFormMetaclass
 
 
-if TYPE_CHECKING:
-    from django.http import HttpRequest
-
-
 class BaseForm(DjangoBaseForm):
     """Custom `BaseForm` that extends Django's `BaseForm` with `get_initial`."""
 
     @classmethod
-    def get_initial(
-        cls, _request: HttpRequest, *_args: object, **_kwargs: object
-    ) -> dict[str, Any]:
+    def get_initial(cls) -> dict[str, Any]:
         """Return initial data for this form.
 
-        Override this method to provide initial data from the request. It is
-        called automatically when creating form instances for GET requests.
-        The returned dictionary becomes the `initial` parameter passed to the
-        form constructor.
+        Override this method to provide initial data. Subclasses can declare
+        whichever DI parameters they need (`request: HttpRequest`, URL kwargs,
+        or named dependencies). The dispatcher resolves them via the standard
+        DI pipeline before invoking the override. The returned dictionary
+        becomes the `initial` parameter passed to the form constructor.
         """
         return {}
 
@@ -43,15 +38,14 @@ class BaseModelForm(DjangoBaseModelForm):
     """Custom `BaseModelForm` with `get_initial` support."""
 
     @classmethod
-    def get_initial(
-        cls, _request: HttpRequest, *_args: object, **_kwargs: object
-    ) -> dict[str, Any] | object:
+    def get_initial(cls) -> dict[str, Any] | object:
         """Return initial data or a model instance for this form.
 
         For `ModelForm` subclasses this may return either a dictionary, which
         becomes the `initial` parameter and results in a new instance on save,
         or a model instance, which becomes the `instance` parameter and
-        updates the existing record.
+        updates the existing record. Subclasses may declare DI parameters in
+        the override. The dispatcher resolves them automatically.
         """
         return {}
 

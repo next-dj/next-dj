@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django.utils import autoreload
-from django.utils.autoreload import autoreload_started
+from django.utils.autoreload import (
+    StatReloader as DjangoStatReloader,
+    autoreload_started,
+)
 
+from next.apps import autoreload as next_autoreload
+from next.components import components_manager
 from next.pages.watch import get_pages_directories_for_watch
 from next.server import NextStatReloader
 
@@ -43,16 +49,12 @@ class TestAutoreloadInstallIdempotent:
     """`install()` is safe to call repeatedly and logs unknown overrides."""
 
     def test_second_install_is_noop(self) -> None:
-        from next.apps import autoreload as next_autoreload
 
         before = autoreload.StatReloader
         next_autoreload.install()
         assert autoreload.StatReloader is before
 
     def test_install_warns_on_incompatible_override(self, caplog) -> None:
-        from django.utils.autoreload import StatReloader as DjangoStatReloader
-
-        from next.apps import autoreload as next_autoreload
 
         original = autoreload.StatReloader
 
@@ -76,8 +78,6 @@ class TestAutoreloadInstallIdempotent:
         # Grab the true Django `StatReloader` class from `NextStatReloader.__bases__`
         # because the module attribute has already been monkey-patched by `ready()`.
         real_django_stat_reloader = NextStatReloader.__bases__[0]
-
-        from next.apps import autoreload as next_autoreload
 
         class Placeholder(real_django_stat_reloader):  # type: ignore[misc,valid-type]
             pass
@@ -106,8 +106,6 @@ class TestStaticfilesInstall:
 
     def test_next_static_files_finder_in_finders(self) -> None:
         """``NextStaticFilesFinder`` is present in ``STATICFILES_FINDERS`` after ready()."""
-        from django.conf import settings
-
         finders = getattr(settings, "STATICFILES_FINDERS", [])
         assert "next.static.NextStaticFilesFinder" in finders
 
@@ -117,8 +115,6 @@ class TestTemplatesInstall:
 
     def test_template_builtins_include_next_tags(self) -> None:
         """next.templatetags modules are present in ``TEMPLATES[0].OPTIONS.builtins``."""
-        from django.conf import settings
-
         builtins = settings.TEMPLATES[0].get("OPTIONS", {}).get("builtins", [])
         assert "next.templatetags.components" in builtins
         assert "next.templatetags.forms" in builtins
@@ -130,6 +126,4 @@ class TestComponentsInstall:
 
     def test_components_manager_backends_loaded(self) -> None:
         """``components_manager._backends`` is populated after ``ready()``."""
-        from next.components import components_manager
-
         assert components_manager._backends is not None

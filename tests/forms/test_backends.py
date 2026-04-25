@@ -23,8 +23,6 @@ class TestFormActionManager:
 
     def test_get_action_url_raises_for_unknown_action(self) -> None:
         """Raise KeyError for unknown action name."""
-        import pytest
-
         with pytest.raises(KeyError, match="Unknown form action"):
             form_action_manager.get_action_url("nonexistent_action_xyz")
 
@@ -45,8 +43,6 @@ class TestRegistryFormActionBackend:
 
     def test_get_action_url_raises_for_unknown(self) -> None:
         """Backend raises KeyError for unknown action."""
-        import pytest
-
         backend = form_action_manager.default_backend
         assert isinstance(backend, RegistryFormActionBackend)
         with pytest.raises(KeyError, match="Unknown form action"):

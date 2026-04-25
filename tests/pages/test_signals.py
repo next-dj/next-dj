@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from next.pages import Page
+from next.pages.registry import PageContextRegistry
 
 
 class TestTemplateLoadedSignal:
@@ -70,8 +71,6 @@ class TestContextRegisteredSignal:
         self, capture_context_registered: list[dict[str, Any]], tmp_path: Path
     ) -> None:
         """``context_registered`` sender is the ``PageContextRegistry`` class."""
-        from next.pages.registry import PageContextRegistry
-
         page_inst = Page()
         page_file = tmp_path / "page.py"
         page_inst._context_manager.register_context(page_file, "key", lambda: "value")

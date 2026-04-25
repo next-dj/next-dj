@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from django.test import override_settings
 
+import next.pages.loaders as loaders_module
 from next.checks import (
     _has_template_or_djx,
     check_context_functions,
@@ -13,7 +14,8 @@ from next.checks import (
     check_layout_templates,
     check_page_functions,
 )
-from next.pages.checks import check_context_processor_signature
+from next.conf import next_framework_settings as s
+from next.pages.checks import check_context_processor_signature, check_template_loaders
 from tests.support import (
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
@@ -231,12 +233,10 @@ class TestCheckTemplateLoaders:
     """`check_template_loaders` validates `NEXT_FRAMEWORK['TEMPLATE_LOADERS']`."""
 
     def _run(self) -> list:
-        from next.pages.checks import check_template_loaders
 
         return list(check_template_loaders())
 
     def _reset_loader_cache(self) -> None:
-        import next.pages.loaders as loaders_module
 
         loaders_module._REGISTERED_LOADERS_CACHE = None
 
@@ -246,7 +246,6 @@ class TestCheckTemplateLoaders:
         }
     )
     def test_valid_default_is_clean(self) -> None:
-        from next.conf import next_framework_settings as s
 
         s.reload()
         self._reset_loader_cache()
@@ -254,7 +253,6 @@ class TestCheckTemplateLoaders:
 
     @override_settings(NEXT_FRAMEWORK={"TEMPLATE_LOADERS": [123]})
     def test_non_string_entry_is_e042(self) -> None:
-        from next.conf import next_framework_settings as s
 
         s.reload()
         self._reset_loader_cache()
@@ -265,7 +263,6 @@ class TestCheckTemplateLoaders:
 
     @override_settings(NEXT_FRAMEWORK={"TEMPLATE_LOADERS": ["does.not.exist.Loader"]})
     def test_unimportable_entry_is_e043(self) -> None:
-        from next.conf import next_framework_settings as s
 
         s.reload()
         self._reset_loader_cache()
@@ -278,7 +275,6 @@ class TestCheckTemplateLoaders:
         NEXT_FRAMEWORK={"TEMPLATE_LOADERS": ["next.pages.loaders.LayoutManager"]}
     )
     def test_non_subclass_entry_is_e043(self) -> None:
-        from next.conf import next_framework_settings as s
 
         s.reload()
         self._reset_loader_cache()

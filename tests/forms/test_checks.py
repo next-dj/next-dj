@@ -5,8 +5,11 @@ import pytest
 from next.forms import RegistryFormActionBackend
 from next.forms.checks import (
     _action_collisions,
+    _handler_fingerprint,
     check_form_action_collisions,
+    record_possible_collision,
 )
+from next.forms.signals import action_registered
 
 
 @pytest.fixture(autouse=True)
@@ -50,9 +53,6 @@ class TestFormActionCollisions:
 
     def test_tracker_is_not_signal_receiver(self) -> None:
         """``register_action`` must not pay signal-dispatch cost for the tracker."""
-        from next.forms.checks import _handler_fingerprint, record_possible_collision
-        from next.forms.signals import action_registered
-
         connected_names = {
             getattr(receiver, "__name__", "")
             for _id, ref in action_registered.receivers

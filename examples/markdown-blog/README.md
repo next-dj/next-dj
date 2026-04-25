@@ -1,7 +1,7 @@
 # Markdown blog
 
 A tiny blog built on **next-dj**. Every article is a plain `template.md` file
-next to a `page.py`; a custom `MarkdownTemplateLoader` registered under
+next to a `page.py`, and a custom `MarkdownTemplateLoader` registered under
 `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]` teaches the framework to read `.md` files
 as page bodies and renders them to HTML on request.
 
@@ -55,7 +55,7 @@ examples/markdown-blog/
         │   ├── layout.djx       # Nested: back button + meta bar + share
         │   ├── welcome/
         │   │   ├── page.py      # @context("post" serialise) + reading_minutes only
-        │   │   └── template.md  # Markdown body; MarkdownTemplateLoader renders it
+        │   │   └── template.md  # Markdown body rendered by MarkdownTemplateLoader
         │   └── hello-world/
         │       ├── page.py
         │       └── template.md
@@ -100,7 +100,7 @@ NEXT_FRAMEWORK = {
 
 `OPTIONS.context_processors` is the Next-router extension point for per-page
 context processors. It is merged with Django's own
-`TEMPLATES[0].OPTIONS.context_processors`; entries from the Next router take
+`TEMPLATES[0].OPTIONS.context_processors`, where entries from the Next router take
 priority and duplicates are dropped.
 
 `TEMPLATE_LOADERS` is a list of dotted paths to
@@ -140,7 +140,7 @@ class MarkdownTemplateLoader(TemplateLoader):
 
 Three methods, three responsibilities:
 
-- **`can_load`** — cheap check; returns `True` when the file this loader
+- **`can_load`** — cheap check that returns `True` when the file this loader
   backs is present next to `page.py`.
 - **`load_template`** — reads the file and returns the rendered body
   string. Returning `None` lets the chain fall through to the next loader.
@@ -195,7 +195,7 @@ def read() -> int:
 ```
 
 No `template = "..."`, no `@context("post_html")`, no `render_markdown` call.
-The body comes from the loader; this module only exposes metadata for the
+The body comes from the loader, and this module only exposes metadata for the
 layout chrome and the JS share button.
 
 - `post` (`serialize=True`) lands in `window.Next.context.post` for the share
@@ -228,7 +228,7 @@ that receives the rendered Markdown:
 </article>
 ```
 
-The `MarkdownTemplateLoader` returns raw HTML (no wrapper); the layout puts
+The `MarkdownTemplateLoader` returns raw HTML (no wrapper) and the layout puts
 that HTML inside the `prose` container. This is the cleanest split — the
 loader does one thing (Markdown → HTML), the layout does one thing (chrome).
 
@@ -335,7 +335,7 @@ def _is_active(url_name: str, request: HttpRequest) -> bool:
     return request.resolver_match.view_name == url_name
 ```
 
-This blog only needs exact match; the shortener example shows the prefix-match
+This blog only needs exact match — the shortener example shows the prefix-match
 variant via an `active_when` prop.
 
 ### 11. URL names from the file router
@@ -377,8 +377,8 @@ Misconfigured loader dotted paths surface as `next.E042` / `next.E043`.
 
 The file router routes a directory that contains only a `template.djx` (no
 `page.py`) as a **virtual page** — see `/about/` in this example. Likewise, a
-component directory with just `component.djx` is a **composite component**; the
-framework does not require an empty `component.py`. Skip any file that would
+component directory with just `component.djx` is a **composite component** and
+the framework does not require an empty `component.py`. Skip any file that would
 hold no code.
 
 ### Loader output is trusted — no `|safe` needed
@@ -388,7 +388,7 @@ hold no code.
 and hands the composed string to Django's template engine, which treats it as
 part of the template source — not as a Django variable — so there is no double
 escaping. Never register a loader that returns user-supplied HTML without
-sanitising; this example trusts the files on disk.
+sanitising — this example trusts the files on disk.
 
 ## Tests
 
@@ -399,7 +399,7 @@ build.
 
 What is tested:
 
-- Index lists both posts; links use `{% url %}` and point at `/posts/<slug>/`.
+- Index lists both posts, and links use `{% url %}` to point at `/posts/<slug>/`.
 - Site chrome (tagline, footer year) renders on every page via the context
   processor.
 - Each post renders through the nested layout with heading, body,

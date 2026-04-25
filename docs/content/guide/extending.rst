@@ -68,7 +68,7 @@ Worked examples by subsystem
 The snippets below each implement one of the five mechanisms. The
 ``examples/markdown-blog`` and ``examples/feature-flags`` projects in the
 source repository contain working custom ``TemplateLoader`` and
-``RegisteredParameterProvider`` implementations; the other subsystems use
+``RegisteredParameterProvider`` implementations, while the other subsystems use
 inline examples here.
 
 **Custom RouterBackend.** Extend ``FileRouterBackend`` and append an

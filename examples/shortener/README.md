@@ -48,13 +48,13 @@ examples/shortener/
         │   └── nav_link/    # Composite: shared nav link with active-state logic
         └── admin/
             ├── layout.djx   # Nested layout: "Admin panel" toolbar + subnav
-            ├── page.py      # Inherits `recent_links` to child pages; pending_clicks
+            ├── page.py      # Inherits `recent_links` to child pages plus pending_clicks
             ├── template.djx
             ├── stats/
             │   ├── page.py
             │   └── template.djx
             └── links/[slug]/
-                ├── page.py  # Uses DLink[Link]; one dict @context for linked values
+                ├── page.py  # Uses DLink[Link] with one dict @context for linked values
                 └── template.djx
 ```
 
@@ -87,7 +87,7 @@ The framework does not hardcode the names. `routes/` could be `screens/`, `views
 A directory under `routes/` with a `page.py` becomes a URL. The framework composes a template in three layers:
 
 - **`layout.djx`** (any ancestor directory) — the outer shell. Must contain an empty placeholder `{% block template %}{% endblock template %}` where the child content is substituted.
-- **`template.djx`** (sibling of `page.py`) — the page body. Just HTML. No `{% block template %}` wrapping needed; the framework handles substitution.
+- **`template.djx`** (sibling of `page.py`) — the page body. Just HTML. No `{% block template %}` wrapping needed because the framework handles substitution.
 - **`page.py`** — Python side: context functions (`@context`), optional form actions (`@forms.action`), optional `template = "..."` module attribute, optional `render(request, ...) -> HttpResponse`.
 
 Ancestor layouts cascade: `routes/admin/stats/` inherits `routes/admin/layout.djx`, which itself is wrapped by `routes/layout.djx`. Look at the nested toolbar in [`admin/layout.djx`](shortener/routes/admin/layout.djx):
@@ -142,7 +142,7 @@ from shortener.cache import pending_clicks
 context("pending_clicks")(pending_clicks)
 ```
 
-`context("key")` returns the decorator; calling it on a function registers the function exactly like `@context("key")` would.
+`context("key")` returns the decorator, and calling it on a function registers the function exactly like `@context("key")` would.
 
 ### 4. `inherit_context=True` — sharing context down the tree
 
@@ -188,7 +188,7 @@ A component lives in `_widgets/<name>/`:
 - **Simple**: just `component.djx` — pure template.
 - **Composite**: `component.py` + `component.djx`. The Python side adds context via `@component.context("key")`.
 
-[`_widgets/link_card/`](shortener/routes/_widgets/link_card/) is a composite. The template renders a card; the Python function computes a display URL via `reverse`:
+[`_widgets/link_card/`](shortener/routes/_widgets/link_card/) is a composite. The template renders a card while the Python function computes a display URL via `reverse`:
 
 ```python
 @component.context("short_url")
@@ -204,7 +204,7 @@ Usage in a loop:
 {% endfor %}
 ```
 
-`{% component "name" %}` accepts only **literal string props**. To pass the loop variable, the framework automatically forwards the parent template's flattened context; the `link` loop variable lands inside the component and `ContextByNameProvider` fills the `link: Link` parameter of `_short_url`.
+`{% component "name" %}` accepts only **literal string props**. To pass the loop variable, the framework automatically forwards the parent template's flattened context, so the `link` loop variable lands inside the component and `ContextByNameProvider` fills the `link: Link` parameter of `_short_url`.
 
 ### 7. Shared `nav_link` — DRY the active-state logic
 
@@ -234,7 +234,7 @@ Usage:
 {% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="admin" class_base="text-sm" %}
 ```
 
-No `request.path` string-munging, no custom template tag, no context processor. Django populates `request.resolver_match.view_name`; the component reads it.
+No `request.path` string-munging, no custom template tag, no context processor. Django populates `request.resolver_match.view_name` and the component reads it.
 
 ### 8. URL names and `{% url %}`
 
@@ -274,7 +274,7 @@ class LinkProvider(RegisteredParameterProvider):
 Two non-obvious details:
 
 1. **Python 3.12 generic syntax is required.** `class DLink[T](DDependencyBase[T])` makes `DLink[Link]` a parameterised generic whose origin is `DLink`. Writing `class DLink(DDependencyBase[Link])` instead gives you a non-generic class and `get_origin(DLink[Link])` returns `None`.
-2. **Register the provider before the resolver caches its provider list.** [`apps.py`](shortener/apps.py) imports `shortener.providers` from `AppConfig.ready()`. The `RegisteredParameterProvider.__init_subclass__` hook records the class at import time; importing early makes the class part of the resolver snapshot.
+2. **Register the provider before the resolver caches its provider list.** [`apps.py`](shortener/apps.py) imports `shortener.providers` from `AppConfig.ready()`. The `RegisteredParameterProvider.__init_subclass__` hook records the class at import time, so importing early makes the class part of the resolver snapshot.
 
 Use it anywhere:
 
@@ -338,7 +338,7 @@ Two rules:
 
 ### `{% component %}` props are literal strings
 
-`{% component "card" title="Hello" %}` is valid; `{% component "card" title=some_var %}` is **not** — `some_var` is taken as the literal string `"some_var"`. To pass variables, rely on the parent template context being forwarded (see `link_card` above), or compute values inside the component via `@component.context`.
+`{% component "card" title="Hello" %}` is valid. `{% component "card" title=some_var %}` is **not** — `some_var` is taken as the literal string `"some_var"`. To pass variables, rely on the parent template context being forwarded (see `link_card` above), or compute values inside the component via `@component.context`.
 
 ### Template wins over `render()` for file-routed pages
 
@@ -352,7 +352,7 @@ What is tested:
 
 - Form happy path (POST → Link created → redirect).
 - Form validation error re-renders with the error message.
-- Slug redirect bumps the cache counter and issues a 302; unknown slug returns 404.
+- Slug redirect bumps the cache counter and issues a 302, while an unknown slug returns 404.
 - `flush_clicks` moves counters from cache to database and empties the cache.
 - Admin index, stats, and detail all render through the nested layout (`"Admin panel"` visible everywhere).
 - Active-link state flips correctly on `/admin/`, `/admin/stats/`, `/admin/links/<slug>/`, and `/`.

@@ -277,7 +277,7 @@ Everything after the component name on ``{% component %}`` / ``{% #component %}`
 
 **Invoking a component**
 
-- **Void** (no inner markup): ``{% component "card" title="Post 1" description="First post" %}`` — the line ends the tag; there is **no** closing tag.
+- **Void** (no inner markup): ``{% component "card" title="Post 1" description="First post" %}`` — the line ends the tag and **no** closing tag is needed.
 - **Block** (slots or nested components): open with ``{% #component "name" ... %}`` and close with ``{% /component %}``. Inside, use:
 
   - ``{% #slot "name" %}`` … ``{% /slot %}`` for slot bodies with markup, or

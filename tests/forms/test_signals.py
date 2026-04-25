@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from django.dispatch import Signal
 
 from next.forms import RegistryFormActionBackend, form_action_manager
 from next.forms.signals import (
@@ -64,8 +65,6 @@ class TestActionRegisteredSignal:
 
     def test_signal_is_importable(self) -> None:
         """``action_registered`` is a Django Signal exported from ``next.forms.signals``."""
-        from django.dispatch import Signal
-
         assert isinstance(action_registered, Signal)
 
     def test_listener_receives_sent_event(
@@ -117,8 +116,6 @@ class TestActionDispatchedSignal:
 
     def test_signal_is_importable(self) -> None:
         """``action_dispatched`` is a Django Signal exported from ``next.forms.signals``."""
-        from django.dispatch import Signal
-
         assert isinstance(action_dispatched, Signal)
 
     def test_listener_receives_sent_event(
@@ -170,8 +167,6 @@ class TestFormValidationFailedSignal:
 
     def test_signal_is_importable(self) -> None:
         """``form_validation_failed`` is a Django Signal exported from ``next.forms.signals``."""
-        from django.dispatch import Signal
-
         assert isinstance(form_validation_failed, Signal)
 
     def test_listener_receives_sent_event(

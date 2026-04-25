@@ -297,8 +297,6 @@ class TestJsContextPolicyIntegration:
         self, collector: StaticCollector
     ) -> None:
         """Non-serialisable values raise at add time, not at inject time."""
-        import pytest
-
         with pytest.raises(TypeError, match="not serialisable"):
             collector.add_js_context("k", object())
         assert "k" not in collector.js_context()
@@ -311,7 +309,7 @@ class TestPlaceholderRegistry:
         reg = PlaceholderRegistry()
         slot = PlaceholderSlot(
             name="meta",
-            token="<!-- next:meta -->",
+            token="<!-- next:meta -->",  # noqa: S106
             bucket="_meta",
             renderer="render_meta_tag",
         )
@@ -321,7 +319,7 @@ class TestPlaceholderRegistry:
 
     def test_iteration(self) -> None:
         reg = PlaceholderRegistry()
-        slot = PlaceholderSlot(name="a", token="<!--a-->", bucket="_a", renderer="r")
+        slot = PlaceholderSlot(name="a", token="<!--a-->", bucket="_a", renderer="r")  # noqa: S106
         reg.register(slot)
         assert list(reg) == [slot]
 
@@ -329,7 +327,7 @@ class TestPlaceholderRegistry:
         reg = PlaceholderRegistry()
         assert len(reg) == 0
         reg.register(
-            PlaceholderSlot(name="a", token="<!--a-->", bucket="_a", renderer="r")
+            PlaceholderSlot(name="a", token="<!--a-->", bucket="_a", renderer="r")  # noqa: S106
         )
         assert len(reg) == 1
 

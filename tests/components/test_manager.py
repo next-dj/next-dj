@@ -2,16 +2,20 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import override_settings
+from django.test import RequestFactory, override_settings
 
+import next.components as next_components_mod
 from next.components import (
     ComponentInfo,
     ComponentRenderer,
     ComponentScanner,
     ComponentsManager,
     ComponentTemplateLoader,
+    CompositeComponentRenderer,
     FileComponentsBackend,
     ModuleLoader,
+    SimpleComponentRenderer,
+    _inject_component_context,
     components_manager,
     get_component,
     get_component_paths_for_watch,
@@ -321,15 +325,11 @@ class TestComponentRenderers:
 
     def test_component_renderer_empty_strategies(self) -> None:
         """ComponentRenderer returns empty string when no strategy matches."""
-        from next.components import ComponentRenderer
-
         info = ComponentInfo("x", Path("/"), "", None, None, True)
         assert ComponentRenderer([]).render(info, {}) == ""
 
     def test_composite_render_module_path_none_guard(self) -> None:
         """CompositeComponentRenderer.render returns '' if module_path is None."""
-        from next.components import CompositeComponentRenderer
-
         loader = ModuleLoader()
         tl = ComponentTemplateLoader(loader)
         r = CompositeComponentRenderer(loader, tl)
@@ -367,8 +367,6 @@ class TestComponentRenderers:
 
     def test_composite_template_render_injects_request(self, tmp_path: Path) -> None:
         """_render_with_template adds request to context when provided."""
-        from django.test import RequestFactory
-
         d = tmp_path / "rq"
         d.mkdir()
         (d / "component.djx").write_text("<i>{{ request.path }}</i>")
@@ -389,8 +387,6 @@ class TestComponentRenderers:
         self, tmp_path: Path
     ) -> None:
         """{% csrf_token %} works in component.djx when request is passed."""
-        from django.test import RequestFactory
-
         d = tmp_path / "csrf"
         d.mkdir()
         (d / "component.djx").write_text("{% csrf_token %}")
@@ -409,18 +405,12 @@ class TestComponentRenderers:
 
     def test_merge_csrf_context_no_op_without_request(self) -> None:
         """Early return when ``request`` is None (defensive API)."""
-        import next.components as next_components_mod
-
         ctx: dict[str, object] = {}
         next_components_mod._merge_csrf_context(ctx, None)
         assert "csrf_token" not in ctx
 
     def test_merge_csrf_context_skips_when_csrf_token_present(self) -> None:
         """Do not replace an existing ``csrf_token`` (caller supplied)."""
-        from django.test import RequestFactory
-
-        import next.components as next_components_mod
-
         req = RequestFactory().get("/")
         existing = "__test_merge_csrf_existing__"
         ctx: dict[str, object] = {"csrf_token": existing}
@@ -431,8 +421,6 @@ class TestComponentRenderers:
         self, tmp_path: Path
     ) -> None:
         """_render_with_template returns '' when template loader yields None."""
-        from next.components import CompositeComponentRenderer
-
         d = tmp_path / "nt"
         d.mkdir()
         (d / "component.djx").write_text("<p>x</p>")
@@ -453,8 +441,6 @@ class TestComponentRenderers:
 
     def test_fallback_template_none_returns_empty(self, tmp_path: Path) -> None:
         """When module load fails and template loader returns None, fallback is empty."""
-        from next.components import CompositeComponentRenderer
-
         d = tmp_path / "nf"
         d.mkdir()
         (d / "component.py").write_text("syntax error (\n")
@@ -475,10 +461,6 @@ class TestComponentRenderers:
         self, tmp_path: Path
     ) -> None:
         """SimpleComponentRenderer adds request and csrf_token for {% csrf_token %}."""
-        from django.test import RequestFactory
-
-        from next.components import SimpleComponentRenderer
-
         (tmp_path / "s.djx").write_text("<b>{% csrf_token %}</b>")
         info = ComponentInfo("s", tmp_path, "", tmp_path / "s.djx", None, True)
         tl = ComponentTemplateLoader(ModuleLoader())
@@ -494,8 +476,6 @@ class TestInjectComponentContext:
 
     def test_no_op_when_no_module_path(self) -> None:
         """When module_path is None, nothing is merged."""
-        from next.components import _inject_component_context
-
         info = ComponentInfo("s", Path("/"), "", Path("/t.djx"), None, True)
         data: dict[str, object] = {"keep": 1}
         _inject_component_context(info, data, None)

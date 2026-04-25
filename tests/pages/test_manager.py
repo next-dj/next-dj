@@ -4,12 +4,14 @@ from unittest.mock import patch
 import pytest
 from django.http import HttpRequest
 
+import next.pages.loaders as loaders_module
 from next.checks import _load_python_module
 from next.pages import Page, context, page
 from next.pages.loaders import (
     LayoutManager,
     LayoutTemplateLoader,
     TemplateLoader,
+    _load_python_module_memo,
 )
 from next.pages.registry import PageContextRegistry
 
@@ -178,7 +180,7 @@ class TestPage:
             (
                 "template_override",
                 "Hello {{ name }}! Count: {{ count }}",
-                {None: lambda *args, **kwargs: {"name": "ContextName", "count": 5}},
+                {None: lambda *_args, **_kwargs: {"name": "ContextName", "count": 5}},
                 {"name": "OverrideName", "count": 20},
                 "Hello ContextName! Count: 5",
             ),
@@ -829,8 +831,6 @@ class TestUnifiedViewBodyResolution:
         page_file = page_dir / "page.py"
         page_file.write_text('template = "<h1>attr body</h1>"')
 
-        from next.pages.loaders import _load_python_module_memo
-
         module = _load_python_module_memo(page_file)
         view = page_instance._create_unified_view(page_file, {}, module)
         response = view(_make_real_request())
@@ -852,8 +852,6 @@ class TestUnifiedViewBodyResolution:
         page_file.write_text(
             "def render(request, **kwargs):\n    return '<p>rendered</p>'\n"
         )
-
-        from next.pages.loaders import _load_python_module_memo
 
         module = _load_python_module_memo(page_file)
         view = page_instance._create_unified_view(page_file, {}, module)
@@ -878,8 +876,6 @@ class TestUnifiedViewBodyResolution:
             "    return HttpResponse('raw', status=201)\n"
         )
 
-        from next.pages.loaders import _load_python_module_memo
-
         module = _load_python_module_memo(page_file)
         view = page_instance._create_unified_view(page_file, {}, module)
         response = view(_make_real_request())
@@ -903,8 +899,6 @@ class TestUnifiedViewBodyResolution:
             "    return HttpResponseRedirect('/target/')\n"
         )
 
-        from next.pages.loaders import _load_python_module_memo
-
         module = _load_python_module_memo(page_file)
         view = page_instance._create_unified_view(page_file, {}, module)
         response = view(_make_real_request())
@@ -926,8 +920,6 @@ class TestUnifiedViewBodyResolution:
             "def render(request, **kwargs):\n"
             "    return JsonResponse({'ok': True})\n"
         )
-
-        from next.pages.loaders import _load_python_module_memo
 
         module = _load_python_module_memo(page_file)
         view = page_instance._create_unified_view(page_file, {}, module)
@@ -954,8 +946,6 @@ class TestUnifiedViewBodyResolution:
             f"def render(request, **kwargs):\n    return {return_value}\n"
         )
 
-        from next.pages.loaders import _load_python_module_memo
-
         module = _load_python_module_memo(page_file)
         view = page_instance._create_unified_view(page_file, {}, module)
         with pytest.raises(TypeError, match="must return str or HttpResponse"):
@@ -967,8 +957,6 @@ class TestUnifiedViewBodyResolution:
         page_file.write_text(
             "def render(request, **kwargs):\n    raise RuntimeError('boom')\n"
         )
-
-        from next.pages.loaders import _load_python_module_memo
 
         module = _load_python_module_memo(page_file)
         view = page_instance._create_unified_view(page_file, {}, module)
@@ -986,8 +974,6 @@ class TestUnifiedViewBodyResolution:
             "    return '<p>from-render</p>'\n"
         )
 
-        from next.pages.loaders import _load_python_module_memo
-
         module = _load_python_module_memo(page_file)
         view = page_instance._create_unified_view(page_file, {}, module)
         response = view(_make_real_request())
@@ -1001,8 +987,6 @@ class TestUnifiedViewBodyResolution:
         (tmp_path / "template.djx").write_text("<p>from-djx</p>")
         page_file = tmp_path / "page.py"
         page_file.write_text('template = "<p>from-attr</p>"')
-
-        from next.pages.loaders import _load_python_module_memo
 
         module = _load_python_module_memo(page_file)
         view = page_instance._create_unified_view(page_file, {}, module)
@@ -1021,8 +1005,6 @@ class TestUnifiedViewBodyResolution:
         page_dir.mkdir()
         page_file = page_dir / "page.py"
         page_file.write_text("")
-
-        from next.pages.loaders import _load_python_module_memo
 
         module = _load_python_module_memo(page_file)
         view = page_instance._create_unified_view(page_file, {}, module)
@@ -1117,7 +1099,6 @@ class TestCustomTemplateLoaderIntegration:
 
     @pytest.fixture(autouse=True)
     def _install_md_loader(self):
-        import next.pages.loaders as loaders_module
 
         loaders_module._REGISTERED_LOADERS_CACHE = [_MdLoader()]
         page._template_registry.clear()
@@ -1151,8 +1132,6 @@ class TestCustomTemplateLoaderIntegration:
         (tmp_path / "template.md").write_text("ignored")
         page_file = tmp_path / "page.py"
         page_file.write_text('template = "from-attr"')
-
-        from next.pages.loaders import _load_python_module_memo
 
         module = _load_python_module_memo(page_file)
         body = page_instance._load_static_body(page_file, module)
