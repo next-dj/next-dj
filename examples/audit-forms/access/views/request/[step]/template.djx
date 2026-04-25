@@ -1,0 +1,82 @@
+<section class="space-y-6">
+  <header class="space-y-1">
+    <p class="text-xs uppercase tracking-wide text-slate-500">
+      Step {{ step_index }} of {{ step_total }}
+    </p>
+    <h1 class="text-2xl font-bold">Request access — {{ current_step|title }}</h1>
+  </header>
+
+  {% component "progress_bar" %}
+
+  {% form @action="access:request_step" class="space-y-4 rounded-xl border bg-white p-6 shadow-sm" %}
+    <input type="hidden" name="step" value="{{ current_step }}">
+
+    {% if current_step == "applicant" %}
+      <label class="block">
+        <span class="block text-sm font-medium text-slate-700">Full name</span>
+        {{ form.full_name }}
+        {% if form.full_name.errors %}
+          <span class="mt-1 block text-xs text-rose-600">{{ form.full_name.errors|first }}</span>
+        {% endif %}
+      </label>
+      <label class="block">
+        <span class="block text-sm font-medium text-slate-700">Email</span>
+        {{ form.email }}
+        {% if form.email.errors %}
+          <span class="mt-1 block text-xs text-rose-600">{{ form.email.errors|first }}</span>
+        {% endif %}
+      </label>
+      <label class="block">
+        <span class="block text-sm font-medium text-slate-700">Team</span>
+        {{ form.team }}
+        {% if form.team.errors %}
+          <span class="mt-1 block text-xs text-rose-600">{{ form.team.errors|first }}</span>
+        {% endif %}
+      </label>
+    {% elif current_step == "justification" %}
+      <label class="block">
+        <span class="block text-sm font-medium text-slate-700">Project slug</span>
+        {{ form.project_slug }}
+        {% if form.project_slug.errors %}
+          <span class="mt-1 block text-xs text-rose-600">{{ form.project_slug.errors|first }}</span>
+        {% endif %}
+      </label>
+      <label class="block">
+        <span class="block text-sm font-medium text-slate-700">Reason</span>
+        {{ form.reason }}
+        {% if form.reason.errors %}
+          <span class="mt-1 block text-xs text-rose-600">{{ form.reason.errors|first }}</span>
+        {% endif %}
+      </label>
+      <label class="block">
+        <span class="block text-sm font-medium text-slate-700">Expires in days</span>
+        {{ form.expires_in_days }}
+        {% if form.expires_in_days.errors %}
+          <span class="mt-1 block text-xs text-rose-600">{{ form.expires_in_days.errors|first }}</span>
+        {% endif %}
+      </label>
+    {% else %}
+      <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+        <h2 class="text-sm font-semibold text-slate-700">Confirm and submit</h2>
+        <dl class="mt-3 grid grid-cols-2 gap-y-2 text-sm">
+          <dt class="text-slate-500">Full name</dt><dd>{{ draft.full_name }}</dd>
+          <dt class="text-slate-500">Email</dt><dd>{{ draft.email }}</dd>
+          <dt class="text-slate-500">Team</dt><dd>{{ draft.team }}</dd>
+          <dt class="text-slate-500">Project</dt><dd>{{ draft.project_slug }}</dd>
+          <dt class="text-slate-500">Days</dt><dd>{{ draft.expires_in_days }}</dd>
+          <dt class="text-slate-500">Reason</dt><dd class="whitespace-pre-line">{{ draft.reason }}</dd>
+        </dl>
+      </div>
+    {% endif %}
+
+    <div class="flex items-center justify-between">
+      <p class="text-xs text-slate-500" data-draft-team>
+        {% if draft.team %}Team on file: <strong>{{ draft.team }}</strong>{% else %}No prior step yet.{% endif %}
+      </p>
+      <button type="submit"
+              class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+        {% if current_step == "review" %}Submit request{% else %}Continue{% endif %}
+      </button>
+    </div>
+  {% endform %}
+</section>

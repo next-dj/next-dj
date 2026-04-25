@@ -1,0 +1,47 @@
+<section class="space-y-6">
+  <header class="flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-bold">Audit log</h1>
+      <p class="text-sm text-slate-600">
+        Backend rows ({{ totals.backend }}) and signal rows ({{ totals.signal }})
+        interleaved newest-first.
+      </p>
+    </div>
+    <form method="get" class="flex items-center gap-2 text-sm">
+      <label for="kind-filter" class="text-slate-600">Filter</label>
+      <select id="kind-filter"
+              name="kind"
+              onchange="this.form.submit()"
+              class="rounded border border-slate-300 bg-white px-2 py-1">
+        <option value="" {% if active_kind == "" %}selected{% endif %}>All kinds</option>
+        <option value="dispatched" {% if active_kind == "dispatched" %}selected{% endif %}>dispatched</option>
+        <option value="validation_failed" {% if active_kind == "validation_failed" %}selected{% endif %}>validation_failed</option>
+        <option value="request_started" {% if active_kind == "request_started" %}selected{% endif %}>request_started</option>
+      </select>
+    </form>
+  </header>
+
+  <div class="overflow-hidden rounded-xl border bg-white shadow-sm">
+    {% if entries %}
+      <table class="w-full text-left text-sm" data-audit-table>
+        <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th class="px-4 py-2">Time</th>
+            <th class="px-4 py-2">Source</th>
+            <th class="px-4 py-2">Kind</th>
+            <th class="px-4 py-2">Action</th>
+            <th class="px-4 py-2">Status</th>
+            <th class="px-4 py-2">Summary</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {% for entry in entries %}
+            {% component "audit_row" %}
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="p-6 text-sm text-slate-500">No audit rows yet. Submit a request to populate the log.</p>
+    {% endif %}
+  </div>
+</section>

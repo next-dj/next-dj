@@ -243,6 +243,14 @@ Troubleshooting
    <next.testing.override_component_backends>` which invalidates
    automatically via ``settings_reloaded``.
 
+**Tests that swap ``DEFAULT_FORM_ACTION_BACKENDS`` keep the old backend.**
+   The form-action manager intentionally does not subscribe to
+   ``settings_reloaded`` — actions register imperatively at import time and
+   a transparent rebuild would drop those registrations. Call
+   :func:`reset_form_actions <next.testing.reset_form_actions>` after
+   changing the setting to drop the cached backend list and pick the new
+   one up on next dispatch.
+
 **``render_page`` returns stale HTML after rewriting a ``page.py`` on disk.**
    ``page.render`` memoises composed template strings per file path. Call
    :func:`reset_page_cache <next.testing.reset_page_cache>` between

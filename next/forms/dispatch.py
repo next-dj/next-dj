@@ -363,6 +363,7 @@ def build_form_namespace_for_action(
     """Build the `SimpleNamespace(form=...)` used by `{% form %}` when lazy."""
     from .manager import form_action_manager  # noqa: PLC0415
 
+    form_action_manager._ensure_backends()
     for backend in form_action_manager._backends:
         meta = backend.get_meta(action_name)
         if meta is None:

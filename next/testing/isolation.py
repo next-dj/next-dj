@@ -13,8 +13,14 @@ from next.pages.manager import page
 
 
 def reset_form_actions() -> None:
-    """Clear every form action registry reachable from `form_action_manager`."""
-    form_action_manager.clear_registries()
+    """Drop cached form-action backends and reload them from settings.
+
+    Forms register imperatively at import time, so the manager does not
+    auto-rebuild on `settings_reloaded`. Tests that swap
+    `NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]` call this helper to
+    discard the stale backend list and pick the new one up on next use.
+    """
+    form_action_manager._reload_config()
 
 
 def reset_components() -> None:

@@ -1,0 +1,27 @@
+<tr data-audit-row data-source="{{ data_attrs.source }}" data-kind="{{ data_attrs.kind }}">
+  <td class="px-4 py-2 align-top font-mono text-xs text-slate-500">
+    {{ entry.created_at|date:"Y-m-d H:i:s" }}
+  </td>
+  <td class="px-4 py-2 align-top">
+    <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium {{ source_class }}">
+      {{ entry.source }}
+    </span>
+  </td>
+  <td class="px-4 py-2 align-top">
+    <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium {{ kind_class }}">
+      {{ entry.kind }}
+    </span>
+  </td>
+  <td class="px-4 py-2 align-top font-mono text-xs text-slate-700">
+    {{ entry.action_name }}
+  </td>
+  <td class="px-4 py-2 align-top text-xs text-slate-700">
+    {{ status_label }}
+  </td>
+  <td class="px-4 py-2 align-top text-xs text-slate-600">
+    <span>{{ summary }}</span>
+    {% if payload_keys %}
+      <span class="ml-2 text-slate-400">[{{ payload_keys|join:", " }}]</span>
+    {% endif %}
+  </td>
+</tr>

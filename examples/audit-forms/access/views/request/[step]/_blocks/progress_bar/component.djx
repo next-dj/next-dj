@@ -1,0 +1,22 @@
+<ol data-progress-bar
+    data-step-label="{{ step_label }}"
+    data-completed="{{ completed_count }}"
+    class="flex items-center gap-2 text-xs">
+  {% for s in progress_steps %}
+    <li class="flex flex-1 items-center gap-2">
+      {% if s.status == "done" %}
+        <span class="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 font-semibold text-emerald-700">✓</span>
+        <span class="text-slate-600">{{ s.label }}</span>
+      {% elif s.status == "current" %}
+        <span class="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 font-semibold text-white">{{ s.index }}</span>
+        <span class="font-semibold text-slate-900">{{ s.label }}</span>
+      {% else %}
+        <span class="flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 font-semibold text-slate-500">{{ s.index }}</span>
+        <span class="text-slate-400">{{ s.label }}</span>
+      {% endif %}
+      {% if not forloop.last %}
+        <span class="h-px flex-1 {% if s.status == "done" %}bg-emerald-200{% else %}bg-slate-200{% endif %}"></span>
+      {% endif %}
+    </li>
+  {% endfor %}
+</ol>
