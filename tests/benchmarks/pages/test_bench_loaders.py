@@ -11,6 +11,7 @@ from next.pages.loaders import (
     LayoutTemplateLoader,
     PythonTemplateLoader,
     _load_python_module_memo,
+    build_registered_loaders,
 )
 
 
@@ -103,3 +104,77 @@ class TestBenchLayoutLoader:
         page_path.write_text(_PY_SRC)
         loader = LayoutTemplateLoader()
         benchmark(loader._find_layout_files, page_path)
+
+
+class TestBenchLoaderChain:
+    """``TEMPLATE_LOADERS`` resolution and iteration through `can_load`."""
+
+    @pytest.mark.benchmark(group="pages.loaders")
+    def test_build_registered_loaders_warm(self, benchmark) -> None:
+        """Memoised lookup — should be O(1) after the first call."""
+        build_registered_loaders()
+        benchmark(build_registered_loaders)
+
+    @pytest.mark.benchmark(group="pages.loaders")
+    def test_chain_first_hit_wins(self, tmp_path: Path, benchmark) -> None:
+        """``.djx`` loader responds on the first try (common happy-path)."""
+        page_path = tmp_path / "page.py"
+        page_path.write_text(_PY_SRC)
+        (tmp_path / "template.djx").write_text("<h1>{{ name }}</h1>")
+        loaders = build_registered_loaders()
+
+        def run() -> None:
+            for loader in loaders:
+                if loader.can_load(page_path):
+                    loader.load_template(page_path)
+                    return
+
+        benchmark(run)
+
+    @pytest.mark.benchmark(group="pages.loaders")
+    def test_chain_miss_then_hit(self, tmp_path: Path, benchmark) -> None:
+        """No ``.djx`` sibling — chain must fall through to a layout."""
+        leaf = tmp_path / "d_0"
+        leaf.mkdir()
+        (leaf / "layout.djx").write_text("{% block template %}{% endblock template %}")
+        page_path = leaf / "page.py"
+        page_path.write_text(_PY_SRC)
+        loaders = build_registered_loaders()
+
+        def run() -> None:
+            for loader in loaders:
+                if loader.can_load(page_path):
+                    loader.load_template(page_path)
+                    return
+
+        benchmark(run)
+
+
+class TestBenchComposeLayoutHierarchy:
+    """``_compose_layout_hierarchy`` cost grows linearly with depth."""
+
+    @staticmethod
+    def _build_layouts(tmp_path: Path, depth: int) -> tuple[Path, list[Path]]:
+        leaf = tmp_path
+        layouts: list[Path] = []
+        for i in range(depth):
+            leaf = leaf / f"d_{i}"
+            leaf.mkdir()
+            layout = leaf / "layout.djx"
+            layout.write_text("{% block template %}{% endblock template %}")
+            layouts.append(layout)
+        page_path = leaf / "page.py"
+        page_path.write_text(_PY_SRC)
+        return page_path, layouts
+
+    @pytest.mark.benchmark(group="pages.loaders")
+    def test_compose_depth_3(self, tmp_path: Path, benchmark) -> None:
+        _page, layouts = self._build_layouts(tmp_path, 3)
+        loader = LayoutTemplateLoader()
+        benchmark(loader._compose_layout_hierarchy, "<body/>", layouts)
+
+    @pytest.mark.benchmark(group="pages.loaders")
+    def test_compose_depth_10(self, tmp_path: Path, benchmark) -> None:
+        _page, layouts = self._build_layouts(tmp_path, 10)
+        loader = LayoutTemplateLoader()
+        benchmark(loader._compose_layout_hierarchy, "<body/>", layouts)

@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from next.pages import Page
-
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from next.pages import Page
 
 
 _SIMPLE_TEMPLATE = "<h1>{{ title }}</h1>"

@@ -65,14 +65,97 @@ The subsystem's factory imports ``BACKEND`` on startup, instantiates the class, 
 Worked examples by subsystem
 ----------------------------
 
-All examples below live in the ``examples/`` directory of the source repository. Each one showcases the extension model relevant to its subsystem.
+The snippets below each implement one of the five mechanisms. The
+``examples/markdown-blog`` and ``examples/feature-flags`` projects in the
+source repository contain working custom ``TemplateLoader`` and
+``RegisteredParameterProvider`` implementations, while the other subsystems use
+inline examples here.
 
-* **Custom RouterBackend** in ``examples/file-routing/myapp/custom_router.py``. ``TaggedFileRouterBackend`` extends ``FileRouterBackend`` and appends a diagnostic URL to the generated patterns.
-* **Custom ComponentsBackend** in ``examples/components/myapp/custom_backend.py``. ``CountingFileComponentsBackend`` extends ``FileComponentsBackend`` to record every component lookup.
-* **Custom FormActionBackend** in ``examples/forms/todos/custom_backend.py``. ``AuditedRegistryFormActionBackend`` extends ``RegistryFormActionBackend`` and keeps an audit log of dispatched UIDs.
-* **Custom TemplateLoader** in ``examples/pages/catalog/custom_loader.py``. ``InMemoryTemplateLoader`` resolves page source from a ``{path -> source}`` mapping.
-* **Custom RegisteredParameterProvider** in ``examples/layouts/layouts/custom_provider.py``. ``LayoutStampProvider`` fills any parameter named ``layout_stamp`` with a fixed value.
-* **Custom StaticBackend.** See the dedicated section in :doc:`static-assets` and the ``AttributedStaticFilesBackend`` in ``examples/static/myapp/custom_backend.py``.
+**Custom RouterBackend.** Extend ``FileRouterBackend`` and append an
+extra URL pattern after the filesystem walk.
+
+.. code-block:: python
+
+   from django.urls import path
+   from django.http import JsonResponse
+   from next.urls import FileRouterBackend
+
+
+   class TaggedFileRouterBackend(FileRouterBackend):
+       """Append a /_router-info/ diagnostic URL after the filesystem patterns."""
+
+       def get_url_patterns(self):
+           patterns = list(super().get_url_patterns())
+           patterns.append(
+               path("_router-info/", lambda r: JsonResponse({"count": len(patterns)})),
+           )
+           return patterns
+
+**Custom ComponentsBackend.** Subclass ``FileComponentsBackend`` to
+observe every component lookup.
+
+.. code-block:: python
+
+   from collections import Counter
+   from next.components import FileComponentsBackend
+
+
+   class CountingFileComponentsBackend(FileComponentsBackend):
+       """Record how many times each component is resolved."""
+
+       def __init__(self, *args, **kwargs):
+           super().__init__(*args, **kwargs)
+           self.lookups: Counter[str] = Counter()
+
+       def resolve(self, name, *args, **kwargs):
+           self.lookups[name] += 1
+           return super().resolve(name, *args, **kwargs)
+
+**Custom FormActionBackend.** Extend ``RegistryFormActionBackend`` and
+keep an audit log of dispatched UIDs.
+
+.. code-block:: python
+
+   import logging
+   from next.forms import RegistryFormActionBackend
+
+
+   class AuditedRegistryFormActionBackend(RegistryFormActionBackend):
+       """Log every dispatched UID for audit trails."""
+
+       _log = logging.getLogger("forms.audit")
+
+       def dispatch(self, uid, request, *args, **kwargs):
+           self._log.info("form action dispatched: uid=%s path=%s", uid, request.path)
+           return super().dispatch(uid, request, *args, **kwargs)
+
+**Custom TemplateLoader.** See ``examples/markdown-blog/blog/loaders.py``
+for a real ``MarkdownTemplateLoader`` that reads a sibling
+``template.md`` and renders it as the page body. The pattern:
+``can_load(file_path) -> bool``, ``load_template(file_path) -> str | None``,
+``source_path(file_path) -> Path | None`` for stale-cache detection.
+
+**Custom RegisteredParameterProvider.** See
+``examples/feature-flags/flags/providers.py`` (``FlagProvider`` /
+``DFlag[T]``) and ``examples/shortener/shortener/providers.py``
+(``LinkProvider`` / ``DLink[T]``). Both implement ``can_handle`` /
+``resolve`` against a ``ResolutionContext`` and use the
+``DDependencyBase`` marker to drive annotation-based injection.
+
+**Custom StaticBackend.** See :doc:`static-assets` for the static-asset
+pipeline. The minimal contract:
+
+.. code-block:: python
+
+   from next.static import StaticBackend
+
+
+   class AttributedStaticFilesBackend(StaticBackend):
+       """Add a `data-served-by` attribute to every asset URL this backend owns."""
+
+       def url_for(self, asset):
+           base = super().url_for(asset)
+           return f"{base}?served-by=attributed"
 
 Signals as an extension point
 -----------------------------

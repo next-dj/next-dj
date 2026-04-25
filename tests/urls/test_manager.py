@@ -6,8 +6,10 @@ import pytest
 from django.test import override_settings
 
 from next.conf import next_framework_settings
+from next.pages import page
 from next.urls import (
     FileRouterBackend,
+    RouterBackend,
     RouterFactory,
     RouterManager,
     router_manager,
@@ -189,48 +191,55 @@ class TestGlobalInstances:
             assert urls == []
 
     @pytest.mark.parametrize(
-        ("test_case", "file_content", "expected_result"),
+        ("test_case", "file_content"),
         [
             (
                 "without_args_parameter",
                 "def render(request, **kwargs):\n    return 'success'",
-                "mocked success",
             ),
             (
                 "args_parameter_not_in_kwargs",
                 "def render(request, **kwargs):\n    return 'success'",
-                "mocked success",
-            ),
-            (
-                "view_returns_kwargs",
-                "def render(request, **kwargs):\n    return kwargs",
-                "mocked kwargs",
             ),
         ],
-        ids=["without_args_parameter", "args_not_in_kwargs", "view_returns_kwargs"],
+        ids=["without_args_parameter", "args_not_in_kwargs"],
     )
-    def test_view_wrapper_scenarios(
-        self, tmp_path, test_case, file_content, expected_result
-    ) -> None:
-        """View callback behavior when args is absent or kwargs vary."""
-        from next.pages import page
-
+    def test_view_wrapper_scenarios(self, tmp_path, test_case, file_content) -> None:
+        """View callback behavior when `render()` returns a string body."""
         router = FileRouterBackend()
         render_module_path = tmp_path / "page.py"
         render_module_path.write_text(file_content)
 
-        with patch("next.urls.backends.page.render", return_value=expected_result):
-            pattern = page.create_url_pattern(
-                "test/[[args]]",
-                render_module_path,
-                router._url_parser,
-            )
-            assert pattern is not None
+        pattern = page.create_url_pattern(
+            "test/[[args]]",
+            render_module_path,
+            router._url_parser,
+        )
+        assert pattern is not None
 
-            if hasattr(pattern, "callback"):
-                view_func = pattern.callback
-                result = view_func(Mock(), other_param="value")
-                assert result is not None
+        view_func = pattern.callback
+        response = view_func(Mock(), other_param="value")
+        assert response.status_code == 200
+        assert response.content == b"success"
+
+    def test_view_wrapper_render_returning_non_str_raises(self, tmp_path) -> None:
+        """`render()` returning a dict (or any non-str non-HttpResponse) raises TypeError."""
+        router = FileRouterBackend()
+        render_module_path = tmp_path / "page.py"
+        render_module_path.write_text(
+            "def render(request, **kwargs):\n    return kwargs"
+        )
+
+        pattern = page.create_url_pattern(
+            "test/[[args]]",
+            render_module_path,
+            router._url_parser,
+        )
+        assert pattern is not None
+
+        view_func = pattern.callback
+        with pytest.raises(TypeError, match="must return str or HttpResponse"):
+            view_func(Mock(), other_param="value")
 
     def test_generate_root_urls_returns_empty_when_base_dir_none(self) -> None:
         """BASE_DIR None yields no root URLs."""
@@ -249,7 +258,6 @@ class TestGlobalInstances:
 
     def test_create_backend_real_execution(self) -> None:
         """Registered custom backend instantiates without pages_dir."""
-        from next.urls import RouterBackend
 
         class CustomBackend(RouterBackend):
             def generate_urls(self):
@@ -341,8 +349,6 @@ class TestGlobalInstances:
 
     def test_create_url_pattern_with_template_attribute(self) -> None:
         """Template only module gets a named pattern and callback."""
-        from next.pages import page
-
         router = FileRouterBackend()
 
         with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
@@ -357,19 +363,10 @@ class TestGlobalInstances:
             assert pattern.name == "page_test"
 
     def test_create_url_pattern_template_view_function_without_args(self) -> None:
-        """Template view forwards kwargs to render when URL has no [[args]]."""
-        from next.pages import page
-
+        """Template view renders the module's `template` attribute with kwargs."""
         router = FileRouterBackend()
 
-        with (
-            named_temp_py('template = "Hello {{ name }}!"') as temp_file,
-            patch("next.urls.backends.page.register_template"),
-            patch(
-                "next.urls.backends.page.render",
-                return_value="Hello World!",
-            ) as mock_render,
-        ):
+        with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
             pattern = page.create_url_pattern(
                 "test",
                 temp_file,
@@ -377,33 +374,18 @@ class TestGlobalInstances:
             )
 
             view_func = pattern.callback
+            response = view_func(Mock(), name="John")
 
-            mock_request = Mock()
-            result = view_func(mock_request, name="John")
-
-            mock_render.assert_called_once_with(
-                temp_file,
-                mock_request,
-                name="John",
-            )
-            assert result is not None
+            assert response.status_code == 200
+            assert response.content == b"Hello John!"
 
     def test_create_url_pattern_template_view_function_args_not_in_parameters(
         self,
     ) -> None:
-        """Args passed as keyword are forwarded without path splitting."""
-        from next.pages import page
-
+        """Args passed as keyword flow through to the rendered template."""
         router = FileRouterBackend()
 
-        with (
-            named_temp_py('template = "Hello {{ name }}!"') as temp_file,
-            patch("next.urls.backends.page.register_template"),
-            patch(
-                "next.urls.backends.page.render",
-                return_value="Hello World!",
-            ) as mock_render,
-        ):
+        with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
             pattern = page.create_url_pattern(
                 "test",
                 temp_file,
@@ -411,31 +393,16 @@ class TestGlobalInstances:
             )
 
             view_func = pattern.callback
+            response = view_func(Mock(), args="arg1/arg2/arg3", name="Mia")
 
-            mock_request = Mock()
-            result = view_func(mock_request, args="arg1/arg2/arg3")
-
-            mock_render.assert_called_once_with(
-                temp_file,
-                mock_request,
-                args="arg1/arg2/arg3",
-            )
-            assert result is not None
+            assert response.status_code == 200
+            assert response.content == b"Hello Mia!"
 
     def test_create_url_pattern_template_view_function_args_not_in_kwargs(self) -> None:
-        """[[args]] in path without args in call still calls render with given kwargs."""
-        from next.pages import page
-
+        """[[args]] in path without an `args` call-kwarg still renders the template."""
         router = FileRouterBackend()
 
-        with (
-            named_temp_py('template = "Hello {{ name }}!"') as temp_file,
-            patch("next.urls.backends.page.register_template"),
-            patch(
-                "next.urls.backends.page.render",
-                return_value="Hello World!",
-            ) as mock_render,
-        ):
+        with named_temp_py('template = "Hello {{ name }}!"') as temp_file:
             pattern = page.create_url_pattern(
                 "test/[[args]]",
                 temp_file,
@@ -443,21 +410,13 @@ class TestGlobalInstances:
             )
 
             view_func = pattern.callback
+            response = view_func(Mock(), name="John")
 
-            mock_request = Mock()
-            result = view_func(mock_request, name="John")
-
-            mock_render.assert_called_once_with(
-                temp_file,
-                mock_request,
-                name="John",
-            )
-            assert result is not None
+            assert response.status_code == 200
+            assert response.content == b"Hello John!"
 
     def test_create_url_pattern_no_template_no_render(self) -> None:
         """Neither template nor render returns no pattern."""
-        from next.pages import page
-
         router = FileRouterBackend()
 
         with named_temp_py('some_variable = "test"') as temp_file:
@@ -466,8 +425,6 @@ class TestGlobalInstances:
 
     def test_create_url_pattern_spec_from_file_location_returns_none(self) -> None:
         """Missing import spec yields no pattern."""
-        from next.pages import page
-
         router = FileRouterBackend()
 
         with patch("importlib.util.spec_from_file_location", return_value=None):
@@ -480,8 +437,6 @@ class TestGlobalInstances:
 
     def test_create_url_pattern_spec_loader_is_none(self) -> None:
         """Spec with no loader returns no pattern."""
-        from next.pages import page
-
         router = FileRouterBackend()
 
         mock_spec = Mock()

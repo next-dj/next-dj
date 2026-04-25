@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from django.http import HttpRequest
+from typing import TYPE_CHECKING
 
 from next.deps import Depends, resolver
 from next.deps.cache import _IN_PROGRESS, DependencyCache
+
+
+if TYPE_CHECKING:
+    from django.http import HttpRequest
 
 
 class TestDependencyCache:

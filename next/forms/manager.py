@@ -49,6 +49,17 @@ class FormActionManager:
         """Forward registration to the first backend."""
         self._backends[0].register_action(name, handler, options=options)
 
+    def clear_registries(self) -> None:
+        """Clear every backend that exposes a `clear_registry` method.
+
+        Intended for test isolation. Backends that do not implement
+        `clear_registry` are skipped silently.
+        """
+        for backend in self._backends:
+            clear = getattr(backend, "clear_registry", None)
+            if callable(clear):
+                clear()
+
     def get_action_url(self, action_name: str) -> str:
         """Return the reverse URL from the first backend that knows `action_name`."""
         for backend in self._backends:

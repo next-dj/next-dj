@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
-from next.components import ComponentInfo
 from next.static import (
     AssetDiscovery,
     StaticCollector,
     StaticFilesBackend,
+    discovery as discovery_mod,
 )
 from next.static.discovery import (
     BackendProvider,
@@ -22,6 +20,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    import pytest
+
+    from next.components import ComponentInfo
     from next.static import StaticBackend
 
 
@@ -276,8 +277,6 @@ class TestAssetDiscoveryModuleLists:
         monkeypatch,
     ) -> None:
         """Both module-list and layout-dir caches drop the oldest key past the limit."""
-        from next.static import discovery as discovery_mod
-
         monkeypatch.setattr(discovery_mod, "_MODULE_LIST_CACHE_MAX_SIZE", 1)
         monkeypatch.setattr(discovery_mod, "_LAYOUT_DIR_CACHE_MAX_SIZE", 1)
 

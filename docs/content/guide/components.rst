@@ -273,11 +273,11 @@ Template syntax
 Props are literal strings
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Everything after the component name on ``{% component %}`` / ``{% #component %}`` is parsed as ``name="value"`` tokens with **static** string values. You cannot pass a template variable there (for example ``title={{ post.title }}`` is not supported). Pass dynamic page data through **slots**, nested template content that the component template renders with ``{% #set_slot %}``, or through variables added by ``@context`` in ``component.py``. The ``examples/components/`` project uses slots for list-driven content (see :ref:`components-example-project`).
+Everything after the component name on ``{% component %}`` / ``{% #component %}`` is parsed as ``name="value"`` tokens with **static** string values. You cannot pass a template variable there (for example ``title={{ post.title }}`` is not supported). Pass dynamic page data through **slots**, nested template content that the component template renders with ``{% #set_slot %}``, or through variables added by ``@context`` in ``component.py``. The ``examples/shortener/shortener/routes/_widgets/link_card/`` component uses slots for list-driven content (see :ref:`components-example-project`).
 
 **Invoking a component**
 
-- **Void** (no inner markup): ``{% component "card" title="Post 1" description="First post" %}`` — the line ends the tag; there is **no** closing tag.
+- **Void** (no inner markup): ``{% component "card" title="Post 1" description="First post" %}`` — the line ends the tag and **no** closing tag is needed.
 - **Block** (slots or nested components): open with ``{% #component "name" ... %}`` and close with ``{% /component %}``. Inside, use:
 
   - ``{% #slot "name" %}`` … ``{% /slot %}`` for slot bodies with markup, or
@@ -341,7 +341,12 @@ Checks
 Example project
 ----------------
 
-The ``examples/components/`` project shows a realistic setup: composite **header** with ``@context("user")`` and navigation, **footer** as a simple ``.djx`` file, **post cards** with ``{% #component %}`` / ``{% #slot %}`` inside a loop, a reusable **card** component, **recommendations** with ``@context``, and root versus branch-scoped ``_components``. See its ``README.md`` and ``tests.py`` in the repository.
+The ``examples/shortener/shortener/routes/_widgets/`` and
+``examples/feature-flags/flags/panels/_chunks/`` directories show realistic
+setups: a ``link_card`` component with ``@context``, a reusable ``nav_link``
+component with active-state detection, and a ``feature_guard`` component
+that hides content based on a flag lookup. See the per-example
+``README.md`` and the ``tests/`` folders.
 
 Extension points
 ----------------
@@ -373,4 +378,4 @@ The signals emitted by :mod:`next.components.signals` let external code observe 
 * ``component_backend_loaded`` fires after ``ComponentsFactory`` instantiates a backend.
 * ``component_rendered`` fires after a component finishes rendering.
 
-A worked example lives in ``examples/components/myapp/custom_backend.py``. See :doc:`extending` for the overall extension model.
+An inline ``CountingFileComponentsBackend`` snippet is in :doc:`extending` (section "Worked examples by subsystem").

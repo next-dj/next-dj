@@ -73,10 +73,10 @@ test-examples: # run tests for examples with coverage
 	for example_dir in examples/*/; do \
 		if [ -d "$$example_dir" ] && [ -f "$$example_dir/manage.py" ]; then \
 			if [ -d "$$example_dir/tests" ]; then \
-				cd "$$example_dir" && $(PYTEST) tests/ -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing; \
+				cd "$$example_dir" && $(PYTEST) tests/ -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
 				cd - > /dev/null; \
 			elif [ -f "$$example_dir/tests.py" ]; then \
-				cd "$$example_dir" && $(PYTEST) tests.py -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing; \
+				cd "$$example_dir" && $(PYTEST) tests.py -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
 				cd - > /dev/null; \
 			fi; \
 		fi; \

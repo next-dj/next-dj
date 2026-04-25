@@ -5,6 +5,11 @@ from typing import Any
 import pytest
 
 from next.components import ComponentInfo
+from next.components.signals import (
+    component_backend_loaded,
+    component_registered,
+    component_rendered,
+)
 
 
 @pytest.fixture()
@@ -48,8 +53,6 @@ def component_info_factory(tmp_path: Path) -> Callable[..., ComponentInfo]:
 @pytest.fixture()
 def capture_component_registered() -> Generator[list[dict[str, Any]], None, None]:
     """Capture ``component_registered`` signal events."""
-    from next.components.signals import component_registered
-
     events: list[dict[str, Any]] = []
 
     def _listener(sender: object, **kwargs: object) -> None:
@@ -65,8 +68,6 @@ def capture_component_registered() -> Generator[list[dict[str, Any]], None, None
 @pytest.fixture()
 def capture_component_backend_loaded() -> Generator[list[dict[str, Any]], None, None]:
     """Capture ``component_backend_loaded`` signal events."""
-    from next.components.signals import component_backend_loaded
-
     events: list[dict[str, Any]] = []
 
     def _listener(sender: object, **kwargs: object) -> None:
@@ -82,8 +83,6 @@ def capture_component_backend_loaded() -> Generator[list[dict[str, Any]], None, 
 @pytest.fixture()
 def capture_component_rendered() -> Generator[list[dict[str, Any]], None, None]:
     """Capture ``component_rendered`` signal events."""
-    from next.components.signals import component_rendered
-
     events: list[dict[str, Any]] = []
 
     def _listener(sender: object, **kwargs: object) -> None:

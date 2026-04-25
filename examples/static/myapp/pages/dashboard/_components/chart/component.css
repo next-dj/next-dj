@@ -1,7 +1,0 @@
-.chart {
-    border-left: 0.25rem solid var(--bs-info);
-}
-
-.chart-canvas {
-    max-height: 260px;
-}

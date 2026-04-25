@@ -2,16 +2,21 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Never
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django.http import HttpRequest
 from django.test import override_settings
 
+import next.pages.loaders as loaders_module
 from next.conf import next_framework_settings
 from next.pages.loaders import (
     DjxTemplateLoader,
     LayoutTemplateLoader,
+    PythonTemplateLoader,
+    TemplateLoader,
+    build_registered_loaders,
 )
 from next.pages.processors import _get_context_processors, _import_context_processor
 from tests.support import (
@@ -220,7 +225,7 @@ def get_landing_data(*args, **kwargs):
         page_instance._context_manager.register_context(
             page_file,
             "landing",
-            lambda *args, **kwargs: {
+            lambda *_args, **_kwargs: {
                 "title": "Test Title",
                 "description": "Test Description",
             },
@@ -997,8 +1002,6 @@ class TestContextProcessors:
 
     def test_render_with_context_processor_error(self, page_instance, tmp_path) -> None:
         """Test render method with context processor that raises an exception."""
-        from typing import Never
-
         page_file = tmp_path / "page.py"
         template_str = "<h1>{{ title }}</h1><p>{{ good_var }}</p>"
         page_instance.register_template(page_file, template_str)
@@ -1034,10 +1037,6 @@ class TestContextProcessors:
         self, page_instance, tmp_path
     ) -> None:
         """`STRICT_CONTEXT=True` turns processor errors into hard failures."""
-        from typing import Never
-
-        import pytest
-
         page_file = tmp_path / "page.py"
         page_instance.register_template(page_file, "<h1>{{ title }}</h1>")
 
@@ -1085,3 +1084,108 @@ class TestContextProcessors:
 
             assert "Test Title" in result
             assert "good_value" in result
+
+
+class TestTemplateLoaderContract:
+    """`TemplateLoader` exposes `source_name` and a default `source_path`."""
+
+    def test_built_in_source_names(self) -> None:
+        assert DjxTemplateLoader.source_name == "template.djx"
+        assert PythonTemplateLoader.source_name == "template"
+        assert LayoutTemplateLoader.source_name == ""
+
+    def test_djx_source_path_returns_sibling_when_exists(self, tmp_path: Path) -> None:
+        page_file = tmp_path / "page.py"
+        djx = tmp_path / "template.djx"
+        djx.write_text("<h1>hi</h1>")
+        assert DjxTemplateLoader().source_path(page_file) == djx
+
+    def test_djx_source_path_returns_none_when_missing(self, tmp_path: Path) -> None:
+        assert DjxTemplateLoader().source_path(tmp_path / "page.py") is None
+
+    def test_default_source_path_is_none(self, tmp_path: Path) -> None:
+        """Custom loaders that do not back a file return None by default."""
+
+        class Stub(TemplateLoader):
+            source_name = "stub"
+
+            def can_load(self, _: Path) -> bool:
+                return False
+
+            def load_template(self, _: Path) -> str | None:
+                return None
+
+        assert Stub().source_path(tmp_path / "page.py") is None
+
+
+class TestBuildRegisteredLoaders:
+    """`build_registered_loaders` reads `TEMPLATE_LOADERS` and caches."""
+
+    def _reset_cache(self) -> None:
+
+        loaders_module._REGISTERED_LOADERS_CACHE = None
+
+    def setup_method(self) -> None:
+        self._reset_cache()
+
+    def teardown_method(self) -> None:
+        self._reset_cache()
+
+    def test_default_list_loads_djx(self) -> None:
+        loaders = build_registered_loaders()
+        assert [type(loader) for loader in loaders] == [DjxTemplateLoader]
+
+    @override_settings(
+        NEXT_FRAMEWORK={
+            "TEMPLATE_LOADERS": [
+                "next.pages.loaders.DjxTemplateLoader",
+                "next.pages.loaders.PythonTemplateLoader",
+            ],
+        }
+    )
+    def test_user_list_replaces_default(self) -> None:
+        next_framework_settings.reload()
+        self._reset_cache()
+        loaders = build_registered_loaders()
+        assert [type(loader) for loader in loaders] == [
+            DjxTemplateLoader,
+            PythonTemplateLoader,
+        ]
+
+    @override_settings(
+        NEXT_FRAMEWORK={
+            "TEMPLATE_LOADERS": [
+                123,
+                "does.not.exist.Loader",
+                "next.pages.loaders.LayoutManager",
+                "next.pages.loaders.DjxTemplateLoader",
+            ],
+        }
+    )
+    def test_invalid_entries_are_skipped(self) -> None:
+        next_framework_settings.reload()
+        self._reset_cache()
+        loaders = build_registered_loaders()
+        assert [type(loader) for loader in loaders] == [DjxTemplateLoader]
+
+    def test_settings_reload_resets_cache(self) -> None:
+        build_registered_loaders()
+
+        assert loaders_module._REGISTERED_LOADERS_CACHE is not None
+        next_framework_settings.reload()
+        assert loaders_module._REGISTERED_LOADERS_CACHE is None
+
+    @override_settings(
+        NEXT_FRAMEWORK={
+            "TEMPLATE_LOADERS": [
+                "next.pages.loaders.DjxTemplateLoader",
+                "next.pages.loaders.DjxTemplateLoader",
+            ],
+        }
+    )
+    def test_duplicate_entries_registered_once(self) -> None:
+        """A loader class appears at most once even when listed multiple times."""
+        next_framework_settings.reload()
+        self._reset_cache()
+        loaders = build_registered_loaders()
+        assert [type(loader) for loader in loaders] == [DjxTemplateLoader]

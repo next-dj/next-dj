@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.contrib.staticfiles.storage import staticfiles_storage
 
+from next.conf import import_class_cached
+
 from .assets import StaticNamespace, default_kinds
 from .signals import backend_loaded
 
@@ -152,10 +154,6 @@ class StaticsFactory:
         Raises `TypeError` when the configured class is not a subclass
         of `StaticBackend`.
         """
-        # Deferred import avoids a module-load cycle with next.conf, which
-        # reloads this package at runtime via importlib.
-        from next.conf import import_class_cached  # noqa: PLC0415
-
         backend_path = config.get("BACKEND", cls.DEFAULT_BACKEND)
         backend_class = import_class_cached(backend_path)
         if not isinstance(backend_class, type) or not issubclass(

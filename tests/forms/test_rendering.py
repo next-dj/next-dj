@@ -11,7 +11,6 @@ from django.template import Context, TemplateSyntaxError
 from next.forms import (
     RegistryFormActionBackend,
     form_action_manager,
-    page,
 )
 from next.templatetags.forms import _parse_form_tag_args
 from tests.forms.actions import SimpleForm
@@ -73,43 +72,42 @@ class TestRenderFormFragment:
         assert isinstance(html, str)
 
     @pytest.mark.parametrize(
-        ("registry_template", "output_mode"),
+        ("template_body", "output_mode"),
         [
             ("{{ form.name }}", "form_fields"),
             ("{{ current_template_path }}", "path"),
         ],
         ids=("form_fields", "current_template_path"),
     )
-    def test_renders_from_registry_template(
-        self, mock_http_request, registry_template: str, output_mode: str
+    def test_renders_from_template_djx(
+        self,
+        mock_http_request,
+        tmp_path,
+        template_body: str,
+        output_mode: str,
     ) -> None:
-        """Render fragment using template stored in page registry for ``page_file_path``."""
+        """Render fragment reading the sibling template.djx of ``page_file_path``."""
         request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "a"})
         backend = form_action_manager.default_backend
         assert isinstance(backend, RegistryFormActionBackend)
-        file_path = PAGE_MODULE_FOR_FORM_TESTS
-        original_registry = page._template_registry.copy()
-        page._template_registry[file_path] = registry_template
-        try:
-            html = backend.render_form_fragment(
-                request,
-                "test_submit",
-                form,
-                template_fragment=None,
-                page_file_path=file_path,
-            )
-            if output_mode == "path":
-                template_djx = file_path.parent / "template.djx"
-                expected_path = (
-                    str(template_djx) if template_djx.is_file() else str(file_path)
-                )
-                assert expected_path in html
-            else:
-                assert "a" in html or "name" in html
-        finally:
-            page._template_registry.clear()
-            page._template_registry.update(original_registry)
+
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        template_djx = tmp_path / "template.djx"
+        template_djx.write_text(template_body)
+
+        html = backend.render_form_fragment(
+            request,
+            "test_submit",
+            form,
+            template_fragment=None,
+            page_file_path=page_file,
+        )
+        if output_mode == "path":
+            assert str(template_djx) in html
+        else:
+            assert "name" in html
 
 
 class TestFormTagParse:

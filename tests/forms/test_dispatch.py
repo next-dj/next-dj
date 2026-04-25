@@ -4,15 +4,15 @@ from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django import forms
+from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 
 from next.forms import (
     Form,
+    FormActionDispatch,
     FormActionOptions,
     ModelForm,
     RegistryFormActionBackend,
-    _FormActionDispatch,
     _get_caller_path,
     form_action_manager,
     page,
@@ -25,7 +25,7 @@ PAGE_MODULE_FOR_FORM_TESTS = (
 
 
 class TestFormActionDispatch:
-    """_FormActionDispatch: _get_caller_path, context_func, ensure_http_response."""
+    """FormActionDispatch: _get_caller_path, context_func, ensure_http_response."""
 
     def test_get_caller_path_raises_when_no_frame(self) -> None:
         """_get_caller_path raises when frame is missing."""
@@ -52,7 +52,7 @@ class TestFormActionDispatch:
         self, response_val, kwargs, expected_status, assert_extra
     ) -> None:
         """ensure_http_response: None, str, redirect-like, unknown, empty url."""
-        resp = _FormActionDispatch.ensure_http_response(response_val, **kwargs)
+        resp = FormActionDispatch.ensure_http_response(response_val, **kwargs)
         assert resp.status_code == expected_status
         if assert_extra is not None:
             assert assert_extra(resp)
@@ -166,16 +166,16 @@ class TestDispatchViaClient:
 
 
 class TestFormDispatchRenderFragmentBranches:
-    """``_FormActionDispatch.render_form_fragment`` fallbacks."""
+    """``FormActionDispatch.render_form_fragment`` fallbacks."""
 
     def test_unknown_action_uses_form_as_p(self, mock_http_request) -> None:
         """Unknown action meta falls back to ``form.as_p()``."""
         backend = RegistryFormActionBackend()
 
         class F(Form):
-            name = forms.CharField(max_length=10)
+            name = django_forms.CharField(max_length=10)
 
-        def h(_request: HttpRequest, _form: F) -> HttpResponseRedirect:
+        def h(request: HttpRequest, form: F) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(
@@ -183,7 +183,7 @@ class TestFormDispatchRenderFragmentBranches:
         )
         req = mock_http_request(method="GET")
         form = F()
-        html = _FormActionDispatch.render_form_fragment(
+        html = FormActionDispatch.render_form_fragment(
             backend,
             req,
             "missing_action",
@@ -193,14 +193,16 @@ class TestFormDispatchRenderFragmentBranches:
         )
         assert html == form.as_p()
 
-    def test_empty_template_string_uses_form_as_p(self, mock_http_request) -> None:
-        """Empty template string in registry falls back to ``form.as_p()``."""
+    def test_empty_template_body_uses_form_as_p(
+        self, mock_http_request, tmp_path
+    ) -> None:
+        """A page.py with no body source and no ancestor layout falls back to ``form.as_p()``."""
         backend = RegistryFormActionBackend()
 
         class F(Form):
-            name = forms.CharField(max_length=10)
+            name = django_forms.CharField(max_length=10)
 
-        def h(_request: HttpRequest, _form: F) -> HttpResponseRedirect:
+        def h(request: HttpRequest, form: F) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(
@@ -208,21 +210,18 @@ class TestFormDispatchRenderFragmentBranches:
         )
         req = mock_http_request(method="GET")
         form = F()
-        original = page._template_registry.copy()
-        page._template_registry[PAGE_MODULE_FOR_FORM_TESTS] = ""
-        try:
-            html = _FormActionDispatch.render_form_fragment(
-                backend,
-                req,
-                "frag",
-                form,
-                None,
-                PAGE_MODULE_FOR_FORM_TESTS,
-            )
-            assert html == form.as_p()
-        finally:
-            page._template_registry.clear()
-            page._template_registry.update(original)
+        blank_page = tmp_path / "page.py"
+        blank_page.write_text("")
+
+        html = FormActionDispatch.render_form_fragment(
+            backend,
+            req,
+            "frag",
+            form,
+            None,
+            blank_page,
+        )
+        assert html == form.as_p()
 
     def test_dispatch_with_modelform_returning_instance(
         self, mock_http_request
@@ -236,14 +235,14 @@ class TestFormDispatchRenderFragmentBranches:
         mock_model._meta.get_fields.return_value = []
 
         class TestModelForm(ModelForm):
-            name = forms.CharField(max_length=100)
+            name = django_forms.CharField(max_length=100)
 
             class Meta:
                 model = mock_model
                 fields: ClassVar[list[str]] = ["name"]
 
             @classmethod
-            def get_initial(cls, _request: HttpRequest) -> object:
+            def get_initial(cls, request: HttpRequest) -> object:
                 # Return a mock model instance
                 mock_instance = MagicMock()
                 mock_instance._meta = MagicMock()
@@ -251,7 +250,7 @@ class TestFormDispatchRenderFragmentBranches:
                 return mock_instance
 
         def handler(
-            _request: HttpRequest, _form: TestModelForm, **_kwargs: object
+            request: HttpRequest, form: TestModelForm, **_kwargs: object
         ) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
@@ -267,7 +266,7 @@ class TestFormDispatchRenderFragmentBranches:
         assert meta is not None
 
         # Call dispatch - this will create form with instance (line 381)
-        response = _FormActionDispatch.dispatch(backend, request, "test_action", meta)
+        response = FormActionDispatch.dispatch(backend, request, "test_action", meta)
         # Should succeed
         assert response.status_code == 302
 
@@ -283,10 +282,10 @@ class TestFormDispatchRenderFragmentBranches:
         backend = RegistryFormActionBackend()
 
         class TestForm(Form):
-            name = forms.CharField(max_length=100)
+            name = django_forms.CharField(max_length=100)
 
         def handler(
-            _request: HttpRequest, _form: TestForm, **_kwargs: object
+            request: HttpRequest, form: TestForm, **_kwargs: object
         ) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
@@ -304,7 +303,7 @@ class TestFormDispatchRenderFragmentBranches:
         meta = backend.get_meta("test_action")
         assert meta is not None
 
-        response = _FormActionDispatch.dispatch(backend, request, "test_action", meta)
+        response = FormActionDispatch.dispatch(backend, request, "test_action", meta)
         assert response.status_code == 302
 
     @pytest.mark.parametrize(
@@ -319,9 +318,9 @@ class TestFormDispatchRenderFragmentBranches:
         backend = RegistryFormActionBackend()
 
         class TestForm(Form):
-            name = forms.CharField(max_length=100)
+            name = django_forms.CharField(max_length=100)
 
-        def handler(_request: HttpRequest, _form: TestForm) -> HttpResponseRedirect:
+        def handler(request: HttpRequest, form: TestForm) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(
@@ -356,13 +355,11 @@ class TestFormDispatchRenderFragmentBranches:
         backend = RegistryFormActionBackend()
 
         # Create a form class that doesn't inherit from BaseForm
-        from django import forms as django_forms
-
         class CustomDjangoForm(django_forms.Form):
             name = django_forms.CharField(max_length=100)
 
         def handler(
-            _request: HttpRequest, _form: CustomDjangoForm
+            request: HttpRequest, form: CustomDjangoForm
         ) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
@@ -381,7 +378,7 @@ class TestFormDispatchRenderFragmentBranches:
 
         # Real call to dispatch - this will trigger the error
         with pytest.raises(TypeError, match="must have get_initial method"):
-            _FormActionDispatch.dispatch(backend, request, "test_action", meta)
+            FormActionDispatch.dispatch(backend, request, "test_action", meta)
 
     def test_dispatch_with_form_returning_instance_but_not_modelform(
         self, mock_http_request
@@ -390,17 +387,17 @@ class TestFormDispatchRenderFragmentBranches:
         backend = RegistryFormActionBackend()
 
         class CustomForm(Form):
-            name = forms.CharField(max_length=100)
+            name = django_forms.CharField(max_length=100)
 
             @classmethod
-            def get_initial(cls, _request: HttpRequest) -> object:
+            def get_initial(cls, request: HttpRequest) -> object:
                 # Return a mock model instance
                 mock_instance = MagicMock()
                 mock_instance._meta = MagicMock()
                 mock_instance._meta.model = MagicMock()
                 return mock_instance
 
-        def handler(_request: HttpRequest, _form: CustomForm) -> HttpResponseRedirect:
+        def handler(request: HttpRequest, form: CustomForm) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(
@@ -418,4 +415,4 @@ class TestFormDispatchRenderFragmentBranches:
         with pytest.raises(
             TypeError, match="instance parameter only supported for ModelForm"
         ):
-            _FormActionDispatch.dispatch(backend, request, "test_action", meta)
+            FormActionDispatch.dispatch(backend, request, "test_action", meta)

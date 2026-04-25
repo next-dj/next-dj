@@ -1,0 +1,8 @@
+/* Co-located styles. Ships once via {% collect_styles %} even when the
+   component renders multiple times on one page. */
+article[data-next-link-card] {
+  transition: background-color 120ms ease-out;
+}
+article[data-next-link-card]:hover {
+  background-color: rgb(248 250 252);
+}

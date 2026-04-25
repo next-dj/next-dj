@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django.utils.autoreload import StatReloader
 
 from next.server import NextStatReloader
+from next.server.autoreload import _tree_dir_signature
 
 
 def _paths_matched_by_reloader_globs(reloader: StatReloader) -> set[Path]:
@@ -84,14 +85,10 @@ class TestTreeDirSignature:
 
     def test_missing_root_returns_zero_signature(self, tmp_path: Path) -> None:
         """A root path that cannot be stat'd yields `(0.0, 0)`."""
-        from next.server.autoreload import _tree_dir_signature
-
         assert _tree_dir_signature(tmp_path / "missing") == (0.0, 0)
 
     def test_file_root_counts_itself_only(self, tmp_path: Path) -> None:
         """Scandir on a regular file raises, so nothing is recursed into."""
-        from next.server.autoreload import _tree_dir_signature
-
         file_root = tmp_path / "file.txt"
         file_root.write_text("x")
         latest, count = _tree_dir_signature(file_root)
@@ -100,10 +97,6 @@ class TestTreeDirSignature:
 
     def test_is_dir_oserror_skips_entry(self, tmp_path: Path) -> None:
         """A `DirEntry.is_dir` that raises is silently skipped."""
-        from unittest.mock import MagicMock, patch
-
-        from next.server.autoreload import _tree_dir_signature
-
         (tmp_path / "inner").mkdir()
 
         def raising_scandir(path):

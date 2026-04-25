@@ -12,6 +12,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import django
+from django.conf import settings
+
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 
@@ -88,9 +91,6 @@ def _build_test_settings() -> dict[str, object]:
 
 def setup() -> None:
     """Configure Django settings and run `django.setup()` if not already done."""
-    import django
-    from django.conf import settings
-
     _install_project_root_on_path()
     if settings.configured:
         return
@@ -99,7 +99,6 @@ def setup() -> None:
     # Register form actions before URL conf loads: `django.setup()` loads
     # `next.urls` which builds url patterns, so `@action` handlers must be
     # in the form-action registry by then.
-    import tests.forms.actions  # noqa: F401
 
     django.setup()
 

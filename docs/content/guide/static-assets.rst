@@ -380,6 +380,15 @@ Each entry is a dict that is passed unchanged into the backend constructor:
     substituted. Default: ``'<link rel="stylesheet" href="{url}">'``.
   - ``js_tag`` (str). Format string for JS script tags. ``{url}`` is
     substituted. Default: ``'<script src="{url}"></script>'``.
+  - ``DEDUP_STRATEGY`` (str, optional). Dotted path to a class implementing
+    :class:`~next.static.collector.DedupStrategy`. Used by
+    :class:`~next.static.StaticCollector` to decide whether an asset is a
+    duplicate. Defaults to :class:`~next.static.collector.UrlDedup`.
+  - ``JS_CONTEXT_POLICY`` (str, optional). Dotted path to a class
+    implementing :class:`~next.static.collector.JsContextPolicy`. Used by
+    the collector to merge values registered through
+    :meth:`~next.static.StaticCollector.add_js_context`. Defaults to
+    :class:`~next.static.collector.FirstWinsPolicy`.
 
 If ``DEFAULT_STATIC_BACKENDS`` is missing, empty, or contains no usable
 entries, the framework falls back to ``StaticFilesBackend()`` so static
@@ -404,6 +413,63 @@ without writing a custom backend:
            },
        ],
    }
+
+Swapping collector strategies
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The collector's dedup and JS-context merge semantics are pluggable. Point
+``OPTIONS`` at dotted paths to swap strategies without subclassing.
+
+.. code-block:: python
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_STATIC_BACKENDS": [
+           {
+               "BACKEND": "next.static.StaticFilesBackend",
+               "OPTIONS": {
+                   "DEDUP_STRATEGY": "next.static.collector.HashContentDedup",
+                   "JS_CONTEXT_POLICY": "next.static.collector.DeepMergePolicy",
+               },
+           },
+       ],
+   }
+
+:class:`~next.static.collector.HashContentDedup` collapses assets whose file
+contents hash to the same value, which is useful behind manifest storage
+that emits multiple filenames for an identical file.
+:class:`~next.static.collector.DeepMergePolicy` merges nested dictionaries
+registered under the same JS-context key instead of keeping the first value.
+
+Pluggable JS-context serializer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Values registered through :meth:`~next.static.StaticCollector.add_js_context`
+and values returned from ``@context(serialize=True)`` callables are encoded
+by a :class:`~next.static.serializers.JsContextSerializer`. The default
+:class:`~next.static.serializers.JsonJsContextSerializer` uses Django's
+``DjangoJSONEncoder``. Applications that need pydantic, msgspec, or any
+other encoder can point ``JS_CONTEXT_SERIALIZER`` at a class that
+implements the protocol.
+
+.. code-block:: python
+
+   NEXT_FRAMEWORK = {
+       "JS_CONTEXT_SERIALIZER": (
+           "next.static.serializers.PydanticJsContextSerializer"
+       ),
+   }
+
+The protocol is a single ``dumps(value) -> str`` method. Framework-provided
+classes live in :mod:`next.static.serializers`:
+
+* :class:`~next.static.serializers.JsonJsContextSerializer` — default,
+  backed by ``DjangoJSONEncoder``.
+* :class:`~next.static.serializers.PydanticJsContextSerializer` — unwraps
+  ``pydantic.BaseModel`` instances through ``model_dump`` before encoding.
+
+Custom serializers can be injected into a single collector for tests
+through the ``js_serializer`` keyword argument on
+:class:`~next.static.StaticCollector`.
 
 .. _static-custom-backends:
 
@@ -512,10 +578,10 @@ Settings:
        ],
    }
 
-A complete working copy lives in
-``examples/static/myapp/custom_backend.py``. The same example demonstrates
-extending :meth:`~next.static.StaticBackend.render_link_tag` through the
-parent's ``css_tag`` OPTIONS string.
+An inline ``AttributedStaticFilesBackend`` snippet lives in
+:doc:`extending` (section "Worked examples by subsystem"). Use
+``OPTIONS["css_tag"]`` / ``OPTIONS["js_tag"]`` to customise the link
+markup that ``render_link_tag`` emits without subclassing.
 
 Staticfiles and collectstatic
 -----------------------------
@@ -602,7 +668,7 @@ The ``policy`` key takes values from
   custom tag can emit them where needed.
 
 The three ``*_template`` keys override the default HTML fragments. The preload
-and script templates must contain ``{url}``; the init template must contain
+and script templates must contain ``{url}``, while the init template must contain
 ``{payload}`` (replaced with the JSON-serialised JS context). Policy values
 may be supplied as strings (``"auto"``/``"disabled"``/``"manual"``) or as
 ``ScriptInjectionPolicy`` enum members directly.
@@ -933,7 +999,9 @@ without subclassing any of the static classes.
    * - :data:`~next.static.signals.html_injected`
      - :class:`~next.static.StaticManager`
      - ``html_before`` (``str``), ``html_after`` (``str``),
-       ``collector`` (:class:`~next.static.StaticCollector`).
+       ``collector`` (:class:`~next.static.StaticCollector`),
+       ``placeholders_replaced`` (``tuple[str, ...]``),
+       ``injected_bytes`` (``int``).
    * - :data:`~next.static.signals.backend_loaded`
      - Concrete backend class (subclass of
        :class:`~next.static.StaticBackend`)
@@ -1044,8 +1112,7 @@ Troubleshooting
     Inline dedup is byte-exact. Whitespace, attribute order, and
     context-interpolated values all contribute to the dedup key. Factor
     the shared part into a context-free block and keep per-instance logic
-    in a second block. See the counter example in ``examples/static/``
-    for the pattern.
+    in a second block.
 
 **Accessing the manager in tests or at runtime**
     Import :data:`~next.static.default_manager`. It is a
@@ -1085,15 +1152,17 @@ The most useful entry points:
   co-located assets under the ``next/`` namespace for ``collectstatic``.
 - :mod:`next.static.signals`. Signals emitted across the pipeline.
 
-Example project
----------------
+Example projects
+----------------
 
-The ``examples/static/`` project shows the complete picture: a root layout
-with shared Bootstrap from ``{% use_style %}`` / ``{% use_script %}``, a home
-page with co-located ``template.css`` plus an Inter-font in ``page.py``, a
-dashboard page with its own ``template.css`` and JetBrains Mono font, two
-composite components (``widget`` with Bootstrap Icons and ``chart`` with
-Chart.js), a ``next-demo`` component that reads ``window.Next.context`` in a
-plain ``<script>`` block, and a full test suite that exercises collector
-ordering, deduplication, staticfiles-based URL resolution, and JavaScript
-context injection.
+The three working examples each exercise a different slice of the static
+pipeline:
+
+- ``examples/shortener`` — co-located ``template.css``/``template.js``
+  on the root layout, Tailwind Play from ``{% use_script %}``.
+- ``examples/markdown-blog`` — per-post pages that expose a ``post``
+  object via ``@context(serialize=True)`` and read through
+  ``window.Next.context.post`` in a page-level ``<script>``.
+- ``examples/feature-flags`` — composite ``feature_guard`` component
+  with Python-side resolution and no component-level assets (showing
+  that static co-location is purely opt-in).

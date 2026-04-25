@@ -99,6 +99,8 @@ Sponsors
    content/guide/dependency-injection
    content/guide/static-assets
    content/guide/autoreload
+   content/guide/testing
+   content/guide/project-layout
    content/guide/extending
 
 .. toctree::

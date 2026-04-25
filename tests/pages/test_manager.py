@@ -2,14 +2,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from django.http import HttpRequest
 
+import next.pages.loaders as loaders_module
 from next.checks import _load_python_module
 from next.pages import Page, context, page
 from next.pages.loaders import (
-    DjxTemplateLoader,
     LayoutManager,
     LayoutTemplateLoader,
-    PythonTemplateLoader,
+    TemplateLoader,
+    _load_python_module_memo,
 )
 from next.pages.registry import PageContextRegistry
 
@@ -21,12 +23,7 @@ class TestPage:
         """Test Page initialization."""
         assert page_instance._template_registry == {}
         assert isinstance(page_instance._context_manager, PageContextRegistry)
-        assert len(page_instance._template_loaders) == 3
-        # check that all expected loaders are present
-        loader_types = [type(loader) for loader in page_instance._template_loaders]
-        assert PythonTemplateLoader in loader_types
-        assert DjxTemplateLoader in loader_types
-        assert LayoutTemplateLoader in loader_types
+        assert isinstance(page_instance._layout_manager, LayoutManager)
 
     def test_register_template_direct(self, page_instance) -> None:
         """Test register_template method with direct file path."""
@@ -183,7 +180,7 @@ class TestPage:
             (
                 "template_override",
                 "Hello {{ name }}! Count: {{ count }}",
-                {None: lambda *args, **kwargs: {"name": "ContextName", "count": 5}},
+                {None: lambda *_args, **_kwargs: {"name": "ContextName", "count": 5}},
                 {"name": "OverrideName", "count": 20},
                 "Hello ContextName! Count: 5",
             ),
@@ -405,14 +402,14 @@ class TestPageHasTemplateAndLazyRender:
         assert page_file in page_instance._template_registry
         assert "Lazy" in result
 
-    def test_load_template_for_file_false_when_no_usable_template_source(
+    def test_render_with_no_body_source_returns_empty_block(
         self, page_instance, tmp_path
     ) -> None:
-        """_load_template_for_file skips loaders that yield no content and returns False."""
+        """Page.render returns an empty `{% block template %}` slot when no source exists."""
         page_file = tmp_path / "page.py"
         page_file.write_text("y = 1")
-        assert not page_instance._load_template_for_file(page_file)
-        assert page_file not in page_instance._template_registry
+        result = page_instance.render(page_file)
+        assert result == ""
 
     def test_render_invalidates_cache_when_template_stale(
         self, page_instance, tmp_path
@@ -724,26 +721,26 @@ class TestLayoutIntegration:
         assert "</body></html>" in layout_template
         assert "{% block template %}" in layout_template
 
-    def test_load_template_for_file_layout_fallback(
+    def test_render_composes_template_djx_under_ancestor_layout(
         self, page_instance, tmp_path
     ) -> None:
-        """Test _load_template_for_file with layout fallback."""
-        # create layout structure
+        """Page.render wraps the sibling template.djx body through ancestor layouts."""
         layout_file = tmp_path / "layout.djx"
         layout_file.write_text(
             "<html><body>{% block template %}{% endblock template %}</body></html>",
         )
 
-        # create template.djx
         sub_dir = tmp_path / "sub"
         sub_dir.mkdir()
         template_file = sub_dir / "template.djx"
         template_file.write_text("<h1>{{ title }}</h1>")
 
         page_file = sub_dir / "page.py"
-        result = page_instance._load_template_for_file(page_file)
+        result = page_instance.render(page_file, title="Hi")
 
-        assert result is True
+        assert "<html><body>" in result
+        assert "<h1>Hi</h1>" in result
+        assert "</body></html>" in result
         assert page_file in page_instance._template_registry
 
     def test_render_with_layout_template_detection(
@@ -798,3 +795,362 @@ class TestLoadPythonModule:
         assert hasattr(result, "x")
         assert result.x == 42
         assert hasattr(result, "template")
+
+
+def _make_real_request() -> HttpRequest:
+    """Build a minimal `HttpRequest` usable by the unified view."""
+    request = HttpRequest()
+    request.method = "GET"
+    request.META["SERVER_NAME"] = "testserver"
+    request.META["SERVER_PORT"] = "80"
+    return request
+
+
+class TestUnifiedViewBodyResolution:
+    """`_create_unified_view` resolves the body via render > template > template.djx."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self):
+        page._template_registry.clear()
+        page._template_source_mtimes.clear()
+        page._layout_manager._layout_registry.clear()
+        yield
+        page._template_registry.clear()
+        page._template_source_mtimes.clear()
+        page._layout_manager._layout_registry.clear()
+
+    def test_template_attribute_with_ancestor_layout_composes(
+        self, page_instance, tmp_path
+    ) -> None:
+        """`template = "..."` flows through an ancestor `layout.djx`."""
+        (tmp_path / "layout.djx").write_text(
+            "<html><body>{% block template %}{% endblock template %}</body></html>",
+        )
+        page_dir = tmp_path / "sub"
+        page_dir.mkdir()
+        page_file = page_dir / "page.py"
+        page_file.write_text('template = "<h1>attr body</h1>"')
+
+        module = _load_python_module_memo(page_file)
+        view = page_instance._create_unified_view(page_file, {}, module)
+        response = view(_make_real_request())
+        body = response.content.decode()
+        assert "<html><body>" in body
+        assert "<h1>attr body</h1>" in body
+        assert "</body></html>" in body
+
+    def test_render_returning_str_with_ancestor_layout_composes(
+        self, page_instance, tmp_path
+    ) -> None:
+        """`render()` returning a string flows through the ancestor layout."""
+        (tmp_path / "layout.djx").write_text(
+            "<html><body>{% block template %}{% endblock template %}</body></html>",
+        )
+        page_dir = tmp_path / "sub"
+        page_dir.mkdir()
+        page_file = page_dir / "page.py"
+        page_file.write_text(
+            "def render(request, **kwargs):\n    return '<p>rendered</p>'\n"
+        )
+
+        module = _load_python_module_memo(page_file)
+        view = page_instance._create_unified_view(page_file, {}, module)
+        response = view(_make_real_request())
+        body = response.content.decode()
+        assert "<html><body>" in body
+        assert "<p>rendered</p>" in body
+
+    def test_render_returning_httpresponse_bypasses_layout(
+        self, page_instance, tmp_path
+    ) -> None:
+        """`render()` returning HttpResponse is returned verbatim, no layout."""
+        (tmp_path / "layout.djx").write_text(
+            "<html><body>{% block template %}{% endblock template %}</body></html>",
+        )
+        page_dir = tmp_path / "sub"
+        page_dir.mkdir()
+        page_file = page_dir / "page.py"
+        page_file.write_text(
+            "from django.http import HttpResponse\n"
+            "def render(request, **kwargs):\n"
+            "    return HttpResponse('raw', status=201)\n"
+        )
+
+        module = _load_python_module_memo(page_file)
+        view = page_instance._create_unified_view(page_file, {}, module)
+        response = view(_make_real_request())
+        assert response.status_code == 201
+        assert response.content == b"raw"
+        assert "<html>" not in response.content.decode()
+
+    def test_render_returning_redirect_bypasses_layout(
+        self, page_instance, tmp_path
+    ) -> None:
+        """`HttpResponseRedirect` (an HttpResponse subclass) is returned verbatim."""
+        (tmp_path / "layout.djx").write_text(
+            "<html>{% block template %}{% endblock template %}</html>",
+        )
+        page_dir = tmp_path / "sub"
+        page_dir.mkdir()
+        page_file = page_dir / "page.py"
+        page_file.write_text(
+            "from django.http import HttpResponseRedirect\n"
+            "def render(request, **kwargs):\n"
+            "    return HttpResponseRedirect('/target/')\n"
+        )
+
+        module = _load_python_module_memo(page_file)
+        view = page_instance._create_unified_view(page_file, {}, module)
+        response = view(_make_real_request())
+        assert response.status_code == 302
+        assert response["Location"] == "/target/"
+
+    def test_render_returning_jsonresponse_bypasses_layout(
+        self, page_instance, tmp_path
+    ) -> None:
+        """`JsonResponse` (an HttpResponse subclass) is returned verbatim."""
+        (tmp_path / "layout.djx").write_text(
+            "<html>{% block template %}{% endblock template %}</html>",
+        )
+        page_dir = tmp_path / "sub"
+        page_dir.mkdir()
+        page_file = page_dir / "page.py"
+        page_file.write_text(
+            "from django.http import JsonResponse\n"
+            "def render(request, **kwargs):\n"
+            "    return JsonResponse({'ok': True})\n"
+        )
+
+        module = _load_python_module_memo(page_file)
+        view = page_instance._create_unified_view(page_file, {}, module)
+        response = view(_make_real_request())
+        assert response["Content-Type"].startswith("application/json")
+        assert response.content == b'{"ok": true}'
+
+    @pytest.mark.parametrize(
+        "return_value",
+        [
+            "None",
+            "{'x': 1}",
+            "[1, 2]",
+            "42",
+        ],
+        ids=["None", "dict", "list", "int"],
+    )
+    def test_render_returning_non_str_non_response_raises(
+        self, page_instance, tmp_path, return_value
+    ) -> None:
+        """`render()` returning anything other than str/HttpResponse raises TypeError."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            f"def render(request, **kwargs):\n    return {return_value}\n"
+        )
+
+        module = _load_python_module_memo(page_file)
+        view = page_instance._create_unified_view(page_file, {}, module)
+        with pytest.raises(TypeError, match="must return str or HttpResponse"):
+            view(_make_real_request())
+
+    def test_render_raising_propagates(self, page_instance, tmp_path) -> None:
+        """`render()` raising an exception propagates to the caller."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "def render(request, **kwargs):\n    raise RuntimeError('boom')\n"
+        )
+
+        module = _load_python_module_memo(page_file)
+        view = page_instance._create_unified_view(page_file, {}, module)
+        with pytest.raises(RuntimeError, match="boom"):
+            view(_make_real_request())
+
+    def test_priority_render_wins_over_template_attr(
+        self, page_instance, tmp_path
+    ) -> None:
+        """When both render() and template attr exist, render() wins."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            'template = "<p>from-attr</p>"\n'
+            "def render(request, **kwargs):\n"
+            "    return '<p>from-render</p>'\n"
+        )
+
+        module = _load_python_module_memo(page_file)
+        view = page_instance._create_unified_view(page_file, {}, module)
+        response = view(_make_real_request())
+        assert b"from-render" in response.content
+        assert b"from-attr" not in response.content
+
+    def test_priority_template_attr_wins_over_template_djx(
+        self, page_instance, tmp_path
+    ) -> None:
+        """When both template attr and template.djx exist, attr wins."""
+        (tmp_path / "template.djx").write_text("<p>from-djx</p>")
+        page_file = tmp_path / "page.py"
+        page_file.write_text('template = "<p>from-attr</p>"')
+
+        module = _load_python_module_memo(page_file)
+        view = page_instance._create_unified_view(page_file, {}, module)
+        response = view(_make_real_request())
+        assert b"from-attr" in response.content
+        assert b"from-djx" not in response.content
+
+    def test_empty_body_with_layout_renders_layout_shell(
+        self, page_instance, tmp_path
+    ) -> None:
+        """A page with no body source still renders the ancestor layout's shell."""
+        (tmp_path / "layout.djx").write_text(
+            "<html><body>{% block template %}{% endblock template %}</body></html>",
+        )
+        page_dir = tmp_path / "sub"
+        page_dir.mkdir()
+        page_file = page_dir / "page.py"
+        page_file.write_text("")
+
+        module = _load_python_module_memo(page_file)
+        view = page_instance._create_unified_view(page_file, {}, module)
+        response = view(_make_real_request())
+        body = response.content.decode()
+        assert "<html><body>" in body
+        assert "</body></html>" in body
+
+
+class TestLoadStaticBodyEdgeCases:
+    """`Page._load_static_body` edge cases."""
+
+    def test_unreadable_template_djx_returns_empty(
+        self, page_instance, tmp_path
+    ) -> None:
+        """UnicodeDecodeError on `template.djx` yields an empty body, not a crash."""
+        template_djx = tmp_path / "template.djx"
+        template_djx.write_bytes(b"\xff\xfe invalid utf-8")
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        assert page_instance._load_static_body(page_file, None) == ""
+
+    def test_has_template_returns_true_when_ancestor_layout_exists(
+        self, page_instance, tmp_path
+    ) -> None:
+        """`has_template` short-circuits to True when an ancestor layout applies."""
+        (tmp_path / "layout.djx").write_text(
+            "<main>{% block template %}{% endblock template %}</main>",
+        )
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        page_file = sub / "page.py"
+        page_file.write_text("")
+        assert page_instance.has_template(page_file, module=None) is True
+
+
+class TestLayoutComposeBody:
+    """`LayoutTemplateLoader.compose_body` is a pure string → string wrap."""
+
+    def test_no_layouts_returns_body_verbatim(self, tmp_path) -> None:
+        """Without layout.djx the body is returned unchanged."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        loader = LayoutTemplateLoader()
+        assert loader.compose_body("<p>hi</p>", page_file) == "<p>hi</p>"
+
+    def test_ancestor_layout_wraps_body_in_block(self, tmp_path) -> None:
+        """Without a sibling layout the body is wrapped in a `{% block template %}`."""
+        (tmp_path / "layout.djx").write_text(
+            "<main>{% block template %}{% endblock template %}</main>",
+        )
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        page_file = sub / "page.py"
+        loader = LayoutTemplateLoader()
+        result = loader.compose_body("<p>body</p>", page_file)
+        assert (
+            result
+            == "<main>{% block template %}<p>body</p>{% endblock template %}</main>"
+        )
+
+    def test_sibling_layout_substitutes_body_directly(self, tmp_path) -> None:
+        """With a sibling layout the body replaces the placeholder verbatim."""
+        (tmp_path / "layout.djx").write_text(
+            "<section>{% block template %}{% endblock template %}</section>",
+        )
+        page_file = tmp_path / "page.py"
+        loader = LayoutTemplateLoader()
+        result = loader.compose_body("<p>body</p>", page_file)
+        assert result == "<section><p>body</p></section>"
+
+
+class _MdLoader(TemplateLoader):
+    """Test double: render sibling `template.md` as `<article>{body}</article>`."""
+
+    source_name = "template.md"
+
+    def can_load(self, file_path):
+        return (file_path.parent / "template.md").exists()
+
+    def load_template(self, file_path):
+        text = (file_path.parent / "template.md").read_text()
+        return f"<article>{text}</article>"
+
+    def source_path(self, file_path):
+        p = file_path.parent / "template.md"
+        return p if p.exists() else None
+
+
+class TestCustomTemplateLoaderIntegration:
+    """Custom `TemplateLoader` registered via `TEMPLATE_LOADERS` feeds `Page.render`."""
+
+    @pytest.fixture(autouse=True)
+    def _install_md_loader(self):
+
+        loaders_module._REGISTERED_LOADERS_CACHE = [_MdLoader()]
+        page._template_registry.clear()
+        page._template_source_mtimes.clear()
+        yield
+        loaders_module._REGISTERED_LOADERS_CACHE = None
+        page._template_registry.clear()
+        page._template_source_mtimes.clear()
+
+    def test_custom_loader_body_is_rendered_through_layout(
+        self, page_instance, tmp_path
+    ) -> None:
+        """A custom loader for `template.md` feeds `_load_static_body`."""
+        (tmp_path / "layout.djx").write_text(
+            "<html>{% block template %}{% endblock template %}</html>",
+        )
+        page_dir = tmp_path / "post"
+        page_dir.mkdir()
+        (page_dir / "template.md").write_text("hello")
+        page_file = page_dir / "page.py"
+        page_file.write_text("")
+
+        body = page_instance._load_static_body(page_file, None)
+        assert body == "<article>hello</article>"
+        html = page_instance.render(page_file)
+        assert "<html>" in html
+        assert "<article>hello</article>" in html
+
+    def test_module_template_beats_custom_loader(self, page_instance, tmp_path) -> None:
+        """`module.template` attribute still wins over any registered loader."""
+        (tmp_path / "template.md").write_text("ignored")
+        page_file = tmp_path / "page.py"
+        page_file.write_text('template = "from-attr"')
+
+        module = _load_python_module_memo(page_file)
+        body = page_instance._load_static_body(page_file, module)
+        assert body == "from-attr"
+
+    def test_has_template_picks_up_custom_loader(self, page_instance, tmp_path) -> None:
+        """`has_template` returns True when only a custom loader can load."""
+        (tmp_path / "template.md").write_text("hello")
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        assert page_instance.has_template(page_file, module=None) is True
+
+    def test_get_template_source_paths_uses_loader_source_path(
+        self, page_instance, tmp_path
+    ) -> None:
+        """Stale-cache detection reads `source_path` from the registered loader."""
+        md = tmp_path / "template.md"
+        md.write_text("body")
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        paths = page_instance._get_template_source_paths(page_file)
+        assert md in paths

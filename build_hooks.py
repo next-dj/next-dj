@@ -40,8 +40,8 @@ class NextJsBuildHook(BuildHookInterface):
             raise RuntimeError(msg)
 
         if not (root / "node_modules").exists():
-            subprocess.run([npm, "ci"], cwd=root, check=True)
-        subprocess.run([npm, "run", "build:next"], cwd=root, check=True)
+            subprocess.run([npm, "ci"], cwd=root, check=True)  # noqa: S603
+        subprocess.run([npm, "run", "build:next"], cwd=root, check=True)  # noqa: S603
 
         if not output.exists():
             msg = f"Expected {output} after npm run build:next, but it is missing."

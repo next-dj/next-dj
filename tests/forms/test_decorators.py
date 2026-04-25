@@ -49,7 +49,7 @@ class TestActionNamespacing:
         try:
 
             @action_decorator("save", namespace="billing")
-            def handler(_request: HttpRequest) -> HttpResponseRedirect:
+            def handler(request: HttpRequest) -> HttpResponseRedirect:
                 return HttpResponseRedirect("/")
 
             assert (
@@ -67,11 +67,11 @@ class TestActionNamespacing:
         try:
 
             @action_decorator("save", namespace="billing")
-            def billing_handler(_request: HttpRequest) -> HttpResponseRedirect:
+            def billing_handler(request: HttpRequest) -> HttpResponseRedirect:
                 return HttpResponseRedirect("/billing/")
 
             @action_decorator("save", namespace="shipping")
-            def shipping_handler(_request: HttpRequest) -> HttpResponseRedirect:
+            def shipping_handler(request: HttpRequest) -> HttpResponseRedirect:
                 return HttpResponseRedirect("/shipping/")
 
             backend = form_action_manager.default_backend
@@ -86,9 +86,7 @@ class TestBaseFormGetInitial:
 
     def test_get_initial_returns_empty_dict_by_default(self) -> None:
         """Default get_initial returns empty dict."""
-        request = HttpRequest()
-        result = Form.get_initial(request)
-        assert result == {}
+        assert Form.get_initial() == {}
 
     def test_get_initial_can_be_overridden(self) -> None:
         """Subclasses can override get_initial."""
@@ -97,7 +95,7 @@ class TestBaseFormGetInitial:
             name = forms.CharField(max_length=100)
 
             @classmethod
-            def get_initial(cls, _request: HttpRequest) -> dict:
+            def get_initial(cls, request: HttpRequest) -> dict:
                 return {"name": "default_name"}
 
         request = HttpRequest()
@@ -122,15 +120,11 @@ class TestBaseFormGetInitial:
 
     def test_basemodelform_get_initial_returns_empty_dict(self) -> None:
         """BaseModelForm.get_initial returns empty dict by default."""
-        request = HttpRequest()
-        result = BaseModelForm.get_initial(request)
-        assert result == {}
+        assert BaseModelForm.get_initial() == {}
 
     def test_modelform_get_initial_returns_empty_dict(self) -> None:
         """ModelForm.get_initial returns empty dict by default."""
-        request = HttpRequest()
-        result = ModelForm.get_initial(request)
-        assert result == {}
+        assert ModelForm.get_initial() == {}
 
     def test_form_class_without_get_initial_raises_error_in_context(self) -> None:
         """Form class without get_initial raises TypeError when lazy context runs."""
@@ -141,7 +135,7 @@ class TestBaseFormGetInitial:
             name = django_forms.CharField(max_length=100)
 
         def handler(
-            _request: HttpRequest, _form: CustomDjangoForm
+            request: HttpRequest, form: CustomDjangoForm
         ) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
@@ -165,14 +159,14 @@ class TestBaseFormGetInitial:
             name = forms.CharField(max_length=100)
 
             @classmethod
-            def get_initial(cls, _request: HttpRequest) -> object:
+            def get_initial(cls, request: HttpRequest) -> object:
                 # Return a mock model instance
                 mock_instance = MagicMock()
                 mock_instance._meta = MagicMock()
                 mock_instance._meta.model = MagicMock()
                 return mock_instance
 
-        def handler(_request: HttpRequest, _form: CustomForm) -> HttpResponseRedirect:
+        def handler(request: HttpRequest, form: CustomForm) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(
@@ -204,16 +198,14 @@ class TestBaseFormGetInitial:
                 fields: ClassVar[list[str]] = ["name"]
 
             @classmethod
-            def get_initial(cls, _request: HttpRequest) -> object:
+            def get_initial(cls, request: HttpRequest) -> object:
                 # Return a mock model instance
                 mock_instance = MagicMock()
                 mock_instance._meta = MagicMock()
                 mock_instance._meta.model = mock_model
                 return mock_instance
 
-        def handler(
-            _request: HttpRequest, _form: TestModelForm
-        ) -> HttpResponseRedirect:
+        def handler(request: HttpRequest, form: TestModelForm) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(
@@ -237,10 +229,10 @@ class TestBaseFormGetInitial:
             name = forms.CharField(max_length=100)
 
             @classmethod
-            def get_initial(cls, _request: HttpRequest, id: int) -> dict:  # noqa: A002
+            def get_initial(cls, request: HttpRequest, id: int) -> dict:  # noqa: A002
                 return {"name": f"from-{id}"}
 
-        def handler(_request: HttpRequest, form: FormWithId) -> HttpResponseRedirect:
+        def handler(request: HttpRequest, form: FormWithId) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(
@@ -264,10 +256,10 @@ class TestBaseFormGetInitial:
             name = forms.CharField(max_length=100)
 
             @classmethod
-            def get_initial(cls, _request: HttpRequest, id: int) -> dict:  # noqa: A002
+            def get_initial(cls, request: HttpRequest, id: int) -> dict:  # noqa: A002
                 return {"name": f"resolver-{id}"}
 
-        def handler(_request: HttpRequest, form: FormWithId) -> HttpResponseRedirect:
+        def handler(request: HttpRequest, form: FormWithId) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(
@@ -290,10 +282,10 @@ class TestBaseFormGetInitial:
             slug = forms.CharField(max_length=100)
 
             @classmethod
-            def get_initial(cls, _request: HttpRequest, slug: str) -> dict:
+            def get_initial(cls, request: HttpRequest, slug: str) -> dict:
                 return {"slug": slug}
 
-        def handler(_request: HttpRequest, form: FormWithSlug) -> HttpResponseRedirect:
+        def handler(request: HttpRequest, form: FormWithSlug) -> HttpResponseRedirect:
             return HttpResponseRedirect("/")
 
         backend.register_action(

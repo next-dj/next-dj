@@ -16,14 +16,12 @@ the collector source.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from django.core.serializers.json import DjangoJSONEncoder
-
 from .assets import _KIND_CSS, _KIND_JS, StaticAsset
+from .serializers import JsContextSerializer, resolve_serializer
 
 
 if TYPE_CHECKING:
@@ -296,12 +294,14 @@ class StaticCollector:
         *,
         dedup: DedupStrategy | None = None,
         js_context_policy: JsContextPolicy | None = None,
+        js_serializer: JsContextSerializer | None = None,
     ) -> None:
-        """Wire up dedup and JS-context policies and prime empty buckets."""
+        """Wire up dedup, JS-context policy, and JS serializer."""
         self._dedup = dedup if dedup is not None else UrlDedup()
         self._js_policy = (
             js_context_policy if js_context_policy is not None else FirstWinsPolicy()
         )
+        self._js_serializer = js_serializer
         self._seen_keys: set[Hashable] = set()
         self._styles: list[StaticAsset] = []
         self._scripts: list[StaticAsset] = []
@@ -368,18 +368,24 @@ class StaticCollector:
         """
         return self._scripts
 
+    def _get_js_serializer(self) -> JsContextSerializer:
+        if self._js_serializer is None:
+            self._js_serializer = resolve_serializer()
+        return self._js_serializer
+
     def add_js_context(self, key: str, value: Any) -> None:  # noqa: ANN401
         """Merge the value under the key through the JS-context policy.
 
-        Validates that `value` is serialisable by `DjangoJSONEncoder`
-        before merging. Surfacing the failure here, at the registration
-        site, gives a much better traceback than catching it at final
-        page inject time.
+        Validates that `value` is serialisable by the configured
+        `JsContextSerializer` before merging. Surfacing the failure
+        here, at the registration site, gives a much better traceback
+        than catching it at final page inject time.
         """
+        serializer = self._get_js_serializer()
         try:
-            json.dumps(value, cls=DjangoJSONEncoder)
+            serializer.dumps(value)
         except (TypeError, ValueError) as e:
-            msg = f"JS context value for key {key!r} is not JSON-serialisable: {e}"
+            msg = f"JS context value for key {key!r} is not serialisable: {e}"
             raise TypeError(msg) from e
         self._js_context = self._js_policy.merge(self._js_context, key, value)
 

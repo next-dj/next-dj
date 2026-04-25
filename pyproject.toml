@@ -51,6 +51,8 @@ dev = [
     "pytest-xdist==3.8.0",
     "pytest-lazy-fixtures==1.4.0",
     "pytest-benchmark==5.1.0",
+    "pydantic>=2.0",
+    "markdown>=3.7",
 ]
 docs = [
     "sphinx==9.0.4",
@@ -186,9 +188,6 @@ exclude = [
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-    "ANN002", "ANN003",
-    "B008",   # do not perform function calls in argument defaults (Django settings)
-
     # Framework-specific ignores
     "SLF001", # private member access (framework code needs this)
 
@@ -203,10 +202,10 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "examples/*" = [
-    "D100", "D101", "D103", "D104", "D105", "D106", "D401",
-    "E501", "EXE001",
+    "D100", "D101", "D103", "D104", "D105", "D106",
+    "EXE001",
     "INP001",
-    "S105", "S106"
+    "S105",
 ]
 "tests/__init__.py" = ["D104"]
 "tests/pages/__init__.py" = ["D104"]
@@ -217,11 +216,11 @@ ignore = [
 "tests/forms/*" = ["INP001", "D104"]
 "**/{test*,conftest}.py" = [
     "ANN001", "ANN201", "ANN202",
-    "ARG001", "ARG002", "ARG005",
-    "S101", "S106", "D100", "D101", "D102", "D103", "D104", "D105", "D107",
-    "PLR2004", "PLR0913", "PLC0415", "PT011",
-    "S108", "E501", "FBT003",
-    "TC001", "TC002",
+    "ARG001", "ARG002", "ARG003",
+    "S101", "S108",
+    "D100", "D101", "D102", "D103", "D104",
+    "PLR2004", "PLR0913",
+    "E501", "FBT003",
 ]
 "**/migrations/**/*.py" = ["F401", "PLR0913"]
 

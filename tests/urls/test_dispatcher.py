@@ -11,7 +11,6 @@ from next.pages.watch import (
 )
 from next.urls import FileRouterBackend, RouterBackend
 from next.urls.dispatcher import (
-    _register_components_folder,
     _scan_pages_directory,
     scan_pages_tree,
 )
@@ -223,7 +222,10 @@ class TestScanPagesDirectory:
         def capture(folder: Path, root: Path, scope: str) -> None:
             calls.append((folder, root, scope))
 
-        with patch("next.urls.dispatcher._register_components_folder", capture):
+        with patch(
+            "next.urls.dispatcher.register_components_folder_from_router_walk",
+            capture,
+        ):
             list(
                 scan_pages_tree(
                     tmp_path,
@@ -234,18 +236,6 @@ class TestScanPagesDirectory:
             )
         assert len(calls) == 1
         assert calls[0][0].name == "_components"
-
-    def test_register_components_folder_imports_components(
-        self, tmp_path: Path
-    ) -> None:
-        """The thin wrapper delegates to ``next.components`` once per folder."""
-        comp = tmp_path / "_components"
-        comp.mkdir()
-        with patch(
-            "next.components.register_components_folder_from_router_walk",
-        ) as mock_reg:
-            _register_components_folder(comp, tmp_path, "scope")
-        mock_reg.assert_called_once_with(comp, tmp_path, "scope")
 
     def test_scan_pages_directory_matches_scan_pages_tree(self, tmp_path) -> None:
         """The module helper yields the same pairs as ``scan_pages_tree``."""

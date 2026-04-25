@@ -5,13 +5,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from next.static import (
+    AssetDiscovery,
     StaticAsset,
     StaticCollector,
     StaticFilesBackend,
     StaticManager,
     StaticsFactory,
 )
-from next.static.collector import STYLES_PLACEHOLDER
+from next.static.collector import SCRIPTS_PLACEHOLDER, STYLES_PLACEHOLDER
 from next.static.signals import (
     asset_registered,
     backend_loaded,
@@ -88,7 +89,6 @@ class TestAssetRegisteredSignal:
         file_backend: StaticFilesBackend,
         capture_asset_registered: list[dict[str, Any]],
     ) -> None:
-        from next.static import AssetDiscovery
 
         class _P:
             @property
@@ -156,6 +156,32 @@ class TestHtmlInjectedSignal:
         assert event["html_before"] == html
         assert event["html_after"] == out
         assert event["collector"] is collector
+        assert event["placeholders_replaced"] == ("styles",)
+        assert event["injected_bytes"] == len(out) - len(html)
+
+    def test_reports_no_placeholders_when_html_has_none(
+        self,
+        fresh_manager: StaticManager,
+        capture_html_injected: list[dict[str, Any]],
+    ) -> None:
+        collector = StaticCollector()
+        fresh_manager.inject("<body/>", collector)
+        assert capture_html_injected[0]["placeholders_replaced"] == ()
+
+    def test_reports_both_placeholders_when_html_has_both(
+        self,
+        fresh_manager: StaticManager,
+        capture_html_injected: list[dict[str, Any]],
+    ) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url="https://cdn/a.css", kind="css"))
+        collector.add(StaticAsset(url="https://cdn/a.js", kind="js"))
+        html = f"<head>{STYLES_PLACEHOLDER}</head><body>{SCRIPTS_PLACEHOLDER}</body>"
+        fresh_manager.inject(html, collector)
+        assert capture_html_injected[0]["placeholders_replaced"] == (
+            "styles",
+            "scripts",
+        )
 
 
 class TestBackendLoadedSignal:

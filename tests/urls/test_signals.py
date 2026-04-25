@@ -2,6 +2,7 @@ from collections.abc import Generator
 from typing import Any
 
 import pytest
+from django.dispatch import Signal
 
 from next.urls.signals import route_registered, router_reloaded
 
@@ -39,8 +40,6 @@ class TestRouteRegisteredSignal:
 
     def test_signal_is_importable(self) -> None:
         """``route_registered`` is a Django Signal exported from ``next.urls.signals``."""
-        from django.dispatch import Signal
-
         assert isinstance(route_registered, Signal)
 
     def test_listener_receives_sent_event(
@@ -92,8 +91,6 @@ class TestRouterReloadedSignal:
 
     def test_signal_is_importable(self) -> None:
         """``router_reloaded`` is a Django Signal exported from ``next.urls.signals``."""
-        from django.dispatch import Signal
-
         assert isinstance(router_reloaded, Signal)
 
     def test_listener_receives_sent_event(

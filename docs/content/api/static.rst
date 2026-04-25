@@ -4,7 +4,7 @@ Static assets package
 =====================
 
 Per-submodule reference for :mod:`next.static`. The package is organised as a
-small set of focused modules; each section below renders the public members
+small set of focused modules, and each section below renders the public members
 of one submodule. See :doc:`/content/guide/static-assets` for a narrative
 walkthrough.
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .manager import components_manager
+from .signals import component_rendered
 
 
 if TYPE_CHECKING:
@@ -32,7 +33,13 @@ def render_component(
     request: HttpRequest | None = None,
 ) -> str:
     """Render `info` to HTML using template context and an optional request."""
-    return components_manager.component_renderer.render(info, context_data, request)
+    html = components_manager.component_renderer.render(info, context_data, request)
+    component_rendered.send(
+        sender=components_manager.__class__,
+        info=info,
+        template_path=getattr(info, "template_path", None),
+    )
+    return html
 
 
 __all__ = ["get_component", "load_component_template", "render_component"]

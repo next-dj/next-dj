@@ -61,6 +61,7 @@ class NextFrameworkSettings:
             "DEFAULT_PAGE_BACKENDS",
             "DEFAULT_COMPONENT_BACKENDS",
             "DEFAULT_STATIC_BACKENDS",
+            "TEMPLATE_LOADERS",
         }
     )
     _BOOL_KEYS: ClassVar[frozenset[str]] = frozenset(
@@ -87,6 +88,10 @@ class NextFrameworkSettings:
                 out[key] = copy.deepcopy(raw)
             elif key in self._BOOL_KEYS:
                 out[key] = bool(raw)
+            elif key == "JS_CONTEXT_SERIALIZER" and (
+                raw is None or isinstance(raw, str)
+            ):
+                out[key] = raw
         return out
 
     def __getattr__(self, attr: str) -> Any:  # noqa: ANN401

@@ -1,0 +1,5 @@
+<button type="button"
+        data-share
+        class="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">
+  📎 Share
+</button>

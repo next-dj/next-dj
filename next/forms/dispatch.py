@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import types
 from typing import TYPE_CHECKING, Any, cast
 
@@ -16,6 +17,7 @@ from next.deps import RESERVED_KEYS, resolver
 from next.utils import caller_source_path
 
 from .base import BaseModelForm
+from .signals import action_dispatched, form_validation_failed
 from .uid import validated_next_form_page_path
 
 
@@ -157,7 +159,7 @@ def _normalize_handler_response(
     return None
 
 
-class _FormActionDispatch:
+class FormActionDispatch:
     """Shared POST pipeline and response shaping for backends."""
 
     @staticmethod
@@ -179,15 +181,16 @@ class _FormActionDispatch:
         dep_stack: list[str] = []
 
         if form_class is None:
-            return _FormActionDispatch._dispatch_handler_only(
+            return FormActionDispatch._dispatch_handler_only(
                 handler,
                 request,
+                action_name,
                 url_kwargs,
                 dep_cache,
                 dep_stack,
             )
 
-        return _FormActionDispatch._dispatch_with_form(
+        return FormActionDispatch._dispatch_with_form(
             backend,
             request,
             action_name,
@@ -199,9 +202,10 @@ class _FormActionDispatch:
         )
 
     @staticmethod
-    def _dispatch_handler_only(
+    def _dispatch_handler_only(  # noqa: PLR0913
         handler: Callable[..., Any],
         request: HttpRequest,
+        action_name: str,
         url_kwargs: dict[str, object],
         dep_cache: dict[str, Any],
         dep_stack: list[str],
@@ -213,10 +217,20 @@ class _FormActionDispatch:
             _stack=dep_stack,
             **url_kwargs,
         )
-        return _FormActionDispatch.ensure_http_response(
-            _normalize_handler_response(handler(**resolved)),
+        start = time.perf_counter()
+        raw = handler(**resolved)
+        duration_ms = (time.perf_counter() - start) * 1000
+        response = FormActionDispatch.ensure_http_response(
+            _normalize_handler_response(raw),
             request=request,
         )
+        action_dispatched.send(
+            sender=FormActionDispatch,
+            action_name=action_name,
+            duration_ms=duration_ms,
+            response_status=response.status_code,
+        )
+        return response
 
     @staticmethod
     def _dispatch_with_form(  # noqa: PLR0913
@@ -242,7 +256,15 @@ class _FormActionDispatch:
         initial_data = form_class.get_initial(**resolved)
         form = _bind_form_for_post(form_class, request, initial_data)
         if not form.is_valid():
-            return _FormActionDispatch.form_response(
+            if form_validation_failed.receivers:
+                error_count = sum(len(errors) for errors in form.errors.values())
+                form_validation_failed.send(
+                    sender=FormActionDispatch,
+                    action_name=action_name,
+                    error_count=error_count,
+                    field_names=tuple(form.errors.keys()),
+                )
+            return FormActionDispatch.form_response(
                 backend, request, action_name, form, None
             )
 
@@ -254,12 +276,22 @@ class _FormActionDispatch:
             _stack=dep_stack,
             **url_kwargs,
         )
-        return _FormActionDispatch.ensure_http_response(
-            _normalize_handler_response(handler(**resolved)),
+        start = time.perf_counter()
+        raw = handler(**resolved)
+        duration_ms = (time.perf_counter() - start) * 1000
+        response = FormActionDispatch.ensure_http_response(
+            _normalize_handler_response(raw),
             request=request,
             action_name=action_name,
             backend=backend,
         )
+        action_dispatched.send(
+            sender=FormActionDispatch,
+            action_name=action_name,
+            duration_ms=duration_ms,
+            response_status=response.status_code,
+        )
+        return response
 
     @staticmethod
     def form_response(
@@ -315,7 +347,7 @@ class _FormActionDispatch:
 
         if response is None:
             if request and action_name and backend:
-                return _FormActionDispatch.form_response(
+                return FormActionDispatch.form_response(
                     backend, request, action_name, None, None
                 )
             return HttpResponse(status=204)
@@ -343,7 +375,7 @@ def build_form_namespace_for_action(
 
 
 __all__ = [
-    "_FormActionDispatch",
+    "FormActionDispatch",
     "_bind_form_for_post",
     "_filter_reserved_url_kwargs",
     "_form_action_context_callable",

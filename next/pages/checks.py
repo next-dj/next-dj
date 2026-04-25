@@ -5,8 +5,8 @@ from __future__ import annotations
 import ast
 import importlib.util
 import inspect
-import types
-from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, cast, get_origin
 
 from django.conf import settings
 from django.core.checks import (
@@ -18,11 +18,13 @@ from django.core.checks import (
 )
 
 from next.checks.common import get_router_manager, iter_scanned_page_pairs
+from next.conf import import_class_cached, next_framework_settings
 
-from .loaders import _load_python_module
+from .loaders import TemplateLoader, _load_python_module, build_registered_loaders
 
 
 if TYPE_CHECKING:
+    import types
     from collections.abc import Callable
     from pathlib import Path
 
@@ -392,18 +394,62 @@ def _check_page_functions_in_directory(
             )
             hard_error = True
 
-        if not hard_error and not _has_page_content(page_file):
-            warnings.append(
-                DjangoWarning(
-                    f"Page file {page_file} has no content: no template variable, "
-                    "no render function, no template.djx, and no layout.djx found. "
-                    "This page will not render anything.",
-                    obj=str(page_file),
-                    id="next.W002",
-                ),
-            )
+        if not hard_error:
+            shadow_warning = _check_body_source_conflicts(page_file)
+            if shadow_warning is not None:
+                warnings.append(shadow_warning)
+            if not _has_page_content(page_file):
+                warnings.append(
+                    DjangoWarning(
+                        f"Page file {page_file} has no content: no template "
+                        "variable, no render function, no template.djx, and "
+                        "no layout.djx found. This page will not render anything.",
+                        obj=str(page_file),
+                        id="next.W002",
+                    ),
+                )
 
     return errors, warnings
+
+
+def _active_body_sources(page_file: Path) -> list[str]:
+    """Return the body sources declared on `page_file` in priority order.
+
+    The priority order starts with `render()`, then the `template`
+    module attribute, and finally registered loaders in the order
+    declared under `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`. Each loader
+    reports its file name via `TemplateLoader.source_name`.
+    """
+    module = _load_python_module(page_file)
+    sources: list[str] = []
+    if module is not None:
+        if callable(getattr(module, "render", None)):
+            sources.append("render()")
+        template_attr = getattr(module, "template", None)
+        if isinstance(template_attr, str):
+            sources.append("template")
+    sources.extend(
+        loader.source_name
+        for loader in build_registered_loaders()
+        if loader.can_load(page_file) and loader.source_name
+    )
+    return sources
+
+
+def _check_body_source_conflicts(page_file: Path) -> CheckMessage | None:
+    """Warn (`next.W043`) when more than one body source is declared for `page_file`."""
+    sources = _active_body_sources(page_file)
+    if len(sources) < 2:  # noqa: PLR2004
+        return None
+    winner = sources[0]
+    shadowed = ", ".join(sources[1:])
+    return DjangoWarning(
+        f"{page_file} declares multiple body sources: {', '.join(sources)}. "
+        f"{winner} takes priority and {shadowed} will not be used. "
+        "Priority order: render() > template > registered TEMPLATE_LOADERS.",
+        obj=str(page_file),
+        id="next.W043",
+    )
 
 
 def _load_render_function(file_path: Path) -> object:
@@ -423,7 +469,7 @@ def _load_render_function(file_path: Path) -> object:
 
 
 def _has_template_or_djx(file_path: Path) -> bool:
-    """Return True when `page.py` has `template` or a sibling `template.djx`."""
+    """Return True when a static body source (attribute or loader) backs `file_path`."""
     try:
         if (
             spec := importlib.util.spec_from_file_location("page_module", file_path)
@@ -436,15 +482,14 @@ def _has_template_or_djx(file_path: Path) -> bool:
         if hasattr(module, "template"):
             return True
 
-        djx_file = file_path.parent / "template.djx"
-        return djx_file.exists()
+        return any(loader.can_load(file_path) for loader in build_registered_loaders())
 
     except (ImportError, AttributeError, OSError, SyntaxError):
         return False
 
 
 def _has_page_content(page_path: Path) -> bool:
-    """Return True when `page.py` has `template`, `render`, or sibling djx files."""
+    """Return True when `page.py` has any body source or an ancestor layout."""
     module = _load_python_module(page_path)
     has_template = False
     has_render = False
@@ -453,13 +498,14 @@ def _has_page_content(page_path: Path) -> bool:
         has_template = hasattr(module, "template")
         has_render = hasattr(module, "render") and callable(module.render)
 
-    template_djx = page_path.parent / "template.djx"
-    has_template_djx = template_djx.exists()
+    has_loader_match = any(
+        loader.can_load(page_path) for loader in build_registered_loaders()
+    )
 
     layout_djx = page_path.parent / "layout.djx"
     has_layout_djx = layout_djx.exists()
 
-    return any([has_template, has_render, has_template_djx, has_layout_djx])
+    return any([has_template, has_render, has_loader_match, has_layout_djx])
 
 
 def _check_layout_file(layout_file: Path) -> CheckMessage | None:
@@ -519,13 +565,29 @@ def _has_context_decorator_without_key(func: Callable[..., Any]) -> bool:
     return False
 
 
-def _get_function_result(func: Callable[..., Any]) -> object:
-    """Call `func()` with no args or with a stub when it needs arguments."""
-    try:
-        return func()
-    except TypeError:
-        stub = types.SimpleNamespace()
-        return func(stub)
+_DICT_ANNOTATION_NAMES = frozenset({"dict", "Dict", "Mapping", "MutableMapping"})
+
+
+def _annotation_is_dict_like(annotation: object) -> bool:
+    """Return True when the return annotation maps to a dict-like result."""
+    if annotation is inspect.Signature.empty:
+        return True
+    if annotation is dict or annotation is None:
+        return annotation is dict
+    origin = get_origin(annotation)
+    if origin is not None:
+        candidate: object = origin
+    else:
+        candidate = annotation
+    if isinstance(candidate, type):
+        try:
+            return issubclass(candidate, Mapping)
+        except TypeError:
+            return False
+    name = getattr(candidate, "_name", None) or getattr(candidate, "__name__", None)
+    if isinstance(name, str):
+        return name in _DICT_ANNOTATION_NAMES
+    return False
 
 
 def _check_context_function(
@@ -533,21 +595,29 @@ def _check_context_function(
     func: Callable[..., Any],
     page_path: Path,
 ) -> CheckMessage | None:
-    """Emit an error when keyless context callables do not produce a dict."""
+    """Emit an error when keyless context callables are not annotated dict-like.
+
+    The check is static: executing user code at ``manage.py check`` time
+    is expensive and can hit databases that have not been migrated yet.
+    Callables without a return annotation are accepted — the runtime
+    emits a clear ``TypeError`` on first render if the result is not a
+    mapping.
+    """
     try:
-        result = _get_function_result(func)
-        if not isinstance(result, dict):
-            return Error(
-                f"Context function '{func_name}' in {page_path} "
-                "must return a dictionary "
-                f"when used with @context decorator (without key). "
-                f"Got {type(result).__name__} instead.",
-                obj=str(page_path),
-                id="next.E029",
-            )
-    except (TypeError, AttributeError, OSError):
-        pass
-    return None
+        annotation = inspect.signature(func).return_annotation
+    except (TypeError, ValueError):
+        return None
+    if _annotation_is_dict_like(annotation):
+        return None
+    annotation_name = getattr(annotation, "__name__", None) or repr(annotation)
+    return Error(
+        f"Context function '{func_name}' in {page_path} "
+        "must return a dictionary "
+        f"when used with @context decorator (without key). "
+        f"Got return annotation {annotation_name} instead.",
+        obj=str(page_path),
+        id="next.E029",
+    )
 
 
 def _check_module_context_functions(
@@ -604,10 +674,119 @@ def check_context_functions(
     return errors
 
 
+@register(Tags.templates)
+def check_context_processor_signature(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when a configured context processor has no `request` parameter."""
+    errors: list[CheckMessage] = []
+    for backend_index, backend in _iter_page_backend_configs():
+        processors = backend.get("OPTIONS", {}).get("context_processors") or []
+        for processor_index, path in enumerate(processors):
+            if not isinstance(path, str):
+                continue
+            loc = (
+                f"NEXT_FRAMEWORK['DEFAULT_PAGE_BACKENDS'][{backend_index}]"
+                f".OPTIONS.context_processors[{processor_index}]"
+            )
+            message = _check_processor_request_parameter(path, loc)
+            if message is not None:
+                errors.append(message)
+    return errors
+
+
+def _iter_page_backend_configs() -> list[tuple[int, dict[str, Any]]]:
+    """Return indexed page backend dicts from `NEXT_FRAMEWORK`."""
+    raw = getattr(settings, "NEXT_FRAMEWORK", {}) or {}
+    backends = raw.get("DEFAULT_PAGE_BACKENDS", []) if isinstance(raw, dict) else []
+    return [
+        (idx, backend)
+        for idx, backend in enumerate(backends)
+        if isinstance(backend, dict)
+    ]
+
+
+def _check_processor_request_parameter(
+    processor_path: str,
+    location: str,
+) -> CheckMessage | None:
+    """Return an error when the callable at `processor_path` lacks `request`."""
+    try:
+        processor = importlib.import_module(processor_path.rsplit(".", 1)[0])
+    except (ImportError, ValueError):
+        return None
+    attr_name = processor_path.rsplit(".", 1)[-1]
+    callable_obj = getattr(processor, attr_name, None)
+    if not callable(callable_obj):
+        return None
+    try:
+        sig = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return None
+    if "request" in sig.parameters:
+        return None
+    return Error(
+        f"{location} points at {processor_path!r} which does not accept a "
+        "'request' parameter. Context processors must accept request.",
+        obj=settings,
+        id="next.E040",
+    )
+
+
+@register(Tags.compatibility)
+def check_template_loaders(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Validate every `NEXT_FRAMEWORK['TEMPLATE_LOADERS']` entry."""
+    try:
+        configured = next_framework_settings.TEMPLATE_LOADERS
+    except (AttributeError, ImportError):  # pragma: no cover
+        return []
+
+    messages: list[CheckMessage] = []
+    for index, entry in enumerate(configured):
+        if not isinstance(entry, str):
+            messages.append(
+                Error(
+                    f"NEXT_FRAMEWORK['TEMPLATE_LOADERS'][{index}] must be a dotted "
+                    f"path string, got {type(entry).__name__!r}.",
+                    obj=settings,
+                    id="next.E042",
+                ),
+            )
+            continue
+        try:
+            cls = import_class_cached(entry)
+        except ImportError as exc:
+            messages.append(
+                Error(
+                    f"NEXT_FRAMEWORK['TEMPLATE_LOADERS'][{index}]={entry!r} "
+                    f"cannot be imported: {exc}.",
+                    obj=settings,
+                    id="next.E043",
+                ),
+            )
+            continue
+        if not isinstance(cls, type) or not issubclass(cls, TemplateLoader):
+            messages.append(
+                Error(
+                    f"NEXT_FRAMEWORK['TEMPLATE_LOADERS'][{index}]={entry!r} is "
+                    "not a TemplateLoader subclass.",
+                    obj=settings,
+                    id="next.E043",
+                ),
+            )
+    return messages
+
+
 __all__ = [
     "check_context_functions",
+    "check_context_processor_signature",
     "check_layout_templates",
     "check_page_functions",
     "check_pages_structure",
     "check_request_in_context",
+    "check_template_loaders",
 ]

@@ -20,6 +20,12 @@ from django.contrib.staticfiles.utils import matches_patterns
 from django.core.files import File
 from django.core.files.storage import Storage
 
+from next.pages.registry import (
+    get_layout_djx_paths_for_watch,
+    get_template_djx_paths_for_watch,
+)
+from next.pages.watch import get_pages_directories_for_watch
+
 from .assets import StaticNamespace, default_kinds
 from .discovery import PathResolver, default_stems
 
@@ -60,12 +66,6 @@ def discover_colocated_static_assets() -> dict[str, Path]:
     components. It honors the process-wide stem and kind registries, so
     custom stems registered during `AppConfig.ready` are picked up.
     """
-    from next.pages.registry import (  # noqa: PLC0415
-        get_layout_djx_paths_for_watch,
-        get_template_djx_paths_for_watch,
-    )
-    from next.pages.watch import get_pages_directories_for_watch  # noqa: PLC0415
-
     out: dict[str, Path] = {}
     page_roots = tuple(root.resolve() for root in get_pages_directories_for_watch())
     resolver = PathResolver(lambda: page_roots)

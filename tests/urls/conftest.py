@@ -1,6 +1,8 @@
+from unittest.mock import Mock, patch
+
 import pytest
 
-from next.urls import FileRouterBackend, RouterBackend
+from next.urls import FileRouterBackend, RouterBackend, RouterManager
 from tests.support import named_temp_py
 
 
@@ -13,8 +15,6 @@ def router():
 @pytest.fixture()
 def mock_settings():
     """Patch ``settings`` in both ``urls`` and ``filesystem`` (``resolve_base_dir``)."""
-    from unittest.mock import Mock, patch
-
     mock = Mock()
     with (
         patch("next.urls.backends.settings", mock),
@@ -44,6 +44,4 @@ def custom_backend_class():
 @pytest.fixture()
 def manager():
     """Fresh RouterManager."""
-    from next.urls import RouterManager
-
     return RouterManager()

@@ -5,7 +5,7 @@ endpoint. Valid submissions run the handler. Invalid forms re-render
 with errors. CSRF is applied for posted forms.
 
 Internal classes are reachable with deep imports of the form
-`from next.forms.dispatch import _FormActionDispatch`.
+`from next.forms.dispatch import FormActionDispatch`.
 """
 
 from __future__ import annotations
@@ -57,11 +57,11 @@ from .base import (
 )
 from .decorators import action
 from .dispatch import (
+    FormActionDispatch,
     _bind_form_for_post,
     _filter_reserved_url_kwargs,
     _form_action_context_callable,
     _form_from_initial_data,
-    _FormActionDispatch,
     _get_caller_path,
     _normalize_handler_response,
     _url_kwargs_from_post,
@@ -100,6 +100,7 @@ __all__ = [
     "FloatField",
     "Form",
     "FormActionBackend",
+    "FormActionDispatch",
     "FormActionManager",
     "FormActionOptions",
     "FormProvider",
@@ -122,7 +123,6 @@ __all__ = [
     "URLInput",
     "ValidationError",
     "Widget",
-    "_FormActionDispatch",
     "_bind_form_for_post",
     "_filter_reserved_url_kwargs",
     "_form_action_context_callable",

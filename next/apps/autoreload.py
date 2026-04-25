@@ -43,7 +43,7 @@ def install() -> None:
     else:
         logger.warning(
             "autoreload.StatReloader has been replaced by %r which is not a "
-            "StatReloader subclass; next-dj will not override it.",
+            "StatReloader subclass, so next-dj will not override it.",
             current,
         )
 

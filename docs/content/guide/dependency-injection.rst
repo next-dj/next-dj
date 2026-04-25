@@ -28,7 +28,8 @@ Where it is used
 - **Pages and layouts** — In child pages under a layout, context functions can
   inject layout-level global dependencies (``Depends("name")``) and
   parent context variables (``Context("key")``). See :doc:`pages-and-templates`
-  and the ``examples/layouts/`` example in the source tree.
+  for a working example (``examples/feature-flags/flags/panels/admin/`` in
+  the source tree uses a nested layout with inherited context).
 
 How it works
 ------------
@@ -75,7 +76,7 @@ If you used the old annotation-based markers, migrate as follows:
 - ``foo: DGlobalContext["name"]`` -> ``foo = Depends("name")``
 - ``bar: DContext["key"]`` -> ``bar = Context("key")`` (or ``Context()`` when the key equals the parameter name)
 
-**Example: layout-level global + parent context (see ``examples/layouts/``):**
+**Example: layout-level global + parent context:**
 
 .. code-block:: python
 
@@ -223,7 +224,11 @@ The signal emitted by :mod:`next.deps.signals` lets external code observe wiring
 
 * ``provider_registered`` fires when a ``RegisteredParameterProvider`` subclass joins the auto-registry.
 
-A worked example lives in ``examples/layouts/layouts/custom_provider.py``. See :doc:`extending` for the overall extension model.
+Working providers live in ``examples/feature-flags/flags/providers.py``
+(``FlagProvider`` + ``DFlag[T]``) and
+``examples/shortener/shortener/providers.py`` (``LinkProvider`` +
+``DLink[T]``). Both use the ``DDependencyBase`` marker and register on
+``AppConfig.ready``. See :doc:`extending` for the overall extension model.
 
 Next
 ----

@@ -1,0 +1,4 @@
+<a href="{{ href }}"
+   class="{% if is_active %}font-semibold text-slate-900{% else %}text-slate-500 hover:text-slate-900{% endif %}">
+  {{ label }}
+</a>

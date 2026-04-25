@@ -65,8 +65,6 @@ def get_first_root_pages_path(file_router: FileRouterBackend) -> Path | None:
 
 def get_first_app_pages_dir(file_router: FileRouterBackend) -> Path | None:
     """Return the first existing app pages directory, or `None`."""
-    from pathlib import Path  # noqa: PLC0415
-
     for app_config in apps.get_app_configs():
         potential = Path(app_config.path) / str(file_router.pages_dir)
         if potential.exists():

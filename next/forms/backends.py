@@ -12,8 +12,10 @@ from django.urls import path, reverse
 from django.urls.exceptions import NoReverseMatch
 from django.views.decorators.http import require_http_methods
 
-from .dispatch import _FormActionDispatch
+from .checks import record_possible_collision
+from .dispatch import FormActionDispatch
 from .rendering import render_form_page_with_errors
+from .signals import action_registered
 from .uid import (
     FORM_ACTION_REVERSE_NAME,
     URL_NAME_FORM_ACTION,
@@ -97,6 +99,15 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry: dict[str, ActionMeta] = {}
         self._uid_to_name: dict[str, str] = {}
 
+    def clear_registry(self) -> None:
+        """Drop every registered action and reset the UID index.
+
+        Intended for test isolation. Use this to clear actions between
+        independent test sessions that register overlapping names.
+        """
+        self._registry.clear()
+        self._uid_to_name.clear()
+
     def register_action(
         self,
         name: str,
@@ -115,11 +126,22 @@ class RegistryFormActionBackend(FormActionBackend):
             )
             raise ImproperlyConfigured(msg)
         self._uid_to_name[uid] = name
+        previous = self._registry.get(name)
+        if previous is not None:
+            record_possible_collision(name, previous["handler"], handler)
         self._registry[name] = {
             "handler": handler,
             "form_class": opts.form_class,
             "uid": uid,
         }
+        action_registered.send(
+            sender=self.__class__,
+            action_name=name,
+            uid=uid,
+            form_class=opts.form_class,
+            namespace=opts.namespace,
+            handler=handler,
+        )
 
     def get_action_url(self, action_name: str) -> str:
         """Return the reverse URL for a registered action name."""
@@ -141,12 +163,12 @@ class RegistryFormActionBackend(FormActionBackend):
         return [path("_next/form/<str:uid>/", view, name=URL_NAME_FORM_ACTION)]
 
     def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
-        """Forward a POST request to `_FormActionDispatch.dispatch`."""
+        """Forward a POST request to `FormActionDispatch.dispatch`."""
         action_name = self._uid_to_name.get(uid)
         if action_name not in self._registry:
             return HttpResponseNotFound()
         meta = self._registry[action_name]
-        return _FormActionDispatch.dispatch(
+        return FormActionDispatch.dispatch(
             self, request, action_name, cast("dict[str, Any]", meta)
         )
 

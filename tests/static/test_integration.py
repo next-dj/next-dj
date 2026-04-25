@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest import mock
 
+from django.contrib.staticfiles.storage import staticfiles_storage
+from django.template import Context, Template
+
 from next.static import (
     StaticCollector,
     StaticFilesBackend,
@@ -49,8 +52,6 @@ class TestFullRenderPipeline:
         manager._backends = [StaticFilesBackend()]
         collector = StaticCollector()
 
-        from django.contrib.staticfiles.storage import staticfiles_storage
-
         staticfiles_storage._setup()  # type: ignore[attr-defined]
         with mock.patch.object(
             staticfiles_storage._wrapped,  # type: ignore[attr-defined]
@@ -77,7 +78,6 @@ class TestUseStyleBlocksThroughPipeline:
     """{% use_style %} registration order survives collector + inject."""
 
     def test_use_style_lands_in_final_html(self) -> None:
-        from django.template import Context, Template
 
         manager = StaticManager()
         manager._backends = [StaticFilesBackend()]
@@ -96,7 +96,6 @@ class TestUseStyleBlocksThroughPipeline:
 
 class TestJsContextFlowsThroughInit:
     def test_context_values_reach_init_script(self) -> None:
-        from django.contrib.staticfiles.storage import staticfiles_storage
 
         manager = StaticManager()
         manager._backends = [StaticFilesBackend()]
@@ -116,7 +115,6 @@ class TestJsContextFlowsThroughInit:
 
 class TestEmptyCollectorIntegration:
     def test_empty_collector_yields_next_runtime_only(self) -> None:
-        from django.contrib.staticfiles.storage import staticfiles_storage
 
         manager = StaticManager()
         manager._backends = [StaticFilesBackend()]

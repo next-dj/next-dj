@@ -577,10 +577,10 @@ Registration and UID
 
 When a module defining ``@forms.action`` is imported:
 
-1. **UID** — A short stable id is derived from the action **name** (SHA-256 of a fixed prefix and the name; first 16 hex characters). The name must be unique across the project.
+1. **UID** — A short stable id is derived from the action **name** (SHA-256 of a fixed prefix and the name, truncated to the first 16 hex characters). The name must be unique across the project.
 2. **Registry** — ``RegistryFormActionBackend`` stores the handler, optional ``form_class``, and UID. Metadata does **not** include the declaring file path for dispatch or error rendering.
 
-There is no automatic ``register_context`` for form actions on ``page.py``; bound forms for GET come from **``build_form_namespace_for_action``** inside ``{% form %}`` unless you provide the namespace yourself.
+There is no automatic ``register_context`` for form actions on ``page.py``, and bound forms for GET come from **``build_form_namespace_for_action``** inside ``{% form %}`` unless you provide the namespace yourself.
 
 URL pattern
 ~~~~~~~~~~~
@@ -596,7 +596,7 @@ All actions share one route shape:
 Request handling
 ~~~~~~~~~~~~~~~~
 
-**GET** to ``/_next/form/<uid>/`` returns **405 Method Not Allowed**. Users never open that URL for browsing; the browser POSTs to it from your page.
+**GET** to ``/_next/form/<uid>/`` returns **405 Method Not Allowed**. Users never open that URL for browsing, and the browser POSTs to it from your page.
 
 **POST** flow:
 
@@ -605,7 +605,7 @@ Request handling
 3. If **invalid**: validate **``_next_form_page``** in POST (must be an existing ``page.py`` under ``BASE_DIR``), load that page’s template, merge **``Page.build_render_context``** with the bound form and errors, return **200**. If **``_next_form_page``** is missing or invalid, return **400**.
 4. If **valid**: call the handler with dependency-injected arguments and normalize the return value (**``None``** → 204 when appropriate, strings and redirect-like objects coerced as documented in the code).
 
-**Roles:** ``FormActionBackend`` / ``RegistryFormActionBackend``, ``FormActionManager``, and ``_FormActionDispatch`` implement the above.
+**Roles:** ``FormActionBackend`` / ``RegistryFormActionBackend``, ``FormActionManager``, and ``FormActionDispatch`` implement the above.
 
 Examples
 --------
@@ -677,7 +677,7 @@ Complete CRUD example with a Todo model:
    from next.pages import context
 
    @context("todos")
-   def get_todos(_request: HttpRequest) -> list[Todo]:
+   def get_todos(request: HttpRequest) -> list[Todo]:
        """Get all todos."""
        return list(Todo.objects.all())
 
@@ -691,7 +691,7 @@ Complete CRUD example with a Todo model:
        is_completed = forms.BooleanField(required=False)
 
        @classmethod
-       def get_initial(cls, _request: HttpRequest) -> dict:
+       def get_initial(cls, request: HttpRequest) -> dict:
            """Empty initial data for new todos."""
            return {}
 
@@ -744,7 +744,7 @@ Complete CRUD example with a Todo model:
    from next.pages import context
 
    @context("todo")
-   def get_todo(_request: HttpRequest, id: int, **_kwargs: object) -> Todo:
+   def get_todo(request: HttpRequest, id: int, **_kwargs: object) -> Todo:
        """Get todo by ID or raise 404."""
        try:
            return Todo.objects.get(pk=id)
@@ -764,7 +764,7 @@ Complete CRUD example with a Todo model:
        @classmethod
        def get_initial(
            cls,
-           _request: HttpRequest,
+           request: HttpRequest,
            id: int,
            **_kwargs: object,
        ) -> Todo | dict:
@@ -960,7 +960,7 @@ Common Issues
 - Ensure ``next`` is in ``INSTALLED_APPS`` (the app registers the ``{% form %}`` tag as a template builtin). For a custom engine, add ``next.templatetags.forms`` to ``OPTIONS['builtins']`` or use ``{% load forms %}`` in the template.
 - Check that action name matches ``@action`` parameter
 - Verify the action module is imported (``page.py`` or ``component.py`` under configured roots)
-- Ensure **``current_page_module_path``** is in the template context; without it ``{% form %}`` raises **``django.core.exceptions.ImproperlyConfigured``**
+- Ensure **``current_page_module_path``** is in the template context, otherwise ``{% form %}`` raises **``django.core.exceptions.ImproperlyConfigured``**
 
 **CSRF token missing:**
 
@@ -977,7 +977,7 @@ Common Issues
 
 - Check that form validation is working (add ``print(form.errors)``)
 - Verify template has error display (``{{ form.errors }}`` or ``{{ form.<field>.errors }}``)
-- Ensure the POST includes a valid **``_next_form_page``** hidden field (same origin as when the page was rendered); otherwise you may get **400** instead of a 200 error page
+- Ensure the POST includes a valid **``_next_form_page``** hidden field (same origin as when the page was rendered), otherwise you may get **400** instead of a 200 error page
 - Ensure response status is **200** for invalid submissions (not a redirect)
 
 **Handler not called:**
@@ -1049,10 +1049,17 @@ Swap the backend through ``FormActionManager``.
 The signals emitted by :mod:`next.forms.signals` let external code observe action lifecycle events.
 
 * ``action_registered`` fires when ``@action`` attaches a handler to a backend.
+  Kwargs: ``action_name``, ``uid``, ``form_class``, ``namespace``.
 * ``action_dispatched`` fires after a backend finishes dispatch for a request.
+  Kwargs: ``action_name``, ``duration_ms``, ``response_status``.
 * ``form_validation_failed`` fires after a submitted form fails validation.
+  Kwargs: ``action_name``, ``error_count``, ``field_names``.
 
-A worked example lives in ``examples/forms/todos/custom_backend.py``. See :doc:`extending` for the overall extension model.
+Inline ``AuditedRegistryFormActionBackend`` and
+``CountingFileComponentsBackend`` snippets live in :doc:`extending`
+(section "Worked examples by subsystem"). Working ``@action`` handlers
+are in ``examples/shortener`` (``create_link`` form) and
+``examples/feature-flags`` (``bulk_toggle`` form).
 
 Next
 ----

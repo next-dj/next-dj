@@ -7,6 +7,7 @@ from next.components import (
     ComponentScanner,
     ComponentVisibilityResolver,
     component_extra_roots_from_config,
+    registry as registry_mod,
 )
 
 
@@ -251,8 +252,6 @@ class TestComponentVisibilityResolver:
         self, tmp_path: Path, monkeypatch
     ) -> None:
         """Exceeding the LRU size evicts the oldest entries for both caches."""
-        from next.components import registry as registry_mod
-
         monkeypatch.setattr(registry_mod, "_VISIBILITY_CACHE_MAX_SIZE", 2)
         reg = ComponentRegistry()
         scope_root = (tmp_path / "scope").resolve()

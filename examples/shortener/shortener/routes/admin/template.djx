@@ -1,0 +1,45 @@
+<section class="space-y-6">
+  <div>
+    <h2 class="text-lg font-semibold">Top links</h2>
+    {% if recent_links %}
+      <ul class="mt-3 space-y-2">
+        {% for link in recent_links %}
+          <li class="space-y-1">
+            {% component "link_card" %}
+            <a href="{% url 'next:page_admin_links_slug' slug=link.slug %}" class="ml-1 text-xs text-slate-500 hover:underline">
+              View details →
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-sm text-slate-500">No links yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="rounded-xl border bg-white p-4 shadow-sm">
+    <h2 class="text-lg font-semibold">Pending clicks (LocMemCache)</h2>
+    <p class="mt-1 text-sm text-slate-600">
+      Counters live in-process. Run
+      <code class="rounded bg-slate-100 px-1">manage.py flush_clicks</code>
+      to persist them into SQLite.
+    </p>
+    {% if pending_clicks %}
+      <table class="mt-3 w-full text-sm">
+        <thead class="text-left text-slate-500">
+          <tr><th class="py-1">Slug</th><th class="py-1">Unflushed clicks</th></tr>
+        </thead>
+        <tbody>
+          {% for slug, count in pending_clicks.items %}
+            <tr class="border-t">
+              <td class="py-1 font-mono">{{ slug }}</td>
+              <td class="py-1">{{ count }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="mt-3 text-sm text-slate-500">Nothing pending.</p>
+    {% endif %}
+  </div>
+</section>

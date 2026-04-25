@@ -70,7 +70,7 @@ Tests mirror this layout:
    * - ``tests/site_pages/``
      - Sample pages directory registered as ``DIRS`` in the test ``NEXT_FRAMEWORK`` config.
    * - ``tests/benchmarks/``
-     - Micro-benchmarks covering every ``next/<area>/`` module. **Opt-in** via the ``perf`` marker; excluded from the default run with ``--ignore=tests/benchmarks``. See Benchmarks_.
+     - Micro-benchmarks covering every ``next/<area>/`` module. **Opt-in** via the ``perf`` marker, excluded from the default run with ``--ignore=tests/benchmarks``. See Benchmarks_.
    * - ``tests/<area>/``
      - Per-module tests matching ``next/<area>/``. Add new tests here.
 
@@ -105,7 +105,7 @@ Tests
    * - ``make test``
      - Runs ``tests/`` with coverage. Fails if ``next/`` coverage is below 100%. Parallel (``pytest -n auto``). HTML report in ``htmlcov/``. Benchmarks skipped by default.
    * - ``make test-examples``
-     - Each example must have ``tests/`` or ``tests.py``; runs pytest with coverage per example (see Examples_).
+     - Each example must have ``tests/`` or ``tests.py``, and the workflow runs pytest with coverage per example (see Examples_).
    * - ``make test-js``
      - Vitest unit tests for ``next/static/next/next.ts``.
    * - ``uv run pytest tests/ -n auto``
@@ -181,7 +181,7 @@ GitHub Actions (``.github/workflows/ci.yml``) additionally:
 - On pull requests: dependency review (``dependency-review`` job).
 - In CI, lint runs on **`next/` only**, plus a separate import-order pass with ``--select I``. Locally, ``make lint`` also covers ``tests/`` and ``examples/``. Keep those directories clean so you do not surprise reviewers.
 - The test matrix installs a specific Django with ``uv pip install "django==…"`` **after** installing the wheel. That override is intentional, not a broken lockfile.
-- A dedicated **Benchmarks** workflow (``.github/workflows/bench.yml``) runs on every PR and posts a comment comparing results against the ``main`` baseline stored in the ``gh-pages`` branch. Alerts fire at ``150%`` regression but never block the merge — they are informational. See Benchmarks_.
+- A dedicated **Benchmarks** workflow (``.github/workflows/bench.yml``) runs on every PR and on push to ``main``. Three jobs: ``bench`` (paired same-runner compare via ``git worktree``), ``comment`` (sticky PR comment), ``publish`` (push numbers to ``gh-pages`` on main). Hard fail at ``mean:99%`` (≈ ×2 of base, the pytest-benchmark parser's maximum). See Benchmarks_.
 
 Ruff uses ``select = ["ALL"]`` with ignores and per-file rules in ``pyproject.toml`` (line length 88, isort with ``known-first-party = ["next"]``, relaxed rules for ``examples/``, ``tests/``, and ``conftest.py``).
 
@@ -248,7 +248,7 @@ Testing
 - Prefer ``@pytest.mark.parametrize`` for matrix-style cases over copy-pasted tests. ``tests/support/cases.py`` holds dataclass-based parametrize rows — reuse and extend them.
 - Use **`django.test.Client`** (the ``client`` fixture) for HTTP-level checks. Do not use the DRF API client unless the example explicitly adds DRF.
 - For deps/forms/urls internals, reuse ``dependency_resolver``, ``csrf_request``, ``form_engine``, and the helpers in ``tests/support/``.
-- The suite expects a pre-configured Django — do not call ``django.setup()`` yourself; ``tests/django_setup.py`` handles it.
+- The suite expects a pre-configured Django — do not call ``django.setup()`` yourself. ``tests/django_setup.py`` handles it.
 
 Coverage
 ~~~~~~~~
@@ -256,7 +256,7 @@ Coverage
 - **`next/`**: CI and ``make test`` enforce 100% line coverage via ``--cov-fail-under=100``.
 - Files under ``next/**/checks.py`` and ``next/checks/`` are **excluded** from coverage (see ``[tool.coverage.run] omit`` in ``pyproject.toml``). Do not chase coverage there.
 - ``[tool.coverage.paths]`` collapses ``next/`` and ``*/site-packages/next/`` so coverage works identically for editable and wheel-installed runs.
-- **Examples**: Each example must ship tests in ``tests/`` or ``tests.py``. ``make test-examples`` does **not** enforce ``--cov-fail-under=100``. Aim for full coverage anyway; reviewers may ask you to close gaps.
+- **Examples**: Each example must ship tests in ``tests/`` or ``tests.py``. ``make test-examples`` does **not** enforce ``--cov-fail-under=100``. Aim for full coverage anyway, since reviewers may ask you to close gaps.
 
 .. _Benchmarks:
 
@@ -270,16 +270,29 @@ Running locally
 
 - ``make bench`` — runs all benchmarks with the ``perf`` marker. First comparison should use ``--benchmark-save=before``, then apply your change and ``--benchmark-save=after``. JSON files land under ``.benchmarks/``.
 - Benchmarks are **excluded from** ``make test`` (ignored via ``addopts``) and auto-marked ``perf`` by ``tests/benchmarks/conftest.py`` — no need to decorate tests yourself.
-- Numbers are **only comparable on the same machine**. Do not cite local deltas in the PR; the CI workflow below does the machine-stable comparison.
+- Numbers are **only comparable on the same machine**. Do not cite local deltas in the PR — the CI workflow below does the machine-stable comparison.
 
 CI integration
 ^^^^^^^^^^^^^^
 
-The Benchmarks workflow (``.github/workflows/bench.yml``) runs on every PR and every push to ``main``:
+The Benchmarks workflow (``.github/workflows/bench.yml``) defines three jobs that share one artefact:
 
-- On ``main``: writes a baseline into ``gh-pages`` under ``dev/bench/``.
-- On PRs: runs the same benchmarks and posts a comment with side-by-side deltas against the baseline. Alerts at ``150%`` regression are informational — the workflow never blocks merges.
-- Uses a single Python/Django version (3.13 / latest) so cross-matrix noise does not pollute comparisons.
+- ``bench`` — runs on every PR and on push to ``main`` with ``contents: read`` only. Builds the BASE side via ``git worktree add ../base <base-sha>`` so the working tree is atomic and complete (no half-checkout state, no stale ``__pycache__``). Runs ``uv sync --locked`` separately for BASE and HEAD so a lockfile bump in the PR is honoured. Benches BASE, then HEAD on the **same runner** with ``--benchmark-save=base`` / ``--benchmark-save=head``. Calls ``pytest-benchmark compare base head`` for the table. Applies the hard-regression gate as a separate ``pytest --benchmark-disable --benchmark-compare=base --benchmark-compare-fail=mean:300%`` step so the saved JSON stays clean. Uploads the comment body, the table, both JSON dumps, the PR number, and the per-machine storage as a single artefact.
+- ``comment`` — needs ``bench``. Runs only on ``pull_request`` with ``pull-requests: write`` (job-level). Downloads the artefact and updates one sticky comment per PR via ``marocchino/sticky-pull-request-comment@v2`` (header ``next-dj-benchmarks``). PRs from forks see a read-only ``GITHUB_TOKEN`` and the comment step is silently skipped — the table still lives in the workflow Job Summary.
+- ``publish`` — needs ``bench``. Runs only on push to ``main`` with ``contents: write`` (job-level). Reuses the artefact's ``bench-head.json`` and pushes it to ``gh-pages`` under ``dev/bench/`` via ``benchmark-action/github-action-benchmark@v1``. Concurrency is configured so this job is never cancelled mid-flight: ``cancel-in-progress`` is true only on PRs, false on ``push``.
+
+Thresholds and noise control:
+
+- ``--benchmark-compare-fail=mean:99%`` — only failure gate. The PR job fails when a benchmark mean slows down by ≥ ×2 of base. The pytest-benchmark parser enforces ``0 < N < 100``, so 99% is the strictest hard-fail threshold the tool supports out of the box.
+- ``--benchmark-warmup=on``, ``--benchmark-warmup-iterations=10000``, ``--benchmark-min-rounds=20``, ``--benchmark-calibration-precision=10``, ``--benchmark-disable-gc`` — stabilise measurements before publication.
+- ``--no-cov --override-ini=addopts=`` — strips the project-wide coverage instrumentation that would otherwise dwarf nano-second timings.
+- Single Python/Django version (3.13 / latest) so cross-matrix noise does not pollute comparisons.
+
+Skipping a benchmark run:
+
+- Put ``[skip bench]`` in the PR title (the PR workflow checks ``pull_request.title``).
+- Put ``[skip bench]`` in the commit message of the push to ``main`` (the publish workflow checks ``head_commit.message``).
+- Mark the PR as draft.
 
 Adding a benchmark
 ^^^^^^^^^^^^^^^^^^
@@ -296,7 +309,7 @@ Interpreting the numbers
 - Trust **Min** and **Median** for comparisons — ``Max`` is almost always a GC pause, not a signal.
 - If ``StdDev > Median``, the measurement is inherently noisy (GC, lazy rebuild). Cite **Min** only for those cases.
 - ``Rounds × Iterations`` tells you how much the harness amortised the measurement — higher is more stable.
-- Units (``ns`` / ``μs`` / ``ms``) are per-group and auto-scaled; only rows within the same group table are directly comparable.
+- Units (``ns`` / ``μs`` / ``ms``) are per-group and auto-scaled, so only rows within the same group table are directly comparable.
 
 When to run
 ^^^^^^^^^^^
@@ -327,7 +340,7 @@ Each example under ``examples/`` should be self-contained, with a ``README.md``,
            ├── conftest.py
            └── test_*.py   # or tests/tests.py
 
-Use ``examples/file-routing/tests/conftest.py`` as the template for Django settings, ``INSTALLED_APPS``, and the ``client`` fixture.
+Use ``examples/_template/conftest.py`` as the canonical template for Django settings, ``INSTALLED_APPS``, and the ``client`` fixture.
 
 **New user-facing behavior** should normally include an example and tests. Small fixes or internal refactors may omit an example if maintainers agree in the PR.
 
@@ -349,7 +362,7 @@ Checklist
 - [ ] TS changes: ``next.min.js`` rebuilt (``make build-js``) and vitest tests updated
 - [ ] Example + tests when adding public API or behavior users copy from ``examples/``
 - [ ] Docs updated when behavior or usage changes
-- [ ] ``make bench`` checked locally when touching a hot path (see Benchmarks_); confirm the PR bench comment before requesting review
+- [ ] ``make bench`` checked locally when touching a hot path (see Benchmarks_), and the PR bench comment confirmed before requesting review
 - [ ] Link issues with ``Fixes #123`` / ``Closes #123`` when applicable
 
 Branches
@@ -373,7 +386,7 @@ Use **draft** PRs for work in progress.
 Review
 ~~~~~~
 
-Maintainers check style with Ruff and mypy, review tests, and assess how the change fits ``next/``. They also consider backwards compatibility and deprecation when behavior changes. Response time depends on maintainer availability; this document does not define a fixed SLA.
+Maintainers check style with Ruff and mypy, review tests, and assess how the change fits ``next/``. They also consider backwards compatibility and deprecation when behavior changes. Response time depends on maintainer availability, and this document does not define a fixed SLA.
 
 Help
 ----

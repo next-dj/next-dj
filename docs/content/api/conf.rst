@@ -49,3 +49,15 @@ Checks (``next.conf.checks``)
    :members:
    :undoc-members:
    :show-inheritance:
+
+Helpers (``next.conf.helpers``)
+-------------------------------
+
+Settings-time shortcuts for extending one default backend entry without
+rebuilding the whole list. See :doc:`/content/guide/project-layout`
+(section "Settings helpers") for usage.
+
+.. automodule:: next.conf.helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:

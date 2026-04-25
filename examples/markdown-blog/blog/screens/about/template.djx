@@ -1,0 +1,16 @@
+<section class="prose max-w-none space-y-4">
+  <h1 class="text-3xl font-bold">About</h1>
+  <p>
+    A demo blog built on <strong>next-dj</strong>. Every post is a plain
+    <code class="rounded bg-slate-100 px-1">post.md</code> file next to a
+    <code class="rounded bg-slate-100 px-1">page.py</code> module. A custom
+    DI provider computes reading time from the Markdown body.
+  </p>
+  <p>
+    The nested post layout wraps every article with a meta bar and a share
+    button — the share button reads the post title from
+    <code class="rounded bg-slate-100 px-1">window.Next.context.post</code>,
+    which is populated by a <code class="rounded bg-slate-100 px-1">@context(serialize=True)</code>
+    declaration.
+  </p>
+</section>
