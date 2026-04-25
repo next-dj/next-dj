@@ -1,3 +1,6 @@
+from next.testing import assert_has_class, assert_missing_class, find_anchor
+
+
 class TestIndex:
     """The home page lists every post in alphabetical order."""
 
@@ -68,30 +71,19 @@ class TestActiveNav:
     """The shared nav_link component toggles active state via request.resolver_match."""
 
     def test_home_link_active_on_home(self, client) -> None:
-        response = client.get("/")
-        body = response.content.decode()
-        home = _anchor(body, "/", "Home")
-        about = _anchor(body, "/about/", "About")
-        assert "font-semibold text-slate-900" in home
-        assert "font-semibold text-slate-900" not in about
+        body = client.get("/").content.decode()
+        assert_has_class(find_anchor(body, href="/", text="Home"), "font-semibold")
+        assert_missing_class(
+            find_anchor(body, href="/about/", text="About"),
+            "font-semibold",
+        )
 
     def test_about_link_active_on_about(self, client) -> None:
-        response = client.get("/about/")
-        body = response.content.decode()
-        home = _anchor(body, "/", "Home")
-        about = _anchor(body, "/about/", "About")
-        assert "font-semibold text-slate-900" in about
-        assert "font-semibold text-slate-900" not in home
-
-
-def _anchor(html: str, href: str, text: str) -> str:
-    """Return the `<a>` tag with the given `href` that contains `text`."""
-    index = 0
-    while (start := html.find("<a ", index)) != -1:
-        end = html.find("</a>", start) + len("</a>")
-        anchor = html[start:end]
-        if f'href="{href}"' in anchor and text in anchor:
-            return anchor
-        index = end
-    msg = f"anchor href={href!r} containing {text!r} not found"
-    raise AssertionError(msg)
+        body = client.get("/about/").content.decode()
+        assert_has_class(
+            find_anchor(body, href="/about/", text="About"), "font-semibold"
+        )
+        assert_missing_class(
+            find_anchor(body, href="/", text="Home"),
+            "font-semibold",
+        )

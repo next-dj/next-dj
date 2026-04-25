@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from next.components.manager import components_manager
 from next.forms.manager import form_action_manager
+from next.pages.manager import page
 
 
 def reset_form_actions() -> None:
@@ -31,4 +32,20 @@ def reset_registries() -> None:
     reset_components()
 
 
-__all__ = ["reset_components", "reset_form_actions", "reset_registries"]
+def reset_page_cache() -> None:
+    """Drop the page template cache and source-mtime bookkeeping.
+
+    Needed between iterations of `render_page` against rewritten files
+    on disk (for example in `tmp_path`), because `page.render` memoises
+    composed template strings per file path.
+    """
+    page._template_registry.clear()
+    page._template_source_mtimes.clear()
+
+
+__all__ = [
+    "reset_components",
+    "reset_form_actions",
+    "reset_page_cache",
+    "reset_registries",
+]

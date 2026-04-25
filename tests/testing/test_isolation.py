@@ -1,6 +1,14 @@
+from pathlib import Path
+
 from next.components.manager import components_manager
 from next.forms import RegistryFormActionBackend, form_action_manager
-from next.testing import reset_components, reset_form_actions, reset_registries
+from next.pages.manager import page
+from next.testing import (
+    reset_components,
+    reset_form_actions,
+    reset_page_cache,
+    reset_registries,
+)
 
 
 class TestResetFormActions:
@@ -79,6 +87,18 @@ class TestResetRegistries:
             backend._registry.update(saved_registry)
             backend._uid_to_name.update(saved_uids)
             components_manager._backends = saved_components
+
+
+class TestResetPageCache:
+    """reset_page_cache drops the template registry and mtime bookkeeping."""
+
+    def test_clears_both_dicts(self) -> None:
+        fp = Path("/tmp/synthetic_page.py")
+        page._template_registry[fp] = "<p>x</p>"
+        page._template_source_mtimes[fp] = {}
+        reset_page_cache()
+        assert fp not in page._template_registry
+        assert fp not in page._template_source_mtimes
 
 
 class _BackendWithoutClear:

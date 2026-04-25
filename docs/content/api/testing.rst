@@ -33,6 +33,38 @@ Signal recording
    :undoc-members:
    :show-inheritance:
 
+HTML assertions
+---------------
+
+.. automodule:: next.testing.html
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Rendering helpers
+-----------------
+
+.. automodule:: next.testing.rendering
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Dependency-injection helpers
+----------------------------
+
+.. automodule:: next.testing.deps
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Patch / override context managers
+---------------------------------
+
+.. automodule:: next.testing.patching
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Registry isolation
 ------------------
 

@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
 from django.core.cache import cache
 from flags.cache import FLAG_PREFIX, MISSING_SENTINEL, get_cached_flag, invalidate_flag
 from flags.metrics import RENDER_INDEX_KEY, record_render, render_counts
 from flags.models import Flag
+from flags.panels._chunks.feature_guard import component as guard
+from flags.receivers import _page_key
+
+from next.testing import resolve_call
 
 
 class TestFlagModel:
@@ -43,26 +50,8 @@ class TestFlagProviderErrors:
     """Direct `FlagProvider` calls without a flag name must fail loudly."""
 
     def test_missing_flag_name_raises(self) -> None:
-        import inspect
-
-        import pytest
-        from flags.panels._chunks.feature_guard import component as guard
-        from flags.providers import FlagProvider
-
-        from next.deps.cache import DependencyCache
-        from next.deps.context import ResolutionContext
-
-        param = inspect.signature(guard.render).parameters["flag"]
-        ctx = ResolutionContext(
-            request=None,
-            form=None,
-            url_kwargs={},
-            context_data={},
-            cache=DependencyCache(),
-        )
-
         with pytest.raises(LookupError):
-            FlagProvider().resolve(param, ctx)
+            resolve_call(guard.render)
 
 
 class TestRenderCounts:
@@ -88,25 +77,13 @@ class TestPageKey:
     """`_page_key` derives a stable per-page identifier from the full path."""
 
     def test_root_page_is_slash(self) -> None:
-        from pathlib import Path
-
-        from flags.receivers import _page_key
-
         assert _page_key(Path("/src/flags/panels/page.py")) == "/"
 
     def test_nested_page_joins_segments(self) -> None:
-        from pathlib import Path
-
-        from flags.receivers import _page_key
-
         assert (
             _page_key(Path("/src/flags/panels/admin/metrics/page.py"))
             == "admin/metrics"
         )
 
     def test_path_without_anchor_falls_back_to_stem(self) -> None:
-        from pathlib import Path
-
-        from flags.receivers import _page_key
-
         assert _page_key(Path("/elsewhere/page.py")) == "page"

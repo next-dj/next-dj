@@ -1,7 +1,10 @@
 import pytest
 from django.dispatch import Signal
 
+from next import signals as framework_signals
+from next.forms.signals import action_dispatched
 from next.testing import SignalEvent, SignalRecorder
+from next.testing.signals import capture_framework_signals, capture_signals
 
 
 class TestSignalRecorder:
@@ -75,3 +78,57 @@ class TestSignalRecorder:
         sig.send(sender="s", n=2)
         rec.stop()
         assert [event.kwargs["n"] for event in rec] == [2]
+
+    def test_first_for_returns_earliest_event(self) -> None:
+        a, b = Signal(), Signal()
+        with SignalRecorder(a, b) as rec:
+            a.send(sender="x", n=1)
+            b.send(sender="x", n=99)
+            a.send(sender="x", n=2)
+        assert rec.first_for(a).kwargs["n"] == 1
+
+    def test_last_for_returns_latest_event(self) -> None:
+        a, b = Signal(), Signal()
+        with SignalRecorder(a, b) as rec:
+            a.send(sender="x", n=1)
+            b.send(sender="x", n=99)
+            a.send(sender="x", n=2)
+        assert rec.last_for(a).kwargs["n"] == 2
+
+    def test_first_for_raises_when_no_matching_event(self) -> None:
+        a, b = Signal(), Signal()
+        with SignalRecorder(a, b) as rec:
+            b.send(sender="x")
+        with pytest.raises(LookupError):
+            rec.first_for(a)
+
+    def test_last_for_raises_when_no_matching_event(self) -> None:
+        a, b = Signal(), Signal()
+        with SignalRecorder(a, b) as rec:
+            b.send(sender="x")
+        with pytest.raises(LookupError):
+            rec.last_for(a)
+
+
+class TestCaptureSignals:
+    """`capture_signals` is sugar over `SignalRecorder(...).start()`."""
+
+    def test_yields_started_recorder(self) -> None:
+        sig = Signal()
+        with capture_signals(sig) as rec:
+            sig.send(sender="s", n=1)
+        assert len(rec) == 1
+
+
+class TestCaptureFrameworkSignals:
+    """`capture_framework_signals` wires every signal in `next.signals.__all__`."""
+
+    def test_covers_action_dispatched(self) -> None:
+        with capture_framework_signals() as rec:
+            action_dispatched.send(sender=None, action_name="test")
+        assert len(rec.events_for(action_dispatched)) == 1
+
+    def test_covers_every_exported_signal(self) -> None:
+        with capture_framework_signals() as rec:
+            pass
+        assert len(rec.signals) == len(framework_signals.__all__)

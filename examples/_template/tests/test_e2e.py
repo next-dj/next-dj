@@ -1,14 +1,20 @@
 """Scaffold tests.
 
-To assert that a framework signal fired during a request, add a test
-that wraps ``client.get(...)`` with ``SignalRecorder`` from
-``next.testing``:
+Native Django assertions cover most of the work. For HTML-aware matches
+prefer ``assertContains(response, ..., html=True)`` or ``assertInHTML``.
+For class-token checks on a specific anchor use ``find_anchor`` +
+``assert_has_class`` from ``next.testing``.
+
+To assert that a framework signal fired during a request, wrap the call
+with ``capture_signals``:
+
+    from next.pages.signals import page_rendered
+    from next.testing import capture_signals
 
     def test_home_emits_page_rendered(client):
-        recorder = SignalRecorder(page_rendered)
-        with recorder:
+        with capture_signals(page_rendered) as rec:
             client.get("/")
-        assert len(recorder.events) == 1
+        assert len(rec) == 1
 """
 
 

@@ -4,6 +4,8 @@ from django.core.cache import cache
 from flags.cache import FLAG_PREFIX, get_cached_flag
 from flags.models import Flag
 
+from next.testing import assert_has_class, assert_missing_class, find_anchor
+
 
 class TestHome:
     """The index lists enabled and disabled flags in two columns."""
@@ -151,24 +153,28 @@ class TestActiveNav:
     """The shared `nav_link` component highlights the current section."""
 
     def test_admin_link_is_active_on_admin_metrics(self, client) -> None:
-        response = client.get("/admin/metrics/")
-        body = response.content.decode()
-        admin_anchor = _extract_anchor(body, "/admin/", "Admin")
-        assert "font-semibold text-slate-900" in admin_anchor
+        body = client.get("/admin/metrics/").content.decode()
+        assert_has_class(
+            find_anchor(body, href="/admin/", text="Admin"), "font-semibold"
+        )
 
     def test_admin_link_not_active_on_home(self, client) -> None:
-        response = client.get("/")
-        body = response.content.decode()
-        admin_anchor = _extract_anchor(body, "/admin/", "Admin")
-        assert "font-semibold text-slate-900" not in admin_anchor
+        body = client.get("/").content.decode()
+        assert_missing_class(
+            find_anchor(body, href="/admin/", text="Admin"),
+            "font-semibold",
+        )
 
     def test_admin_subnav_metrics_active_only_on_metrics(self, client) -> None:
-        response = client.get("/admin/metrics/")
-        body = response.content.decode()
-        metrics_anchor = _extract_anchor(body, "/admin/metrics/", "Render metrics")
-        flags_anchor = _extract_anchor(body, "/admin/", "Flags")
-        assert "font-semibold" in metrics_anchor
-        assert "font-semibold" not in flags_anchor
+        body = client.get("/admin/metrics/").content.decode()
+        assert_has_class(
+            find_anchor(body, href="/admin/metrics/", text="Render metrics"),
+            "font-semibold",
+        )
+        assert_missing_class(
+            find_anchor(body, href="/admin/", text="Flags"),
+            "font-semibold",
+        )
 
 
 class TestPostDeleteReceiver:
@@ -182,19 +188,3 @@ class TestPostDeleteReceiver:
         flag.delete()
 
         assert cache.get(f"{FLAG_PREFIX}beta") is None
-
-
-def _extract_anchor(html: str, href: str, text: str) -> str:
-    """Return the `<a>` tag that links to `href` and contains `text`."""
-    index = 0
-    while True:
-        start = html.find("<a ", index)
-        if start == -1:
-            break
-        end = html.find("</a>", start) + len("</a>")
-        anchor = html[start:end]
-        if f'href="{href}"' in anchor and text in anchor:
-            return anchor
-        index = end
-    msg = f"anchor href={href!r} text={text!r} not found"
-    raise AssertionError(msg)

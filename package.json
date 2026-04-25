@@ -4,8 +4,8 @@
     "test:js": "vitest run",
     "lint:js": "eslint",
     "lint:js:fix": "eslint --fix",
-    "format": "prettier --write \"next/static/next/*.ts\" \"vitest.config.ts\" \"eslint.config.mjs\"",
-    "format:check": "prettier --check \"next/static/next/*.ts\" \"vitest.config.ts\" \"eslint.config.mjs\""
+    "format": "prettier --write \"{next,examples}/**/*.{mjs,ts,js,css}\" \"vitest.config.ts\" \"eslint.config.mjs\"",
+    "format:check": "prettier --check \"*.{mjs,ts,js,css}\" \"vitest.config.ts\" \"eslint.config.mjs\""
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

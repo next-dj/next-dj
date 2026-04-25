@@ -8,6 +8,8 @@ from django.core.management import call_command
 from shortener.cache import CLICK_PREFIX, increment_clicks, pending_clicks
 from shortener.models import Link
 
+from next.testing import assert_has_class, assert_missing_class, find_anchor
+
 
 class TestShorten:
     """Submitting the form creates a Link and redirects home."""
@@ -87,49 +89,39 @@ class TestActiveNav:
     """Active link highlighting uses `request.resolver_match.view_name`."""
 
     def test_admin_subnav_highlights_links_when_on_admin_index(self, client) -> None:
-        response = client.get("/admin/")
-        body = response.content.decode()
-        links_anchor = _extract_anchor(body, "/admin/", "Links")
-        stats_anchor = _extract_anchor(body, "/admin/stats/", "Stats")
-        assert "font-semibold text-slate-900" in links_anchor
-        assert "font-semibold text-slate-900" not in stats_anchor
+        body = client.get("/admin/").content.decode()
+        assert_has_class(
+            find_anchor(body, href="/admin/", text="Links"), "font-semibold"
+        )
+        assert_missing_class(
+            find_anchor(body, href="/admin/stats/", text="Stats"),
+            "font-semibold",
+        )
 
     def test_admin_subnav_highlights_stats_when_on_stats(self, client) -> None:
-        response = client.get("/admin/stats/")
-        body = response.content.decode()
-        links_anchor = _extract_anchor(body, "/admin/", "Links")
-        stats_anchor = _extract_anchor(body, "/admin/stats/", "Stats")
-        assert "font-semibold text-slate-900" not in links_anchor
-        assert "font-semibold text-slate-900" in stats_anchor
+        body = client.get("/admin/stats/").content.decode()
+        assert_missing_class(
+            find_anchor(body, href="/admin/", text="Links"),
+            "font-semibold",
+        )
+        assert_has_class(
+            find_anchor(body, href="/admin/stats/", text="Stats"),
+            "font-semibold",
+        )
 
     def test_root_admin_link_is_active_on_detail_page(self, client) -> None:
         Link.objects.create(slug="deep", url="https://example.com/d")
-        response = client.get("/admin/links/deep/")
-        body = response.content.decode()
-        admin_anchor = _extract_anchor(body, "/admin/", "admin")
-        assert "font-semibold" in admin_anchor
+        body = client.get("/admin/links/deep/").content.decode()
+        assert_has_class(
+            find_anchor(body, href="/admin/", text="admin"), "font-semibold"
+        )
 
     def test_root_admin_link_not_active_on_home(self, client) -> None:
-        response = client.get("/")
-        body = response.content.decode()
-        admin_anchor = _extract_anchor(body, "/admin/", "admin")
-        assert "font-semibold" not in admin_anchor
-
-
-def _extract_anchor(html: str, href: str, text: str) -> str:
-    """Return the `<a>` tag that links to `href` and contains `text`."""
-    index = 0
-    while True:
-        start = html.find("<a ", index)
-        if start == -1:
-            break
-        end = html.find("</a>", start) + len("</a>")
-        anchor = html[start:end]
-        if f'href="{href}"' in anchor and text in anchor:
-            return anchor
-        index = end
-    msg = f"anchor href={href!r} text={text!r} not found"
-    raise AssertionError(msg)
+        body = client.get("/").content.decode()
+        assert_missing_class(
+            find_anchor(body, href="/admin/", text="admin"),
+            "font-semibold",
+        )
 
 
 class TestAdminSurface:

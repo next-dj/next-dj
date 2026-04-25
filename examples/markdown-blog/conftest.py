@@ -6,6 +6,7 @@ from pathlib import Path
 import django
 import pytest
 from django.conf import settings
+from django.core.cache import cache
 
 from next.testing import NextClient, eager_load_pages
 
@@ -26,6 +27,11 @@ if not settings.configured:
 @pytest.fixture(autouse=True, scope="session")
 def _load_pages() -> None:
     eager_load_pages(EXAMPLE_ROOT / "blog" / "screens")
+
+
+@pytest.fixture(autouse=True)
+def _isolate() -> None:
+    cache.clear()
 
 
 @pytest.fixture()

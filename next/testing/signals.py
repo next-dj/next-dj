@@ -96,9 +96,53 @@ class SignalRecorder:
         """Return every captured event emitted by the given signal."""
         return [event for event in self.events if event.signal is signal]
 
+    def first_for(self, signal: Signal) -> SignalEvent:
+        """Return the first captured event for `signal` or raise `LookupError`."""
+        for event in self.events:
+            if event.signal is signal:
+                return event
+        msg = f"No captured events for signal {signal!r}"
+        raise LookupError(msg)
+
+    def last_for(self, signal: Signal) -> SignalEvent:
+        """Return the last captured event for `signal` or raise `LookupError`."""
+        for event in reversed(self.events):
+            if event.signal is signal:
+                return event
+        msg = f"No captured events for signal {signal!r}"
+        raise LookupError(msg)
+
     def clear(self) -> None:
         """Drop every captured event without disconnecting."""
         self.events.clear()
 
 
-__all__ = ["SignalEvent", "SignalRecorder"]
+def capture_signals(*signals: Signal) -> SignalRecorder:
+    """Return a started `SignalRecorder` for use as a context manager.
+
+    Equivalent to `SignalRecorder(*signals).start()` but reads like a
+    verb at the call site: `with capture_signals(sig) as rec: ...`.
+    """
+    return SignalRecorder(*signals).start()
+
+
+def capture_framework_signals() -> SignalRecorder:
+    """Return a recorder connected to every signal in `next.signals.__all__`.
+
+    Handy when a test wants to verify that nothing unexpected fires
+    without wiring each signal by hand.
+    """
+    from next import signals as framework_signals
+
+    tracked = tuple(
+        getattr(framework_signals, name) for name in framework_signals.__all__
+    )
+    return SignalRecorder(*tracked).start()
+
+
+__all__ = [
+    "SignalEvent",
+    "SignalRecorder",
+    "capture_framework_signals",
+    "capture_signals",
+]
