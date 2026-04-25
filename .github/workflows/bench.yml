@@ -2,59 +2,255 @@ name: Benchmarks
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
 
+# PR runs are cancellable on new pushes. Main pushes are NOT cancelled
+# so the gh-pages auto-push cannot be left half-committed.
 concurrency:
   group: bench-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Job-level permissions override these per job (least privilege).
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  BENCH_FLAGS: >-
+    -m perf
+    --benchmark-only
+    --benchmark-warmup=on
+    --benchmark-warmup-iterations=10000
+    --benchmark-min-rounds=20
+    --benchmark-calibration-precision=10
+    --benchmark-disable-gc
+    --benchmark-storage=file://./.benchmarks
+    --benchmark-columns=mean,stddev,rounds
+    --benchmark-sort=mean
+    --benchmark-time-unit=auto
+    --no-cov
+    --override-ini=addopts=
+  PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
+  # Same-runner paired comparison via `git worktree`. Produces the
+  # artefact consumed by `comment` and `publish`.
   bench:
+    if: >-
+      ${{ (github.event_name != 'pull_request'
+           || (!github.event.pull_request.draft
+               && !contains(github.event.pull_request.title, '[skip bench]')))
+          && !contains(github.event.head_commit.message, '[skip bench]') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-python-uv
+      - name: Checkout HEAD with full history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Resolve and validate base / head SHAs
+        id: shas
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            head="${{ github.sha }}"
+            base="$(git rev-parse "$head^" 2>/dev/null || echo "$head")"
+          fi
+          git fetch --no-tags --depth=1 origin "$base" || true
+          git cat-file -e "${base}^{commit}" || {
+            echo "::error::Base SHA $base is not reachable, aborting."
+            exit 1
+          }
+          git cat-file -e "${head}^{commit}"
+          {
+            echo "base=$base"
+            echo "base_short=${base:0:8}"
+            echo "head=$head"
+            echo "head_short=${head:0:8}"
+            echo "pr=${{ github.event.pull_request.number }}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
         with:
           python-version: "3.13"
           cache: "true"
           cache-key-suffix: bench-py-3.13
 
-      - name: Run benchmarks
-        run: >-
-          uv run pytest tests/benchmarks
-          -m perf
-          --benchmark-only
-          --benchmark-json=bench.json
-          --no-cov
-          --override-ini=addopts=
+      - name: Create base worktree
+        run: git worktree add --detach ../base "${{ steps.shas.outputs.base }}"
 
-      - name: Upload benchmark JSON artifact
+      - name: Sync base dependencies
+        working-directory: ../base
+        run: uv sync --locked --dev --python 3.13
+
+      - name: Bench BASE
+        working-directory: ../base
+        run: |
+          set -o pipefail
+          uv run pytest tests/benchmarks $BENCH_FLAGS \
+            --benchmark-save=base \
+            --benchmark-json=bench-base.json
+          mkdir -p "${{ github.workspace }}/.benchmarks"
+          cp -R .benchmarks/. "${{ github.workspace }}/.benchmarks/"
+          cp bench-base.json "${{ github.workspace }}/bench-base.json"
+
+      - name: Sync head dependencies
+        run: uv sync --locked --dev --python 3.13
+
+      - name: Bench HEAD
+        run: |
+          set -o pipefail
+          uv run pytest tests/benchmarks $BENCH_FLAGS \
+            --benchmark-save=head \
+            --benchmark-json=bench-head.json
+
+      - name: Render comparison table
+        run: |
+          set -o pipefail
+          uv run pytest-benchmark compare base head \
+            --columns=mean,stddev,rounds \
+            --sort=mean \
+            2>&1 | tee bench-compare.txt
+
+      - name: Apply hard-regression gate
+        id: gate
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          uv run pytest tests/benchmarks $BENCH_FLAGS \
+            --benchmark-disable \
+            --benchmark-compare=base \
+            --benchmark-compare-fail=mean:300%
+
+      - name: Build comment body and pin PR number
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## next-dj benchmarks"
+            echo
+            echo "Same-runner paired comparison on \`ubuntu-latest\` (Python 3.13)."
+            echo "Base \`${{ steps.shas.outputs.base_short }}\` → head \`${{ steps.shas.outputs.head_short }}\`."
+            echo "Hard-fail threshold: \`mean:300%\` (×4 of base)."
+            echo
+            if [ "${{ steps.gate.outcome }}" = "failure" ]; then
+              echo "**Result:** :red_circle: hard regression detected."
+            else
+              echo "**Result:** :green_circle: within tolerance."
+            fi
+            echo
+            echo '<details><summary>Comparison table</summary>'
+            echo
+            echo '```'
+            cat bench-compare.txt
+            echo '```'
+            echo
+            echo '</details>'
+          } > bench-comment.md
+          echo "${{ steps.shas.outputs.pr }}" > pr-number.txt
+
+      - name: Append to job summary
+        if: always()
+        run: cat bench-comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload bench artefact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bench-${{ github.sha }}
-          path: bench.json
+          name: bench-${{ steps.shas.outputs.head_short }}-${{ github.run_attempt }}
+          path: |
+            bench-comment.md
+            bench-compare.txt
+            bench-base.json
+            bench-head.json
+            pr-number.txt
+            .benchmarks/**/*.json
           retention-days: 14
           if-no-files-found: error
 
-      - name: Publish benchmark results
+      - name: Fail job on hard regression
+        if: ${{ steps.gate.outcome == 'failure' }}
+        run: |
+          echo "::error::pytest-benchmark compare-fail tripped (mean ratio ≥ 4×)."
+          exit 1
+
+  # Sticky PR comment. Runs after `bench` even on a hard regression so
+  # authors see the table when the gate trips. PRs from forks are
+  # skipped at the posting step (read-only GITHUB_TOKEN).
+  comment:
+    needs: bench
+    if: ${{ github.event_name == 'pull_request' && always() && needs.bench.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Download bench artefact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bench-*
+          merge-multiple: true
+          path: ./_bench
+
+      - name: Read PR number
+        id: pr
+        run: |
+          set -euo pipefail
+          number=$(tr -d '[:space:]' < ./_bench/pr-number.txt)
+          test -n "$number"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Post / update sticky PR comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: next-dj-benchmarks
+          number: ${{ steps.pr.outputs.number }}
+          path: ./_bench/bench-comment.md
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Push HEAD numbers to gh-pages history. Reuses the bench artefact,
+  # so benchmarks are not re-run.
+  publish:
+    needs: bench
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.bench.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Download bench artefact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bench-*
+          merge-multiple: true
+          path: ./_bench
+
+      - name: Push HEAD numbers to gh-pages
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: next-dj benchmarks
           tool: pytest
-          output-file-path: bench.json
+          output-file-path: ./_bench/bench-head.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           gh-pages-branch: gh-pages
           benchmark-data-dir-path: dev/bench
-          auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          comment-always: true
-          comment-on-alert: true
-          alert-threshold: "150%"
-          fail-on-alert: false
+          auto-push: true
+          comment-always: false
+          comment-on-alert: false
           summary-always: true
-          alert-comment-cc-users: "@${{ github.actor }}"
+          alert-threshold: "200%"
+          fail-on-alert: false

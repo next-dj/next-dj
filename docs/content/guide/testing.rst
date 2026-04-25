@@ -33,35 +33,46 @@ Reach for ``next.testing`` when those native tools do not cover the case.
 When to use ``next.testing``
 ----------------------------
 
-================================================   =============================================
-Need                                               Helper
-================================================   =============================================
-Dispatch a form action by its registration name    :class:`NextClient <next.testing.NextClient>`
-                                                   (``post_action``, ``get_action_url``)
-Observe framework signals                          :class:`SignalRecorder <next.testing.SignalRecorder>`,
-                                                   :func:`capture_signals <next.testing.capture_signals>`,
-                                                   :func:`capture_framework_signals <next.testing.capture_framework_signals>`
-Pick the right ``<a>`` out of a rendered page and
-check a class token                                :func:`find_anchor <next.testing.find_anchor>`,
-                                                   :func:`assert_has_class <next.testing.assert_has_class>`,
-                                                   :func:`assert_missing_class <next.testing.assert_missing_class>`
-Render a page or component in isolation            :func:`render_page <next.testing.render_page>`,
-                                                   :func:`render_component_by_name <next.testing.render_component_by_name>`
-Unit-test a provider or a DI-aware callable        :func:`resolve_call <next.testing.resolve_call>`,
-                                                   :func:`make_resolution_context <next.testing.make_resolution_context>`
-Unit-test a form without HTTP                      :func:`build_form_for <next.testing.build_form_for>`
-Override a DI dependency for a block               :func:`override_dependency <next.testing.override_dependency>`,
-                                                   :func:`override_provider <next.testing.override_provider>`
-Merge keys into ``NEXT_FRAMEWORK`` without
-replacing the full dict                            :func:`override_next_settings <next.testing.override_next_settings>`,
-                                                   :func:`override_component_backends <next.testing.override_component_backends>`
-Stub a form action for a block                     :func:`override_form_action <next.testing.override_form_action>`
-Inspect collected static assets                    :func:`patch_static_collector <next.testing.patch_static_collector>`
-Import every ``page.py`` before URL dispatch       :func:`eager_load_pages <next.testing.eager_load_pages>`
-Reset registries or the page template cache
-after swapping settings                            :func:`reset_registries <next.testing.reset_registries>`,
-                                                   :func:`reset_page_cache <next.testing.reset_page_cache>`
-================================================   =============================================
+.. list-table::
+   :header-rows: 1
+   :widths: 45 55
+
+   * - Need
+     - Helper
+   * - Dispatch a form action by its registration name
+     - :class:`NextClient <next.testing.NextClient>`
+       (``post_action``, ``get_action_url``)
+   * - Observe framework signals
+     - :class:`SignalRecorder <next.testing.SignalRecorder>`,
+       :func:`capture_signals <next.testing.capture_signals>`,
+       :func:`capture_framework_signals <next.testing.capture_framework_signals>`
+   * - Pick the right ``<a>`` out of a rendered page and check a class token
+     - :func:`find_anchor <next.testing.find_anchor>`,
+       :func:`assert_has_class <next.testing.assert_has_class>`,
+       :func:`assert_missing_class <next.testing.assert_missing_class>`
+   * - Render a page or component in isolation
+     - :func:`render_page <next.testing.render_page>`,
+       :func:`render_component_by_name <next.testing.render_component_by_name>`
+   * - Unit-test a provider or a DI-aware callable
+     - :func:`resolve_call <next.testing.resolve_call>`,
+       :func:`make_resolution_context <next.testing.make_resolution_context>`
+   * - Unit-test a form without HTTP
+     - :func:`build_form_for <next.testing.build_form_for>`
+   * - Override a DI dependency for a block
+     - :func:`override_dependency <next.testing.override_dependency>`,
+       :func:`override_provider <next.testing.override_provider>`
+   * - Merge keys into ``NEXT_FRAMEWORK`` without replacing the full dict
+     - :func:`override_next_settings <next.testing.override_next_settings>`,
+       :func:`override_component_backends <next.testing.override_component_backends>`
+   * - Stub a form action for a block
+     - :func:`override_form_action <next.testing.override_form_action>`
+   * - Inspect collected static assets
+     - :func:`patch_static_collector <next.testing.patch_static_collector>`
+   * - Import every ``page.py`` before URL dispatch
+     - :func:`eager_load_pages <next.testing.eager_load_pages>`
+   * - Reset registries or the page template cache after swapping settings
+     - :func:`reset_registries <next.testing.reset_registries>`,
+       :func:`reset_page_cache <next.testing.reset_page_cache>`
 
 Recipes
 -------
