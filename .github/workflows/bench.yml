@@ -145,6 +145,11 @@ jobs:
       #
       # `--benchmark-compare` accepts a glob over saved-run filenames.
       # `*_base` matches `0001_base.json` regardless of the auto-counter.
+      #
+      # `--benchmark-compare-fail` percentage parser enforces 0 < N < 100,
+      # so 99% (≈ ×2 of base) is the strictest hard gate the tool will
+      # accept. Anything tighter would noise-trip on shared CI runners
+      # anyway.
       - name: Bench HEAD and gate
         id: gate
         continue-on-error: true
@@ -154,7 +159,7 @@ jobs:
             --benchmark-save=head \
             --benchmark-json=bench-head.json \
             --benchmark-compare='*_base' \
-            --benchmark-compare-fail=mean:300% \
+            --benchmark-compare-fail=mean:99% \
             2>&1 | tee bench-compare.txt
 
       - name: Build comment body and pin PR number
@@ -166,7 +171,7 @@ jobs:
             echo
             echo "Same-runner paired comparison on \`ubuntu-latest\` (Python 3.13)."
             echo "Base \`${{ steps.shas.outputs.base_short }}\` → head \`${{ steps.shas.outputs.head_short }}\`."
-            echo "Hard-fail threshold: \`mean:300%\` (×4 of base)."
+            echo "Hard-fail threshold: \`mean:99%\` (≈ ×2 of base, the parser's max)."
             echo
             case "${{ steps.gate.outcome }}" in
               failure) echo "**Result:** :red_circle: hard regression detected." ;;
@@ -210,7 +215,7 @@ jobs:
       - name: Fail job on hard regression
         if: ${{ steps.gate.outcome == 'failure' }}
         run: |
-          echo "::error::pytest-benchmark compare-fail tripped (mean ratio ≥ 4×)."
+          echo "::error::pytest-benchmark compare-fail tripped (mean ratio ≥ 2× of base)."
           exit 1
 
   # Sticky PR comment. Runs after `bench` even on a hard regression so

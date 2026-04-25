@@ -181,7 +181,7 @@ GitHub Actions (``.github/workflows/ci.yml``) additionally:
 - On pull requests: dependency review (``dependency-review`` job).
 - In CI, lint runs on **`next/` only**, plus a separate import-order pass with ``--select I``. Locally, ``make lint`` also covers ``tests/`` and ``examples/``. Keep those directories clean so you do not surprise reviewers.
 - The test matrix installs a specific Django with ``uv pip install "django==…"`` **after** installing the wheel. That override is intentional, not a broken lockfile.
-- A dedicated **Benchmarks** workflow (``.github/workflows/bench.yml``) runs on every PR and on push to ``main``. Three jobs: ``bench`` (paired same-runner compare via ``git worktree``), ``comment`` (sticky PR comment), ``publish`` (push numbers to ``gh-pages`` on main). Hard fail at ``mean:300%`` (×4 of base). See Benchmarks_.
+- A dedicated **Benchmarks** workflow (``.github/workflows/bench.yml``) runs on every PR and on push to ``main``. Three jobs: ``bench`` (paired same-runner compare via ``git worktree``), ``comment`` (sticky PR comment), ``publish`` (push numbers to ``gh-pages`` on main). Hard fail at ``mean:99%`` (≈ ×2 of base, the pytest-benchmark parser's maximum). See Benchmarks_.
 
 Ruff uses ``select = ["ALL"]`` with ignores and per-file rules in ``pyproject.toml`` (line length 88, isort with ``known-first-party = ["next"]``, relaxed rules for ``examples/``, ``tests/``, and ``conftest.py``).
 
@@ -283,7 +283,7 @@ The Benchmarks workflow (``.github/workflows/bench.yml``) defines three jobs tha
 
 Thresholds and noise control:
 
-- ``--benchmark-compare-fail=mean:300%`` — only failure gate. The PR job fails when a benchmark mean slows down by ≥ ×4 of base, well above realistic GitHub-runner CPU jitter.
+- ``--benchmark-compare-fail=mean:99%`` — only failure gate. The PR job fails when a benchmark mean slows down by ≥ ×2 of base. The pytest-benchmark parser enforces ``0 < N < 100``, so 99% is the strictest hard-fail threshold the tool supports out of the box.
 - ``--benchmark-warmup=on``, ``--benchmark-warmup-iterations=10000``, ``--benchmark-min-rounds=20``, ``--benchmark-calibration-precision=10``, ``--benchmark-disable-gc`` — stabilise measurements before publication.
 - ``--no-cov --override-ini=addopts=`` — strips the project-wide coverage instrumentation that would otherwise dwarf nano-second timings.
 - Single Python/Django version (3.13 / latest) so cross-matrix noise does not pollute comparisons.
