@@ -94,8 +94,21 @@ jobs:
       - name: Create base worktree
         run: git worktree add --detach ../base "${{ steps.shas.outputs.base }}"
 
+      # Compute the BASE lockfile hash via sha256sum because `hashFiles()`
+      # is restricted to paths inside $GITHUB_WORKSPACE.
+      - name: Hash BASE lockfile
+        id: base_lock
+        run: |
+          set -euo pipefail
+          if [ -f ../base/uv.lock ]; then
+            hash=$(sha256sum ../base/uv.lock | cut -c1-16)
+          else
+            hash=none
+          fi
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
       # Most PRs target the same `main` SHA. Caching the BASE result by
-      # base-SHA + uv.lock hash means the second PR skips the BASE bench
+      # base-SHA + lockfile hash means the second PR skips the BASE bench
       # (and its `uv sync`) entirely.
       - name: Cache BASE benchmark result
         id: base_cache
@@ -104,7 +117,7 @@ jobs:
           path: |
             .benchmarks
             bench-base.json
-          key: bench-base-${{ steps.shas.outputs.base }}-${{ hashFiles('../base/uv.lock') }}
+          key: bench-base-${{ steps.shas.outputs.base }}-${{ steps.base_lock.outputs.hash }}
 
       - name: Sync base dependencies
         if: steps.base_cache.outputs.cache-hit != 'true'
@@ -123,18 +136,15 @@ jobs:
           cp -R .benchmarks/. "${{ github.workspace }}/.benchmarks/"
           cp bench-base.json "${{ github.workspace }}/bench-base.json"
 
-      # Skip head sync when uv.lock is unchanged (typical PR), otherwise
-      # the HEAD-side `uv sync` would just re-verify what's already there.
       - name: Sync head dependencies
-        run: |
-          set -euo pipefail
-          if ! diff -q uv.lock ../base/uv.lock >/dev/null 2>&1; then
-            uv sync --locked --dev --python 3.13
-          fi
+        run: uv sync --locked --dev --python 3.13
 
       # HEAD bench prints the comparison table itself (--benchmark-compare)
       # and trips the hard gate via --benchmark-compare-fail. One pytest
       # invocation does what used to take three steps.
+      #
+      # `--benchmark-compare` accepts a glob over saved-run filenames.
+      # `*_base` matches `0001_base.json` regardless of the auto-counter.
       - name: Bench HEAD and gate
         id: gate
         continue-on-error: true
@@ -143,7 +153,7 @@ jobs:
           uv run pytest tests/benchmarks $BENCH_FLAGS \
             --benchmark-save=head \
             --benchmark-json=bench-head.json \
-            --benchmark-compare=base \
+            --benchmark-compare='*_base' \
             --benchmark-compare-fail=mean:300% \
             2>&1 | tee bench-compare.txt
 
@@ -158,16 +168,20 @@ jobs:
             echo "Base \`${{ steps.shas.outputs.base_short }}\` → head \`${{ steps.shas.outputs.head_short }}\`."
             echo "Hard-fail threshold: \`mean:300%\` (×4 of base)."
             echo
-            if [ "${{ steps.gate.outcome }}" = "failure" ]; then
-              echo "**Result:** :red_circle: hard regression detected."
-            else
-              echo "**Result:** :green_circle: within tolerance."
-            fi
+            case "${{ steps.gate.outcome }}" in
+              failure) echo "**Result:** :red_circle: hard regression detected." ;;
+              success) echo "**Result:** :green_circle: within tolerance." ;;
+              *)       echo "**Result:** :grey_question: bench did not finish (\`${{ steps.gate.outcome }}\`). See workflow logs." ;;
+            esac
             echo
             echo '<details><summary>Comparison table</summary>'
             echo
             echo '```'
-            cat bench-compare.txt
+            if [ -s bench-compare.txt ]; then
+              cat bench-compare.txt
+            else
+              echo "(no comparison output — bench failed before producing a table)"
+            fi
             echo '```'
             echo
             echo '</details>'
@@ -220,11 +234,18 @@ jobs:
         id: pr
         run: |
           set -euo pipefail
+          if [ ! -s ./_bench/pr-number.txt ] || [ ! -s ./_bench/bench-comment.md ]; then
+            echo "::warning::bench artefact missing pr-number.txt or bench-comment.md, skipping comment."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           number=$(tr -d '[:space:]' < ./_bench/pr-number.txt)
           test -n "$number"
           echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Post / update sticky PR comment
+        if: ${{ steps.pr.outputs.skip != 'true' }}
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: next-dj-benchmarks
