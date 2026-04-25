@@ -110,3 +110,36 @@ class TestBenchDispatchEndToEnd:
             "bench_action",
             meta,
         )
+
+    @pytest.mark.benchmark(group="forms.dispatch")
+    def test_dispatch_through_subclassed_backend(self, benchmark) -> None:
+        """Dispatch through a thin `RegistryFormActionBackend` subclass.
+
+        Pins the wrapper overhead for projects that inherit from the
+        registry backend (audit-trail, metrics, gating). Compare against
+        ``test_dispatch_valid_form`` to spot regressions in the
+        super-call path.
+        """
+
+        class _SubclassedBackend(RegistryFormActionBackend):
+            def dispatch(self, request, uid):  # type: ignore[override]
+                return super().dispatch(request, uid)
+
+        backend = _SubclassedBackend()
+        backend.register_action(
+            "bench_action",
+            _ok_handler,
+            options=FormActionOptions(form_class=_BenchForm),
+        )
+        meta = backend.get_meta("bench_action")
+        assert meta is not None
+        post = MagicMock()
+        post.items.return_value = [("name", "bench")]
+        request = build_mock_http_request(method="POST", POST=post, FILES=None)
+        benchmark(
+            FormActionDispatch.dispatch,
+            backend,
+            request,
+            "bench_action",
+            meta,
+        )
