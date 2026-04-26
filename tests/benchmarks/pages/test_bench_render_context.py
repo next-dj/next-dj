@@ -14,6 +14,7 @@ import pytest
 
 from next.pages import Page
 from next.pages.signals import page_rendered
+from tests.benchmarks.factories import noop_signal_receiver
 
 
 if TYPE_CHECKING:
@@ -21,10 +22,6 @@ if TYPE_CHECKING:
 
 
 _SIMPLE_TEMPLATE = "<h1>{{ title }}</h1>"
-
-
-def _noop_receiver(sender: object, **_: object) -> None:  # pragma: no cover
-    del sender
 
 
 def _register_context_functions(page: Page, page_path, count: int) -> None:
@@ -39,22 +36,13 @@ def _register_context_functions(page: Page, page_path, count: int) -> None:
 
 
 class TestBenchBuildRenderContext:
+    @pytest.mark.parametrize("count", [5, 20], ids=["small", "large"])
     @pytest.mark.benchmark(group="pages.render_context")
-    def test_build_small_context(self, tmp_path: Path, benchmark) -> None:
-        """Cold build with 5 ``@context`` callables."""
+    def test_build_context(self, tmp_path: Path, count: int, benchmark) -> None:
         page = Page()
         page_path = tmp_path / "page.py"
         page_path.write_text("def render(r): return 'x'\n")
-        _register_context_functions(page, page_path, 5)
-        benchmark(page.build_render_context, page_path)
-
-    @pytest.mark.benchmark(group="pages.render_context")
-    def test_build_large_context(self, tmp_path: Path, benchmark) -> None:
-        """Heavy case with 20 ``@context`` callables."""
-        page = Page()
-        page_path = tmp_path / "page.py"
-        page_path.write_text("def render(r): return 'x'\n")
-        _register_context_functions(page, page_path, 20)
+        _register_context_functions(page, page_path, count)
         benchmark(page.build_render_context, page_path)
 
 
@@ -75,11 +63,11 @@ class TestBenchPageRenderedSignal:
         page_path = tmp_path / "page.py"
         page_path.write_text("def render(r): return 'x'\n")
         page.register_template(page_path, _SIMPLE_TEMPLATE)
-        page_rendered.connect(_noop_receiver)
+        page_rendered.connect(noop_signal_receiver)
         try:
             benchmark(page.render, page_path, title="bench")
         finally:
-            page_rendered.disconnect(_noop_receiver)
+            page_rendered.disconnect(noop_signal_receiver)
 
     @pytest.mark.benchmark(group="pages.signals")
     def test_render_with_receiver_large_context(
@@ -96,8 +84,8 @@ class TestBenchPageRenderedSignal:
         page_path.write_text("def render(r): return 'x'\n")
         page.register_template(page_path, _SIMPLE_TEMPLATE)
         _register_context_functions(page, page_path, 20)
-        page_rendered.connect(_noop_receiver)
+        page_rendered.connect(noop_signal_receiver)
         try:
             benchmark(page.render, page_path, title="bench")
         finally:
-            page_rendered.disconnect(_noop_receiver)
+            page_rendered.disconnect(noop_signal_receiver)

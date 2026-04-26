@@ -6,6 +6,8 @@ from django.http import HttpRequest, HttpResponse
 
 from next.forms import (
     FormActionBackend,
+    FormActionFactory,
+    FormActionManager,
     RegistryFormActionBackend,
     form_action_manager,
 )
@@ -115,3 +117,57 @@ class TestFormActionBackendAbstract:
         stub = StubBackend()
         req = HttpRequest()
         assert stub.render_form_fragment(req, "x", None, None) == ""
+
+
+class TestFormActionManagerReloadConfig:
+    """`_reload_config` reads `DEFAULT_FORM_ACTION_BACKENDS` defensively."""
+
+    def test_non_dict_entries_are_skipped(self, settings) -> None:
+        """Non-dict entries inside the list are skipped without raising."""
+        settings.NEXT_FRAMEWORK = {
+            "DEFAULT_FORM_ACTION_BACKENDS": [
+                "not-a-dict",
+                {"BACKEND": "next.forms.RegistryFormActionBackend"},
+            ],
+        }
+        manager = FormActionManager()
+        manager._reload_config()
+        assert len(manager._backends) == 1
+        assert isinstance(manager._backends[0], RegistryFormActionBackend)
+
+    def test_factory_failure_is_logged_and_skipped(self, settings, caplog) -> None:
+        """If a backend constructor raises, the entry is skipped and logged."""
+        settings.NEXT_FRAMEWORK = {
+            "DEFAULT_FORM_ACTION_BACKENDS": [
+                {"BACKEND": "next.forms.RegistryFormActionBackend"},
+            ],
+        }
+
+        def boom(_config: dict) -> None:
+            msg = "boom"
+            raise RuntimeError(msg)
+
+        with patch.object(FormActionFactory, "create_backend", side_effect=boom):
+            manager = FormActionManager()
+            with caplog.at_level("ERROR"):
+                manager._reload_config()
+        assert manager._backends == []
+        assert any(
+            "Error creating form-action backend" in r.message for r in caplog.records
+        )
+
+
+class TestFormActionFactory:
+    """`FormActionFactory.create_backend` resolves dotted paths to backends."""
+
+    def test_explicit_backend_path(self) -> None:
+        """Explicit `BACKEND` path is honoured."""
+        backend = FormActionFactory.create_backend(
+            {"BACKEND": "next.forms.RegistryFormActionBackend"},
+        )
+        assert isinstance(backend, RegistryFormActionBackend)
+
+    def test_missing_backend_key_raises_keyerror(self) -> None:
+        """Configuration without `BACKEND` is the system-check's responsibility."""
+        with pytest.raises(KeyError):
+            FormActionFactory.create_backend({})

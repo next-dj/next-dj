@@ -16,6 +16,7 @@ from . import checks, signals
 from .backends import (
     ActionMeta,
     FormActionBackend,
+    FormActionFactory,
     FormActionOptions,
     RegistryFormActionBackend,
 )
@@ -101,6 +102,7 @@ __all__ = [
     "Form",
     "FormActionBackend",
     "FormActionDispatch",
+    "FormActionFactory",
     "FormActionManager",
     "FormActionOptions",
     "FormProvider",

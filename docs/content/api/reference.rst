@@ -146,6 +146,7 @@ Single dictionary in Django settings. Top-level keys (each optional beyond defau
 * ``URL_NAME_TEMPLATE`` is the format string for URL pattern names (default ``page_{name}``).
 * ``DEFAULT_COMPONENT_BACKENDS`` is a list of component backend dicts (``BACKEND``, ``DIRS``, ``COMPONENTS_DIR``). See :doc:`/content/guide/components`.
 * ``DEFAULT_STATIC_BACKENDS`` is a list of static backend dicts (``BACKEND``, ``OPTIONS``). The default backend resolves co-located CSS/JS through Django ``staticfiles_storage``. See :doc:`/content/guide/static-assets`.
+* ``DEFAULT_FORM_ACTION_BACKENDS`` is a list of form-action backend dicts (``BACKEND``, ``OPTIONS``). Each entry's ``BACKEND`` must subclass :class:`~next.forms.FormActionBackend`. The default is a single :class:`~next.forms.RegistryFormActionBackend` and is loaded lazily on first dispatch. Subclass it (or implement the ABC directly) to add audit logging, cache the registry in Redis, or gate dispatch behind authorization. See :doc:`/content/guide/forms` and :doc:`/content/guide/extending`.
 * ``NEXT_JS_OPTIONS`` is a dict passed to :class:`~next.static.NextScriptBuilder` to control injection of ``next.min.js``. Recognised keys are ``policy`` (``"auto"``/``"disabled"``/``"manual"`` or a :class:`~next.static.ScriptInjectionPolicy` member), ``preload_template``, ``script_tag_template``, and ``init_template``. See :doc:`/content/guide/static-assets`.
 * ``STRICT_CONTEXT`` (bool, default ``False``) promotes ``TypeError`` / ``ValueError`` / ``AttributeError`` / ``KeyError`` raised by Django context processors from a warning to a re-raise during page rendering. See :doc:`/content/guide/context`.
 * ``LAZY_COMPONENT_MODULES`` (bool, default ``False``) skips the eager import of every discovered ``component.py`` at startup. Modules are imported on first resolve of the component instead. See :doc:`/content/guide/components`.
@@ -182,6 +183,12 @@ Single dictionary in Django settings. Top-level keys (each optional beyond defau
        "DEFAULT_STATIC_BACKENDS": [
            {
                "BACKEND": "next.static.StaticFilesBackend",
+               "OPTIONS": {},
+           },
+       ],
+       "DEFAULT_FORM_ACTION_BACKENDS": [
+           {
+               "BACKEND": "next.forms.RegistryFormActionBackend",
                "OPTIONS": {},
            },
        ],

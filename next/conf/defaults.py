@@ -39,6 +39,12 @@ DEFAULTS: dict[str, Any] = {
             "OPTIONS": {},
         },
     ],
+    "DEFAULT_FORM_ACTION_BACKENDS": [
+        {
+            "BACKEND": "next.forms.RegistryFormActionBackend",
+            "OPTIONS": {},
+        },
+    ],
     "TEMPLATE_LOADERS": [
         "next.pages.loaders.DjxTemplateLoader",
     ],
