@@ -14,13 +14,10 @@ import pytest
 from next.forms import RegistryFormActionBackend
 from next.forms.backends import FormActionOptions
 from next.forms.manager import FormActionManager
+from tests.benchmarks.factories import noop_form_handler
 
 
 _BULK = 100
-
-
-def _noop_handler(**_: object) -> None:  # pragma: no cover - bench stub
-    return None
 
 
 def _make_populated_manager() -> FormActionManager:
@@ -30,7 +27,7 @@ def _make_populated_manager() -> FormActionManager:
     for i in range(_BULK):
         backend.register_action(
             f"act_{i}",
-            _noop_handler,
+            noop_form_handler,
             options=FormActionOptions(),
         )
     return manager
@@ -68,7 +65,7 @@ class TestBenchRegisterThroughManager:
             for i in range(_BULK):
                 manager.register_action(
                     f"act_{i}",
-                    _noop_handler,
+                    noop_form_handler,
                     options=FormActionOptions(),
                 )
 
@@ -128,7 +125,7 @@ class TestBenchClearRegistries:
 
         def setup() -> tuple[tuple[object, ...], dict[str, object]]:
             for i in range(_BULK):
-                backend.register_action(f"act_{i}", _noop_handler)
+                backend.register_action(f"act_{i}", noop_form_handler)
             return (), {}
 
         benchmark.pedantic(

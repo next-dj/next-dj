@@ -4,13 +4,7 @@ from django.http import HttpRequest
 from next.pages import context
 
 
-_VALID_KIND_FILTERS = frozenset(
-    {
-        AuditEntry.KIND_DISPATCHED,
-        AuditEntry.KIND_VALIDATION_FAILED,
-        AuditEntry.KIND_REQUEST_STARTED,
-    },
-)
+_VALID_KIND_FILTERS = frozenset(k for k, _ in AuditEntry.KIND_CHOICES)
 
 
 @context("entries")

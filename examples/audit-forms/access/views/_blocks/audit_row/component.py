@@ -63,3 +63,11 @@ def _payload_keys(entry: AuditEntry) -> list[str]:
 @component.context("data_attrs")
 def _data_attrs(entry: AuditEntry) -> dict[str, Any]:
     return {"source": entry.source, "kind": entry.kind}
+
+
+@component.context("request_link")
+def _request_link(entry: AuditEntry) -> str:
+    """Return the per-request audit URL when the row is correlated."""
+    if entry.request_id is None:
+        return ""
+    return f"/request/{entry.request_id}/audit/"

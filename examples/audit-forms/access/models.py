@@ -40,6 +40,13 @@ class AuditEntry(models.Model):
     action_name = models.CharField(max_length=120)
     kind = models.CharField(max_length=20, choices=KIND_CHOICES)
     source = models.CharField(max_length=10, choices=SOURCE_CHOICES)
+    request = models.ForeignKey(
+        "access.AccessRequest",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="audit_entries",
+    )
     step = models.CharField(max_length=20, blank=True)
     payload = models.JSONField(default=dict, blank=True)
     duration_ms = models.FloatField(null=True, blank=True)

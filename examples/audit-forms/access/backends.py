@@ -49,10 +49,16 @@ class AuditedFormActionBackend(RegistryFormActionBackend):
 
         Skips auditing for UIDs that the registry does not know — those
         return 404 from `super().dispatch` and have no associated action.
+
+        After ``super().dispatch`` runs the handler, the dispatched-row
+        reads ``request.session["access_request_just_created"]`` to
+        attach the row to the freshly-created ``AccessRequest`` (the
+        last step in the workflow). The session key is consumed so
+        subsequent dispatches do not over-attach.
         """
-        if uid not in self._uid_to_name:
+        action_name = self._uid_to_name.get(uid)
+        if action_name is None:
             return super().dispatch(request, uid)
-        action_name = self._uid_to_name[uid]
         step = request.POST.get("step", "") if request.method == "POST" else ""
         payload: dict[str, Any] = (
             _safe_form_payload(request) if request.method == "POST" else {}
@@ -65,12 +71,23 @@ class AuditedFormActionBackend(RegistryFormActionBackend):
             payload=payload,
         )
         response = super().dispatch(request, uid)
+        request_id = _consume_just_created(request)
         AuditEntry.objects.create(
             action_name=action_name,
             kind=AuditEntry.KIND_DISPATCHED,
             source=AuditEntry.SOURCE_BACKEND,
+            request_id=request_id,
             step=step,
             response_status=response.status_code,
             payload={"redirect": response.get("Location", "")},
         )
         return response
+
+
+def _consume_just_created(request: HttpRequest) -> int | None:
+    """Pop the per-request correlation id stored by the form handler."""
+    raw = request.session.pop("access_request_just_created", None)
+    if raw is None:
+        return None
+    request.session.modified = True
+    return int(raw)

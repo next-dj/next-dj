@@ -15,14 +15,16 @@ if TYPE_CHECKING:
 
 
 class TestBenchTreeSignature:
+    @pytest.mark.parametrize(
+        ("depth", "fanout"),
+        [(3, 3), (4, 5)],
+        ids=["small", "large"],
+    )
     @pytest.mark.benchmark(group="server.autoreload")
-    def test_signature_small(self, tmp_path: Path, benchmark) -> None:
-        build_pages_tree(tmp_path, depth=3, fanout=3, leaf="page.py")
-        benchmark(_tree_dir_signature, tmp_path)
-
-    @pytest.mark.benchmark(group="server.autoreload")
-    def test_signature_large(self, tmp_path: Path, benchmark) -> None:
-        build_pages_tree(tmp_path, depth=4, fanout=5, leaf="page.py")
+    def test_signature(
+        self, tmp_path: Path, depth: int, fanout: int, benchmark
+    ) -> None:
+        build_pages_tree(tmp_path, depth=depth, fanout=fanout, leaf="page.py")
         benchmark(_tree_dir_signature, tmp_path)
 
 

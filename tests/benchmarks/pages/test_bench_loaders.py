@@ -25,14 +25,15 @@ _PY_SRC = "template = 'hello {{ name }}'\n"
 class TestBenchPythonModuleLoader:
     @pytest.mark.benchmark(group="pages.loaders")
     def test_python_load_cold(self, tmp_path: Path, benchmark) -> None:
-        def run() -> None:
-            i = getattr(run, "i", 0)
-            run.i = i + 1
-            page_path = tmp_path / f"page_{i}.py"
-            page_path.write_text(_PY_SRC)
-            _load_python_module_memo(page_path)
+        counter = [0]
 
-        benchmark(run)
+        def setup() -> tuple[tuple[object, ...], dict[str, object]]:
+            path = tmp_path / f"page_{counter[0]}.py"
+            path.write_text(_PY_SRC)
+            counter[0] += 1
+            return (path,), {}
+
+        benchmark.pedantic(_load_python_module_memo, setup=setup, rounds=20)
 
     @pytest.mark.benchmark(group="pages.loaders")
     def test_python_load_warm_mtime_hit(self, tmp_path: Path, benchmark) -> None:
@@ -167,14 +168,9 @@ class TestBenchComposeLayoutHierarchy:
         page_path.write_text(_PY_SRC)
         return page_path, layouts
 
+    @pytest.mark.parametrize("depth", [3, 10])
     @pytest.mark.benchmark(group="pages.loaders")
-    def test_compose_depth_3(self, tmp_path: Path, benchmark) -> None:
-        _page, layouts = self._build_layouts(tmp_path, 3)
-        loader = LayoutTemplateLoader()
-        benchmark(loader._compose_layout_hierarchy, "<body/>", layouts)
-
-    @pytest.mark.benchmark(group="pages.loaders")
-    def test_compose_depth_10(self, tmp_path: Path, benchmark) -> None:
-        _page, layouts = self._build_layouts(tmp_path, 10)
+    def test_compose(self, tmp_path: Path, depth: int, benchmark) -> None:
+        _page, layouts = self._build_layouts(tmp_path, depth)
         loader = LayoutTemplateLoader()
         benchmark(loader._compose_layout_hierarchy, "<body/>", layouts)

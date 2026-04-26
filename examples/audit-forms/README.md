@@ -9,20 +9,31 @@ side by side.
 
 The example focuses on the form-action subsystem of next-dj: a custom
 backend wired through `NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]`, a
-single namespaced `@action` handling all three steps, two composite
-components (`progress_bar` inside the form, `audit_row` inside the admin
-table), session-backed step state, and full coverage of the
-`next.testing` `SignalRecorder` API.
+single namespaced `@action` handling all three steps, three composite
+components (`progress_bar` and `step_section` inside the form,
+`audit_row` shared between the admin and per-request audit pages),
+session-backed step state with a `request_id` correlation column on
+`AuditEntry`, and full coverage of the `next.testing` `SignalRecorder`
+API.
 
 ## What you will see
 
 | URL | Description |
 |-----|-------------|
-| `/` | Landing page with two CTAs and snapshots of the latest five requests and audit rows. |
-| `/request/applicant/` | Step 1 of the request form — full name, email, team. |
+| `/` | Landing page. Recent requests link to their per-request audit. |
+| `/request/applicant/` | Step 1 — full name, email, team. Saved sections show "✓ saved" pills. |
 | `/request/justification/` | Step 2 — project slug, free-form reason, expiry days. |
-| `/request/review/` | Step 3 — read-only summary, "Submit request" button. |
-| `/admin/audit/` | Audit log table. Filter by `kind` via `?kind=…`. Backend rows and signal rows live next to each other. |
+| `/request/review/` | Step 3 — read-only confirmation summary. |
+| `/request/<id>/audit/` | Per-request audit trail, opened on submit with a "✅ Submitted" banner. |
+| `/admin/audit/` | Global audit log. Filter by `kind` via `?kind=…`. Backend rows link to their per-request page. |
+
+The user flow:
+
+```
+/  →  /request/applicant/  →  /request/justification/  →  /request/review/  →  submit
+                                                                                  ↓
+                                                         /request/<new id>/audit/?just=1
+```
 
 ## How to run
 
@@ -30,7 +41,7 @@ table), session-backed step state, and full coverage of the
 cd examples/audit-forms
 uv run python manage.py migrate
 uv run python manage.py runserver     # http://127.0.0.1:8000/
-uv run pytest                         # 9 tests
+uv run pytest                         # 35 tests
 ```
 
 Tailwind loads via the Play CDN in
@@ -164,28 +175,64 @@ fields and only renders a confirmation. The handler reads
 `form.cleaned_data["step"]` to decide whether to redirect to the next
 step or commit the `AccessRequest`.
 
-This pattern is small enough to read in one screen and demonstrates the
-DI-driven `get_initial(cls, request, step)` hook — the page URL kwarg
-`step` is resolved through the framework's dependency resolver, so the
-form repopulates from `request.session["access_request"]` on every GET.
+The form declares `get_initial(cls, request, step)` as a classmethod.
+You never call it directly — the framework calls it automatically with
+`step` resolved from the page URL kwarg through the dependency
+resolver, and uses the returned dict to seed the form on every GET.
+Combined with the session merge in the handler, that gives you
+"saved data on every step page" without writing any view code.
 
-### 5. Composite components scoped to their section
+### 5. Two composite components, two patterns
 
-Both composite components live in `_blocks/` next to their parent route,
-not at the top of `views/`. The component scanner only makes them visible
-inside that subtree, so neither leaks into unrelated pages.
+The example ships three composite components that demonstrate two
+different ways the framework lets a component contribute logic:
 
-`progress_bar/` reads `progress_steps` from the page context (one of the
-`@context` functions in `page.py`) and adds derived view-data through
-`@component.context` — `step_label`, `completed_count`. Its template
-renders the stepper using both inputs.
+- **`progress_bar/` — synthesised state from session truth.** Lives at
+  `views/request/[step]/_blocks/progress_bar/`. It does NOT consume a
+  pre-built `progress_steps` from the page; it builds the step list
+  itself by inspecting `request.session["access_request"]` and the
+  current URL kwarg. A step is `current` when it matches the URL,
+  `saved` when every field it owns is in the session draft, otherwise
+  `pending`. Page-level context shrinks to just `current_step` and
+  `draft` — all step knowledge lives in the component.
 
-`audit_row/` receives an `entry` from the admin template's
-`{% for entry in entries %}` loop and adds `kind_class`, `source_class`,
-`summary`, `payload_keys`, and `data_attrs` so the template stays
-markup-only.
+- **`step_section/` — Python `render()` gating on form state.** Lives
+  next to `progress_bar`. Has only a `component.py` (no `.djx`); the
+  `render()` function takes `form`, `request`, `step`, and
+  `current_step` via DI, then assembles HTML through inline
+  `django.template.Template` instances. It owns the section chrome:
+  red border on validation errors, "✓ saved" pill plus a compact
+  value summary when the step is past, slate placeholder for steps
+  not yet visited. The page template just calls
+  `{% component "step_section" step="applicant" %}` three times.
 
-### 6. Session state, not hidden form fields
+- **`audit_row/` — `@component.context` deriving display data.** Lives
+  at `views/_blocks/audit_row/` (one scope above the admin and
+  per-request pages so both can use it). Takes an `AuditEntry` from
+  the parent loop and exposes `kind_class`, `source_class`,
+  `summary`, `payload_keys`, `request_link`, and `data_attrs`. The
+  template stays markup-only.
+
+### 6. Per-request audit trail (`AuditEntry.request` FK)
+
+The audit log can be read globally at `/admin/audit/` or per-request at
+`/request/<id>/audit/`. The router walks the file tree and emits both
+patterns from one app — `views/request/[step]/page.py` becomes
+`request/<str:step>/`, `views/request/[int:id]/audit/page.py` becomes
+`request/<int:id>/audit/`. Django's URL resolver picks the int variant
+first, so `/request/5/audit/` reaches the per-request page even though
+`5` would also be a valid `<str:step>`.
+
+The correlation column on `AuditEntry.request` is **only** populated by
+the backend channel, on the **dispatched** row of the final step. The
+form handler stores `request.session["access_request_just_created"]`
+right after `AccessRequest.objects.create(...)`, and
+`AuditedFormActionBackend.dispatch` pops that key after `super()`
+returns. Signal-channel rows stay unlinked by design — that is a
+teaching point in itself: the signal channel sees only what the A3
+payload ships, and `AccessRequest.id` is not in that payload.
+
+### 7. Session state, not hidden form fields
 
 Each step posts the visible fields (plus a hidden `step`). The handler
 merges them into `request.session["access_request"]` and redirects. The
@@ -193,35 +240,62 @@ form's `get_initial` reads back the same session dict, so on `GET` of
 step 2 you can see "Computing" already filled into the team summary —
 that is what `tests/test_e2e.py::TestSessionResume` asserts.
 
-### 7. Admin filter by GET query
+### 8. Admin filter by GET query
 
 `/admin/audit/?kind=validation_failed` narrows the table to one kind
 through a plain GET form. The `@context("active_kind")` function reads
 `request.GET` and the template uses it to mark the matching `<option>`
 as `selected`. No JavaScript, no AJAX.
 
+### 9. Comparing the two audit channels
+
+| | Backend channel | Signal channel |
+|---|---|---|
+| Where written | inside `AuditedFormActionBackend.dispatch` | `@receiver(action_dispatched / form_validation_failed)` |
+| Sees raw POST? | yes | no — only the signal kwargs |
+| Sees response status? | yes | yes (via signal kwarg) |
+| Correlated to `AccessRequest`? | yes (last step only) | no |
+| Coupled to backend class? | yes — only fires when this backend dispatches | no — fires whatever backend is configured |
+| When to pick | compliance, full request payloads, transactional rollback | metrics, side effects on action lifecycle, decoupled from backend swap |
+
+The example runs both because it is a *demonstration*. In production,
+pick the channel that matches your need: backend if you want raw
+inputs and atomicity with the form's database write, signal if you
+want decoupling and minimal coupling to the backend implementation.
+
 ## Tests
 
-[`tests/test_e2e.py`](tests/test_e2e.py) groups nine tests across five
-classes:
+[`tests/test_e2e.py`](tests/test_e2e.py) and
+[`tests/test_unit.py`](tests/test_unit.py) hold 35 tests across the
+following groups:
 
-- `TestFullSubmission` — three-step happy path. Asserts a single
-  `AccessRequest`, six backend rows (3× `request_started` + 3×
-  `dispatched`), three signal rows, and that `SignalRecorder` captures
-  three `action_dispatched` events with non-zero `duration_ms`.
-- `TestValidationFailure` — empty email on step 1. Asserts no
-  `AccessRequest`, one signal-source `validation_failed` row with
-  `error_count >= 1` and `"email" in field_names`, and one
-  `form_validation_failed` event recorded by `SignalRecorder`.
-- `TestAdminAuditPage` — both `data-source="backend"` and
-  `data-source="signal"` `<tr>` elements appear after one valid and one
-  invalid post. The `?kind=` filter narrows the rendered HTML.
-- `TestNamespacedAction` — `resolve_action_url("access:request_step")`
-  succeeds, the bare name raises `KeyError`.
-- `TestSessionResume` — POST step 1, then GET `/request/justification/`,
-  and assert "Computing" appears in the rendered HTML.
+- `TestFullSubmission` — three-step happy path; asserts the
+  `AccessRequest` row plus the expected backend / signal channel
+  counts and `SignalRecorder` events.
+- `TestValidationFailure` — empty email on step 1; asserts no
+  `AccessRequest` and one signal-source `validation_failed` row with
+  `error_count >= 1` and `"email" in field_names`.
+- `TestAdminAuditPage` — DOM and DB assertions on the global audit
+  table and the `?kind=` filter.
+- `TestRequestCorrelation` — backend `dispatched` row links to the
+  freshly-created `AccessRequest`; signal rows do not.
+- `TestPerRequestAuditPage` — `/request/<id>/audit/` shows only that
+  request's rows; unknown id 404s; `?just=1` toggles the success
+  banner.
+- `TestSuccessRedirect` — final step redirects to
+  `/request/<id>/audit/?just=1` with the correct id.
+- `TestStepSection` — composite renders `data-state="active"` for
+  the current step, `data-state="saved"` plus `data-saved-badge` for
+  completed steps.
+- `TestNamespacedAction`, `TestSessionResume`, `TestUnknownUid` —
+  the existing namespace, session-resume, and unknown-UID assertions
+  from the original test pass.
+- `TestProgressBarSteps`, `TestStepFallbacks`,
+  `TestRequestStepFormDerive`, `TestModelStr`, `TestAuditRowHelpers`,
+  `TestLandingPage` — unit-level coverage of derived state, form
+  fallbacks, and component helpers.
 
-Coverage is 95% across the `access` package
+Coverage is 100% across the `access` package
 (`uv run pytest --cov=access`).
 
 ## Forward-compat

@@ -34,8 +34,12 @@ _progress = _load(
     "audit_progress_bar",
 )
 _audit_row = _load(
-    VIEWS_ROOT / "admin" / "audit" / "_blocks" / "audit_row" / "component.py",
+    VIEWS_ROOT / "_blocks" / "audit_row" / "component.py",
     "audit_audit_row",
+)
+_step_section = _load(
+    VIEWS_ROOT / "request" / "[step]" / "_blocks" / "step_section" / "component.py",
+    "audit_step_section",
 )
 
 
@@ -71,22 +75,35 @@ class TestModelStr:
         assert "2026-04-25 12:30:00" in rendered
 
 
-class TestProgressBarLabel:
-    """`_step_label` returns the active step label, or empty when none is current."""
+class TestProgressBarSteps:
+    """`progress_bar` synthesises step status from the URL kwarg and the session."""
 
-    def test_returns_label_for_current_step(self) -> None:
-        steps = [
-            {"key": "applicant", "label": "Applicant", "index": 1, "status": "done"},
-            {"key": "review", "label": "Review", "index": 2, "status": "current"},
-        ]
-        assert _progress._step_label(steps) == "Review"
+    def test_active_step_is_current(self) -> None:
+        request = HttpRequest()
+        request.session = {}  # type: ignore[assignment]
+        steps = _progress._steps(request, step="justification")
+        statuses = {entry["key"]: entry["status"] for entry in steps}
+        assert statuses["applicant"] == "pending"
+        assert statuses["justification"] == "current"
+        assert statuses["review"] == "pending"
 
-    def test_returns_empty_when_no_step_is_current(self) -> None:
-        steps = [
-            {"key": "a", "label": "A", "index": 1, "status": "done"},
-            {"key": "b", "label": "B", "index": 2, "status": "done"},
-        ]
-        assert _progress._step_label(steps) == ""
+    def test_filled_session_marks_step_as_saved(self) -> None:
+        request = HttpRequest()
+        request.session = {  # type: ignore[assignment]
+            "access_request": {
+                "full_name": "Ada",
+                "email": "ada@example.com",
+                "team": "Computing",
+            },
+        }
+        steps = _progress._steps(request, step="justification")
+        statuses = {entry["key"]: entry["status"] for entry in steps}
+        assert statuses["applicant"] == "saved"
+
+    def test_label_helpers_return_canonical_values(self) -> None:
+        assert _progress._step_label(step="justification") == "Justification"
+        assert _progress._step_index(step="review") == 3
+        assert _progress._step_total() == 3
 
 
 class TestAuditRowHelpers:
@@ -139,16 +156,13 @@ class TestStepFallbacks:
     def test_current_step_normalises_invalid_value(self) -> None:
         assert _step_page.current_step("nope") == _step_page.STEP_ORDER[0]
 
-    def test_step_index_normalises_invalid_value(self) -> None:
-        assert _step_page.step_index("nope") == 1
-
-    def test_step_total_returns_step_order_length(self) -> None:
-        assert _step_page.step_total() == len(_step_page.STEP_ORDER)
-
-    def test_progress_steps_normalises_invalid_value(self) -> None:
-        result = _step_page.progress_steps("nope")
-        assert [entry["key"] for entry in result] == _step_page.STEP_ORDER
-        assert result[0]["status"] == "current"
+    def test_progress_bar_normalises_invalid_step(self) -> None:
+        request = HttpRequest()
+        request.session = {}  # type: ignore[assignment]
+        steps = _progress._steps(request, step="nope")
+        statuses = [entry["status"] for entry in steps]
+        assert statuses[0] == "current"
+        assert _progress._step_index(step="nope") == 1
 
 
 class TestRequestStepFormDerive:
@@ -174,6 +188,66 @@ class TestRequestStepFormDerive:
         request.session = {}  # type: ignore[assignment]
         initial = _step_page.RequestStepForm.get_initial(request, step="ghost")
         assert initial["step"] == _step_page.STEP_ORDER[0]
+
+
+class TestStepSectionRenderPaths:
+    """`step_section.render` covers the review, errors, and truncation branches."""
+
+    def test_review_step_renders_summary(self) -> None:
+        request = HttpRequest()
+        request.session = {  # type: ignore[assignment]
+            "access_request": {
+                "full_name": "Ada",
+                "email": "ada@example.com",
+                "team": "Computing",
+                "project_slug": "engine",
+                "reason": "ok",
+                "expires_in_days": 7,
+            },
+        }
+        form = _step_page.RequestStepForm(initial={"step": "review"})
+        rendered = _step_section.render(
+            form, request, step="review", current_step="review"
+        )
+        assert 'data-step-section="review"' in rendered
+        assert "Confirm and submit" in rendered
+        assert "Computing" in rendered
+
+    def test_invalid_active_step_reports_errors_state(self) -> None:
+        request = HttpRequest()
+        request.session = {}  # type: ignore[assignment]
+        form = _step_page.RequestStepForm(
+            data={"step": "applicant", "full_name": "", "email": "", "team": ""},
+        )
+        form.is_valid()  # populate form.errors
+        rendered = _step_section.render(
+            form,
+            request,
+            step="applicant",
+            current_step="applicant",
+        )
+        assert 'data-state="errors"' in rendered
+        assert "border-rose-300" in rendered
+
+    def test_long_saved_value_is_truncated(self) -> None:
+        long_reason = "x" * 200
+        request = HttpRequest()
+        request.session = {  # type: ignore[assignment]
+            "access_request": {
+                "project_slug": "engine",
+                "reason": long_reason,
+                "expires_in_days": 7,
+            },
+        }
+        form = _step_page.RequestStepForm(initial={"step": "applicant"})
+        rendered = _step_section.render(
+            form,
+            request,
+            step="justification",
+            current_step="applicant",
+        )
+        assert "..." in rendered
+        assert long_reason not in rendered
 
 
 class TestLandingPage:

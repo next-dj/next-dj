@@ -31,9 +31,10 @@
                 <p class="font-medium">{{ r.full_name }}</p>
                 <p class="text-xs text-slate-500">{{ r.email }} · {{ r.project_slug }}</p>
               </div>
-              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                {{ r.status }}
-              </span>
+              <a href="{% url 'next:page_request_int_id_audit' id=r.pk %}"
+                 class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
+                {{ r.status }} · audit
+              </a>
             </li>
           {% endfor %}
         </ul>

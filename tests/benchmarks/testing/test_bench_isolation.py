@@ -11,10 +11,7 @@ import pytest
 from next.forms import form_action_manager
 from next.forms.backends import FormActionOptions
 from next.testing.isolation import reset_form_actions
-
-
-def _noop_handler(**_: object) -> None:  # pragma: no cover - bench stub
-    return None
+from tests.benchmarks.factories import noop_form_handler
 
 
 _REGISTRY_SIZE = 50
@@ -31,7 +28,7 @@ class TestBenchResetFormActions:
             for i in range(_REGISTRY_SIZE):
                 backend.register_action(
                     f"act_{i}",
-                    _noop_handler,
+                    noop_form_handler,
                     options=FormActionOptions(),
                 )
             return (), {}

@@ -61,7 +61,7 @@ Tests mirror this layout:
 | `make test-examples` | Each example must have `tests/` or `tests.py`; runs pytest with coverage per example. |
 | `make test-js` | Vitest unit tests for `next/static/next/next.ts`. |
 | `uv run pytest tests/ -n auto` | Fast iteration without coverage flags. |
-| `make bench` | Opt-in micro-benchmarks. Equivalent to `uv run pytest tests/benchmarks -m perf --benchmark-only --no-cov --override-ini="addopts="`. See [Benchmarks](#benchmarks). |
+| `make bench` | Opt-in micro-benchmarks with CI-aligned flags (warmup, min-rounds, gc-disabled, storage under `.benchmarks/`). Override via `BENCH_FLAGS`. See [Benchmarks](#benchmarks). |
 
 ### Lint, types, format
 
@@ -103,7 +103,7 @@ GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) additional
 - On pull requests: dependency review (`dependency-review` job).
 - In CI, `lint` runs on **`next/` only**, plus a separate import-order pass with `--select I`. Locally, `make lint` also covers `tests/` and `examples/`. Keep those directories clean so you do not surprise reviewers.
 - The test matrix installs a specific Django with `uv pip install "django==…"` **after** installing the wheel. That override is intentional, not a broken lockfile.
-- A dedicated **Benchmarks** workflow ([.github/workflows/bench.yml](.github/workflows/bench.yml)) runs on every PR and posts a comment comparing results against the `main` baseline stored in the `gh-pages` branch. Alerts fire at `150%` regression but never block the merge — they are informational. See [Benchmarks](#benchmarks).
+- A dedicated **Benchmarks** workflow ([.github/workflows/bench.yml](.github/workflows/bench.yml)) runs on every PR and posts a comment with side-by-side deltas. The `bench` job has a hard gate at `mean:99%` (≈×2 slowdown) — the job fails and blocks merge if the gate trips. On `main`, HEAD numbers are pushed to `gh-pages` with an informational `alert-threshold: 200%` that never blocks. See [Benchmarks](#benchmarks).
 
 Ruff uses `select = ["ALL"]` with ignores and per-file rules in [pyproject.toml](pyproject.toml) (line length 88, isort with `known-first-party = ["next"]`, relaxed rules for `examples/`, `tests/`, and `conftest.py`).
 
@@ -177,7 +177,7 @@ Micro-benchmarks in [tests/benchmarks/](tests/benchmarks/) guard the hot paths i
 
 **Running locally**
 
-- `make bench` — runs all benchmarks with the `perf` marker. First comparison should use `--benchmark-save=before`, then apply your change and `--benchmark-save=after`. JSON files land under `.benchmarks/`.
+- `make bench` — runs all benchmarks with the `perf` marker using the same flags as CI (warmup=1000, min-rounds=10, gc disabled, results stored in `.benchmarks/`). For a before/after comparison: `make bench BENCH_EXTRA="--benchmark-save=before"`, apply your change, then `make bench BENCH_EXTRA="--benchmark-save=after --benchmark-compare='*_before'"`. JSON files land under `.benchmarks/`.
 - Benchmarks are **excluded from `make test`** (ignored via `addopts`) and auto-marked `perf` by [tests/benchmarks/conftest.py](tests/benchmarks/conftest.py) — no need to decorate tests yourself.
 - Numbers are **only comparable on the same machine**. Do not cite local deltas in the PR; the CI workflow below does the machine-stable comparison.
 
@@ -186,7 +186,7 @@ Micro-benchmarks in [tests/benchmarks/](tests/benchmarks/) guard the hot paths i
 The [Benchmarks workflow](.github/workflows/bench.yml) runs on every PR and every push to `main`:
 
 - On `main`: writes a baseline into `gh-pages` under `dev/bench/`.
-- On PRs: runs the same benchmarks and posts a comment with side-by-side deltas against the baseline. Alerts at `150%` regression are informational — the workflow never blocks merges.
+- On PRs: runs the same benchmarks and posts a comment with side-by-side deltas. A hard gate at `mean:99%` (≈×2 of base — the strictest value the flag parser accepts) fails the `bench` job and blocks merge on a detected regression. Put `[skip bench]` in the PR title or commit message to bypass.
 - Uses a single Python/Django version (3.13 / latest) so cross-matrix noise does not pollute comparisons.
 
 **Adding a benchmark**
@@ -206,10 +206,10 @@ The [Benchmarks workflow](.github/workflows/bench.yml) runs on every PR and ever
 
 **When to run**
 
-Always run `make bench` locally when your change touches:
+Always run `make bench` locally when your change touches any `next/<area>/` file that has a mirror under `tests/benchmarks/<area>/`. That currently covers:
 
-- `next/server/autoreload.py`, `next/components/registry.py`, `next/static/discovery.py`, `next/pages/loaders.py`, `next/pages/manager.py`, `next/urls/{parser,backends}.py`, `next/conf/settings.py`, or `next/components/backends.py`.
-- Any caching or invalidation logic.
+- **Hot-path modules** (run locally, results matter): `next/server/autoreload.py`, `next/components/{registry,backends}.py`, `next/static/discovery.py`, `next/pages/{loaders,manager}.py`, `next/urls/{parser,backends}.py`, `next/conf/settings.py`, `next/forms/{dispatch,manager,backends}.py`, `next/deps/resolver.py`.
+- Any caching or invalidation logic, regardless of area.
 - Any code in a hot render, autoreload, or URL-generation path.
 
 Non-hot paths (checks, one-shot app startup code, templatetag glue) do not need a local bench pass — the CI comment covers that.

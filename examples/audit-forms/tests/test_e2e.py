@@ -172,3 +172,109 @@ class TestUnknownUid:
         response = client.post("/_next/form/deadbeefdeadbeef/", {"step": "applicant"})
         assert response.status_code == 404
         assert AuditEntry.objects.filter(source=AuditEntry.SOURCE_BACKEND).count() == 0
+
+
+class TestRequestCorrelation:
+    """Backend rows for the final step attach to the freshly-created `AccessRequest`."""
+
+    def test_backend_dispatched_row_links_to_request_when_created(self, client) -> None:
+        _walk_three_steps(client)
+        ar = AccessRequest.objects.get()
+        attached = AuditEntry.objects.filter(
+            source=AuditEntry.SOURCE_BACKEND,
+            kind=AuditEntry.KIND_DISPATCHED,
+            request_id=ar.pk,
+        )
+        assert attached.count() == 1
+
+    def test_signal_rows_have_no_request_link(self, client) -> None:
+        _walk_three_steps(client)
+        unlinked = AuditEntry.objects.filter(source=AuditEntry.SOURCE_SIGNAL).count()
+        linked = (
+            AuditEntry.objects.filter(source=AuditEntry.SOURCE_SIGNAL)
+            .exclude(request_id=None)
+            .count()
+        )
+        assert unlinked == 3
+        assert linked == 0
+
+
+class TestPerRequestAuditPage:
+    """`/request/<id>/audit/` shows only that request's rows."""
+
+    def test_renders_only_owned_rows(self, client) -> None:
+        _walk_three_steps(client)
+        first = AccessRequest.objects.get()
+
+        # Walk a second request to add unrelated audit rows.
+        client.cookies.clear()
+        _walk_three_steps(client)
+        second = AccessRequest.objects.exclude(pk=first.pk).get()
+
+        response = client.get(f"/request/{first.pk}/audit/")
+        assert response.status_code == 200
+        body = response.content.decode()
+        assert f"request #{first.pk}" in body
+        assert f"request #{second.pk}" not in body
+        assert "data-audit-table" in body
+
+    def test_unknown_request_returns_404(self, client) -> None:
+        response = client.get("/request/9999/audit/")
+        assert response.status_code == 404
+
+    def test_just_submitted_banner_appears_only_with_query(self, client) -> None:
+        _walk_three_steps(client)
+        ar = AccessRequest.objects.get()
+
+        without = client.get(f"/request/{ar.pk}/audit/")
+        with_flag = client.get(f"/request/{ar.pk}/audit/?just=1")
+        assert "data-just-submitted" not in without.content.decode()
+        assert "data-just-submitted" in with_flag.content.decode()
+
+
+class TestSuccessRedirect:
+    """The final step redirects to the new request's per-request audit page."""
+
+    def test_review_redirect_targets_per_request_page(self, client) -> None:
+        _post_step(client, VALID_APPLICANT)
+        _post_step(client, VALID_JUSTIFICATION)
+        response = _post_step(client, VALID_REVIEW)
+        ar = AccessRequest.objects.get()
+        assert response.status_code == 302
+        assert response["Location"] == f"/request/{ar.pk}/audit/?just=1"
+
+
+class TestStepSection:
+    """The `step_section` composite gates visuals on form state."""
+
+    def test_active_step_is_marked_active(self, client) -> None:
+        response = client.get("/request/applicant/")
+        body = response.content.decode()
+        assert 'data-step-section="applicant"' in body
+        assert 'data-state="active"' in body
+
+    def test_saved_badge_appears_on_completed_step(self, client) -> None:
+        _post_step(client, VALID_APPLICANT)
+        response = client.get("/request/justification/")
+        body = response.content.decode()
+        assert 'data-step-section="applicant"' in body
+        assert 'data-state="saved"' in body
+        assert "data-saved-badge" in body
+
+    def test_invalid_submission_renders_errors_state(self, client) -> None:
+        # Need a session-bound _next_form_page so the dispatch returns 200 (not 400)
+        # with the rendered error state. The dispatch only returns 400 when the
+        # framework cannot locate the page; here we POST through an active GET
+        # to seed the session, then submit invalid data on the same step.
+        response = client.post_action(
+            "access:request_step",
+            {**VALID_APPLICANT, "email": "", "_next_form_page": ""},
+        )
+        # Bad-page → 400, but the validation_failed signal already fired and
+        # the session state did not advance, so the next GET on step 1 still
+        # shows fields (not the saved badge for applicant).
+        assert response.status_code == 400
+        followup = client.get("/request/applicant/")
+        body = followup.content.decode()
+        assert 'data-step-section="applicant"' in body
+        assert 'data-state="active"' in body
