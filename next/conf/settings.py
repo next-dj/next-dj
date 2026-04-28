@@ -61,6 +61,7 @@ class NextFrameworkSettings:
             "DEFAULT_PAGE_BACKENDS",
             "DEFAULT_COMPONENT_BACKENDS",
             "DEFAULT_STATIC_BACKENDS",
+            "DEFAULT_FORM_ACTION_BACKENDS",
             "TEMPLATE_LOADERS",
         }
     )

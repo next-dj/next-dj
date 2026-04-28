@@ -1,0 +1,51 @@
+<section class="space-y-6">
+  <a href="{% url 'next:page_' %}" class="inline-block text-xs text-slate-500 hover:text-slate-800">
+    ← Back to home
+  </a>
+
+  {% if just_submitted %}
+    <div data-just-submitted class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+      ✅ Request submitted. The backend channel attached this dispatch to your new request below.
+    </div>
+  {% endif %}
+
+  <header class="space-y-1">
+    <p class="text-xs uppercase tracking-wide text-slate-500">Per-request audit</p>
+    <h1 class="text-2xl font-bold">{{ access_request.full_name }} · {{ access_request.project_slug }}</h1>
+    <p class="text-sm text-slate-600">
+      {{ access_request.email }} · team {{ access_request.team }} ·
+      expires in {{ access_request.expires_in_days }} day{{ access_request.expires_in_days|pluralize }}
+    </p>
+  </header>
+
+  <div class="overflow-hidden rounded-xl border bg-white shadow-sm">
+    {% if entries %}
+      <table class="w-full text-left text-sm" data-audit-table>
+        <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th class="px-4 py-2">Time</th>
+            <th class="px-4 py-2">Source</th>
+            <th class="px-4 py-2">Kind</th>
+            <th class="px-4 py-2">Action</th>
+            <th class="px-4 py-2">Status</th>
+            <th class="px-4 py-2">Summary</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {% for entry in entries %}
+            {% component "audit_row" %}
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="p-6 text-sm text-slate-500">
+        No audit rows linked to this request. Backend rows are attached on the final dispatch;
+        signal rows stay unlinked by design.
+      </p>
+    {% endif %}
+  </div>
+
+  <p class="text-xs text-slate-500">
+    <a href="{% url 'next:page_admin_audit' %}" class="underline hover:text-slate-700">View the global audit log →</a>
+  </p>
+</section>

@@ -1,0 +1,24 @@
+<header data-progress-bar class="space-y-3">
+  <p class="text-xs uppercase tracking-wide text-slate-500">
+    Step {{ step_index }} of {{ step_total }} · {{ step_label }}
+  </p>
+  <ol class="flex items-center gap-2 text-xs">
+    {% for s in steps %}
+      <li class="flex flex-1 items-center gap-2" data-step="{{ s.key }}" data-status="{{ s.status }}">
+        {% if s.status == "saved" %}
+          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 font-semibold text-emerald-700">✓</span>
+          <span class="text-emerald-700" title="Data captured">{{ s.label }}</span>
+        {% elif s.status == "current" %}
+          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 font-semibold text-white">{{ s.index }}</span>
+          <span class="font-semibold text-slate-900">{{ s.label }}</span>
+        {% else %}
+          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 font-semibold text-slate-500">{{ s.index }}</span>
+          <span class="text-slate-400">{{ s.label }}</span>
+        {% endif %}
+        {% if not forloop.last %}
+          <span class="h-px flex-1 {% if s.status == "saved" %}bg-emerald-200{% else %}bg-slate-200{% endif %}"></span>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ol>
+</header>

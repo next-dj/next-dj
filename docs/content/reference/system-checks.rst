@@ -287,6 +287,16 @@ Reported by ``manage.py check``:
    * - ``next.E041``
      - Two ``@action`` calls register distinct handlers for the same action name
      - Error
+   * - ``next.E044``
+     - ``NEXT_FRAMEWORK['DEFAULT_FORM_ACTION_BACKENDS']`` is not a list, an
+       entry is not a dict, an entry's ``BACKEND`` is not a string, or the
+       dotted path cannot be imported
+     - Error
+   * - ``next.E045``
+     - ``NEXT_FRAMEWORK['DEFAULT_FORM_ACTION_BACKENDS']`` entry's ``BACKEND``
+       resolves to a class that does not subclass
+       :class:`~next.forms.FormActionBackend`
+     - Error
    * - ``next.W042``
      - ``NEXT_FRAMEWORK['JS_CONTEXT_SERIALIZER']`` does not resolve to a class
        implementing the ``JsContextSerializer`` protocol
@@ -300,7 +310,11 @@ Reported by ``manage.py check``:
      - Error
 
 **What to do:** E040 — ensure context processor callables accept ``request``.
-E041 — rename one of the colliding handlers or add ``namespace="…"``. W042 —
+E041 — rename one of the colliding handlers or add ``namespace="…"``. E044 —
+fix the shape of ``DEFAULT_FORM_ACTION_BACKENDS`` so each entry is a dict with
+a string ``BACKEND`` that imports cleanly. E045 — point ``BACKEND`` at a
+:class:`~next.forms.FormActionBackend` subclass. See :doc:`../guide/forms`
+(section "Configuring form-action backends") for the wiring example. W042 —
 point ``JS_CONTEXT_SERIALIZER`` at a class providing ``dumps(value) -> str``,
 for example :class:`~next.static.serializers.JsonJsContextSerializer`. E042 /
 E043 — every entry in ``TEMPLATE_LOADERS`` must be a dotted path that imports
@@ -314,6 +328,7 @@ Flat top-level keys (see :mod:`next.conf`):
 * ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, …). The skip-folder name for routing comes from ``DEFAULT_COMPONENT_BACKENDS``, not from page router dicts.
 * ``URL_NAME_TEMPLATE`` — Python format string for URL names (default ``page_{name}``).
 * ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts.
+* ``DEFAULT_FORM_ACTION_BACKENDS`` — list of form-action backend dicts (``BACKEND``, ``OPTIONS``). Each ``BACKEND`` must subclass :class:`~next.forms.FormActionBackend`. Defaults to a single :class:`~next.forms.RegistryFormActionBackend`. See :doc:`../guide/forms`.
 * ``TEMPLATE_LOADERS`` — list of dotted paths to :class:`~next.pages.loaders.TemplateLoader` subclasses. Defaults to ``["next.pages.loaders.DjxTemplateLoader"]``, and user lists replace the default.
 
 Each key can be overridden independently. There is no nested ``PAGES`` / ``COMPONENTS`` namespace and no runtime hook for custom ``ModuleLoader`` classes.

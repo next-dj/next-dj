@@ -52,8 +52,26 @@ install: # install the package (editable) using the lockfile
 test: # run tests with 100% coverage requirement
 	uv run pytest tests/ -n auto --cov=next --cov-report=html --cov-report=term-missing --cov-fail-under=100
 
-bench: # run performance benchmarks (opt-in, no coverage, not ignored)
-	uv run pytest tests/benchmarks -m perf --benchmark-only --no-cov --override-ini="addopts="
+BENCH_FLAGS ?= \
+	-m perf \
+	--benchmark-only \
+	--benchmark-warmup=on \
+	--benchmark-warmup-iterations=1000 \
+	--benchmark-min-rounds=10 \
+	--benchmark-disable-gc \
+	--benchmark-storage=file://./.benchmarks \
+	--benchmark-columns=mean,stddev,rounds \
+	--benchmark-sort=mean \
+	--benchmark-time-unit=auto \
+	--no-cov \
+	--override-ini=addopts=
+
+# Append extra flags without overriding the base set.
+# Example: make bench BENCH_EXTRA="--benchmark-save=before"
+BENCH_EXTRA ?=
+
+bench: # run performance benchmarks (opt-in, no coverage, flags match CI)
+	uv run pytest tests/benchmarks $(BENCH_FLAGS) $(BENCH_EXTRA)
 
 test-examples: # run tests for examples with coverage
 	@set -e; \

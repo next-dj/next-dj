@@ -70,22 +70,24 @@ class TestResetRegistries:
     """reset_registries clears form and component state in one call."""
 
     def test_clears_form_actions_and_reloads_components(self) -> None:
-        backend = form_action_manager.default_backend
-        saved_registry = dict(backend._registry)
-        saved_uids = dict(backend._uid_to_name)
+        original = form_action_manager.default_backend
+        saved_registry = dict(original._registry)
+        saved_uids = dict(original._uid_to_name)
         components_manager._ensure_backends()
         saved_components = list(components_manager._backends)
         sentinel = object()
         components_manager._backends.append(sentinel)
         try:
             reset_registries()
-            assert backend._registry == {}
-            assert backend._uid_to_name == {}
+            refreshed = form_action_manager.default_backend
+            assert refreshed._registry == {}
+            assert refreshed._uid_to_name == {}
             components_manager._ensure_backends()
             assert sentinel not in components_manager._backends
         finally:
-            backend._registry.update(saved_registry)
-            backend._uid_to_name.update(saved_uids)
+            form_action_manager._backends = [original]
+            original._registry.update(saved_registry)
+            original._uid_to_name.update(saved_uids)
             components_manager._backends = saved_components
 
 

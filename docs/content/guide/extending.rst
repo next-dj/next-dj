@@ -66,10 +66,11 @@ Worked examples by subsystem
 ----------------------------
 
 The snippets below each implement one of the five mechanisms. The
-``examples/markdown-blog`` and ``examples/feature-flags`` projects in the
-source repository contain working custom ``TemplateLoader`` and
-``RegisteredParameterProvider`` implementations, while the other subsystems use
-inline examples here.
+``examples/markdown-blog``, ``examples/feature-flags``, and
+``examples/audit-forms`` projects in the source repository contain
+working custom ``TemplateLoader``, ``RegisteredParameterProvider``, and
+``FormActionBackend`` implementations respectively, while the other
+subsystems use inline examples here.
 
 **Custom RouterBackend.** Extend ``FileRouterBackend`` and append an
 extra URL pattern after the filesystem walk.
@@ -128,6 +129,23 @@ keep an audit log of dispatched UIDs.
        def dispatch(self, uid, request, *args, **kwargs):
            self._log.info("form action dispatched: uid=%s path=%s", uid, request.path)
            return super().dispatch(uid, request, *args, **kwargs)
+
+Wire the subclass through ``NEXT_FRAMEWORK`` so the framework's lazy
+factory picks it up on first dispatch:
+
+.. code-block:: python
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_FORM_ACTION_BACKENDS": [
+           {"BACKEND": "myapp.backends.AuditedRegistryFormActionBackend"},
+       ],
+   }
+
+The ``examples/audit-forms`` project ships a complete subclass that
+records request payloads and response statuses into a Django model and
+runs a parallel signal-receiver channel for comparison. See
+:doc:`forms` (section "Configuring form-action backends") for the
+settings-driven loading rules.
 
 **Custom TemplateLoader.** See ``examples/markdown-blog/blog/loaders.py``
 for a real ``MarkdownTemplateLoader`` that reads a sibling

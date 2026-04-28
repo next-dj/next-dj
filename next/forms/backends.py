@@ -12,6 +12,8 @@ from django.urls import path, reverse
 from django.urls.exceptions import NoReverseMatch
 from django.views.decorators.http import require_http_methods
 
+from next.conf import import_class_cached
+
 from .checks import record_possible_collision
 from .dispatch import FormActionDispatch
 from .rendering import render_form_page_with_errors
@@ -94,8 +96,8 @@ class FormActionBackend(ABC):
 class RegistryFormActionBackend(FormActionBackend):
     """In-memory actions behind one dispatcher path keyed by UID."""
 
-    def __init__(self) -> None:
-        """Create an empty action map."""
+    def __init__(self, config: dict[str, Any] | None = None) -> None:  # noqa: ARG002
+        """Create an empty action map. `config` is accepted for factory parity."""
         self._registry: dict[str, ActionMeta] = {}
         self._uid_to_name: dict[str, str] = {}
 
@@ -201,9 +203,26 @@ class RegistryFormActionBackend(FormActionBackend):
         )
 
 
+class FormActionFactory:
+    """Instantiates backends from merged `DEFAULT_FORM_ACTION_BACKENDS` entries."""
+
+    @classmethod
+    def create_backend(cls, config: dict[str, Any]) -> FormActionBackend:
+        """Return a single backend instance for one settings entry.
+
+        The `BACKEND` key must be present and resolve to a `FormActionBackend`
+        subclass. The matching `next.E044` system check guarantees both before
+        the factory runs in production.
+        """
+        backend_path = config["BACKEND"]
+        backend_class = import_class_cached(backend_path)
+        return cast("FormActionBackend", backend_class(config))
+
+
 __all__ = [
     "ActionMeta",
     "FormActionBackend",
+    "FormActionFactory",
     "FormActionOptions",
     "RegistryFormActionBackend",
 ]

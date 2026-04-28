@@ -1038,13 +1038,38 @@ The forms subsystem exposes two pluggable surfaces.
 * ``next.forms.backends.FormActionBackend`` is the abstract contract for storing and dispatching actions. Subclass it to move the registry into a different store.
 * ``next.forms.backends.RegistryFormActionBackend`` is the default in-memory backend. Subclass it to audit, cache, or gate dispatch.
 
-Swap the backend through ``FormActionManager``.
+Configuring form-action backends
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Wire a custom backend through ``NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]``. The framework loads each entry lazily on first dispatch via :class:`~next.forms.FormActionFactory`, which imports the dotted path and instantiates the class with the entry dict.
 
 .. code-block:: python
 
-   from next.forms import FormActionManager
+   NEXT_FRAMEWORK = {
+       "DEFAULT_FORM_ACTION_BACKENDS": [
+           {"BACKEND": "myapp.backends.AuditedFormActionBackend"},
+       ],
+   }
 
-   form_action_manager = FormActionManager(backends=[MyBackend()])
+The ``BACKEND`` key is required and must subclass :class:`~next.forms.FormActionBackend`. ``manage.py check`` reports ``next.E044`` when the entry shape is wrong (non-list setting, non-dict entry, missing ``BACKEND``, unimportable path) and ``next.E045`` when the imported class is not a ``FormActionBackend`` subclass. The full reference table for both ids lives in :doc:`/content/reference/system-checks`.
+
+Unlike the components and static managers, ``FormActionManager`` does not auto-rebuild on ``settings_reloaded`` — actions register imperatively at import time, and a transparent rebuild would drop those registrations. Tests that swap ``DEFAULT_FORM_ACTION_BACKENDS`` between cases must call :func:`next.testing.reset_form_actions` to drop the cached backend list.
+
+Test-only override
+~~~~~~~~~~~~~~~~~~
+
+For unit tests that need a pristine isolated manager (no module-level singleton), construct ``FormActionManager`` directly with explicit backends.
+
+.. code-block:: python
+
+   from next.forms import FormActionManager, RegistryFormActionBackend
+
+   manager = FormActionManager(backends=[RegistryFormActionBackend()])
+
+In production code prefer the settings-driven path above.
+
+Signals
+~~~~~~~
 
 The signals emitted by :mod:`next.forms.signals` let external code observe action lifecycle events.
 
@@ -1055,11 +1080,7 @@ The signals emitted by :mod:`next.forms.signals` let external code observe actio
 * ``form_validation_failed`` fires after a submitted form fails validation.
   Kwargs: ``action_name``, ``error_count``, ``field_names``.
 
-Inline ``AuditedRegistryFormActionBackend`` and
-``CountingFileComponentsBackend`` snippets live in :doc:`extending`
-(section "Worked examples by subsystem"). Working ``@action`` handlers
-are in ``examples/shortener`` (``create_link`` form) and
-``examples/feature-flags`` (``bulk_toggle`` form).
+A :class:`~next.forms.FormActionBackend` subclass that subscribes to these signals lives in ``examples/audit-forms`` — the example wires ``AuditedFormActionBackend`` through ``DEFAULT_FORM_ACTION_BACKENDS`` and writes audit rows from both the backend channel and the signal channel side by side. The inline ``AuditedRegistryFormActionBackend`` snippet in :doc:`extending` (section "Worked examples by subsystem") shows the minimal subclass shape. Working ``@action`` handlers without custom backends are in ``examples/shortener`` (``create_link`` form) and ``examples/feature-flags`` (``bulk_toggle`` form).
 
 Next
 ----

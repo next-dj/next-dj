@@ -1,0 +1,22 @@
+<section class="space-y-6">
+  <a href="{% url 'next:page_' %}" class="inline-block text-xs text-slate-500 hover:text-slate-800">
+    ← Back to home
+  </a>
+
+  {% component "progress_bar" %}
+
+  {% form @action="access:request_step" class="space-y-3 rounded-xl border bg-white p-6 shadow-sm" %}
+    <input type="hidden" name="step" value="{{ current_step }}">
+
+    {% component "step_section" step="applicant" %}
+    {% component "step_section" step="justification" %}
+    {% component "step_section" step="review" %}
+
+    <div class="flex items-center justify-end pt-2">
+      <button type="submit"
+              class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+        {% if current_step == "review" %}Submit request{% else %}Continue{% endif %}
+      </button>
+    </div>
+  {% endform %}
+</section>
