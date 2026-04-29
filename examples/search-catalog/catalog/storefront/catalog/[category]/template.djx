@@ -1,4 +1,3 @@
-{% load catalog_qs %}
 <header class="flex items-baseline justify-between">
   <h2 class="text-lg font-semibold">{{ category.name }} products</h2>
   <p class="text-sm text-slate-500">{{ page_obj.total }} products</p>
@@ -10,18 +9,4 @@
   {% endfor %}
 </ul>
 
-<nav class="flex items-center justify-between text-sm">
-  {% if page_obj.has_prev %}
-    <a class="rounded border bg-white px-3 py-1 hover:border-slate-400"
-       href="?{% querystring page=page_obj.page|add:'-1' %}">Previous</a>
-  {% else %}
-    <span></span>
-  {% endif %}
-  <span class="text-slate-500">Page {{ page_obj.page }} of {{ page_obj.num_pages }}</span>
-  {% if page_obj.has_next %}
-    <a class="rounded border bg-white px-3 py-1 hover:border-slate-400"
-       href="?{% querystring page=page_obj.page|add:'1' %}">Next</a>
-  {% else %}
-    <span></span>
-  {% endif %}
-</nav>
+{% component "pagination" %}

@@ -18,7 +18,9 @@ def featured(show: DQuery[int] = DEFAULT_FEATURED) -> list[Product]:
     """
     count = max(1, min(MAX_FEATURED, show))
     return list(
-        Product.objects.filter(in_stock=True).select_related("category")[:count],
+        Product.objects.filter(in_stock=True)
+        .select_related("category")
+        .order_by("-created_at")[:count],
     )
 
 

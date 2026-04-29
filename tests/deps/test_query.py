@@ -4,7 +4,7 @@ import pytest
 from django.http import HttpRequest, QueryDict
 
 from next.deps import DependencyResolver
-from next.urls import DQuery, QueryParamProvider
+from next.urls import DQuery, QueryParamProvider, get_multi_values
 from next.urls.parser import _coerce_url_value
 from tests.support import _ctx, inspect_parameter
 
@@ -291,3 +291,30 @@ class TestCoerceUrlValue:
     def test_coerce(self, value, hint, expected) -> None:
         """Coerce a raw string to the requested primitive type when possible."""
         assert _coerce_url_value(value, hint) == expected
+
+
+class TestGetMultiValues:
+    """Cover the public `get_multi_values` helper."""
+
+    def _request(self, query_string: str) -> HttpRequest:
+        request = MagicMock(spec=HttpRequest)
+        request.GET = QueryDict(query_string)
+        return request
+
+    @pytest.mark.parametrize(
+        ("query_string", "expected"),
+        [
+            ("brand=Acme&brand=Globex", ["Acme", "Globex"]),
+            ("brand[]=Acme&brand[]=Globex", ["Acme", "Globex"]),
+            ("brand=Acme,Globex", ["Acme", "Globex"]),
+            ("brand=Acme", ["Acme"]),
+            ("", []),
+        ],
+    )
+    def test_wire_formats(self, query_string, expected) -> None:
+        """Return all values across plain-repeated, bracket, and comma forms."""
+        assert get_multi_values(self._request(query_string), "brand") == expected
+
+    def test_absent_key_returns_empty(self) -> None:
+        """Return an empty list when the key is not present at all."""
+        assert get_multi_values(self._request("other=x"), "brand") == []

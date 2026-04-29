@@ -24,6 +24,7 @@ from .markers import (
     QueryParamProvider,
     UrlByAnnotationProvider,
     UrlKwargsProvider,
+    get_multi_values,
 )
 from .parser import URLPatternParser
 
@@ -42,6 +43,7 @@ __all__ = [
     "UrlKwargsProvider",
     "app_name",
     "checks",
+    "get_multi_values",
     "router_manager",
     "signals",
     "urlpatterns",

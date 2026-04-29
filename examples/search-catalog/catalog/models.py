@@ -3,6 +3,12 @@ from typing import ClassVar
 from django.db import models
 
 
+class ProductQuerySet(models.QuerySet):
+    def brand_list(self) -> list[str]:
+        """Return a sorted, distinct list of brand names in this queryset."""
+        return list(self.order_by("brand").values_list("brand", flat=True).distinct())
+
+
 class Category(models.Model):
     slug = models.SlugField(max_length=64, unique=True)
     name = models.CharField(max_length=120)
@@ -28,6 +34,8 @@ class Product(models.Model):
     price = models.DecimalField(max_digits=10, decimal_places=2)
     in_stock = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ProductQuerySet.as_manager()
 
     class Meta:
         ordering: ClassVar = ["-created_at"]

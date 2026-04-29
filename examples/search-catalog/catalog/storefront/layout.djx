@@ -13,7 +13,7 @@
       <div class="flex items-center gap-6">
         {% component "site_search" %}
         <nav class="text-sm">
-          <a class="text-slate-600 hover:text-slate-900" href="/catalog/">All products</a>
+          <a class="text-slate-600 hover:text-slate-900" href="{% url 'next:page_catalog' %}">All products</a>
         </nav>
       </div>
     </div>

@@ -209,6 +209,20 @@ def _expand_multi_value(
     return plain
 
 
+def get_multi_values(request: HttpRequest, name: str) -> list[str]:
+    """Return all values for `name` from ``request.GET``.
+
+    Tries three wire formats in order: plain repeated keys
+    (``?brand=a&brand=b``), bracket suffix (``?brand[]=a&brand[]=b``),
+    and comma-delimited (``?brand=a,b``). Returns an empty list when
+    the parameter is absent in all three forms.
+    """
+    plain = request.GET.getlist(name)
+    if len(plain) > 1:
+        return plain
+    return _expand_multi_value(request, name, plain)
+
+
 __all__ = [
     "DQuery",
     "DUrl",
@@ -216,4 +230,5 @@ __all__ = [
     "QueryParamProvider",
     "UrlByAnnotationProvider",
     "UrlKwargsProvider",
+    "get_multi_values",
 ]

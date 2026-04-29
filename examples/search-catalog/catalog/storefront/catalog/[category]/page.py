@@ -43,9 +43,4 @@ def page_obj(
 @context("all_brands")
 def all_brands(category: Category) -> list[str]:
     """Return every brand that has products inside the current category."""
-    return list(
-        Product.objects.filter(category=category)
-        .order_by("brand")
-        .values_list("brand", flat=True)
-        .distinct(),
-    )
+    return Product.objects.filter(category=category).brand_list()

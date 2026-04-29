@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import inspect
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
 from next.deps import DDependencyBase, RegisteredParameterProvider
-from next.urls import DQuery, QueryParamProvider
+from next.urls import get_multi_values
 
 
 if TYPE_CHECKING:
+    import inspect
+
     from django.http import HttpRequest
 
     from next.deps.context import ResolutionContext
@@ -72,42 +73,12 @@ def _decimal_or_none(raw: str | None) -> Decimal | None:
         return None
 
 
-_QUERY_PROVIDER = QueryParamProvider()
-
-
-class _RequestContext:
-    """Minimal stand-in for `ResolutionContext` when only a request is needed."""
-
-    __slots__ = ("request",)
-
-    def __init__(self, request: HttpRequest) -> None:
-        self.request = request
-
-
-def _read_brand_list(request: HttpRequest) -> tuple[str, ...]:
-    """Read the `brand` parameter through `DQuery[list[str]]`.
-
-    Reusing `QueryParamProvider` keeps every multi-value wire format
-    accepted by `DQuery` (plain repeated, bracket suffix, comma) in a
-    single place. The function is the example's dogfood point for the
-    new core marker.
-    """
-    param = inspect.Parameter(
-        "brand",
-        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        default=(),
-        annotation=DQuery[list[str]],
-    )
-    raw = _QUERY_PROVIDER.resolve(param, _RequestContext(request))
-    return tuple(raw) if isinstance(raw, list) else ()
-
-
 def parse_filters(request: HttpRequest) -> Filters:
     """Build a `Filters` snapshot from `request.GET`."""
     g = request.GET
     return Filters(
         q=g.get("q", "").strip(),
-        brands=_read_brand_list(request),
+        brands=tuple(get_multi_values(request, "brand")),
         price_min=_decimal_or_none(g.get("price_min")),
         price_max=_decimal_or_none(g.get("price_max")),
         in_stock=g.get("in_stock") in {"1", "true", "on"},

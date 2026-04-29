@@ -20,6 +20,4 @@ def all_categories() -> list[Category]:
 @context("all_brands")
 def all_brands() -> list[str]:
     """Return every brand currently present in the catalog."""
-    return list(
-        Product.objects.order_by("brand").values_list("brand", flat=True).distinct(),
-    )
+    return Product.objects.brand_list()

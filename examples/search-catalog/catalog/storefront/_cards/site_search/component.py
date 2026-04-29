@@ -5,11 +5,11 @@ from next.urls import DQuery
 
 
 @component.context("search_url")
-def _search_url() -> str:
+def search_url() -> str:
     return reverse("next:page_search")
 
 
 @component.context("current_q")
-def _current_q(q: DQuery[str] = "") -> str:
+def current_q(q: DQuery[str] = "") -> str:
     """Return the active query term to pre-fill the header input."""
     return q

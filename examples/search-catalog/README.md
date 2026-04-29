@@ -115,9 +115,9 @@ to keep every other query parameter intact.
 ### 2. The new `DQuery[T]` provider
 
 [`next/urls/markers.py`](../../next/urls/markers.py) ships a marker
-that mirrors `DUrl[T]` and reads `request.GET`. Any future GET
-listing or admin filter can declare a typed parameter and skip the
-`request.GET.get(...)` plumbing.
+that mirrors `DUrl[T]` and reads `request.GET`. Any GET listing page
+can declare a typed parameter and skip the `request.GET.get(...)`
+plumbing.
 
 ```python
 from next.pages import context
@@ -274,15 +274,6 @@ permanent noise.
   tests. `catalog_db` gates tests on the pre-loaded demo catalog.
 
 Total: 47 tests, 100% coverage on the `catalog` package.
-
-## Forward-compat
-
-| Future feature | Hook in this example |
-|----------------|----------------------|
-| Suspense (async heavy chunks) | `cached_search` is the single point of heavy render. Wrap with the future async-context decorator without touching templates. |
-| Partial rerender of forms | Not applicable here. Search is GET-based and the filter form already round-trips through the URL. |
-| Parent-policies (native inherit) | `@context("category", inherit_context=True)` already declares the intent. The native replacement is a one-line edit per `@context`. |
-| React bridge | `product_card` exposes `data-product-card` and `data-product-slug` attributes. A future `component.jsx` next to `component.djx` gets bootstrapped through `@component.context("product", serialize=True)`. |
 
 ## Further reading
 

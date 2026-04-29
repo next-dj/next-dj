@@ -5,7 +5,7 @@
       Browse all products or pick a category. Search and filters live on the
       catalog listing page and persist through pagination.
     </p>
-    <a href="/catalog/" class="mt-4 inline-block rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white">
+    <a href="{% url 'next:page_catalog' %}" class="mt-4 inline-block rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white">
       Browse the catalog
     </a>
   </div>
@@ -15,7 +15,7 @@
     <ul class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
       {% for cat in categories %}
         <li>
-          <a href="/catalog/{{ cat.slug }}/" class="block rounded-lg border bg-white px-4 py-3 text-sm font-medium hover:border-slate-400">
+          <a href="{% url 'next:page_catalog_category' category=cat.slug %}" class="block rounded-lg border bg-white px-4 py-3 text-sm font-medium hover:border-slate-400">
             {{ cat.name }}
           </a>
         </li>
