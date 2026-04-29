@@ -175,15 +175,24 @@ CI vs local ``make ci``
 
 GitHub Actions (``.github/workflows/ci.yml``) additionally:
 
-- Builds the wheel in a dedicated ``build`` job, then runs the test matrix against the installed wheel (not ``uv run``). See ``.github/workflows/test-matrix.yml``. Python 3.12–3.14 × Django 4.2–6.0 with matrix exclusions.
+- Builds the wheel in a dedicated ``build`` job, then runs the test matrix against the installed wheel (not ``uv run``).
+  See ``.github/workflows/test-matrix.yml``.
+  Python 3.12–3.14 × Django 4.2–6.0 with matrix exclusions.
 - Builds docs with warnings as errors (``sphinx-build -W --keep-going``) and runs linkcheck.
 - Runs the ``security`` job: typos and ``uv-lock`` via pre-commit.
 - On pull requests: dependency review (``dependency-review`` job).
-- In CI, lint runs on **`next/` only**, plus a separate import-order pass with ``--select I``. Locally, ``make lint`` also covers ``tests/`` and ``examples/``. Keep those directories clean so you do not surprise reviewers.
-- The test matrix installs a specific Django with ``uv pip install "django==…"`` **after** installing the wheel. That override is intentional, not a broken lockfile.
-- A dedicated **Benchmarks** workflow (``.github/workflows/bench.yml``) runs on every PR and on push to ``main``. Three jobs: ``bench`` (paired same-runner compare via ``git worktree``), ``comment`` (sticky PR comment), ``publish`` (push numbers to ``gh-pages`` on main). Hard fail at ``mean:99%`` (≈ ×2 of base, the pytest-benchmark parser's maximum). See Benchmarks_.
+- In CI, lint runs on **`next/` only**, plus a separate import-order pass with ``--select I``.
+  Locally, ``make lint`` also covers ``tests/`` and ``examples/``.
+  Keep those directories clean so you do not surprise reviewers.
+- The test matrix installs a specific Django with ``uv pip install "django==…"`` **after** installing the wheel.
+  That override is intentional, not a broken lockfile.
+- A dedicated **Benchmarks** workflow (``.github/workflows/bench.yml``) runs on every PR and on push to ``main``.
+  Three jobs: ``bench`` (paired same-runner compare via ``git worktree``), ``comment`` (sticky PR comment), ``publish`` (push numbers to ``gh-pages`` on main).
+  Hard fail at ``mean:99%`` (≈ ×2 of base, the pytest-benchmark parser's maximum).
+  See Benchmarks_.
 
-Ruff uses ``select = ["ALL"]`` with ignores and per-file rules in ``pyproject.toml`` (line length 88, isort with ``known-first-party = ["next"]``, relaxed rules for ``examples/``, ``tests/``, and ``conftest.py``).
+Ruff uses ``select = ["ALL"]`` with ignores and per-file rules in ``pyproject.toml``
+(line length 88, isort with ``known-first-party = ["next"]``, relaxed rules for ``examples/``, ``tests/``, and ``conftest.py``).
 
 Code style
 ----------
@@ -228,7 +237,8 @@ Exceptions
 Loops and builtins
 ~~~~~~~~~~~~~~~~~~
 
-Prefer builtins, comprehensions, or ``itertools`` when they read clearly. Avoid manual loops that duplicate ``sum``, ``max``, filtering, or dict/set building.
+Prefer builtins, comprehensions, or ``itertools`` when they read clearly.
+Avoid manual loops that duplicate ``sum``, ``max``, filtering, or dict/set building.
 
 Type hints
 ~~~~~~~~~~
@@ -238,53 +248,80 @@ Use annotations throughout ``next/``. Mypy is strict (see ``[tool.mypy]`` in ``p
 Extensibility
 -------------
 
-Major pieces (template loaders, router backends, factories) should stay **replaceable**. Use clear protocols or ABCs, registration or settings-driven selection, and dependency injection where practical. Follow patterns in existing ``next/`` modules when adding extension points.
+Major pieces (template loaders, router backends, factories) should stay **replaceable**.
+Use clear protocols or ABCs, registration or settings-driven selection, and dependency injection where practical.
+Follow patterns in existing ``next/`` modules when adding extension points.
 
 Testing
 -------
 
 - Pytest discovers ``test_*.py``, ``*_test.py``, and ``tests.py`` (see ``python_files`` in ``pyproject.toml``). In the main tree, prefer ``tests/<area>/test_<thing>.py``.
 - Classes named ``Test…`` with ``test_*`` methods are common but not required.
-- Prefer ``@pytest.mark.parametrize`` for matrix-style cases over copy-pasted tests. ``tests/support/cases.py`` holds dataclass-based parametrize rows — reuse and extend them.
-- Use **`django.test.Client`** (the ``client`` fixture) for HTTP-level checks. Do not use the DRF API client unless the example explicitly adds DRF.
+- Prefer ``@pytest.mark.parametrize`` for matrix-style cases over copy-pasted tests.
+  ``tests/support/cases.py`` holds dataclass-based parametrize rows — reuse and extend them.
+- Use **`django.test.Client`** (the ``client`` fixture) for HTTP-level checks.
+  Do not use the DRF API client unless the example explicitly adds DRF.
 - For deps/forms/urls internals, reuse ``dependency_resolver``, ``csrf_request``, ``form_engine``, and the helpers in ``tests/support/``.
-- The suite expects a pre-configured Django — do not call ``django.setup()`` yourself. ``tests/django_setup.py`` handles it.
+- The suite expects a pre-configured Django — do not call ``django.setup()`` yourself.
+  ``tests/django_setup.py`` handles it.
 
 Coverage
 ~~~~~~~~
 
 - **`next/`**: CI and ``make test`` enforce 100% line coverage via ``--cov-fail-under=100``.
-- Files under ``next/**/checks.py`` and ``next/checks/`` are **excluded** from coverage (see ``[tool.coverage.run] omit`` in ``pyproject.toml``). Do not chase coverage there.
+- Files under ``next/**/checks.py`` and ``next/checks/`` are **excluded** from coverage (see ``[tool.coverage.run] omit`` in ``pyproject.toml``).
+  Do not chase coverage there.
 - ``[tool.coverage.paths]`` collapses ``next/`` and ``*/site-packages/next/`` so coverage works identically for editable and wheel-installed runs.
-- **Examples**: Each example must ship tests in ``tests/`` or ``tests.py``. ``make test-examples`` does **not** enforce ``--cov-fail-under=100``. Aim for full coverage anyway, since reviewers may ask you to close gaps.
+- **Examples**: Each example must ship tests in ``tests/`` or ``tests.py``.
+  ``make test-examples`` does **not** enforce ``--cov-fail-under=100``.
+  Aim for full coverage anyway, since reviewers may ask you to close gaps.
 
 .. _Benchmarks:
 
 Benchmarks
 ~~~~~~~~~~
 
-Micro-benchmarks in ``tests/benchmarks/`` guard the hot paths in every ``next/<area>/`` module against silent regressions. After each significant core change we expect a bench pass to keep the baseline honest — framework work pays a compounding cost, so even sub-microsecond regressions matter at scale.
+Micro-benchmarks in ``tests/benchmarks/`` guard the hot paths in every ``next/<area>/`` module against silent regressions.
+After each significant core change we expect a bench pass to keep the baseline honest — framework work pays a compounding cost, so even sub-microsecond regressions matter at scale.
 
 Running locally
 ^^^^^^^^^^^^^^^
 
-- ``make bench`` — runs all benchmarks with the ``perf`` marker. First comparison should use ``--benchmark-save=before``, then apply your change and ``--benchmark-save=after``. JSON files land under ``.benchmarks/``.
+- ``make bench`` — runs all benchmarks with the ``perf`` marker.
+  First comparison should use ``--benchmark-save=before``, then apply your change and ``--benchmark-save=after``.
+  JSON files land under ``.benchmarks/``.
 - Benchmarks are **excluded from** ``make test`` (ignored via ``addopts``) and auto-marked ``perf`` by ``tests/benchmarks/conftest.py`` — no need to decorate tests yourself.
-- Numbers are **only comparable on the same machine**. Do not cite local deltas in the PR — the CI workflow below does the machine-stable comparison.
+- Numbers are **only comparable on the same machine**.
+  Do not cite local deltas in the PR — the CI workflow below does the machine-stable comparison.
 
 CI integration
 ^^^^^^^^^^^^^^
 
 The Benchmarks workflow (``.github/workflows/bench.yml``) defines three jobs that share one artefact:
 
-- ``bench`` — runs on every PR and on push to ``main`` with ``contents: read`` only. Builds the BASE side via ``git worktree add ../base <base-sha>`` so the working tree is atomic and complete (no half-checkout state, no stale ``__pycache__``). Runs ``uv sync --locked`` separately for BASE and HEAD so a lockfile bump in the PR is honoured. Benches BASE, then HEAD on the **same runner** with ``--benchmark-save=base`` / ``--benchmark-save=head``. Calls ``pytest-benchmark compare base head`` for the table. Applies the hard-regression gate as a separate ``pytest --benchmark-disable --benchmark-compare=base --benchmark-compare-fail=mean:300%`` step so the saved JSON stays clean. Uploads the comment body, the table, both JSON dumps, the PR number, and the per-machine storage as a single artefact.
-- ``comment`` — needs ``bench``. Runs only on ``pull_request`` with ``pull-requests: write`` (job-level). Downloads the artefact and updates one sticky comment per PR via ``marocchino/sticky-pull-request-comment@v2`` (header ``next-dj-benchmarks``). PRs from forks see a read-only ``GITHUB_TOKEN`` and the comment step is silently skipped — the table still lives in the workflow Job Summary.
-- ``publish`` — needs ``bench``. Runs only on push to ``main`` with ``contents: write`` (job-level). Reuses the artefact's ``bench-head.json`` and pushes it to ``gh-pages`` under ``dev/bench/`` via ``benchmark-action/github-action-benchmark@v1``. Concurrency is configured so this job is never cancelled mid-flight: ``cancel-in-progress`` is true only on PRs, false on ``push``.
+- ``bench`` — runs on every PR and on push to ``main`` with ``contents: read`` only.
+  Builds the BASE side via ``git worktree add ../base <base-sha>`` so the working tree is atomic and complete (no half-checkout state, no stale ``__pycache__``).
+  Runs ``uv sync --locked`` separately for BASE and HEAD so a lockfile bump in the PR is honoured.
+  Benches BASE, then HEAD on the **same runner** with ``--benchmark-save=base`` / ``--benchmark-save=head``.
+  Calls ``pytest-benchmark compare base head`` for the table.
+  Applies the hard-regression gate as a separate ``pytest --benchmark-disable --benchmark-compare=base --benchmark-compare-fail=mean:300%`` step so the saved JSON stays clean.
+  Uploads the comment body, the table, both JSON dumps, the PR number, and the per-machine storage as a single artefact.
+- ``comment`` — needs ``bench``.
+  Runs only on ``pull_request`` with ``pull-requests: write`` (job-level).
+  Downloads the artefact and updates one sticky comment per PR via ``marocchino/sticky-pull-request-comment@v2`` (header ``next-dj-benchmarks``).
+  PRs from forks see a read-only ``GITHUB_TOKEN`` and the comment step is silently skipped — the table still lives in the workflow Job Summary.
+- ``publish`` — needs ``bench``.
+  Runs only on push to ``main`` with ``contents: write`` (job-level).
+  Reuses the artefact's ``bench-head.json`` and pushes it to ``gh-pages`` under ``dev/bench/`` via ``benchmark-action/github-action-benchmark@v1``.
+  Concurrency is configured so this job is never cancelled mid-flight: ``cancel-in-progress`` is true only on PRs, false on ``push``.
 
 Thresholds and noise control:
 
-- ``--benchmark-compare-fail=mean:99%`` — only failure gate. The PR job fails when a benchmark mean slows down by ≥ ×2 of base. The pytest-benchmark parser enforces ``0 < N < 100``, so 99% is the strictest hard-fail threshold the tool supports out of the box.
-- ``--benchmark-warmup=on``, ``--benchmark-warmup-iterations=10000``, ``--benchmark-min-rounds=20``, ``--benchmark-calibration-precision=10``, ``--benchmark-disable-gc`` — stabilise measurements before publication.
+- ``--benchmark-compare-fail=mean:99%`` — only failure gate.
+  The PR job fails when a benchmark mean slows down by ≥ ×2 of base.
+  The pytest-benchmark parser enforces ``0 < N < 100``, so 99% is the strictest hard-fail threshold the tool supports out of the box.
+- ``--benchmark-warmup=on``, ``--benchmark-warmup-iterations=10000``, ``--benchmark-min-rounds=20``,
+  ``--benchmark-calibration-precision=10``, ``--benchmark-disable-gc`` — stabilise measurements before publication.
 - ``--no-cov --override-ini=addopts=`` — strips the project-wide coverage instrumentation that would otherwise dwarf nano-second timings.
 - Single Python/Django version (3.13 / latest) so cross-matrix noise does not pollute comparisons.
 
@@ -316,7 +353,9 @@ When to run
 
 Always run ``make bench`` locally when your change touches:
 
-- ``next/server/autoreload.py``, ``next/components/registry.py``, ``next/static/discovery.py``, ``next/pages/loaders.py``, ``next/pages/manager.py``, ``next/urls/{parser,backends}.py``, ``next/conf/settings.py``, or ``next/components/backends.py``.
+- ``next/server/autoreload.py``, ``next/components/registry.py``, ``next/static/discovery.py``,
+  ``next/pages/loaders.py``, ``next/pages/manager.py``, ``next/urls/{parser,backends}.py``,
+  ``next/conf/settings.py``, or ``next/components/backends.py``.
 - Any caching or invalidation logic.
 - Any code in a hot render, autoreload, or URL-generation path.
 
@@ -347,7 +386,11 @@ Use ``examples/_template/conftest.py`` as the canonical template for Django sett
 Documentation
 -------------
 
-User-facing docs live under ``docs/`` and publish to Read the Docs (see ``README.md``). Doc build deps are the ``docs`` group in ``pyproject.toml`` (locked in ``uv.lock``). Read the Docs runs ``uv sync --frozen --no-dev --group docs`` (see ``.readthedocs.yaml``). Locally, run ``make docs`` or rely on the CI docs job. Fix any warnings and broken links — CI builds with ``-W --keep-going``.
+User-facing docs live under ``docs/`` and publish to Read the Docs (see ``README.md``).
+Doc build deps are the ``docs`` group in ``pyproject.toml`` (locked in ``uv.lock``).
+Read the Docs runs ``uv sync --frozen --no-dev --group docs`` (see ``.readthedocs.yaml``).
+Locally, run ``make docs`` or rely on the CI docs job.
+Fix any warnings and broken links — CI builds with ``-W --keep-going``.
 
 See :doc:`documentation-guide` for writing conventions.
 
@@ -386,7 +429,9 @@ Use **draft** PRs for work in progress.
 Review
 ~~~~~~
 
-Maintainers check style with Ruff and mypy, review tests, and assess how the change fits ``next/``. They also consider backwards compatibility and deprecation when behavior changes. Response time depends on maintainer availability, and this document does not define a fixed SLA.
+Maintainers check style with Ruff and mypy, review tests, and assess how the change fits ``next/``.
+They also consider backwards compatibility and deprecation when behavior changes.
+Response time depends on maintainer availability, and this document does not define a fixed SLA.
 
 Help
 ----

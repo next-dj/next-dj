@@ -1,7 +1,8 @@
 Pages and Templates
 ===================
 
-next.dj uses a custom template system with ``.djx`` files that provides powerful inheritance and composition capabilities. Unlike traditional Django templates, the inheritance system works through file-based layout composition rather than Django's extends mechanism.
+next.dj uses a custom template system with ``.djx`` files that provides powerful inheritance and composition capabilities.
+Unlike traditional Django templates, the inheritance system works through file-based layout composition rather than Django's extends mechanism.
 
 Template Types
 --------------
@@ -55,7 +56,8 @@ Use separate template files for better organization:
 Page body sources and priority
 ------------------------------
 
-A page supplies its body through one of three mechanisms. All three are composed through the ancestor ``layout.djx`` chain the same way, and the framework runs the context processors, ``StaticCollector``, and ``page_rendered`` signal exactly once per request regardless of which source produced the body.
+A page supplies its body through one of three mechanisms.
+All three are composed through the ancestor ``layout.djx`` chain the same way, and the framework runs the context processors, ``StaticCollector``, and ``page_rendered`` signal exactly once per request regardless of which source produced the body.
 
 Priority (highest wins):
 
@@ -63,7 +65,8 @@ Priority (highest wins):
 2. ``template = "..."`` **module attribute** (a plain string).
 3. Sibling ``template.djx`` file.
 
-When more than one source is declared on the same ``page.py``, the lower-priority ones are silently dropped at render time, and ``manage.py check`` emits a :ref:`next.W043 <check-next-w043>` warning pointing at the file.
+When more than one source is declared on the same ``page.py``, the lower-priority ones are silently dropped at render time.
+``manage.py check`` emits a :ref:`next.W043 <check-next-w043>` warning pointing at the file.
 
 Render functions
 ~~~~~~~~~~~~~~~~
@@ -90,20 +93,28 @@ A ``render`` function receives DI-resolved arguments (request, URL kwargs, named
 
 Return-type contract:
 
-* ``str`` — treated as the page body. Layout composition, context processors, ``StaticCollector``, and ``page_rendered`` run as for ``template.djx`` and ``template``.
-* Any :class:`django.http.HttpResponse` (including :class:`~django.http.HttpResponseRedirect`, :class:`~django.http.StreamingHttpResponse`, :class:`~django.http.JsonResponse`, and your own subclasses) — returned verbatim. Layout and static pipeline are skipped. This is the escape hatch for redirects, JSON APIs, streaming, and anything else that is not a server-rendered HTML page.
+* ``str`` — treated as the page body.
+  Layout composition, context processors, ``StaticCollector``, and ``page_rendered`` run as for ``template.djx`` and ``template``.
+* Any :class:`django.http.HttpResponse` (including :class:`~django.http.HttpResponseRedirect`,
+  :class:`~django.http.StreamingHttpResponse`, :class:`~django.http.JsonResponse`, and your own subclasses) — returned verbatim.
+  Layout and static pipeline are skipped.
+  This is the escape hatch for redirects, JSON APIs, streaming, and anything else that is not a server-rendered HTML page.
 * Anything else (``None``, ``dict``, ``list``, …) — raises ``TypeError`` naming the file so mistakes surface immediately.
 
 Exceptions raised inside ``render()`` propagate to Django's request-handling stack unchanged.
 
 .. note::
 
-   ``Page.render`` (the programmatic API exposed to tests and tools) uses the static body sources only and never invokes ``render()``. The unified view function that handles real HTTP requests invokes ``render()`` first and hands its string result to the same composition pipeline.
+   ``Page.render`` (the programmatic API exposed to tests and tools) uses the static body sources only and never invokes ``render()``.
+   The unified view function that handles real HTTP requests invokes ``render()`` first and hands its string result to the same composition pipeline.
 
 Custom template formats
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-The sibling ``template.djx`` file is just one implementation of the ``TemplateLoader`` contract. Register additional loaders under ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to teach the framework about any file format you like. Each entry is a dotted path to a ``next.pages.loaders.TemplateLoader`` subclass. Loaders are consulted in the order they appear after the ``template`` module attribute is checked.
+The sibling ``template.djx`` file is just one implementation of the ``TemplateLoader`` contract.
+Register additional loaders under ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to teach the framework about any file format you like.
+Each entry is a dotted path to a ``next.pages.loaders.TemplateLoader`` subclass.
+Loaders are consulted in the order they appear after the ``template`` module attribute is checked.
 
 .. code-block:: python
 
@@ -136,12 +147,15 @@ The sibling ``template.djx`` file is just one implementation of the ``TemplateLo
        ],
    }
 
-User-provided ``TEMPLATE_LOADERS`` **replaces** the default list (which is just ``DjxTemplateLoader``), so include ``DjxTemplateLoader`` explicitly if you still want sibling ``template.djx`` support. ``source_name`` is used by :ref:`next.W043 <check-next-w043>` to name the active source in conflict warnings. ``source_path`` feeds the stale-cache detector so edits to the backing file invalidate the composed template on the next request.
+User-provided ``TEMPLATE_LOADERS`` **replaces** the default list (which is just ``DjxTemplateLoader``), so include ``DjxTemplateLoader`` explicitly if you still want sibling ``template.djx`` support.
+``source_name`` is used by :ref:`next.W043 <check-next-w043>` to name the active source in conflict warnings.
+``source_path`` feeds the stale-cache detector so edits to the backing file invalidate the composed template on the next request.
 
 Layout System
 -------------
 
-The layout system uses ``layout.djx`` files to create hierarchical template inheritance. Unlike Django's template inheritance, this system works through **file-based composition** rather than extends/block syntax.
+The layout system uses ``layout.djx`` files to create hierarchical template inheritance.
+Unlike Django's template inheritance, this system works through **file-based composition** rather than extends/block syntax.
 
 How Layout Inheritance Works
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -185,7 +199,12 @@ This allows you to have:
 Root Layout for Entire Site
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A site-wide layout is provided the same way as root-level pages: add path roots to **``DIRS``** on the file router backend (see :doc:`file-router`). The **``PAGES_DIR``** key is only the name of the app subdirectory (e.g. ``"pages"``), not a list of project roots. Add a directory (e.g. ``root_pages``) that contains ``layout.djx``. It can contain only that file (no ``page.py``) and will be used as an additional layout for all app pages. If the directory also has its own pages, they are served as root-level URLs. Duplicate URL patterns with app pages cause a check error (``next.E015``).
+A site-wide layout is provided the same way as root-level pages: add path roots to **``DIRS``** on the file router backend (see :doc:`file-router`).
+The **``PAGES_DIR``** key is only the name of the app subdirectory (e.g. ``"pages"``), not a list of project roots.
+Add a directory (e.g. ``root_pages``) that contains ``layout.djx``.
+It can contain only that file (no ``page.py``) and will be used as an additional layout for all app pages.
+If the directory also has its own pages, they are served as root-level URLs.
+Duplicate URL patterns with app pages cause a check error (``next.E015``).
 
 .. code-block:: python
 
@@ -210,11 +229,11 @@ A site-wide layout is provided the same way as root-level pages: add path roots 
                <a href="/contact/">Contact</a>
            </nav>
        </header>
-       
+
        <main>
            {% block template %}{% endblock %}
        </main>
-       
+
        <footer>
            <p>&copy; 2024 My Site</p>
        </footer>
@@ -234,7 +253,7 @@ Layouts can inherit from each other through the directory hierarchy. The system 
 When a page is rendered, the system composes all layouts in the inheritance chain:
 
 1. **Root layout** (``pages/layout.djx``)
-2. **Section layout** (``pages/blog/layout.djx``)  
+2. **Section layout** (``pages/blog/layout.djx``)
 3. **Subsection layout** (``pages/blog/post/layout.djx``)
 4. **Page template** (``pages/blog/post/[slug]/template.djx``)
 
@@ -328,11 +347,11 @@ Use Django template blocks for flexible content areas:
            <h1>My Site</h1>
        </header>
        {% endblock %}
-       
+
        <main>
            {% block template %}{% endblock %}
        </main>
-       
+
        {% block footer %}
        <footer>
            <p>&copy; 2024 My Site</p>
@@ -448,7 +467,9 @@ Extension points
 
 The pages subsystem exposes one pluggable surface for loading template source.
 
-* ``next.pages.loaders.TemplateLoader`` is the abstract contract used by ``Page`` to read template source by path. The default stack resolves Python modules, ``.djx`` files, and layout chains. Subclass it to read sources from a database, a bundled archive, or an in-memory map.
+* ``next.pages.loaders.TemplateLoader`` is the abstract contract used by ``Page`` to read template source by path.
+  The default stack resolves Python modules, ``.djx`` files, and layout chains.
+  Subclass it to read sources from a database, a bundled archive, or an in-memory map.
 
 The canonical registration surface is the ``TEMPLATE_LOADERS`` key in
 ``NEXT_FRAMEWORK`` (see above). A working example lives in

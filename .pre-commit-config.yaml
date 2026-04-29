@@ -7,6 +7,12 @@ repos:
     rev: 0.11.2
     hooks:
       - id: uv-lock
+  - repo: https://github.com/PyCQA/doc8
+    rev: v2.0.0
+    hooks:
+      - id: doc8
+        args: ["--config=pyproject.toml"]
+        files: ^docs/.*\.rst$
   - repo: local
     hooks:
       - id: prettier

@@ -1,7 +1,8 @@
 Forms
 =====
 
-next.dj provides a powerful form handling system that integrates seamlessly with file-based routing, context management, and template rendering. Forms are registered using action decorators and automatically handle CSRF protection, validation, and error rendering.
+next.dj provides a powerful form handling system that integrates seamlessly with file-based routing, context management, and template rendering.
+Forms are registered using action decorators and automatically handle CSRF protection, validation, and error rendering.
 
 Overview
 --------
@@ -71,9 +72,13 @@ That's it! The form automatically includes CSRF protection, the origin field ``_
 Page context and ``{% form %}``
 --------------------------------
 
-File-based rendering sets **``current_page_module_path``** in the template context (absolute path to the current ``page.py``). The ``{% form %}`` tag **requires** this value. It emits a hidden field **``_next_form_page``** so that if validation fails, the framework can reload that page’s template and show errors. If **``_next_form_page``** is missing or does not point to a ``page.py`` under ``BASE_DIR``, the dispatcher responds with **400 Bad Request**.
+File-based rendering sets **``current_page_module_path``** in the template context (absolute path to the current ``page.py``).
+The ``{% form %}`` tag **requires** this value.
+It emits a hidden field **``_next_form_page``** so that if validation fails, the framework can reload that page’s template and show errors.
+If **``_next_form_page``** is missing or does not point to a ``page.py`` under ``BASE_DIR``, the dispatcher responds with **400 Bad Request**.
 
-Register **``@forms.action``** in ``page.py`` or in a **``component.py``** next to ``component.djx``. Component modules under your configured component roots are imported during app startup so actions are registered without manual ``importlib`` hacks.
+Register **``@forms.action``** in ``page.py`` or in a **``component.py``** next to ``component.djx``.
+Component modules under your configured component roots are imported during app startup so actions are registered without manual ``importlib`` hacks.
 
 Basic Usage
 -----------
@@ -102,27 +107,27 @@ All standard Django form fields are available:
        name = forms.CharField(max_length=100)
        email = forms.EmailField()
        url = forms.URLField()
-       
+
        # Number fields
        age = forms.IntegerField()
        price = forms.DecimalField(max_digits=10, decimal_places=2)
        rating = forms.FloatField()
-       
+
        # Choice fields
        status = forms.ChoiceField(choices=[('active', 'Active'), ('inactive', 'Inactive')])
        multiple_choice = forms.MultipleChoiceField(choices=[...])
-       
+
        # Date fields
        birth_date = forms.DateField()
        created_at = forms.DateTimeField()
-       
+
        # Boolean
        is_active = forms.BooleanField(required=False)
-       
+
        # File uploads
        avatar = forms.ImageField(required=False)
        document = forms.FileField(required=False)
-       
+
        # Custom widgets
        description = forms.CharField(widget=forms.Textarea)
        password = forms.CharField(widget=forms.PasswordInput)
@@ -182,11 +187,15 @@ Use the ``@forms.action()`` decorator to register form action handlers:
 
 - **``name``** (required): Unique action name used in templates and to build a stable form endpoint. Must not collide with another action in the project.
 - **``form_class``** (optional): Django form class implementing ``get_initial``. If omitted, the handler is invoked without a bound form (useful for non-form POST actions).
-- **``namespace``** (optional, keyword-only): Prefix added to ``name`` as ``"<namespace>:<name>"``. Useful when several apps ship actions with overlapping names (e.g. ``"save"``). The resulting namespaced name is what templates reference in ``@action="blog:save"``.
+- **``namespace``** (optional, keyword-only): Prefix added to ``name`` as ``"<namespace>:<name>"``.
+  Useful when several apps ship actions with overlapping names (e.g. ``"save"``).
+  The resulting namespaced name is what templates reference in ``@action="blog:save"``.
 
 **Action name collisions:**
 
-Two actions that hash to the same 16-character UID are a hard error: a system check raises ``django.core.exceptions.ImproperlyConfigured`` at startup naming both registered actions. Use a ``namespace=`` prefix (or rename one action) to resolve the collision. Plain name reuse without a collision is caught by the same check as a duplicate registration error.
+Two actions that hash to the same 16-character UID are a hard error: a system check raises ``django.core.exceptions.ImproperlyConfigured`` at startup naming both registered actions.
+Use a ``namespace=`` prefix (or rename one action) to resolve the collision.
+Plain name reuse without a collision is caught by the same check as a duplicate registration error.
 
 **Handler function signature:**
 
@@ -318,7 +327,9 @@ Handlers can return different types of responses:
 
 **Invalid form handling:**
 
-If the form is invalid, the handler is **not** called. The framework reads **``_next_form_page``** from POST, validates that path, rebuilds the page render context, injects the bound form and errors, and returns **200** with the full page HTML. A missing or untrusted **``_next_form_page``** yields **400**.
+If the form is invalid, the handler is **not** called.
+The framework reads **``_next_form_page``** from POST, validates that path, rebuilds the page render context, injects the bound form and errors, and returns **200** with the full page HTML.
+A missing or untrusted **``_next_form_page``** yields **400**.
 
 Working with ModelForm
 ----------------------
@@ -460,7 +471,9 @@ Forms automatically receive URL parameters from file routing:
 Context and the bound form
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Form actions **do not** register extra entries on the page context registry. Inside ``{% form %}``, if the template context already contains **``create_todo``** (or your action name) as a namespace with a **``.form``** attribute, that instance is used. Otherwise the framework calls **``build_form_namespace_for_action``** for the action name and current request, which runs **``get_initial``** with URL parameters from the resolver or from **``_url_param_*``** on POST.
+Form actions **do not** register extra entries on the page context registry.
+Inside ``{% form %}``, if the template context already contains **``create_todo``** (or your action name) as a namespace with a **``.form``** attribute, that instance is used.
+Otherwise the framework calls **``build_form_namespace_for_action``** for the action name and current request, which runs **``get_initial``** with URL parameters from the resolver or from **``_url_param_*``** on POST.
 
 You can combine forms with **``@context``** functions as usual:
 
@@ -522,7 +535,7 @@ Forms work seamlessly with layout inheritance:
 
    <!-- pages/contact/template.djx -->
    {% extends "layout.djx" %}
-   
+
    {% block template %}
        <h1>Contact Us</h1>
        {% form @action="contact" %}
@@ -580,7 +593,8 @@ When a module defining ``@forms.action`` is imported:
 1. **UID** — A short stable id is derived from the action **name** (SHA-256 of a fixed prefix and the name, truncated to the first 16 hex characters). The name must be unique across the project.
 2. **Registry** — ``RegistryFormActionBackend`` stores the handler, optional ``form_class``, and UID. Metadata does **not** include the declaring file path for dispatch or error rendering.
 
-There is no automatic ``register_context`` for form actions on ``page.py``, and bound forms for GET come from **``build_form_namespace_for_action``** inside ``{% form %}`` unless you provide the namespace yourself.
+There is no automatic ``register_context`` for form actions on ``page.py``.
+Bound forms for GET come from **``build_form_namespace_for_action``** inside ``{% form %}`` unless you provide the namespace yourself.
 
 URL pattern
 ~~~~~~~~~~~
@@ -602,8 +616,12 @@ Request handling
 
 1. Read URL-related kwargs from **``_url_param_*``** fields.
 2. Resolve **``get_initial``**, bind POST/FILES, run **``is_valid()``**.
-3. If **invalid**: validate **``_next_form_page``** in POST (must be an existing ``page.py`` under ``BASE_DIR``), load that page’s template, merge **``Page.build_render_context``** with the bound form and errors, return **200**. If **``_next_form_page``** is missing or invalid, return **400**.
-4. If **valid**: call the handler with dependency-injected arguments and normalize the return value (**``None``** → 204 when appropriate, strings and redirect-like objects coerced as documented in the code).
+3. If **invalid**: validate **``_next_form_page``** in POST (must be an existing ``page.py`` under ``BASE_DIR``),
+   load that page’s template, merge **``Page.build_render_context``** with the bound form and errors,
+   return **200**.
+   If **``_next_form_page``** is missing or invalid, return **400**.
+4. If **valid**: call the handler with dependency-injected arguments and normalize the return value
+   (**``None``** → 204 when appropriate, strings and redirect-like objects coerced as documented in the code).
 
 **Roles:** ``FormActionBackend`` / ``RegistryFormActionBackend``, ``FormActionManager``, and ``FormActionDispatch`` implement the above.
 
@@ -653,7 +671,7 @@ A complete example of a contact form without a model:
 
    <!-- pages/contact/template.djx -->
    <h1>Contact Us</h1>
-   
+
    {% form @action="contact" %}
        {{ form.as_p }}
        <button type="submit">Send Message</button>
@@ -708,7 +726,7 @@ Complete CRUD example with a Todo model:
 
    <!-- pages/template.djx -->
    <h1>Todo List</h1>
-   
+
    <h2>Create New Todo</h2>
    {% form @action="create_todo" %}
        {{ form.as_p }}
@@ -787,9 +805,9 @@ Complete CRUD example with a Todo model:
 
    <!-- pages/edit/[int:id]/template.djx -->
    <h1>Edit Todo</h1>
-   
+
    <p><a href="/">Back to list</a></p>
-   
+
    {% form @action="update_todo" %}
        {{ form.as_p }}
        <button type="submit">Update Todo</button>
@@ -944,7 +962,7 @@ Add permission checks in handlers:
        if not request.user.has_perm('todos.delete_todo'):
            messages.error(request, "Permission denied.")
            return HttpResponseRedirect("/")
-       
+
        todo = Todo.objects.get(pk=id)
        todo.delete()
        return HttpResponseRedirect("/")
@@ -957,7 +975,8 @@ Common Issues
 
 **Form not appearing in template:**
 
-- Ensure ``next`` is in ``INSTALLED_APPS`` (the app registers the ``{% form %}`` tag as a template builtin). For a custom engine, add ``next.templatetags.forms`` to ``OPTIONS['builtins']`` or use ``{% load forms %}`` in the template.
+- Ensure ``next`` is in ``INSTALLED_APPS`` (the app registers the ``{% form %}`` tag as a template builtin).
+  For a custom engine, add ``next.templatetags.forms`` to ``OPTIONS['builtins']`` or use ``{% load forms %}`` in the template.
 - Check that action name matches ``@action`` parameter
 - Verify the action module is imported (``page.py`` or ``component.py`` under configured roots)
 - Ensure **``current_page_module_path``** is in the template context, otherwise ``{% form %}`` raises **``django.core.exceptions.ImproperlyConfigured``**
@@ -1041,7 +1060,8 @@ The forms subsystem exposes two pluggable surfaces.
 Configuring form-action backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Wire a custom backend through ``NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]``. The framework loads each entry lazily on first dispatch via :class:`~next.forms.FormActionFactory`, which imports the dotted path and instantiates the class with the entry dict.
+Wire a custom backend through ``NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]``.
+The framework loads each entry lazily on first dispatch via :class:`~next.forms.FormActionFactory`, which imports the dotted path and instantiates the class with the entry dict.
 
 .. code-block:: python
 
@@ -1051,9 +1071,13 @@ Wire a custom backend through ``NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]``
        ],
    }
 
-The ``BACKEND`` key is required and must subclass :class:`~next.forms.FormActionBackend`. ``manage.py check`` reports ``next.E044`` when the entry shape is wrong (non-list setting, non-dict entry, missing ``BACKEND``, unimportable path) and ``next.E045`` when the imported class is not a ``FormActionBackend`` subclass. The full reference table for both ids lives in :doc:`/content/reference/system-checks`.
+The ``BACKEND`` key is required and must subclass :class:`~next.forms.FormActionBackend`.
+``manage.py check`` reports ``next.E044`` when the entry shape is wrong (non-list setting, non-dict entry, missing ``BACKEND``, unimportable path) and ``next.E045`` when the imported class is not a ``FormActionBackend`` subclass.
+The full reference table for both ids lives in :doc:`/content/reference/system-checks`.
 
-Unlike the components and static managers, ``FormActionManager`` does not auto-rebuild on ``settings_reloaded`` — actions register imperatively at import time, and a transparent rebuild would drop those registrations. Tests that swap ``DEFAULT_FORM_ACTION_BACKENDS`` between cases must call :func:`next.testing.reset_form_actions` to drop the cached backend list.
+Unlike the components and static managers, ``FormActionManager`` does not auto-rebuild on ``settings_reloaded``.
+Actions register imperatively at import time, and a transparent rebuild would drop those registrations.
+Tests that swap ``DEFAULT_FORM_ACTION_BACKENDS`` between cases must call :func:`next.testing.reset_form_actions` to drop the cached backend list.
 
 Test-only override
 ~~~~~~~~~~~~~~~~~~
@@ -1080,7 +1104,10 @@ The signals emitted by :mod:`next.forms.signals` let external code observe actio
 * ``form_validation_failed`` fires after a submitted form fails validation.
   Kwargs: ``action_name``, ``error_count``, ``field_names``.
 
-A :class:`~next.forms.FormActionBackend` subclass that subscribes to these signals lives in ``examples/audit-forms`` — the example wires ``AuditedFormActionBackend`` through ``DEFAULT_FORM_ACTION_BACKENDS`` and writes audit rows from both the backend channel and the signal channel side by side. The inline ``AuditedRegistryFormActionBackend`` snippet in :doc:`extending` (section "Worked examples by subsystem") shows the minimal subclass shape. Working ``@action`` handlers without custom backends are in ``examples/shortener`` (``create_link`` form) and ``examples/feature-flags`` (``bulk_toggle`` form).
+A :class:`~next.forms.FormActionBackend` subclass that subscribes to these signals lives in ``examples/audit-forms``.
+The example wires ``AuditedFormActionBackend`` through ``DEFAULT_FORM_ACTION_BACKENDS`` and writes audit rows from both the backend channel and the signal channel side by side.
+The inline ``AuditedRegistryFormActionBackend`` snippet in :doc:`extending` (section "Worked examples by subsystem") shows the minimal subclass shape.
+Working ``@action`` handlers without custom backends are in ``examples/shortener`` (``create_link`` form) and ``examples/feature-flags`` (``bulk_toggle`` form).
 
 Next
 ----

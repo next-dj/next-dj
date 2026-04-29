@@ -142,16 +142,37 @@ NEXT_FRAMEWORK
 
 Single dictionary in Django settings. Top-level keys (each optional beyond defaults):
 
-* ``DEFAULT_PAGE_BACKENDS`` is a list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``). The file router's skip-folder name always comes from ``DEFAULT_COMPONENT_BACKENDS`` (``COMPONENTS_DIR`` on the first entry). See :doc:`/content/guide/file-router`.
+* ``DEFAULT_PAGE_BACKENDS`` is a list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``).
+  The file router's skip-folder name always comes from ``DEFAULT_COMPONENT_BACKENDS`` (``COMPONENTS_DIR`` on the first entry).
+  See :doc:`/content/guide/file-router`.
 * ``URL_NAME_TEMPLATE`` is the format string for URL pattern names (default ``page_{name}``).
-* ``DEFAULT_COMPONENT_BACKENDS`` is a list of component backend dicts (``BACKEND``, ``DIRS``, ``COMPONENTS_DIR``). See :doc:`/content/guide/components`.
-* ``DEFAULT_STATIC_BACKENDS`` is a list of static backend dicts (``BACKEND``, ``OPTIONS``). The default backend resolves co-located CSS/JS through Django ``staticfiles_storage``. See :doc:`/content/guide/static-assets`.
-* ``DEFAULT_FORM_ACTION_BACKENDS`` is a list of form-action backend dicts (``BACKEND``, ``OPTIONS``). Each entry's ``BACKEND`` must subclass :class:`~next.forms.FormActionBackend`. The default is a single :class:`~next.forms.RegistryFormActionBackend` and is loaded lazily on first dispatch. Subclass it (or implement the ABC directly) to add audit logging, cache the registry in Redis, or gate dispatch behind authorization. See :doc:`/content/guide/forms` and :doc:`/content/guide/extending`.
-* ``NEXT_JS_OPTIONS`` is a dict passed to :class:`~next.static.NextScriptBuilder` to control injection of ``next.min.js``. Recognised keys are ``policy`` (``"auto"``/``"disabled"``/``"manual"`` or a :class:`~next.static.ScriptInjectionPolicy` member), ``preload_template``, ``script_tag_template``, and ``init_template``. See :doc:`/content/guide/static-assets`.
-* ``STRICT_CONTEXT`` (bool, default ``False``) promotes ``TypeError`` / ``ValueError`` / ``AttributeError`` / ``KeyError`` raised by Django context processors from a warning to a re-raise during page rendering. See :doc:`/content/guide/context`.
-* ``LAZY_COMPONENT_MODULES`` (bool, default ``False``) skips the eager import of every discovered ``component.py`` at startup. Modules are imported on first resolve of the component instead. See :doc:`/content/guide/components`.
-* ``TEMPLATE_LOADERS`` is a list of dotted paths to :class:`~next.pages.loaders.TemplateLoader` subclasses. Defaults to ``["next.pages.loaders.DjxTemplateLoader"]``. A user-provided list **replaces** the default, so include ``DjxTemplateLoader`` explicitly if you want ``.djx`` files to keep resolving. See :doc:`/content/guide/pages-and-templates`.
-* ``JS_CONTEXT_SERIALIZER`` is an optional dotted path to a class implementing the :class:`~next.static.serializers.JsContextSerializer` protocol (single ``dumps(value) -> str`` method). Values from ``@context(serialize=True)`` flow through this serializer into ``window.Next.context``. Defaults to ``None`` (uses the built-in JSON encoder). See :doc:`/content/guide/static-assets`.
+* ``DEFAULT_COMPONENT_BACKENDS`` is a list of component backend dicts (``BACKEND``, ``DIRS``, ``COMPONENTS_DIR``).
+  See :doc:`/content/guide/components`.
+* ``DEFAULT_STATIC_BACKENDS`` is a list of static backend dicts (``BACKEND``, ``OPTIONS``).
+  The default backend resolves co-located CSS/JS through Django ``staticfiles_storage``.
+  See :doc:`/content/guide/static-assets`.
+* ``DEFAULT_FORM_ACTION_BACKENDS`` is a list of form-action backend dicts (``BACKEND``, ``OPTIONS``).
+  Each entry's ``BACKEND`` must subclass :class:`~next.forms.FormActionBackend`.
+  The default is a single :class:`~next.forms.RegistryFormActionBackend` and is loaded lazily on first dispatch.
+  Subclass it (or implement the ABC directly) to add audit logging, cache the registry in Redis, or gate dispatch behind authorization.
+  See :doc:`/content/guide/forms` and :doc:`/content/guide/extending`.
+* ``NEXT_JS_OPTIONS`` is a dict passed to :class:`~next.static.NextScriptBuilder` to control injection of ``next.min.js``.
+  Recognised keys are ``policy`` (``"auto"``/``"disabled"``/``"manual"`` or a :class:`~next.static.ScriptInjectionPolicy` member), ``preload_template``, ``script_tag_template``, and ``init_template``.
+  See :doc:`/content/guide/static-assets`.
+* ``STRICT_CONTEXT`` (bool, default ``False``) promotes ``TypeError`` / ``ValueError`` / ``AttributeError`` / ``KeyError``
+  raised by Django context processors from a warning to a re-raise during page rendering.
+  See :doc:`/content/guide/context`.
+* ``LAZY_COMPONENT_MODULES`` (bool, default ``False``) skips the eager import of every discovered ``component.py`` at startup.
+  Modules are imported on first resolve of the component instead.
+  See :doc:`/content/guide/components`.
+* ``TEMPLATE_LOADERS`` is a list of dotted paths to :class:`~next.pages.loaders.TemplateLoader` subclasses.
+  Defaults to ``["next.pages.loaders.DjxTemplateLoader"]``.
+  A user-provided list **replaces** the default, so include ``DjxTemplateLoader`` explicitly if you want ``.djx`` files to keep resolving.
+  See :doc:`/content/guide/pages-and-templates`.
+* ``JS_CONTEXT_SERIALIZER`` is an optional dotted path to a class implementing the :class:`~next.static.serializers.JsContextSerializer` protocol (single ``dumps(value) -> str`` method).
+  Values from ``@context(serialize=True)`` flow through this serializer into ``window.Next.context``.
+  Defaults to ``None`` (uses the built-in JSON encoder).
+  See :doc:`/content/guide/static-assets`.
 
 .. code-block:: python
 

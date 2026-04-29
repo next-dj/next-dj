@@ -7,7 +7,9 @@ Full-stack Django framework
 
 .. rst-class:: lead
 
-next.dj brings **file-based routing** and **modern frontend patterns** to Django. You get a Next.js-like structure—pages, layouts, and forms from the filesystem—while keeping Django's backend, ORM, and ecosystem. Less boilerplate, clear conventions, one stack.
+next.dj brings **file-based routing** and **modern frontend patterns** to Django.
+You get a Next.js-like structure—pages, layouts, and forms from the filesystem—while keeping Django's backend, ORM, and ecosystem.
+Less boilerplate, clear conventions, one stack.
 
 .. container:: buttons
 

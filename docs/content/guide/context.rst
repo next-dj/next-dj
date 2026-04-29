@@ -296,12 +296,12 @@ Context functions are called on every request. For expensive operations, conside
    def get_expensive_data(request):
        cache_key = "expensive_data"
        data = cache.get(cache_key)
-       
+
        if data is None:
            # Expensive operation
            data = perform_expensive_calculation()
            cache.set(cache_key, data, 300)  # Cache for 5 minutes
-       
+
        return {"expensive_data": data}
 
 Validation Checks

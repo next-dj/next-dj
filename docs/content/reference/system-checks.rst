@@ -325,10 +325,14 @@ to a :class:`~next.pages.loaders.TemplateLoader` subclass.
 
 Flat top-level keys (see :mod:`next.conf`):
 
-* ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, …). The skip-folder name for routing comes from ``DEFAULT_COMPONENT_BACKENDS``, not from page router dicts.
+* ``DEFAULT_PAGE_BACKENDS`` — list of file-router backend dicts (``BACKEND``, ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, ``OPTIONS``, …).
+  The skip-folder name for routing comes from ``DEFAULT_COMPONENT_BACKENDS``, not from page router dicts.
 * ``URL_NAME_TEMPLATE`` — Python format string for URL names (default ``page_{name}``).
 * ``DEFAULT_COMPONENT_BACKENDS`` — list of component backend dicts.
-* ``DEFAULT_FORM_ACTION_BACKENDS`` — list of form-action backend dicts (``BACKEND``, ``OPTIONS``). Each ``BACKEND`` must subclass :class:`~next.forms.FormActionBackend`. Defaults to a single :class:`~next.forms.RegistryFormActionBackend`. See :doc:`../guide/forms`.
+* ``DEFAULT_FORM_ACTION_BACKENDS`` — list of form-action backend dicts (``BACKEND``, ``OPTIONS``).
+  Each ``BACKEND`` must subclass :class:`~next.forms.FormActionBackend`.
+  Defaults to a single :class:`~next.forms.RegistryFormActionBackend`.
+  See :doc:`../guide/forms`.
 * ``TEMPLATE_LOADERS`` — list of dotted paths to :class:`~next.pages.loaders.TemplateLoader` subclasses. Defaults to ``["next.pages.loaders.DjxTemplateLoader"]``, and user lists replace the default.
 
 Each key can be overridden independently. There is no nested ``PAGES`` / ``COMPONENTS`` namespace and no runtime hook for custom ``ModuleLoader`` classes.

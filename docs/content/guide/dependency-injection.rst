@@ -239,8 +239,12 @@ Extension points
 
 The dependency-injection layer exposes three pluggable surfaces.
 
-* ``next.deps.providers.ParameterProvider`` is the minimal protocol consumed by ``DependencyResolver``. Implement it for ad-hoc providers passed directly to a custom resolver.
-* ``next.deps.providers.RegisteredParameterProvider`` is the ABC used by built-in providers. Every concrete subclass auto-registers through ``__init_subclass__``, so importing the module that defines the subclass is enough to wire it into the resolver. ``next.urls.markers.QueryParamProvider`` is shipped through this mechanism. Its module loads with ``next.urls`` so ``DQuery[T]`` resolution is wired without explicit registration.
+* ``next.deps.providers.ParameterProvider`` is the minimal protocol consumed by ``DependencyResolver``.
+  Implement it for ad-hoc providers passed directly to a custom resolver.
+* ``next.deps.providers.RegisteredParameterProvider`` is the ABC used by built-in providers.
+  Every concrete subclass auto-registers through ``__init_subclass__``, so importing the module that defines the subclass is enough to wire it into the resolver.
+  ``next.urls.markers.QueryParamProvider`` is shipped through this mechanism.
+  Its module loads with ``next.urls`` so ``DQuery[T]`` resolution is wired without explicit registration.
 * ``DependencyResolver.register_dependency`` binds a callable to a name so ``Depends("name")`` resolves it.
 
 Register a custom provider by importing the module that defines it.
