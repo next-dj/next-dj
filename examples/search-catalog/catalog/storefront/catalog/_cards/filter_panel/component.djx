@@ -3,8 +3,16 @@
     <div>
       <label class="block text-xs uppercase text-slate-500" for="filter-q">Search</label>
       <input id="filter-q" name="q" type="search" value="{{ current_filters.q }}"
-             class="mt-1 w-full rounded border px-2 py-1"
-             placeholder="iphone, novel"/>
+             class="mt-1 w-full rounded border px-2 py-1 invalid:border-rose-400 invalid:bg-rose-50"
+             placeholder="iphone, novel"
+             minlength="3"
+             aria-describedby="filter-q-help"
+             data-help-default="Type at least 3 characters."
+             data-help-tooshort="Need {min} more — at least 3 characters in total."/>
+      <p id="filter-q-help" data-filter-help
+         class="mt-1 text-xs text-slate-500">
+        Type at least 3 characters.
+      </p>
     </div>
 
     <fieldset class="space-y-1">
@@ -41,7 +49,7 @@
     </select>
 
     <button type="submit"
-            class="w-full rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white">
+            class="w-full rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800">
       Apply filters
     </button>
   </form>

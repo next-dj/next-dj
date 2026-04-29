@@ -1,5 +1,5 @@
 <section class="grid gap-6 lg:grid-cols-[260px_1fr]">
-  <aside class="space-y-4">
+  <aside class="catalog-sidebar space-y-4">
     {% component "filter_panel" %}
   </aside>
 

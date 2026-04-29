@@ -2,20 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Search catalog</title>
+  <title>next.dj — Search catalog</title>
   <script src="https://cdn.tailwindcss.com"></script>
   {% collect_styles %}
 </head>
 <body class="bg-slate-50 text-slate-900">
   <header class="border-b bg-white">
     <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
-      <a href="/" class="text-lg font-semibold">Search catalog</a>
-      <div class="flex items-center gap-6">
-        {% component "site_search" %}
-        <nav class="text-sm">
-          <a class="text-slate-600 hover:text-slate-900" href="{% url 'next:page_catalog' %}">All products</a>
-        </nav>
-      </div>
+      <a href="/" class="text-lg font-semibold text-slate-900">
+        🔍 next.dj catalog
+      </a>
+      <nav class="text-sm">
+        <a class="text-slate-600 hover:text-slate-900" href="{% url 'next:page_catalog' %}">All products</a>
+      </nav>
     </div>
   </header>
 

@@ -42,14 +42,18 @@ The user flow:
 cd examples/search-catalog
 uv run python manage.py migrate        # schema + demo data in one step
 uv run python manage.py runserver      # http://127.0.0.1:8000/
-uv run pytest                          # 50 tests, 100% coverage
+uv run pytest                          # 53 tests, 100% coverage
 ```
 
 Tailwind loads via the Play CDN in
 [`catalog/storefront/layout.djx`](catalog/storefront/layout.djx). No
-Node, no build step. The two composite components have co-located CSS
-that the static collector picks up, deduplicates, and emits exactly
-once per page.
+Node, no build step. Components carry co-located CSS and JS that the
+static collector picks up, deduplicates, and emits exactly once per
+page. The `filter_panel` component ships a small `component.js` that
+auto-submits the form when any checkbox or dropdown changes and runs
+live constraint validation on the search field (minimum 3 characters)
+through the native Constraint Validation API, with a help text that
+narrates exactly how many more characters are needed.
 
 ## Project tour
 
@@ -75,18 +79,23 @@ examples/search-catalog/
         ├── page.py             # @context("featured", "categories")
         ├── template.djx        # Landing UI
         ├── _cards/             # ← COMPONENTS_DIR scoped at storefront level
-        │   ├── product_card/
+        │   ├── product_card/   # used on both landing and catalog — lives here
         │   │   ├── component.py
         │   │   ├── component.djx
         │   │   └── component.css
-        │   └── filter_panel/
-        │       ├── component.py
-        │       ├── component.djx
-        │       └── component.css
+        │   └── pagination/     # template-only (no component.py); used by catalog/*
+        │       └── component.djx
         └── catalog/
             ├── layout.djx      # Two-column grid with filter sidebar and chip strip
+            ├── layout.css      # Sticky sidebar (position: sticky; top: 1rem)
             ├── page.py         # @context("page_obj", "all_categories", "all_brands")
             ├── template.djx
+            ├── _cards/         # ← nested COMPONENTS_DIR scoped to catalog/* only
+            │   └── filter_panel/   # invisible on the landing page
+            │       ├── component.py
+            │       ├── component.djx
+            │       ├── component.css
+            │       └── component.js    # auto-submit on checkbox/select change
             └── [category]/
                 ├── layout.djx  # Category banner and breadcrumb
                 ├── page.py     # @context("category", inherit_context=True), page_obj, all_brands
@@ -104,9 +113,9 @@ Search is idempotent. A bookmark of `?q=iphone&brand=Acme&page=2`
 should reproduce the same listing. That is the natural shape of
 `<form method="get">` posting back to the same page. `@action` is for
 POST side effects such as creating, updating, or deleting rows.
-[`catalog/storefront/_cards/filter_panel/component.djx`](catalog/storefront/_cards/filter_panel/component.djx)
+[`catalog/storefront/catalog/_cards/filter_panel/component.djx`](catalog/storefront/catalog/_cards/filter_panel/component.djx)
 renders a regular HTML form. The `submit_url` value comes from
-[`catalog/storefront/_cards/filter_panel/component.py`](catalog/storefront/_cards/filter_panel/component.py)
+[`catalog/storefront/catalog/_cards/filter_panel/component.py`](catalog/storefront/catalog/_cards/filter_panel/component.py)
 which reverses the current category page when scoped, otherwise the
 all-products listing. Pagination uses
 [`catalog/templatetags/catalog_qs.py`](catalog/templatetags/catalog_qs.py)
@@ -220,7 +229,7 @@ declares `category: Category` and gets the inherited instance through
 `ContextByDefaultProvider`. No re-query, no kwargs threading, no
 helper.
 
-### 6. Co-located CSS and dedup
+### 6. Co-located CSS, JS, and scoped components
 
 `product_card` is rendered six times on the catalog listing and three
 more times on the landing page. Its
@@ -234,6 +243,59 @@ and
 tests assert this directly. The component lives at
 [`storefront/_cards/`](catalog/storefront/_cards/) one level above
 the catalog tree because both the landing and the listing render it.
+
+`pagination` is a template-only component — it has `component.djx`
+but no `component.py`. It reads `page_obj` directly from template
+context without any Python-side registration. This is valid: a
+`component.py` is only needed when the component must compute derived
+values or perform DI lookups.
+
+`filter_panel` lives at
+[`storefront/catalog/_cards/filter_panel/`](catalog/storefront/catalog/_cards/filter_panel/)
+— a nested `_cards/` folder inside the `catalog/` subtree. The
+framework's dispatcher registers any `_cards/` directory it encounters
+during the route tree walk, scoping each to its containing subtree.
+`filter_panel` is therefore visible to `/catalog/` and
+`/catalog/<category>/` but invisible on the landing page. The
+[`test_filter_panel_scoped_to_catalog`](tests/test_e2e.py) test
+verifies that `filter_panel` CSS appears in catalog pages but not on
+the landing page.
+
+`filter_panel` also ships
+[`component.js`](catalog/storefront/catalog/_cards/filter_panel/component.js).
+It does two things. First, it attaches a `change` listener to
+`[data-filter-form]` and auto-submits the form when a checkbox or
+`<select>` changes (only if the form passes `checkValidity()`).
+Number inputs and the text query field are excluded so that
+partially-typed values do not trigger a reload mid-entry — those
+commit on Enter, and the "Apply filters" button submits everything
+at once.
+
+Second, it runs live validation on the query field using the native
+Constraint Validation API. The `<input>` declares `minlength="3"`, so
+the browser already enforces the rule on submit and shows the
+`invalid:` Tailwind variant (rose border on a red-tinted background).
+The script layers a contextual help message on top: it reads
+`data-help-default` and `data-help-tooshort` from the input,
+calls `setCustomValidity()` with a tailored message ("Need 2 more —
+at least 3 characters in total"), and updates the help paragraph
+with three colour states (`text-slate-500` idle, `text-rose-600` too
+short, `text-emerald-600` valid). The empty string is treated as
+"no filter" so the user can clear the field without seeing an error.
+The script is injected via `{% collect_scripts %}` in
+[`storefront/layout.djx`](catalog/storefront/layout.djx).
+
+[`catalog/layout.css`](catalog/storefront/catalog/layout.css) is a
+co-located layout stylesheet. It applies `position: sticky; top: 1rem`
+to the sidebar on large screens, keeping the filter panel in view as
+the product grid scrolls. This style belongs in `layout.css` rather
+than a utility class because the `top` offset must be a concrete pixel
+value that Tailwind's `top-*` utilities do not express cleanly. The
+file is injected automatically for every page in the `catalog/`
+subtree through the layout chain and is absent on the landing page,
+as the
+[`test_catalog_layout_css_absent_on_landing`](tests/test_e2e.py)
+test verifies.
 
 ### 7. `cached_search` and the LocMem hit path
 
@@ -273,7 +335,7 @@ permanent noise.
   from `next.testing`. `_isolate` clears the LocMem cache between
   tests. `catalog_db` gates tests on the pre-loaded demo catalog.
 
-Total: 47 tests, 100% coverage on the `catalog` package.
+Total: 53 tests, 100% coverage on the `catalog` package.
 
 ## Further reading
 

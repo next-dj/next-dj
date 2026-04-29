@@ -104,6 +104,19 @@ class TestRouting:
         assert r.status_code == 200
         assert "iPhone 15" in r.content.decode()
 
+    def test_filter_panel_scoped_to_catalog(self, client, catalog_db) -> None:
+        """filter_panel CSS is present on catalog pages but absent on the landing page."""
+        catalog_body = client.get("/catalog/").content.decode()
+        assert "filter_panel" in catalog_body
+
+        landing_body = client.get("/").content.decode()
+        assert "filter_panel" not in landing_body
+
+    def test_catalog_layout_css_absent_on_landing(self, client, catalog_db) -> None:
+        """catalog/layout.css is not injected on the landing page."""
+        landing_body = client.get("/").content.decode()
+        assert "catalog/layout" not in landing_body
+
 
 class TestFilters:
     """Cover query filtering across every supported wire format."""
@@ -229,43 +242,3 @@ class TestCacheHit:
         client.get("/catalog/?brand=Acme")
         client.get("/catalog/?brand=Globex")
         assert len(_cache_keys()) == 2
-
-
-class TestGlobalSearch:
-    """Cover the global site-search bar and the /search/ results page."""
-
-    def test_search_bar_appears_on_landing(self, client, catalog_db) -> None:
-        """Render the site-search form on the landing page."""
-        body = client.get("/").content.decode()
-        assert "data-site-search" in body
-
-    def test_search_bar_appears_on_catalog(self, client, catalog_db) -> None:
-        """Render the site-search form on the catalog listing page."""
-        body = client.get("/catalog/").content.decode()
-        assert "data-site-search" in body
-
-    def test_search_page_empty_renders(self, client, catalog_db) -> None:
-        """Return 200 with an empty-state heading when no query is given."""
-        r = client.get("/search/")
-        assert r.status_code == 200
-        body = r.content.decode()
-        assert "data-search-heading" in body
-
-    def test_search_page_returns_matching_product(self, client, catalog_db) -> None:
-        """Return the matching product card when the query hits a product name."""
-        r = client.get("/search/?q=iPhone")
-        assert r.status_code == 200
-        body = r.content.decode()
-        assert "iPhone 15" in body
-        assert "data-product-card" in body
-
-    def test_search_page_no_results(self, client, catalog_db) -> None:
-        """Show the no-results message when no product name matches."""
-        r = client.get("/search/?q=doesnotexist99")
-        assert r.status_code == 200
-        assert "data-no-results" in r.content.decode()
-
-    def test_search_bar_prefills_current_query(self, client, catalog_db) -> None:
-        """Pre-fill the header input with the active query on the results page."""
-        body = client.get("/search/?q=iPhone").content.decode()
-        assert 'value="iPhone"' in body
