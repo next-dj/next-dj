@@ -41,7 +41,7 @@ The user flow:
 cd examples/audit-forms
 uv run python manage.py migrate
 uv run python manage.py runserver     # http://127.0.0.1:8000/
-uv run pytest                         # 35 tests
+uv run pytest
 ```
 
 Tailwind loads via the Play CDN in
@@ -49,45 +49,6 @@ Tailwind loads via the Play CDN in
 step. The example uses Django sessions to thread step data, so make sure
 `SESSION` middleware stays in `MIDDLEWARE` (it is by default in
 [`config/settings.py`](config/settings.py)).
-
-## Project tour
-
-```
-examples/audit-forms/
-├── config/
-│   ├── settings.py             # PAGES_DIR="views", COMPONENTS_DIR="_blocks",
-│   │                           # DEFAULT_FORM_ACTION_BACKENDS=[AuditedFormActionBackend]
-│   └── urls.py                 # Only include('next.urls') — file router owns every route
-└── access/
-    ├── apps.py                 # AppConfig.ready() imports backends + receivers
-    ├── models.py               # AccessRequest, AuditEntry (with source + kind discriminators)
-    ├── backends.py             # AuditedFormActionBackend — writes "backend"-source rows
-    ├── receivers.py            # action_dispatched / form_validation_failed → "signal"-source rows
-    └── views/                  # ← PAGES_DIR
-        ├── layout.djx          # Root chrome — Tailwind, header, top nav
-        ├── page.py             # @context("recent_requests"), @context("recent_audit")
-        ├── template.djx        # Landing UI
-        ├── request/
-        │   └── [step]/
-        │       ├── page.py     # RequestStepForm + @action("request_step", namespace="access")
-        │       ├── template.djx
-        │       └── _blocks/    # ← scoped composite components
-        │           └── progress_bar/
-        │               ├── component.py   # @component.context("step_label", "completed_count")
-        │               └── component.djx
-        └── admin/
-            └── audit/
-                ├── page.py     # @context("entries", "active_kind", "totals")
-                ├── template.djx
-                └── _blocks/
-                    └── audit_row/
-                        ├── component.py   # @component.context for row-derived view-data
-                        └── component.djx
-```
-
-The two composite components live next to the routes they are scoped to.
-The `_blocks/` directory name matches `COMPONENTS_DIR="_blocks"` in
-[`config/settings.py`](config/settings.py).
 
 ## Walking the code
 
@@ -262,58 +223,6 @@ The example runs both because it is a *demonstration*. In production,
 pick the channel that matches your need: backend if you want raw
 inputs and atomicity with the form's database write, signal if you
 want decoupling and minimal coupling to the backend implementation.
-
-## Tests
-
-[`tests/test_e2e.py`](tests/test_e2e.py) and
-[`tests/test_unit.py`](tests/test_unit.py) hold 35 tests across the
-following groups:
-
-- `TestFullSubmission` — three-step happy path; asserts the
-  `AccessRequest` row plus the expected backend / signal channel
-  counts and `SignalRecorder` events.
-- `TestValidationFailure` — empty email on step 1; asserts no
-  `AccessRequest` and one signal-source `validation_failed` row with
-  `error_count >= 1` and `"email" in field_names`.
-- `TestAdminAuditPage` — DOM and DB assertions on the global audit
-  table and the `?kind=` filter.
-- `TestRequestCorrelation` — backend `dispatched` row links to the
-  freshly-created `AccessRequest`; signal rows do not.
-- `TestPerRequestAuditPage` — `/request/<id>/audit/` shows only that
-  request's rows; unknown id 404s; `?just=1` toggles the success
-  banner.
-- `TestSuccessRedirect` — final step redirects to
-  `/request/<id>/audit/?just=1` with the correct id.
-- `TestStepSection` — composite renders `data-state="active"` for
-  the current step, `data-state="saved"` plus `data-saved-badge` for
-  completed steps.
-- `TestNamespacedAction`, `TestSessionResume`, `TestUnknownUid` —
-  the existing namespace, session-resume, and unknown-UID assertions
-  from the original test pass.
-- `TestProgressBarSteps`, `TestStepFallbacks`,
-  `TestRequestStepFormDerive`, `TestModelStr`, `TestAuditRowHelpers`,
-  `TestLandingPage` — unit-level coverage of derived state, form
-  fallbacks, and component helpers.
-
-Coverage is 100% across the `access` package
-(`uv run pytest --cov=access`).
-
-## Forward-compat
-
-- **Partial rerender**. The handler returns `HttpResponseRedirect` on
-  every step. The day the framework grows `form.partial_response(...)`,
-  switching is a one-line edit per step — no template restructure.
-- **Suspense / async backends**. `AuditedFormActionBackend.dispatch` is
-  the only async-eligible spot. Subclassing it again with an
-  async-aware variant or wrapping the receivers in a queue does not
-  change the example's URL surface or test assertions.
-- **Native parent context**. `@context` already runs at the page level
-  and the admin filter context. When the framework adds native
-  `inherit_context=True` on `@context`, the admin page can move common
-  context up without touching the template.
-- **Pluggable serializers**. The audit rows store JSON via Django's
-  `JSONField`. Switching to msgspec or pydantic for `AuditEntry.payload`
-  is a model-only change.
 
 ## Further reading
 

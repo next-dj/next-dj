@@ -42,7 +42,7 @@ The user flow:
 cd examples/search-catalog
 uv run python manage.py migrate        # schema + demo data in one step
 uv run python manage.py runserver      # http://127.0.0.1:8000/
-uv run pytest                          # 53 tests, 100% coverage
+uv run pytest
 ```
 
 Tailwind loads via the Play CDN in
@@ -54,56 +54,6 @@ auto-submits the form when any checkbox or dropdown changes and runs
 live constraint validation on the search field (minimum 3 characters)
 through the native Constraint Validation API, with a help text that
 narrates exactly how many more characters are needed.
-
-## Project tour
-
-```
-examples/search-catalog/
-├── config/
-│   ├── settings.py             # PAGES_DIR="storefront", COMPONENTS_DIR="_cards"
-│   │                           # context_processors=["catalog.context_processors.active_filters"]
-│   └── urls.py                 # Only include('next.urls')
-└── catalog/
-    ├── apps.py                 # AppConfig.ready() imports providers
-    ├── models.py               # Category, Product (with composite uniqueness on slug)
-    ├── providers.py            # Filters, PageRequest, FiltersProvider, PageProvider, parse_filters
-    ├── queries.py              # cached_search with a stable blake2b cache key
-    ├── context_processors.py   # active_filters builds chip descriptors and a drop-filter map
-    ├── templatetags/
-    │   └── catalog_qs.py       # {% querystring %} tag and `kv` filter for chip URLs
-    ├── migrations/
-    │   ├── 0001_initial.py     # schema
-    │   └── 0002_seed_catalog.py        # pre-loads the demo catalog
-    └── storefront/             # ← PAGES_DIR
-        ├── layout.djx          # Root chrome with Tailwind and the {% collect_styles %} sink
-        ├── page.py             # @context("featured", "categories")
-        ├── template.djx        # Landing UI
-        ├── _cards/             # ← COMPONENTS_DIR scoped at storefront level
-        │   ├── product_card/   # used on both landing and catalog — lives here
-        │   │   ├── component.py
-        │   │   ├── component.djx
-        │   │   └── component.css
-        │   └── pagination/     # template-only (no component.py); used by catalog/*
-        │       └── component.djx
-        └── catalog/
-            ├── layout.djx      # Two-column grid with filter sidebar and chip strip
-            ├── layout.css      # Sticky sidebar (position: sticky; top: 1rem)
-            ├── page.py         # @context("page_obj", "all_categories", "all_brands")
-            ├── template.djx
-            ├── _cards/         # ← nested COMPONENTS_DIR scoped to catalog/* only
-            │   └── filter_panel/   # invisible on the landing page
-            │       ├── component.py
-            │       ├── component.djx
-            │       ├── component.css
-            │       └── component.js    # auto-submit on checkbox/select change
-            └── [category]/
-                ├── layout.djx  # Category banner and breadcrumb
-                ├── page.py     # @context("category", inherit_context=True), page_obj, all_brands
-                ├── template.djx
-                └── [slug]/
-                    ├── page.py # @context("product") receives the inherited Category
-                    └── template.djx
-```
 
 ## Walking the code
 
@@ -319,23 +269,6 @@ rest.
 
 The default `sort=newest` is filtered out of the chip list to avoid
 permanent noise.
-
-## Tests
-
-- [`tests/test_e2e.py`](tests/test_e2e.py) covers routing, filtering,
-  the chip strip, the inherit-context pathway, and the cache. The
-  filter test is parametrised across all three wire formats so plain
-  repeated, bracket-suffix, and comma-delimited queries all run.
-- [`tests/test_unit.py`](tests/test_unit.py) covers the data migration
-  (forward and reverse), model `__str__` methods, the `Filters` dataclass,
-  every branch of `parse_filters`, the `PageProvider` clamping, and the
-  `querystring` template helper.
-- [`conftest.py`](conftest.py) ships three fixtures. `_load_pages`
-  loads the storefront tree once per session through `eager_load_pages`
-  from `next.testing`. `_isolate` clears the LocMem cache between
-  tests. `catalog_db` gates tests on the pre-loaded demo catalog.
-
-Total: 53 tests, 100% coverage on the `catalog` package.
 
 ## Further reading
 

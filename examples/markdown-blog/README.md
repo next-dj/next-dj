@@ -26,48 +26,13 @@ nav components.
 cd examples/markdown-blog
 uv run python manage.py migrate
 uv run python manage.py runserver     # http://127.0.0.1:8000/
-uv run pytest                         # 22 tests, 100% coverage
+uv run pytest
 ```
 
 Tailwind loads via the Play CDN in [`screens/layout.djx`](blog/screens/layout.djx).
 No Node, no build step.
 
-## Project tour
-
-```
-examples/markdown-blog/
-├── config/
-│   ├── settings.py      # PAGES_DIR="screens", COMPONENTS_DIR="_parts"
-│   │                    # + context_processors=[site_nav] under NEXT_FRAMEWORK
-│   └── urls.py
-└── blog/
-    ├── apps.py
-    ├── loaders.py               # MarkdownTemplateLoader — reads sibling template.md
-    ├── markdown_template.py     # render_markdown / post_metadata / reading_minutes
-    ├── context_processors.py    # site_nav — site_year, site_tagline
-    └── screens/                 # ← PAGES_DIR
-        ├── layout.djx           # Root chrome: Tailwind, header + nav, footer
-        ├── page.py              # @context("posts") — scans posts/*/template.md
-        ├── template.djx         # Post list
-        ├── about/
-        │   └── template.djx     # Virtual page — no page.py needed
-        ├── posts/
-        │   ├── layout.djx       # Nested: back button + meta bar + share
-        │   ├── welcome/
-        │   │   ├── page.py      # @context("post" serialise) + reading_minutes only
-        │   │   └── template.md  # Markdown body rendered by MarkdownTemplateLoader
-        │   └── hello-world/
-        │       ├── page.py
-        │       └── template.md
-        └── _parts/              # ← COMPONENTS_DIR
-            ├── nav_link/        # Shared active-aware link
-            └── share_button/    # Bodyless composite, reads window.Next.context.post
-```
-
 ## Walking the code
-
-The rest of this README walks the project in the order you would naturally learn
-the framework.
 
 ### 1. Rename directories to fit the domain
 
@@ -389,28 +354,6 @@ and hands the composed string to Django's template engine, which treats it as
 part of the template source — not as a Django variable — so there is no double
 escaping. Never register a loader that returns user-supplied HTML without
 sanitising — this example trusts the files on disk.
-
-## Tests
-
-[`tests/test_e2e.py`](tests/test_e2e.py) and [`tests/test_unit.py`](tests/test_unit.py)
-cover every module in `blog/` at **100%**. `make test-examples` enforces
-`--cov-fail-under=100`, so a regression anywhere in the example breaks the
-build.
-
-What is tested:
-
-- Index lists both posts, and links use `{% url %}` to point at `/posts/<slug>/`.
-- Site chrome (tagline, footer year) renders on every page via the context
-  processor.
-- Each post renders through the nested layout with heading, body,
-  "min read" meta, and a "Back to posts" link.
-- Fenced code block is escaped and classed as `language-python`.
-- Share button renders only on post pages, not on the homepage.
-- `window.Next.context.post` is injected with the serialized post meta.
-- `nav_link` active state flips correctly between `/` and `/about/`.
-- Unit: `render_markdown`, `post_metadata`, `read_post_body`,
-  `reading_minutes`, `MarkdownTemplateLoader` (can_load, load_template,
-  source_path, decode-error fallback).
 
 ## Further reading
 

@@ -27,7 +27,7 @@ bulk-toggle form, a nested admin layout, and two signal receivers
 cd examples/feature-flags
 uv run python manage.py migrate
 uv run python manage.py runserver     # http://127.0.0.1:8000/
-uv run pytest                         # 31 tests, 100% coverage
+uv run pytest
 ```
 
 Tailwind loads via the Play CDN in
@@ -47,44 +47,7 @@ Flag.objects.create(name='ai_suggestions', label='AI suggestions',
 "
 ```
 
-## Project tour
-
-```
-examples/feature-flags/
-├── config/
-│   ├── settings.py             # PAGES_DIR="panels", COMPONENTS_DIR="_chunks", LocMemCache
-│   └── urls.py                 # Only include('next.urls') — file router owns every route
-└── flags/
-    ├── apps.py                 # AppConfig.ready() imports providers + receivers
-    ├── models.py               # Flag(name, label, description, enabled, updated_at)
-    ├── providers.py            # DFlag[T] marker + FlagProvider (URL kwarg or component prop)
-    ├── cache.py                # get_cached_flag, invalidate_flag, MISSING_SENTINEL
-    ├── metrics.py              # record_render, render_counts — LocMemCache counters
-    ├── receivers.py            # post_save / post_delete / page_rendered wiring
-    └── panels/                 # ← PAGES_DIR
-        ├── layout.djx          # Root chrome — Tailwind, header, top nav
-        ├── page.py             # @context("active_flags") + @context("disabled_flags")
-        ├── template.djx        # Two-column flag list
-        ├── admin/
-        │   ├── layout.djx      # Nested toolbar + subnav (Flags · Render metrics · Back)
-        │   ├── page.py         # BulkToggleForm + @action("bulk_toggle")
-        │   ├── template.djx    # Form body with per-row {% component "toggle_preview" %}
-        │   └── metrics/
-        │       ├── page.py     # @context("render_counts") from the metrics module
-        │       └── template.djx
-        ├── demo/
-        │   ├── page.py         # @context("demo_flags") for the per-flag status header
-        │   └── template.djx    # Three {% component "feature_guard" %} calls
-        └── _chunks/            # ← COMPONENTS_DIR
-            ├── feature_guard/  # Composite: component.py with render() that gates content
-            ├── toggle_preview/ # Composite: @component.context("state") + component.djx
-            └── nav_link/       # Shared active-aware link
-```
-
 ## Walking the code
-
-The rest of this README walks the project in the order you would naturally
-learn the framework.
 
 ### 1. Rename `pages/` and `_components/` to fit the domain
 
@@ -376,30 +339,6 @@ and no `template` attribute.
 you move those imports to the top of `flags/__init__.py`, Django will try
 to load them before the app registry is populated and `@receiver(post_save,
 sender=Flag)` will crash looking up `Flag`.
-
-## Tests
-
-[`tests/test_e2e.py`](tests/test_e2e.py) and
-[`tests/test_unit.py`](tests/test_unit.py) cover every module in `flags/`
-at **100%**. `make test-examples` enforces `--cov-fail-under=100`, so a
-regression anywhere in this example breaks the build.
-
-What is tested:
-
-- Home page partitions flags into "enabled" and "disabled" columns.
-- Admin renders a bulk-toggle form with checkboxes + toggle_preview badges.
-- POSTing the form toggles the right rows, redirects to `/admin/`, and
-  invalidates the cache for every changed flag (but not unchanged ones).
-- Demo page renders a `feature_guard` banner only when the underlying flag
-  exists **and** is enabled. Missing flags and disabled flags produce zero
-  bytes of output.
-- Enabled flag with no description falls back to "No description provided."
-- `page_rendered` receiver increments per-page counters visible on
-  `/admin/metrics/`.
-- `nav_link` active state flips between home / admin / metrics correctly.
-- Unit: `Flag.__str__`, cache sentinel round-trip + invalidation, metrics
-  aggregation + deduplicated index, `FlagProvider.resolve` raises
-  `LookupError` when neither URL kwarg nor template prop is set.
 
 ## Further reading
 
