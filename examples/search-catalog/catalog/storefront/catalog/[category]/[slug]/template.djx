@@ -1,0 +1,32 @@
+<article class="rounded-xl bg-white p-8 shadow-sm">
+  <nav class="text-sm text-slate-500" data-breadcrumb>
+    <a class="hover:text-slate-900" href="/catalog/">All products</a>
+    <span class="mx-1">/</span>
+    <a class="hover:text-slate-900" href="/catalog/{{ category.slug }}/">{{ category.name }}</a>
+    <span class="mx-1">/</span>
+    <span class="font-medium text-slate-700">{{ product.name }}</span>
+  </nav>
+
+  <h1 class="mt-4 text-3xl font-bold">{{ product.name }}</h1>
+  <p class="text-sm text-slate-500">{{ product.brand }}</p>
+
+  <p class="mt-4 text-2xl font-semibold">${{ product.price }}</p>
+
+  <p class="mt-2 text-sm">
+    {% if product.in_stock %}
+      <span class="rounded-full bg-emerald-100 px-2 py-1 text-emerald-800">In stock</span>
+    {% else %}
+      <span class="rounded-full bg-rose-100 px-2 py-1 text-rose-800">Out of stock</span>
+    {% endif %}
+  </p>
+
+  {% if product.description %}
+    <p class="mt-6 max-w-2xl text-slate-700">{{ product.description }}</p>
+  {% endif %}
+
+  <p class="mt-8">
+    <a class="text-sm text-slate-600 hover:text-slate-900" href="/catalog/{{ category.slug }}/">
+      Back to {{ category.name }}
+    </a>
+  </p>
+</article>

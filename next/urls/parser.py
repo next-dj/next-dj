@@ -14,7 +14,9 @@ from typing import ClassVar
 def _coerce_url_value(value: str, hint: type) -> object:
     """Coerce a URL string toward `int`, `bool`, `float`, or `str`.
 
-    Leaves the original string when conversion fails.
+    Returns the original string when conversion fails so the caller
+    can decide how to react. The helper is shared by `DUrl` and
+    `DQuery` parameter resolution.
     """
     if hint is int:
         try:

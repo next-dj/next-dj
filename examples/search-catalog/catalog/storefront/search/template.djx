@@ -1,0 +1,40 @@
+{% load catalog_qs %}
+<div class="space-y-6">
+  <header class="flex items-baseline justify-between">
+    {% if q %}
+      <h1 class="text-2xl font-semibold" data-search-heading>
+        Results for <em class="not-italic text-slate-500">{{ q }}</em>
+      </h1>
+      <p class="text-sm text-slate-500">{{ page_obj.total }} product{{ page_obj.total|pluralize }}</p>
+    {% else %}
+      <h1 class="text-2xl font-semibold" data-search-heading>Search</h1>
+      <p class="text-sm text-slate-500">Enter a search term in the header.</p>
+    {% endif %}
+  </header>
+
+  {% if page_obj.products %}
+    <ul class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {% for product in page_obj.products %}
+        <li>{% component "product_card" %}</li>
+      {% endfor %}
+    </ul>
+
+    <nav class="flex items-center justify-between text-sm">
+      {% if page_obj.has_prev %}
+        <a class="rounded border bg-white px-3 py-1 hover:border-slate-400"
+           href="?{% querystring page=page_obj.page|add:'-1' %}">Previous</a>
+      {% else %}
+        <span></span>
+      {% endif %}
+      <span class="text-slate-500">Page {{ page_obj.page }} of {{ page_obj.num_pages }}</span>
+      {% if page_obj.has_next %}
+        <a class="rounded border bg-white px-3 py-1 hover:border-slate-400"
+           href="?{% querystring page=page_obj.page|add:'1' %}">Next</a>
+      {% else %}
+        <span></span>
+      {% endif %}
+    </nav>
+  {% elif q %}
+    <p class="text-slate-500" data-no-results>No products match "{{ q }}".</p>
+  {% endif %}
+</div>
