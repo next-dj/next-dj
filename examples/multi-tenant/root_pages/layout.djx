@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>next.dj — Multi-tenant notes</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .accent-bar { background: var(--tenant-accent, #0f172a); }
+    .accent-text { color: var(--tenant-accent, #0f172a); }
+    .accent-border { border-color: var(--tenant-accent, #0f172a); }
+  </style>
+  {% collect_styles %}
+</head>
+<body class="min-h-screen flex flex-col bg-slate-50 text-slate-900" style="{{ tenant_theme_css }}">
+  <div class="accent-bar h-1 w-full"></div>
+  {% component "header" %}
+
+  <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
+    {% block template %}{% endblock template %}
+  </main>
+
+  {% component "footer" %}
+  {% collect_scripts %}
+</body>
+</html>

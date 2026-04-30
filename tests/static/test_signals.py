@@ -137,6 +137,22 @@ class TestCollectorFinalizedSignal:
 
         assert len(capture_collector_finalized) == 1
         assert capture_collector_finalized[0]["page_path"] is None
+        assert capture_collector_finalized[0]["request"] is None
+
+    def test_carries_request_when_provided(
+        self,
+        fresh_manager: StaticManager,
+        capture_collector_finalized: list[dict[str, Any]],
+    ) -> None:
+        collector = StaticCollector()
+        sentinel = object()
+        fresh_manager.inject(
+            "<body/>",
+            collector,
+            request=sentinel,  # type: ignore[arg-type]
+        )
+
+        assert capture_collector_finalized[0]["request"] is sentinel
 
 
 class TestHtmlInjectedSignal:
@@ -182,6 +198,71 @@ class TestHtmlInjectedSignal:
             "styles",
             "scripts",
         )
+
+    def test_carries_request_when_provided(
+        self,
+        fresh_manager: StaticManager,
+        capture_html_injected: list[dict[str, Any]],
+    ) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url="https://cdn/a.css", kind="css"))
+        sentinel = object()
+        fresh_manager.inject(
+            f"<head>{STYLES_PLACEHOLDER}</head>",
+            collector,
+            request=sentinel,  # type: ignore[arg-type]
+        )
+        assert capture_html_injected[0]["request"] is sentinel
+
+
+class TestLegacyReceiverCompat:
+    """Receivers written before the `request` payload was added still work."""
+
+    def test_collector_finalized_accepts_legacy_receiver(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        """A receiver with `(sender, **kwargs)` consumes the new `request` kwarg."""
+        seen: list[dict[str, object]] = []
+
+        def legacy(sender: object, **kwargs: object) -> None:
+            seen.append({"sender": sender, **kwargs})
+
+        collector_finalized.connect(legacy)
+        try:
+            collector = StaticCollector()
+            fresh_manager.inject("<body/>", collector, request=object())
+        finally:
+            collector_finalized.disconnect(legacy)
+
+        assert len(seen) == 1
+        assert "request" in seen[0]
+        assert "page_path" in seen[0]
+
+    def test_html_injected_accepts_legacy_receiver(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        """A receiver with `(sender, **kwargs)` consumes the new `request` kwarg."""
+        seen: list[dict[str, object]] = []
+
+        def legacy(sender: object, **kwargs: object) -> None:
+            seen.append({"sender": sender, **kwargs})
+
+        html_injected.connect(legacy)
+        try:
+            collector = StaticCollector()
+            collector.add(StaticAsset(url="https://cdn/a.css", kind="css"))
+            fresh_manager.inject(
+                f"<head>{STYLES_PLACEHOLDER}</head>",
+                collector,
+                request=object(),
+            )
+        finally:
+            html_injected.disconnect(legacy)
+
+        assert len(seen) == 1
+        assert "request" in seen[0]
+        assert "html_before" in seen[0]
+        assert "html_after" in seen[0]
 
 
 class TestBackendLoadedSignal:

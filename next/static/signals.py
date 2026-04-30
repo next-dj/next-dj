@@ -11,13 +11,16 @@ and the keyword arguments are `collector` and `backend`.
 
 The `collector_finalized` signal fires when the static manager begins
 injection, after template rendering has completed and the collector
-is sealed. The sender is the collector. The keyword argument is
-`page_path`, which may be None for partial renders.
+is sealed. The sender is the collector. The keyword arguments are
+`page_path`, which may be None for partial renders, and `request`,
+which is the active `HttpRequest` or None for renders outside a
+request lifecycle.
 
 The `html_injected` signal fires after placeholder replacement
 completes. The sender is the static manager. The keyword arguments
 are `html_before`, `html_after`, `collector`, `placeholders_replaced`,
-and `injected_bytes`.
+`injected_bytes`, and `request`. The `request` argument carries the
+active `HttpRequest` or None.
 
 The `backend_loaded` signal fires after the static factory
 instantiates a backend. The sender is the backend class. The keyword

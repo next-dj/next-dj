@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
+    from django.http import HttpRequest
+
 
 CSS_URL = "https://cdn.example.com/site.css"
 JS_URL = "https://cdn.example.com/site.js"
@@ -35,10 +37,22 @@ class _CollectingBackend(StaticBackend):
     ) -> str:
         return f"/{logical_name}.{kind}"
 
-    def render_link_tag(self, url: str) -> str:
+    def render_link_tag(
+        self,
+        url: str,
+        *,
+        request: HttpRequest | None = None,
+    ) -> str:
+        del request
         return f"<link {url}>"
 
-    def render_script_tag(self, url: str) -> str:
+    def render_script_tag(
+        self,
+        url: str,
+        *,
+        request: HttpRequest | None = None,
+    ) -> str:
+        del request
         return f"<script {url}>"
 
 
@@ -108,6 +122,16 @@ class TestStaticFilesBackendOptions:
     def test_empty_options_mapping(self) -> None:
         backend = StaticFilesBackend({"OPTIONS": {}})
         assert backend.render_script_tag(JS_URL) == (
+            f'<script src="{JS_URL}"></script>'
+        )
+
+    def test_default_backend_ignores_request(self) -> None:
+        backend = StaticFilesBackend()
+        sentinel = object()
+        assert backend.render_link_tag(CSS_URL, request=sentinel) == (  # type: ignore[arg-type]
+            f'<link rel="stylesheet" href="{CSS_URL}">'
+        )
+        assert backend.render_script_tag(JS_URL, request=sentinel) == (  # type: ignore[arg-type]
             f'<script src="{JS_URL}"></script>'
         )
 

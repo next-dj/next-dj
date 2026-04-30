@@ -122,6 +122,14 @@ can share a common page tree and component scope.
 ``routes``. ``root_blocks`` lets you publish components available to every
 page.
 
+The ``examples/multi-tenant`` showcase example puts this pattern to work.
+Its ``root_pages/layout.djx`` carries the HTML shell (``<!DOCTYPE html>``,
+``{% collect_styles %}``, header, footer) used by every page in the
+``notes`` app, and ``root_blocks/header/`` and ``root_blocks/footer/``
+provide the global components that read ``request.tenant`` to render
+per-tenant chrome. See ``examples/multi-tenant/config/settings.py`` for the
+matching ``DIRS`` configuration.
+
 Layout directives
 -----------------
 

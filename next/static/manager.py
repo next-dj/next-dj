@@ -42,6 +42,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from django.http import HttpRequest
+
     from next.components import ComponentInfo
 
     from .assets import StaticAsset
@@ -115,6 +117,7 @@ class StaticManager:
         collector: StaticCollector,
         *,
         page_path: Path | None = None,
+        request: HttpRequest | None = None,
     ) -> str:
         """Replace style and script placeholders with rendered tags.
 
@@ -127,8 +130,13 @@ class StaticManager:
         before user-collected scripts unless the injection policy is
         `DISABLED`. The preload hint is injected before `</head>`
         under the same policy.
+
+        The optional `request` argument is forwarded to backend tag
+        renderers and to the `collector_finalized` and `html_injected`
+        signals. Backends may use it to rewrite asset URLs based on
+        per-request state. The default backend ignores it.
         """
-        collector_finalized.send(sender=collector, page_path=page_path)
+        collector_finalized.send(sender=collector, page_path=page_path, request=request)
         html_before = html
         replaced: tuple[str, ...] | None = None
         if html_injected.receivers:
@@ -140,8 +148,12 @@ class StaticManager:
                 )
                 if token in html
             )
-        html = html.replace(STYLES_PLACEHOLDER, self._render_style_tags(collector))
-        html = html.replace(SCRIPTS_PLACEHOLDER, self._render_script_section(collector))
+        html = html.replace(
+            STYLES_PLACEHOLDER, self._render_style_tags(collector, request=request)
+        )
+        html = html.replace(
+            SCRIPTS_PLACEHOLDER, self._render_script_section(collector, request=request)
+        )
         html = self._inject_preload_hint(html)
         if replaced is not None:
             html_injected.send(
@@ -151,6 +163,7 @@ class StaticManager:
                 collector=collector,
                 placeholders_replaced=replaced,
                 injected_bytes=len(html) - len(html_before),
+                request=request,
             )
         return html
 
@@ -163,9 +176,14 @@ class StaticManager:
             self._script_builder = NextScriptBuilder.from_options(url, options)
         return self._script_builder
 
-    def _render_script_section(self, collector: StaticCollector) -> str:
+    def _render_script_section(
+        self,
+        collector: StaticCollector,
+        *,
+        request: HttpRequest | None = None,
+    ) -> str:
         builder = self._next_script_builder()
-        user_scripts = self._render_script_tags(collector)
+        user_scripts = self._render_script_tags(collector, request=request)
         if builder.policy is ScriptInjectionPolicy.AUTO:
             next_scripts = (
                 "\n".join(
@@ -193,13 +211,29 @@ class StaticManager:
             for asset in assets
         )
 
-    def _render_style_tags(self, collector: StaticCollector) -> str:
+    def _render_style_tags(
+        self,
+        collector: StaticCollector,
+        *,
+        request: HttpRequest | None = None,
+    ) -> str:
         backend = self.default_backend
-        return self._render_tags(collector.styles(), backend.render_link_tag)
+        return self._render_tags(
+            collector.styles(),
+            lambda url: backend.render_link_tag(url, request=request),
+        )
 
-    def _render_script_tags(self, collector: StaticCollector) -> str:
+    def _render_script_tags(
+        self,
+        collector: StaticCollector,
+        *,
+        request: HttpRequest | None = None,
+    ) -> str:
         backend = self.default_backend
-        return self._render_tags(collector.scripts(), backend.render_script_tag)
+        return self._render_tags(
+            collector.scripts(),
+            lambda url: backend.render_script_tag(url, request=request),
+        )
 
     def _ensure_backends(self) -> None:
         if not self._backends:

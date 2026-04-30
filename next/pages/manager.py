@@ -38,10 +38,30 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from next.static import StaticCollector
     from next.urls import URLPatternParser
 
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_request(
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> HttpRequest | None:
+    """Return the `HttpRequest` from positional or keyword arguments.
+
+    Most call sites pass the active request as the first positional
+    argument, but programmatic callers of `Page.render` may also
+    supply it through the `request` keyword. The helper accepts both
+    forms and returns `None` when neither carries an `HttpRequest`.
+    """
+    if args and isinstance(args[0], HttpRequest):
+        return args[0]
+    candidate = kwargs.get("request")
+    if isinstance(candidate, HttpRequest):
+        return candidate
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,17 +279,27 @@ class Page:
         )
         raise TypeError(msg)
 
-    def _render_template_str(
+    def render_with_static_assets(
         self,
         file_path: Path,
         template_str: str,
-        start: float,
-        *args: object,
-        **kwargs: object,
-    ) -> str:
-        """Build context, render `template_str`, inject static assets, emit signal."""
-        context_data = self.build_render_context(file_path, *args, **kwargs)
+        context_data: dict[str, object],
+        *,
+        request: HttpRequest | None = None,
+    ) -> tuple[str, StaticCollector]:
+        """Render `template_str` and inject collected static assets.
 
+        The method seeds a fresh `StaticCollector`, hydrates it with
+        the JS context that `build_render_context` left under the
+        `_next_js_context` key, discovers co-located assets for the
+        page, renders the Django template, and replaces placeholders
+        through `default_manager.inject`. The active `request` reaches
+        the static backend so request-aware subclasses can rewrite
+        URLs. Both the rendered HTML and the collector are returned so
+        callers can reuse the collector for telemetry without a second
+        rendering pass. Suitable for the canonical page render path
+        and for partial paths such as form-error rerenders.
+        """
         from next.static import default_manager  # noqa: PLC0415
 
         collector = default_manager.create_collector()
@@ -281,7 +311,29 @@ class Page:
 
         html = Template(template_str).render(DjangoTemplateContext(context_data))
         result = cast(
-            "str", default_manager.inject(html, collector, page_path=file_path)
+            "str",
+            default_manager.inject(
+                html, collector, page_path=file_path, request=request
+            ),
+        )
+        return result, collector
+
+    def _render_template_str(
+        self,
+        file_path: Path,
+        template_str: str,
+        start: float,
+        *args: object,
+        **kwargs: object,
+    ) -> str:
+        """Build context, render `template_str`, inject static assets, emit signal."""
+        context_data = self.build_render_context(file_path, *args, **kwargs)
+        request = _extract_request(args, kwargs)
+        result, collector = self.render_with_static_assets(
+            file_path,
+            template_str,
+            context_data,
+            request=request,
         )
         if page_rendered.receivers:
             duration_ms = (time.perf_counter() - start) * 1000

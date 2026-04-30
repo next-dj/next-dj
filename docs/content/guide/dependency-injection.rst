@@ -179,6 +179,15 @@ You can add providers that supply extra parameters (e.g. ``user`` from
 ``context_data``, ``cache``, and ``stack`` for cycle detection.
 See :ref:`dependency-injection-api` for the full API.
 
+Two showcase examples ship a request-scoped provider you can copy directly:
+
+- ``examples/search-catalog/catalog/providers.py`` defines ``DFilters`` and
+  ``DPage`` that build typed snapshots from ``request.GET``.
+- ``examples/multi-tenant/notes/providers.py`` defines ``DTenant`` that returns
+  ``request.tenant`` after a ``TenantMiddleware`` resolves the active tenant.
+  This is the canonical pattern when middleware enriches the request and
+  pages want the result as a typed parameter.
+
 Parameters that no provider handles receive ``None`` (or keep their default).
 
 Registered DI functions (Depends)
