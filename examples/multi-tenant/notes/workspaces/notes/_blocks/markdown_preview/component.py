@@ -11,7 +11,6 @@ scripts = ["https://cdn.jsdelivr.net/npm/marked/marked.min.js"]
 
 
 EMPTY_PREVIEW = "<p class='text-slate-400 italic'>Nothing to preview yet.</p>"
-RENDERER = markdown.Markdown(extensions=["fenced_code", "tables"])
 UNSAFE_HREF = re.compile(
     r'href="\s*(?:javascript|data|vbscript):[^"]*"',
     flags=re.IGNORECASE,
@@ -33,7 +32,7 @@ def render_html(body: str = "") -> SafeString:
     text = body or ""
     if not text.strip():
         return mark_safe(EMPTY_PREVIEW)  # noqa: S308 - static content, no user input
-    RENDERER.reset()
-    rendered = RENDERER.convert(escape(text))
+    renderer = markdown.Markdown(extensions=["fenced_code", "tables"])
+    rendered = renderer.convert(escape(text))
     cleaned = UNSAFE_HREF.sub('href="#"', rendered)
     return mark_safe(cleaned)  # noqa: S308 - escape() and regex above strip vectors

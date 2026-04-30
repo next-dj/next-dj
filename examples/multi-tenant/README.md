@@ -176,11 +176,11 @@ for the broader pattern.
 
 ```python
 @context("tenant", inherit_context=True)
-def tenant(active_tenant: DTenant) -> Tenant:
+def tenant(active_tenant: DTenant) -> "Tenant":
     return active_tenant
 
 
-@context("recent_notes", inherit_context=True)
+@context("recent_notes")
 def recent_notes(active_tenant: DTenant) -> list[Note]:
     return list(Note.objects.filter(tenant=active_tenant)[:5])
 ```

@@ -4,6 +4,7 @@ from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
+from notes.access import get_active_tenant
 from notes.models import Note
 from notes.providers import DTenant
 
@@ -41,7 +42,7 @@ class NoteEditForm(Form):
         id: int | None = None,  # noqa: A002
     ) -> dict[str, Any]:
         """Seed the form from the existing note when called during a GET render."""
-        tenant = getattr(request, "tenant", None)
+        tenant = get_active_tenant(request)
         if tenant is None or id is None:
             return {}
         note = get_owned_note(tenant, id)

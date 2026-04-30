@@ -21,13 +21,7 @@ TENANT_STATIC_PREFIX = "/_t/"
 
 
 def is_debug_fallback_enabled() -> bool:
-    """Return whether the DEBUG-only query/cookie fallbacks are active.
-
-    The browser-friendly affordances ride on `settings.DEBUG`, but
-    keeping the policy behind a named function makes the contract
-    explicit and lets a deployment override it without touching
-    Django's debug switch.
-    """
+    """Return whether the DEBUG-only query/cookie fallbacks are active."""
     return bool(settings.DEBUG)
 
 

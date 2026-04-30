@@ -1,11 +1,17 @@
+from typing import TYPE_CHECKING
+
 from notes.models import Note
 from notes.providers import DTenant
 
 from next.pages import context
 
 
+if TYPE_CHECKING:
+    from notes.models import Tenant
+
+
 @context("tenant", inherit_context=True)
-def tenant(active_tenant: DTenant) -> object:
+def tenant(active_tenant: DTenant) -> "Tenant":
     """Expose the active tenant under `tenant` to every workspace page."""
     return active_tenant
 

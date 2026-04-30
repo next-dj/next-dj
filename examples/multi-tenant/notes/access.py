@@ -15,7 +15,5 @@ def get_active_tenant(request: HttpRequest) -> Tenant | None:
     The middleware stashes the resolved tenant under `request.tenant`.
     Every Python consumer that needs the active tenant should go
     through this helper rather than reading the attribute directly.
-    A future request-aware DI provider unification will then become a
-    one-line change.
     """
     return getattr(request, "tenant", None)
