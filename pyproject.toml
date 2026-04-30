@@ -55,6 +55,7 @@ dev = [
     "markdown>=3.7",
 ]
 docs = [
+    "doc8==2.0.0",
     "sphinx==9.0.4",
     "shibuya==2026.1.9",
     "sphinx-design==0.7.0",
@@ -259,6 +260,14 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 docstring-code-format = true
 docstring-code-line-length = "dynamic"
+
+[tool.doc8]
+max-line-length = 200
+ignore-path = [
+    "docs/_build",
+    "docs/_static",
+    "docs/_images",
+]
 
 [tool.django-stubs]
 django_settings_module = "django.conf.global_settings"

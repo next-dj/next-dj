@@ -2,10 +2,10 @@
   "scripts": {
     "build:next": "esbuild next/static/next/next.ts --bundle --minify --target=es2020 --outfile=next/static/next/next.min.js",
     "test:js": "vitest run",
-    "lint:js": "eslint",
-    "lint:js:fix": "eslint --fix",
+    "lint:js": "eslint \"{next,examples}/**/*.{mjs,ts,js,css}\"",
+    "lint:js:fix": "eslint --fix \"{next,examples}/**/*.{mjs,ts,js,css}\"",
     "format": "prettier --write \"{next,examples}/**/*.{mjs,ts,js,css}\" \"vitest.config.ts\" \"eslint.config.mjs\"",
-    "format:check": "prettier --check \"*.{mjs,ts,js,css}\" \"vitest.config.ts\" \"eslint.config.mjs\""
+    "format:check": "prettier --check \"{next,examples}/**/*.{mjs,ts,js,css}\" \"vitest.config.ts\" \"eslint.config.mjs\""
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

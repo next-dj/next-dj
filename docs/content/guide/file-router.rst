@@ -1,12 +1,14 @@
 File Router
 ===========
 
-next.dj provides a powerful file-based routing system that automatically generates Django URL patterns from your file system structure. This eliminates the need to manually write URL configurations.
+next.dj provides a powerful file-based routing system that automatically generates Django URL patterns from your file system structure.
+This eliminates the need to manually write URL configurations.
 
 How It Works
 ------------
 
-The file router scans your project for ``page.py`` files and automatically creates Django URL patterns based on the directory structure. Each directory becomes a URL segment, creating a hierarchical URL structure that mirrors your file system.
+The file router scans your project for ``page.py`` files and automatically creates Django URL patterns based on the directory structure.
+Each directory becomes a URL segment, creating a hierarchical URL structure that mirrors your file system.
 
 Basic File Structure
 ~~~~~~~~~~~~~~~~~~~~
@@ -131,10 +133,16 @@ Root and App Pages (Like Staticfiles)
 
 Resolution works like Django's static files:
 
-- **Project-level directories** — List absolute or project-relative paths in ``DIRS``. These behave like ``STATICFILES_DIRS``. Each entry must exist on disk as a directory. Each root contains ``page.py`` / ``template.djx`` and optionally ``layout.djx`` for a global layout.
-- **App directories** — With ``APP_DIRS: True``, each installed app's ``pages/`` directory is scanned (like each app's ``static/`` folder). The subdirectory name comes from top-level ``PAGES_DIR`` (default ``"pages"``).
+- **Project-level directories** — List absolute or project-relative paths in ``DIRS``.
+  These behave like ``STATICFILES_DIRS``.
+  Each entry must exist on disk as a directory.
+  Each root contains ``page.py`` / ``template.djx`` and optionally ``layout.djx`` for a global layout.
+- **App directories** — With ``APP_DIRS: True``, each installed app's ``pages/`` directory is scanned (like each app's ``static/`` folder).
+  The subdirectory name comes from top-level ``PAGES_DIR`` (default ``"pages"``).
 
-You can use both in one backend: set ``APP_DIRS: True`` and add path roots to ``DIRS``. URL patterns are then built in this order: first from app pages, then from each root directory in ``DIRS``. If the same URL pattern is defined in both an app and a root directory, ``python manage.py check`` reports an error (``next.E015``).
+You can use both in one backend: set ``APP_DIRS: True`` and add path roots to ``DIRS``.
+URL patterns are then built in this order: first from app pages, then from each root directory in ``DIRS``.
+If the same URL pattern is defined in both an app and a root directory, ``python manage.py check`` reports an error (``next.E015``).
 
 .. code-block:: python
 
@@ -160,7 +168,11 @@ You can use both in one backend: set ``APP_DIRS: True`` and add path roots to ``
 Component folder and file routing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The ``COMPONENTS_DIR`` value on ``DEFAULT_COMPONENT_BACKENDS`` (default ``"_components"`` in framework defaults) sets the folder name that is **not** used for file-based routing and does not create URL segments. The file router uses that same string when scanning for ``page.py`` and ``template.djx``. Only the configured name is skipped (not all directories starting with an underscore). See :doc:`components` for the components system.
+The ``COMPONENTS_DIR`` value on ``DEFAULT_COMPONENT_BACKENDS`` (default ``"_components"`` in framework defaults)
+sets the folder name that is **not** used for file-based routing and does not create URL segments.
+The file router uses that same string when scanning for ``page.py`` and ``template.djx``.
+Only the configured name is skipped (not all directories starting with an underscore).
+See :doc:`components` for the components system.
 
 Multiple Configurations
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -200,7 +212,7 @@ Router Discovery
 The system discovers routes by:
 
 1. **Scanning app directories**: Each Django app's ``pages/`` directory
-2. **Scanning root pages**: Project root ``pages/`` directory  
+2. **Scanning root pages**: Project root ``pages/`` directory
 3. **Processing page files**: Converting ``page.py`` files to URL patterns
 4. **Processing virtual routes**: Converting ``template.djx`` files to URL patterns
 

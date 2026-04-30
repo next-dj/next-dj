@@ -1,0 +1,7 @@
+aside[data-filter-panel] fieldset {
+  border: 0;
+}
+
+aside[data-filter-panel] input[type="checkbox"]:focus {
+  outline: 2px solid rgb(15 23 42);
+}

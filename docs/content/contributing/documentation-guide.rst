@@ -45,6 +45,19 @@ RST Formatting
 * Use inline code with double backticks: ``function_name``
 * Use cross-references: :ref:`getting-started`
 
+Line Wrapping
+-------------
+
+Prose follows **semantic line breaks**: one sentence per line.
+This keeps diffs readable, makes review comments precise, and lets translators work on whole sentences without re-flowing paragraphs.
+
+* One sentence — one line, even when the line goes over 80 columns.
+* When a single sentence runs longer than ~120 characters, break it on a semicolon, after a colon, or before a coordinating conjunction. Each segment starts on its own line.
+* Bullet lists keep one bullet per line. If a bullet contains several sentences, wrap each sentence on its own line under the bullet, indented to the bullet body.
+* The rule does not apply inside ``.. code-block::``, ``.. list-table::``, raw HTML, URL targets, headings, or option tables. Long lines are fine there.
+
+The ``doc8`` linter enforces a 200-character upper bound (configured in ``pyproject.toml``) so unwrapped multi-sentence paragraphs are caught while normal long sentences pass through.
+
 When Adding New Features
 ------------------------
 

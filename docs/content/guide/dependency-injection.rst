@@ -118,6 +118,18 @@ Built-in providers
 - **URL path parameters** — Parameter name matching the path segment (e.g. ``id``
   for ``[int:id]``), or annotation ``DUrl[int]`` / ``DUrl["param"]``. Type coercion
   is applied. For catch-all (``[[args]]``), use ``list[str]``.
+- **Query string parameters**. A parameter annotated with ``DQuery[T]``
+  reads ``request.GET`` by parameter name. Use ``DQuery[str]``,
+  ``DQuery[int]``, ``DQuery[bool]``, or ``DQuery[float]`` for scalar
+  values. Use ``DQuery[list[T]]`` for repeated keys such as
+  ``?brand=a&brand=b``. The list form also accepts the qs-style bracket
+  suffix ``?brand[]=a&brand[]=b`` emitted by axios and other front-end
+  clients. The third accepted format is the comma-delimited form
+  ``?brand=a,b`` produced by ``qs.stringify`` with the comma array
+  format. Empty segments around commas are dropped. The provider
+  returns the parameter default when the key is absent. When no
+  default is given the provider returns ``None``. Use ``DUrl`` for URL
+  path segments and ``DQuery`` for query string parameters.
 - **Form** — Parameter named ``form`` or annotated with ``DForm[FormClass]``
   receives the form instance (in form actions).
 - **Context by key** — ``Context("key")`` or ``Context()``: value from current
@@ -137,6 +149,23 @@ Example: context function with URL parameter
 
 No need for ``**kwargs`` or ``request.resolver_match.kwargs`` — declare ``id: int``
 and it is injected.
+
+Example: page reading the query string
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+   # storefront/catalog/page.py
+   from next.pages import context
+   from next.urls import DQuery
+
+   @context("results")
+   def search(
+       q: DQuery[str] = "",
+       brand: DQuery[list[str]] = (),
+       page: DQuery[int] = 1,
+   ):
+       return run_search(q=q, brands=brand, page=page)
 
 Custom dependency providers
 ---------------------------
@@ -210,8 +239,12 @@ Extension points
 
 The dependency-injection layer exposes three pluggable surfaces.
 
-* ``next.deps.providers.ParameterProvider`` is the minimal protocol consumed by ``DependencyResolver``. Implement it for ad-hoc providers passed directly to a custom resolver.
-* ``next.deps.providers.RegisteredParameterProvider`` is the ABC used by built-in providers. Every concrete subclass auto-registers through ``__init_subclass__``, so importing the module that defines the subclass is enough to wire it into the resolver.
+* ``next.deps.providers.ParameterProvider`` is the minimal protocol consumed by ``DependencyResolver``.
+  Implement it for ad-hoc providers passed directly to a custom resolver.
+* ``next.deps.providers.RegisteredParameterProvider`` is the ABC used by built-in providers.
+  Every concrete subclass auto-registers through ``__init_subclass__``, so importing the module that defines the subclass is enough to wire it into the resolver.
+  ``next.urls.markers.QueryParamProvider`` is shipped through this mechanism.
+  Its module loads with ``next.urls`` so ``DQuery[T]`` resolution is wired without explicit registration.
 * ``DependencyResolver.register_dependency`` binds a callable to a name so ``Depends("name")`` resolves it.
 
 Register a custom provider by importing the module that defines it.

@@ -1,0 +1,7 @@
+@media (min-width: 1024px) {
+  .catalog-sidebar {
+    position: sticky;
+    top: 1rem;
+    align-self: start;
+  }
+}

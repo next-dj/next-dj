@@ -1,0 +1,56 @@
+<aside data-filter-panel class="space-y-4 rounded-xl border bg-white p-4 shadow-sm">
+  <form method="get" action="{{ submit_url }}" class="space-y-4" data-filter-form>
+    <div>
+      <label class="block text-xs uppercase text-slate-500" for="filter-q">Search</label>
+      <input id="filter-q" name="q" type="search" value="{{ current_filters.q }}"
+             class="mt-1 w-full rounded border px-2 py-1 invalid:border-rose-400 invalid:bg-rose-50"
+             placeholder="iphone, novel"
+             minlength="3"
+             aria-describedby="filter-q-help"
+             data-help-default="Type at least 3 characters."
+             data-help-tooshort="Need {min} more — at least 3 characters in total."/>
+      <p id="filter-q-help" data-filter-help
+         class="mt-1 text-xs text-slate-500">
+        Type at least 3 characters.
+      </p>
+    </div>
+
+    <fieldset class="space-y-1">
+      <legend class="text-xs uppercase text-slate-500">Brand</legend>
+      {% for brand in all_brands %}
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="brand" value="{{ brand }}"
+                 {% if brand in current_filters.brands %}checked{% endif %}/>
+          {{ brand }}
+        </label>
+      {% endfor %}
+    </fieldset>
+
+    <div class="grid grid-cols-2 gap-2">
+      <input name="price_min" type="number" step="0.01" placeholder="min"
+             value="{{ current_filters.price_min|default_if_none:'' }}"
+             class="rounded border px-2 py-1"/>
+      <input name="price_max" type="number" step="0.01" placeholder="max"
+             value="{{ current_filters.price_max|default_if_none:'' }}"
+             class="rounded border px-2 py-1"/>
+    </div>
+
+    <label class="flex items-center gap-2 text-sm">
+      <input type="checkbox" name="in_stock" value="1"
+             {% if current_filters.in_stock %}checked{% endif %}/>
+      In stock only
+    </label>
+
+    <select name="sort" class="w-full rounded border px-2 py-1">
+      <option value="newest" {% if current_filters.sort == "newest" %}selected{% endif %}>Newest</option>
+      <option value="price_asc" {% if current_filters.sort == "price_asc" %}selected{% endif %}>Price ascending</option>
+      <option value="price_desc" {% if current_filters.sort == "price_desc" %}selected{% endif %}>Price descending</option>
+      <option value="name" {% if current_filters.sort == "name" %}selected{% endif %}>Name</option>
+    </select>
+
+    <button type="submit"
+            class="w-full rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800">
+      Apply filters
+    </button>
+  </form>
+</aside>

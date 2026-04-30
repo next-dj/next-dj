@@ -66,7 +66,9 @@ Development Installation
          cd next-dj
          pip install -e .
 
-Development tools (pytest, ruff, mypy, and others) are listed under ``[dependency-groups] dev`` in ``pyproject.toml``. With ``uv`` use ``uv sync --locked --dev``. With pip alone, install those packages as needed for your workflow.
+Development tools (pytest, ruff, mypy, and others) are listed under ``[dependency-groups] dev`` in ``pyproject.toml``.
+With ``uv`` use ``uv sync --locked --dev``.
+With pip alone, install those packages as needed for your workflow.
 
 Django Setup
 ------------

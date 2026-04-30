@@ -8,15 +8,15 @@ Each folder below is a self-contained Django project that runs on SQLite and Dja
 
 ## Examples
 
-The example set is being rebuilt to showcase specific framework features in isolation. Each example is a complete mini-product with e2e tests and a dedicated README.
+Each example is a complete mini-product with e2e tests and a dedicated README.
 
-| # | Folder | Focus |
-|---|--------|-------|
-| 1 | [`shortener/`](shortener/) | File router + DI providers + LocMemCache + management command |
-| 2 | [`markdown-blog/`](markdown-blog/) | Markdown posts, nested layouts, `@context(serialize=True)`, context processor, co-located `component.js` |
-| 4 | [`feature-flags/`](feature-flags/) | Composite `feature_guard`, signal receivers, cache invalidation |
-
-More examples (3, 5, 6, 7, 8, 9, 10) are being added in subsequent PRs.
+| Folder | Focus |
+|--------|-------|
+| [`shortener/`](shortener/) | File router + DI providers + LocMemCache + management command |
+| [`markdown-blog/`](markdown-blog/) | Markdown posts, nested layouts, `@context(serialize=True)`, context processor, co-located `component.js` |
+| [`feature-flags/`](feature-flags/) | Composite `feature_guard`, signal receivers, cache invalidation |
+| [`audit-forms/`](audit-forms/) | Custom `FormActionBackend`, `action_dispatched` and `form_validation_failed` signals, dual audit channels |
+| [`search-catalog/`](search-catalog/) | `DQuery[T]`, faceted filters, three-level nested layouts, `inherit_context=True`, cached search |
 
 ## Running any example
 
@@ -34,4 +34,4 @@ Tailwind is loaded via the Play CDN (`https://cdn.tailwindcss.com`) from the roo
 * One custom `PAGES_DIR` (`routes`, `screens`, `panels`, …) and one custom components directory (`_widgets`, `_parts`, `_chunks`, …).
 * Co-located CSS/JS next to the `page.py`, `component.py`, or `layout.djx` they belong to. The `{% collect_styles %}` / `{% collect_scripts %}` tags place them in the rendered HTML, with deduplication.
 * E2E tests driven by `next.testing`: `eager_load_pages`, `reset_registries`, `NextClient`.
-* Forms return `HttpResponseRedirect` on success so partial-rerender support can be added later without touching the request/response contract.
+* Forms return `HttpResponseRedirect` on success.

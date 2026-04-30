@@ -20,47 +20,12 @@ The example is small on purpose. It is a tour of the framework surface you will 
 cd examples/shortener
 uv run python manage.py migrate
 uv run python manage.py runserver     # http://127.0.0.1:8000/
-uv run pytest                         # 17 tests, 100% coverage
+uv run pytest
 ```
 
 Tailwind loads via the Play CDN in [`routes/layout.djx`](shortener/routes/layout.djx). No Node, no build step.
 
-## Project tour
-
-```
-examples/shortener/
-├── config/
-│   ├── settings.py          # Django + NEXT_FRAMEWORK: PAGES_DIR="routes", COMPONENTS_DIR="_widgets"
-│   └── urls.py              # Plain Django path for /s/<slug>/ + include('next.urls')
-└── shortener/
-    ├── apps.py              # AppConfig.ready() imports providers.py for DI registration
-    ├── models.py            # Link(slug, url, clicks)
-    ├── views.py             # redirect_slug — the Django view mounted at /s/<slug>/
-    ├── providers.py         # DLink[T] marker + LinkProvider (custom DI)
-    ├── cache.py             # increment_clicks / pending_clicks / flush_clicks
-    ├── management/commands/flush_clicks.py
-    └── routes/              # ← PAGES_DIR
-        ├── layout.djx       # Root HTML shell + Tailwind + <header> nav
-        ├── page.py          # @context("recent_links") + @forms.action("create_link")
-        ├── template.djx     # Form body + latest-links list (uses {% component %})
-        ├── _widgets/        # ← COMPONENTS_DIR
-        │   ├── link_card/   # Composite: component.py + component.djx + component.css
-        │   └── nav_link/    # Composite: shared nav link with active-state logic
-        └── admin/
-            ├── layout.djx   # Nested layout: "Admin panel" toolbar + subnav
-            ├── page.py      # Inherits `recent_links` to child pages plus pending_clicks
-            ├── template.djx
-            ├── stats/
-            │   ├── page.py
-            │   └── template.djx
-            └── links/[slug]/
-                ├── page.py  # Uses DLink[Link] with one dict @context for linked values
-                └── template.djx
-```
-
 ## Walking the code
-
-The rest of this README walks the project in the order you would naturally learn the framework.
 
 ### 1. Rename `pages/` and `_components/` to fit your domain
 
@@ -343,21 +308,6 @@ Two rules:
 ### Template wins over `render()` for file-routed pages
 
 If any `layout.djx` applies to a `page.py`, the framework renders a template and ignores a top-level `render()` in the module. To write a pure-response view, use a plain Django URL in `config/urls.py` (see `views.py` / `/s/<slug>/`).
-
-## Tests
-
-[`tests/test_e2e.py`](tests/test_e2e.py) and [`tests/test_unit.py`](tests/test_unit.py) cover every module in `shortener/` at **100%**. The suite is wired into `make test-examples` with `--cov-fail-under=100`, so any regression against the example breaks the build.
-
-What is tested:
-
-- Form happy path (POST → Link created → redirect).
-- Form validation error re-renders with the error message.
-- Slug redirect bumps the cache counter and issues a 302, while an unknown slug returns 404.
-- `flush_clicks` moves counters from cache to database and empties the cache.
-- Admin index, stats, and detail all render through the nested layout (`"Admin panel"` visible everywhere).
-- Active-link state flips correctly on `/admin/`, `/admin/stats/`, `/admin/links/<slug>/`, and `/`.
-- `link_card` component renders `short_url` via `reverse`.
-- `Link.__str__` and the `flush_clicks()` no-op path (unit-level).
 
 ## Further reading
 

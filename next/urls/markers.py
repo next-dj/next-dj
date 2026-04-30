@@ -1,23 +1,28 @@
 """Dependency injection markers and providers for URL-derived parameters.
 
 `DUrl` is an annotation marker used in `@context` and view-derived
-callables to pull a value from URL kwargs. The three provider classes
-plug into the `next.deps` resolver via `RegisteredParameterProvider`
-and expose `HttpRequest`, `DUrl[...]` values, and raw URL kwargs by
-name.
+callables to pull a value from URL kwargs. `DQuery` is the parallel
+marker that reads `request.GET` query-string parameters. The provider
+classes plug into the `next.deps` resolver via
+`RegisteredParameterProvider` and expose `HttpRequest`, `DUrl[...]`
+values, raw URL kwargs by name, and `DQuery[...]` values.
 """
 
 from __future__ import annotations
 
 import inspect
 import logging
-from typing import TypeVar, get_args, get_origin, get_type_hints
+from typing import TYPE_CHECKING, TypeVar, get_args, get_origin, get_type_hints
 
 from django.http import HttpRequest
 
 from next.deps import DDependencyBase, RegisteredParameterProvider
 
 from .parser import _coerce_url_value
+
+
+if TYPE_CHECKING:
+    from next.deps.context import ResolutionContext
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +34,22 @@ class DUrl(DDependencyBase[_T]):
     """Annotation for a path or query parameter with optional type coercion.
 
     Use `DUrl["param"]` or `DUrl[SomeType]`.
+    """
+
+    __slots__ = ()
+
+
+class DQuery(DDependencyBase[_T]):
+    """Annotation marker for a `request.GET` parameter.
+
+    Use `DQuery[str]`, `DQuery[int]`, `DQuery[bool]`, or `DQuery[float]`
+    for scalar values, or `DQuery[list[T]]` for multi-value parameters.
+    The list form accepts the plain repeated form `?brand=a&brand=b`,
+    the qs-style bracket suffix `?brand[]=a&brand[]=b` emitted by axios
+    and other front-end clients, and the comma-delimited form
+    `?brand=a,b` produced by `qs.stringify` with the comma array
+    format. The provider returns the parameter default when the key is
+    absent, or `None` when no default is given.
     """
 
     __slots__ = ()
@@ -106,9 +127,108 @@ class UrlKwargsProvider(RegisteredParameterProvider):
         return _coerce_url_value(str(raw), hint)
 
 
+class QueryParamProvider(RegisteredParameterProvider):
+    """Resolve `DQuery[...]` parameters from `request.GET`."""
+
+    def can_handle(
+        self,
+        param: inspect.Parameter,
+        context: ResolutionContext,
+    ) -> bool:
+        """Return True for `DQuery[...]` annotations when a request is present."""
+        if get_origin(param.annotation) is not DQuery:
+            return False
+        return getattr(context, "request", None) is not None
+
+    def resolve(
+        self,
+        param: inspect.Parameter,
+        context: ResolutionContext,
+    ) -> object:
+        """Pull the value from `request.GET` and coerce it to the annotated type."""
+        request = context.request
+        if request is None:
+            return _missing(param)
+        args = get_args(param.annotation)
+        hint = args[0] if args else str
+        if get_origin(hint) is list:
+            return _resolve_multi(request, param, hint)
+        raw = request.GET.get(param.name)
+        if raw is None:
+            return _missing(param)
+        return _coerce_url_value(raw, hint if isinstance(hint, type) else str)
+
+
+def _missing(param: inspect.Parameter) -> object:
+    """Return the param default or `None` when no key is present in `request.GET`."""
+    return param.default if param.default is not inspect.Parameter.empty else None
+
+
+def _resolve_multi(
+    request: HttpRequest,
+    param: inspect.Parameter,
+    hint: object,
+) -> object:
+    """Resolve a `DQuery[list[T]]` parameter from repeated query-string keys.
+
+    The function tries three wire formats in order. The plain repeated
+    form `?brand=a&brand=b` wins first. The qs-style bracket suffix
+    `?brand[]=a&brand[]=b` is the second fallback. The comma-delimited
+    form `?brand=a,b` is the third fallback. When none of the three
+    yield values, the parameter default is returned.
+    """
+    inner = get_args(hint)
+    first = inner[0] if inner else str
+    inner_type = first if isinstance(first, type) else str
+    raw_list = request.GET.getlist(param.name)
+    if len(raw_list) <= 1:
+        raw_list = _expand_multi_value(request, param.name, raw_list)
+    if not raw_list and param.default is not inspect.Parameter.empty:
+        return param.default
+    return [_coerce_url_value(v, inner_type) for v in raw_list]
+
+
+def _expand_multi_value(
+    request: HttpRequest,
+    name: str,
+    plain: list[str],
+) -> list[str]:
+    """Return values for `name` after considering bracket and comma forms.
+
+    `plain` holds whatever `request.GET.getlist(name)` returned and is
+    expected to have at most one element. An empty `plain` or a single
+    empty string falls back to the bracket form `name[]`. A single
+    non-empty string is split on commas when commas are present and
+    empty segments are dropped. Otherwise `plain` is returned unchanged.
+    """
+    only = plain[0] if plain else ""
+    if not only:
+        return request.GET.getlist(f"{name}[]")
+    if "," in only:
+        return [segment for segment in only.split(",") if segment]
+    return plain
+
+
+def get_multi_values(request: HttpRequest, name: str) -> list[str]:
+    """Return all values for `name` from ``request.GET``.
+
+    Tries three wire formats in order: plain repeated keys
+    (``?brand=a&brand=b``), bracket suffix (``?brand[]=a&brand[]=b``),
+    and comma-delimited (``?brand=a,b``). Returns an empty list when
+    the parameter is absent in all three forms.
+    """
+    plain = request.GET.getlist(name)
+    if len(plain) > 1:
+        return plain
+    return _expand_multi_value(request, name, plain)
+
+
 __all__ = [
+    "DQuery",
     "DUrl",
     "HttpRequestProvider",
+    "QueryParamProvider",
     "UrlByAnnotationProvider",
     "UrlKwargsProvider",
+    "get_multi_values",
 ]

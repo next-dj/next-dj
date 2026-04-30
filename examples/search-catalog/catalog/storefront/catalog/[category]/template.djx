@@ -1,0 +1,12 @@
+<header class="flex items-baseline justify-between">
+  <h2 class="text-lg font-semibold">{{ category.name }} products</h2>
+  <p class="text-sm text-slate-500">{{ page_obj.total }} products</p>
+</header>
+
+<ul class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  {% for product in page_obj.products %}
+    <li>{% component "product_card" %}</li>
+  {% endfor %}
+</ul>
+
+{% component "pagination" %}
