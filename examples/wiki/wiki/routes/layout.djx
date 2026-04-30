@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>next.dj — Wiki</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  {% collect_styles %}
+</head>
+<body class="min-h-screen flex flex-col bg-slate-50 text-slate-900">
+  <header class="border-b border-slate-200 bg-white">
+    <div class="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-4">
+      <a href="{% url 'next:page_' %}" class="text-lg font-semibold text-slate-900 hover:text-indigo-700">
+        Wiki
+      </a>
+      <nav class="flex items-center gap-4 text-sm text-slate-600">
+        <a href="{% url 'next:page_search' %}" class="hover:text-indigo-700">Search</a>
+        <a href="{% url 'next:page_articles_new' %}"
+           class="rounded-md bg-indigo-600 px-3 py-1.5 font-medium text-white hover:bg-indigo-700">
+          New article
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
+    {% block template %}{% endblock template %}
+  </main>
+
+  <footer class="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
+    Built with next.dj. File routes plus a `HybridRouterBackend`.
+  </footer>
+  {% collect_scripts %}
+</body>
+</html>

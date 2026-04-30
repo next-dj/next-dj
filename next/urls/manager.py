@@ -13,11 +13,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, SupportsIndex, overload
 
+from django.urls import clear_url_caches
+
 from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
 from next.forms import form_action_manager
 
 from .backends import RouterBackend, RouterFactory
+from .signals import router_reloaded
 
 
 if TYPE_CHECKING:
@@ -48,7 +51,7 @@ class RouterManager:
     def __iter__(self) -> Generator[URLPattern | URLResolver, None, None]:
         """All patterns from each backend, loading config on first use."""
         if not self._backends:
-            self._reload_config()
+            self.reload()
         for backend in self._backends:
             yield from backend.generate_urls()
 
@@ -56,8 +59,14 @@ class RouterManager:
         """Return the backend at the given index."""
         return self._backends[index]
 
-    def _reload_config(self) -> None:
-        """Reload backends from `DEFAULT_PAGE_BACKENDS`."""
+    def reload(self) -> None:
+        """Rebuild backends from `DEFAULT_PAGE_BACKENDS` and notify listeners.
+
+        The Django URL resolver caches resolved patterns. The cache is
+        cleared here so the next request sees the freshly built backend
+        list. The `router_reloaded` signal fires after the rebuild and
+        the cache flush so receivers observe a consistent state.
+        """
         self._config_cache = None
         self._backends.clear()
 
@@ -68,6 +77,9 @@ class RouterManager:
                     self._backends.append(backend)
             except Exception:
                 logger.exception("error creating router from config %s", config)
+
+        clear_url_caches()
+        router_reloaded.send(sender=type(self))
 
     def _get_next_pages_config(self) -> list[dict[str, Any]]:
         """Router list from `settings.NEXT_FRAMEWORK` (merged defaults, cached)."""
@@ -86,7 +98,7 @@ router_manager = RouterManager()
 
 def _on_settings_reloaded(**_kwargs: object) -> None:
     """Rebuild router backends when framework settings reload."""
-    router_manager._reload_config()
+    router_manager.reload()
 
 
 settings_reloaded.connect(_on_settings_reloaded)

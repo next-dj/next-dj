@@ -1,0 +1,6 @@
+<div data-markdown-preview class="rounded border border-slate-200 bg-slate-50 p-4 text-sm">
+  <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Live preview</p>
+  <div class="markdown-body prose prose-slate max-w-none">
+    {{ rendered_html }}
+  </div>
+</div>

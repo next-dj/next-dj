@@ -1,0 +1,20 @@
+<article class="prose prose-slate max-w-none">
+  <p class="text-xs uppercase tracking-wide text-slate-500">Documentation · {{ section }}</p>
+  <h1>Components</h1>
+
+  <p>
+    Components live in directories named <code>_blocks/</code>. Each component
+    folder collects a <code>component.py</code>, a <code>component.djx</code>,
+    and any co-located <code>component.css</code> or <code>component.js</code>.
+    The static collector deduplicates assets even when the component is rendered
+    twice on the same page.
+  </p>
+
+  <h2>Markdown preview</h2>
+  <p>
+    The article forms reuse the <code>markdown_preview</code> composite. The
+    Python side rebuilds the HTML on every render through a context decorator.
+    The JavaScript layer wires a textarea to the preview pane for keystroke
+    updates without leaving the page.
+  </p>
+</article>

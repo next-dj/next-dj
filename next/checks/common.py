@@ -43,7 +43,7 @@ def get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
 
     try:
         router_manager = RouterManager()
-        router_manager._reload_config()
+        router_manager.reload()
     except (ImportError, AttributeError) as e:
         error = Error(
             f"Error initializing router manager: {e}",
