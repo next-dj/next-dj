@@ -29,6 +29,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
+    from django.http import HttpRequest
+
 
 class StaticBackend(ABC):
     """Pluggable strategy for resolving asset files to URLs and rendering tags.
@@ -67,12 +69,23 @@ class StaticBackend(ABC):
         """
 
     @abstractmethod
-    def render_link_tag(self, url: str) -> str:
-        """Return an HTML link tag for a CSS asset URL."""
+    def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+        """Return an HTML link tag for a CSS asset URL.
+
+        The `request` keyword argument is the active `HttpRequest` when
+        the tag is rendered as part of a page response. It is `None`
+        for renders that happen outside a request lifecycle. Subclasses
+        may use it to rewrite the URL based on per-request state. The
+        default backend ignores it.
+        """
 
     @abstractmethod
-    def render_script_tag(self, url: str) -> str:
-        """Return an HTML script tag for a JS asset URL."""
+    def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
+        """Return an HTML script tag for a JS asset URL.
+
+        The `request` keyword argument follows the same contract as
+        `render_link_tag`. The default backend ignores it.
+        """
 
 
 class StaticFilesBackend(StaticBackend):
@@ -133,12 +146,30 @@ class StaticFilesBackend(StaticBackend):
         self._url_cache[path] = url
         return url
 
-    def render_link_tag(self, url: str) -> str:
-        """Return a link tag built from the configured css_tag template."""
+    def render_link_tag(
+        self,
+        url: str,
+        *,
+        request: HttpRequest | None = None,  # noqa: ARG002
+    ) -> str:
+        """Return a link tag built from the configured css_tag template.
+
+        The `request` argument is accepted for contract compatibility
+        and ignored by the default backend.
+        """
         return self._css_tag.format(url=url)
 
-    def render_script_tag(self, url: str) -> str:
-        """Return a script tag built from the configured js_tag template."""
+    def render_script_tag(
+        self,
+        url: str,
+        *,
+        request: HttpRequest | None = None,  # noqa: ARG002
+    ) -> str:
+        """Return a script tag built from the configured js_tag template.
+
+        The `request` argument is accepted for contract compatibility
+        and ignored by the default backend.
+        """
         return self._js_tag.format(url=url)
 
 

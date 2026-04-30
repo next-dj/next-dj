@@ -1,0 +1,3 @@
+<section class="space-y-6">
+  {% block template %}{% endblock template %}
+</section>

@@ -1120,6 +1120,47 @@ Troubleshooting
     when ``NEXT_FRAMEWORK`` changes. In tests, call
     :func:`~next.static.reset_default_manager` between overrides.
 
+Request-aware backends
+----------------------
+
+The ``render_link_tag`` and ``render_script_tag`` methods accept an optional
+keyword argument ``request`` that carries the active
+:class:`~django.http.HttpRequest` when the tag is rendered inside a page
+response. The default backend ignores it. Subclasses use the hook when they
+need to rewrite the URL based on per-request state, for example a CDN prefix
+that varies per tenant or per build identifier.
+
+.. code-block:: python
+
+    class TenantPrefixStaticBackend(StaticFilesBackend):
+        def render_link_tag(self, url, *, request=None):
+            return super().render_link_tag(_prefixed(url, request))
+
+        def render_script_tag(self, url, *, request=None):
+            return super().render_script_tag(_prefixed(url, request))
+
+
+    def _prefixed(url, request):
+        tenant = getattr(request, "tenant", None) if request is not None else None
+        if tenant is None or not url.startswith("/"):
+            return url
+        return f"/_t/{tenant.slug}{url}"
+
+The same ``request`` object reaches the ``collector_finalized`` and
+``html_injected`` signal payloads, so subscribers can correlate injection
+events with the request that produced them. The hook is contract-only — the
+default backend continues to cache static URLs the way it always did.
+
+The ``examples/multi-tenant`` showcase wires this pattern end to end. A
+``TenantMiddleware`` parses ``X-Tenant`` and stashes the resolved ``Tenant``
+on ``request.tenant``. The custom backend reads it and prepends
+``/_t/<slug>/`` to every co-located asset URL, so per-tenant CDNs can serve
+cache-isolated copies without forking the page tree. The prefix is an
+example-local convention used to illustrate the hook, not a stable framework
+contract. A real deployment would set ``STATIC_URL`` or
+``STATICFILES_STORAGE`` accordingly to make the rewritten URLs route to a
+real origin.
+
 Public API
 ----------
 
@@ -1166,3 +1207,7 @@ pipeline:
 - ``examples/feature-flags`` — composite ``feature_guard`` component
   with Python-side resolution and no component-level assets (showing
   that static co-location is purely opt-in).
+- ``examples/multi-tenant`` — per-tenant URL prefix through a custom
+  ``TenantPrefixStaticBackend`` that reads ``request.tenant`` from the
+  ``render_*_tag`` hook. Demonstrates request-aware backends paired with a
+  shared ``root_pages`` layout.

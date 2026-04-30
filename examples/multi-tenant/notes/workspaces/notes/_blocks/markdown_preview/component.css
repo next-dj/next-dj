@@ -1,0 +1,12 @@
+[data-markdown-preview] .markdown-body code {
+  background: rgba(15, 23, 42, 0.06);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+[data-markdown-preview] .markdown-body pre {
+  background: rgba(15, 23, 42, 0.85);
+  color: #f8fafc;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+}

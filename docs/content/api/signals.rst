@@ -50,7 +50,10 @@ Each signal's sender and kwargs are documented on its subsystem page:
 - :mod:`next.forms.signals` — ``action_registered``, ``action_dispatched``,
   ``form_validation_failed``.
 - :mod:`next.static.signals` — ``asset_registered``, ``backend_loaded``,
-  ``collector_finalized``, ``html_injected``.
+  ``collector_finalized``, ``html_injected``. The latter two carry the
+  active :class:`~django.http.HttpRequest` (or ``None`` for renders outside
+  a request lifecycle) under the ``request`` keyword argument so receivers
+  can correlate injection events with the originating request.
 - :mod:`next.urls.signals` — ``route_registered``, ``router_reloaded``.
 - :mod:`next.deps.signals` — ``provider_registered``.
 - :mod:`next.conf.signals` — ``settings_reloaded``.

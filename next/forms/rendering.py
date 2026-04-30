@@ -5,8 +5,6 @@ from __future__ import annotations
 import types
 from typing import TYPE_CHECKING
 
-from django.template import Context as DjangoTemplateContext, Template
-
 from next.pages import page
 from next.pages.loaders import _load_python_module_memo
 
@@ -30,7 +28,13 @@ def render_form_page_with_errors(  # noqa: PLR0913
     template_fragment: str | None,
     page_file_path: Path,
 ) -> str:
-    """Render the page template for `page_file_path` with a bound form in context."""
+    """Render the page template for `page_file_path` with a bound form in context.
+
+    The rendered HTML flows through `Page.render_with_static_assets`
+    so co-located CSS and JS land in the response and any
+    request-aware backend (such as a per-tenant URL prefix) sees the
+    same `request` it does on the canonical render path.
+    """
     del template_fragment
 
     meta = backend.get_meta(action_name)
@@ -51,7 +55,13 @@ def render_form_page_with_errors(  # noqa: PLR0913
         context_data[action_name] = types.SimpleNamespace(form=form)
         context_data["form"] = form
 
-    return Template(template_str).render(DjangoTemplateContext(context_data))
+    rendered, _collector = page.render_with_static_assets(
+        file_path,
+        template_str,
+        context_data,
+        request=request,
+    )
+    return rendered
 
 
 __all__ = ["render_form_page_with_errors"]

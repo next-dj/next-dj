@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest import mock
 from unittest.mock import patch
 
 import pytest
@@ -14,6 +15,7 @@ from next.pages.loaders import (
     _load_python_module_memo,
 )
 from next.pages.registry import PageContextRegistry
+from next.static import default_manager as static_default_manager
 
 
 class TestPage:
@@ -435,6 +437,40 @@ class TestPageHasTemplateAndLazyRender:
         result = page_instance.render(page_file)
         assert "current_template_path" in result or str(tmp_path) in result
         assert "path=" in result
+
+    def test_render_forwards_request_to_static_inject(
+        self, page_instance, tmp_path
+    ) -> None:
+        """render() passes the HttpRequest through to StaticManager.inject."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1")
+        (tmp_path / "template.djx").write_text("hello")
+
+        request = HttpRequest()
+        request.method = "GET"
+
+        with mock.patch.object(
+            static_default_manager, "inject", return_value="hello"
+        ) as inject_mock:
+            page_instance.render(page_file, request)
+
+        assert inject_mock.call_args.kwargs["request"] is request
+
+    def test_render_forwards_request_via_keyword(self, page_instance, tmp_path) -> None:
+        """render() also accepts the HttpRequest under the `request` keyword."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1")
+        (tmp_path / "template.djx").write_text("hello")
+
+        request = HttpRequest()
+        request.method = "GET"
+
+        with mock.patch.object(
+            static_default_manager, "inject", return_value="hello"
+        ) as inject_mock:
+            page_instance.render(page_file, request=request)
+
+        assert inject_mock.call_args.kwargs["request"] is request
 
     def test_record_template_source_mtimes_empty_paths(
         self, page_instance, tmp_path

@@ -240,6 +240,67 @@ class TestInjectMissingPlaceholders:
         assert out == html
 
 
+class TestInjectForwardsRequest:
+    """`inject` forwards the active request to backend tag renderers."""
+
+    def test_request_passed_to_render_link_tag(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        sentinel = object()
+        with mock.patch.object(
+            fresh_manager.default_backend,
+            "render_link_tag",
+            return_value="<link/>",
+        ) as render:
+            fresh_manager.inject(
+                f"<head>{STYLES_PLACEHOLDER}</head>",
+                collector,
+                request=sentinel,  # type: ignore[arg-type]
+            )
+        render.assert_called_once_with(CSS_URL, request=sentinel)
+
+    def test_request_passed_to_render_script_tag(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url=JS_URL, kind="js"))
+        sentinel = object()
+        with (
+            mock.patch.object(
+                fresh_manager,
+                "_next_script_builder",
+                return_value=NextScriptBuilder(
+                    "/static/next/next.min.js",
+                    policy=ScriptInjectionPolicy.DISABLED,
+                ),
+            ),
+            mock.patch.object(
+                fresh_manager.default_backend,
+                "render_script_tag",
+                return_value="<script/>",
+            ) as render,
+        ):
+            fresh_manager.inject(
+                f"<body>{SCRIPTS_PLACEHOLDER}</body>",
+                collector,
+                request=sentinel,  # type: ignore[arg-type]
+            )
+        render.assert_called_once_with(JS_URL, request=sentinel)
+
+    def test_request_defaults_to_none(self, fresh_manager: StaticManager) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url=CSS_URL, kind="css"))
+        with mock.patch.object(
+            fresh_manager.default_backend,
+            "render_link_tag",
+            return_value="<link/>",
+        ) as render:
+            fresh_manager.inject(f"<head>{STYLES_PLACEHOLDER}</head>", collector)
+        render.assert_called_once_with(CSS_URL, request=None)
+
+
 class TestDiscoveryForwarding:
     def test_discover_page_assets_delegates(
         self,
