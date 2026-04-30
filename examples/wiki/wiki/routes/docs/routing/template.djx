@@ -1,0 +1,26 @@
+<article class="prose prose-slate max-w-none">
+  <p class="text-xs uppercase tracking-wide text-slate-500">Documentation · {{ section }}</p>
+  <h1>Routing</h1>
+
+  <p>
+    File routes mirror the directory tree under <code>wiki/routes/</code>. Each
+    <code>page.py</code> becomes a Django URL pattern. Bracket segments such as
+    <code>[slug]</code> map to typed Django path converters.
+  </p>
+
+  <h2>Hybrid sources</h2>
+  <p>
+    The example registers a <code>HybridRouterBackend</code> that subclasses the
+    built-in file router. After collecting file routes the backend appends one
+    named URL per row in the <code>Article</code> table. The aliases share the
+    catchall view at <code>wiki/[slug]/</code> and bind a fixed <code>slug</code> kwarg.
+  </p>
+
+  <h2>Reload triggers</h2>
+  <p>
+    A <code>post_save</code> and a <code>post_delete</code> receiver call
+    <code>router_manager.reload()</code> whenever an article is created, edited,
+    or removed. The next request sees the fresh URL set without a process
+    restart.
+  </p>
+</article>

@@ -1,0 +1,43 @@
+<a href="{{ article.url }}"
+   class="inline-block text-xs text-slate-500 hover:text-slate-800">
+  ← Back to article
+</a>
+
+<h1 class="mt-4 text-2xl font-semibold text-slate-900">Edit “{{ article.title }}”</h1>
+
+{% form @action="wiki:article_edit" class="mt-6 grid gap-6 md:grid-cols-2" %}
+  <div class="space-y-4">
+    <input type="hidden" name="article_id" value="{{ article.pk }}">
+    <div>
+      <label class="text-xs font-medium uppercase tracking-wide text-slate-500" for="id_slug">
+        Slug
+      </label>
+      {{ form.slug }}
+      {% if form.slug.errors %}
+        <p class="mt-1 text-xs text-rose-600">{{ form.slug.errors|join:" " }}</p>
+      {% endif %}
+    </div>
+    <div>
+      <label class="text-xs font-medium uppercase tracking-wide text-slate-500" for="id_title">
+        Title
+      </label>
+      {{ form.title }}
+    </div>
+    <div>
+      <label class="text-xs font-medium uppercase tracking-wide text-slate-500" for="id_body_md">
+        Body (Markdown)
+      </label>
+      {{ form.body_md }}
+    </div>
+    <div class="pt-2">
+      <button type="submit"
+              class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+        Save changes
+      </button>
+    </div>
+  </div>
+
+  <aside>
+    {% component "markdown_preview" %}
+  </aside>
+{% endform %}

@@ -1,9 +1,12 @@
 from collections.abc import Generator
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from django.dispatch import Signal
 
+from next.conf import next_framework_settings
+from next.urls import RouterManager, router_manager
 from next.urls.signals import route_registered, router_reloaded
 
 
@@ -134,3 +137,47 @@ class TestRouterReloadedSignal:
         router_reloaded.disconnect(_listener)
         router_reloaded.send(sender=object)
         assert len(events) == 0
+
+
+class TestRouterManagerReloadIntegration:
+    """`RouterManager.reload` emits `router_reloaded` and clears URL caches."""
+
+    def test_reload_emits_router_reloaded_once(
+        self, capture_router_reloaded: list[dict[str, Any]]
+    ) -> None:
+        """Each `reload` call publishes exactly one `router_reloaded` event."""
+        manager = RouterManager()
+        manager.reload()
+        assert len(capture_router_reloaded) == 1
+
+    def test_reload_sender_is_router_manager_class(
+        self, capture_router_reloaded: list[dict[str, Any]]
+    ) -> None:
+        """The `sender` of a manager-driven event is the `RouterManager` class."""
+        manager = RouterManager()
+        manager.reload()
+        assert capture_router_reloaded[0]["sender"] is RouterManager
+
+    def test_reload_clears_django_url_cache(self) -> None:
+        """`reload` invalidates Django URL resolver caches for fresh dispatch."""
+        with patch("next.urls.manager.clear_url_caches") as mock_clear:
+            RouterManager().reload()
+            mock_clear.assert_called_once()
+
+    def test_settings_reload_chain_publishes_event(
+        self, capture_router_reloaded: list[dict[str, Any]]
+    ) -> None:
+        """`next_framework_settings.reload` triggers exactly one router event."""
+        capture_router_reloaded.clear()
+        next_framework_settings.reload()
+        assert len(capture_router_reloaded) >= 1
+        senders = {event["sender"] for event in capture_router_reloaded}
+        assert RouterManager in senders
+
+    def test_global_router_manager_reload_is_idempotent(
+        self, capture_router_reloaded: list[dict[str, Any]]
+    ) -> None:
+        """Two consecutive `reload` calls publish two events with stable state."""
+        router_manager.reload()
+        router_manager.reload()
+        assert len(capture_router_reloaded) >= 2

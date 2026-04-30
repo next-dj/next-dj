@@ -58,8 +58,8 @@ class TestRouterManager:
         assert url_patterns == ["url1", "url2", "url3"]
 
     def test_iter_triggers_reload_when_empty(self, manager) -> None:
-        """Empty routers triggers _reload_config on iteration."""
-        with patch.object(manager, "_reload_config") as mock_reload:
+        """Empty routers triggers reload on iteration."""
+        with patch.object(manager, "reload") as mock_reload:
             manager._backends = []
             list(manager)
             mock_reload.assert_called_once()
@@ -67,7 +67,7 @@ class TestRouterManager:
     def test_iter_reloads_config_when_empty(self, manager) -> None:
         """After reload, iteration returns patterns from created routers."""
         with (
-            patch.object(manager, "_reload_config"),
+            patch.object(manager, "reload"),
             patch.object(manager, "_get_next_pages_config") as mock_get_config,
             patch("next.urls.RouterFactory.create_backend") as mock_create,
         ):
@@ -100,7 +100,7 @@ class TestRouterManager:
         """Reload replaces cache and builds routers from default framework config."""
         manager._config_cache = ["some", "cached", "config"]
 
-        manager._reload_config()
+        manager.reload()
         assert manager._config_cache is not None
         assert len(manager._config_cache) == 1
         assert manager._config_cache[0]["BACKEND"] == "next.urls.FileRouterBackend"
@@ -113,7 +113,7 @@ class TestRouterManager:
             "next.urls.RouterFactory.create_backend",
             side_effect=Exception("Test error"),
         ):
-            manager._reload_config()
+            manager.reload()
             assert len(manager._backends) == 0
             assert manager._config_cache is not None
             assert len(manager._config_cache) == 1
@@ -148,7 +148,7 @@ class TestGlobalInstances:
     def test_router_manager_reload_config_clears_cache(self) -> None:
         """Global manager reload refreshes config cache."""
         len(router_manager._backends)
-        router_manager._reload_config()
+        router_manager.reload()
         assert router_manager._config_cache is not None
 
     def test_urlpatterns_dynamic(self) -> None:
