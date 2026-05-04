@@ -33,7 +33,7 @@
 
   function bindPreview(root) {
     const target = root.querySelector(".markdown-body");
-    const textarea = document.querySelector('textarea[data-markdown-source]');
+    const textarea = document.querySelector("textarea[data-markdown-source]");
     if (!target || !textarea) {
       return;
     }
