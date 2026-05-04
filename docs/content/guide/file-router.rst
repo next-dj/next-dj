@@ -312,9 +312,40 @@ Register a custom backend through the settings contract.
 The signals emitted by :mod:`next.urls.signals` let external code observe routing decisions without subclassing.
 
 * ``route_registered`` fires when a backend yields a new URL pattern.
-* ``router_reloaded`` fires when the ``RouterManager`` rebuilds its pattern list after a settings change.
+* ``router_reloaded`` fires after the ``RouterManager`` rebuilds its pattern list. The ``sender`` is the ``RouterManager`` class.
 
 A worked inline ``TaggedFileRouterBackend`` example is in :doc:`extending` (section "Worked examples by subsystem").
+
+Reloading the router after data changes
+---------------------------------------
+
+A router backend that reads URLs from a database has to rebuild its pattern list whenever the underlying rows change. The ``RouterManager`` exposes a public ``reload`` method for that case.
+
+.. code-block:: python
+
+   from django.db.models.signals import post_delete, post_save
+   from django.dispatch import receiver
+
+   from next.urls import router_manager
+
+   from .models import Article
+
+
+   @receiver(post_save, sender=Article)
+   @receiver(post_delete, sender=Article)
+   def reload_router_on_article_change(**_kwargs) -> None:
+       """Rebuild URL patterns whenever an article appears or disappears."""
+       router_manager.reload()
+
+The call is idempotent. Each invocation rebuilds the backend list from
+``DEFAULT_PAGE_BACKENDS``, clears the Django URL resolver cache, and emits one
+``router_reloaded`` event. The next request observes the new patterns without a
+process restart.
+
+The same path runs automatically when ``next_framework_settings.reload`` fires
+after a settings change. Application code rarely needs to call that broader
+entry point. Prefer ``router_manager.reload`` when only the URL surface needs
+to refresh.
 
 Next
 ----

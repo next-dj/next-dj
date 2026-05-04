@@ -17,6 +17,7 @@ Each example is a complete mini-product with e2e tests and a dedicated README.
 | [`feature-flags/`](feature-flags/) | Composite `feature_guard`, signal receivers, cache invalidation |
 | [`audit-forms/`](audit-forms/) | Custom `FormActionBackend`, `action_dispatched` and `form_validation_failed` signals, dual audit channels |
 | [`search-catalog/`](search-catalog/) | `DQuery[T]`, faceted filters, three-level nested layouts, `inherit_context=True`, cached search |
+| [`wiki/`](wiki/) | `HybridRouterBackend`, `router_manager.reload()` on signal, `DArticle` DI provider, forms with live Markdown preview |
 
 ## Running any example
 
