@@ -30,7 +30,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from next.pages import loaders as pages_loaders
 
-from .assets import _KIND_CSS, _KIND_JS, StaticAsset
+from .assets import StaticAsset, default_kinds
+from .collector import default_placeholders
 from .signals import asset_registered
 
 
@@ -49,6 +50,15 @@ logger = logging.getLogger(__name__)
 
 _MODULE_LIST_CACHE_MAX_SIZE = 2048
 _LAYOUT_DIR_CACHE_MAX_SIZE = 2048
+
+
+def _url_suffix(url: str) -> str:
+    """Return the lowercase dot-suffix of a URL or empty string when absent."""
+    last_segment = url.rsplit("?", 1)[0].rsplit("#", 1)[0].rsplit("/", 1)[-1]
+    dot = last_segment.rfind(".")
+    if dot < 0:
+        return ""
+    return last_segment[dot:].lower()
 
 
 def _rel_path_str(child: Path, root: Path) -> str | None:
@@ -234,9 +244,7 @@ class AssetDiscovery:
         self._provider = provider
         self._resolver = resolver or PathResolver(provider.page_roots)
         self._stems = stems or default_stems
-        self._module_list_cache: OrderedDict[Path, tuple[list[str], list[str]]] = (
-            OrderedDict()
-        )
+        self._module_list_cache: OrderedDict[Path, dict[str, list[str]]] = OrderedDict()
         self._layout_dir_cache: OrderedDict[Path, list[Path]] = OrderedDict()
 
     def discover_page_assets(
@@ -302,21 +310,31 @@ class AssetDiscovery:
         role: str,
         collector: StaticCollector,
     ) -> None:
-        """Register every `{stem}.css` and `{stem}.js` found in the directory."""
+        """Register `{stem}{ext}` files for every registered kind.
+
+        The set of extensions probed comes from `KindRegistry.kinds()`,
+        so registering a new kind during `AppConfig.ready` is enough to
+        teach discovery about additional file types.
+        """
         for stem in self._stems.stems(role):
-            css_file = directory / f"{stem}.css"
-            if css_file.exists():
-                self._register_file(css_file, logical_name, _KIND_CSS, collector)
-            js_file = directory / f"{stem}.js"
-            if js_file.exists():
-                self._register_file(js_file, logical_name, _KIND_JS, collector)
+            for kind in default_kinds.kinds():
+                suffix = default_kinds.extension(kind)
+                candidate = directory / f"{stem}{suffix}"
+                if candidate.exists():
+                    self._register_file(candidate, logical_name, kind, collector)
 
     def _collect_module_lists(
         self,
         module_path: Path,
         collector: StaticCollector,
     ) -> None:
-        """Read `styles` and `scripts` list variables from a Python module.
+        """Read URL list variables matching every registered placeholder slot.
+
+        The discovery layer iterates over registered slots in
+        `default_placeholders` and reads the variable named after each
+        slot. Each URL gets a `kind` derived from its file extension via
+        `KindRegistry.kind_for_extension`. URLs whose suffix is not in
+        the registry are dropped with a debug log.
 
         The caller in `discover_page_assets` passes a resolved module
         path. The component entry point still calls with the raw path,
@@ -329,21 +347,52 @@ class AssetDiscovery:
         else:
             module = pages_loaders._load_python_module(module_path)
             if module is None:
-                self._module_list_cache[cache_key] = ([], [])
+                self._module_list_cache[cache_key] = {}
                 if len(self._module_list_cache) > _MODULE_LIST_CACHE_MAX_SIZE:
                     self._module_list_cache.popitem(last=False)
                 return
-            styles = pages_loaders._read_string_list(module, "styles")
-            scripts = pages_loaders._read_string_list(module, "scripts")
-            cached = (styles, scripts)
+            cached = {
+                slot.name: pages_loaders._read_string_list(module, slot.name)
+                for slot in default_placeholders
+            }
             self._module_list_cache[cache_key] = cached
             if len(self._module_list_cache) > _MODULE_LIST_CACHE_MAX_SIZE:
                 self._module_list_cache.popitem(last=False)
-        styles_list, scripts_list = cached
-        for url in styles_list:
-            collector.add(StaticAsset(url=url, kind=_KIND_CSS))
-        for url in scripts_list:
-            collector.add(StaticAsset(url=url, kind=_KIND_JS))
+        for slot_name, urls in cached.items():
+            for url in urls:
+                self._register_module_url(url, slot_name, collector)
+
+    def _register_module_url(
+        self,
+        url: str,
+        slot_name: str,
+        collector: StaticCollector,
+    ) -> None:
+        """Resolve a module-level URL to a kind and add it to the collector.
+
+        The kind comes from `KindRegistry.kind_for_extension(suffix)`
+        where suffix is the lowercase trailing dot-extension of the
+        URL. URLs whose extension is not registered, or whose resolved
+        kind belongs to a different slot, are dropped with a debug log.
+        """
+        suffix = _url_suffix(url)
+        if not suffix:
+            logger.debug("Module URL %r has no recognised extension", url)
+            return
+        kind = default_kinds.kind_for_extension(suffix)
+        if kind is None:
+            logger.debug("Module URL %r has unregistered extension %r", url, suffix)
+            return
+        if default_kinds.slot(kind) != slot_name:
+            logger.debug(
+                "Module URL %r maps to kind %r but list %r expects slot %r",
+                url,
+                kind,
+                slot_name,
+                slot_name,
+            )
+            return
+        collector.add(StaticAsset(url=url, kind=kind))
 
     def _register_file(
         self,

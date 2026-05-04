@@ -18,6 +18,7 @@ Each example is a complete mini-product with e2e tests and a dedicated README.
 | [`audit-forms/`](audit-forms/) | Custom `FormActionBackend`, `action_dispatched` and `form_validation_failed` signals, dual audit channels |
 | [`search-catalog/`](search-catalog/) | `DQuery[T]`, faceted filters, three-level nested layouts, `inherit_context=True`, cached search |
 | [`wiki/`](wiki/) | `HybridRouterBackend`, `router_manager.reload()` on signal, `DArticle` DI provider, forms with live Markdown preview |
+| [`kanban/`](kanban/) | Custom `StaticBackend` that registers a `.jsx` kind through the public `KindRegistry`, multi-level `@context(serialize=True)` with `DeepMergePolicy`, `HashContentDedup` on co-located CSS, composite components with React JSX |
 
 ## Running any example
 

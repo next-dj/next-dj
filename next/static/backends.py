@@ -1,10 +1,16 @@
 """Pluggable backend contract and Django-staticfiles default implementation.
 
 A static backend turns co-located asset paths into public URLs and
-renders them as `<link>` or `<script>` tags. The default backend
-delegates URL resolution to Django staticfiles, so manifest hashing, S3
-storage, and CDN configuration from Django settings apply
+renders them through one of its named renderer methods. The default
+backend delegates URL resolution to Django staticfiles, so manifest
+hashing, S3 storage, and CDN configuration from Django settings apply
 automatically.
+
+The abstract `StaticBackend` only mandates `register_file`. Renderer
+methods are concrete on the default backend and selected per asset by
+`KindRegistry.renderer(kind)`. Custom backends extend the surface by
+adding more named methods such as `render_babel_script_tag` and
+registering kinds that point to them.
 
 A small factory builds backend instances from
 `NEXT_FRAMEWORK['DEFAULT_STATIC_BACKENDS']` entries. The factory also
@@ -21,7 +27,7 @@ from django.contrib.staticfiles.storage import staticfiles_storage
 
 from next.conf import import_class_cached
 
-from .assets import StaticNamespace, default_kinds
+from .assets import StaticNamespace
 from .signals import backend_loaded
 
 
@@ -40,6 +46,13 @@ class StaticBackend(ABC):
     `{"BACKEND": "...", "OPTIONS": {...}}`. The base class stores the
     mapping on the `config` property. Subclasses are free to read any
     keys they expose to users.
+
+    The only abstract requirement is `register_file`. Renderer methods
+    are added by subclasses and selected per asset through
+    `KindRegistry.renderer(kind)`. The default backend below ships
+    `render_link_tag` and `render_script_tag` for the built-in `css`
+    and `js` kinds. Custom backends register additional kinds and
+    expose matching methods.
     """
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
@@ -68,25 +81,6 @@ class StaticBackend(ABC):
         cannot be resolved to a URL.
         """
 
-    @abstractmethod
-    def render_link_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
-        """Return an HTML link tag for a CSS asset URL.
-
-        The `request` keyword argument is the active `HttpRequest` when
-        the tag is rendered as part of a page response. It is `None`
-        for renders that happen outside a request lifecycle. Subclasses
-        may use it to rewrite the URL based on per-request state. The
-        default backend ignores it.
-        """
-
-    @abstractmethod
-    def render_script_tag(self, url: str, *, request: HttpRequest | None = None) -> str:
-        """Return an HTML script tag for a JS asset URL.
-
-        The `request` keyword argument follows the same contract as
-        `render_link_tag`. The default backend ignores it.
-        """
-
 
 class StaticFilesBackend(StaticBackend):
     """Resolve co-located asset URLs through Django staticfiles.
@@ -112,28 +106,31 @@ class StaticFilesBackend(StaticBackend):
         opts = dict(self._config.get("OPTIONS") or {})
         self._css_tag = str(opts.get("css_tag") or self._DEFAULT_CSS_TAG)
         self._js_tag = str(opts.get("js_tag") or self._DEFAULT_JS_TAG)
-        self._url_cache: dict[str, str] = {}
+        self._url_cache: dict[tuple[str, str], str] = {}
 
-    def _logical_static_path(self, logical_name: str, kind: str) -> str:
-        extension = default_kinds.extension(kind)
-        return f"{StaticNamespace.NEXT}/{logical_name}{extension}"
+    def _logical_static_path(self, logical_name: str, suffix: str) -> str:
+        return f"{StaticNamespace.NEXT}/{logical_name}{suffix}"
 
     def register_file(
         self,
-        source_path: Path,  # noqa: ARG002
+        source_path: Path,
         logical_name: str,
-        kind: str,
+        kind: str,  # noqa: ARG002
     ) -> str:
-        """Return the staticfiles URL for `next/<logical_name>.<ext>`.
+        """Return the staticfiles URL for `next/<logical_name><suffix>`.
 
-        The result is cached per logical path. Missing entries in the
-        staticfiles manifest are reported as `RuntimeError` with a hint
-        about running `collectstatic`.
+        The suffix is taken from `source_path.suffix`, so a single kind
+        can serve multiple file extensions if a custom backend wishes
+        to. Result is cached per `(logical_name, suffix)`. Missing
+        entries in the staticfiles manifest are reported as
+        `RuntimeError` with a hint about running `collectstatic`.
         """
-        path = self._logical_static_path(logical_name, kind)
-        cached = self._url_cache.get(path)
+        suffix = source_path.suffix
+        cache_key = (logical_name, suffix)
+        cached = self._url_cache.get(cache_key)
         if cached is not None:
             return cached
+        path = self._logical_static_path(logical_name, suffix)
         try:
             url = str(staticfiles_storage.url(path))
         except ValueError as e:
@@ -143,7 +140,7 @@ class StaticFilesBackend(StaticBackend):
                 "finder is enabled."
             )
             raise RuntimeError(msg) from e
-        self._url_cache[path] = url
+        self._url_cache[cache_key] = url
         return url
 
     def render_link_tag(

@@ -3,7 +3,10 @@ from __future__ import annotations
 from django.template import Context, Template
 
 from next.static import StaticCollector
-from next.static.collector import SCRIPTS_PLACEHOLDER, STYLES_PLACEHOLDER
+
+
+STYLES_PLACEHOLDER = "<!-- next:styles -->"
+SCRIPTS_PLACEHOLDER = "<!-- next:scripts -->"
 
 
 def _render(
@@ -30,17 +33,17 @@ class TestUseStyleScriptInlineTags:
     def test_use_style_registers_and_emits_nothing(self) -> None:
         out, coll = _render('{% load next_static %}{% use_style "https://cdn/a.css" %}')
         assert out == ""
-        assert [a.url for a in coll.styles()] == ["https://cdn/a.css"]
+        assert [a.url for a in coll.assets_in_slot("styles")] == ["https://cdn/a.css"]
 
     def test_use_script_registers_and_emits_nothing(self) -> None:
         out, coll = _render('{% load next_static %}{% use_script "https://cdn/a.js" %}')
         assert out == ""
-        assert [a.url for a in coll.scripts()] == ["https://cdn/a.js"]
+        assert [a.url for a in coll.assets_in_slot("scripts")] == ["https://cdn/a.js"]
 
     def test_empty_url_is_ignored(self) -> None:
         out, coll = _render('{% load next_static %}{% use_style "" %}')
         assert out == ""
-        assert coll.styles() == []
+        assert coll.assets_in_slot("styles") == []
 
     def test_no_collector_in_context_is_no_op(self) -> None:
         template = Template('{% load next_static %}{% use_style "https://cdn/a.css" %}')
@@ -54,7 +57,7 @@ class TestBlockUseStyleScript:
             "{% load next_static %}{% #use_style %}body{color:red}{% /use_style %}"
         )
         assert out == ""
-        styles = coll.styles()
+        styles = coll.assets_in_slot("styles")
         assert len(styles) == 1
         assert styles[0].inline == "body{color:red}"
         assert styles[0].url == ""
@@ -64,7 +67,7 @@ class TestBlockUseStyleScript:
             "{% load next_static %}{% #use_script %}window.x=1;{% /use_script %}"
         )
         assert out == ""
-        scripts = coll.scripts()
+        scripts = coll.assets_in_slot("scripts")
         assert len(scripts) == 1
         assert scripts[0].inline == "window.x=1;"
 
@@ -75,7 +78,7 @@ class TestBlockUseStyleScript:
             {"user": "alice"},
         )
         assert out == ""
-        scripts = coll.scripts()
+        scripts = coll.assets_in_slot("scripts")
         assert scripts[0].inline == "window.user = 'alice';"
 
     def test_blank_block_body_is_ignored(self) -> None:
@@ -83,7 +86,7 @@ class TestBlockUseStyleScript:
             "{% load next_static %}{% #use_style %}   \n   {% /use_style %}"
         )
         assert out == ""
-        assert coll.styles() == []
+        assert coll.assets_in_slot("styles") == []
 
     def test_block_without_collector_noop(self) -> None:
         template = Template(
@@ -100,5 +103,5 @@ class TestPrependOrdering:
             '{% load next_static %}{% use_style "https://cdn/a.css" %}'
             '{% use_style "https://cdn/b.css" %}'
         )
-        urls = [a.url for a in coll.styles()]
+        urls = [a.url for a in coll.assets_in_slot("styles")]
         assert urls == ["https://cdn/a.css", "https://cdn/b.css"]

@@ -1,0 +1,7 @@
+<li data-kanban-card="{{ card.id }}" draggable="true"
+    class="kanban-column rounded border border-slate-200 bg-white p-2 shadow-sm">
+  <div class="text-sm font-medium text-slate-900">{{ card.title }}</div>
+  {% if excerpt %}
+    <div class="mt-1 text-xs text-slate-500">{{ excerpt }}</div>
+  {% endif %}
+</li>

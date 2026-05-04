@@ -1,0 +1,10 @@
+<div data-kanban-root="{{ board.id }}" class="space-y-6">
+  {% if moved_card %}
+    {% component "preview" %}
+  {% endif %}
+  <div id="kanban-mount-{{ board.id }}" class="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
+    {% for column in columns %}
+      {% component "column" %}
+    {% endfor %}
+  </div>
+</div>

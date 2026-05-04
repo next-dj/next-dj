@@ -11,6 +11,11 @@ Strategy objects plug in at construction time, so users can swap
 URL-based dedup for content-hash dedup or replace the default
 first-wins JS-context merge with a deep-merge policy without touching
 the collector source.
+
+The collector is also fully type-agnostic. Each asset routes to a
+slot named in `KindRegistry`, and the buckets live in a slot-keyed
+dictionary on the collector. There is no built-in knowledge of `css`,
+`js`, or any other specific kind here.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from .assets import _KIND_CSS, _KIND_JS, StaticAsset
+from .assets import StaticAsset, default_kinds
 from .serializers import JsContextSerializer, resolve_serializer
 
 
@@ -32,8 +37,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-STYLES_PLACEHOLDER: str = "<!-- next:styles -->"
-SCRIPTS_PLACEHOLDER: str = "<!-- next:scripts -->"
 HEAD_CLOSE: str = "</head>"
 
 
@@ -208,39 +211,55 @@ class DeepMergePolicy:
 
 @dataclass(frozen=True, slots=True)
 class PlaceholderSlot:
-    """Binding between a `{% collect_* %}` placeholder and collector state.
+    """Binding between a `{% collect_* %}` placeholder name and its token.
 
-    The `name` field is the short slot identifier used by the
-    corresponding template tag. The `token` field is the HTML comment
-    marker emitted into the template output. The `bucket` field is the
-    attribute name on the collector that holds the asset list for this
-    slot, for example `_styles`. The `renderer` field is the method
-    name on the backend used to render URL-form assets for this slot,
-    for example `render_link_tag`.
+    The `name` field identifies the slot. Assets routed to this slot by
+    `KindRegistry.slot(asset.kind)` accumulate in the collector under
+    this name. The `token` field is the HTML comment marker emitted by
+    the matching template tag at render time and replaced by the static
+    manager during injection.
     """
 
     name: str
     token: str
-    bucket: str
-    renderer: str
 
 
 class PlaceholderRegistry:
-    """Mutable registry of placeholder slots produced by `{% collect_* %}`.
+    """Mutable registry of placeholder slots.
 
-    The built-in slots `styles` and `scripts` are pre-registered on the
-    default registry. Users may register new slots such as `meta` for
-    `<meta>` tags by extending the registry and supplying matching
-    template tags.
+    The registry ships empty. Framework bootstrap registers built-in
+    slots such as `styles` and `scripts`, and user code registers
+    additional slots with the same `register` call when introducing new
+    asset destinations.
     """
 
     def __init__(self) -> None:
         """Initialise an empty slot registry."""
         self._slots: dict[str, PlaceholderSlot] = {}
 
-    def register(self, slot: PlaceholderSlot) -> None:
-        """Register the slot under its name, overwriting any previous entry."""
-        self._slots[slot.name] = slot
+    def register(self, name: str, *, token: str) -> None:
+        """Register the slot under its name with the given placeholder token.
+
+        A repeated call with the same token is idempotent. A repeated
+        call with a different token raises `ValueError` so silent
+        overrides cannot mask bugs.
+        """
+        if not name:
+            msg = "Slot name must be a non-empty string"
+            raise ValueError(msg)
+        if not token:
+            msg = "Slot token must be a non-empty string"
+            raise ValueError(msg)
+        existing = self._slots.get(name)
+        if existing is not None:
+            if existing.token == token:
+                return
+            msg = (
+                f"Slot {name!r} is already registered with token "
+                f"{existing.token!r}. Cannot re-register with token {token!r}."
+            )
+            raise ValueError(msg)
+        self._slots[name] = PlaceholderSlot(name=name, token=token)
 
     def get(self, name: str) -> PlaceholderSlot | None:
         """Return the slot registered under the given name or None."""
@@ -256,22 +275,6 @@ class PlaceholderRegistry:
 
 
 default_placeholders: PlaceholderRegistry = PlaceholderRegistry()
-default_placeholders.register(
-    PlaceholderSlot(
-        name="styles",
-        token=STYLES_PLACEHOLDER,
-        bucket="_styles",
-        renderer="render_link_tag",
-    )
-)
-default_placeholders.register(
-    PlaceholderSlot(
-        name="scripts",
-        token=SCRIPTS_PLACEHOLDER,
-        bucket="_scripts",
-        renderer="render_script_tag",
-    )
-)
 
 
 class StaticCollector:
@@ -287,6 +290,10 @@ class StaticCollector:
     static manager during injection. The collector has no knowledge of
     backends or rendering. It coordinates insertion order,
     deduplication, and JS context merging.
+
+    Buckets are keyed by slot name as resolved through `KindRegistry`.
+    The collector does not hardcode any specific slot, so adding new
+    asset kinds to the registry transparently produces new buckets.
     """
 
     def __init__(
@@ -303,10 +310,8 @@ class StaticCollector:
         )
         self._js_serializer = js_serializer
         self._seen_keys: set[Hashable] = set()
-        self._styles: list[StaticAsset] = []
-        self._scripts: list[StaticAsset] = []
-        self._styles_prepend_idx: int = 0
-        self._scripts_prepend_idx: int = 0
+        self._buckets: dict[str, list[StaticAsset]] = {}
+        self._prepend_idx: dict[str, int] = {}
         self._js_context: dict[str, Any] = {}
 
     def add(self, asset: StaticAsset, *, prepend: bool = False) -> None:
@@ -316,57 +321,33 @@ class StaticCollector:
         from the body. URL-form assets with `prepend=True` are inserted
         before existing append entries while keeping registration
         order among prepended items.
+
+        The asset routes to the bucket named by
+        `KindRegistry.slot(asset.kind)`. Unregistered kinds raise
+        `KeyError` so misconfiguration surfaces immediately.
         """
         key = self._dedup.key(asset)
         if key in self._seen_keys:
             return
         self._seen_keys.add(key)
+        slot = default_kinds.slot(asset.kind)
+        bucket = self._buckets.setdefault(slot, [])
         is_inline = asset.inline is not None
         use_prepend = prepend and not is_inline
-        if asset.kind == _KIND_CSS:
-            self._insert(self._styles, asset, prepend=use_prepend, kind=_KIND_CSS)
-        elif asset.kind == _KIND_JS:
-            self._insert(self._scripts, asset, prepend=use_prepend, kind=_KIND_JS)
+        if use_prepend:
+            idx = self._prepend_idx.get(slot, 0)
+            bucket.insert(idx, asset)
+            self._prepend_idx[slot] = idx + 1
         else:
-            logger.debug(
-                "Ignoring asset with unknown kind %r: %s", asset.kind, asset.url
-            )
+            bucket.append(asset)
 
-    def _insert(
-        self,
-        target: list[StaticAsset],
-        asset: StaticAsset,
-        *,
-        prepend: bool,
-        kind: str,
-    ) -> None:
-        if prepend:
-            idx = (
-                self._styles_prepend_idx
-                if kind == _KIND_CSS
-                else self._scripts_prepend_idx
-            )
-            target.insert(idx, asset)
-            if kind == _KIND_CSS:
-                self._styles_prepend_idx += 1
-            else:
-                self._scripts_prepend_idx += 1
-        else:
-            target.append(asset)
+    def assets_in_slot(self, name: str) -> list[StaticAsset]:
+        """Return collected assets for the named slot in insertion order.
 
-    def styles(self) -> list[StaticAsset]:
-        """Return collected CSS assets in insertion order.
-
+        Returns an empty list when nothing was registered for the slot.
         Callers must not mutate the returned list.
         """
-        return self._styles
-
-    def scripts(self) -> list[StaticAsset]:
-        """Return collected JS assets in insertion order.
-
-        Callers must not mutate the returned list.
-        """
-        return self._scripts
+        return self._buckets.get(name, [])
 
     def _get_js_serializer(self) -> JsContextSerializer:
         if self._js_serializer is None:

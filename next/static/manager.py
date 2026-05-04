@@ -1,10 +1,10 @@
 """Coordinate static backends, asset discovery, and placeholder injection.
 
 The static manager loads backends lazily on first use, owns the shared
-asset discovery instance, caches page-tree roots, and replaces
-`{% collect_styles %}` and `{% collect_scripts %}` placeholders with
-real tags once rendering completes. It also injects the `next.min.js`
-wiring unless the injection policy is `DISABLED`.
+asset discovery instance, caches page-tree roots, and replaces every
+registered placeholder token with the rendered tags once rendering
+completes. It also injects the `next.min.js` wiring unless the
+injection policy is `DISABLED`.
 
 The module-level `default_manager` is a lazy handle around a single
 static manager instance. Test code may replace the wrapped instance by
@@ -26,13 +26,9 @@ from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 from next.pages.watch import get_pages_directories_for_watch
 
+from .assets import default_kinds
 from .backends import StaticBackend, StaticFilesBackend, StaticsFactory
-from .collector import (
-    HEAD_CLOSE,
-    SCRIPTS_PLACEHOLDER,
-    STYLES_PLACEHOLDER,
-    StaticCollector,
-)
+from .collector import HEAD_CLOSE, StaticCollector, default_placeholders
 from .discovery import AssetDiscovery, PathResolver
 from .scripts import NEXT_JS_STATIC_PATH, NextScriptBuilder, ScriptInjectionPolicy
 from .signals import collector_finalized, html_injected
@@ -47,11 +43,14 @@ if TYPE_CHECKING:
     from next.components import ComponentInfo
 
     from .assets import StaticAsset
-    from .collector import DedupStrategy, JsContextPolicy
+    from .collector import DedupStrategy, JsContextPolicy, PlaceholderSlot
     from .scripts import NextScriptBuilder as NextScriptBuilderType
 
 
 logger = logging.getLogger(__name__)
+
+
+_RUNTIME_SLOT_NAME = "scripts"
 
 
 class StaticManager:
@@ -119,17 +118,19 @@ class StaticManager:
         page_path: Path | None = None,
         request: HttpRequest | None = None,
     ) -> str:
-        """Replace style and script placeholders with rendered tags.
+        """Replace every registered placeholder token with rendered tags.
 
-        Placeholders are emitted by the `{% collect_styles %}` and
-        `{% collect_scripts %}` template tags during rendering. A
-        missing placeholder is left unchanged because `str.replace`
+        Each slot in `default_placeholders` contributes its bucket of
+        collected assets. Asset rendering dispatches through the
+        backend method named by `KindRegistry.renderer(asset.kind)`,
+        so adding new kinds with new renderer methods does not require
+        any changes here. The `scripts` slot also receives the next-dj
+        runtime wiring when the injection policy is `AUTO`.
+
+        A missing placeholder is left unchanged because `str.replace`
         returns the original string when there is nothing to replace.
-        An empty collector yields empty tag sections. The
-        `next.min.js` script and its context init script are prepended
-        before user-collected scripts unless the injection policy is
-        `DISABLED`. The preload hint is injected before `</head>`
-        under the same policy.
+        An empty collector yields empty tag sections. The preload hint
+        is injected before `</head>` under the same policy.
 
         The optional `request` argument is forwarded to backend tag
         renderers and to the `collector_finalized` and `html_injected`
@@ -141,19 +142,12 @@ class StaticManager:
         replaced: tuple[str, ...] | None = None
         if html_injected.receivers:
             replaced = tuple(
-                name
-                for name, token in (
-                    ("styles", STYLES_PLACEHOLDER),
-                    ("scripts", SCRIPTS_PLACEHOLDER),
-                )
-                if token in html
+                slot.name for slot in default_placeholders if slot.token in html
             )
-        html = html.replace(
-            STYLES_PLACEHOLDER, self._render_style_tags(collector, request=request)
-        )
-        html = html.replace(
-            SCRIPTS_PLACEHOLDER, self._render_script_section(collector, request=request)
-        )
+        backend = self.default_backend
+        for slot in default_placeholders:
+            rendered = self._render_slot(slot, collector, backend, request=request)
+            html = html.replace(slot.token, rendered)
         html = self._inject_preload_hint(html)
         if replaced is not None:
             html_injected.send(
@@ -176,14 +170,23 @@ class StaticManager:
             self._script_builder = NextScriptBuilder.from_options(url, options)
         return self._script_builder
 
-    def _render_script_section(
+    def _render_slot(
         self,
+        slot: PlaceholderSlot,
         collector: StaticCollector,
+        backend: StaticBackend,
         *,
-        request: HttpRequest | None = None,
+        request: HttpRequest | None,
     ) -> str:
+        user_tags = self._render_tags(
+            collector.assets_in_slot(slot.name), backend, request=request
+        )
+        if slot.name == _RUNTIME_SLOT_NAME:
+            return self._wrap_with_runtime(user_tags, collector)
+        return user_tags
+
+    def _wrap_with_runtime(self, user_tags: str, collector: StaticCollector) -> str:
         builder = self._next_script_builder()
-        user_scripts = self._render_script_tags(collector, request=request)
         if builder.policy is ScriptInjectionPolicy.AUTO:
             next_scripts = (
                 "\n".join(
@@ -191,8 +194,8 @@ class StaticManager:
                 )
                 + "\n"
             )
-            return next_scripts + user_scripts if user_scripts else next_scripts
-        return user_scripts
+            return next_scripts + user_tags if user_tags else next_scripts
+        return user_tags
 
     def _inject_preload_hint(self, html: str) -> str:
         builder = self._next_script_builder()
@@ -204,36 +207,23 @@ class StaticManager:
     def _render_tags(
         self,
         assets: list[StaticAsset],
-        render_url: Callable[[str], str],
-    ) -> str:
-        return "\n".join(
-            asset.inline if asset.inline is not None else render_url(asset.url)
-            for asset in assets
-        )
-
-    def _render_style_tags(
-        self,
-        collector: StaticCollector,
+        backend: StaticBackend,
         *,
-        request: HttpRequest | None = None,
+        request: HttpRequest | None,
     ) -> str:
-        backend = self.default_backend
-        return self._render_tags(
-            collector.styles(),
-            lambda url: backend.render_link_tag(url, request=request),
-        )
+        return "\n".join(self._render_one(asset, backend, request) for asset in assets)
 
-    def _render_script_tags(
+    def _render_one(
         self,
-        collector: StaticCollector,
-        *,
-        request: HttpRequest | None = None,
+        asset: StaticAsset,
+        backend: StaticBackend,
+        request: HttpRequest | None,
     ) -> str:
-        backend = self.default_backend
-        return self._render_tags(
-            collector.scripts(),
-            lambda url: backend.render_script_tag(url, request=request),
-        )
+        if asset.inline is not None:
+            return asset.inline
+        renderer_name = default_kinds.renderer(asset.kind)
+        renderer = getattr(backend, renderer_name)
+        return cast("str", renderer(asset.url, request=request))
 
     def _ensure_backends(self) -> None:
         if not self._backends:

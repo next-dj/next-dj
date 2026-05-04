@@ -15,13 +15,13 @@ from next.static import (
     default_manager,
     reset_default_manager,
 )
-from next.static.collector import (
-    HEAD_CLOSE,
-    SCRIPTS_PLACEHOLDER,
-    STYLES_PLACEHOLDER,
-)
+from next.static.collector import HEAD_CLOSE
 from next.static.manager import DefaultStaticManager
 from next.static.scripts import NextScriptBuilder
+
+
+STYLES_PLACEHOLDER = "<!-- next:styles -->"
+SCRIPTS_PLACEHOLDER = "<!-- next:scripts -->"
 
 
 if TYPE_CHECKING:
@@ -318,7 +318,9 @@ class TestDiscoveryForwarding:
             return_value="/static/next/index.css",
         ):
             fresh_manager.discover_page_assets(page_path, collector)
-        assert [a.url for a in collector.styles()] == ["/static/next/index.css"]
+        assert [a.url for a in collector.assets_in_slot("styles")] == [
+            "/static/next/index.css"
+        ]
 
 
 class TestDefaultManagerLazy:

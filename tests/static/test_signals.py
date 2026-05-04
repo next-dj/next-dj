@@ -12,7 +12,6 @@ from next.static import (
     StaticManager,
     StaticsFactory,
 )
-from next.static.collector import SCRIPTS_PLACEHOLDER, STYLES_PLACEHOLDER
 from next.static.signals import (
     asset_registered,
     backend_loaded,
@@ -24,6 +23,10 @@ from next.static.signals import (
 if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
+
+
+STYLES_PLACEHOLDER = "<!-- next:styles -->"
+SCRIPTS_PLACEHOLDER = "<!-- next:scripts -->"
 
 
 @pytest.fixture()

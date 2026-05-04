@@ -170,8 +170,8 @@ class TestAssetDiscoveryPageTemplate:
         collector = StaticCollector()
         discovery.discover_page_assets(page_path, collector)
 
-        style_urls = [a.url for a in collector.styles()]
-        script_urls = [a.url for a in collector.scripts()]
+        style_urls = [a.url for a in collector.assets_in_slot("styles")]
+        script_urls = [a.url for a in collector.assets_in_slot("scripts")]
         assert style_urls == ["/static/next/index.css"]
         assert script_urls == ["/static/next/index.js"]
 
@@ -187,8 +187,8 @@ class TestAssetDiscoveryPageTemplate:
 
         collector = StaticCollector()
         discovery.discover_page_assets(page_path, collector)
-        assert collector.styles() == []
-        assert collector.scripts() == []
+        assert collector.assets_in_slot("styles") == []
+        assert collector.assets_in_slot("scripts") == []
 
 
 class TestAssetDiscoveryLayoutChain:
@@ -216,7 +216,7 @@ class TestAssetDiscoveryLayoutChain:
 
         collector = StaticCollector()
         discovery.discover_page_assets(page_path, collector)
-        urls = [a.url for a in collector.styles()]
+        urls = [a.url for a in collector.assets_in_slot("styles")]
         assert urls == [
             "/static/next/layout.css",
             "/static/next/section/layout.css",
@@ -245,8 +245,12 @@ class TestAssetDiscoveryModuleLists:
 
         collector = StaticCollector()
         discovery.discover_page_assets(page_path, collector)
-        assert [a.url for a in collector.styles()] == ["https://cdn.example.com/x.css"]
-        assert [a.url for a in collector.scripts()] == ["https://cdn.example.com/x.js"]
+        assert [a.url for a in collector.assets_in_slot("styles")] == [
+            "https://cdn.example.com/x.css"
+        ]
+        assert [a.url for a in collector.assets_in_slot("scripts")] == [
+            "https://cdn.example.com/x.js"
+        ]
 
     def test_module_list_cache_skips_reparse(
         self,
@@ -268,7 +272,9 @@ class TestAssetDiscoveryModuleLists:
 
         collector2 = StaticCollector()
         discovery.discover_page_assets(page_path, collector2)
-        assert [a.url for a in collector2.styles()] == ["https://c.example/a.css"]
+        assert [a.url for a in collector2.assets_in_slot("styles")] == [
+            "https://c.example/a.css"
+        ]
 
     def test_module_list_and_layout_caches_evict_oldest(
         self,
@@ -314,6 +320,62 @@ class TestAssetDiscoveryModuleLists:
         assert len(discovery._layout_dir_cache) <= 1
 
 
+class TestAssetDiscoveryModuleListUrlRouting:
+    """`scripts`/`styles` list URLs are dropped when their suffix mismatches."""
+
+    def test_url_without_extension_is_dropped(
+        self,
+        tmp_path: Path,
+        file_backend: StaticBackend,
+    ) -> None:
+        page_dir = tmp_path / "noext"
+        page_dir.mkdir()
+        page_path = page_dir / "page.py"
+        page_path.write_text('scripts = ["https://cdn.example.com/loader"]\n')
+
+        provider = _Provider(file_backend, (tmp_path.resolve(),))
+        discovery = AssetDiscovery(provider)
+
+        collector = StaticCollector()
+        discovery.discover_page_assets(page_path, collector)
+        assert collector.assets_in_slot("scripts") == []
+
+    def test_url_with_unregistered_extension_is_dropped(
+        self,
+        tmp_path: Path,
+        file_backend: StaticBackend,
+    ) -> None:
+        page_dir = tmp_path / "weird"
+        page_dir.mkdir()
+        page_path = page_dir / "page.py"
+        page_path.write_text('scripts = ["https://cdn.example.com/asset.zzz"]\n')
+
+        provider = _Provider(file_backend, (tmp_path.resolve(),))
+        discovery = AssetDiscovery(provider)
+
+        collector = StaticCollector()
+        discovery.discover_page_assets(page_path, collector)
+        assert collector.assets_in_slot("scripts") == []
+
+    def test_url_with_mismatched_slot_is_dropped(
+        self,
+        tmp_path: Path,
+        file_backend: StaticBackend,
+    ) -> None:
+        page_dir = tmp_path / "mismatch"
+        page_dir.mkdir()
+        page_path = page_dir / "page.py"
+        page_path.write_text('scripts = ["https://cdn.example.com/styling.css"]\n')
+
+        provider = _Provider(file_backend, (tmp_path.resolve(),))
+        discovery = AssetDiscovery(provider)
+
+        collector = StaticCollector()
+        discovery.discover_page_assets(page_path, collector)
+        assert collector.assets_in_slot("scripts") == []
+        assert collector.assets_in_slot("styles") == []
+
+
 class TestAssetDiscoveryComponents:
     def test_simple_component_yields_nothing(
         self,
@@ -325,8 +387,8 @@ class TestAssetDiscoveryComponents:
 
         collector = StaticCollector()
         discovery.discover_component_assets(simple_component, collector)
-        assert collector.styles() == []
-        assert collector.scripts() == []
+        assert collector.assets_in_slot("styles") == []
+        assert collector.assets_in_slot("scripts") == []
 
     def test_composite_component_picks_up_css_js_and_module_lists(
         self,
@@ -339,8 +401,8 @@ class TestAssetDiscoveryComponents:
         collector = StaticCollector()
         discovery.discover_component_assets(composite_component, collector)
 
-        style_urls = [a.url for a in collector.styles()]
-        script_urls = [a.url for a in collector.scripts()]
+        style_urls = [a.url for a in collector.assets_in_slot("styles")]
+        script_urls = [a.url for a in collector.assets_in_slot("scripts")]
         assert "/static/next/components/widget.css" in style_urls
         assert "/static/next/components/widget.js" in script_urls
         assert "https://cdn.example.com/extra.css" in style_urls
@@ -375,7 +437,7 @@ class TestAssetDiscoveryErrorHandling:
         with caplog.at_level("WARNING", logger="next.static.discovery"):
             discovery.discover_page_assets(page_path, collector)
 
-        assert collector.styles() == []
+        assert collector.assets_in_slot("styles") == []
         assert any(
             "Failed to register static asset" in r.getMessage() for r in caplog.records
         )
@@ -398,7 +460,9 @@ class TestAssetDiscoveryCustomStems:
 
         collector = StaticCollector()
         discovery.discover_page_assets(page_path, collector)
-        assert [a.url for a in collector.styles()] == ["/static/next/index.css"]
+        assert [a.url for a in collector.assets_in_slot("styles")] == [
+            "/static/next/index.css"
+        ]
 
 
 class TestMakeDiscoveryFixture:

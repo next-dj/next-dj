@@ -120,6 +120,7 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-fail-under=100",
     "--ignore=tests/benchmarks",
+    "-p", "no:benchmark",
 ]
 
 [tool.coverage.run]
@@ -218,7 +219,7 @@ ignore = [
 "**/{test*,conftest}.py" = [
     "ANN001", "ANN201", "ANN202",
     "ARG001", "ARG002", "ARG003",
-    "S101", "S108",
+    "S101", "S105", "S106", "S108",
     "D100", "D101", "D102", "D103", "D104",
     "PLR2004", "PLR0913",
     "E501", "FBT003",
