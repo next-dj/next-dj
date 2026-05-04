@@ -54,7 +54,7 @@ class HybridRouterBackend(FileRouterBackend):
         article_model = django_apps.get_model("wiki", "Article")
         try:
             slugs = list(article_model.objects.values_list("slug", flat=True))
-        except DatabaseError:
+        except DatabaseError:  # pragma: no cover - DB not ready before migrations
             return []
         return [
             path(
