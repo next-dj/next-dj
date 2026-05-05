@@ -1,3 +1,4 @@
+import base64
 import os
 
 from django.conf import settings
@@ -12,33 +13,39 @@ def _has_module_assets(collector: object) -> bool:
 
 
 def inject_vite_dev_assets(sender: object, **_kwargs: object) -> None:
-    """Prepend the Vite HMR client and React Refresh preamble.
+    """Prepend the React Refresh preamble and the Vite HMR client.
 
-    Only fires when the page actually carries jsx scripts so the index
-    page stays free of Vite dev plumbing.
+    Both assets are added as URL-form module scripts because the
+    collector force-appends inline assets, and `@vitejs/plugin-react`
+    requires the preamble to execute before any jsx module loads. The
+    preamble JS is base64-encoded into a `data:` URL so it stays a
+    single self-contained module script tag. The receiver only fires on
+    pages that actually carry jsx scripts so the index page stays free
+    of Vite dev plumbing.
     """
     if not _has_module_assets(sender):
         return
     origin = os.environ.get("VITE_ORIGIN", "http://localhost:5173")
-    preamble = (
-        '<script type="module">'
+    preamble_code = (
         f'import RefreshRuntime from "{origin}/@react-refresh";'
         "RefreshRuntime.injectIntoGlobalHook(window);"
         "window.$RefreshReg$ = () => {};"
         "window.$RefreshSig$ = () => (type) => type;"
         "window.__vite_plugin_react_preamble_installed__ = true;"
-        "</script>"
     )
+    preamble_url = (
+        "data:text/javascript;base64,"
+        + base64.b64encode(preamble_code.encode()).decode()
+    )
+    # Two prepends in call order. Each insert goes to the next prepend
+    # slot, so the resulting bucket order is preamble, then @vite/client,
+    # then the regular module scripts.
     sender.add(  # type: ignore[attr-defined]
-        StaticAsset(
-            url="",
-            kind="js",
-            inline=f'<script type="module" src="{origin}/@vite/client"></script>',
-        ),
+        StaticAsset(url=preamble_url, kind="module"),
         prepend=True,
     )
     sender.add(  # type: ignore[attr-defined]
-        StaticAsset(url="", kind="js", inline=preamble),
+        StaticAsset(url=f"{origin}/@vite/client", kind="module"),
         prepend=True,
     )
 

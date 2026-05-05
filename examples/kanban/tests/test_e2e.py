@@ -1,3 +1,4 @@
+import base64
 import json
 import re
 
@@ -469,16 +470,27 @@ class TestViteDevAssetsGuard:
         response = client.get("/")
         body = response.content.decode()
         assert "@vite/client" not in body
-        assert "RefreshRuntime" not in body
+        assert 'src="data:text/javascript' not in body
 
-    def test_board_page_includes_vite_client(
+    def test_board_page_includes_vite_client_and_preamble(
         self,
         client: NextClient,
         board: Board,
     ) -> None:
         body = _board_html(client, board)
+        preamble_match = re.search(
+            r'<script type="module" src="data:text/javascript;base64,([^"]+)"',
+            body,
+        )
+        assert preamble_match is not None, "React Refresh preamble not injected"
+        decoded = base64.b64decode(preamble_match.group(1)).decode()
+        assert "RefreshRuntime" in decoded
         assert "@vite/client" in body
-        assert "RefreshRuntime" in body
+        # Preamble must precede @vite/client which must precede page.jsx.
+        preamble_pos = body.find("data:text/javascript")
+        vite_client_pos = body.find("@vite/client")
+        page_jsx_pos = body.find("page.jsx")
+        assert preamble_pos < vite_client_pos < page_jsx_pos
 
 
 class TestPayloadEnrichment:

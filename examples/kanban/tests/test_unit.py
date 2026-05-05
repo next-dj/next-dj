@@ -1,3 +1,4 @@
+import base64
 import importlib.util
 import inspect
 import json
@@ -426,6 +427,12 @@ class TestViteManifestBackendLoadManifest:
         assert backend._load_manifest() is first
 
 
+def _decode_preamble_data_url(url: str) -> str:
+    prefix = "data:text/javascript;base64,"
+    assert url.startswith(prefix)
+    return base64.b64decode(url[len(prefix) :]).decode()
+
+
 class TestInjectViteDevAssetsGuard:
     def test_skips_when_no_jsx_assets(self) -> None:
         collector = StaticCollector()
@@ -436,19 +443,23 @@ class TestInjectViteDevAssetsGuard:
         collector = StaticCollector()
         collector.add(StaticAsset(url="/static/page.jsx", kind="jsx"))
         inject_vite_dev_assets(collector)
-        scripts = collector.assets_in_slot("scripts")
-        inline = [a.inline for a in scripts if a.inline]
-        assert any("@vite/client" in s for s in inline)
-        assert any("RefreshRuntime" in s for s in inline)
+        urls = [a.url for a in collector.assets_in_slot("scripts")]
+        preamble_idx = next(i for i, u in enumerate(urls) if u.startswith("data:"))
+        vite_idx = next(i for i, u in enumerate(urls) if "@vite/client" in u)
+        jsx_idx = next(i for i, u in enumerate(urls) if "page.jsx" in u)
+        assert preamble_idx < vite_idx < jsx_idx
+        assert "RefreshRuntime" in _decode_preamble_data_url(urls[preamble_idx])
 
     def test_uses_env_origin(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("VITE_ORIGIN", "http://example.test:4242")
         collector = StaticCollector()
         collector.add(StaticAsset(url="/static/page.jsx", kind="jsx"))
         inject_vite_dev_assets(collector)
-        inline = [a.inline for a in collector.assets_in_slot("scripts") if a.inline]
-        assert any('src="http://example.test:4242/@vite/client"' in s for s in inline)
-        assert any('"http://example.test:4242/@react-refresh"' in s for s in inline)
+        urls = [a.url for a in collector.assets_in_slot("scripts")]
+        assert "http://example.test:4242/@vite/client" in urls
+        preamble = next(u for u in urls if u.startswith("data:"))
+        decoded = _decode_preamble_data_url(preamble)
+        assert 'from "http://example.test:4242/@react-refresh"' in decoded
 
 
 class TestColumnCardsContext:
