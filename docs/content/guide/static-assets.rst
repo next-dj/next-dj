@@ -352,6 +352,221 @@ both styles and scripts), so:
    you want two components to share a single boot script, make sure the
    block bodies render to the exact same bytes.
 
+.. _static-asset-kinds:
+
+Asset kinds: extending beyond CSS and JS
+----------------------------------------
+
+The static subsystem is type-agnostic. Built-in kinds such as ``css`` and
+``js`` are not privileged in core code. They are registered through the
+same public :class:`~next.static.KindRegistry` API that user code uses to
+teach the framework about new file types. Adding ``.jsx``, ``.wasm``, or
+``.ts`` is a one-call extension.
+
+How the registry works
+~~~~~~~~~~~~~~~~~~~~~~
+
+A kind registration carries three independent pieces of metadata:
+
+- **extension.** The file suffix that asset discovery probes for next to
+  every ``layout.djx``, ``template.djx``, and ``component.djx``.
+- **slot.** The placeholder slot name where collected assets land. The
+  built-in slots are ``"styles"`` and ``"scripts"``. New slots are
+  registered through :class:`~next.static.PlaceholderRegistry`.
+- **renderer.** The method name on the active static backend that
+  renders one asset URL. The framework looks the method up per asset
+  via ``getattr(backend, default_kinds.renderer(kind))``, so adding a
+  new kind only requires adding a matching method on the backend.
+
+The framework bootstrap calls
+:func:`~next.static.register_defaults` from
+:mod:`next.apps.staticfiles` during ``AppConfig.ready`` to register the
+two built-in kinds:
+
+.. code-block:: python
+
+   default_placeholders.register("styles", token="<!-- next:styles -->")
+   default_placeholders.register("scripts", token="<!-- next:scripts -->")
+   default_kinds.register(
+       "css",
+       extension=".css",
+       slot="styles",
+       renderer="render_link_tag",
+   )
+   default_kinds.register(
+       "js",
+       extension=".js",
+       slot="scripts",
+       renderer="render_script_tag",
+   )
+   default_kinds.register(
+       "module",
+       extension=".mjs",
+       slot="scripts",
+       renderer="render_module_tag",
+   )
+
+Repeat calls with identical parameters are idempotent. Conflicting
+re-registrations raise ``ValueError`` so silent overrides cannot mask
+configuration bugs.
+
+The ``module`` kind registers ``.mjs`` files and renders them with
+``render_module_tag``, which wraps the URL in
+``<script type="module" src="..."></script>``. Drop a ``template.mjs``
+or ``component.mjs`` next to any page or component and it lands in the
+``"scripts"`` slot as a native ES-module script tag with no extra
+configuration. A ``module_tag`` key in ``OPTIONS`` overrides the default
+fragment (useful for adding ``crossorigin`` or ``integrity`` attributes).
+
+Adding a new kind from your project
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``examples/kanban`` project teaches the framework about ``.jsx``
+files and hooks a Vite build pipeline to co-located JSX assets. Two
+pieces wire it together. The first is a registration call inside
+``AppConfig.ready``. The second is a custom backend that resolves JSX
+URLs differently in development and production.
+
+.. code-block:: python
+
+   from django.apps import AppConfig
+
+
+   class KanbanConfig(AppConfig):
+       name = "kanban"
+
+       def ready(self) -> None:
+           from next.static import default_kinds
+           from next.static.discovery import default_stems
+
+           default_kinds.register(
+               "jsx",
+               extension=".jsx",
+               slot="scripts",
+               renderer="render_babel_script_tag",
+           )
+
+           # Teach discovery to pick up page.jsx alongside page.py.
+           default_stems.register("template", "page")
+
+The ``default_stems.register("template", "page")`` call is the second
+extension point: it tells the stem-based file scanner to probe
+``page.jsx`` (and any other kind extension) next to ``page.py`` in
+every page directory. Without this call discovery only looks for the
+default ``template.jsx``.
+
+The matching backend overrides ``register_file`` to switch between
+Vite dev-server URLs (when ``DEV_ORIGIN`` is set) and hashed manifest
+paths (for production builds):
+
+.. code-block:: python
+
+   from next.static import StaticFilesBackend
+
+
+   class ViteManifestBackend(StaticFilesBackend):
+       def register_file(self, source_path, logical_name, kind):
+           if kind != "jsx":
+               return super().register_file(source_path, logical_name, kind)
+           if self._dev_origin:
+               return self._build_dev_url(source_path)   # Vite HMR URL
+           if self._manifest_path:
+               return self._resolve_from_manifest(source_path, logical_name)
+           return super().register_file(source_path, logical_name, kind)
+
+       def render_babel_script_tag(self, url, *, request=None):
+           target = self._dev_url_map.get(url, url)
+           return f'<script type="module" src="{target}"></script>'
+
+After registration, the rest of the pipeline transparently picks the
+new kind up:
+
+- :class:`~next.static.AssetDiscovery` iterates over every registered
+  kind and looks for ``component.jsx`` next to each ``component.djx``,
+  and ``page.jsx`` next to ``page.py`` (due to the stem registration).
+- :class:`~next.static.NextStaticFilesFinder` exposes the file under
+  ``next/components/<name>.jsx`` so ``collectstatic`` and the
+  staticfiles manifest pick it up.
+- :class:`~next.static.StaticCollector` routes the asset into the
+  ``"scripts"`` bucket via ``default_kinds.slot("jsx")``.
+- :class:`~next.static.StaticManager` calls
+  ``backend.render_babel_script_tag(url, request=...)`` because
+  ``default_kinds.renderer("jsx")`` resolves to that method name.
+
+The framework does not learn about ``"jsx"`` anywhere in core. It only
+follows the registry.
+
+.. tip::
+
+   The same pattern adds ``.ts`` (with a custom transpiler script tag),
+   ``.wasm`` (with a binding script that hydrates the module), or any
+   project-specific extension. Pick the slot the asset belongs to,
+   choose a renderer method name, and add the method on your backend.
+
+Custom stems: extending file discovery
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:class:`~next.static.StemRegistry` (``default_stems``) controls which
+filenames discovery probes next to each ``page.py``, ``layout.djx``,
+and ``component.djx``. The built-in stems are:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Role
+     - Default stems
+   * - ``"template"``
+     - ``"template"`` (finds ``template.css``, ``template.js``, ``template.mjs``, …)
+   * - ``"layout"``
+     - ``"layout"`` (finds ``layout.css``, ``layout.js``, …)
+   * - ``"component"``
+     - ``"component"`` (finds ``component.css``, ``component.js``, …)
+
+Register an additional stem to teach discovery about a new filename
+convention without changing the role:
+
+.. code-block:: python
+
+   from next.static.discovery import default_stems
+
+   # page.jsx, page.mjs, page.css … are now probed next to page.py
+   default_stems.register("template", "page")
+
+Multiple stems under the same role are scanned in registration order.
+A stem is a filename prefix only. The discovery loop pairs every
+registered stem with every registered kind extension and probes the
+combination. Registering ``"page"`` under ``"template"`` therefore
+unlocks ``page.jsx``, ``page.mjs``, ``page.css``, ``page.js`` — any
+extension that has a matching kind — simultaneously.
+
+Placeholder slots: the second extension point
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Slots tie a registered kind to a placement in the rendered HTML. The
+default ``"styles"`` and ``"scripts"`` slots are registered by the
+bootstrap above. Add a new slot when you need a third destination, for
+example a ``<head>``-level metadata block:
+
+.. code-block:: python
+
+   from next.static import default_placeholders
+
+   default_placeholders.register("meta", token="<!-- next:meta -->")
+   default_kinds.register(
+       "meta",
+       extension=".meta",
+       slot="meta",
+       renderer="render_meta_tag",
+   )
+
+Add ``<!-- next:meta -->`` to your root layout, drop a
+``component.meta`` next to a composite component, and provide
+``BackendSubclass.render_meta_tag(url, *, request=None)``. The framework
+walks every registered slot during the inject phase and rewrites each
+token in place, so introducing a new slot does not require any change
+to :class:`~next.static.StaticManager`.
+
 Backends and settings
 ---------------------
 
@@ -477,34 +692,45 @@ Custom backends
 ---------------
 
 A backend is any class that subclasses :class:`~next.static.StaticBackend`.
-The contract is small (three methods) and lets you swap how assets are
-rendered and how URLs are produced (typically still via Django staticfiles).
+The only abstract requirement is :meth:`~next.static.StaticBackend.register_file`.
+Renderer methods are concrete on the subclass and selected per asset
+through ``default_kinds.renderer(kind)``. Subclassing
+:class:`~next.static.StaticFilesBackend` keeps the default URL resolution
+path (Django staticfiles) and lets you focus on the rendering side.
 
 .. code-block:: python
 
    from typing import Any
 
-   from next.static import StaticBackend
+   from next.static import StaticAsset, StaticBackend, StaticNamespace
 
 
    class CDNStaticBackend(StaticBackend):
        """Push co-located files to a CDN and return public URLs."""
 
        def __init__(self, config: dict[str, Any] | None = None) -> None:
-           cfg = config or {}
-           opts = cfg.get("OPTIONS") or {}
+           super().__init__(config)
+           opts = dict((self._config or {}).get("OPTIONS") or {})
            self._base = opts["base_url"].rstrip("/")
 
        def register_file(self, source_path, logical_name, kind):
-           extension = ".css" if kind == "css" else ".js"
+           del kind
            upload_to_cdn(source_path)
-           return f"{self._base}/{logical_name}{extension}"
+           return f"{self._base}/{logical_name}{source_path.suffix}"
 
-       def render_link_tag(self, url: str) -> str:
+       def render_link_tag(self, url: str, *, request=None) -> str:
+           del request
            return f'<link rel="stylesheet" href="{url}" crossorigin>'
 
-       def render_script_tag(self, url: str) -> str:
+       def render_script_tag(self, url: str, *, request=None) -> str:
+           del request
            return f'<script src="{url}" defer></script>'
+
+The URL extension comes from ``source_path.suffix`` rather than from the
+``kind`` parameter. That decoupling lets one kind serve multiple file
+extensions (a common need when adding ``.jsx`` alongside ``.js`` in the
+same ``"scripts"`` slot) and keeps the ``register_file`` contract free
+of any ``css``/``js`` literal in core.
 
 Wire it up like any other backend:
 
@@ -582,6 +808,31 @@ An inline ``AttributedStaticFilesBackend`` snippet lives in
 :doc:`extending` (section "Worked examples by subsystem"). Use
 ``OPTIONS["css_tag"]`` / ``OPTIONS["js_tag"]`` to customise the link
 markup that ``render_link_tag`` emits without subclassing.
+
+Cache-friendly attributes for CDN scripts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Browsers can reuse a single cached copy of a shared library across
+origins only when the script tag carries ``crossorigin="anonymous"``.
+A custom backend can inspect the URL and add these attributes to external
+(``http://`` / ``https://``) scripts while leaving local
+``/static/...`` URLs untouched:
+
+.. code-block:: python
+
+   class CdnAwareStaticBackend(StaticFilesBackend):
+       _CDN_ATTRS = {"crossorigin": "anonymous", "referrerpolicy": "no-referrer"}
+
+       def render_script_tag(self, url, *, request=None):
+           if not url.startswith(("http://", "https://")):
+               return super().render_script_tag(url)
+           extra = "".join(f' {k}="{v}"' for k, v in self._CDN_ATTRS.items())
+           return f'<script src="{url}"{extra}></script>'
+
+The pattern lives entirely in the backend. Local assets keep the lean
+default rendering. The attribute dict makes it trivial to swap in
+subresource-integrity hashes (``integrity``) or fetch priority hints
+(``fetchpriority``) without touching the framework.
 
 Staticfiles and collectstatic
 -----------------------------
@@ -1181,7 +1432,16 @@ The most useful entry points:
 - :class:`~next.static.StaticManager`. Coordinates backends, discovery, and
   placeholder injection.
 - :class:`~next.static.KindRegistry` and :data:`~next.static.default_kinds`.
-  Register extra asset kinds beyond the built-in CSS and JS.
+  Register extra asset kinds beyond the built-in CSS and JS. See
+  :ref:`static-asset-kinds`.
+- :class:`~next.static.PlaceholderRegistry` and
+  :data:`~next.static.default_placeholders`. Register additional
+  placeholder slots (``<!-- next:meta -->``, ``<!-- next:preload -->``)
+  for new asset destinations.
+- :func:`~next.static.register_defaults`. Bootstrap helper that
+  registers the built-in ``css`` and ``js`` kinds plus the matching
+  ``styles`` and ``scripts`` slots through the public API. Wired in
+  by :mod:`next.apps.staticfiles`.
 - :class:`~next.static.NextScriptBuilder` and
   :class:`~next.static.ScriptInjectionPolicy`. Control how ``next.min.js``
   is injected.
@@ -1211,3 +1471,11 @@ pipeline:
   ``TenantPrefixStaticBackend`` that reads ``request.tenant`` from the
   ``render_*_tag`` hook. Demonstrates request-aware backends paired with a
   shared ``root_pages`` layout.
+- ``examples/kanban`` — custom ``ViteManifestBackend`` that registers a
+  ``.jsx`` kind through ``default_kinds.register`` and routes assets to
+  the Vite dev server (HMR) or to hashed production URLs read from
+  ``dist/.vite/manifest.json``. Co-located ``page.jsx`` is discovered
+  alongside ``page.py`` via ``default_stems.register``. The
+  ``collector_finalized`` signal injects ``@vite/client`` without
+  template edits. Uses ``HashContentDedup`` and ``DeepMergePolicy`` for
+  dedup and multi-source JS context merging.

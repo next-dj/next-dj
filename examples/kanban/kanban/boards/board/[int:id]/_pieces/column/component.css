@@ -1,0 +1,7 @@
+.kanban-column {
+  min-height: 8rem;
+}
+
+.kanban-column[data-drop="active"] {
+  outline: 2px dashed #0ea5e9;
+}

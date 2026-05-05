@@ -35,60 +35,105 @@ class TestStaticAsset:
             asset.url = "mutated"  # type: ignore[misc]
 
 
-class TestKindRegistry:
-    """KindRegistry maps kinds to file extensions with mutation support."""
+class TestKindRegistryStartsEmpty:
+    """A fresh registry ships with zero registered kinds."""
 
-    def test_default_kinds(self) -> None:
+    def test_empty_after_init(self) -> None:
         reg = KindRegistry()
+        assert reg.kinds() == ()
+        assert "css" not in reg
+
+
+class TestKindRegistryRegister:
+    """register stores extension, slot, and renderer per kind."""
+
+    def test_register_makes_lookups_succeed(self) -> None:
+        reg = KindRegistry()
+        reg.register("css", extension=".css", slot="styles", renderer="render_link_tag")
         assert reg.extension("css") == ".css"
-        assert reg.extension("js") == ".js"
-
-    def test_contains(self) -> None:
-        reg = KindRegistry()
+        assert reg.slot("css") == "styles"
+        assert reg.renderer("css") == "render_link_tag"
         assert "css" in reg
-        assert "unknown" not in reg
-        assert 42 not in reg  # type: ignore[comparison-overlap]
 
-    def test_register_new_kind(self) -> None:
+    def test_register_is_idempotent_for_identical_params(self) -> None:
         reg = KindRegistry()
-        reg.register("wasm", ".wasm")
-        assert reg.extension("wasm") == ".wasm"
-        assert "wasm" in reg
+        reg.register("css", extension=".css", slot="styles", renderer="render_link_tag")
+        reg.register("css", extension=".css", slot="styles", renderer="render_link_tag")
+        assert reg.kinds() == ("css",)
 
-    def test_register_overrides_existing(self) -> None:
+    def test_register_rejects_conflicting_re_registration(self) -> None:
         reg = KindRegistry()
-        reg.register("css", ".scss")
-        assert reg.extension("css") == ".scss"
+        reg.register("css", extension=".css", slot="styles", renderer="render_link_tag")
+        with pytest.raises(ValueError, match="already registered"):
+            reg.register(
+                "css",
+                extension=".sass",
+                slot="styles",
+                renderer="render_link_tag",
+            )
+
+    def test_register_rejects_empty_kind(self) -> None:
+        reg = KindRegistry()
+        with pytest.raises(ValueError, match="Invalid kind"):
+            reg.register("", extension=".x", slot="s", renderer="r")
+
+    def test_register_rejects_non_identifier_kind(self) -> None:
+        reg = KindRegistry()
+        with pytest.raises(ValueError, match="Invalid kind"):
+            reg.register("has-dash", extension=".x", slot="s", renderer="r")
+
+    def test_register_rejects_extension_without_dot(self) -> None:
+        reg = KindRegistry()
+        with pytest.raises(ValueError, match="must start with"):
+            reg.register("foo", extension="foo", slot="s", renderer="r")
+
+    def test_register_rejects_empty_slot(self) -> None:
+        reg = KindRegistry()
+        with pytest.raises(ValueError, match="Slot name"):
+            reg.register("foo", extension=".x", slot="", renderer="r")
+
+    def test_register_rejects_empty_renderer(self) -> None:
+        reg = KindRegistry()
+        with pytest.raises(ValueError, match="Renderer"):
+            reg.register("foo", extension=".x", slot="s", renderer="")
+
+
+class TestKindRegistryLookups:
+    """Lookups raise KeyError on unregistered kinds."""
 
     def test_extension_raises_for_unknown(self) -> None:
         reg = KindRegistry()
         with pytest.raises(KeyError, match="Unsupported asset kind"):
             reg.extension("ghost")
 
-    def test_register_rejects_empty_kind(self) -> None:
+    def test_slot_raises_for_unknown(self) -> None:
         reg = KindRegistry()
-        with pytest.raises(ValueError, match="Invalid kind"):
-            reg.register("", ".x")
+        with pytest.raises(KeyError, match="Unsupported asset kind"):
+            reg.slot("ghost")
 
-    def test_register_rejects_non_identifier_kind(self) -> None:
+    def test_renderer_raises_for_unknown(self) -> None:
         reg = KindRegistry()
-        with pytest.raises(ValueError, match="Invalid kind"):
-            reg.register("has-dash", ".x")
-
-    def test_register_rejects_extension_without_dot(self) -> None:
-        reg = KindRegistry()
-        with pytest.raises(ValueError, match="must start with"):
-            reg.register("foo", "foo")
+        with pytest.raises(KeyError, match="Unsupported asset kind"):
+            reg.renderer("ghost")
 
     def test_kind_for_extension(self) -> None:
         reg = KindRegistry()
+        reg.register("css", extension=".css", slot="styles", renderer="render_link_tag")
         assert reg.kind_for_extension(".css") == "css"
         assert reg.kind_for_extension(".missing") is None
 
     def test_kinds_preserves_order(self) -> None:
         reg = KindRegistry()
-        reg.register("wasm", ".wasm")
-        assert reg.kinds() == ("css", "js", "wasm")
+        reg.register("css", extension=".css", slot="styles", renderer="render_link_tag")
+        reg.register(
+            "js", extension=".js", slot="scripts", renderer="render_script_tag"
+        )
+        reg.register("jsx", extension=".jsx", slot="scripts", renderer="render_babel")
+        assert reg.kinds() == ("css", "js", "jsx")
+
+    def test_contains_rejects_non_string(self) -> None:
+        reg = KindRegistry()
+        assert 42 not in reg  # type: ignore[comparison-overlap]
 
 
 class TestDefaultKinds:
@@ -97,9 +142,13 @@ class TestDefaultKinds:
     def test_is_a_kind_registry(self) -> None:
         assert isinstance(default_kinds, KindRegistry)
 
-    def test_ships_css_and_js(self) -> None:
+    def test_bootstrap_registered_css_and_js(self) -> None:
         assert "css" in default_kinds
         assert "js" in default_kinds
+        assert default_kinds.slot("css") == "styles"
+        assert default_kinds.slot("js") == "scripts"
+        assert default_kinds.renderer("css") == "render_link_tag"
+        assert default_kinds.renderer("js") == "render_script_tag"
 
 
 class TestStaticNamespace:

@@ -13,11 +13,11 @@ from next.static import (
     StaticFilesBackend,
     StaticManager,
 )
-from next.static.collector import (
-    HEAD_CLOSE,
-    SCRIPTS_PLACEHOLDER,
-    STYLES_PLACEHOLDER,
-)
+from next.static.collector import HEAD_CLOSE
+
+
+STYLES_PLACEHOLDER = "<!-- next:styles -->"
+SCRIPTS_PLACEHOLDER = "<!-- next:scripts -->"
 
 
 if TYPE_CHECKING:

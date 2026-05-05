@@ -20,29 +20,6 @@ Articles persist in SQLite. After every create, edit, or delete the
 router rebuilds itself in-process and the new URL is reachable on the
 next request.
 
-## Framework features showcased
-
-- **Hybrid router backend.** `wiki.backends.HybridRouterBackend`
-  subclasses `FileRouterBackend` and overrides `generate_urls` to emit
-  one named alias per article slug alongside the file routes. The
-  aliases share a single catchall view.
-- **Public router reload.** `next.urls.router_manager.reload()` rebuilds
-  the URL tree, clears the Django resolver cache, and emits the
-  `router_reloaded` signal. The example wires it to `post_save` and
-  `post_delete` of `Article`.
-- **DI provider for slug lookup.** `DArticle[Article]` mirrors the
-  shortener pattern. The provider reads the URL `slug` and either
-  returns the model or raises `Http404`.
-- **Composite component inside a form.** `markdown_preview` renders the
-  current draft body through the same Python helper that powers the
-  public article view.
-- **Co-located static.** Every `page.css` and `component.css` lives next
-  to its template. The `{% collect_styles %}` and `{% collect_scripts %}`
-  tags emit them once each per request.
-- **Slug reservations.** `Article.clean()` plus form-level `clean_slug`
-  reject the prefixes used by file routes (`docs`, `articles`, `search`,
-  `wiki`).
-
 ## How to run
 
 ```bash
@@ -60,7 +37,7 @@ The new article becomes available at `/wiki/<slug>/` immediately. Open
 the search page with `?q=...` to see both file and database matches in
 the same response.
 
-## Key ideas
+## Walking the code
 
 ### 1. Two URL sources, one router
 
@@ -129,40 +106,6 @@ side by side.
 The example wires only one `layout.djx` at the routes root. A nested
 layout is not needed and would add noise. Examples that do need nested
 layouts are `examples/multi-tenant` and `examples/markdown-blog`.
-
-## Tests
-
-`tests/test_e2e.py` covers eight scenarios end-to-end.
-
-| Class | Coverage |
-|-------|----------|
-| `TestIndex` | Index lists both file pages and articles. |
-| `TestFileDocs` | Each file documentation page renders through the layout. |
-| `TestArticleCreation` | Create form publishes a new `/wiki/<slug>/` URL. |
-| `TestArticleEdit` | Edit form replaces the persisted body. |
-| `TestArticleDeletion` | Delete removes the dynamic URL. |
-| `TestSearch` | Search returns matches from both stores. |
-| `TestRouterReloadSignal` | `router_reloaded` fires on save and delete. |
-| `TestValidationPreservesPreview` | Reserved slug re-renders with a live preview. |
-
-Run the suite with:
-
-```bash
-uv run pytest
-```
-
-## Forward-compat
-
-- **Suspense.** The article view splits cleanly across two context
-  callables (`article` and `rendered_html`). When async lands, the
-  Markdown render becomes the obvious place to await without touching
-  the page module shape.
-- **Partial rerender.** The forms already follow the redirect-after-post
-  pattern. The validation re-render uses `_next_form_page` which is the
-  same hook a partial fragment would target.
-- **Native React.** The Markdown preview is a small JavaScript bundle
-  that listens to a textarea. Replacing it with a React island fits in
-  the same `component.js` file without touching the page module.
 
 ## Further reading
 

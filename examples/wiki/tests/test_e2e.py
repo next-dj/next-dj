@@ -261,7 +261,9 @@ class TestRouterReloadSignal:
     ) -> None:
         with SignalRecorder(router_reloaded) as recorder:
             if trigger == "save":
-                Article.objects.create(slug="signal-trigger", title="Signal", body_md="")
+                Article.objects.create(
+                    slug="signal-trigger", title="Signal", body_md=""
+                )
             else:
                 routing_doc.delete()
         assert len(recorder.events_for(router_reloaded)) >= 1

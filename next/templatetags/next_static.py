@@ -12,6 +12,11 @@ templates can pull in shared third-party libraries without touching
 context and hoisted into the matching slot, so developers can co-locate
 inline ``<style>`` or ``<script>`` blocks with their components while still
 letting the collector control final placement and order.
+
+These convenience tags lean on the bootstrap-registered ``css`` and ``js``
+kinds. Custom kinds added by user code register through the same public
+``KindRegistry.register`` API and pick up automatic discovery without needing
+new template tags.
 """
 
 from __future__ import annotations
@@ -22,9 +27,7 @@ from django import template
 from django.template.base import Node, NodeList
 from django.utils.safestring import mark_safe
 
-from next.static import StaticAsset, StaticCollector
-from next.static.assets import _KIND_CSS, _KIND_JS
-from next.static.collector import SCRIPTS_PLACEHOLDER, STYLES_PLACEHOLDER
+from next.static import StaticAsset, StaticCollector, default_placeholders
 
 
 if TYPE_CHECKING:
@@ -33,20 +36,28 @@ if TYPE_CHECKING:
 
 register = template.Library()
 
+
+_KIND_CSS = "css"
+_KIND_JS = "js"
 _END_BLOCK_USE_STYLE = ("/use_style",)
 _END_BLOCK_USE_SCRIPT = ("/use_script",)
+
+
+def _slot_token(name: str) -> str:
+    slot = default_placeholders.get(name)
+    return slot.token if slot is not None else ""
 
 
 @register.simple_tag
 def collect_styles() -> str:
     """Mark where collected CSS link tags will be injected after rendering."""
-    return mark_safe(STYLES_PLACEHOLDER)  # noqa: S308
+    return mark_safe(_slot_token("styles"))  # noqa: S308
 
 
 @register.simple_tag
 def collect_scripts() -> str:
     """Mark where collected JS script tags will be injected after rendering."""
-    return mark_safe(SCRIPTS_PLACEHOLDER)  # noqa: S308
+    return mark_safe(_slot_token("scripts"))  # noqa: S308
 
 
 @register.simple_tag(takes_context=True)

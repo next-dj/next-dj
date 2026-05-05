@@ -341,8 +341,8 @@ class Page:
                 sender=Page,
                 file_path=file_path,
                 duration_ms=duration_ms,
-                styles_count=len(collector.styles()),
-                scripts_count=len(collector.scripts()),
+                styles_count=len(collector.assets_in_slot("styles")),
+                scripts_count=len(collector.assets_in_slot("scripts")),
                 context_keys=tuple(context_data.keys()),
             )
         return result

@@ -165,19 +165,34 @@ for a real ``MarkdownTemplateLoader`` that reads a sibling
 ``DDependencyBase`` marker to drive annotation-based injection.
 
 **Custom StaticBackend.** See :doc:`static-assets` for the static-asset
-pipeline. The minimal contract:
+pipeline. The two hooks most backends override are ``register_file``
+(called once per discovered asset — return the URL to embed) and
+``render_*_tag`` methods (called at render time — return the HTML tag
+string). Subclass ``StaticFilesBackend`` to inherit Django ``staticfiles``
+URL resolution and add only what differs:
 
 .. code-block:: python
 
-   from next.static import StaticBackend
+   from pathlib import Path
+   from next.static import StaticFilesBackend
 
 
-   class AttributedStaticFilesBackend(StaticBackend):
-       """Add a `data-served-by` attribute to every asset URL this backend owns."""
+   class ViteManifestBackend(StaticFilesBackend):
+       """Route .jsx assets to a Vite dev server or hashed prod URLs."""
 
-       def url_for(self, asset):
-           base = super().url_for(asset)
-           return f"{base}?served-by=attributed"
+       def register_file(self, source_path: Path, logical_name: str, kind: str) -> str:
+           if kind != "jsx":
+               return super().register_file(source_path, logical_name, kind)
+           if self._dev_origin:
+               return self._build_dev_url(source_path)   # Vite HMR URL
+           return self._resolve_from_manifest(source_path, logical_name)
+
+       def render_babel_script_tag(self, url: str, *, request=None) -> str:
+           target = self._dev_url_map.get(url, url)
+           return f'<script type="module" src="{target}"></script>'
+
+See ``examples/kanban/kanban/backends.py`` for the complete implementation
+including manifest loading, dev URL mapping, and ``VITE_ROOT`` resolution.
 
 Signals as an extension point
 -----------------------------

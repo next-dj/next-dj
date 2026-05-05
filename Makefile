@@ -1,4 +1,4 @@
-.PHONY: help install test bench lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js lint-js format-js format-js-check
+.PHONY: help install test bench lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js lint-js format-js format-js-check test-examples
 
 # Allow CI to point at a prebuilt venv's pytest (bypassing `uv run` and its sync step)
 PYTEST ?= uv run pytest
@@ -8,7 +8,7 @@ help: # show this help message
 	@echo "  install         - sync runtime deps + project from uv.lock (no dev group)"
 	@echo "  test            - run tests in parallel with 100% coverage requirement"
 	@echo "  bench           - run performance benchmarks (opt-in, no coverage)"
-	@echo "  test-examples   - run tests for examples in parallel with coverage"
+	@echo "  test-examples   - run Python + JS tests for examples with coverage"
 	@echo "  lint            - run linting with ruff"
 	@echo "  format          - format code with ruff"
 	@echo "  type-check      - run type checking with mypy"
@@ -73,7 +73,7 @@ BENCH_EXTRA ?=
 bench: # run performance benchmarks (opt-in, no coverage, flags match CI)
 	uv run pytest tests/benchmarks $(BENCH_FLAGS) $(BENCH_EXTRA)
 
-test-examples: # run tests for examples with coverage
+test-examples: # run Python, JS tests for examples with coverage
 	@set -e; \
 	missing_tests=0; \
 	for example_dir in examples/*/; do \
@@ -95,6 +95,14 @@ test-examples: # run tests for examples with coverage
 				cd - > /dev/null; \
 			elif [ -f "$$example_dir/tests.py" ]; then \
 				cd "$$example_dir" && $(PYTEST) tests.py -n auto --cov=. --cov-config=../.coveragerc --cov-report=term-missing --cov-fail-under=100; \
+				cd - > /dev/null; \
+			fi; \
+		fi; \
+	done; \
+	for example_dir in examples/*/; do \
+		if [ -f "$${example_dir}package.json" ]; then \
+			if node -e "const p=require('./$${example_dir}package.json');process.exit(p.scripts&&p.scripts.test?0:1)" 2>/dev/null; then \
+				cd "$$example_dir" && npm ci && npm test; \
 				cd - > /dev/null; \
 			fi; \
 		fi; \

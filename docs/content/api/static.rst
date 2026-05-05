@@ -33,6 +33,14 @@ Backends (``next.static.backends``)
    :show-inheritance:
    :exclude-members: staticfiles_storage
 
+Defaults bootstrap (``next.static.defaults``)
+---------------------------------------------
+
+.. automodule:: next.static.defaults
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Discovery (``next.static.discovery``)
 --------------------------------------
 

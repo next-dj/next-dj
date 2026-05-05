@@ -1,5 +1,6 @@
 [run]
 source = .
+disable_warnings = no-data-collected
 omit =
     */tests.py
     */tests/*

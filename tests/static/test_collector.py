@@ -7,8 +7,6 @@ import pytest
 from next.static import StaticAsset, StaticCollector
 from next.static.collector import (
     HEAD_CLOSE,
-    SCRIPTS_PLACEHOLDER,
-    STYLES_PLACEHOLDER,
     DeepMergePolicy,
     FirstWinsPolicy,
     HashContentDedup,
@@ -27,25 +25,26 @@ JS_URL = "https://example.com/a.js"
 
 
 class TestStaticCollectorOrdering:
-    """Collector keeps CSS and JS in distinct buckets and preserves insertion order."""
+    """Collector buckets assets per slot and preserves insertion order."""
 
-    def test_css_and_js_go_to_separate_lists(self, collector: StaticCollector) -> None:
+    def test_css_and_js_go_to_separate_buckets(
+        self, collector: StaticCollector
+    ) -> None:
         css = StaticAsset(url=CSS_URL, kind="css")
         js = StaticAsset(url=JS_URL, kind="js")
         collector.add(css)
         collector.add(js)
-        assert collector.styles() == [css]
-        assert collector.scripts() == [js]
+        assert collector.assets_in_slot("styles") == [css]
+        assert collector.assets_in_slot("scripts") == [js]
 
     def test_preserves_insertion_order(self, collector: StaticCollector) -> None:
         urls = [f"https://cdn/{i}.css" for i in range(3)]
         for url in urls:
             collector.add(StaticAsset(url=url, kind="css"))
-        assert [asset.url for asset in collector.styles()] == urls
+        assert [asset.url for asset in collector.assets_in_slot("styles")] == urls
 
-    def test_accessors_return_same_list(self, collector: StaticCollector) -> None:
-        collector.add(StaticAsset(url=CSS_URL, kind="css"))
-        assert collector.styles() is collector.styles()
+    def test_unknown_slot_returns_empty_list(self, collector: StaticCollector) -> None:
+        assert collector.assets_in_slot("never-registered") == []
 
 
 class TestStaticCollectorDedup:
@@ -54,31 +53,24 @@ class TestStaticCollectorDedup:
     def test_duplicate_url_ignored(self, collector: StaticCollector) -> None:
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
-        assert len(collector.styles()) == 1
+        assert len(collector.assets_in_slot("styles")) == 1
 
     def test_dedup_is_kind_scoped(self, collector: StaticCollector) -> None:
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
         collector.add(StaticAsset(url=CSS_URL, kind="js"))
-        assert [a.url for a in collector.styles()] == [CSS_URL]
-        assert [a.url for a in collector.scripts()] == [CSS_URL]
+        assert [a.url for a in collector.assets_in_slot("styles")] == [CSS_URL]
+        assert [a.url for a in collector.assets_in_slot("scripts")] == [CSS_URL]
 
     def test_dedup_survives_source_path_variation(
         self, collector: StaticCollector
     ) -> None:
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
         collector.add(StaticAsset(url=CSS_URL, kind="css", source_path=Path("/a.css")))
-        assert len(collector.styles()) == 1
+        assert len(collector.assets_in_slot("styles")) == 1
 
-    def test_unknown_kind_dropped_with_debug_log(
-        self,
-        collector: StaticCollector,
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        with caplog.at_level("DEBUG", logger="next.static.collector"):
+    def test_unregistered_kind_raises(self, collector: StaticCollector) -> None:
+        with pytest.raises(KeyError, match="Unsupported asset kind"):
             collector.add(StaticAsset(url="weird://x", kind="weird"))
-        assert collector.styles() == []
-        assert collector.scripts() == []
-        assert any("unknown kind" in rec.message for rec in caplog.records)
 
 
 class TestStaticCollectorPrepend:
@@ -87,7 +79,10 @@ class TestStaticCollectorPrepend:
     def test_prepend_moves_asset_to_front(self, collector: StaticCollector) -> None:
         collector.add(StaticAsset(url="/own.css", kind="css"))
         collector.add(StaticAsset(url="/dep.css", kind="css"), prepend=True)
-        assert [a.url for a in collector.styles()] == ["/dep.css", "/own.css"]
+        assert [a.url for a in collector.assets_in_slot("styles")] == [
+            "/dep.css",
+            "/own.css",
+        ]
 
     def test_prepend_preserves_order_across_calls(
         self, collector: StaticCollector
@@ -95,20 +90,20 @@ class TestStaticCollectorPrepend:
         collector.add(StaticAsset(url="/own.css", kind="css"))
         for url in ("/a.css", "/b.css", "/c.css"):
             collector.add(StaticAsset(url=url, kind="css"), prepend=True)
-        assert [a.url for a in collector.styles()] == [
+        assert [a.url for a in collector.assets_in_slot("styles")] == [
             "/a.css",
             "/b.css",
             "/c.css",
             "/own.css",
         ]
 
-    def test_prepend_cursor_independent_per_kind(
+    def test_prepend_cursor_independent_per_slot(
         self, collector: StaticCollector
     ) -> None:
         collector.add(StaticAsset(url="/own.js", kind="js"))
         collector.add(StaticAsset(url="/a.js", kind="js"), prepend=True)
         collector.add(StaticAsset(url="/b.js", kind="js"), prepend=True)
-        assert [a.url for a in collector.scripts()] == [
+        assert [a.url for a in collector.assets_in_slot("scripts")] == [
             "/a.js",
             "/b.js",
             "/own.js",
@@ -119,7 +114,7 @@ class TestStaticCollectorPrepend:
         collector.add(StaticAsset(url="/dep.css", kind="css"), prepend=True)
         collector.add(StaticAsset(url="/dep.css", kind="css"), prepend=True)
         collector.add(StaticAsset(url="/dep2.css", kind="css"), prepend=True)
-        assert [a.url for a in collector.styles()] == [
+        assert [a.url for a in collector.assets_in_slot("styles")] == [
             "/dep.css",
             "/dep2.css",
             "/own.css",
@@ -130,45 +125,49 @@ class TestStaticCollectorInline:
     """Inline assets always append and dedup by body."""
 
     @pytest.mark.parametrize(
-        ("kind", "body", "accessor"),
-        [("js", "console.log(1)", "scripts"), ("css", "body{color:red}", "styles")],
+        ("kind", "body", "slot"),
+        [
+            ("js", "console.log(1)", "scripts"),
+            ("css", "body{color:red}", "styles"),
+        ],
     )
     def test_inline_asset_lands_in_bucket(
         self,
         collector: StaticCollector,
         kind: str,
         body: str,
-        accessor: str,
+        slot: str,
     ) -> None:
         collector.add(StaticAsset(url="", kind=kind, inline=body))
-        items = getattr(collector, accessor)()
+        items = collector.assets_in_slot(slot)
         assert len(items) == 1
         assert items[0].inline == body
 
     def test_identical_inline_bodies_dedupe(self, collector: StaticCollector) -> None:
         collector.add(StaticAsset(url="", kind="js", inline="x()"))
         collector.add(StaticAsset(url="", kind="js", inline="x()"))
-        assert len(collector.scripts()) == 1
+        assert len(collector.assets_in_slot("scripts")) == 1
 
     def test_different_inline_bodies_kept_distinct(
         self, collector: StaticCollector
     ) -> None:
         collector.add(StaticAsset(url="", kind="js", inline="one()"))
         collector.add(StaticAsset(url="", kind="js", inline="two()"))
-        assert [a.inline for a in collector.scripts()] == ["one()", "two()"]
+        scripts = collector.assets_in_slot("scripts")
+        assert [a.inline for a in scripts] == ["one()", "two()"]
 
     def test_inline_asset_ignores_prepend(self, collector: StaticCollector) -> None:
         collector.add(StaticAsset(url=JS_URL, kind="js"), prepend=True)
         collector.add(StaticAsset(url="", kind="js", inline="inline()"), prepend=True)
-        scripts = collector.scripts()
+        scripts = collector.assets_in_slot("scripts")
         assert scripts[0].url == JS_URL
         assert scripts[-1].inline == "inline()"
 
     def test_inline_dedup_is_kind_scoped(self, collector: StaticCollector) -> None:
         collector.add(StaticAsset(url="", kind="css", inline="same"))
         collector.add(StaticAsset(url="", kind="js", inline="same"))
-        assert [a.inline for a in collector.styles()] == ["same"]
-        assert [a.inline for a in collector.scripts()] == ["same"]
+        assert [a.inline for a in collector.assets_in_slot("styles")] == ["same"]
+        assert [a.inline for a in collector.assets_in_slot("scripts")] == ["same"]
 
 
 class TestUrlDedup:
@@ -197,7 +196,7 @@ class TestHashContentDedup:
         collector = StaticCollector(dedup=dedup)
         collector.add(StaticAsset(url="/a.css", kind="css", source_path=a))
         collector.add(StaticAsset(url="/b.css", kind="css", source_path=b))
-        assert len(collector.styles()) == 1
+        assert len(collector.assets_in_slot("styles")) == 1
 
     def test_different_content_kept(self, tmp_path: Path) -> None:
         a = tmp_path / "a.css"
@@ -208,14 +207,14 @@ class TestHashContentDedup:
         collector = StaticCollector(dedup=dedup)
         collector.add(StaticAsset(url="/a.css", kind="css", source_path=a))
         collector.add(StaticAsset(url="/b.css", kind="css", source_path=b))
-        assert len(collector.styles()) == 2
+        assert len(collector.assets_in_slot("styles")) == 2
 
     def test_fallback_to_url_when_no_source(self) -> None:
         dedup = HashContentDedup()
         collector = StaticCollector(dedup=dedup)
         collector.add(StaticAsset(url="/a.css", kind="css"))
         collector.add(StaticAsset(url="/a.css", kind="css"))
-        assert len(collector.styles()) == 1
+        assert len(collector.assets_in_slot("styles")) == 1
 
 
 class TestIdentityDedup:
@@ -225,7 +224,7 @@ class TestIdentityDedup:
         collector = StaticCollector(dedup=IdentityDedup())
         collector.add(StaticAsset(url="/a.css", kind="css"))
         collector.add(StaticAsset(url="/a.css", kind="css"))
-        assert len(collector.styles()) == 2
+        assert len(collector.assets_in_slot("styles")) == 2
 
 
 class TestFirstWinsPolicy:
@@ -307,56 +306,64 @@ class TestPlaceholderRegistry:
 
     def test_register_and_get(self) -> None:
         reg = PlaceholderRegistry()
-        slot = PlaceholderSlot(
-            name="meta",
-            token="<!-- next:meta -->",  # noqa: S106
-            bucket="_meta",
-            renderer="render_meta_tag",
-        )
-        reg.register(slot)
-        assert reg.get("meta") is slot
+        reg.register("meta", token="<!-- next:meta -->")
+        slot = reg.get("meta")
+        assert isinstance(slot, PlaceholderSlot)
+        assert slot.name == "meta"
+        assert slot.token == "<!-- next:meta -->"
         assert reg.get("missing") is None
+
+    def test_register_is_idempotent(self) -> None:
+        reg = PlaceholderRegistry()
+        reg.register("a", token="<!--a-->")
+        reg.register("a", token="<!--a-->")
+        assert len(reg) == 1
+
+    def test_register_rejects_conflicting_token(self) -> None:
+        reg = PlaceholderRegistry()
+        reg.register("a", token="<!--a-->")
+        with pytest.raises(ValueError, match="already registered"):
+            reg.register("a", token="<!--changed-->")
+
+    def test_register_rejects_empty_name(self) -> None:
+        reg = PlaceholderRegistry()
+        with pytest.raises(ValueError, match="Slot name"):
+            reg.register("", token="<!--x-->")
+
+    def test_register_rejects_empty_token(self) -> None:
+        reg = PlaceholderRegistry()
+        with pytest.raises(ValueError, match="Slot token"):
+            reg.register("a", token="")
 
     def test_iteration(self) -> None:
         reg = PlaceholderRegistry()
-        slot = PlaceholderSlot(name="a", token="<!--a-->", bucket="_a", renderer="r")  # noqa: S106
-        reg.register(slot)
-        assert list(reg) == [slot]
+        reg.register("a", token="<!--a-->")
+        slots = list(reg)
+        assert [s.name for s in slots] == ["a"]
 
     def test_len(self) -> None:
         reg = PlaceholderRegistry()
         assert len(reg) == 0
-        reg.register(
-            PlaceholderSlot(name="a", token="<!--a-->", bucket="_a", renderer="r")  # noqa: S106
-        )
+        reg.register("a", token="<!--a-->")
         assert len(reg) == 1
 
 
 class TestDefaultPlaceholders:
-    """The default registry ships with styles and scripts slots."""
+    """Bootstrap registers the styles and scripts slots."""
 
     def test_styles_slot(self) -> None:
         slot = default_placeholders.get("styles")
         assert slot is not None
-        assert slot.token == STYLES_PLACEHOLDER
-        assert slot.bucket == "_styles"
-        assert slot.renderer == "render_link_tag"
+        assert slot.token == "<!-- next:styles -->"
 
     def test_scripts_slot(self) -> None:
         slot = default_placeholders.get("scripts")
         assert slot is not None
-        assert slot.token == SCRIPTS_PLACEHOLDER
-        assert slot.renderer == "render_script_tag"
+        assert slot.token == "<!-- next:scripts -->"
 
 
 class TestPlaceholderConstants:
-    """Placeholder strings stay stable across refactors."""
-
-    def test_styles_placeholder(self) -> None:
-        assert STYLES_PLACEHOLDER == "<!-- next:styles -->"
-
-    def test_scripts_placeholder(self) -> None:
-        assert SCRIPTS_PLACEHOLDER == "<!-- next:scripts -->"
+    """HEAD_CLOSE remains a module-level constant for the preload hint."""
 
     def test_head_close(self) -> None:
         assert HEAD_CLOSE == "</head>"

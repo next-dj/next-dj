@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 CSS_URL = "https://cdn.example.com/site.css"
 JS_URL = "https://cdn.example.com/site.js"
+MJS_URL = "https://cdn.example.com/site.mjs"
 
 
 class _CollectingBackend(StaticBackend):
@@ -84,6 +85,9 @@ class TestStaticFilesBackendDefaults:
         assert backend.render_script_tag(JS_URL) == (
             f'<script src="{JS_URL}"></script>'
         )
+        assert backend.render_module_tag(MJS_URL) == (
+            f'<script type="module" src="{MJS_URL}"></script>'
+        )
 
 
 class TestStaticFilesBackendOptions:
@@ -125,6 +129,24 @@ class TestStaticFilesBackendOptions:
             f'<script src="{JS_URL}"></script>'
         )
 
+    def test_custom_module_tag(self) -> None:
+        backend = StaticFilesBackend(
+            {
+                "OPTIONS": {
+                    "module_tag": '<script type="module" defer src="{url}"></script>'
+                }
+            }
+        )
+        assert backend.render_module_tag(MJS_URL) == (
+            f'<script type="module" defer src="{MJS_URL}"></script>'
+        )
+
+    def test_options_none_falls_back_to_module_default(self) -> None:
+        backend = StaticFilesBackend({"OPTIONS": None})
+        assert backend.render_module_tag(MJS_URL) == (
+            f'<script type="module" src="{MJS_URL}"></script>'
+        )
+
     def test_default_backend_ignores_request(self) -> None:
         backend = StaticFilesBackend()
         sentinel = object()
@@ -133,6 +155,9 @@ class TestStaticFilesBackendOptions:
         )
         assert backend.render_script_tag(JS_URL, request=sentinel) == (  # type: ignore[arg-type]
             f'<script src="{JS_URL}"></script>'
+        )
+        assert backend.render_module_tag(MJS_URL, request=sentinel) == (  # type: ignore[arg-type]
+            f'<script type="module" src="{MJS_URL}"></script>'
         )
 
 

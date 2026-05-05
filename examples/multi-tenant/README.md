@@ -26,29 +26,6 @@ The header pill carries the tenant name, the accent strip and accent text use
 the CSS variable surfaced by the `tenant_theme` context processor, and every
 `<link>` and `<script>` URL is prefixed with `/_t/acme/` or `/_t/globex/`.
 
-## Framework features showcased
-
-- **Middleware → DI**. `TenantMiddleware` resolves the active tenant from
-  the `X-Tenant` header, attaches it to `request.tenant`, and a
-  `RegisteredParameterProvider` named `TenantProvider` exposes it as the
-  typed `DTenant` parameter to every page and form action.
-- **Custom static backend**. `TenantPrefixStaticBackend` subclasses
-  `StaticFilesBackend` and rewrites every collected asset URL with the
-  `/_t/<slug>/` prefix using the `request=` hook on
-  `render_link_tag`/`render_script_tag`.
-- **Shared root pages and root blocks**. The root layout
-  ([`root_pages/layout.djx`](root_pages/layout.djx)) and global components
-  ([`root_blocks/header/`](root_blocks/header/),
-  [`root_blocks/footer/`](root_blocks/footer/)) are wired through the
-  `DIRS` section of the page and component backends so the `notes` app does
-  not own its HTML shell.
-- **Inherit context**. `@context("tenant", inherit_context=True)` in
-  [`notes/workspaces/page.py`](notes/workspaces/page.py) lifts the active
-  tenant into every descendant page without re-resolving it.
-- **Composite component inside a form**. The note edit page renders the
-  `markdown_preview` composite next to the body textarea so live previews
-  do not need a JSON endpoint.
-
 ## How to run
 
 ```bash
@@ -83,7 +60,7 @@ There are two ways to drive the app:
 Tailwind loads via the Play CDN in
 [`root_pages/layout.djx`](root_pages/layout.djx). No Node, no build step.
 
-## Key ideas
+## Walking the code
 
 ### 1. The tenant resolution chain
 
@@ -203,48 +180,6 @@ The body textarea is rendered side by side with the
 `markdown_preview` composite ([`_blocks/markdown_preview/`](notes/workspaces/notes/_blocks/markdown_preview/)).
 The composite imports the `markdown` package and renders the body through
 `mark_safe` after letting the renderer escape raw HTML.
-
-## Tests
-
-The example ships unit and end-to-end tests at
-[`tests/test_unit.py`](tests/test_unit.py) and
-[`tests/test_e2e.py`](tests/test_e2e.py). Coverage stays above 90% on
-`notes/`.
-
-End-to-end coverage:
-
-- `TestTenantContract` asserts that the production header path is the only
-  way to reach the page tree when `DEBUG=False`.
-- `TestTenantTheme` checks that the right CSS variable lands in the
-  rendered HTML for each tenant.
-- `TestTenantPrefixStatic` asserts that every `<link>` and `<script>` URL
-  carries the `/_t/<slug>/` prefix.
-- `TestRootBlocks` confirms that the shared header and footer come from
-  `root_blocks/`.
-- `TestNoteEditForm` exercises the happy-path edit and the cross-tenant
-  isolation case.
-- `TestDebugAffordance` covers the DEBUG-only `?tenant=` and `next_tenant`
-  cookie path, plus the production short-circuit.
-
-Unit tests cover the middleware error branches, the provider matching
-logic, the context processor, the static backend URL rewriting, and both
-composite components.
-
-## Forward-compat
-
-- **Suspense / partial renders.** `tenant` is exposed via `@context`, so a
-  future native suspense API can swap the inherit step without touching
-  templates.
-- **Native context inheritance.** `inherit_context=True` is the explicit
-  marker today. The inherit semantics will switch to the framework default
-  once parent-page policies land.
-- **Per-tenant CDN.** The static backend already routes through Django
-  `staticfiles_storage`. Pointing `STATICFILES_STORAGE` at S3 or a CDN
-  storage automatically composes with the `/_t/<slug>/` prefix.
-- **Native React bridge.** None of the React patterns from `kanban` or
-  `live-polls` are required here, but the page tree is React-ready: the
-  `note_card` composite renders straight HTML today and can be swapped for
-  a JSX equivalent without changing routes or DI plumbing.
 
 ## Further reading
 
