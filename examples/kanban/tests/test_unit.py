@@ -447,7 +447,8 @@ class TestInjectViteDevAssetsGuard:
         collector.add(StaticAsset(url="/static/page.jsx", kind="jsx"))
         inject_vite_dev_assets(collector)
         inline = [a.inline for a in collector.assets_in_slot("scripts") if a.inline]
-        assert any("http://example.test:4242" in s for s in inline)
+        assert any('src="http://example.test:4242/@vite/client"' in s for s in inline)
+        assert any('"http://example.test:4242/@react-refresh"' in s for s in inline)
 
 
 class TestColumnCardsContext:
