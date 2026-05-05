@@ -27,8 +27,15 @@ class TestRegisterDefaults:
         assert default_kinds.renderer("css") == "render_link_tag"
         assert default_kinds.renderer("js") == "render_script_tag"
 
+    def test_registers_module_kind(self) -> None:
+        register_defaults()
+        assert default_kinds.extension("module") == ".mjs"
+        assert default_kinds.slot("module") == "scripts"
+        assert default_kinds.renderer("module") == "render_module_tag"
+
     def test_is_idempotent(self) -> None:
         register_defaults()
         register_defaults()
         assert "css" in default_kinds
         assert "js" in default_kinds
+        assert "module" in default_kinds

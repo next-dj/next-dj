@@ -1,19 +1,21 @@
 from django.apps import AppConfig
 
+from next.static import default_kinds
+from next.static.discovery import default_stems
+
 
 class KanbanConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "kanban"
 
     def ready(self) -> None:
-        """Register the .jsx asset kind and import action handlers at startup."""
-        from next.static import default_kinds  # noqa: PLC0415
-
+        """Register JSX kind, page stem, and connect signal handlers."""
         default_kinds.register(
             "jsx",
             extension=".jsx",
             slot="scripts",
             renderer="render_babel_script_tag",
         )
+        default_stems.register("template", "page")
 
-        from kanban import actions, providers  # noqa: F401, PLC0415
+        from kanban import actions, providers, signals  # noqa: F401, PLC0415

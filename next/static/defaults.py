@@ -37,6 +37,12 @@ def register_defaults() -> None:
         slot="scripts",
         renderer="render_script_tag",
     )
+    default_kinds.register(
+        "module",
+        extension=".mjs",
+        slot="scripts",
+        renderer="render_module_tag",
+    )
 
 
 __all__ = ["register_defaults"]

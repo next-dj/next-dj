@@ -92,14 +92,15 @@ NEXT_FRAMEWORK = {
     ],
     "DEFAULT_STATIC_BACKENDS": [
         {
-            "BACKEND": "kanban.backends.BabelStaticBackend",
+            "BACKEND": "kanban.backends.ViteManifestBackend",
             "OPTIONS": {
                 "DEDUP_STRATEGY": "kanban.static_policies.HashContentDedup",
                 "JS_CONTEXT_POLICY": "kanban.static_policies.DeepMergePolicy",
-                "SCRIPT_CACHE_ATTRS": {
-                    "crossorigin": "anonymous",
-                    "referrerpolicy": "no-referrer",
-                },
+                "DEV_ORIGIN": "http://localhost:5173",
+                "VITE_ROOT": str(BASE_DIR),
+                "MANIFEST_PATH": str(
+                    BASE_DIR / "kanban/static/kanban/dist/.vite/manifest.json"
+                ),
             },
         },
     ],

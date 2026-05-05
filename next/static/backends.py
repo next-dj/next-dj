@@ -99,6 +99,7 @@ class StaticFilesBackend(StaticBackend):
 
     _DEFAULT_CSS_TAG: ClassVar[str] = '<link rel="stylesheet" href="{url}">'
     _DEFAULT_JS_TAG: ClassVar[str] = '<script src="{url}"></script>'
+    _DEFAULT_MODULE_TAG: ClassVar[str] = '<script type="module" src="{url}"></script>'
 
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
         """Read tag templates from the OPTIONS mapping and prime caches."""
@@ -106,6 +107,7 @@ class StaticFilesBackend(StaticBackend):
         opts = dict(self._config.get("OPTIONS") or {})
         self._css_tag = str(opts.get("css_tag") or self._DEFAULT_CSS_TAG)
         self._js_tag = str(opts.get("js_tag") or self._DEFAULT_JS_TAG)
+        self._module_tag = str(opts.get("module_tag") or self._DEFAULT_MODULE_TAG)
         self._url_cache: dict[tuple[str, str], str] = {}
 
     def _logical_static_path(self, logical_name: str, suffix: str) -> str:
@@ -168,6 +170,19 @@ class StaticFilesBackend(StaticBackend):
         and ignored by the default backend.
         """
         return self._js_tag.format(url=url)
+
+    def render_module_tag(
+        self,
+        url: str,
+        *,
+        request: HttpRequest | None = None,  # noqa: ARG002
+    ) -> str:
+        """Return a module script tag built from the configured module_tag template.
+
+        The `request` argument is accepted for contract compatibility
+        and ignored by the default backend.
+        """
+        return self._module_tag.format(url=url)
 
 
 class StaticsFactory:

@@ -1,8 +1,11 @@
+import importlib.util
 import inspect
+import json
+from pathlib import Path
 
 import pytest
 from django.http import Http404, HttpRequest
-from kanban.backends import BabelStaticBackend
+from kanban.backends import ViteManifestBackend
 from kanban.forms import CreateCardForm, MoveCardForm
 from kanban.models import Board, Card, Column
 from kanban.providers import BoardProvider, CardProvider, DBoard, DCard
@@ -17,6 +20,25 @@ from next.static.collector import (
 
 
 pytestmark = pytest.mark.django_db
+
+_PIECES = (
+    Path(__file__).parent.parent
+    / "kanban"
+    / "boards"
+    / "board"
+    / "[int:id]"
+    / "_pieces"
+)
+
+
+def _load(relative: str):
+    spec = importlib.util.spec_from_file_location(
+        f"_test_{relative.replace('/', '_').replace('.py', '')}",
+        _PIECES / relative,
+    )
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
 
 
 @pytest.fixture()
@@ -53,49 +75,41 @@ class TestStaticPoliciesReexports:
         assert isinstance(DeepMergePolicy(), CoreDeepMergePolicy)
 
 
-class TestBabelStaticBackend:
-    def test_jsx_local_url_renders_without_cache_attrs(self) -> None:
-        backend = BabelStaticBackend()
-        out = backend.render_babel_script_tag("/static/next/components/column.jsx")
-        assert out == (
-            '<script type="text/babel" '
-            'src="/static/next/components/column.jsx"></script>'
+class TestViteManifestBackend:
+    def test_render_babel_script_tag_produces_module_script(self) -> None:
+        backend = ViteManifestBackend()
+        out = backend.render_babel_script_tag("/static/next/components/page.jsx")
+        assert (
+            out
+            == '<script type="module" src="/static/next/components/page.jsx"></script>'
         )
 
-    def test_external_jsx_url_carries_cache_attrs(self) -> None:
-        backend = BabelStaticBackend()
-        out = backend.render_babel_script_tag("https://cdn.example.com/lib.jsx")
-        assert out == (
-            '<script type="text/babel" src="https://cdn.example.com/lib.jsx" '
-            'crossorigin="anonymous" referrerpolicy="no-referrer"></script>'
+    def test_dev_url_map_overrides_url_in_renderer(self) -> None:
+        backend = ViteManifestBackend(
+            {"OPTIONS": {"DEV_ORIGIN": "http://localhost:5173"}}
         )
-
-    def test_external_script_url_carries_cache_attrs(self) -> None:
-        backend = BabelStaticBackend()
-        out = backend.render_script_tag("https://unpkg.com/react/umd/react.min.js")
-        assert 'crossorigin="anonymous"' in out
-        assert 'referrerpolicy="no-referrer"' in out
-        assert 'src="https://unpkg.com/react/umd/react.min.js"' in out
-
-    def test_local_script_url_unaffected(self) -> None:
-        backend = BabelStaticBackend()
-        out = backend.render_script_tag("/static/next/components/column.js")
-        assert out == '<script src="/static/next/components/column.js"></script>'
+        vite_url = "http://localhost:5173/kanban/boards/page.jsx"
+        backend._dev_url_map["/static/next/page.jsx"] = vite_url
+        out = backend.render_babel_script_tag("/static/next/page.jsx")
+        assert f'src="{vite_url}"' in out
+        assert "@react-refresh" in out
 
     def test_render_link_tag_unaffected(self) -> None:
-        backend = BabelStaticBackend()
+        backend = ViteManifestBackend()
         out = backend.render_link_tag("/static/next/components/column.css")
         assert out == (
             '<link rel="stylesheet" href="/static/next/components/column.css">'
         )
 
-    def test_custom_cache_attrs_override_defaults(self) -> None:
-        backend = BabelStaticBackend(
-            {"OPTIONS": {"SCRIPT_CACHE_ATTRS": {"integrity": "sha256-x"}}}
-        )
-        out = backend.render_script_tag("https://cdn.example.com/x.js")
-        assert 'integrity="sha256-x"' in out
-        assert "crossorigin" not in out
+    def test_render_script_tag_unaffected(self) -> None:
+        backend = ViteManifestBackend()
+        out = backend.render_script_tag("/static/next/components/column.js")
+        assert out == '<script src="/static/next/components/column.js"></script>'
+
+    def test_options_none_uses_defaults(self) -> None:
+        backend = ViteManifestBackend({"OPTIONS": None})
+        out = backend.render_babel_script_tag("/static/next/page.jsx")
+        assert 'type="module"' in out
 
 
 class TestBoardProvider:
@@ -325,3 +339,132 @@ class TestMoveCardFormBlankCleanedReturns:
         form = MoveCardForm(data={"card_id": "", "target_column_id": ""})
         assert not form.is_valid()
         assert "card_id" in form.errors
+
+
+class TestViteManifestBackendRegisterFile:
+    def test_non_jsx_delegates_to_super(self) -> None:
+        backend = ViteManifestBackend()
+        out = backend.register_file(Path("/tmp/style.css"), "kanban/style.css", "css")
+        assert "kanban/style.css" in out
+
+    def test_jsx_no_dev_no_manifest_delegates_to_super(self) -> None:
+        backend = ViteManifestBackend()
+        out = backend.register_file(Path("/tmp/page.jsx"), "kanban/page.jsx", "jsx")
+        assert "kanban/page.jsx" in out
+
+    def test_jsx_with_manifest_resolves_hashed_url(self, tmp_path: Path) -> None:
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({"page.jsx": {"file": "assets/page-abc.js"}}))
+        backend = ViteManifestBackend(
+            {"OPTIONS": {"MANIFEST_PATH": str(manifest), "VITE_ROOT": str(tmp_path)}}
+        )
+        jsx = tmp_path / "page.jsx"
+        out = backend.register_file(jsx, "page.jsx", "jsx")
+        assert "page-abc.js" in out
+
+    def test_jsx_with_manifest_missing_entry_falls_back(self, tmp_path: Path) -> None:
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text("{}")
+        backend = ViteManifestBackend(
+            {"OPTIONS": {"MANIFEST_PATH": str(manifest), "VITE_ROOT": str(tmp_path)}}
+        )
+        jsx = tmp_path / "unknown.jsx"
+        out = backend.register_file(jsx, "unknown.jsx", "jsx")
+        assert isinstance(out, str)
+
+
+class TestViteManifestBackendBuildDevUrl:
+    def test_path_outside_vite_root_falls_back_to_name(self) -> None:
+        backend = ViteManifestBackend(
+            {"OPTIONS": {"DEV_ORIGIN": "http://localhost:5173", "VITE_ROOT": "/other"}}
+        )
+        out = backend._build_dev_url(Path("/completely/different/component.jsx"))
+        assert out == "http://localhost:5173/component.jsx"
+
+    def test_no_vite_root_uses_filename(self) -> None:
+        backend = ViteManifestBackend(
+            {"OPTIONS": {"DEV_ORIGIN": "http://localhost:5173"}}
+        )
+        out = backend._build_dev_url(Path("/any/path/page.jsx"))
+        assert out == "http://localhost:5173/page.jsx"
+
+
+class TestViteManifestBackendManifestKey:
+    def test_with_vite_root_returns_relative_path(self, tmp_path: Path) -> None:
+        jsx = tmp_path / "kanban" / "page.jsx"
+        backend = ViteManifestBackend({"OPTIONS": {"VITE_ROOT": str(tmp_path)}})
+        assert backend._manifest_key(jsx) == "kanban/page.jsx"
+
+    def test_path_outside_vite_root_falls_back_to_name(self) -> None:
+        backend = ViteManifestBackend({"OPTIONS": {"VITE_ROOT": "/other/root"}})
+        assert (
+            backend._manifest_key(Path("/different/component.jsx")) == "component.jsx"
+        )
+
+    def test_without_vite_root_returns_filename(self) -> None:
+        backend = ViteManifestBackend()
+        assert backend._manifest_key(Path("/any/path/component.jsx")) == "component.jsx"
+
+
+class TestViteManifestBackendLoadManifest:
+    def test_parses_json(self, tmp_path: Path) -> None:
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text('{"page.jsx": {"file": "assets/page-abc.js"}}')
+        backend = ViteManifestBackend({"OPTIONS": {"MANIFEST_PATH": str(manifest)}})
+        assert backend._load_manifest() == {"page.jsx": {"file": "assets/page-abc.js"}}
+
+    def test_caches_result(self, tmp_path: Path) -> None:
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text('{"a": {"file": "b.js"}}')
+        backend = ViteManifestBackend({"OPTIONS": {"MANIFEST_PATH": str(manifest)}})
+        first = backend._load_manifest()
+        manifest.write_text('{"changed": true}')
+        assert backend._load_manifest() is first
+
+
+class TestCardExcerptContext:
+    def test_short_body_returned_verbatim(
+        self, two_columns: tuple[Column, Column]
+    ) -> None:
+        col_a, _ = two_columns
+        card = Card.objects.create(column=col_a, title="T", body="Short", position=0)
+        mod = _load("card/component.py")
+        assert mod.excerpt(card) == "Short"
+
+    def test_empty_body_returns_empty_string(
+        self, two_columns: tuple[Column, Column]
+    ) -> None:
+        col_a, _ = two_columns
+        card = Card.objects.create(column=col_a, title="T", body="", position=0)
+        mod = _load("card/component.py")
+        assert mod.excerpt(card) == ""
+
+    def test_long_body_truncated_with_ellipsis(
+        self, two_columns: tuple[Column, Column]
+    ) -> None:
+        col_a, _ = two_columns
+        long_body = "x" * 200
+        card = Card.objects.create(column=col_a, title="T", body=long_body, position=0)
+        mod = _load("card/component.py")
+        result = mod.excerpt(card)
+        assert result.endswith("…")
+        assert len(result) <= 100
+
+
+class TestColumnCardsContext:
+    def test_returns_column_cards(self, two_columns: tuple[Column, Column]) -> None:
+        col_a, _ = two_columns
+        card = Card.objects.create(column=col_a, title="A", position=0)
+        mod = _load("column/component.py")
+        qs = mod.cards(col_a)
+        assert card in qs
+
+
+class TestColumnBoardContext:
+    def test_returns_columns_list(self, two_columns: tuple[Column, Column]) -> None:
+        col_a, _ = two_columns
+        mod = _load("column/component.py")
+        result = mod.board(col_a)
+        assert "columns" in result
+        assert any(c["id"] == col_a.pk for c in result["columns"])
+        assert any(c["id"] == two_columns[1].pk for c in result["columns"])

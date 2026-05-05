@@ -1,4 +1,4 @@
-from django.db.models import QuerySet
+from django.db.models import Prefetch, QuerySet
 from django.http import HttpRequest
 from django.middleware.csrf import get_token
 from kanban.models import Board, Card, Column
@@ -37,12 +37,33 @@ def board_payload(
     active_board: DBoard[Board],
     request: HttpRequest,
 ) -> dict[str, object]:
-    """Expose board metadata under the merged ``board`` JS context key."""
+    """Expose board metadata and full column/card tree under the merged board JS key."""
+    board_with_cards = Board.objects.prefetch_related(
+        Prefetch(
+            "columns",
+            queryset=Column.objects.order_by("position").prefetch_related(
+                Prefetch("cards", queryset=Card.objects.order_by("position"))
+            ),
+        )
+    ).get(pk=active_board.pk)
+
     return {
-        "id": active_board.pk,
-        "title": active_board.title,
-        "slug": active_board.slug,
-        "archived": active_board.archived,
+        "id": board_with_cards.pk,
+        "title": board_with_cards.title,
+        "slug": board_with_cards.slug,
+        "archived": board_with_cards.archived,
         "csrf": get_token(request),
         "move_card_url": form_action_manager.get_action_url("kanban:move_card"),
+        "columns": [
+            {
+                "id": col.id,
+                "title": col.title,
+                "position": col.position,
+                "cards": [
+                    {"id": c.id, "title": c.title, "position": c.position}
+                    for c in col.cards.all()
+                ],
+            }
+            for col in board_with_cards.columns.all()
+        ],
     }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django import forms as django_forms
 
+from kanban.models import Card, Column
 from next.forms import Form
 
 
@@ -26,8 +27,6 @@ class MoveCardForm(Form):
 
     def clean(self) -> dict[str, object]:
         """Reject moves that cross a board boundary."""
-        from kanban.models import Card, Column  # noqa: PLC0415
-
         cleaned = super().clean() or {}
         card_id = cleaned.get("card_id")
         target_column_id = cleaned.get("target_column_id")
@@ -61,9 +60,7 @@ class CreateCardForm(Form):
     )
 
     def clean(self) -> dict[str, object]:
-        """Reject creation when the column is already at its WIP limit."""
-        from kanban.models import Column  # noqa: PLC0415
-
+        """Reject creation when the column is at its WIP limit."""
         cleaned = super().clean() or {}
         column_id = cleaned.get("column_id")
         if column_id is None:

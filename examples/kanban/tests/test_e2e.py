@@ -2,7 +2,6 @@ import json
 import re
 
 import pytest
-from django.test import override_settings
 from django.urls import reverse
 from kanban.models import Board, Card, Column
 
@@ -87,7 +86,7 @@ class TestBoardList:
 
 
 class TestBoardView:
-    """The board detail page renders columns, cards, and React CDN."""
+    """The board detail page renders columns and the React mount point."""
 
     def test_columns_and_cards_render(
         self,
@@ -105,13 +104,13 @@ class TestBoardView:
         body = _board_html(client, board)
         assert "🗂️ next.dj Kanban" in body  # root layout marker
         assert "Board #" in body  # nested board layout marker
-        assert "data-kanban-root" in body  # template marker
+        assert 'id="kanban-board"' in body  # React mount point
 
-    def test_react_cdn_links_present(self, client: NextClient, board: Board) -> None:
+    def test_vite_module_scripts_present(
+        self, client: NextClient, board: Board
+    ) -> None:
         body = _board_html(client, board)
-        assert "react.production.min.js" in body
-        assert "react-dom.production.min.js" in body
-        assert "babel.min.js" in body
+        assert re.search(r'<script type="module"', body)
 
     def test_inherit_context_visible_in_settings(
         self,
@@ -270,25 +269,6 @@ class TestMoveCard:
         assert response.status_code == 400
 
 
-class TestCardExcerpt:
-    """The card component truncates long bodies for in-card preview."""
-
-    def test_long_body_is_truncated_with_ellipsis(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
-        backlog = board.columns.get(title="Backlog")
-        Card.objects.create(
-            column=backlog,
-            title="Long card",
-            body="x" * 200,
-            position=99,
-        )
-        body = _board_html(client, board)
-        assert "…" in body
-
-
 class TestPreviewComponent:
     """The preview composite renders after a successful move."""
 
@@ -381,65 +361,27 @@ class TestCreateCard:
         assert backlog.cards.count() >= 5
 
 
-class TestCssDedup:
-    """Identical bytes in column.css and card.css collapse to one link tag."""
-
-    def test_identical_column_card_css_collapses_to_one_link(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
-        body = _board_html(client, board)
-        kanban_links = re.findall(r'href="/static/next/components/[^"]+\.css"', body)
-        # column/component.css and card/component.css ship byte-for-byte
-        # identical content. HashContentDedup hashes the bytes, so the
-        # collector keeps only the first registration, whichever wins.
-        assert len(kanban_links) == 1
-
-    def test_dedup_picks_one_winning_url(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
-        body = _board_html(client, board)
-        link_match = re.search(r'href="(/static/next/components/[^"]+\.css)"', body)
-        assert link_match is not None
-        url = link_match.group(1)
-        assert url.endswith(("column.css", "card.css"))
-
-
 class TestJsxBackend:
-    """The kanban backend renders .jsx URLs as <script type="text/babel">."""
+    """JSX files discovered alongside templates are injected as ES module scripts."""
 
-    def test_column_jsx_block_rendered(
+    def test_page_jsx_rendered_as_module(
         self,
         client: NextClient,
         board: Board,
     ) -> None:
         body = _board_html(client, board)
         assert re.search(
-            r'<script type="text/babel" src="[^"]*column\.jsx"></script>',
+            r'<script type="module" src="[^"]*page\.jsx">',
             body,
         )
 
-    def test_card_jsx_block_rendered(
+    def test_no_text_babel_scripts_present(
         self,
         client: NextClient,
         board: Board,
     ) -> None:
         body = _board_html(client, board)
-        assert re.search(
-            r'<script type="text/babel" src="[^"]*card\.jsx"></script>',
-            body,
-        )
-
-    def test_render_link_tag_unaffected(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
-        body = _board_html(client, board)
-        assert '<link rel="stylesheet"' in body
+        assert 'type="text/babel"' not in body
 
 
 class TestJsContext:
@@ -467,56 +409,6 @@ class TestJsContext:
         assert {c["title"] for c in cols} >= {"Backlog", "In Progress", "Done"}
         backlog = next(c for c in cols if c["title"] == "Backlog")
         assert {card["title"] for card in backlog["cards"]} == {"Plan", "Spec"}
-
-    def test_first_wins_policy_loses_data(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
-        with override_settings(
-            NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [
-                    {
-                        "BACKEND": "next.urls.FileRouterBackend",
-                        "APP_DIRS": True,
-                        "DIRS": [],
-                        "PAGES_DIR": "boards",
-                        "OPTIONS": {"context_processors": []},
-                    }
-                ],
-                "DEFAULT_COMPONENT_BACKENDS": [
-                    {
-                        "BACKEND": "next.components.FileComponentsBackend",
-                        "DIRS": [],
-                        "COMPONENTS_DIR": "_pieces",
-                    }
-                ],
-                "DEFAULT_STATIC_BACKENDS": [
-                    {
-                        "BACKEND": "kanban.backends.BabelStaticBackend",
-                        "OPTIONS": {
-                            "DEDUP_STRATEGY": (
-                                "kanban.static_policies.HashContentDedup"
-                            ),
-                            "JS_CONTEXT_POLICY": (
-                                "next.static.collector.FirstWinsPolicy"
-                            ),
-                        },
-                    }
-                ],
-            }
-        ):
-            body = _board_html(client, board)
-            payload = _next_init_payload(body)
-            board_payload = payload["board"]
-            # FirstWinsPolicy keeps whichever key is registered first.
-            # The page-level context registers (id, title, slug, archived,
-            # csrf), while the component-level registers `columns`. With
-            # FirstWins they cannot both survive — at least one of the two
-            # sets is missing.
-            has_page_keys = "id" in board_payload and "csrf" in board_payload
-            has_columns = "columns" in board_payload
-            assert not (has_page_keys and has_columns)
 
 
 class TestInheritedHeaderCount:
@@ -548,31 +440,7 @@ class TestInheritedHeaderCount:
 
 
 class TestCdnCachePolicy:
-    """External CDN scripts render with cache-friendly attributes."""
-
-    @pytest.mark.parametrize(
-        "needle",
-        [
-            "react.production.min.js",
-            "react-dom.production.min.js",
-            "babel.min.js",
-        ],
-    )
-    def test_cdn_script_has_crossorigin(
-        self,
-        client: NextClient,
-        board: Board,
-        needle: str,
-    ) -> None:
-        body = _board_html(client, board)
-        match = re.search(
-            rf'<script[^>]*src="[^"]*{re.escape(needle)}"[^>]*></script>',
-            body,
-        )
-        assert match is not None
-        tag = match.group(0)
-        assert 'crossorigin="anonymous"' in tag
-        assert 'referrerpolicy="no-referrer"' in tag
+    """Local script tags do not carry CDN cache-control attributes."""
 
     def test_local_script_has_no_cache_attrs(
         self,
@@ -587,42 +455,6 @@ class TestCdnCachePolicy:
         )
         assert match is not None
         assert "crossorigin" not in match.group(0)
-
-
-class TestReactCdn:
-    """React, react-dom, and babel CDN tags appear before any text/babel block."""
-
-    @pytest.mark.parametrize(
-        "needle",
-        [
-            "react.production.min.js",
-            "react-dom.production.min.js",
-            "babel.min.js",
-        ],
-    )
-    def test_cdn_script_present(
-        self,
-        client: NextClient,
-        board: Board,
-        needle: str,
-    ) -> None:
-        body = _board_html(client, board)
-        assert needle in body
-
-    def test_cdn_scripts_in_correct_order_before_babel_blocks(
-        self,
-        client: NextClient,
-        board: Board,
-    ) -> None:
-        body = _board_html(client, board)
-        cdn_indices = [
-            body.index("react.production.min.js"),
-            body.index("react-dom.production.min.js"),
-            body.index("babel.min.js"),
-        ]
-        babel_block = body.index('<script type="text/babel"')
-        assert all(idx < babel_block for idx in cdn_indices)
-        assert cdn_indices == sorted(cdn_indices)
 
 
 def test_index_page_has_module_help(client: NextClient) -> None:

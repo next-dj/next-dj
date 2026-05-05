@@ -399,18 +399,33 @@ two built-in kinds:
        slot="scripts",
        renderer="render_script_tag",
    )
+   default_kinds.register(
+       "module",
+       extension=".mjs",
+       slot="scripts",
+       renderer="render_module_tag",
+   )
 
 Repeat calls with identical parameters are idempotent. Conflicting
 re-registrations raise ``ValueError`` so silent overrides cannot mask
 configuration bugs.
 
+The ``module`` kind registers ``.mjs`` files and renders them with
+``render_module_tag``, which wraps the URL in
+``<script type="module" src="..."></script>``. Drop a ``template.mjs``
+or ``component.mjs`` next to any page or component and it lands in the
+``"scripts"`` slot as a native ES-module script tag with no extra
+configuration. A ``module_tag`` key in ``OPTIONS`` overrides the default
+fragment (useful for adding ``crossorigin`` or ``integrity`` attributes).
+
 Adding a new kind from your project
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The ``examples/kanban`` project teaches the framework about ``.jsx``
-files. Two pieces wire it together. The first is a registration call
-inside ``AppConfig.ready``. The second is a custom backend that ships
-the matching renderer method.
+files and hooks a Vite build pipeline to co-located JSX assets. Two
+pieces wire it together. The first is a registration call inside
+``AppConfig.ready``. The second is a custom backend that resolves JSX
+URLs differently in development and production.
 
 .. code-block:: python
 
@@ -422,6 +437,7 @@ the matching renderer method.
 
        def ready(self) -> None:
            from next.static import default_kinds
+           from next.static.discovery import default_stems
 
            default_kinds.register(
                "jsx",
@@ -430,22 +446,44 @@ the matching renderer method.
                renderer="render_babel_script_tag",
            )
 
-The matching backend exposes the renderer method named at registration.
+           # Teach discovery to pick up page.jsx alongside page.py.
+           default_stems.register("template", "page")
+
+The ``default_stems.register("template", "page")`` call is the second
+extension point: it tells the stem-based file scanner to probe
+``page.jsx`` (and any other kind extension) next to ``page.py`` in
+every page directory. Without this call discovery only looks for the
+default ``template.jsx``.
+
+The matching backend overrides ``register_file`` to switch between
+Vite dev-server URLs (when ``DEV_ORIGIN`` is set) and hashed manifest
+paths (for production builds):
 
 .. code-block:: python
 
    from next.static import StaticFilesBackend
 
 
-   class BabelStaticBackend(StaticFilesBackend):
+   class ViteManifestBackend(StaticFilesBackend):
+       def register_file(self, source_path, logical_name, kind):
+           if kind != "jsx":
+               return super().register_file(source_path, logical_name, kind)
+           if self._dev_origin:
+               return self._build_dev_url(source_path)   # Vite HMR URL
+           if self._manifest_path:
+               return self._resolve_from_manifest(source_path, logical_name)
+           return super().register_file(source_path, logical_name, kind)
+
        def render_babel_script_tag(self, url, *, request=None):
-           return f'<script type="text/babel" src="{url}"></script>'
+           target = self._dev_url_map.get(url, url)
+           return f'<script type="module" src="{target}"></script>'
 
 After registration, the rest of the pipeline transparently picks the
 new kind up:
 
 - :class:`~next.static.AssetDiscovery` iterates over every registered
-  kind and looks for ``component.jsx`` next to each ``component.djx``.
+  kind and looks for ``component.jsx`` next to each ``component.djx``,
+  and ``page.jsx`` next to ``page.py`` (due to the stem registration).
 - :class:`~next.static.NextStaticFilesFinder` exposes the file under
   ``next/components/<name>.jsx`` so ``collectstatic`` and the
   staticfiles manifest pick it up.
@@ -464,6 +502,43 @@ follows the registry.
    ``.wasm`` (with a binding script that hydrates the module), or any
    project-specific extension. Pick the slot the asset belongs to,
    choose a renderer method name, and add the method on your backend.
+
+Custom stems: extending file discovery
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:class:`~next.static.StemRegistry` (``default_stems``) controls which
+filenames discovery probes next to each ``page.py``, ``layout.djx``,
+and ``component.djx``. The built-in stems are:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Role
+     - Default stems
+   * - ``"template"``
+     - ``"template"`` (finds ``template.css``, ``template.js``, ``template.mjs``, …)
+   * - ``"layout"``
+     - ``"layout"`` (finds ``layout.css``, ``layout.js``, …)
+   * - ``"component"``
+     - ``"component"`` (finds ``component.css``, ``component.js``, …)
+
+Register an additional stem to teach discovery about a new filename
+convention without changing the role:
+
+.. code-block:: python
+
+   from next.static.discovery import default_stems
+
+   # page.jsx, page.mjs, page.css … are now probed next to page.py
+   default_stems.register("template", "page")
+
+Multiple stems under the same role are scanned in registration order.
+A stem is a filename prefix only. The discovery loop pairs every
+registered stem with every registered kind extension and probes the
+combination. Registering ``"page"`` under ``"template"`` therefore
+unlocks ``page.jsx``, ``page.mjs``, ``page.css``, ``page.js`` — any
+extension that has a matching kind — simultaneously.
 
 Placeholder slots: the second extension point
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -737,56 +812,27 @@ markup that ``render_link_tag`` emits without subclassing.
 Cache-friendly attributes for CDN scripts
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Browsers can reuse a single cached copy of React, ReactDOM, or Babel
-across origins only when the script tag carries
-``crossorigin="anonymous"``. The custom backend in ``examples/kanban``
-exposes the attribute set as a backend option and applies it to every
-external (``http://`` / ``https://``) script URL while leaving local
-``/static/...`` URLs untouched.
+Browsers can reuse a single cached copy of a shared library across
+origins only when the script tag carries ``crossorigin="anonymous"``.
+A custom backend can inspect the URL and add these attributes to external
+(``http://`` / ``https://``) scripts while leaving local
+``/static/...`` URLs untouched:
 
 .. code-block:: python
 
-   class BabelStaticBackend(StaticFilesBackend):
-       _DEFAULT_CDN_ATTRS = {
-           "crossorigin": "anonymous",
-           "referrerpolicy": "no-referrer",
-       }
-
-       def __init__(self, config=None):
-           super().__init__(config)
-           opts = dict((self._config or {}).get("OPTIONS") or {})
-           attrs = opts.get("SCRIPT_CACHE_ATTRS")
-           self._cdn_attrs = dict(attrs if attrs is not None else self._DEFAULT_CDN_ATTRS)
+   class CdnAwareStaticBackend(StaticFilesBackend):
+       _CDN_ATTRS = {"crossorigin": "anonymous", "referrerpolicy": "no-referrer"}
 
        def render_script_tag(self, url, *, request=None):
            if not url.startswith(("http://", "https://")):
                return super().render_script_tag(url)
-           extra = "".join(f' {k}="{v}"' for k, v in self._cdn_attrs.items())
+           extra = "".join(f' {k}="{v}"' for k, v in self._CDN_ATTRS.items())
            return f'<script src="{url}"{extra}></script>'
 
-The matching settings entry passes the attribute dict through
-``OPTIONS``.
-
-.. code-block:: python
-
-   NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
-           {
-               "BACKEND": "kanban.backends.BabelStaticBackend",
-               "OPTIONS": {
-                   "SCRIPT_CACHE_ATTRS": {
-                       "crossorigin": "anonymous",
-                       "referrerpolicy": "no-referrer",
-                   },
-               },
-           },
-       ],
-   }
-
 The pattern lives entirely in the backend. Local assets keep the lean
-default rendering. The user-controlled attribute dict makes it trivial
-to swap in subresource-integrity hashes (``integrity``) or fetch
-priority hints (``fetchpriority``) without touching the framework.
+default rendering. The attribute dict makes it trivial to swap in
+subresource-integrity hashes (``integrity``) or fetch priority hints
+(``fetchpriority``) without touching the framework.
 
 Staticfiles and collectstatic
 -----------------------------
@@ -1425,9 +1471,11 @@ pipeline:
   ``TenantPrefixStaticBackend`` that reads ``request.tenant`` from the
   ``render_*_tag`` hook. Demonstrates request-aware backends paired with a
   shared ``root_pages`` layout.
-- ``examples/kanban`` — custom ``BabelStaticBackend`` that registers a
-  ``.jsx`` kind through ``default_kinds.register`` and applies
-  cache-friendly attributes to external CDN scripts. Pairs the new kind
-  with composite React components, ``HashContentDedup`` on co-located
-  CSS, and multi-level ``@context(serialize=True)`` merged through
-  ``DeepMergePolicy``.
+- ``examples/kanban`` — custom ``ViteManifestBackend`` that registers a
+  ``.jsx`` kind through ``default_kinds.register`` and routes assets to
+  the Vite dev server (HMR) or to hashed production URLs read from
+  ``dist/.vite/manifest.json``. Co-located ``page.jsx`` is discovered
+  alongside ``page.py`` via ``default_stems.register``. The
+  ``collector_finalized`` signal injects ``@vite/client`` without
+  template edits. Uses ``HashContentDedup`` and ``DeepMergePolicy`` for
+  dedup and multi-source JS context merging.
