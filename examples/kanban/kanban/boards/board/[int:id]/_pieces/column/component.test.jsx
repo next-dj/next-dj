@@ -48,4 +48,38 @@ describe("Column", () => {
     fireEvent.dragLeave(colEl);
     expect(colEl.className).not.toContain("drop-active");
   });
+
+  it("renders WIP badge when wip_limit is set", () => {
+    const col = {
+      id: 1,
+      title: "To Do",
+      wip_limit: 3,
+      cards: [{ id: 1, title: "A", position: 0 }],
+    };
+    render(<Column column={col} onDrop={vi.fn()} />);
+    const badge = document.querySelector("[data-kanban-wip]");
+    expect(badge).toBeTruthy();
+    expect(badge.textContent).toBe("1/3");
+  });
+
+  it("hides WIP badge when wip_limit is null", () => {
+    const col = { id: 1, title: "To Do", wip_limit: null, cards: [] };
+    render(<Column column={col} onDrop={vi.fn()} />);
+    expect(document.querySelector("[data-kanban-wip]")).toBeNull();
+  });
+
+  it("highlights WIP badge in red when over the limit", () => {
+    const col = {
+      id: 1,
+      title: "To Do",
+      wip_limit: 1,
+      cards: [
+        { id: 1, title: "A", position: 0 },
+        { id: 2, title: "B", position: 1 },
+      ],
+    };
+    render(<Column column={col} onDrop={vi.fn()} />);
+    const badge = document.querySelector("[data-kanban-wip]");
+    expect(badge.className).toContain("rose");
+  });
 });

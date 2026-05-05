@@ -9,14 +9,12 @@ from kanban.backends import ViteManifestBackend
 from kanban.forms import CreateCardForm, MoveCardForm
 from kanban.models import Board, Card, Column
 from kanban.providers import BoardProvider, CardProvider, DBoard, DCard
-from kanban.static_policies import DeepMergePolicy, HashContentDedup
+from kanban.signals import inject_vite_dev_assets
 
 from next.deps.cache import DependencyCache
 from next.deps.context import ResolutionContext
-from next.static.collector import (
-    DeepMergePolicy as CoreDeepMergePolicy,
-    HashContentDedup as CoreHashContentDedup,
-)
+from next.static.assets import StaticAsset
+from next.static.collector import StaticCollector
 
 
 pytestmark = pytest.mark.django_db
@@ -67,49 +65,30 @@ class TestModelStrings:
         assert str(card) == "Hello"
 
 
-class TestStaticPoliciesReexports:
-    def test_hash_dedup_subclasses_core(self) -> None:
-        assert isinstance(HashContentDedup(), CoreHashContentDedup)
+class TestCardExcerptProperty:
+    def test_short_body_returned_verbatim(
+        self, two_columns: tuple[Column, Column]
+    ) -> None:
+        col_a, _ = two_columns
+        card = Card.objects.create(column=col_a, title="T", body="Short", position=0)
+        assert card.excerpt == "Short"
 
-    def test_deep_merge_subclasses_core(self) -> None:
-        assert isinstance(DeepMergePolicy(), CoreDeepMergePolicy)
+    def test_empty_body_returns_empty_string(
+        self, two_columns: tuple[Column, Column]
+    ) -> None:
+        col_a, _ = two_columns
+        card = Card.objects.create(column=col_a, title="T", body="", position=0)
+        assert card.excerpt == ""
 
-
-class TestViteManifestBackend:
-    def test_render_babel_script_tag_produces_module_script(self) -> None:
-        backend = ViteManifestBackend()
-        out = backend.render_babel_script_tag("/static/next/components/page.jsx")
-        assert (
-            out
-            == '<script type="module" src="/static/next/components/page.jsx"></script>'
-        )
-
-    def test_dev_url_map_overrides_url_in_renderer(self) -> None:
-        backend = ViteManifestBackend(
-            {"OPTIONS": {"DEV_ORIGIN": "http://localhost:5173"}}
-        )
-        vite_url = "http://localhost:5173/kanban/boards/page.jsx"
-        backend._dev_url_map["/static/next/page.jsx"] = vite_url
-        out = backend.render_babel_script_tag("/static/next/page.jsx")
-        assert f'src="{vite_url}"' in out
-        assert "@react-refresh" in out
-
-    def test_render_link_tag_unaffected(self) -> None:
-        backend = ViteManifestBackend()
-        out = backend.render_link_tag("/static/next/components/column.css")
-        assert out == (
-            '<link rel="stylesheet" href="/static/next/components/column.css">'
-        )
-
-    def test_render_script_tag_unaffected(self) -> None:
-        backend = ViteManifestBackend()
-        out = backend.render_script_tag("/static/next/components/column.js")
-        assert out == '<script src="/static/next/components/column.js"></script>'
-
-    def test_options_none_uses_defaults(self) -> None:
-        backend = ViteManifestBackend({"OPTIONS": None})
-        out = backend.render_babel_script_tag("/static/next/page.jsx")
-        assert 'type="module"' in out
+    def test_long_body_truncated_with_ellipsis(
+        self, two_columns: tuple[Column, Column]
+    ) -> None:
+        col_a, _ = two_columns
+        long_body = "x" * 200
+        card = Card.objects.create(column=col_a, title="T", body=long_body, position=0)
+        result = card.excerpt
+        assert result.endswith("…")
+        assert len(result) <= 100
 
 
 class TestBoardProvider:
@@ -302,6 +281,11 @@ class TestMoveCardFormClean:
         assert not form.is_valid()
         assert "Unknown card" in str(form.errors)
 
+    def test_missing_fields_skip_database_lookups(self) -> None:
+        form = MoveCardForm(data={"card_id": "", "target_column_id": ""})
+        assert not form.is_valid()
+        assert "card_id" in form.errors
+
 
 class TestCreateCardFormClean:
     def test_wip_limit_blocks_creation(
@@ -330,15 +314,6 @@ class TestCreateCardFormClean:
         form = CreateCardForm(data={"column_id": "", "title": ""})
         assert not form.is_valid()
         assert "column_id" in form.errors
-
-
-class TestMoveCardFormBlankCleanedReturns:
-    """Field-level errors keep the cross-form clean from running database lookups."""
-
-    def test_missing_fields_skip_database_lookups(self) -> None:
-        form = MoveCardForm(data={"card_id": "", "target_column_id": ""})
-        assert not form.is_valid()
-        assert "card_id" in form.errors
 
 
 class TestViteManifestBackendRegisterFile:
@@ -371,6 +346,35 @@ class TestViteManifestBackendRegisterFile:
         jsx = tmp_path / "unknown.jsx"
         out = backend.register_file(jsx, "unknown.jsx", "jsx")
         assert isinstance(out, str)
+
+    def test_jsx_dev_origin_returns_dev_url(self) -> None:
+        backend = ViteManifestBackend(
+            {"OPTIONS": {"DEV_ORIGIN": "http://localhost:5173"}}
+        )
+        out = backend.register_file(
+            Path("/some/path/page.jsx"), "kanban/page.jsx", "jsx"
+        )
+        assert out == "http://localhost:5173/page.jsx"
+
+    def test_jsx_with_missing_manifest_file_falls_back(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        manifest = tmp_path / "missing.json"  # never created
+        backend = ViteManifestBackend(
+            {"OPTIONS": {"MANIFEST_PATH": str(manifest), "VITE_ROOT": str(tmp_path)}}
+        )
+        jsx = tmp_path / "page.jsx"
+        with caplog.at_level("WARNING"):
+            out = backend.register_file(jsx, "page.jsx", "jsx")
+        assert isinstance(out, str)
+        assert any("manifest not found" in r.message for r in caplog.records)
+        # Repeat call: warning emitted only once.
+        caplog.clear()
+        with caplog.at_level("WARNING"):
+            backend.register_file(jsx, "page.jsx", "jsx")
+        assert not any("manifest not found" in r.message for r in caplog.records)
 
 
 class TestViteManifestBackendBuildDevUrl:
@@ -422,33 +426,28 @@ class TestViteManifestBackendLoadManifest:
         assert backend._load_manifest() is first
 
 
-class TestCardExcerptContext:
-    def test_short_body_returned_verbatim(
-        self, two_columns: tuple[Column, Column]
-    ) -> None:
-        col_a, _ = two_columns
-        card = Card.objects.create(column=col_a, title="T", body="Short", position=0)
-        mod = _load("card/component.py")
-        assert mod.excerpt(card) == "Short"
+class TestInjectViteDevAssetsGuard:
+    def test_skips_when_no_jsx_assets(self) -> None:
+        collector = StaticCollector()
+        inject_vite_dev_assets(collector)
+        assert collector.assets_in_slot("scripts") == []
 
-    def test_empty_body_returns_empty_string(
-        self, two_columns: tuple[Column, Column]
-    ) -> None:
-        col_a, _ = two_columns
-        card = Card.objects.create(column=col_a, title="T", body="", position=0)
-        mod = _load("card/component.py")
-        assert mod.excerpt(card) == ""
+    def test_injects_when_jsx_present(self) -> None:
+        collector = StaticCollector()
+        collector.add(StaticAsset(url="/static/page.jsx", kind="jsx"))
+        inject_vite_dev_assets(collector)
+        scripts = collector.assets_in_slot("scripts")
+        inline = [a.inline for a in scripts if a.inline]
+        assert any("@vite/client" in s for s in inline)
+        assert any("RefreshRuntime" in s for s in inline)
 
-    def test_long_body_truncated_with_ellipsis(
-        self, two_columns: tuple[Column, Column]
-    ) -> None:
-        col_a, _ = two_columns
-        long_body = "x" * 200
-        card = Card.objects.create(column=col_a, title="T", body=long_body, position=0)
-        mod = _load("card/component.py")
-        result = mod.excerpt(card)
-        assert result.endswith("…")
-        assert len(result) <= 100
+    def test_uses_env_origin(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("VITE_ORIGIN", "http://example.test:4242")
+        collector = StaticCollector()
+        collector.add(StaticAsset(url="/static/page.jsx", kind="jsx"))
+        inject_vite_dev_assets(collector)
+        inline = [a.inline for a in collector.assets_in_slot("scripts") if a.inline]
+        assert any("http://example.test:4242" in s for s in inline)
 
 
 class TestColumnCardsContext:
@@ -460,11 +459,48 @@ class TestColumnCardsContext:
         assert card in qs
 
 
-class TestColumnBoardContext:
-    def test_returns_columns_list(self, two_columns: tuple[Column, Column]) -> None:
+class TestCardExcerptComponent:
+    def test_delegates_to_model_property(
+        self, two_columns: tuple[Column, Column]
+    ) -> None:
         col_a, _ = two_columns
-        mod = _load("column/component.py")
-        result = mod.board(col_a)
-        assert "columns" in result
-        assert any(c["id"] == col_a.pk for c in result["columns"])
-        assert any(c["id"] == two_columns[1].pk for c in result["columns"])
+        card = Card.objects.create(column=col_a, title="T", body="Hi", position=0)
+        mod = _load("card/component.py")
+        assert mod.excerpt(card) == "Hi"
+
+
+class TestCreateCardHandlerRace:
+    """Authoritative WIP check inside the handler rejects a racing post."""
+
+    def test_handler_returns_400_when_limit_filled_after_clean(
+        self,
+        two_columns: tuple[Column, Column],
+    ) -> None:
+        col_a, _ = two_columns
+        col_a.wip_limit = 2
+        col_a.save()
+        # Form sees one free slot.
+        form = CreateCardForm(data={"column_id": str(col_a.pk), "title": "Late"})
+        Card.objects.create(column=col_a, title="One", position=0)
+        assert form.is_valid()
+        # Concurrent post fills the slot before the handler runs.
+        Card.objects.create(column=col_a, title="Two", position=1)
+
+        page_module = _load_handler_module()
+        response = page_module.create_card(form)
+        assert response.status_code == 400
+
+
+def _load_handler_module():
+    spec = importlib.util.spec_from_file_location(
+        "_test_board_page",
+        Path(__file__).parent.parent
+        / "kanban"
+        / "boards"
+        / "board"
+        / "[int:id]"
+        / "page.py",
+    )
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod

@@ -94,8 +94,8 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "kanban.backends.ViteManifestBackend",
             "OPTIONS": {
-                "DEDUP_STRATEGY": "kanban.static_policies.HashContentDedup",
-                "JS_CONTEXT_POLICY": "kanban.static_policies.DeepMergePolicy",
+                "DEDUP_STRATEGY": "next.static.collector.HashContentDedup",
+                "JS_CONTEXT_POLICY": "next.static.collector.DeepMergePolicy",
                 "DEV_ORIGIN": "http://localhost:5173",
                 "VITE_ROOT": str(BASE_DIR),
                 "MANIFEST_PATH": str(

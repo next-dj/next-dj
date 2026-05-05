@@ -457,6 +457,63 @@ class TestCdnCachePolicy:
         assert "crossorigin" not in match.group(0)
 
 
+class TestViteDevAssetsGuard:
+    """`@vite/client` is injected only on pages that ship jsx scripts."""
+
+    def test_index_page_skips_vite_client(
+        self,
+        client: NextClient,
+        board: Board,
+    ) -> None:
+        del board
+        response = client.get("/")
+        body = response.content.decode()
+        assert "@vite/client" not in body
+        assert "RefreshRuntime" not in body
+
+    def test_board_page_includes_vite_client(
+        self,
+        client: NextClient,
+        board: Board,
+    ) -> None:
+        body = _board_html(client, board)
+        assert "@vite/client" in body
+        assert "RefreshRuntime" in body
+
+
+class TestPayloadEnrichment:
+    """Board JS payload carries excerpt and wip_limit for the React layer."""
+
+    def test_payload_includes_wip_limit(
+        self,
+        client: NextClient,
+        board: Board,
+    ) -> None:
+        body = _board_html(client, board)
+        payload = _next_init_payload(body)
+        in_progress = next(
+            c for c in payload["board"]["columns"] if c["title"] == "In Progress"
+        )
+        assert in_progress["wip_limit"] == 2
+
+    def test_payload_includes_card_excerpt(
+        self,
+        client: NextClient,
+        board: Board,
+    ) -> None:
+        backlog = board.columns.get(title="Backlog")
+        long_card = backlog.cards.first()
+        long_card.body = "y" * 200
+        long_card.save(update_fields=["body"])
+        body = _board_html(client, board)
+        payload = _next_init_payload(body)
+        backlog_payload = next(
+            c for c in payload["board"]["columns"] if c["title"] == "Backlog"
+        )
+        target = next(c for c in backlog_payload["cards"] if c["id"] == long_card.pk)
+        assert target["excerpt"].endswith("…")
+
+
 def test_index_page_has_module_help(client: NextClient) -> None:
     """The default response uses the next.dj page reverse helper."""
     url = reverse("next:page_")

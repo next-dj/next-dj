@@ -60,7 +60,11 @@ class CreateCardForm(Form):
     )
 
     def clean(self) -> dict[str, object]:
-        """Reject creation when the column is at its WIP limit."""
+        """Reject creation when the column is at its WIP limit.
+
+        The check is best-effort. The authoritative lock+check+insert
+        lives in the action handler under select_for_update.
+        """
         cleaned = super().clean() or {}
         column_id = cleaned.get("column_id")
         if column_id is None:

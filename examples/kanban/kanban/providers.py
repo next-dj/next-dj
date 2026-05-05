@@ -20,7 +20,12 @@ class DCard[T](DDependencyBase[T]):
 
 
 class BoardProvider(RegisteredParameterProvider):
-    """Resolve ``DBoard[Model]`` parameters from the URL ``id`` kwarg."""
+    """Resolve ``DBoard[Model]`` parameters from URL or POST.
+
+    Checks ``url_kwargs["id"]`` first, then falls back to a POST
+    ``board_id`` field so form actions can receive a board through DI
+    without re-fetching it inside the handler.
+    """
 
     def can_handle(
         self,
@@ -35,9 +40,13 @@ class BoardProvider(RegisteredParameterProvider):
         param: inspect.Parameter,
         context: ResolutionContext,
     ) -> object:
-        """Fetch the board matching the URL ``id``, or raise ``Http404``."""
+        """Fetch the board matching the URL ``id`` or POST ``board_id``."""
         (model_cls,) = get_args(param.annotation)
         pk = context.url_kwargs.get("id")
+        if pk is None:
+            request = getattr(context, "request", None)
+            if request is not None:
+                pk = request.POST.get("board_id")
         if pk is None:
             return None
         try:

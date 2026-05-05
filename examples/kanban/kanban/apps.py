@@ -14,8 +14,8 @@ class KanbanConfig(AppConfig):
             "jsx",
             extension=".jsx",
             slot="scripts",
-            renderer="render_babel_script_tag",
+            renderer="render_module_tag",
         )
         default_stems.register("template", "page")
 
-        from kanban import actions, providers, signals  # noqa: F401, PLC0415
+        from kanban import providers, signals  # noqa: F401, PLC0415

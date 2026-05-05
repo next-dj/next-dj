@@ -42,6 +42,9 @@ class Column(models.Model):
         return self.title
 
 
+_EXCERPT_LIMIT = 100
+
+
 class Card(models.Model):
     """An individual task card that lives inside one column."""
 
@@ -57,8 +60,20 @@ class Card(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        # Position uniqueness inside a column is maintained by move_card
+        # and create_card under select_for_update. SQLite does not
+        # support deferrable UNIQUE constraints, so the invariant lives
+        # at the application layer rather than in the schema.
         ordering: ClassVar = ["position", "id"]
 
     def __str__(self) -> str:
         """Return the human-readable card title."""
         return self.title
+
+    @property
+    def excerpt(self) -> str:
+        """Return the card body trimmed for in-card preview."""
+        text = self.body or ""
+        if len(text) <= _EXCERPT_LIMIT:
+            return text
+        return text[: _EXCERPT_LIMIT - 1].rstrip() + "…"
