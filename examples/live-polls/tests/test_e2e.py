@@ -59,6 +59,24 @@ def _next_init_payload(html: str) -> dict:
     return json.loads(match.group(1))
 
 
+def _parse_sse_payload(frame: bytes) -> dict:
+    """Parse one SSE event frame and return the JSON `data:` payload as a dict."""
+    return json.loads(frame.split(b"data: ", 1)[1].split(b"\n\n", 1)[0])
+
+
+@pytest.fixture()
+def primed_broker(poll: Poll) -> PollBroker:
+    """Stand-alone broker with `poll`'s initial snapshot already cached.
+
+    Tests use a local instance so revision counters do not leak across
+    cases. The cache is process-wide, so seeding through
+    `store_snapshot` is enough to make the first `subscribe` yield a
+    snapshot frame.
+    """
+    store_snapshot(build_snapshot(poll))
+    return PollBroker()
+
+
 class TestRootRedirect:
     """The bare site root sends visitors to the polls list."""
 
@@ -302,45 +320,44 @@ class TestStreamEndpoint:
         try:
             first = next(iter(response.streaming_content))
             assert first.startswith(b"event: snapshot")
-            payload = json.loads(first.split(b"data: ", 1)[1].split(b"\n\n", 1)[0])
-            assert payload["poll_id"] == poll.pk
+            assert _parse_sse_payload(first)["poll_id"] == poll.pk
         finally:
             response.close()
 
-    def test_first_frame_is_cached_snapshot(self, poll: Poll) -> None:
-        store_snapshot(build_snapshot(poll))
-        local = PollBroker()
-        stream = local.subscribe(poll.pk)
+    def test_first_frame_is_cached_snapshot(
+        self, primed_broker: PollBroker, poll: Poll
+    ) -> None:
+        stream = primed_broker.subscribe(poll.pk)
         first = next(stream)
         stream.close()
         assert first.startswith(b"event: snapshot")
-        payload = json.loads(first.split(b"data: ", 1)[1].split(b"\n\n", 1)[0])
-        assert payload["poll_id"] == poll.pk
+        assert _parse_sse_payload(first)["poll_id"] == poll.pk
 
-    def test_publish_wakes_subscriber_with_update_event(self, poll: Poll) -> None:
-        store_snapshot(build_snapshot(poll))
-        local = PollBroker()
-        stream = local.subscribe(poll.pk)
+    def test_publish_wakes_subscriber_with_update_event(
+        self, primed_broker: PollBroker, poll: Poll
+    ) -> None:
+        stream = primed_broker.subscribe(poll.pk)
         next(stream)  # consume initial snapshot
         Choice.objects.filter(poll=poll, text="Tabs").update(votes=2)
-        local.publish(build_snapshot(poll))
+        primed_broker.publish(build_snapshot(poll))
         update = next(stream)
         stream.close()
         assert update.startswith(b"event: update")
-        payload = json.loads(update.split(b"data: ", 1)[1].split(b"\n\n", 1)[0])
-        votes_by_text = {row["text"]: row["votes"] for row in payload["choices"]}
+        votes_by_text = {
+            row["text"]: row["votes"] for row in _parse_sse_payload(update)["choices"]
+        }
         assert votes_by_text["Tabs"] == 2
 
-    def test_publish_fans_out_to_multiple_subscribers(self, poll: Poll) -> None:
+    def test_publish_fans_out_to_multiple_subscribers(
+        self, primed_broker: PollBroker, poll: Poll
+    ) -> None:
         """Every open subscriber wakes on a single publish without losing events."""
-        store_snapshot(build_snapshot(poll))
-        local = PollBroker()
-        stream_a = local.subscribe(poll.pk)
-        stream_b = local.subscribe(poll.pk)
+        stream_a = primed_broker.subscribe(poll.pk)
+        stream_b = primed_broker.subscribe(poll.pk)
         next(stream_a)  # initial snapshot
         next(stream_b)
         Choice.objects.filter(poll=poll, text="Tabs").update(votes=3)
-        local.publish(build_snapshot(poll))
+        primed_broker.publish(build_snapshot(poll))
         update_a = next(stream_a)
         update_b = next(stream_b)
         stream_a.close()
@@ -348,8 +365,10 @@ class TestStreamEndpoint:
         assert update_a.startswith(b"event: update")
         assert update_b.startswith(b"event: update")
         for frame in (update_a, update_b):
-            payload = json.loads(frame.split(b"data: ", 1)[1].split(b"\n\n", 1)[0])
-            votes_by_text = {row["text"]: row["votes"] for row in payload["choices"]}
+            votes_by_text = {
+                row["text"]: row["votes"]
+                for row in _parse_sse_payload(frame)["choices"]
+            }
             assert votes_by_text["Tabs"] == 3
 
     def test_unknown_poll_returns_404(self, client: NextClient) -> None:

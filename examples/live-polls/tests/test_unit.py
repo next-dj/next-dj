@@ -3,9 +3,13 @@ from pathlib import Path
 
 import pytest
 from django.http import Http404
+from polls import broker as broker_module
 from polls.backends import ViteManifestBackend
-from polls.models import Poll
+from polls.broker import PollBroker, format_keepalive
+from polls.forms import VoteForm
+from polls.models import Choice, Poll
 from polls.providers import DPoll
+from polls.signals import VOTE_ACTION_NAME, broadcast_vote
 
 from next.static import default_kinds
 from next.testing import resolve_call
@@ -231,3 +235,127 @@ class TestVueKindRegistration:
     def test_vue_extension_round_trips_through_registry(self) -> None:
         """The reverse lookup also resolves so discovery picks up `.vue` files."""
         assert default_kinds.kind_for_extension(".vue") == "vue"
+
+
+class TestModelStrings:
+    """`__str__` returns the human-readable handle for the admin and shell."""
+
+    @pytest.mark.parametrize(
+        ("instance", "expected"),
+        [
+            (Poll(question="Tabs or spaces?"), "Tabs or spaces?"),
+            (Choice(text="Tabs"), "Tabs"),
+        ],
+        ids=["poll_question", "choice_text"],
+    )
+    def test_str_returns_human_handle(self, instance: object, expected: str) -> None:
+        assert str(instance) == expected
+
+
+class TestVoteFormCleanGuard:
+    """`VoteForm.clean` short-circuits when either field is absent."""
+
+    def test_clean_returns_early_when_poll_and_choice_missing(self) -> None:
+        """An empty submission fails on required fields, not on the cross-poll check."""
+        form = VoteForm(data={})
+        assert not form.is_valid()
+        assert all(
+            "Choice does not belong" not in str(error)
+            for errors in form.errors.values()
+            for error in errors
+        )
+
+
+class TestManifestCachedAfterFirstRead:
+    """`_load_manifest` reads disk once and reuses the parsed dict on later calls."""
+
+    def test_second_lookup_returns_cached_manifest(
+        self, vite_root: Path, asset_path: Path, tmp_path: Path
+    ) -> None:
+        """Deleting the manifest after the first read still resolves through cache."""
+        relative = str(asset_path.relative_to(vite_root))
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(
+            json.dumps({relative: {"file": "assets/component-cached.js"}})
+        )
+        backend = _backend(
+            {"VITE_ROOT": str(vite_root), "MANIFEST_PATH": str(manifest_path)}
+        )
+        first = backend.register_file(asset_path, "component", "vue")
+        manifest_path.unlink()
+        second = backend.register_file(asset_path, "component", "vue")
+        assert first == second
+        assert "polls/dist/assets/component-cached.js" in second
+
+
+def _form_without_poll() -> VoteForm:
+    """Bind an empty `VoteForm` so `cleaned_data["poll"]` is absent post-validation."""
+    form = VoteForm(data={})
+    form.is_valid()
+    return form
+
+
+class TestBroadcastReceiverGuards:
+    """The receiver bails out cleanly on payloads it cannot act on."""
+
+    @pytest.mark.parametrize(
+        ("action_name", "form_factory"),
+        [
+            ("other:action", lambda: None),
+            (VOTE_ACTION_NAME, lambda: None),
+            (VOTE_ACTION_NAME, _form_without_poll),
+        ],
+        ids=["wrong_action_name", "handler_only_action", "form_missing_poll"],
+    )
+    def test_returns_without_publishing(self, action_name: str, form_factory) -> None:
+        """Each unactionable payload exits before reaching `broker.publish`."""
+        broadcast_vote(action_name=action_name, form=form_factory())
+
+
+class TestBrokerEdgeFrames:
+    """Keepalive timeout and post-publish cache eviction stay non-fatal."""
+
+    @pytest.fixture(autouse=True)
+    def _zero_keepalive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Make `wait_for` return immediately so the generator advances per call."""
+        monkeypatch.setattr(broker_module, "KEEPALIVE_SECONDS", 0)
+
+    def test_subscriber_keepalive_loop_resumes_into_next_iteration(self) -> None:
+        """A keepalive yield is followed by a clean loop reentry.
+
+        The first `next()` yields a keepalive frame and pauses the
+        generator. The second `next()` advances past the post-yield
+        `continue`, loops back into the wait, and yields a fresh
+        keepalive. Two keepalives in a row prove the loop did not
+        leak control or stall after the yield.
+        """
+        local = PollBroker()
+        stream = local.subscribe(poll_id=1)
+        try:
+            assert next(stream) == format_keepalive()
+            assert next(stream) == format_keepalive()
+        finally:
+            stream.close()
+
+    def test_subscriber_skips_yield_when_payload_was_evicted(self) -> None:
+        """A revision bump without a fresh cache entry loops without crashing.
+
+        The branch guards against a publisher that bumps the revision
+        but cannot reach the cache, or a cache eviction that lands
+        between `notify_all` and the subscriber's `read_snapshot`. The
+        first `next()` captures the zero baseline and yields the
+        timeout keepalive. The bump then races the cache, and the
+        second `next()` reaches `read_snapshot`, gets `None`,
+        re-enters the wait, and yields another keepalive instead of
+        leaking a `None` payload to the client.
+        """
+        local = PollBroker()
+        stream = local.subscribe(poll_id=42)
+        try:
+            assert next(stream) == format_keepalive()
+            with local._conditions[42]:
+                local._revisions[42] += 1
+                local._conditions[42].notify_all()
+            assert next(stream) == format_keepalive()
+        finally:
+            stream.close()
