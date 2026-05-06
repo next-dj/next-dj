@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from django.dispatch import Signal
 
-from next.forms import RegistryFormActionBackend, form_action_manager
+from next.forms import Form, RegistryFormActionBackend, form_action_manager
 from next.forms.signals import (
     action_dispatched,
     action_registered,
@@ -254,6 +254,8 @@ class TestActionDispatchedWiring:
         assert event["response_status"] == 200
         assert isinstance(event["duration_ms"], float)
         assert event["duration_ms"] >= 0
+        assert event["form"] is None
+        assert event["url_kwargs"] == {}
 
     def test_fires_on_successful_dispatch_with_form(
         self,
@@ -276,6 +278,20 @@ class TestActionDispatchedWiring:
         event = capture_action_dispatched[0]
         assert event["action_name"] == "test_redirect"
         assert event["response_status"] == 302
+        assert isinstance(event["form"], Form)
+        assert event["form"].cleaned_data["name"] == "Alice"
+        assert event["url_kwargs"] == {}
+
+    def test_payload_includes_url_kwargs_from_post_hidden_fields(
+        self,
+        client_no_csrf,
+        capture_action_dispatched: list[dict[str, Any]],
+    ) -> None:
+        """`_url_param_*` hidden fields surface as `url_kwargs` on the signal."""
+        url = form_action_manager.get_action_url("test_no_form")
+        client_no_csrf.post(url, data={"_url_param_id": "42"})
+        assert len(capture_action_dispatched) == 1
+        assert capture_action_dispatched[0]["url_kwargs"] == {"id": 42}
 
     def test_does_not_fire_on_invalid_form(
         self,

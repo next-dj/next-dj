@@ -1,0 +1,19 @@
+.poll-chart-bar {
+  transition: width 240ms ease-out;
+}
+
+.poll-chart-row[data-just-updated="true"] [data-poll-chart-votes] {
+  animation: poll-chart-pulse 600ms ease-out;
+}
+
+@keyframes poll-chart-pulse {
+  0% {
+    color: rgb(15, 23, 42);
+  }
+  40% {
+    color: rgb(220, 38, 38);
+  }
+  100% {
+    color: rgb(100, 116, 139);
+  }
+}
