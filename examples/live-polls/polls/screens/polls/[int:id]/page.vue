@@ -1,6 +1,6 @@
 <script>
 import { createApp } from "vue";
-import PollChart from "../_widgets/poll_chart/component.vue";
+import PollChart from "./_widgets/poll_chart/component.vue";
 
 // A plain `<script>` block runs once when Vite loads this entry as
 // an ES module. `<script setup>` would be the setup function of the

@@ -27,7 +27,15 @@ def vite_root(tmp_path: Path) -> Path:
 @pytest.fixture()
 def asset_path(vite_root: Path) -> Path:
     """Synthesise a co-located Vue file path inside `vite_root`."""
-    asset = vite_root / "polls" / "screens" / "polls" / "_widgets" / "poll_chart"
+    asset = (
+        vite_root
+        / "polls"
+        / "screens"
+        / "polls"
+        / "[int:id]"
+        / "_widgets"
+        / "poll_chart"
+    )
     asset.mkdir(parents=True, exist_ok=True)
     file = asset / "component.vue"
     file.write_text("<template></template>")
@@ -47,7 +55,10 @@ class TestDevOriginRouting:
     @pytest.mark.parametrize(
         ("root_strategy", "expected_url_suffix"),
         [
-            ("matching", "polls/screens/polls/_widgets/poll_chart/component.vue"),
+            (
+                "matching",
+                "polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue",
+            ),
             ("unrelated", "component.vue"),
         ],
         ids=["under_vite_root", "outside_vite_root"],
@@ -97,7 +108,7 @@ class TestManifestRouting:
         [
             (
                 "matching",
-                "polls/screens/polls/_widgets/poll_chart/component.vue",
+                "polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue",
                 "assets/component-abc123.js",
             ),
             ("unrelated", "component.vue", "assets/component-xyz.js"),
@@ -205,9 +216,9 @@ class TestDPollResolution:
         kwargs = resolve_call(consume, url_kwargs={"id": poll.pk})
         assert kwargs["active"] == poll
 
-    def test_falls_back_to_post_poll_id(self, rf, poll: Poll) -> None:
-        """`DPoll[Poll]` reads `request.POST['poll_id']` when URL kwargs are empty."""
-        request = rf.post("/", data={"poll_id": str(poll.pk)})
+    def test_falls_back_to_post_poll(self, rf, poll: Poll) -> None:
+        """`DPoll[Poll]` reads `request.POST['poll']` when URL kwargs are empty."""
+        request = rf.post("/", data={"poll": str(poll.pk)})
         kwargs = resolve_call(consume, request=request)
         assert kwargs["active"] == poll
 
@@ -252,18 +263,24 @@ class TestModelStrings:
         assert str(instance) == expected
 
 
-class TestVoteFormCleanGuard:
-    """`VoteForm.clean` short-circuits when either field is absent."""
+class TestVoteFormValidation:
+    """``VoteForm`` rejects invalid submissions at field-validation time."""
 
-    def test_clean_returns_early_when_poll_and_choice_missing(self) -> None:
-        """An empty submission fails on required fields, not on the cross-poll check."""
+    def test_empty_submission_fails_on_required_fields(self) -> None:
+        """An empty submission produces field errors, not a cross-poll message."""
         form = VoteForm(data={})
         assert not form.is_valid()
-        assert all(
-            "Choice does not belong" not in str(error)
-            for errors in form.errors.values()
-            for error in errors
-        )
+        assert "poll" in form.errors
+        assert "choice" in form.errors
+
+    def test_foreign_choice_rejected_by_queryset(self) -> None:
+        """A choice from a different poll fails ``ModelChoiceField`` validation."""
+        poll_a = Poll.objects.create(question="A?")
+        poll_b = Poll.objects.create(question="B?")
+        choice_b = Choice.objects.create(poll=poll_b, text="opt")
+        form = VoteForm(data={"poll": str(poll_a.pk), "choice": str(choice_b.pk)})
+        assert not form.is_valid()
+        assert "choice" in form.errors
 
 
 class TestManifestCachedAfterFirstRead:

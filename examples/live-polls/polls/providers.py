@@ -17,8 +17,9 @@ class PollProvider(RegisteredParameterProvider):
     """Resolve ``DPoll[Model]`` parameters from URL or POST.
 
     The provider reads ``url_kwargs["id"]`` first. When that is missing
-    it falls back to ``request.POST["poll_id"]`` so the vote action
-    handler can receive the poll through DI without an extra query.
+    it falls back to ``request.POST["poll"]`` — the field name used by
+    ``VoteForm`` — so any action handler annotated with ``DPoll`` can
+    receive the poll through DI without an extra query.
     """
 
     def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
@@ -26,13 +27,13 @@ class PollProvider(RegisteredParameterProvider):
         return get_origin(param.annotation) is DPoll
 
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
-        """Fetch the poll matching the URL ``id`` or POST ``poll_id``."""
+        """Fetch the poll matching the URL ``id`` or POST ``poll``."""
         (model_cls,) = get_args(param.annotation)
         pk = context.url_kwargs.get("id")
         if pk is None:
             request = getattr(context, "request", None)
             if request is not None:
-                pk = request.POST.get("poll_id")
+                pk = request.POST.get("poll")
         if pk is None:
             return None
         try:

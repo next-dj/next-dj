@@ -37,12 +37,15 @@ function applySnapshot(payload) {
 onMounted(() => {
   if (!ctx?.stream_url) return;
   source = new EventSource(ctx.stream_url);
-  source.addEventListener("snapshot", (event) => {
-    applySnapshot(JSON.parse(event.data));
-  });
-  source.addEventListener("update", (event) => {
-    applySnapshot(JSON.parse(event.data));
-  });
+  for (const type of ["snapshot", "update"]) {
+    source.addEventListener(type, (event) => {
+      applySnapshot(JSON.parse(event.data));
+    });
+  }
+  source.onerror = () => {
+    source.close();
+    source = null;
+  };
 });
 
 onBeforeUnmount(() => {
