@@ -1,7 +1,5 @@
 from typing import Any
 
-from obs.serializers import PydanticJsContextSerializer
-
 from next.components import component
 
 
@@ -12,18 +10,14 @@ from next.components import component
 scripts = ["https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"]
 
 
-@component.context(
-    "render_rates",
-    serialize=True,
-    serializer=PydanticJsContextSerializer(),
-)
+@component.context("render_rates", serialize=True)
 def render_rates(live_stats: dict[str, Any]) -> dict[str, Any]:
     """Expose the per-source totals under `window.Next.context.render_rates`.
 
-    The React layer renders one horizontal bar per source. The
-    `serializer` argument illustrates that the override travels
-    through component context registration the same way it does on
-    `@page.context`.
+    No `serializer=` override here. The value travels through the
+    process-wide `JS_CONTEXT_SERIALIZER`, so the rendered HTML carries
+    a flat object. Compare against the wrapped `live_stats` and
+    `totals_chart` keys to see the per-key override semantics.
     """
     totals = live_stats["totals"]
     return {

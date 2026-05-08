@@ -1,21 +1,2 @@
 <h2 class="mb-4 text-lg font-semibold">Per-page render counts</h2>
-{% if counters %}
-  <table class="w-full text-sm">
-    <thead class="text-left text-slate-500">
-      <tr>
-        <th class="py-2 pr-4">Page module</th>
-        <th class="py-2 pl-4 text-right">Renders</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for path, value in counters %}
-        <tr class="border-t border-slate-100">
-          <td class="py-2 pr-4 font-mono text-xs">{{ path }}</td>
-          <td class="py-2 pl-4 text-right tabular-nums">{{ value }}</td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-{% else %}
-  <p class="text-sm text-slate-500">No pages have been rendered yet. Visit a few dashboards and reload.</p>
-{% endif %}
+{% component "counter_list" items=counters layout="table" name_header="Page module" value_header="Renders" empty_message="No pages have been rendered yet. Visit a few dashboards and reload." %}

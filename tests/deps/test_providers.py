@@ -54,13 +54,25 @@ class TestHttpRequestProvider:
         ("request_obj", "annotation", "expected"),
         [
             (_mock_request_factory, HttpRequest, True),
+            (_mock_request_factory, HttpRequest | None, True),
+            (_mock_request_factory, HttpRequest | int, False),
+            (_mock_request_factory, int | None, False),
             (_no_request, HttpRequest, False),
+            (_no_request, HttpRequest | None, False),
             (_mock_request_factory, inspect.Parameter.empty, False),
         ],
-        ids=["request_present", "request_none", "annotation_empty"],
+        ids=[
+            "request_present",
+            "pep604_optional",
+            "union_with_other_type",
+            "int_or_none",
+            "request_none",
+            "request_none_optional_annotation",
+            "annotation_empty",
+        ],
     )
     def test_can_handle(self, request_obj, annotation, expected) -> None:
-        """can_handle matches request presence and HttpRequest annotation."""
+        """can_handle matches request presence and HttpRequest-or-None annotation."""
         provider = HttpRequestProvider()
         param = inspect_parameter("request", annotation)
         req = request_obj()
@@ -74,6 +86,56 @@ class TestHttpRequestProvider:
         param = inspect_parameter("request", HttpRequest)
         ctx = _ctx(request=request)
         assert provider.resolve(param, ctx) is request
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            (
+                "from django.http import HttpRequest\n"
+                "def handler(request: HttpRequest):\n"
+                "    pass\n",
+                True,
+            ),
+            (
+                "from django.http import HttpRequest\n"
+                "def handler(request: HttpRequest | None = None):\n"
+                "    pass\n",
+                True,
+            ),
+            (
+                "from django.http import HttpRequest\n"
+                "def handler(request: HttpRequest | int = 0):\n"
+                "    pass\n",
+                False,
+            ),
+        ],
+        ids=[
+            "type_hints_bare_request",
+            "type_hints_pep604_optional",
+            "type_hints_union_other_type",
+        ],
+    )
+    def test_can_handle_via_get_type_hints_branch(
+        self, tmp_path: Path, source, expected
+    ) -> None:
+        """The `get_type_hints` branch accepts the same forms as the fallback."""
+        mod_path = tmp_path / "stack_ann.py"
+        mod_path.write_text(source, encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("stack_ann", mod_path)
+        assert spec is not None
+        assert spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        handler = mod.handler
+
+        provider = HttpRequestProvider()
+        param = inspect.signature(handler).parameters["request"]
+        ctx = _ctx(request=HttpRequest())
+        resolver._resolve_call_stack.append(handler)
+        try:
+            assert provider.can_handle(param, ctx) is expected
+        finally:
+            resolver._resolve_call_stack.pop()
 
     def test_can_handle_when_get_type_hints_raises_falls_back(
         self, tmp_path: Path

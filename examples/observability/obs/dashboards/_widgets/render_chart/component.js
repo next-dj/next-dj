@@ -1,12 +1,12 @@
 /* Chart.js bar chart mounted on `#render-chart-canvas`.
  *
  * Reads `window.Next.context.render_rates` produced by the matching
- * `@component.context` callable and draws one horizontal bar per
- * source. Chart.js arrives from a CDN URL listed in `scripts = [...]`
- * inside `component.py`. The framework collects and dedupes that URL
- * through the static collector. The init runs on `DOMContentLoaded`
- * so the chart waits for every collected script (Chart.js included)
- * to finish parsing before drawing.
+ * `@component.context` callable. No serializer override here, so the
+ * payload is flat. Chart.js arrives from a CDN URL listed in
+ * `scripts = [...]` inside `component.py`. The framework collects and
+ * dedupes that URL through the static collector. The init runs on
+ * `DOMContentLoaded` so the chart waits for every collected script
+ * (Chart.js included) to finish parsing before drawing.
  */
 document.addEventListener("DOMContentLoaded", function () {
   const canvas = document.getElementById("render-chart-canvas");
@@ -24,9 +24,15 @@ document.addEventListener("DOMContentLoaded", function () {
     actions: "#15803d",
   };
 
-  const labels = data.bars.map(function (b) { return b.name; });
-  const values = data.bars.map(function (b) { return b.value; });
-  const colors = labels.map(function (name) { return palette[name] || "#475569"; });
+  const labels = data.bars.map(function (b) {
+    return b.name;
+  });
+  const values = data.bars.map(function (b) {
+    return b.value;
+  });
+  const colors = labels.map(function (name) {
+    return palette[name] || "#475569";
+  });
 
   new window.Chart(canvas, {
     type: "bar",

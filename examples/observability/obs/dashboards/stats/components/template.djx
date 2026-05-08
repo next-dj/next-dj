@@ -1,13 +1,2 @@
 <h2 class="mb-4 text-lg font-semibold">Per-component render counts</h2>
-{% if counters %}
-  <ul class="space-y-1 text-sm">
-    {% for name, value in counters %}
-      <li class="flex justify-between border-b border-slate-100 py-1">
-        <span class="font-medium">{{ name }}</span>
-        <span class="tabular-nums">{{ value }}</span>
-      </li>
-    {% endfor %}
-  </ul>
-{% else %}
-  <p class="text-sm text-slate-500">No components have rendered yet.</p>
-{% endif %}
+{% component "counter_list" items=counters empty_message="No components have rendered yet." %}

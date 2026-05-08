@@ -1,5 +1,0 @@
-/* Reserved for future chart-specific tweaks. The component already
- * styles itself through Tailwind utilities applied inside the JSX
- * tree. Co-located here to demonstrate the framework collects the
- * file automatically and the dedup policy filters duplicates.
- */

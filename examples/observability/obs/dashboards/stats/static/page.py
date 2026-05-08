@@ -6,13 +6,13 @@ from next.pages import context
 @context("dedup")
 def dedup() -> list[tuple[str, int]]:
     """Return per-kind dedup hit counts."""
-    return sorted(metrics.read_kind("static.dedup").items(), key=lambda item: -item[1])
+    return metrics.top_by_kind("static.dedup")
 
 
 @context("assets")
 def assets() -> list[tuple[str, int]]:
     """Return per-kind total asset key generations."""
-    return sorted(metrics.read_kind("static.asset").items(), key=lambda item: -item[1])
+    return metrics.top_by_kind("static.asset")
 
 
 @context("collector")

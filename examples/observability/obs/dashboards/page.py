@@ -3,6 +3,13 @@ from obs import metrics
 from next.pages import context
 
 
+scripts = [
+    "https://unpkg.com/react@18/umd/react.production.min.js",
+    "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js",
+    "https://unpkg.com/@babel/standalone@7/babel.min.js",
+]
+
+
 @context("totals")
 def totals() -> dict[str, int]:
     """Return the headline counters every overview tile reads from."""

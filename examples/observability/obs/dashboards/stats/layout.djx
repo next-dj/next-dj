@@ -6,13 +6,7 @@
     </div>
     {% component "filter_window" current=window %}
   </header>
-  <nav class="flex gap-2 text-sm">
-    <a class="rounded-md bg-white px-3 py-2 ring-1 ring-slate-200 hover:bg-slate-100" href="/stats/">Live</a>
-    <a class="rounded-md bg-white px-3 py-2 ring-1 ring-slate-200 hover:bg-slate-100" href="/stats/pages/">Pages</a>
-    <a class="rounded-md bg-white px-3 py-2 ring-1 ring-slate-200 hover:bg-slate-100" href="/stats/components/">Components</a>
-    <a class="rounded-md bg-white px-3 py-2 ring-1 ring-slate-200 hover:bg-slate-100" href="/stats/forms/">Forms</a>
-    <a class="rounded-md bg-white px-3 py-2 ring-1 ring-slate-200 hover:bg-slate-100" href="/stats/static/">Static</a>
-  </nav>
+  {% component "stats_nav" %}
   <div class="rounded-md bg-white p-6 ring-1 ring-slate-200">
     {% block template %}{% endblock template %}
   </div>

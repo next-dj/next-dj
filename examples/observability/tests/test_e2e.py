@@ -109,19 +109,95 @@ class TestStatsTreeRendersEachSubpage:
 
 
 class TestLiveStatsSerializerOverride:
-    """The `live_stats` key carries through `window.Next.context` after override."""
+    """The override on `live_stats` wraps the payload in a versioned envelope.
 
-    def test_window_next_context_contains_live_stats(self, client) -> None:
+    Sibling serialised keys (`render_rates`, `totals_chart`) are emitted
+    by component-level callables and demonstrate the per-key
+    granularity the framework guarantees.
+    """
+
+    def test_live_stats_carries_envelope(self, client) -> None:
         response = client.get("/stats/")
         body = response.content.decode()
-        assert '"live_stats":' in body
-        assert '"render_rates":' in body
-        assert '"bars":' in body
+        assert '"live_stats":{"v":1,"data":{' in body
+
+    def test_render_rates_stays_flat_through_global_serializer(self, client) -> None:
+        response = client.get("/stats/")
+        body = response.content.decode()
+        # `render_rates` is owned by `_widgets/render_chart` which has
+        # no `serializer=` override, so it travels through the global
+        # `JS_CONTEXT_SERIALIZER` and lands flat.
+        assert '"render_rates":{' in body
+        assert '"render_rates":{"v":1' not in body
+
+    def test_overview_totals_chart_carries_envelope(self, client) -> None:
+        response = client.get("/")
+        body = response.content.decode()
+        assert '"totals_chart":{"v":1,"data":{' in body
 
     def test_window_querystring_propagates_to_inherit_context(self, client) -> None:
         response = client.get("/stats/?window=1h")
         body = response.content.decode()
         assert "Window: 1h" in body
+
+
+class TestWindowFilters:
+    """`?window=...` actually narrows the aggregation through bucket reads."""
+
+    BASE = "2026-05-08T12:00:00+00:00"
+
+    def test_only_recent_buckets_count_under_one_minute_window(
+        self, client, frozen_now
+    ) -> None:
+        with frozen_now(self.BASE) as traveller:
+            metrics.incr("pages.rendered", "/old", by=99)
+            traveller.move_to("2026-05-08T12:30:00+00:00")
+            metrics.incr("pages.rendered", "/recent", by=2)
+            response = client.get("/stats/?window=1m")
+            body = response.content.decode()
+            # `live_stats.totals.pages` reads through `read_window`, so
+            # the 99 from 30 minutes ago is excluded under window=1m.
+            # The page-render of `/stats/` itself counts toward the
+            # current minute too, so the recent total is at least 2.
+            assert '"window":"1m"' in body or '"window": "1m"' in body
+            recent = metrics.read_window("pages.rendered", minutes=1)
+            assert "/old" not in recent
+            assert recent.get("/recent", 0) >= 2
+
+    def test_wider_window_reaches_older_buckets(self, client, frozen_now) -> None:
+        with frozen_now(self.BASE) as traveller:
+            metrics.incr("pages.rendered", "/old", by=99)
+            traveller.move_to("2026-05-08T12:30:00+00:00")
+            client.get("/stats/?window=1h")
+            wide = metrics.read_window("pages.rendered", minutes=60)
+            assert wide["/old"] == 99
+
+
+class TestJsxAssetPipeline:
+    """`.jsx` files are emitted as `<script type="text/babel">` tags.
+
+    The overview page mounts the React sparkline through the custom
+    `BabelJsxBackend`. The Chart.js widget on `/stats/` continues to
+    travel through the regular `.js` path so both kinds coexist on the
+    same dashboard.
+    """
+
+    def test_overview_emits_babel_script_tag(self, client) -> None:
+        response = client.get("/")
+        body = response.content.decode()
+        assert '<script type="text/babel"' in body
+        assert "sparkline" in body
+
+    def test_overview_loads_react_and_babel_cdn_scripts(self, client) -> None:
+        response = client.get("/")
+        body = response.content.decode()
+        assert "react@18" in body
+        assert "babel/standalone" in body
+
+    def test_stats_keeps_chart_js_on_regular_script_path(self, client) -> None:
+        response = client.get("/stats/")
+        body = response.content.decode()
+        assert "chart.umd.min.js" in body
 
 
 class TestFilterFormDispatch:
@@ -186,7 +262,16 @@ class TestFlushMetricsCommand:
         assert after == 0
         assert MetricSnapshot.objects.count() >= before
 
-    def test_flush_command_is_idempotent_when_empty(self) -> None:
+    def test_flush_command_is_idempotent_when_empty(self, capsys) -> None:
         assert metrics.read_all() == {}
         call_command("flush_metrics")
+        captured = capsys.readouterr()
+        assert "nothing to flush" in captured.out
         assert MetricSnapshot.objects.count() == 0
+
+    def test_flush_command_announces_count(self, client, capsys) -> None:
+        _walk_dashboard(client)
+        before = len(metrics.read_all())
+        call_command("flush_metrics")
+        captured = capsys.readouterr()
+        assert f"flushed {before} counters" in captured.out

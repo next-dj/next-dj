@@ -5,6 +5,5 @@ from next.pages import context
 
 @context("counters")
 def counters() -> list[tuple[str, int]]:
-    """Return ordered `(file_path, value)` pairs for the `pages.rendered` kind."""
-    rendered = metrics.read_kind("pages.rendered")
-    return sorted(rendered.items(), key=lambda item: -item[1])
+    """Return cumulative `(file_path, value)` pairs for the `pages.rendered` kind."""
+    return metrics.top_by_kind("pages.rendered")

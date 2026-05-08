@@ -4,5 +4,5 @@
     {% component "stat_card" label="Components" value=live_stats.totals.components %}
     {% component "stat_card" label="Actions" value=live_stats.totals.actions %}
   </div>
-  {% component "line_chart" %}
+  {% component "render_chart" %}
 </div>

@@ -100,7 +100,7 @@ NEXT_FRAMEWORK = {
     ],
     "DEFAULT_STATIC_BACKENDS": [
         {
-            "BACKEND": "next.static.StaticFilesBackend",
+            "BACKEND": "obs.backends.BabelJsxBackend",
             "OPTIONS": {
                 "DEDUP_STRATEGY": "obs.static_policies.InstrumentedDedup",
             },

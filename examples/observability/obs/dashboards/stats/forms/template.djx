@@ -2,32 +2,10 @@
 <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
   <div>
     <h3 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Dispatched</h3>
-    {% if dispatched %}
-      <ul class="space-y-1 text-sm">
-        {% for name, value in dispatched %}
-          <li class="flex justify-between border-b border-slate-100 py-1">
-            <span class="font-medium">{{ name }}</span>
-            <span class="tabular-nums">{{ value }}</span>
-          </li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p class="text-sm text-slate-500">No actions have been dispatched yet.</p>
-    {% endif %}
+    {% component "counter_list" items=dispatched empty_message="No actions have been dispatched yet." %}
   </div>
   <div>
     <h3 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Validation failed</h3>
-    {% if validation_failed %}
-      <ul class="space-y-1 text-sm">
-        {% for name, value in validation_failed %}
-          <li class="flex justify-between border-b border-slate-100 py-1">
-            <span class="font-medium">{{ name }}</span>
-            <span class="tabular-nums">{{ value }}</span>
-          </li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p class="text-sm text-slate-500">No validation failures so far.</p>
-    {% endif %}
+    {% component "counter_list" items=validation_failed empty_message="No validation failures so far." %}
   </div>
 </div>

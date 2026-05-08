@@ -120,9 +120,9 @@ class NextScriptBuilder:
             default = resolve_serializer()
             fragments: list[str] = []
             for k, v in js_context.items():
-                set = key_serializers.get(k, default)
+                key_serializer = key_serializers.get(k, default)
                 encoded_key = json.dumps(k, separators=(",", ":"))
-                encoded_val = set.dumps(v)
+                encoded_val = key_serializer.dumps(v)
                 fragments.append(f"{encoded_key}:{encoded_val}")
             payload = "{" + ",".join(fragments) + "}"
         return self._init_template.format(payload=payload)

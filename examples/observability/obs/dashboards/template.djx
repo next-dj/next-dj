@@ -10,9 +10,11 @@
     {% component "stat_card" label="HTML injections" value=totals.html_injections %}
   </div>
 
+  {% component "sparkline" %}
+
   <p class="text-sm text-slate-500">
     Drill down on the
     <a class="text-slate-900 underline" href="/stats/">stats page</a>
-    for per-source counters and the live React sparkline.
+    for windowed counters and the live Chart.js bar chart.
   </p>
 </section>

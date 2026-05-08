@@ -1,0 +1,31 @@
+{% if items %}
+  {% if layout == "table" %}
+    <table class="w-full text-sm">
+      <thead class="text-left text-slate-500">
+        <tr>
+          <th class="py-2 pr-4">{{ name_header }}</th>
+          <th class="py-2 pl-4 text-right">{{ value_header }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for name, value in items %}
+          <tr class="border-t border-slate-100">
+            <td class="py-2 pr-4 font-mono text-xs">{{ name }}</td>
+            <td class="py-2 pl-4 text-right tabular-nums">{{ value }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <ul class="space-y-1 text-sm">
+      {% for name, value in items %}
+        <li class="flex justify-between border-b border-slate-100 py-1">
+          <span class="font-medium">{{ name }}</span>
+          <span class="tabular-nums">{{ value }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% else %}
+  <p class="text-sm text-slate-500">{{ empty_message }}</p>
+{% endif %}
