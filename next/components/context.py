@@ -20,14 +20,22 @@ from next.utils import caller_source_path
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from next.static.serializers import JsContextSerializer
+
 
 @dataclass(frozen=True, slots=True)
 class ContextFunction:
-    """One function registered to add variables before a component template runs."""
+    """One function registered to add variables before a component template runs.
+
+    The optional `serializer` overrides the global JS context
+    serializer for the value this callable produces, but only when
+    `serialize` is true.
+    """
 
     func: Callable[..., Any]
     key: str | None
     serialize: bool = False
+    serializer: JsContextSerializer | None = None
 
 
 class ComponentContextRegistry:
@@ -44,6 +52,7 @@ class ComponentContextRegistry:
         func: Callable[..., Any],
         *,
         serialize: bool = False,
+        serializer: JsContextSerializer | None = None,
     ) -> None:
         """Register `func` under `key` for `component_path`, rejecting reserved keys."""
         path = component_path.resolve()
@@ -70,7 +79,7 @@ class ComponentContextRegistry:
                 raise ValueError(msg)
 
         component_registry[key] = ContextFunction(
-            func=func, key=key, serialize=serialize
+            func=func, key=key, serialize=serialize, serializer=serializer
         )
 
     def get_functions(self, component_path: Path) -> Sequence[ContextFunction]:
@@ -121,24 +130,35 @@ class ComponentContextManager:
         func_or_key: Callable[..., Any] | str | None = None,
         *,
         serialize: bool = False,
+        serializer: JsContextSerializer | None = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Mark a function so it fills template variables for this component module.
 
         Pass `serialize=True` to include the return value in
         `Next.context` so JavaScript code on the page can read it via
-        `window.Next.context`.
+        `window.Next.context`. Pass `serializer=` to route this key
+        through a custom `JsContextSerializer` instead of the global
+        `JS_CONTEXT_SERIALIZER` setting.
         """
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             if callable(func_or_key):
                 caller_path = self._get_caller_path(2)
                 self._registry.register(
-                    caller_path, None, func_or_key, serialize=serialize
+                    caller_path,
+                    None,
+                    func_or_key,
+                    serialize=serialize,
+                    serializer=serializer,
                 )
             else:
                 caller_path = self._get_caller_path(1)
                 self._registry.register(
-                    caller_path, func_or_key, func, serialize=serialize
+                    caller_path,
+                    func_or_key,
+                    func,
+                    serialize=serialize,
+                    serializer=serializer,
                 )
             return func
 

@@ -1,0 +1,8 @@
+<div class="space-y-6">
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+    {% component "stat_card" label="Pages" value=live_stats.totals.pages %}
+    {% component "stat_card" label="Components" value=live_stats.totals.components %}
+    {% component "stat_card" label="Actions" value=live_stats.totals.actions %}
+  </div>
+  {% component "line_chart" %}
+</div>

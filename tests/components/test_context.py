@@ -442,3 +442,86 @@ class TestInjectComponentContextSerialize:
         context_data: dict = {}
         with patch("next.components.renderers.component", mgr):
             _inject_component_context(info, context_data, None)
+
+
+class TestComponentContextSerializerOverride:
+    """`@component.context(serializer=...)` routes one key through a custom encoder."""
+
+    class _MarkerSerializer:
+        """Tracks which values were dumped through the override."""
+
+        def __init__(self) -> None:
+            self.calls: list[object] = []
+
+        def dumps(self, value: object) -> str:
+            self.calls.append(value)
+            return f'"marker:{value}"'
+
+    def _setup(
+        self, tmp_path: Path
+    ) -> tuple[ComponentContextManager, ComponentInfo, Path]:
+        mgr = ComponentContextManager()
+        module_path = (tmp_path / "component.py").resolve()
+        module_path.parent.mkdir(parents=True, exist_ok=True)
+        template_path = module_path.parent / "component.djx"
+        template_path.write_text("<div></div>")
+        info = ComponentInfo(
+            name="demo",
+            scope_root=module_path.parent,
+            scope_relative="",
+            template_path=template_path,
+            module_path=module_path,
+            is_simple=False,
+        )
+        return mgr, info, module_path
+
+    def test_keyed_override_recorded_on_collector(self, tmp_path: Path) -> None:
+        """A keyed context with `serializer=` records the override on the collector."""
+        mgr, info, module_path = self._setup(tmp_path)
+        marker = self._MarkerSerializer()
+        mgr._registry.register(
+            module_path,
+            "feed",
+            lambda: "payload",
+            serialize=True,
+            serializer=marker,
+        )
+
+        collector = StaticCollector()
+        context_data: dict = {"_static_collector": collector}
+        with patch("next.components.renderers.component", mgr):
+            _inject_component_context(info, context_data, None)
+
+        assert collector.js_context_serializers() == {"feed": marker}
+        assert marker.calls == ["payload"]
+
+    def test_dict_merge_override_applies_to_each_key(self, tmp_path: Path) -> None:
+        """An unkeyed context with `serializer=` records the override per merged key."""
+        mgr, info, module_path = self._setup(tmp_path)
+        marker = self._MarkerSerializer()
+        mgr._registry.register(
+            module_path,
+            None,
+            lambda: {"a": 1, "b": 2},
+            serialize=True,
+            serializer=marker,
+        )
+
+        collector = StaticCollector()
+        context_data: dict = {"_static_collector": collector}
+        with patch("next.components.renderers.component", mgr):
+            _inject_component_context(info, context_data, None)
+
+        assert collector.js_context_serializers() == {"a": marker, "b": marker}
+
+    def test_no_serializer_keeps_collector_map_empty(self, tmp_path: Path) -> None:
+        """Without `serializer=` the override map on the collector stays empty."""
+        mgr, info, module_path = self._setup(tmp_path)
+        mgr._registry.register(module_path, "k", lambda: "v", serialize=True)
+
+        collector = StaticCollector()
+        context_data: dict = {"_static_collector": collector}
+        with patch("next.components.renderers.component", mgr):
+            _inject_component_context(info, context_data, None)
+
+        assert collector.js_context_serializers() == {}

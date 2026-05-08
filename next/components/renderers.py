@@ -101,12 +101,14 @@ def _inject_component_context(
                 context_data.update(data)
                 if ctx_func.serialize and collector is not None:
                     for k, v in data.items():
-                        collector.add_js_context(k, v)
+                        collector.add_js_context(k, v, serializer=ctx_func.serializer)
         else:
             result = ctx_func.func(**resolved)
             context_data[ctx_func.key] = result
             if ctx_func.serialize and collector is not None:
-                collector.add_js_context(ctx_func.key, result)
+                collector.add_js_context(
+                    ctx_func.key, result, serializer=ctx_func.serializer
+                )
 
 
 class ComponentRenderStrategy(Protocol):

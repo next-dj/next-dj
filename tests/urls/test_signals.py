@@ -1,12 +1,13 @@
 from collections.abc import Generator
+from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from django.dispatch import Signal
 
 from next.conf import next_framework_settings
-from next.urls import RouterManager, router_manager
+from next.urls import FileRouterBackend, RouterManager, router_manager
 from next.urls.signals import route_registered, router_reloaded
 
 
@@ -87,6 +88,49 @@ class TestRouteRegisteredSignal:
         route_registered.disconnect(_listener)
         route_registered.send(sender=object)
         assert len(events) == 0
+
+
+class TestRouteRegisteredFromBackend:
+    """`FileRouterBackend` fires `route_registered` once per yielded pattern."""
+
+    def test_fires_per_yielded_pattern(
+        self, capture_route_registered: list[dict[str, Any]]
+    ) -> None:
+        """Each yielded URL pattern produces one `route_registered` event."""
+        router = FileRouterBackend()
+        scanned = [
+            ("home/", Path("/tmp/pages/home/page.py")),
+            ("about/", Path("/tmp/pages/about/page.py")),
+        ]
+        with (
+            patch.object(router, "_scan_pages_directory", return_value=scanned),
+            patch("next.urls.backends.page.create_url_pattern") as mock_create,
+        ):
+            mock_create.side_effect = [Mock(name="p1"), Mock(name="p2")]
+            list(router._generate_patterns_from_directory(Mock()))
+        assert len(capture_route_registered) == 2
+        senders = {ev["sender"] for ev in capture_route_registered}
+        assert senders == {FileRouterBackend}
+        captured_urls = [ev["url_path"] for ev in capture_route_registered]
+        assert captured_urls == ["home/", "about/"]
+        captured_files = [ev["file_path"] for ev in capture_route_registered]
+        assert captured_files == [scanned[0][1], scanned[1][1]]
+
+    def test_no_event_when_pattern_filtered(
+        self, capture_route_registered: list[dict[str, Any]]
+    ) -> None:
+        """When `create_url_pattern` returns falsy, no event is fired."""
+        router = FileRouterBackend()
+        with (
+            patch.object(
+                router,
+                "_scan_pages_directory",
+                return_value=[("skip/", Path("/tmp/pages/skip/page.py"))],
+            ),
+            patch("next.urls.backends.page.create_url_pattern", return_value=None),
+        ):
+            list(router._generate_patterns_from_directory(Mock()))
+        assert capture_route_registered == []
 
 
 class TestRouterReloadedSignal:

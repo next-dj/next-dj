@@ -301,6 +301,49 @@ class TestJsContextPolicyIntegration:
         assert "k" not in collector.js_context()
 
 
+class TestJsContextSerializerOverride:
+    """`add_js_context(serializer=)` routes one key through a custom encoder."""
+
+    class _CustomSerializer:
+        """Serializer that wraps the value into a sentinel envelope."""
+
+        def __init__(self) -> None:
+            self.calls: list[object] = []
+
+        def dumps(self, value: object) -> str:
+            self.calls.append(value)
+            return f'{{"_custom":{value!r}}}'.replace("'", '"')
+
+    def test_override_recorded_for_key(self, collector: StaticCollector) -> None:
+        """The override is recorded under the same key in the sibling map."""
+        custom = self._CustomSerializer()
+        collector.add_js_context("special", "payload", serializer=custom)
+        assert collector.js_context_serializers() == {"special": custom}
+
+    def test_override_validates_with_supplied_serializer(self) -> None:
+        """Validation goes through the override, not the global default."""
+        custom = self._CustomSerializer()
+        collector = StaticCollector()
+        collector.add_js_context("k", "v", serializer=custom)
+        assert custom.calls == ["v"]
+
+    def test_override_is_per_key_only(self, collector: StaticCollector) -> None:
+        """Other keys keep using the global serializer when no override is set."""
+        custom = self._CustomSerializer()
+        collector.add_js_context("a", 1, serializer=custom)
+        collector.add_js_context("b", 2)
+        assert collector.js_context_serializers() == {"a": custom}
+        assert collector.js_context() == {"a": 1, "b": 2}
+
+    def test_no_override_leaves_serializer_map_empty(
+        self, collector: StaticCollector
+    ) -> None:
+        """When every call omits `serializer=`, the override map stays empty."""
+        collector.add_js_context("a", 1)
+        collector.add_js_context("b", 2)
+        assert collector.js_context_serializers() == {}
+
+
 class TestPlaceholderRegistry:
     """PlaceholderRegistry stores slot metadata keyed by slot name."""
 

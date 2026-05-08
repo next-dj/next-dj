@@ -1,10 +1,14 @@
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from next.components import ComponentInfo, render_component
+from next.components.backends import ComponentsBackend, ComponentsFactory
+from next.components.manager import ComponentsManager
+from next.components.registry import ComponentRegistry
 from next.components.signals import (
     component_backend_loaded,
     component_registered,
@@ -132,6 +136,58 @@ class TestComponentRegisteredSignal:
         component_registered.send(sender=object, name="x")
         assert len(capture_component_registered) == 1
 
+    def test_registry_register_emits_per_component(
+        self,
+        tmp_path: Path,
+        capture_component_registered: list[dict[str, Any]],
+    ) -> None:
+        """`ComponentRegistry.register` fires once per component with `info`."""
+        registry = ComponentRegistry()
+        info_a = ComponentInfo(
+            name="a",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "a.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        info_b = ComponentInfo(
+            name="b",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "b.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        registry.register(info_a)
+        registry.register(info_b)
+        assert len(capture_component_registered) == 2
+        infos = [ev["info"] for ev in capture_component_registered]
+        assert infos == [info_a, info_b]
+        senders = {ev["sender"] for ev in capture_component_registered}
+        assert senders == {ComponentRegistry}
+
+    def test_registry_register_many_emits_per_item(
+        self,
+        tmp_path: Path,
+        capture_component_registered: list[dict[str, Any]],
+    ) -> None:
+        """`register_many` fires the signal once per item, not in batch."""
+        registry = ComponentRegistry()
+        items = [
+            ComponentInfo(
+                name=f"c{i}",
+                scope_root=tmp_path,
+                scope_relative="",
+                template_path=tmp_path / f"c{i}.djx",
+                module_path=None,
+                is_simple=True,
+            )
+            for i in range(3)
+        ]
+        registry.register_many(items)
+        assert len(capture_component_registered) == 3
+
 
 class TestComponentBackendLoadedSignal:
     """``component_backend_loaded`` wiring."""
@@ -159,6 +215,50 @@ class TestComponentBackendLoadedSignal:
 
         component_backend_loaded.send(sender=_Backend)
         assert capture_component_backend_loaded[0]["sender"] is _Backend
+
+    def test_manager_reload_config_emits_per_backend(
+        self,
+        capture_component_backend_loaded: list[dict[str, Any]],
+    ) -> None:
+        """`ComponentsManager._reload_config` fires once per built backend."""
+        sentinel: ComponentsBackend = ComponentsFactory.create_backend(
+            {
+                "BACKEND": "next.components.DummyBackend",
+                "COMPONENTS_DIR": "_widgets",
+            }
+        )
+
+        class _StubFactory:
+            calls = 0
+
+            @classmethod
+            def create_backend(cls, _config: dict[str, Any]) -> ComponentsBackend:
+                cls.calls += 1
+                return sentinel
+
+        manager = ComponentsManager()
+        configs = [
+            {"BACKEND": "next.components.DummyBackend", "COMPONENTS_DIR": "a"},
+            {"BACKEND": "next.components.DummyBackend", "COMPONENTS_DIR": "b"},
+        ]
+
+        with (
+            patch(
+                "next.components.manager.next_framework_settings",
+            ) as fake_settings,
+            patch.object(
+                ComponentsFactory, "create_backend", _StubFactory.create_backend
+            ),
+        ):
+            fake_settings.DEFAULT_COMPONENT_BACKENDS = configs
+            manager._reload_config()
+
+        assert len(capture_component_backend_loaded) == 2
+        senders = {ev["sender"] for ev in capture_component_backend_loaded}
+        assert senders == {ComponentsManager}
+        captured_configs = [ev["config"] for ev in capture_component_backend_loaded]
+        assert captured_configs == configs
+        assert all(ev["backend"] is sentinel for ev in capture_component_backend_loaded)
 
 
 class TestComponentRenderedSignal:

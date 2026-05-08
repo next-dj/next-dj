@@ -313,6 +313,7 @@ class StaticCollector:
         self._buckets: dict[str, list[StaticAsset]] = {}
         self._prepend_idx: dict[str, int] = {}
         self._js_context: dict[str, Any] = {}
+        self._js_context_serializers: dict[str, JsContextSerializer] = {}
 
     def add(self, asset: StaticAsset, *, prepend: bool = False) -> None:
         """Add the asset unless its dedup key was already recorded.
@@ -354,21 +355,32 @@ class StaticCollector:
             self._js_serializer = resolve_serializer()
         return self._js_serializer
 
-    def add_js_context(self, key: str, value: Any) -> None:  # noqa: ANN401
+    def add_js_context(
+        self,
+        key: str,
+        value: Any,  # noqa: ANN401
+        *,
+        serializer: JsContextSerializer | None = None,
+    ) -> None:
         """Merge the value under the key through the JS-context policy.
 
-        Validates that `value` is serialisable by the configured
-        `JsContextSerializer` before merging. Surfacing the failure
-        here, at the registration site, gives a much better traceback
-        than catching it at final page inject time.
+        Validates that `value` is serialisable by the active serializer
+        before merging. Surfacing the failure here, at the registration
+        site, gives a much better traceback than catching it at final
+        page inject time. When `serializer` is supplied, the override
+        validates this value and is recorded for the inject phase so
+        the same key uses the same serializer end to end. The override
+        does not leak into other keys.
         """
-        serializer = self._get_js_serializer()
+        active = serializer if serializer is not None else self._get_js_serializer()
         try:
-            serializer.dumps(value)
+            active.dumps(value)
         except (TypeError, ValueError) as e:
             msg = f"JS context value for key {key!r} is not serialisable: {e}"
             raise TypeError(msg) from e
         self._js_context = self._js_policy.merge(self._js_context, key, value)
+        if serializer is not None:
+            self._js_context_serializers[key] = serializer
 
     def js_context(self) -> dict[str, Any]:
         """Return the accumulated JS context.
@@ -376,3 +388,11 @@ class StaticCollector:
         Callers must not mutate the returned mapping.
         """
         return self._js_context
+
+    def js_context_serializers(self) -> dict[str, JsContextSerializer]:
+        """Return the per-key serializer overrides recorded so far.
+
+        The returned mapping is empty when every key uses the global
+        serializer. Callers must not mutate it.
+        """
+        return self._js_context_serializers

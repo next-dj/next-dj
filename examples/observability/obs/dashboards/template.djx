@@ -1,0 +1,18 @@
+<section class="space-y-6">
+  <header class="flex items-baseline justify-between">
+    <h1 class="text-2xl font-semibold">Overview</h1>
+    <p class="text-sm text-slate-500">In-process counters refresh on every page render.</p>
+  </header>
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    {% component "stat_card" label="Pages rendered" value=totals.pages_rendered %}
+    {% component "stat_card" label="Components rendered" value=totals.components_rendered %}
+    {% component "stat_card" label="Actions dispatched" value=totals.actions_dispatched %}
+    {% component "stat_card" label="HTML injections" value=totals.html_injections %}
+  </div>
+
+  <p class="text-sm text-slate-500">
+    Drill down on the
+    <a class="text-slate-900 underline" href="/stats/">stats page</a>
+    for per-source counters and the live React sparkline.
+  </p>
+</section>

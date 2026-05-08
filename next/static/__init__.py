@@ -39,15 +39,24 @@ from .discovery import AssetDiscovery
 from .finders import NextStaticFilesFinder
 from .manager import StaticManager, default_manager, reset_default_manager
 from .scripts import NextScriptBuilder, ScriptInjectionPolicy
+from .serializers import (
+    JsContextSerializer,
+    JsonJsContextSerializer,
+    PydanticJsContextSerializer,
+    resolve_serializer,
+)
 
 
 __all__ = [
     "AssetDiscovery",
+    "JsContextSerializer",
+    "JsonJsContextSerializer",
     "KindRegistry",
     "NextScriptBuilder",
     "NextStaticFilesFinder",
     "PlaceholderRegistry",
     "PlaceholderSlot",
+    "PydanticJsContextSerializer",
     "ScriptInjectionPolicy",
     "StaticAsset",
     "StaticBackend",
@@ -60,5 +69,6 @@ __all__ = [
     "default_placeholders",
     "register_defaults",
     "reset_default_manager",
+    "resolve_serializer",
     "signals",
 ]

@@ -1,0 +1,19 @@
+<section class="space-y-6">
+  <header class="flex flex-wrap items-baseline justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold">Stats</h1>
+      <p class="text-sm text-slate-500">Window: {{ window }}</p>
+    </div>
+    {% component "filter_window" current=window %}
+  </header>
+  <nav class="flex gap-2 text-sm">
+    <a class="rounded-md bg-white px-3 py-2 ring-1 ring-slate-200 hover:bg-slate-100" href="/stats/">Live</a>
+    <a class="rounded-md bg-white px-3 py-2 ring-1 ring-slate-200 hover:bg-slate-100" href="/stats/pages/">Pages</a>
+    <a class="rounded-md bg-white px-3 py-2 ring-1 ring-slate-200 hover:bg-slate-100" href="/stats/components/">Components</a>
+    <a class="rounded-md bg-white px-3 py-2 ring-1 ring-slate-200 hover:bg-slate-100" href="/stats/forms/">Forms</a>
+    <a class="rounded-md bg-white px-3 py-2 ring-1 ring-slate-200 hover:bg-slate-100" href="/stats/static/">Static</a>
+  </nav>
+  <div class="rounded-md bg-white p-6 ring-1 ring-slate-200">
+    {% block template %}{% endblock template %}
+  </div>
+</section>

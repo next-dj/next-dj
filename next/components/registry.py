@@ -16,6 +16,8 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
+from .signals import component_registered
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -50,6 +52,7 @@ class ComponentRegistry:
         self._ordered.append(component)
         self._by_name.setdefault(component.name, []).append(component)
         self._bump()
+        component_registered.send(sender=ComponentRegistry, info=component)
 
     def register_many(self, components: Iterable[ComponentInfo]) -> None:
         """Register each component from the iterable in order."""

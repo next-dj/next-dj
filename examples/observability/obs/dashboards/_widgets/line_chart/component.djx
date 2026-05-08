@@ -1,0 +1,11 @@
+<figure class="rounded-md bg-white p-6 ring-1 ring-slate-200">
+  <figcaption class="mb-4 text-sm font-semibold text-slate-700">
+    Render distribution
+  </figcaption>
+  <div class="relative h-56">
+    <canvas id="render-chart-canvas"></canvas>
+  </div>
+  <noscript>
+    <p class="text-sm text-slate-500">JavaScript is required to render the chart.</p>
+  </noscript>
+</figure>

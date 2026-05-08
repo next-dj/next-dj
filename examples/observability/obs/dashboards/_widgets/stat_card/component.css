@@ -1,0 +1,4 @@
+/* Stat card uses Tailwind utilities. This file proves co-located CSS
+ * is collected and that the dedup policy filters identical includes
+ * when the same component is rendered twice on one page.
+ */

@@ -188,12 +188,11 @@ class StaticManager:
     def _wrap_with_runtime(self, user_tags: str, collector: StaticCollector) -> str:
         builder = self._next_script_builder()
         if builder.policy is ScriptInjectionPolicy.AUTO:
-            next_scripts = (
-                "\n".join(
-                    [builder.script_tag(), builder.init_script(collector.js_context())]
-                )
-                + "\n"
+            init_payload = builder.init_script(
+                collector.js_context(),
+                key_serializers=collector.js_context_serializers(),
             )
+            next_scripts = f"{builder.script_tag()}\n{init_payload}\n"
             return next_scripts + user_tags if user_tags else next_scripts
         return user_tags
 
