@@ -655,6 +655,8 @@ that emits multiple filenames for an identical file.
 :class:`~next.static.collector.DeepMergePolicy` merges nested dictionaries
 registered under the same JS-context key instead of keeping the first value.
 
+.. _static-js-context-serializer:
+
 Pluggable JS-context serializer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
