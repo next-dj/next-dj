@@ -1100,7 +1100,10 @@ The signals emitted by :mod:`next.forms.signals` let external code observe actio
 * ``action_registered`` fires when ``@action`` attaches a handler to a backend.
   Kwargs: ``action_name``, ``uid``, ``form_class``, ``namespace``.
 * ``action_dispatched`` fires after a backend finishes dispatch for a request.
-  Kwargs: ``action_name``, ``duration_ms``, ``response_status``.
+  Kwargs: ``action_name``, ``duration_ms``, ``response_status``, ``form``,
+  ``url_kwargs``. ``form`` is the bound form post-validation, or ``None`` for
+  handler-only actions. ``url_kwargs`` is a copy of the resolved kwargs so
+  receivers can route on the action payload without re-querying state.
 * ``form_validation_failed`` fires after a submitted form fails validation.
   Kwargs: ``action_name``, ``error_count``, ``field_names``.
 
@@ -1108,6 +1111,7 @@ A :class:`~next.forms.FormActionBackend` subclass that subscribes to these signa
 The example wires ``AuditedFormActionBackend`` through ``DEFAULT_FORM_ACTION_BACKENDS`` and writes audit rows from both the backend channel and the signal channel side by side.
 The inline ``AuditedRegistryFormActionBackend`` snippet in :doc:`extending` (section "Worked examples by subsystem") shows the minimal subclass shape.
 Working ``@action`` handlers without custom backends are in ``examples/shortener`` (``create_link`` form) and ``examples/feature-flags`` (``bulk_toggle`` form).
+``examples/live-polls`` reads the bound ``form`` and ``url_kwargs`` from ``action_dispatched`` to fan out a fresh poll snapshot to every open Server-Sent Events subscriber.
 
 Next
 ----

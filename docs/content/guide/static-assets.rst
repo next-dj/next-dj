@@ -1479,3 +1479,11 @@ pipeline:
   ``collector_finalized`` signal injects ``@vite/client`` without
   template edits. Uses ``HashContentDedup`` and ``DeepMergePolicy`` for
   dedup and multi-source JS context merging.
+- ``examples/live-polls`` — same ``ViteManifestBackend`` shape applied
+  to a Vue 3 stack. The ``vue`` kind binds ``.vue`` to the ``scripts``
+  slot through ``default_kinds.register`` and reuses the framework
+  built-in ``render_module_tag``. The backend refuses to fall back to
+  staticfiles when the manifest is missing because a raw ``.vue`` file
+  is unrenderable without compilation. Pairs with a Server-Sent Events
+  stream so the SFC subscribes through ``EventSource`` and reacts to
+  votes published by an ``action_dispatched`` receiver.

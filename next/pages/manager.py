@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from django.http import HttpRequest, HttpResponse
+from django.http.response import HttpResponseBase
 from django.template import Context as DjangoTemplateContext, Template
 from django.urls import URLPattern, path
 
@@ -72,11 +73,12 @@ class _BodyResolution:
     and rendered. `http_response` is a Django response that is returned
     verbatim. The framework uses the verbatim path as the `render()`
     escape hatch for redirects, streaming responses, JSON, and anything
-    else.
+    else. The type is `HttpResponseBase` so `StreamingHttpResponse` and
+    `FileResponse` flow through unchanged alongside `HttpResponse`.
     """
 
     body: str | None = None
-    http_response: HttpResponse | None = None
+    http_response: HttpResponseBase | None = None
 
 
 class Page:
@@ -238,9 +240,9 @@ class Page:
         The resolution order is `render()`, then the `template` module
         attribute, then the registered `TemplateLoader` chain, then an
         empty body. `render()` may short-circuit by returning any
-        `HttpResponse` subclass such as a redirect, a streaming
-        response, or a JSON response. In that case the layout and
-        static pipelines are bypassed entirely.
+        `HttpResponseBase` subclass such as a redirect, a streaming
+        response, a file response, or a JSON response. In that case
+        the layout and static pipelines are bypassed entirely.
         """
         if module is not None:
             render_func = getattr(module, "render", None)
@@ -269,13 +271,13 @@ class Page:
             **kwargs,
         )
         result = render_func(**resolved)
-        if isinstance(result, HttpResponse):
+        if isinstance(result, HttpResponseBase):
             return _BodyResolution(http_response=result)
         if isinstance(result, str):
             return _BodyResolution(body=result)
         msg = (
-            f"page.py render() at {file_path} must return str or HttpResponse, "
-            f"got {type(result).__name__}."
+            f"page.py render() at {file_path} must return str or "
+            f"HttpResponseBase, got {type(result).__name__}."
         )
         raise TypeError(msg)
 
@@ -394,10 +396,10 @@ class Page:
         file_path: Path,
         _parameters: dict[str, str],
         module: types.ModuleType | None,
-    ) -> Callable[..., HttpResponse]:
+    ) -> Callable[..., HttpResponseBase]:
         """Return a view that resolves the body, composes layouts, and renders."""
 
-        def view(request: HttpRequest, **kwargs: object) -> HttpResponse:
+        def view(request: HttpRequest, **kwargs: object) -> HttpResponseBase:
             resolution = self._resolve_page_body(file_path, module, request, **kwargs)
             if resolution.http_response is not None:
                 return resolution.http_response

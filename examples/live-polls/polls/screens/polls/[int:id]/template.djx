@@ -1,0 +1,1 @@
+{% component "poll_chart" %}

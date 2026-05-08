@@ -1,4 +1,3 @@
-{% load next_static components forms %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
