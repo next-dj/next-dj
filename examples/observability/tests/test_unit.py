@@ -23,6 +23,7 @@ from obs.receivers import (
     on_component_backend_loaded,
     on_component_registered,
     on_component_rendered,
+    on_components_registered,
     on_context_registered,
     on_form_validation_failed,
     on_html_injected,
@@ -323,6 +324,19 @@ class TestReceiverDirectInvocation:
         info = type("X", (), {"name": "stat_card"})()
         on_component_registered(info=info)
         assert metrics.read_kind("components.registered") == {"stat_card": 1}
+
+    def test_components_registered_counts_each_info_in_batch(self) -> None:
+        a = type("X", (), {"name": "stat_card"})()
+        b = type("X", (), {"name": "header"})()
+        on_components_registered(infos=(a, b, a))
+        assert metrics.read_kind("components.registered") == {
+            "stat_card": 2,
+            "header": 1,
+        }
+
+    def test_components_registered_empty_batch_is_noop(self) -> None:
+        on_components_registered(infos=())
+        assert metrics.read_kind("components.registered") == {}
 
     def test_component_rendered_uses_info_name(self) -> None:
         info = type("X", (), {"name": "stat_card"})()

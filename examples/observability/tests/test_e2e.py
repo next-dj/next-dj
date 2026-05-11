@@ -7,6 +7,7 @@ from next.components.signals import (
     component_backend_loaded,
     component_registered,
     component_rendered,
+    components_registered,
 )
 from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
@@ -37,6 +38,7 @@ GROUP_SAMPLES: dict[str, list] = {
     "urls": [route_registered, router_reloaded],
     "components": [
         component_registered,
+        components_registered,
         component_backend_loaded,
         component_rendered,
     ],

@@ -441,7 +441,14 @@ Register a custom backend through the settings contract.
 
 The signals emitted by :mod:`next.components.signals` let external code observe component activity.
 
-* ``component_registered`` fires when a backend reports a new component.
+* ``component_registered`` fires from singular
+  :meth:`~next.components.registry.ComponentRegistry.register` calls and
+  carries one ``info`` per event.
+* ``components_registered`` fires from
+  :meth:`~next.components.registry.ComponentRegistry.register_many` exactly
+  once per batch with the full ``infos`` tuple. The bulk path skips
+  ``component_registered`` to keep registration of large component sets
+  O(1) in signal dispatches.
 * ``component_backend_loaded`` fires after ``ComponentsFactory`` instantiates a backend.
 * ``component_rendered`` fires after a component finishes rendering.
 

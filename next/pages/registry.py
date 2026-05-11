@@ -10,8 +10,7 @@ autoreloader and for the static finder.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from django.http import HttpRequest
 
@@ -29,13 +28,14 @@ if TYPE_CHECKING:
     from next.static.serializers import JsContextSerializer
 
 
-@dataclass(frozen=True, slots=True)
-class PageContextEntry:
+class PageContextEntry(NamedTuple):
     """One context callable registered for a `page.py` file.
 
     The optional `serializer` overrides the global JS context
     serializer for the value this callable produces, but only when
-    `serialize` is true.
+    `serialize` is true. Backed by `NamedTuple` so the hot
+    `register_context` path allocates a plain tuple rather than a
+    frozen dataclass instance.
     """
 
     func: Callable[..., Any]

@@ -14,6 +14,7 @@ class TestAggregateSignalsModule:
             "component_backend_loaded",
             "component_registered",
             "component_rendered",
+            "components_registered",
             "context_registered",
             "form_validation_failed",
             "html_injected",

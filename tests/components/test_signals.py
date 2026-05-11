@@ -1,9 +1,10 @@
-from collections.abc import Generator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from django.dispatch import Signal
 
 from next.components import ComponentInfo, render_component
 from next.components.backends import ComponentsBackend, ComponentsFactory
@@ -13,92 +14,26 @@ from next.components.signals import (
     component_backend_loaded,
     component_registered,
     component_rendered,
+    components_registered,
 )
 
 
-@pytest.fixture()
-def capture_component_registered() -> Generator[list[dict[str, Any]], None, None]:
-    """Capture ``component_registered`` signal events."""
-    events: list[dict[str, Any]] = []
-
-    def _listener(sender: object, **kwargs: object) -> None:
-        events.append({"sender": sender, **kwargs})
-
-    component_registered.connect(_listener)
-    try:
-        yield events
-    finally:
-        component_registered.disconnect(_listener)
-
-
-@pytest.fixture()
-def capture_component_backend_loaded() -> Generator[list[dict[str, Any]], None, None]:
-    """Capture ``component_backend_loaded`` signal events."""
-    events: list[dict[str, Any]] = []
-
-    def _listener(sender: object, **kwargs: object) -> None:
-        events.append({"sender": sender, **kwargs})
-
-    component_backend_loaded.connect(_listener)
-    try:
-        yield events
-    finally:
-        component_backend_loaded.disconnect(_listener)
-
-
-@pytest.fixture()
-def capture_component_rendered() -> Generator[list[dict[str, Any]], None, None]:
-    """Capture ``component_rendered`` signal events."""
-    events: list[dict[str, Any]] = []
-
-    def _listener(sender: object, **kwargs: object) -> None:
-        events.append({"sender": sender, **kwargs})
-
-    component_rendered.connect(_listener)
-    try:
-        yield events
-    finally:
-        component_rendered.disconnect(_listener)
-
-
+@pytest.mark.parametrize(
+    "signal",
+    [
+        pytest.param(component_registered, id="component_registered"),
+        pytest.param(components_registered, id="components_registered"),
+        pytest.param(component_backend_loaded, id="component_backend_loaded"),
+        pytest.param(component_rendered, id="component_rendered"),
+    ],
+)
+@pytest.mark.parametrize("method", ["connect", "disconnect", "send"])
 class TestComponentSignalsAreDjangoSignals:
-    """All three component signals expose the Django ``Signal`` interface."""
+    """Every component signal exposes the Django :class:`Signal` interface."""
 
-    def test_component_registered_has_connect(self) -> None:
-        """``component_registered`` exposes ``.connect``."""
-        assert hasattr(component_registered, "connect")
-
-    def test_component_registered_has_disconnect(self) -> None:
-        """``component_registered`` exposes ``.disconnect``."""
-        assert hasattr(component_registered, "disconnect")
-
-    def test_component_registered_has_send(self) -> None:
-        """``component_registered`` exposes ``.send``."""
-        assert hasattr(component_registered, "send")
-
-    def test_component_backend_loaded_has_connect(self) -> None:
-        """``component_backend_loaded`` exposes ``.connect``."""
-        assert hasattr(component_backend_loaded, "connect")
-
-    def test_component_backend_loaded_has_disconnect(self) -> None:
-        """``component_backend_loaded`` exposes ``.disconnect``."""
-        assert hasattr(component_backend_loaded, "disconnect")
-
-    def test_component_backend_loaded_has_send(self) -> None:
-        """``component_backend_loaded`` exposes ``.send``."""
-        assert hasattr(component_backend_loaded, "send")
-
-    def test_component_rendered_has_connect(self) -> None:
-        """``component_rendered`` exposes ``.connect``."""
-        assert hasattr(component_rendered, "connect")
-
-    def test_component_rendered_has_disconnect(self) -> None:
-        """``component_rendered`` exposes ``.disconnect``."""
-        assert hasattr(component_rendered, "disconnect")
-
-    def test_component_rendered_has_send(self) -> None:
-        """``component_rendered`` exposes ``.send``."""
-        assert hasattr(component_rendered, "send")
+    def test_exposes_method(self, signal: Signal, method: str) -> None:
+        """The signal carries the named Django dispatch method."""
+        assert hasattr(signal, method)
 
 
 class TestComponentRegisteredSignal:
@@ -138,27 +73,13 @@ class TestComponentRegisteredSignal:
 
     def test_registry_register_emits_per_component(
         self,
-        tmp_path: Path,
+        component_info_factory: Callable[..., ComponentInfo],
         capture_component_registered: list[dict[str, Any]],
     ) -> None:
         """`ComponentRegistry.register` fires once per component with `info`."""
         registry = ComponentRegistry()
-        info_a = ComponentInfo(
-            name="a",
-            scope_root=tmp_path,
-            scope_relative="",
-            template_path=tmp_path / "a.djx",
-            module_path=None,
-            is_simple=True,
-        )
-        info_b = ComponentInfo(
-            name="b",
-            scope_root=tmp_path,
-            scope_relative="",
-            template_path=tmp_path / "b.djx",
-            module_path=None,
-            is_simple=True,
-        )
+        info_a = component_info_factory(name="a", template_name="a.djx")
+        info_b = component_info_factory(name="b", template_name="b.djx")
         registry.register(info_a)
         registry.register(info_b)
         assert len(capture_component_registered) == 2
@@ -167,26 +88,72 @@ class TestComponentRegisteredSignal:
         senders = {ev["sender"] for ev in capture_component_registered}
         assert senders == {ComponentRegistry}
 
-    def test_registry_register_many_emits_per_item(
+    def test_registry_register_many_skips_singular_signal(
         self,
-        tmp_path: Path,
+        component_info_factory: Callable[..., ComponentInfo],
         capture_component_registered: list[dict[str, Any]],
     ) -> None:
-        """`register_many` fires the signal once per item, not in batch."""
-        registry = ComponentRegistry()
+        """`register_many` does not fire the per-item `component_registered`."""
         items = [
-            ComponentInfo(
-                name=f"c{i}",
-                scope_root=tmp_path,
-                scope_relative="",
-                template_path=tmp_path / f"c{i}.djx",
-                module_path=None,
-                is_simple=True,
-            )
+            component_info_factory(name=f"c{i}", template_name=f"c{i}.djx")
             for i in range(3)
         ]
-        registry.register_many(items)
-        assert len(capture_component_registered) == 3
+        ComponentRegistry().register_many(items)
+        assert capture_component_registered == []
+
+
+class TestComponentsRegisteredSignal:
+    """`components_registered` (plural) wiring for bulk registration."""
+
+    @pytest.fixture()
+    def items(
+        self, component_info_factory: Callable[..., ComponentInfo]
+    ) -> list[ComponentInfo]:
+        """Three named `ComponentInfo` objects for batch-registration cases."""
+        return [
+            component_info_factory(name=f"c{i}", template_name=f"c{i}.djx")
+            for i in range(3)
+        ]
+
+    def test_listener_receives_manual_send(
+        self,
+        capture_components_registered: list[dict[str, Any]],
+    ) -> None:
+        """A connected listener receives `infos` from `.send`."""
+        components_registered.send(sender=object, infos=())
+        assert len(capture_components_registered) == 1
+        assert capture_components_registered[0]["infos"] == ()
+
+    def test_registry_register_many_emits_one_batch_event(
+        self,
+        items: list[ComponentInfo],
+        capture_components_registered: list[dict[str, Any]],
+    ) -> None:
+        """`register_many` fires `components_registered` exactly once."""
+        ComponentRegistry().register_many(items)
+        assert len(capture_components_registered) == 1
+        event = capture_components_registered[0]
+        assert event["sender"] is ComponentRegistry
+        assert event["infos"] == tuple(items)
+
+    def test_registry_register_many_empty_does_not_fire(
+        self,
+        capture_components_registered: list[dict[str, Any]],
+    ) -> None:
+        """An empty bulk call stays silent."""
+        ComponentRegistry().register_many([])
+        assert capture_components_registered == []
+
+    def test_registry_register_singular_path_does_not_fire_batch(
+        self,
+        component_info_factory: Callable[..., ComponentInfo],
+        capture_components_registered: list[dict[str, Any]],
+    ) -> None:
+        """The singular `register` does not fire `components_registered`."""
+        ComponentRegistry().register(
+            component_info_factory(name="solo", template_name="solo.djx")
+        )
+        assert capture_components_registered == []
 
 
 class TestComponentBackendLoadedSignal:

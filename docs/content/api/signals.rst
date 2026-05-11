@@ -46,11 +46,19 @@ Each signal's sender and kwargs are documented on its subsystem page:
 - :mod:`next.pages.signals` — ``template_loaded``, ``context_registered``,
   ``page_rendered``.
 - :mod:`next.components.signals` — ``component_registered``,
-  ``component_backend_loaded``, ``component_rendered``.
-  ``component_registered`` fires on every
+  ``components_registered``, ``component_backend_loaded``,
+  ``component_rendered``.
+  ``component_registered`` fires on every singular
   :meth:`~next.components.registry.ComponentRegistry.register` call with the
   full :class:`~next.components.info.ComponentInfo` under the ``info``
-  keyword. ``component_backend_loaded`` fires from
+  keyword. The bulk path
+  :meth:`~next.components.registry.ComponentRegistry.register_many` follows
+  the Django bulk convention and skips the per-item signal. It instead
+  fires ``components_registered`` exactly once with every newly
+  registered :class:`~next.components.info.ComponentInfo` as a tuple
+  under the ``infos`` keyword. An empty batch stays silent. Receivers
+  that must observe both paths subscribe to both signals.
+  ``component_backend_loaded`` fires from
   :class:`~next.components.manager.ComponentsManager` after a backend is
   built from its config dict, carrying the live ``backend`` instance and
   the source ``config``.

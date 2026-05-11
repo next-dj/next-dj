@@ -11,6 +11,7 @@ from next.components.signals import (
     component_backend_loaded,
     component_registered,
     component_rendered,
+    components_registered,
 )
 from next.conf.signals import settings_reloaded
 from next.deps.signals import provider_registered
@@ -89,6 +90,14 @@ def on_component_registered(info: object = None, **_kwargs: object) -> None:
     """Components group: count discovered components by name."""
     name = getattr(info, "name", "<unknown>")
     incr("components.registered", str(name))
+
+
+@receiver(components_registered)
+def on_components_registered(infos: tuple[object, ...] = (), **_kwargs: object) -> None:
+    """Components group: count bulk-registered components by name."""
+    for info in infos:
+        name = getattr(info, "name", "<unknown>")
+        incr("components.registered", str(name))
 
 
 @receiver(component_backend_loaded)
