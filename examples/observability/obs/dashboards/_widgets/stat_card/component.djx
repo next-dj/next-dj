@@ -1,0 +1,4 @@
+<div class="rounded-md bg-white p-5 shadow-sm ring-1 ring-slate-200">
+  <p class="text-xs font-medium uppercase tracking-wide text-slate-500">{{ label }}</p>
+  <p class="mt-2 text-3xl font-semibold tabular-nums">{{ value }}</p>
+</div>

@@ -188,7 +188,7 @@ Call it from a template in scope (``template.djx``, ``layout.djx``, or another c
    {% component "card" title="Hello" %}
 
 The first argument is the component name (file stem).
-Remaining bits on the opening tag are static ``key="value"`` props (see :ref:`components-props-literals`).
+Remaining bits on the opening tag are ``key=expr`` props that resolve against the template context at render time (see :ref:`components-props`).
 
 Composite with ``component.py`` and ``@context`` only
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -306,14 +306,23 @@ Components under e.g. ``pages/blog/_components`` are not visible there.
 Template syntax
 ---------------
 
-.. _components-props-literals:
+.. _components-props:
 
-Props are literal strings
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Props
+~~~~~
 
-Everything after the component name on ``{% component %}`` / ``{% #component %}`` is parsed as ``name="value"`` tokens with **static** string values.
-You cannot pass a template variable there (for example ``title={{ post.title }}`` is not supported).
-Pass dynamic page data through **slots**, nested template content that the component template renders with ``{% #set_slot %}``, or through variables added by ``@context`` in ``component.py``.
+Everything after the component name on ``{% component %}`` / ``{% #component %}`` is parsed as ``name=expr`` tokens.
+Each ``expr`` compiles into a Django ``FilterExpression`` and resolves against the template context at render time.
+The same syntax accepts string literals, numbers, context variables, attribute lookups, and filter chains:
+
+.. code-block:: django
+
+   {% component "card" title="Static title" %}
+   {% component "card" title=post.title %}
+   {% component "stat_card" label="Pages" value=totals.pages_rendered %}
+   {% component "filter_window" current=window selected=user.window|default:"5m" %}
+
+For richer payloads — list-driven children, nested markup — use **slots**: nested template content that the component template renders with ``{% #set_slot %}``.
 The ``examples/shortener/shortener/routes/_widgets/link_card/`` component uses slots for list-driven content (see :ref:`components-example-project`).
 
 **Invoking a component**
@@ -432,7 +441,14 @@ Register a custom backend through the settings contract.
 
 The signals emitted by :mod:`next.components.signals` let external code observe component activity.
 
-* ``component_registered`` fires when a backend reports a new component.
+* ``component_registered`` fires from singular
+  :meth:`~next.components.registry.ComponentRegistry.register` calls and
+  carries one ``info`` per event.
+* ``components_registered`` fires from
+  :meth:`~next.components.registry.ComponentRegistry.register_many` exactly
+  once per batch with the full ``infos`` tuple. The bulk path skips
+  ``component_registered`` to keep registration of large component sets
+  O(1) in signal dispatches.
 * ``component_backend_loaded`` fires after ``ComponentsFactory`` instantiates a backend.
 * ``component_rendered`` fires after a component finishes rendering.
 

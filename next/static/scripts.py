@@ -15,6 +15,7 @@ the static manager emits those tags at all.
 from __future__ import annotations
 
 import enum
+import json
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from .serializers import resolve_serializer
@@ -22,6 +23,8 @@ from .serializers import resolve_serializer
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from .serializers import JsContextSerializer
 
 
 NEXT_JS_STATIC_PATH: Final = "next/next.min.js"
@@ -96,14 +99,32 @@ class NextScriptBuilder:
         """Return the blocking script tag that executes `next.min.js`."""
         return self._script_tag_template.format(url=self._url)
 
-    def init_script(self, js_context: Mapping[str, Any]) -> str:
+    def init_script(
+        self,
+        js_context: Mapping[str, Any],
+        *,
+        key_serializers: Mapping[str, JsContextSerializer] | None = None,
+    ) -> str:
         """Return the inline script that passes the context to `Next._init`.
 
         Delegates serialisation to the configured `JsContextSerializer`
         so the init payload honours the same encoding rules as values
-        registered through `StaticCollector.add_js_context`.
+        registered through `StaticCollector.add_js_context`. When
+        `key_serializers` is supplied, each top-level key listed there
+        is encoded with its dedicated serializer and the rest fall
+        back to the global default.
         """
-        payload = resolve_serializer().dumps(dict(js_context))
+        if not key_serializers:
+            payload = resolve_serializer().dumps(dict(js_context))
+        else:
+            default = resolve_serializer()
+            fragments: list[str] = []
+            for k, v in js_context.items():
+                key_serializer = key_serializers.get(k, default)
+                encoded_key = json.dumps(k, separators=(",", ":"))
+                encoded_val = key_serializer.dumps(v)
+                fragments.append(f"{encoded_key}:{encoded_val}")
+            payload = "{" + ",".join(fragments) + "}"
         return self._init_template.format(payload=payload)
 
     @classmethod

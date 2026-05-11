@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from next.static import StaticCollector
+    from next.static.serializers import JsContextSerializer
     from next.urls import URLPatternParser
 
 
@@ -120,12 +121,15 @@ class Page:
         *,
         inherit_context: bool = False,
         serialize: bool = False,
+        serializer: JsContextSerializer | None = None,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Register a keyed or dict-merge `@context` for the caller file.
 
         Pass `serialize=True` to include the return value in
         `Next.context` so JavaScript code on the page can read it via
-        `window.Next.context`.
+        `window.Next.context`. Pass `serializer=` to route this key
+        through a custom `JsContextSerializer` instead of the global
+        `JS_CONTEXT_SERIALIZER` setting.
         """
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -137,6 +141,7 @@ class Page:
                     func_or_key,
                     inherit_context=inherit_context,
                     serialize=serialize,
+                    serializer=serializer,
                 )
             else:
                 caller_path = self._get_caller_path(1)
@@ -146,6 +151,7 @@ class Page:
                     func,
                     inherit_context=inherit_context,
                     serialize=serialize,
+                    serializer=serializer,
                 )
             return func
 
@@ -177,6 +183,9 @@ class Page:
         )
         context_data.update(context_result.context_data)
         context_data["_next_js_context"] = context_result.js_context
+        context_data["_next_js_context_serializers"] = (
+            context_result.js_context_serializers
+        )
 
         request: HttpRequest | None = None
         if args and isinstance(args[0], HttpRequest):
@@ -306,8 +315,13 @@ class Page:
 
         collector = default_manager.create_collector()
         js_context: dict[str, object] = context_data.pop("_next_js_context", {})  # type: ignore[assignment]
+        js_serializers: dict[str, JsContextSerializer] = context_data.pop(
+            "_next_js_context_serializers", {}
+        )  # type: ignore[assignment]
         for js_key, js_value in js_context.items():
-            collector.add_js_context(js_key, js_value)
+            collector.add_js_context(
+                js_key, js_value, serializer=js_serializers.get(js_key)
+            )
         default_manager.discover_page_assets(file_path, collector)
         context_data["_static_collector"] = collector
 

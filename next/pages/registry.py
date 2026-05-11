@@ -10,7 +10,7 @@ autoreloader and for the static finder.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from django.http import HttpRequest
 
@@ -24,6 +24,24 @@ from .watch import get_pages_directories_for_watch
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+    from next.static.serializers import JsContextSerializer
+
+
+class PageContextEntry(NamedTuple):
+    """One context callable registered for a `page.py` file.
+
+    The optional `serializer` overrides the global JS context
+    serializer for the value this callable produces, but only when
+    `serialize` is true. Backed by `NamedTuple` so the hot
+    `register_context` path allocates a plain tuple rather than a
+    frozen dataclass instance.
+    """
+
+    func: Callable[..., Any]
+    inherit_context: bool
+    serialize: bool
+    serializer: JsContextSerializer | None = None
 
 
 logger = logging.getLogger(__name__)
@@ -66,7 +84,7 @@ class PageContextRegistry:
         """Initialise with an optional resolver and an empty registry."""
         self._context_registry: dict[
             Path,
-            dict[str | None, tuple[Callable[..., Any], bool, bool]],
+            dict[str | None, PageContextEntry],
         ] = {}
         self._resolver = resolver
 
@@ -76,7 +94,7 @@ class PageContextRegistry:
             return self._resolver
         return resolver
 
-    def register_context(
+    def register_context(  # noqa: PLR0913
         self,
         file_path: Path,
         key: str | None,
@@ -84,12 +102,14 @@ class PageContextRegistry:
         *,
         inherit_context: bool = False,
         serialize: bool = False,
+        serializer: JsContextSerializer | None = None,
     ) -> None:
         """Bind `func` to `file_path` with keyed or dict-merge semantics."""
-        self._context_registry.setdefault(file_path, {})[key] = (
-            func,
-            inherit_context,
-            serialize,
+        self._context_registry.setdefault(file_path, {})[key] = PageContextEntry(
+            func=func,
+            inherit_context=inherit_context,
+            serialize=serialize,
+            serializer=serializer,
         )
         context_registered.send(
             sender=PageContextRegistry, file_path=file_path, key=key
@@ -111,6 +131,7 @@ class PageContextRegistry:
         request = args[0] if args and isinstance(args[0], HttpRequest) else None
         context_data: dict[str, Any] = {}
         js_context: dict[str, Any] = {}
+        js_context_serializers: dict[str, JsContextSerializer] = {}
         dep_cache: dict[str, Any] = {}
         dep_stack: list[str] = []
 
@@ -124,28 +145,36 @@ class PageContextRegistry:
             registry.items(),
             key=lambda item: (item[0] is not None, str(item[0] or "")),
         )
-        for key, (func, _, serialize) in ordered:
+        for key, entry in ordered:
             resolved = self._get_resolver().resolve_dependencies(
-                func,
+                entry.func,
                 request=request,
                 _cache=dep_cache,
                 _stack=dep_stack,
                 _context_data=context_data,
                 **kwargs,
             )
-            result = func(**resolved)
+            result = entry.func(**resolved)
             if key is None:
                 context_data.update(result)
-                if serialize:
+                if entry.serialize:
                     for k, v in result.items():
                         if k not in js_context:
                             js_context[k] = v
+                            if entry.serializer is not None:
+                                js_context_serializers[k] = entry.serializer
             else:
                 context_data[key] = result
-                if serialize and key not in js_context:
+                if entry.serialize and key not in js_context:
                     js_context[key] = result
+                    if entry.serializer is not None:
+                        js_context_serializers[key] = entry.serializer
 
-        return ContextResult(context_data=context_data, js_context=js_context)
+        return ContextResult(
+            context_data=context_data,
+            js_context=js_context,
+            js_context_serializers=js_context_serializers,
+        )
 
     def _collect_inherited_context(
         self,
@@ -167,22 +196,22 @@ class PageContextRegistry:
             page_file = current_dir / "page.py"
 
             if layout_file.exists() and page_file.exists():
-                for key, (func, inherit_context, _) in self._context_registry.get(
+                for key, entry in self._context_registry.get(
                     page_file,
                     {},
                 ).items():
-                    if inherit_context:
+                    if entry.inherit_context:
                         resolved = self._get_resolver().resolve_dependencies(
-                            func,
+                            entry.func,
                             request=request,
                             _cache=dep_cache,
                             _stack=dep_stack,
                             **url_kwargs,
                         )
                         if key is None:
-                            inherited_context.update(func(**resolved))
+                            inherited_context.update(entry.func(**resolved))
                         else:
-                            inherited_context[key] = func(**resolved)
+                            inherited_context[key] = entry.func(**resolved)
 
             current_dir = current_dir.parent
 

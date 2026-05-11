@@ -203,7 +203,11 @@ Every subsystem publishes a ``signals`` submodule. The signals below are safe to
 * :mod:`next.deps.signals` publishes ``provider_registered`` when a ``RegisteredParameterProvider`` subclass joins the auto-registry.
 * :mod:`next.pages.signals` publishes ``template_loaded``, ``context_registered``, and ``page_rendered``.
 * :mod:`next.urls.signals` publishes ``route_registered`` and ``router_reloaded``.
-* :mod:`next.components.signals` publishes ``component_registered``, ``component_backend_loaded``, and ``component_rendered``.
+* :mod:`next.components.signals` publishes ``component_registered`` (per-call) and
+  ``components_registered`` (one event per
+  :meth:`~next.components.registry.ComponentRegistry.register_many` batch
+  carrying the full ``infos`` tuple), plus ``component_backend_loaded``
+  and ``component_rendered``.
 * :mod:`next.forms.signals` publishes ``action_registered``, ``action_dispatched``, and ``form_validation_failed``.
 * :mod:`next.server.signals` publishes ``watch_specs_ready`` after the dev reloader resolves its watch specs.
 * :mod:`next.static.signals` publishes ``asset_registered``, ``collector_finalized``, ``html_injected``, and ``backend_loaded``. See :doc:`static-assets` for the static-asset lifecycle.
@@ -226,6 +230,21 @@ Example subscription.
            def _on_component_registered(sender, **kwargs):
                info = kwargs.get("info")
                # record, validate, or forward the event
+
+To observe components added via :meth:`~next.components.registry.ComponentRegistry.register_many`
+(used by :class:`~next.components.backends.FileComponentsBackend` during
+discovery) subscribe to ``components_registered`` too. Each batch fires a
+single event, so the receiver iterates the ``infos`` tuple itself.
+
+.. code-block:: python
+
+   from next.components.signals import components_registered
+
+
+   @receiver(components_registered)
+   def _on_components_registered(sender, **kwargs):
+       for info in kwargs.get("infos", ()):
+           ...  # one bookkeeping call per discovered component
 
 What not to do
 --------------

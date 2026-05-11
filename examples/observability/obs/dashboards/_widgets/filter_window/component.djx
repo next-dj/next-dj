@@ -1,0 +1,15 @@
+{% form @action="obs:filter_window" class="flex items-center gap-2" %}
+  <label for="filter-window" class="text-xs uppercase tracking-wide text-slate-500">Window</label>
+  <select
+    id="filter-window"
+    name="window"
+    class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+  >
+    {% for value, label in window_options %}
+      <option value="{{ value }}" {% if value == current %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+    Apply
+  </button>
+{% endform %}

@@ -21,6 +21,7 @@ from .renderers import (
     CompositeComponentRenderer,
     SimpleComponentRenderer,
 )
+from .signals import component_backend_loaded
 
 
 if TYPE_CHECKING:
@@ -83,11 +84,17 @@ class ComponentsManager:
                 continue
             try:
                 backend = ComponentsFactory.create_backend(config)
-                self._backends.append(backend)
             except Exception:
                 logger.exception(
                     "Error creating component backend from config %s", config
                 )
+                continue
+            component_backend_loaded.send(
+                sender=ComponentsManager,
+                backend=backend,
+                config=config,
+            )
+            self._backends.append(backend)
 
     def _ensure_backends(self) -> None:
         if not self._backends:

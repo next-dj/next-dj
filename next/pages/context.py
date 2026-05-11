@@ -19,6 +19,8 @@ from next.deps import DependencyResolver, RegisteredParameterProvider
 if TYPE_CHECKING:
     import inspect
 
+    from next.static.serializers import JsContextSerializer
+
 
 _CONTEXT_DEFAULT_UNSET: object = object()
 
@@ -45,11 +47,15 @@ class ContextResult:
     `context_data` contains every value merged into the Django template
     context. `js_context` contains only the subset marked
     `serialize=True`, which the renderer later hands to
-    `StaticCollector.add_js_context`.
+    `StaticCollector.add_js_context`. `js_context_serializers` carries
+    per-key serializer overrides supplied through
+    `@context(serializer=...)` so the collector can route a single key
+    through a custom serializer without affecting other keys.
     """
 
     context_data: dict[str, Any]
     js_context: dict[str, Any]
+    js_context_serializers: dict[str, JsContextSerializer] = field(default_factory=dict)
 
 
 class ContextByDefaultProvider(RegisteredParameterProvider):

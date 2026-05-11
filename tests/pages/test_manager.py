@@ -83,14 +83,12 @@ class TestPage:
             expected_key
             in page_instance._context_manager._context_registry[context_temp_file]
         )
-        func_registered, inherit, serialize = (
-            page_instance._context_manager._context_registry[context_temp_file][
-                expected_key
-            ]
-        )
-        assert func_registered == func
-        assert inherit is False
-        assert serialize is False
+        entry = page_instance._context_manager._context_registry[context_temp_file][
+            expected_key
+        ]
+        assert entry.func == func
+        assert entry.inherit_context is False
+        assert entry.serialize is False
 
     def test_context_decorator_with_inherit_context(
         self,
@@ -111,12 +109,12 @@ class TestPage:
             "inherited_key"
             in page_instance._context_manager._context_registry[context_temp_file]
         )
-        func, inherit, serialize = page_instance._context_manager._context_registry[
-            context_temp_file
-        ]["inherited_key"]
-        assert func == get_inherited_value
-        assert inherit is True
-        assert serialize is False
+        entry = page_instance._context_manager._context_registry[context_temp_file][
+            "inherited_key"
+        ]
+        assert entry.func == get_inherited_value
+        assert entry.inherit_context is True
+        assert entry.serialize is False
 
     def test_context_decorator_without_key_inherit_context(
         self,
@@ -138,12 +136,12 @@ class TestPage:
         assert (
             None in page_instance._context_manager._context_registry[context_temp_file]
         )
-        func, inherit, serialize = page_instance._context_manager._context_registry[
-            context_temp_file
-        ][None]
-        assert func == get_context_data
-        assert inherit is True
-        assert serialize is False
+        entry = page_instance._context_manager._context_registry[context_temp_file][
+            None
+        ]
+        assert entry.func == get_context_data
+        assert entry.inherit_context is True
+        assert entry.serialize is False
 
     @pytest.mark.parametrize(
         ("test_case", "template_str", "context_setup", "render_kwargs", "expected"),
@@ -558,12 +556,10 @@ class TestGlobalPageInstance:
 
         assert global_file_path in page._context_manager._context_registry
         assert "test_key" in page._context_manager._context_registry[global_file_path]
-        func, inherit, serialize = page._context_manager._context_registry[
-            global_file_path
-        ]["test_key"]
-        assert func == test_function
-        assert inherit is False
-        assert serialize is False
+        entry = page._context_manager._context_registry[global_file_path]["test_key"]
+        assert entry.func == test_function
+        assert entry.inherit_context is False
+        assert entry.serialize is False
 
     @pytest.mark.parametrize(
         ("test_case", "frame_setup"),

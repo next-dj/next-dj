@@ -1,0 +1,9 @@
+<figure class="rounded-md bg-white p-6 ring-1 ring-slate-200">
+  <figcaption class="mb-4 text-sm font-semibold text-slate-700">
+    Lifetime totals (React sparkline)
+  </figcaption>
+  <div id="sparkline-mount" class="relative h-32"></div>
+  <noscript>
+    <p class="text-sm text-slate-500">JavaScript is required to render the sparkline.</p>
+  </noscript>
+</figure>

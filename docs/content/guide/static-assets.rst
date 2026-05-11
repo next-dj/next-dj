@@ -655,6 +655,8 @@ that emits multiple filenames for an identical file.
 :class:`~next.static.collector.DeepMergePolicy` merges nested dictionaries
 registered under the same JS-context key instead of keeping the first value.
 
+.. _static-js-context-serializer:
+
 Pluggable JS-context serializer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -685,6 +687,25 @@ classes live in :mod:`next.static.serializers`:
 Custom serializers can be injected into a single collector for tests
 through the ``js_serializer`` keyword argument on
 :class:`~next.static.StaticCollector`.
+
+A per-decorator override is also available. Both
+``@page.context`` and ``@component.context`` accept a ``serializer=``
+argument that wins over the global setting for that one key only. The
+override travels with the value through the static collector and the
+``Next._init`` payload, so a single page can mix pydantic models under
+one key with plain JSON values everywhere else.
+
+.. code-block:: python
+
+   from next.pages import context
+   from next.static import PydanticJsContextSerializer
+
+   from .models import LiveStats
+
+
+   @context("metrics", serialize=True, serializer=PydanticJsContextSerializer())
+   def metrics() -> LiveStats:
+       return LiveStats.snapshot()
 
 .. _static-custom-backends:
 

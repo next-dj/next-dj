@@ -1,0 +1,11 @@
+<h2 class="mb-4 text-lg font-semibold">Form actions</h2>
+<div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+  <div>
+    <h3 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Dispatched</h3>
+    {% component "counter_list" items=dispatched empty_message="No actions have been dispatched yet." %}
+  </div>
+  <div>
+    <h3 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Validation failed</h3>
+    {% component "counter_list" items=validation_failed empty_message="No validation failures so far." %}
+  </div>
+</div>

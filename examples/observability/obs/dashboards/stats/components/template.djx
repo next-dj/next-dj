@@ -1,0 +1,2 @@
+<h2 class="mb-4 text-lg font-semibold">Per-component render counts</h2>
+{% component "counter_list" items=counters empty_message="No components have rendered yet." %}

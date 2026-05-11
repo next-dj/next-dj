@@ -261,6 +261,122 @@ class TestComponentTag:
             )
         assert "Kept" in result
 
+    def test_component_tag_resolves_variable_prop_from_context(
+        self, tmp_path: Path
+    ) -> None:
+        """A bare identifier resolves as a context variable, not a literal."""
+        (tmp_path / "card.djx").write_text("<h1>{{ title }}</h1>")
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template('{% load components %}{% component "card" title=page_title %}')
+            result = t.render(
+                Context(
+                    {
+                        "current_template_path": str(tmp_path / "t.djx"),
+                        "page_title": "From Context",
+                    }
+                ),
+            )
+        assert "From Context" in result
+        assert "page_title" not in result
+
+    def test_component_tag_resolves_dotted_attribute_lookup(
+        self, tmp_path: Path
+    ) -> None:
+        """Dotted props traverse attributes, dict keys, and sequence indices."""
+        (tmp_path / "card.djx").write_text("<h1>{{ title }}</h1>")
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template('{% load components %}{% component "card" title=user.name %}')
+            result = t.render(
+                Context(
+                    {
+                        "current_template_path": str(tmp_path / "t.djx"),
+                        "user": {"name": "Ada"},
+                    }
+                ),
+            )
+        assert "Ada" in result
+
+    def test_component_tag_resolves_numeric_literal(self, tmp_path: Path) -> None:
+        """Unquoted numbers resolve to ints, not strings."""
+        (tmp_path / "card.djx").write_text("<span>{{ count|add:0 }}</span>")
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template('{% load components %}{% component "card" count=42 %}')
+            result = t.render(
+                Context({"current_template_path": str(tmp_path / "t.djx")}),
+            )
+        assert "42" in result
+
+    def test_component_tag_passes_object_identity_through(self, tmp_path: Path) -> None:
+        """A prop bound to an object resolves to that same instance for the child."""
+        (tmp_path / "card.djx").write_text("{% if data.flag %}YES{% endif %}")
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        marker = {"flag": True, "id": object()}
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template('{% load components %}{% component "card" data=payload %}')
+            result = t.render(
+                Context(
+                    {
+                        "current_template_path": str(tmp_path / "t.djx"),
+                        "payload": marker,
+                    }
+                ),
+            )
+        assert "YES" in result
+
+    def test_component_tag_applies_filter_chain(self, tmp_path: Path) -> None:
+        """Prop values can carry Django filters that run at render time."""
+        (tmp_path / "card.djx").write_text("<em>{{ title }}</em>")
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template('{% load components %}{% component "card" title=name|upper %}')
+            result = t.render(
+                Context(
+                    {
+                        "current_template_path": str(tmp_path / "t.djx"),
+                        "name": "ada",
+                    }
+                ),
+            )
+        assert "ADA" in result
+
     def test_nested_components_three_levels(self, tmp_path: Path) -> None:
         """{% #component %} inside component.djx resolves nested names."""
         (tmp_path / "inner.djx").write_text("<i>inner</i>")

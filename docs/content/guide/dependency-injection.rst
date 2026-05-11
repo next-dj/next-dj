@@ -113,8 +113,12 @@ as the param name.
 Built-in providers
 ------------------
 
-- **HttpRequest** — Parameter annotated with ``HttpRequest`` (or subclass) receives
-  the current request.
+- **HttpRequest** — Parameter annotated with ``HttpRequest`` or
+  ``HttpRequest | None`` receives the current request. The PEP 604
+  optional form lets handlers keep ``request: HttpRequest | None = None``
+  for direct unit-test calls without giving up DI on real renders.
+  Mixed unions such as ``HttpRequest | int`` are not accepted because the
+  provider has no way to choose between them.
 - **URL path parameters** — Parameter name matching the path segment (e.g. ``id``
   for ``[int:id]``), or annotation ``DUrl[int]`` / ``DUrl["param"]``. Type coercion
   is applied. For catch-all (``[[args]]``), use ``list[str]``.

@@ -11,6 +11,7 @@ from next.components.signals import (
     component_backend_loaded,
     component_registered,
     component_rendered,
+    components_registered,
 )
 from next.conf.signals import settings_reloaded
 from next.deps.signals import provider_registered
@@ -43,6 +44,7 @@ __all__ = [
     "component_backend_loaded",
     "component_registered",
     "component_rendered",
+    "components_registered",
     "context_registered",
     "form_validation_failed",
     "html_injected",

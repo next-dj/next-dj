@@ -1,0 +1,25 @@
+<h2 class="mb-4 text-lg font-semibold">Static asset pipeline</h2>
+<div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+  <div>
+    <h3 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Asset key generations per kind</h3>
+    {% component "counter_list" items=assets empty_message="No assets have been collected yet." %}
+  </div>
+  <div>
+    <h3 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Dedup hits per kind</h3>
+    {% component "counter_list" items=dedup empty_message="No duplicates filtered yet." %}
+  </div>
+</div>
+<dl class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+  <div class="rounded-md bg-slate-50 p-4 ring-1 ring-slate-200">
+    <dt class="text-xs uppercase tracking-wide text-slate-500">HTML injections</dt>
+    <dd class="mt-1 text-xl font-semibold tabular-nums">{{ collector.html_injected }}</dd>
+  </div>
+  <div class="rounded-md bg-slate-50 p-4 ring-1 ring-slate-200">
+    <dt class="text-xs uppercase tracking-wide text-slate-500">Collector finalizations</dt>
+    <dd class="mt-1 text-xl font-semibold tabular-nums">{{ collector.collector_finalized }}</dd>
+  </div>
+  <div class="rounded-md bg-slate-50 p-4 ring-1 ring-slate-200">
+    <dt class="text-xs uppercase tracking-wide text-slate-500">Bytes injected (cumulative)</dt>
+    <dd class="mt-1 text-xl font-semibold tabular-nums">{{ collector.injected_bytes_total }}</dd>
+  </div>
+</dl>

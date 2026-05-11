@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import types
 from typing import TYPE_CHECKING, TypeVar, get_args, get_origin, get_type_hints
 
 from django.http import HttpRequest
@@ -55,11 +56,33 @@ class DQuery(DDependencyBase[_T]):
     __slots__ = ()
 
 
+def _is_http_request_annotation(annotation: object) -> bool:
+    """Return True when `annotation` is `HttpRequest` or `HttpRequest | None`.
+
+    The check accepts the bare `HttpRequest` class and the PEP 604
+    union form that adds only `None` to it. Unions that mix
+    `HttpRequest` with another concrete type are not accepted because
+    the provider has no way to choose between them.
+    """
+    if annotation is HttpRequest:
+        return True
+    if get_origin(annotation) is types.UnionType:
+        non_none = [arg for arg in get_args(annotation) if arg is not type(None)]
+        return len(non_none) == 1 and non_none[0] is HttpRequest
+    return False
+
+
 class HttpRequestProvider(RegisteredParameterProvider):
-    """Supply `HttpRequest` from `context.request`."""
+    """Supply `HttpRequest` from `context.request`.
+
+    The provider claims parameters annotated as `HttpRequest` or
+    `HttpRequest | None`. The optional form lets handlers keep
+    `request: HttpRequest | None = None` for direct unit-test calls
+    without giving up dependency injection.
+    """
 
     def can_handle(self, param: inspect.Parameter, context: object) -> bool:
-        """Return True when the parameter is `HttpRequest` and a request exists."""
+        """Return True when the parameter expects `HttpRequest` and a request exists."""
         if getattr(context, "request", None) is None:
             return False
         stack = getattr(self.resolver, "_resolve_call_stack", ())
@@ -67,7 +90,7 @@ class HttpRequestProvider(RegisteredParameterProvider):
             func = stack[-1]
             try:
                 hints = get_type_hints(func)
-                if hints.get(param.name) is HttpRequest:
+                if _is_http_request_annotation(hints.get(param.name)):
                     return True
             except (NameError, TypeError, AttributeError, ValueError):
                 logger.debug(
@@ -77,8 +100,7 @@ class HttpRequestProvider(RegisteredParameterProvider):
                     param.name,
                     exc_info=True,
                 )
-        origin = get_origin(param.annotation)
-        return origin is None and param.annotation is HttpRequest
+        return _is_http_request_annotation(param.annotation)
 
     def resolve(self, _param: inspect.Parameter, context: object) -> object:
         """Return the request from the resolution context."""

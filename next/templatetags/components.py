@@ -16,7 +16,7 @@ from typing import Any, cast
 
 from django import template
 from django.template import base as template_base
-from django.template.base import Node, NodeList, Parser, Token
+from django.template.base import FilterExpression, Node, NodeList, Parser, Token
 
 from next.components import get_component, render_component
 from next.static import default_manager
@@ -46,14 +46,25 @@ def _strip_quotes(raw: str) -> str:
     return raw.strip("'\"").strip()
 
 
-def _parse_literal_props(bits: list[str], start: int) -> dict[str, str]:
-    """Parse ``key="value"`` pairs from tag bits starting at *start*."""
-    props: dict[str, str] = {}
+def _parse_props(
+    parser: Parser,
+    bits: list[str],
+    start: int,
+) -> dict[str, FilterExpression]:
+    """Parse ``key=expr`` pairs from tag bits starting at *start*.
+
+    Each ``expr`` is compiled into a Django :class:`FilterExpression`
+    so the value resolves against the template context at render time.
+    Quoted strings, numbers, dotted attribute lookups, and filter
+    chains all work through the same mechanism. Bits without ``=``
+    are skipped to keep the tag tolerant of stray tokens.
+    """
+    props: dict[str, FilterExpression] = {}
     for part in bits[start:]:
         if "=" not in part:
             continue
-        key, _, val = part.partition("=")
-        props[key.strip()] = _strip_quotes(val)
+        key, _, raw = part.partition("=")
+        props[key.strip()] = FilterExpression(raw, parser)
     return props
 
 
@@ -107,13 +118,17 @@ class ComponentNode(Node):
     def __init__(
         self,
         name: str,
-        props: dict[str, str],
+        props: dict[str, FilterExpression],
         nodelist: NodeList,
     ) -> None:
-        """Store component name, static props from the tag, and nested nodes."""
+        """Store component name, prop expressions, and nested nodes."""
         self.name = name
         self.props = props
         self.nodelist = nodelist
+
+    def _resolved_props(self, context: template.Context) -> dict[str, Any]:
+        """Resolve every prop expression against the active template context."""
+        return {key: expr.resolve(context) for key, expr in self.props.items()}
 
     def _template_path_from_context(self, context: template.Context) -> Path | None:
         """Return a resolved path from ``current_template_path``, or ``None``."""
@@ -154,7 +169,10 @@ class ComponentNode(Node):
         parent_flat = dict(cast("dict[str, Any]", context.flatten()))
         for key in _INTERNAL_CONTEXT_KEYS:
             parent_flat.pop(key, None)
-        render_ctx: dict[str, Any] = {**parent_flat, **self.props}
+        render_ctx: dict[str, Any] = {
+            **parent_flat,
+            **self._resolved_props(context),
+        }
         render_ctx["current_template_path"] = path
         render_ctx["children"] = "".join(child_chunks)
 
@@ -185,7 +203,7 @@ class SetSlotNode(Node):
 
 
 @register.tag(name="component")
-def do_component(_parser: Parser, token: Token) -> ComponentNode:
+def do_component(parser: Parser, token: Token) -> ComponentNode:
     """Compile void ``{% component "name" … %}`` (no body, no closing tag)."""
     bits = token.split_contents()
     if len(bits) < _COMPONENT_MIN_BITS:
@@ -195,7 +213,7 @@ def do_component(_parser: Parser, token: Token) -> ComponentNode:
     if not name:
         msg = "{% component %} tag requires a quoted component name"
         raise template.TemplateSyntaxError(msg)
-    props = _parse_literal_props(bits, 2)
+    props = _parse_props(parser, bits, 2)
     return ComponentNode(name=name, props=props, nodelist=NodeList())
 
 
@@ -210,7 +228,7 @@ def do_block_component(parser: Parser, token: Token) -> ComponentNode:
     if not name:
         msg = "{% #component %} tag requires a quoted component name"
         raise template.TemplateSyntaxError(msg)
-    props = _parse_literal_props(bits, 2)
+    props = _parse_props(parser, bits, 2)
     nodelist = parser.parse(_END_BLOCK_COMPONENT)
     parser.delete_first_token()
     return ComponentNode(name=name, props=props, nodelist=nodelist)

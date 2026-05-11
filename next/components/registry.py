@@ -16,6 +16,8 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
+from .signals import component_registered, components_registered
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -50,11 +52,25 @@ class ComponentRegistry:
         self._ordered.append(component)
         self._by_name.setdefault(component.name, []).append(component)
         self._bump()
+        component_registered.send(sender=ComponentRegistry, info=component)
 
     def register_many(self, components: Iterable[ComponentInfo]) -> None:
-        """Register each component from the iterable in order."""
-        for c in components:
-            self.register(c)
+        """Index every component from the iterable in order.
+
+        Follows the Django bulk convention (`bulk_create` skips
+        per-instance `post_save`). Receivers that need per-item
+        events should subscribe to `components_registered` and read
+        the `infos` tuple. The singular `component_registered` is
+        not fired from this path.
+        """
+        added = tuple(components)
+        if not added:
+            return
+        for c in added:
+            self._ordered.append(c)
+            self._by_name.setdefault(c.name, []).append(c)
+        self._bump()
+        components_registered.send(sender=ComponentRegistry, infos=added)
 
     def get_all(self) -> Sequence[ComponentInfo]:
         """Return an immutable view of every registered component."""

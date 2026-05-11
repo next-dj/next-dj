@@ -114,6 +114,26 @@ needed. See :ref:`next-object` in the static-assets guide for the full
 picture: injection mechanism, conflict resolution, TypeScript declarations,
 and component-level usage.
 
+A single key can opt out of the global ``JS_CONTEXT_SERIALIZER`` through
+the ``serializer=`` argument. The override travels with the value through
+the static collector and the ``Next._init`` payload, so a wrapped or
+pydantic-aware encoder applies to one key only while every sibling key
+keeps using the global default:
+
+.. code-block:: python
+
+   from next.pages import context
+   from next.static import PydanticJsContextSerializer
+
+
+   @context("metrics", serialize=True, serializer=PydanticJsContextSerializer())
+   def metrics() -> "LiveStats":
+       return LiveStats.snapshot()
+
+The same keyword is accepted on ``@component.context``. See
+:ref:`static-js-context-serializer` in the static-assets guide for the
+end-to-end picture.
+
 Context Priority
 ----------------
 

@@ -1,0 +1,2 @@
+<h2 class="mb-4 text-lg font-semibold">Per-page render counts</h2>
+{% component "counter_list" items=counters layout="table" name_header="Page module" value_header="Renders" empty_message="No pages have been rendered yet. Visit a few dashboards and reload." %}

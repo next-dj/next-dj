@@ -8,7 +8,7 @@ from django.http import HttpRequest
 from next.deps import DependencyResolver
 from next.pages import Context, Page
 from next.pages.context import ContextByDefaultProvider
-from next.pages.registry import PageContextRegistry
+from next.pages.registry import PageContextEntry, PageContextRegistry
 from next.static import StaticCollector
 from tests.support import inspect_parameter
 
@@ -52,9 +52,11 @@ class TestPageContextRegistry:
         assert test_file_path in context_manager._context_registry
         assert key in context_manager._context_registry[test_file_path]
         assert context_manager._context_registry[test_file_path][key] == (
-            func_return,
-            False,
-            False,
+            PageContextEntry(
+                func=func_return,
+                inherit_context=False,
+                serialize=False,
+            )
         )
 
         result = context_manager.collect_context(test_file_path)
@@ -152,12 +154,10 @@ class TestPageContextRegistry:
 
         assert test_file_path in context_manager._context_registry
         assert "inherited_key" in context_manager._context_registry[test_file_path]
-        func, inherit, serialize = context_manager._context_registry[test_file_path][
-            "inherited_key"
-        ]
-        assert func == test_func
-        assert inherit is True
-        assert serialize is False
+        entry = context_manager._context_registry[test_file_path]["inherited_key"]
+        assert entry.func == test_func
+        assert entry.inherit_context is True
+        assert entry.serialize is False
 
     def test_collect_inherited_context(self, context_manager, tmp_path) -> None:
         """Test collecting inherited context from layout directories."""
@@ -518,3 +518,71 @@ class TestPageContextRegistrySerialize:
         )
         html = page_inst.render(path)
         assert '"title":"Hello"' in html
+
+
+class TestPageContextRegistrySerializerOverride:
+    """`@page.context(serializer=...)` routes one key through a custom serializer."""
+
+    class _MarkerSerializer:
+        """Tracks which values were dumped through the override."""
+
+        def __init__(self) -> None:
+            self.calls: list[object] = []
+
+        def dumps(self, value: object) -> str:
+            self.calls.append(value)
+            return f'"marker:{value}"'
+
+    @pytest.fixture()
+    def registry(self) -> PageContextRegistry:
+        """Return a fresh PageContextRegistry for each test."""
+        return PageContextRegistry()
+
+    def test_keyed_override_recorded(self, registry, tmp_path) -> None:
+        """A keyed context with `serializer=` records the override under the key."""
+        path = tmp_path / "page.py"
+        marker = self._MarkerSerializer()
+        registry.register_context(
+            path, "feed", lambda: {"x": 1}, serialize=True, serializer=marker
+        )
+        result = registry.collect_context(path)
+        assert result.js_context_serializers == {"feed": marker}
+
+    def test_dict_merge_override_applies_to_each_key(self, registry, tmp_path) -> None:
+        """An unkeyed context with `serializer=` records the override per merged key."""
+        path = tmp_path / "page.py"
+        marker = self._MarkerSerializer()
+        registry.register_context(
+            path,
+            None,
+            lambda: {"a": 1, "b": 2},
+            serialize=True,
+            serializer=marker,
+        )
+        result = registry.collect_context(path)
+        assert result.js_context_serializers == {"a": marker, "b": marker}
+
+    def test_no_serializer_keeps_map_empty(self, registry, tmp_path) -> None:
+        """Without `serializer=` the override map stays empty."""
+        path = tmp_path / "page.py"
+        registry.register_context(path, "k", lambda: "v", serialize=True)
+        result = registry.collect_context(path)
+        assert result.js_context_serializers == {}
+
+    def test_render_routes_override_key_through_marker(self, tmp_path) -> None:
+        """End-to-end: the override serializer encodes its key in the init script."""
+        marker = self._MarkerSerializer()
+        page_inst = Page()
+        path = tmp_path / "page.py"
+        page_inst.register_template(path, "{{ k }}<!-- next:scripts -->")
+        page_inst._context_manager.register_context(
+            path, "k", lambda: "v", serialize=True, serializer=marker
+        )
+        page_inst._context_manager.register_context(
+            path, "other", lambda: "plain", serialize=True
+        )
+        html = page_inst.render(path)
+        assert '"k":"marker:v"' in html
+        assert '"other":"plain"' in html
+        assert marker.calls.count("v") >= 1
+        assert all(call == "v" for call in marker.calls)

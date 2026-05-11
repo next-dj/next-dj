@@ -9,6 +9,7 @@ from next.components.signals import (
     component_backend_loaded,
     component_registered,
     component_rendered,
+    components_registered,
 )
 
 
@@ -63,6 +64,21 @@ def capture_component_registered() -> Generator[list[dict[str, Any]], None, None
         yield events
     finally:
         component_registered.disconnect(_listener)
+
+
+@pytest.fixture()
+def capture_components_registered() -> Generator[list[dict[str, Any]], None, None]:
+    """Capture ``components_registered`` (plural) signal events."""
+    events: list[dict[str, Any]] = []
+
+    def _listener(sender: object, **kwargs: object) -> None:
+        events.append({"sender": sender, **kwargs})
+
+    components_registered.connect(_listener)
+    try:
+        yield events
+    finally:
+        components_registered.disconnect(_listener)
 
 
 @pytest.fixture()

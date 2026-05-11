@@ -22,6 +22,7 @@ from next.utils import classify_dirs_entries, resolve_base_dir
 
 from .dispatcher import FilesystemTreeDispatcher
 from .parser import default_url_parser
+from .signals import route_registered
 
 
 if TYPE_CHECKING:
@@ -222,6 +223,11 @@ class FileRouterBackend(RouterBackend):
                 file_path,
                 self._url_parser,
             ):
+                route_registered.send(
+                    sender=FileRouterBackend,
+                    url_path=url_path,
+                    file_path=file_path,
+                )
                 yield pattern
 
     def _scan_pages_directory(

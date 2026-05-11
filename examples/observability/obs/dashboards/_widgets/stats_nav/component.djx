@@ -1,0 +1,5 @@
+<nav class="flex gap-2 text-sm">
+  {% for href, label in nav_items %}
+    <a class="rounded-md bg-white px-3 py-2 ring-1 ring-slate-200 hover:bg-slate-100" href="{{ href }}">{{ label }}</a>
+  {% endfor %}
+</nav>

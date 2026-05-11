@@ -53,6 +53,7 @@ dev = [
     "pytest-benchmark==5.2.3",
     "pydantic>=2.0",
     "markdown>=3.7",
+    "time-machine>=2.16",
 ]
 docs = [
     "doc8==2.0.0",
