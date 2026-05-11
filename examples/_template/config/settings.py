@@ -69,7 +69,13 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
-STATICFILES_DIRS = [BASE_DIR / "static"]
+
+# The shared next.dj examples UI kit lives one level up under
+# examples/_shared/. Pull its static files and root component tree
+# into this project so templates can render shadcn-style components
+# (button, card, badge, …) via `{% component "button" %}`.
+SHARED_DIR = BASE_DIR.parent / "_shared"
+STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -82,7 +88,11 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            "DIRS": [],
+            # Project-level page root: contains the HTML envelope layout
+            # (and may host project-shared components under `_widgets/`).
+            # Demonstrates `DEFAULT_PAGE_BACKENDS["DIRS"]` working alongside
+            # `APP_DIRS=True`.
+            "DIRS": [str(BASE_DIR / "chrome")],
             "PAGES_DIR": "routes",
             "OPTIONS": {
                 "context_processors": [],
@@ -92,7 +102,7 @@ NEXT_FRAMEWORK = {
     "DEFAULT_COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
-            "DIRS": [],
+            "DIRS": [str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_widgets",
         },
     ],

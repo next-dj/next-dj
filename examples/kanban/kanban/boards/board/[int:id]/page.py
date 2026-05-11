@@ -21,6 +21,17 @@ def board_object(active_board: DBoard[Board]) -> Board:
     return active_board
 
 
+@context("board_url_kwargs", inherit_context=True)
+def board_url_kwargs(active_board: DBoard[Board]) -> dict[str, int]:
+    """Expose the reverse() kwargs for the current board route.
+
+    Shared by the nav_link calls in the board layout so the tabs link
+    back to themselves using `url_name` without hard-coding the URL
+    converter on the call site.
+    """
+    return {"id": active_board.pk}
+
+
 @context("columns", inherit_context=True)
 def columns(active_board: DBoard[Board]) -> QuerySet[Column]:
     """Return the ordered columns of the active board for the template."""

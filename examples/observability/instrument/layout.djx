@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+{% #component "page_head" title="next.dj — Observability dashboard" %}
+  {% #slot "extra" %}
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+  {% /slot %}
+{% /component %}
+<body class="min-h-screen flex flex-col">
+  {% #component "app_shell" brand="next.dj observability" brand_href="/" brand_icon="📊" %}
+    {% #slot "actions" %}
+      {% component "nav_link" url="/" label="Overview" variant="bar" %}
+      {% component "nav_link" url="/stats/" label="Stats" variant="bar" %}
+    {% /slot %}
+    {% #slot "content" %}
+      {% block template %}{% endblock template %}
+    {% /slot %}
+  {% /component %}
+  {% collect_scripts %}
+</body>
+</html>

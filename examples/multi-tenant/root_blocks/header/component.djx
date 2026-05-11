@@ -1,5 +1,5 @@
-<header class="border-b bg-white">
-  <nav class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
+<header class="border-b border-border bg-background">
+  <nav class="mx-auto flex w-full max-w-container items-center justify-between px-4 py-4">
     <a href="{% url 'next:page_' %}" class="flex items-center gap-2 text-lg font-semibold accent-text">
       <span class="inline-block h-3 w-3 rounded-full accent-bar"></span>
       next.dj notes
@@ -9,11 +9,11 @@
         <span class="rounded-full px-3 py-1 text-xs font-medium accent-bar text-white">
           {{ request.tenant.name }}
         </span>
-        <a data-link-notes href="{% url 'next:page_notes' %}" class="text-slate-600 hover:text-slate-900">
+        <a data-link-notes href="{% url 'next:page_notes' %}" class="text-muted-foreground hover:text-foreground">
           Notes
         </a>
       {% else %}
-        <span class="text-xs text-slate-400">no tenant</span>
+        <span class="text-xs text-muted-foreground">no tenant</span>
       {% endif %}
     </div>
   </nav>

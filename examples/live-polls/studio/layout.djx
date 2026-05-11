@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+{% component "page_head" title="next.dj — Live polls" %}
+<body class="min-h-screen flex flex-col">
+  {% #component "app_shell" brand="🗳️ next.dj Live polls" brand_href="/polls/" %}
+    {% #slot "actions" %}
+      <span class="text-sm text-muted-foreground">
+        {{ active_polls_count }} open polls
+      </span>
+    {% /slot %}
+    {% #slot "content" %}
+      {% block template %}{% endblock template %}
+    {% /slot %}
+  {% /component %}
+  {% collect_scripts %}
+</body>
+</html>

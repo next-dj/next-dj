@@ -1,20 +1,17 @@
-<section class="space-y-4">
-  <a href="{% url 'next:page_admin' %}" class="text-sm text-slate-600 hover:underline">← Back to links</a>
-  <header>
-    <h2 class="text-lg font-semibold">Link <code class="rounded bg-slate-100 px-1 font-mono">{{ link.slug }}</code></h2>
-    <p class="mt-1 truncate text-sm text-slate-500">→ {{ link.url }}</p>
-  </header>
+<div class="space-y-4">
+  <a href="{% url 'next:page_admin' %}" class="text-sm text-muted-foreground hover:underline">← Back to links</a>
+
+  {% component "page_header" title=link.slug description=link.url %}
 
   {% component "link_card" %}
 
-  <dl class="grid grid-cols-2 gap-3">
-    <div class="rounded-lg border bg-white p-3">
-      <dt class="text-xs text-slate-500">Persisted clicks</dt>
-      <dd class="text-2xl font-bold">{{ link.clicks }}</dd>
-    </div>
-    <div class="rounded-lg border bg-white p-3">
-      <dt class="text-xs text-slate-500">Cache key</dt>
-      <dd class="break-all font-mono text-sm">{{ cache_key }}</dd>
-    </div>
-  </dl>
-</section>
+  <div class="grid gap-3 sm:grid-cols-2">
+    {% component "stat_card" label="Persisted clicks" value=link.clicks %}
+    {% #component "card" %}
+      {% #slot "content" %}
+        <p class="text-xs uppercase tracking-wide text-muted-foreground">Cache key</p>
+        <p class="mt-1 break-all font-mono text-sm">{{ cache_key }}</p>
+      {% /slot %}
+    {% /component %}
+  </div>
+</div>

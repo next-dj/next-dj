@@ -1,32 +1,28 @@
-<a href="{% url 'next:page_notes' %}"
-   class="inline-block text-xs text-slate-500 hover:text-slate-800">
-  ← Back to notes
-</a>
+<div class="space-y-6">
+  <a href="{% url 'next:page_notes' %}"
+     class="inline-block text-xs text-muted-foreground hover:text-foreground">
+    ← Back to notes
+  </a>
 
-{% form @action="notes:note_create" class="grid gap-6 md:grid-cols-2" %}
-  <div class="space-y-3">
-    <div>
-      <label class="text-xs font-medium uppercase tracking-wide text-slate-500" for="id_title">
-        Title
-      </label>
-      {{ form.title }}
+  {% form @action="notes:note_create" class="grid gap-6 md:grid-cols-2" %}
+    <div class="space-y-3">
+      {% #component "field" label="Title" for_id="id_title" %}
+        {% #slot "control" %}{{ form.title }}{% /slot %}
+      {% /component %}
+      {% #component "field" label="Body (markdown)" for_id="id_body" %}
+        {% #slot "control" %}{{ form.body }}{% /slot %}
+      {% /component %}
+      <div class="flex items-center justify-between pt-2">
+        <span class="text-xs text-muted-foreground">tenant: {{ tenant.slug }}</span>
+        <button type="submit"
+                class="rounded-md accent-bar px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+          Create note
+        </button>
+      </div>
     </div>
-    <div>
-      <label class="text-xs font-medium uppercase tracking-wide text-slate-500" for="id_body">
-        Body (markdown)
-      </label>
-      {{ form.body }}
-    </div>
-    <div class="flex items-center justify-between pt-2">
-      <span class="text-xs text-slate-400">tenant: {{ tenant.slug }}</span>
-      <button type="submit"
-              class="rounded-lg accent-bar px-4 py-2 text-sm font-medium text-white hover:opacity-90">
-        Create note
-      </button>
-    </div>
-  </div>
 
-  <aside class="space-y-2">
-    {% component "markdown_preview" body=draft_body %}
-  </aside>
-{% endform %}
+    <aside class="space-y-2">
+      {% component "markdown_preview" body=draft_body %}
+    </aside>
+  {% endform %}
+</div>

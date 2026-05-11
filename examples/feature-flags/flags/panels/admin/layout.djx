@@ -1,14 +1,15 @@
-<section class="space-y-4">
-  <div class="flex items-center justify-between border-b pb-3">
-    <h1 class="text-2xl font-bold">Flag administration</h1>
-    <nav class="flex items-center gap-3 text-sm">
-      {% component "nav_link" url_name="next:page_admin" label="Flags" %}
-      <span class="text-slate-300">·</span>
-      {% component "nav_link" url_name="next:page_admin_metrics" label="Render metrics" %}
-      <span class="text-slate-300">·</span>
-      {% component "nav_link" url_name="next:page_" label="Back" %}
-    </nav>
-  </div>
+<div class="space-y-6">
+  {% #component "page_header" title="Flag administration" %}
+    {% #slot "actions" %}
+      {% #component "nav" %}
+        {% #slot "content" %}
+          {% component "nav_link" url_name="next:page_admin" label="Flags" variant="tabs" %}
+          {% component "nav_link" url_name="next:page_admin_metrics" label="Render metrics" variant="tabs" %}
+          {% component "nav_link" url_name="next:page_" label="Back" variant="tabs" %}
+        {% /slot %}
+      {% /component %}
+    {% /slot %}
+  {% /component %}
 
   {% block template %}{% endblock template %}
-</section>
+</div>

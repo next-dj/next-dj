@@ -16,7 +16,15 @@ from typing import Any, cast
 
 from django import template
 from django.template import base as template_base
-from django.template.base import FilterExpression, Node, NodeList, Parser, Token
+from django.template.base import (
+    FilterExpression,
+    Node,
+    NodeList,
+    Parser,
+    Token,
+    Variable,
+)
+from django.utils.safestring import SafeString
 
 from next.components import get_component, render_component
 from next.static import default_manager
@@ -40,6 +48,11 @@ _SHORT_SET_SLOT_EMPTY_NAME = "{% set_slot %} tag requires a quoted slot name"
 
 # Slot collection uses this key during parent ``{% #component %}`` body render
 _INTERNAL_CONTEXT_KEYS = frozenset({"_component_slots"})
+
+# Sentinel distinguishing "slot key absent" from "slot present but empty".
+# An explicitly empty slot (``{% #slot "x" %}{% /slot %}``) renders nothing,
+# whereas a missing slot falls back to the ``{% #set_slot %}`` default body.
+_SLOT_MISSING: Any = object()
 
 
 def _strip_quotes(raw: str) -> str:
@@ -127,8 +140,25 @@ class ComponentNode(Node):
         self.nodelist = nodelist
 
     def _resolved_props(self, context: template.Context) -> dict[str, Any]:
-        """Resolve every prop expression against the active template context."""
-        return {key: expr.resolve(context) for key, expr in self.props.items()}
+        """Resolve every prop expression against the active template context.
+
+        Django's ``FilterExpression`` marks bare string literals as safe so
+        ``{% tag "x" %}`` style arguments would render unescaped if interpolated
+        through ``{{ x }}``. Component props are user-facing text by default,
+        so we strip the safe marker from plain string literals. Callers who
+        want raw HTML can opt in explicitly with ``prop=value|safe`` or with
+        a variable that already holds a ``SafeString``.
+        """
+        resolved: dict[str, Any] = {}
+        for key, expr in self.props.items():
+            value = expr.resolve(context)
+            is_literal = not isinstance(expr.var, Variable)
+            if is_literal and not expr.filters and isinstance(value, SafeString):
+                # Bare string literal that Django marked safe by convention.
+                # Demote to a plain ``str`` so ``{{ prop }}`` autoescapes it.
+                value = str.__str__(value)
+            resolved[key] = value
+        return resolved
 
     def _template_path_from_context(self, context: template.Context) -> Path | None:
         """Return a resolved path from ``current_template_path``, or ``None``."""
@@ -177,8 +207,11 @@ class ComponentNode(Node):
         render_ctx["children"] = "".join(child_chunks)
 
         for slot_name, content in slots.items():
+            # Slot content lives exclusively under ``slot_<name>`` so prop
+            # names never collide with slot names. The unprefixed key would
+            # shadow a same-named prop and make ``{% #set_slot %}`` defaults
+            # unreachable when a prop happened to share the slot's name.
             render_ctx[f"slot_{slot_name}"] = content
-            render_ctx[slot_name] = content
 
         request = render_ctx.get("request")
         if request is None:
@@ -195,11 +228,18 @@ class SetSlotNode(Node):
         self.nodelist = nodelist
 
     def render(self, context: template.Context) -> str:
-        """Prefer ``slot_<name>`` / ``<name>`` from context over the inner template."""
-        slot_content = context.get(f"slot_{self.name}") or context.get(self.name)
-        if slot_content is not None and slot_content != "":
-            return str(slot_content)
-        return self.nodelist.render(context)
+        """Render injected slot HTML when present, otherwise the fallback body.
+
+        Slot content is looked up under the prefixed ``slot_<name>`` key only.
+        Props live in the unprefixed namespace and never shadow slot defaults,
+        even when a prop happens to share a slot's name. An explicitly empty
+        slot (``{% #slot "x" %}{% /slot %}``) renders as the empty string. Only
+        a missing slot key falls back to the inner template.
+        """
+        slot_content = context.get(f"slot_{self.name}", _SLOT_MISSING)
+        if slot_content is _SLOT_MISSING:
+            return self.nodelist.render(context)
+        return str(slot_content)
 
 
 @register.tag(name="component")

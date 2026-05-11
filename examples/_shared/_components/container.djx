@@ -1,0 +1,1 @@
+<div class="mx-auto w-full max-w-container px-4 {{ extra }}">{{ children|default:'' }}</div>

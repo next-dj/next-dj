@@ -1,30 +1,22 @@
-<section class="grid grid-cols-3 gap-4">
-  <div class="rounded-xl border bg-white p-4 shadow-sm">
-    <p class="text-xs uppercase tracking-wide text-slate-500">Total links</p>
-    <p class="mt-1 text-3xl font-bold">{{ totals.links }}</p>
+<div class="space-y-6">
+  <div class="grid gap-4 sm:grid-cols-3">
+    {% component "stat_card" label="Total links" value=totals.links %}
+    {% component "stat_card" label="Total clicks" value=totals.clicks %}
+    {% component "stat_card" label="Pending clicks" value=totals.pending %}
   </div>
-  <div class="rounded-xl border bg-white p-4 shadow-sm">
-    <p class="text-xs uppercase tracking-wide text-slate-500">Total clicks</p>
-    <p class="mt-1 text-3xl font-bold">{{ totals.clicks }}</p>
-  </div>
-  <div class="rounded-xl border bg-white p-4 shadow-sm">
-    <p class="text-xs uppercase tracking-wide text-slate-500">Pending clicks</p>
-    <p class="mt-1 text-3xl font-bold">{{ totals.pending }}</p>
-  </div>
-</section>
 
-{% if form_actions %}
-<section class="mt-6 rounded-xl border bg-white p-4 shadow-sm">
-  <p class="text-xs uppercase tracking-wide text-slate-500">
-    Form actions dispatched (live)
-  </p>
-  <ul class="mt-2 space-y-1 text-sm">
-    {% for name, count in form_actions.items %}
-      <li class="flex items-center justify-between">
-        <span class="font-mono">{{ name }}</span>
-        <span class="font-bold">{{ count }}</span>
-      </li>
-    {% endfor %}
-  </ul>
-</section>
-{% endif %}
+  {% if form_actions %}
+    {% #component "card" title="Form actions dispatched (live)" %}
+      {% #slot "content" %}
+        <ul class="space-y-1 text-sm">
+          {% for name, count in form_actions.items %}
+            <li class="flex items-center justify-between">
+              <span class="font-mono">{{ name }}</span>
+              <span class="font-semibold tabular-nums">{{ count }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% /slot %}
+    {% /component %}
+  {% endif %}
+</div>

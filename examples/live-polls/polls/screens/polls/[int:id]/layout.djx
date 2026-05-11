@@ -1,14 +1,14 @@
 <div class="space-y-6">
   <header class="flex items-baseline justify-between gap-4">
     <div>
-      <a href="/polls/" class="text-xs uppercase tracking-wide text-slate-500 hover:text-slate-700">
+      <a href="/polls/" class="text-xs uppercase tracking-wide text-muted-foreground hover:text-foreground">
         ← All polls
       </a>
-      <h1 class="mt-1 text-2xl font-semibold text-slate-900">
+      <h1 class="mt-1 text-2xl font-semibold tracking-tight text-foreground">
         {{ poll.question }}
       </h1>
     </div>
-    <p class="shrink-0 text-xs uppercase tracking-wide text-slate-400">
+    <p class="shrink-0 text-xs uppercase tracking-wide text-muted-foreground">
       Poll #{{ poll.pk }}
     </p>
   </header>

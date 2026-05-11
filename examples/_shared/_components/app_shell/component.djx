@@ -1,0 +1,29 @@
+{% if header_visible is None or header_visible %}
+  <header class="border-b border-border bg-background">
+    <div class="mx-auto flex w-full max-w-container items-center justify-between gap-4 px-4 py-4">
+      <div class="flex items-center gap-3">
+        {% #set_slot "brand" %}
+          {% if brand_href %}
+            <a href="{{ brand_href }}" class="flex items-center gap-2 text-base font-semibold tracking-tight text-foreground">
+              {% if brand_icon %}<span aria-hidden="true">{{ brand_icon }}</span>{% endif %}
+              <span>{{ brand|default:'next.dj' }}</span>
+            </a>
+          {% else %}
+            <span class="flex items-center gap-2 text-base font-semibold tracking-tight text-foreground">
+              {% if brand_icon %}<span aria-hidden="true">{{ brand_icon }}</span>{% endif %}
+              <span>{{ brand|default:'next.dj' }}</span>
+            </span>
+          {% endif %}
+        {% /set_slot %}
+        {% set_slot "nav" %}
+      </div>
+      <div class="flex items-center gap-3">
+        {% set_slot "actions" %}
+      </div>
+    </div>
+  </header>
+{% endif %}
+<main class="mx-auto w-full max-w-container flex-1 px-4 py-8 {{ main_extra }}">
+  {% set_slot "content" %}
+</main>
+{% set_slot "page_footer" %}

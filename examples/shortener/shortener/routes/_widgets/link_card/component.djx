@@ -1,9 +1,9 @@
-<article data-next-link-card class="flex items-center justify-between gap-3 rounded-lg border bg-white px-4 py-3 shadow-sm">
+<article data-next-link-card class="flex items-center justify-between gap-3 rounded-md border border-border bg-card px-4 py-3 shadow-sm">
   <div class="min-w-0">
-    <a class="block truncate font-mono text-sm text-slate-900 hover:underline" href="{{ short_url }}">{{ short_url }}</a>
-    <p class="truncate text-xs text-slate-500">→ {{ link.url }}</p>
+    <a class="block truncate font-mono text-sm text-foreground hover:underline" href="{{ short_url }}">{{ short_url }}</a>
+    <p class="truncate text-xs text-muted-foreground">→ {{ link.url }}</p>
   </div>
-  <span class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+  <span class="shrink-0 rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
     {{ link.clicks }} clicks
   </span>
 </article>

@@ -1,0 +1,6 @@
+<div role="alert" class="{{ classes }}">
+  {% if title %}<h4 class="mb-1 font-medium leading-none tracking-tight">{{ title }}</h4>{% endif %}
+  <div class="text-sm leading-relaxed">
+    {% #set_slot "content" %}{{ text }}{% /set_slot %}
+  </div>
+</div>

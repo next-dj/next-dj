@@ -1,64 +1,56 @@
-<section class="space-y-8">
-  <header class="space-y-2">
-    <h1 class="text-3xl font-bold">Audit-trail forms</h1>
-    <p class="text-slate-600">
-      A three-step access-request workflow whose every dispatch and validation failure
-      is recorded by two parallel channels: a custom <code class="rounded bg-slate-100 px-1">FormActionBackend</code>
-      writing rows synchronously inside dispatch, and signal receivers reacting to
-      <code class="rounded bg-slate-100 px-1">action_dispatched</code> and
-      <code class="rounded bg-slate-100 px-1">form_validation_failed</code> from the framework.
-    </p>
-    <div class="flex gap-3">
-      <a href="{% url 'next:page_request_step' step='applicant' %}"
-         class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
-        Start a new request
-      </a>
-      <a href="{% url 'next:page_admin_audit' %}"
-         class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50">
-        Open the audit log
-      </a>
-    </div>
-  </header>
+<div class="space-y-8">
+  {% #component "page_header" title="Audit-trail forms" description="A three-step access-request workflow whose every dispatch and validation failure is recorded by two parallel channels: a custom FormActionBackend writing rows synchronously inside dispatch, and signal receivers reacting to action_dispatched and form_validation_failed from the framework." %}
+    {% #slot "actions" %}
+      <div class="flex gap-3">
+        {% component "button" href="/request/applicant/" text="Start a new request" variant="default" %}
+        {% component "button" href="/admin/audit/" text="Open the audit log" variant="outline" %}
+      </div>
+    {% /slot %}
+  {% /component %}
 
-  <section class="grid grid-cols-1 gap-6 md:grid-cols-2">
-    <div class="rounded-xl border bg-white p-4 shadow-sm">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Recent requests</h2>
-      {% if recent_requests %}
-        <ul class="mt-3 space-y-2">
-          {% for r in recent_requests %}
-            <li class="flex items-start justify-between gap-2">
-              <div>
-                <p class="font-medium">{{ r.full_name }}</p>
-                <p class="text-xs text-slate-500">{{ r.email }} · {{ r.project_slug }}</p>
-              </div>
-              <a href="{% url 'next:page_request_int_id_audit' id=r.pk %}"
-                 class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
-                {{ r.status }} · audit
-              </a>
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="mt-3 text-sm text-slate-500">No requests submitted yet.</p>
-      {% endif %}
-    </div>
+  <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+    {% #component "card" %}
+      {% #slot "content" %}
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Recent requests</h2>
+        {% if recent_requests %}
+          <ul class="mt-3 space-y-2">
+            {% for r in recent_requests %}
+              <li class="flex items-start justify-between gap-2">
+                <div>
+                  <p class="font-medium">{{ r.full_name }}</p>
+                  <p class="text-xs text-muted-foreground">{{ r.email }} · {{ r.project_slug }}</p>
+                </div>
+                <a href="{% url 'next:page_request_int_id_audit' id=r.pk %}"
+                   class="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent">
+                  {{ r.status }} · audit
+                </a>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="mt-3 text-sm text-muted-foreground">No requests submitted yet.</p>
+        {% endif %}
+      {% /slot %}
+    {% /component %}
 
-    <div class="rounded-xl border bg-white p-4 shadow-sm">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Recent audit rows</h2>
-      {% if recent_audit %}
-        <ul class="mt-3 space-y-2 text-sm">
-          {% for entry in recent_audit %}
-            <li class="flex items-center justify-between gap-2">
-              <span class="font-mono text-xs text-slate-500">{{ entry.created_at|date:"H:i:s" }}</span>
-              <span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs">{{ entry.source }}</span>
-              <span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs">{{ entry.kind }}</span>
-              <span class="truncate text-slate-700">{{ entry.action_name }}</span>
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="mt-3 text-sm text-slate-500">No audit rows yet.</p>
-      {% endif %}
-    </div>
-  </section>
-</section>
+    {% #component "card" %}
+      {% #slot "content" %}
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Recent audit rows</h2>
+        {% if recent_audit %}
+          <ul class="mt-3 space-y-2 text-sm">
+            {% for entry in recent_audit %}
+              <li class="flex items-center justify-between gap-2">
+                <span class="font-mono text-xs text-muted-foreground">{{ entry.created_at|date:"H:i:s" }}</span>
+                <span class="rounded bg-muted px-1.5 py-0.5 text-xs">{{ entry.source }}</span>
+                <span class="rounded bg-muted px-1.5 py-0.5 text-xs">{{ entry.kind }}</span>
+                <span class="truncate text-foreground">{{ entry.action_name }}</span>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="mt-3 text-sm text-muted-foreground">No audit rows yet.</p>
+        {% endif %}
+      {% /slot %}
+    {% /component %}
+  </div>
+</div>

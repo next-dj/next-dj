@@ -1,21 +1,23 @@
-<section class="space-y-8">
-  <div class="rounded-xl bg-white p-8 shadow-sm">
-    <h1 class="text-3xl font-bold">Welcome to the catalog</h1>
-    <p class="mt-2 text-slate-600">
-      Browse all products or pick a category. Search and filters live on the
-      catalog listing page and persist through pagination.
-    </p>
-    <a href="{% url 'next:page_catalog' %}" class="mt-4 inline-block rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white">
-      Browse the catalog
-    </a>
-  </div>
+<div class="space-y-8">
+  {% #component "card" %}
+    {% #slot "content" %}
+      <h1 class="text-3xl font-bold tracking-tight text-foreground">Welcome to the catalog</h1>
+      <p class="mt-2 text-muted-foreground">
+        Browse all products or pick a category. Search and filters live on the
+        catalog listing page and persist through pagination.
+      </p>
+      <div class="mt-4">
+        {% component "button" href="/catalog/" text="Browse the catalog" variant="default" %}
+      </div>
+    {% /slot %}
+  {% /component %}
 
   <div>
     <h2 class="text-lg font-semibold">Categories</h2>
     <ul class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
       {% for cat in categories %}
         <li>
-          <a href="{% url 'next:page_catalog_category' category=cat.slug %}" class="block rounded-lg border bg-white px-4 py-3 text-sm font-medium hover:border-slate-400">
+          <a href="{% url 'next:page_catalog_category' category=cat.slug %}" class="block rounded-md border border-border bg-card px-4 py-3 text-sm font-medium hover:border-ring hover:bg-accent">
             {{ cat.name }}
           </a>
         </li>
@@ -31,4 +33,4 @@
       {% endfor %}
     </ul>
   </div>
-</section>
+</div>

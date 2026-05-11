@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+{% component "page_head" title="next.dj — Wiki" tailwind_plugins="typography" %}
+<body class="min-h-screen flex flex-col">
+  {% #component "app_shell" brand="Wiki" brand_href="/" brand_icon="📚" %}
+    {% #slot "actions" %}
+      {% component "nav_link" url_name="next:page_search" label="Search" variant="bar" %}
+      {% component "button" href="/articles/new/" text="New article" variant="default" size="sm" %}
+    {% /slot %}
+    {% #slot "content" %}
+      {% block template %}{% endblock template %}
+    {% /slot %}
+    {% #slot "page_footer" %}
+      <footer class="border-t border-border bg-background py-4 text-center text-xs text-muted-foreground">
+        Built with next.dj. File routes plus a `HybridRouterBackend`.
+      </footer>
+    {% /slot %}
+  {% /component %}
+  {% collect_scripts %}
+</body>
+</html>

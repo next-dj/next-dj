@@ -184,7 +184,15 @@ class PageContextRegistry:
         dep_cache: dict[str, Any],
         dep_stack: list[str],
     ) -> dict[str, Any]:
-        """Return values from ancestor `page.py` callables marked `inherit_context`."""
+        """Return values from ancestor `page.py` callables marked `inherit_context`.
+
+        Walks ancestor directories that contain a `page.py` and runs every
+        `@context(..., inherit_context=True)` callable registered there.
+        A sibling `layout.djx` is not required — the shared HTML envelope
+        can live one level up under ``DEFAULT_PAGE_BACKENDS["DIRS"]``,
+        and pages declaring inheritable context should still surface it
+        on descendant routes.
+        """
         inherited_context = {}
         current_dir = file_path.parent
 
@@ -192,10 +200,9 @@ class PageContextRegistry:
             if current_dir == current_dir.parent:
                 break
 
-            layout_file = current_dir / "layout.djx"
             page_file = current_dir / "page.py"
 
-            if layout_file.exists() and page_file.exists():
+            if page_file.exists():
                 for key, entry in self._context_registry.get(
                     page_file,
                     {},

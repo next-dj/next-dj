@@ -69,6 +69,9 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+SHARED_DIR = BASE_DIR.parent / "_shared"
+STATICFILES_DIRS = [SHARED_DIR / "static"]
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 NEXT_FRAMEWORK = {
@@ -76,7 +79,10 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            "DIRS": [],
+            # `cockpit/` is the project-level page root for the Kanban
+            # app — it ships the shared HTML envelope wrapped around
+            # every board and settings screen.
+            "DIRS": [str(BASE_DIR / "cockpit")],
             "PAGES_DIR": "boards",
             "OPTIONS": {
                 "context_processors": [],
@@ -86,7 +92,7 @@ NEXT_FRAMEWORK = {
     "DEFAULT_COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
-            "DIRS": [],
+            "DIRS": [str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_pieces",
         },
     ],

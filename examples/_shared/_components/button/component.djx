@@ -1,0 +1,9 @@
+{% if href %}
+  <a href="{{ href }}" class="{{ classes }}"{% if target %} target="{{ target }}"{% endif %}>
+    {% #set_slot "content" %}{{ text }}{% /set_slot %}
+  </a>
+{% else %}
+  <button type="{{ type|default:'button' }}" class="{{ classes }}"{% if name %} name="{{ name }}"{% endif %}{% if value %} value="{{ value }}"{% endif %}{% if disabled %} disabled{% endif %}>
+    {% #set_slot "content" %}{{ text }}{% /set_slot %}
+  </button>
+{% endif %}

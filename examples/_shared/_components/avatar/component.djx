@@ -1,0 +1,3 @@
+<span class="inline-flex h-{{ size|default:10 }} w-{{ size|default:10 }} items-center justify-center overflow-hidden rounded-full bg-muted text-sm font-medium text-muted-foreground {{ extra }}">
+  {% if src %}<img src="{{ src }}" alt="{{ alt|default:'' }}" class="h-full w-full object-cover" />{% else %}{{ initials|default:'?' }}{% endif %}
+</span>

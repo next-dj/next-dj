@@ -1,17 +1,14 @@
-<section class="space-y-6">
-  <header class="space-y-1">
-    <h1 class="text-3xl font-bold">Latest posts</h1>
-    <p class="text-slate-600">Markdown files under <code class="rounded bg-slate-100 px-1">screens/posts/</code>. One folder = one route.</p>
-  </header>
+<div class="space-y-6">
+  {% component "page_header" title="Latest posts" description="Markdown files under `screens/posts/`. One folder = one route." %}
 
   <ul class="space-y-3">
     {% for post in posts %}
-      <li class="rounded-lg border bg-white p-4 shadow-sm">
-        <a href="{% url post.url_name %}" class="text-lg font-semibold text-slate-900 hover:underline">
+      <li class="rounded-md border border-border bg-card p-4 shadow-sm">
+        <a href="{% url post.url_name %}" class="text-lg font-semibold text-foreground hover:underline">
           {{ post.title }}
         </a>
-        <p class="mt-1 font-mono text-xs text-slate-500">/posts/{{ post.slug }}/</p>
+        <p class="mt-1 font-mono text-xs text-muted-foreground">/posts/{{ post.slug }}/</p>
       </li>
     {% endfor %}
   </ul>
-</section>
+</div>

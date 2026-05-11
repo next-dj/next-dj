@@ -62,6 +62,9 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+SHARED_DIR = BASE_DIR.parent / "_shared"
+STATICFILES_DIRS = [SHARED_DIR / "static"]
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 NEXT_FRAMEWORK = {
@@ -69,7 +72,11 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            "DIRS": [],
+            # `site/` holds the project-level HTML envelope plus the
+            # `site_footer` project-shared component. The file router
+            # walks this root alongside `blog/screens/`, and components
+            # under `site/_parts/` become root-scope visible everywhere.
+            "DIRS": [str(BASE_DIR / "site")],
             "PAGES_DIR": "screens",
             "OPTIONS": {
                 "context_processors": [
@@ -82,7 +89,14 @@ NEXT_FRAMEWORK = {
     "DEFAULT_COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
-            "DIRS": [],
+            # Two extra component roots: the cross-project shadcn kit AND
+            # the project-level `_parts/` next to the shared layout. The
+            # second entry makes `site_footer` resolve at the empty route
+            # scope across every template in the project.
+            "DIRS": [
+                str(SHARED_DIR / "_components"),
+                str(BASE_DIR / "site" / "_parts"),
+            ],
             "COMPONENTS_DIR": "_parts",
         },
     ],

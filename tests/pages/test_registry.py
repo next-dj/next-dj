@@ -284,6 +284,40 @@ class TestPageContextRegistry:
         result = context_manager.collect_context(child_page_file)
         assert result.context_data == {}
 
+    def test_collect_inherited_context_without_sibling_layout(
+        self, context_manager, tmp_path
+    ) -> None:
+        """`inherit_context=True` works without a sibling ``layout.djx``.
+
+        The shared HTML envelope can live in a project-level page root
+        registered via ``DEFAULT_PAGE_BACKENDS["DIRS"]``, in which case
+        intermediate ``page.py`` modules do not need a layout sibling
+        for their inheritable context to surface on descendant routes.
+        """
+        section_dir = tmp_path / "section"
+        section_dir.mkdir()
+        section_page = section_dir / "page.py"
+        section_page.write_text("")
+
+        child_dir = section_dir / "child"
+        child_dir.mkdir()
+        child_page_file = child_dir / "page.py"
+
+        def inheritable() -> str:
+            return "section_value"
+
+        context_manager.register_context(
+            section_page,
+            "section_var",
+            inheritable,
+            inherit_context=True,
+        )
+
+        result = context_manager.collect_context(child_page_file)
+
+        assert "section_var" in result.context_data
+        assert result.context_data["section_var"] == "section_value"
+
     def test_collect_inherited_context_inherit_false(
         self, context_manager, tmp_path
     ) -> None:

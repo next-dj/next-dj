@@ -69,6 +69,9 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+SHARED_DIR = BASE_DIR.parent / "_shared"
+STATICFILES_DIRS = [SHARED_DIR / "static"]
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 NEXT_FRAMEWORK = {
@@ -76,7 +79,10 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            "DIRS": [],
+            # `portal/` is the project-level page root that carries the
+            # shared HTML envelope around every request step and admin
+            # surface in this access-request workflow.
+            "DIRS": [str(BASE_DIR / "portal")],
             "PAGES_DIR": "views",
             "OPTIONS": {
                 "context_processors": [],
@@ -86,7 +92,7 @@ NEXT_FRAMEWORK = {
     "DEFAULT_COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
-            "DIRS": [],
+            "DIRS": [str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_blocks",
         },
     ],

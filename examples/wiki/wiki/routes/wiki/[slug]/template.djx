@@ -1,18 +1,15 @@
 <article class="space-y-6">
-  <header class="border-b border-slate-200 pb-3">
-    <p class="text-xs uppercase tracking-wide text-slate-500">Article</p>
-    <h1 class="mt-1 text-3xl font-semibold text-slate-900">{{ article.title }}</h1>
-    <p class="mt-2 text-xs text-slate-500">
-      Updated {{ article.updated_at|date:"Y-m-d H:i" }}
-    </p>
-  </header>
+  {% component "page_header" eyebrow="Article" title=article.title %}
+  <p class="-mt-4 text-xs text-muted-foreground">
+    Updated {{ article.updated_at|date:"Y-m-d H:i" }}
+  </p>
 
-  <div class="prose prose-slate max-w-none">
+  <div class="prose prose-slate max-w-none text-foreground">
     {{ rendered_html }}
   </div>
 
-  <footer class="border-t border-slate-200 pt-3">
+  <footer class="border-t border-border pt-3">
     <a href="{% url 'next:page_articles_edit_slug' slug=article.slug %}"
-       class="text-xs text-slate-500 hover:text-indigo-700">Edit this article</a>
+       class="text-xs text-muted-foreground hover:text-foreground">Edit this article</a>
   </footer>
 </article>

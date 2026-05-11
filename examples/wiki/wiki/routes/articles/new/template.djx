@@ -1,45 +1,29 @@
-<a href="{% url 'next:page_' %}"
-   class="inline-block text-xs text-slate-500 hover:text-slate-800">
-  ← Back to index
-</a>
+<div class="space-y-6">
+  <a href="{% url 'next:page_' %}"
+     class="inline-block text-xs text-muted-foreground hover:text-foreground">
+    ← Back to index
+  </a>
 
-<h1 class="mt-4 text-2xl font-semibold text-slate-900">Create an article</h1>
+  {% component "page_header" title="Create an article" %}
 
-{% form @action="wiki:article_create" class="mt-6 grid gap-6 md:grid-cols-2" %}
-  <div class="space-y-4">
-    <div>
-      <label class="text-xs font-medium uppercase tracking-wide text-slate-500" for="id_slug">
-        Slug
-      </label>
-      {{ form.slug }}
-      {% if form.slug.errors %}
-        <p class="mt-1 text-xs text-rose-600">{{ form.slug.errors|join:" " }}</p>
-      {% endif %}
+  {% form @action="wiki:article_create" class="grid gap-6 md:grid-cols-2" %}
+    <div class="space-y-4">
+      {% #component "field" label="Slug" for_id="id_slug" error=form.slug.errors|join:" " %}
+        {% #slot "control" %}{{ form.slug }}{% /slot %}
+      {% /component %}
+      {% #component "field" label="Title" for_id="id_title" error=form.title.errors|join:" " %}
+        {% #slot "control" %}{{ form.title }}{% /slot %}
+      {% /component %}
+      {% #component "field" label="Body (Markdown)" for_id="id_body_md" %}
+        {% #slot "control" %}{{ form.body_md }}{% /slot %}
+      {% /component %}
+      <div class="pt-2">
+        {% component "button" type="submit" text="Publish" variant="default" %}
+      </div>
     </div>
-    <div>
-      <label class="text-xs font-medium uppercase tracking-wide text-slate-500" for="id_title">
-        Title
-      </label>
-      {{ form.title }}
-      {% if form.title.errors %}
-        <p class="mt-1 text-xs text-rose-600">{{ form.title.errors|join:" " }}</p>
-      {% endif %}
-    </div>
-    <div>
-      <label class="text-xs font-medium uppercase tracking-wide text-slate-500" for="id_body_md">
-        Body (Markdown)
-      </label>
-      {{ form.body_md }}
-    </div>
-    <div class="pt-2">
-      <button type="submit"
-              class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">
-        Publish
-      </button>
-    </div>
-  </div>
 
-  <aside>
-    {% component "markdown_preview" %}
-  </aside>
-{% endform %}
+    <aside>
+      {% component "markdown_preview" %}
+    </aside>
+  {% endform %}
+</div>

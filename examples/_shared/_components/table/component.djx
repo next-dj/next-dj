@@ -1,0 +1,5 @@
+<div class="w-full overflow-auto rounded-md border border-border {{ wrapper_extra }}">
+  <table class="w-full caption-bottom text-sm {{ extra }}">
+    {% set_slot "content" %}
+  </table>
+</div>

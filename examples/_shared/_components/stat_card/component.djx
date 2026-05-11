@@ -1,0 +1,5 @@
+<article class="rounded-lg border border-border bg-card text-card-foreground shadow-sm p-5 {{ extra }}">
+  {% if label %}<p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{{ label }}</p>{% endif %}
+  <p class="mt-2 text-3xl font-semibold tabular-nums text-foreground">{% #set_slot "value" %}{{ value }}{% /set_slot %}</p>
+  {% if hint %}<p class="mt-1 text-xs text-muted-foreground">{{ hint }}</p>{% endif %}
+</article>

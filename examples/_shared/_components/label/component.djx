@@ -1,0 +1,3 @@
+<label {% if for_id %}for="{{ for_id }}"{% endif %} class="text-sm font-medium leading-none text-foreground {{ extra }}">
+  {% #set_slot "content" %}{{ text }}{% /set_slot %}
+</label>

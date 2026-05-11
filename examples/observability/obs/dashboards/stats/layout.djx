@@ -1,13 +1,15 @@
-<section class="space-y-6">
-  <header class="flex flex-wrap items-baseline justify-between gap-4">
-    <div>
-      <h1 class="text-2xl font-semibold">Stats</h1>
-      <p class="text-sm text-slate-500">Window: {{ window }}</p>
+<div class="space-y-6">
+  <section class="flex flex-col gap-3 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
+    <div class="space-y-1">
+      <h1 class="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Stats</h1>
+      <p class="text-sm text-muted-foreground">Window: {{ window }}</p>
     </div>
     {% component "filter_window" current=window %}
-  </header>
+  </section>
+
   {% component "stats_nav" %}
-  <div class="rounded-md bg-white p-6 ring-1 ring-slate-200">
+
+  <div class="rounded-md border border-border bg-card p-6 shadow-sm">
     {% block template %}{% endblock template %}
   </div>
-</section>
+</div>
