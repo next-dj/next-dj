@@ -17,6 +17,7 @@ from next.forms import (
     form_action_manager,
     page,
 )
+from next.forms.dispatch import _resolve_form_class
 
 
 PAGE_MODULE_FOR_FORM_TESTS = (
@@ -416,3 +417,56 @@ class TestFormDispatchRenderFragmentBranches:
             TypeError, match="instance parameter only supported for ModelForm"
         ):
             FormActionDispatch.dispatch(backend, request, "test_action", meta)
+
+
+class TestResolveFormClass:
+    """`_resolve_form_class`: type passthrough, factory call, error paths."""
+
+    def test_form_class_type_returned_as_is(self, mock_http_request) -> None:
+        """A `Form` subclass is returned unchanged without DI resolution."""
+
+        class F(Form):
+            name = django_forms.CharField(max_length=10)
+
+        request = mock_http_request(method="POST")
+        out = _resolve_form_class(F, request, {})
+        assert out is F
+
+    def test_factory_callable_resolves_per_request(self, mock_http_request) -> None:
+        """A callable factory is invoked with DI-resolved kwargs each call."""
+
+        class F(Form):
+            name = django_forms.CharField(max_length=10)
+
+        seen: dict[str, object] = {}
+
+        def factory(request: HttpRequest, model_name: str) -> type[Form]:
+            seen["request"] = request
+            seen["model_name"] = model_name
+            return F
+
+        request = mock_http_request(method="POST")
+        out = _resolve_form_class(
+            factory,
+            request,
+            {"model_name": "tag"},
+        )
+        assert out is F
+        assert seen["model_name"] == "tag"
+        assert seen["request"] is request
+
+    def test_non_callable_raises_typeerror(self, mock_http_request) -> None:
+        """An object that is neither a type nor callable is a configuration error."""
+        request = mock_http_request(method="POST")
+        with pytest.raises(TypeError, match="Form subclass or callable"):
+            _resolve_form_class("not-a-form", request, {})
+
+    def test_factory_returning_non_type_raises(self, mock_http_request) -> None:
+        """A factory must return a class; returning an instance is a hard error."""
+
+        def bad_factory(request: HttpRequest) -> object:
+            return "not-a-class"
+
+        request = mock_http_request(method="POST")
+        with pytest.raises(TypeError, match="factory must return a Form subclass"):
+            _resolve_form_class(bad_factory, request, {})

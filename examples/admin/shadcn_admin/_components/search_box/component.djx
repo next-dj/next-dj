@@ -1,0 +1,12 @@
+{% if search_enabled %}
+  <form method="get" class="flex items-center gap-2">
+    {% component "input" name="q" value=query placeholder="Search…" type="search" extra="w-72" %}
+    {% for key, val in carried_params %}
+      <input type="hidden" name="{{ key }}" value="{{ val }}">
+    {% endfor %}
+    {% component "button" type="submit" text="Search" variant="outline" size="sm" %}
+    {% if query %}
+      {% component "button" href="?" text="Reset" variant="ghost" size="sm" %}
+    {% endif %}
+  </form>
+{% endif %}

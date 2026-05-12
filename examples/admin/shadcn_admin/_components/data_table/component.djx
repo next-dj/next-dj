@@ -1,0 +1,53 @@
+<div class="overflow-x-auto rounded-lg border border-border bg-card">
+  <table class="w-full text-sm">
+    <thead class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+      <tr>
+        {% if selectable %}
+          <th class="w-10 px-3 py-2 text-left">
+            <input type="checkbox" data-bulk-toggle aria-label="Select all">
+          </th>
+        {% endif %}
+        {% for col in columns %}
+          <th class="px-3 py-2 text-left font-medium">
+            {% if col.sortable and col.sort_url %}
+              <a href="{{ col.sort_url }}" class="inline-flex items-center gap-1 hover:text-foreground">
+                <span>{{ col.label }}</span>
+                {% if col.direction == "asc" %}
+                  <span aria-hidden="true">▲</span>
+                {% elif col.direction == "desc" %}
+                  <span aria-hidden="true">▼</span>
+                {% endif %}
+              </a>
+            {% else %}
+              <span>{{ col.label }}</span>
+            {% endif %}
+          </th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-border">
+      {% for row in rows %}
+        <tr class="hover:bg-accent/30">
+          {% if selectable %}
+            <td class="w-10 px-3 py-2">
+              <input type="checkbox" name="_selected_action" value="{{ row.pk }}" form="{{ select_form_id|default:'bulk-action-form' }}">
+            </td>
+          {% endif %}
+          {% for cell in row.cells %}
+            <td class="px-3 py-2 align-top {% if forloop.first %}font-medium{% endif %}">
+              {% if forloop.first %}
+                <a href="{{ row.change_url }}" class="text-foreground hover:text-primary">{{ cell }}</a>
+              {% else %}
+                {{ cell }}
+              {% endif %}
+            </td>
+          {% endfor %}
+        </tr>
+      {% empty %}
+        <tr>
+          <td colspan="{{ columns|length|add:'1' }}" class="px-3 py-8 text-center text-sm text-muted-foreground">No records.</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

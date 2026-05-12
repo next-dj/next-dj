@@ -181,6 +181,63 @@ class TestFormTagRender:
         assert 'class="my-form"' in html
         assert 'id="f1"' in html
 
+    def test_resolves_action_from_context_variable(
+        self, form_engine, csrf_request
+    ) -> None:
+        """Unquoted @action resolves against the template context at render time.
+
+        This lets a composite component reuse one template for several action
+        targets (for example admin's add and change paths) without forcing the
+        caller to duplicate the entire form block per branch.
+        """
+        t = form_engine.from_string("{% form @action=action_key %}x{% endform %}")
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                    "action_key": "test_submit",
+                }
+            )
+        )
+        # When the action name resolves to a registered action, its UID URL
+        # is rendered. The literal variable reference must not survive.
+        assert "action_key" not in html
+        assert 'action=""' not in html
+        assert "/_next/form/" in html
+
+    def test_accepts_single_quoted_action(self, form_engine, csrf_request) -> None:
+        """Single-quoted @action parses as a literal alongside double-quoted form."""
+        t = form_engine.from_string("{% form @action='test_submit' %}x{% endform %}")
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert "/_next/form/" in html
+        assert 'action=""' not in html
+
+    def test_resolves_html_attr_from_context_variable(
+        self, form_engine, csrf_request
+    ) -> None:
+        """Unquoted attribute values resolve against the context too."""
+        t = form_engine.from_string(
+            '{% form @action="test_submit" class=form_class %}x{% endform %}'
+        )
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                    "form_class": "space-y-4",
+                }
+            )
+        )
+        assert 'class="space-y-4"' in html
+
     def test_includes_csrf_when_request_in_context(
         self, form_engine, csrf_request
     ) -> None:

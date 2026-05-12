@@ -39,15 +39,22 @@ class ActionMeta(TypedDict, total=False):
     """Per-action data stored in the registry backend."""
 
     handler: Callable[..., Any]
-    form_class: type[django_forms.Form] | None
+    form_class: type[django_forms.Form] | Callable[..., type[django_forms.Form]] | None
     uid: str
 
 
 @dataclass
 class FormActionOptions:
-    """Options passed to `register_action` (used by the `@action` decorator)."""
+    """Options passed to `register_action` (used by the `@action` decorator).
 
-    form_class: type[django_forms.Form] | None = None
+    `form_class` may be a `Form` subclass or a zero-or-more-argument
+    callable that returns one. Callables are resolved per request at
+    dispatch time, enabling factories like `ModelAdmin.get_form()`.
+    """
+
+    form_class: (
+        type[django_forms.Form] | Callable[..., type[django_forms.Form]] | None
+    ) = None
     namespace: str | None = None
 
 

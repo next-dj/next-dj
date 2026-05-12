@@ -119,21 +119,28 @@ def _form_action_context_callable(
     """Return a callable that builds a form instance for GET error rendering."""
 
     def context_func(request: HttpRequest) -> types.SimpleNamespace:
-        if not hasattr(form_class, "get_initial"):
-            msg = f"Form class {form_class} must have get_initial method"
-            raise TypeError(msg)
         url_kwargs = _url_kwargs_from_resolver_or_post(request)
         dep_cache: dict[str, Any] = {}
         dep_stack: list[str] = []
+        resolved_form_class = _resolve_form_class(
+            form_class,
+            request,
+            url_kwargs,
+            dep_cache,
+            dep_stack,
+        )
+        if not hasattr(resolved_form_class, "get_initial"):
+            msg = f"Form class {resolved_form_class} must have get_initial method"
+            raise TypeError(msg)
         resolved = resolver.resolve_dependencies(
-            form_class.get_initial,
+            resolved_form_class.get_initial,
             request=request,
             _cache=dep_cache,
             _stack=dep_stack,
             **url_kwargs,
         )
-        initial_data = form_class.get_initial(**resolved)
-        form_instance = _form_from_initial_data(form_class, initial_data)
+        initial_data = resolved_form_class.get_initial(**resolved)
+        form_instance = _form_from_initial_data(resolved_form_class, initial_data)
         return types.SimpleNamespace(form=form_instance)
 
     return context_func
@@ -146,6 +153,41 @@ def _bind_form_for_post(
 ) -> django_forms.Form:
     """Return a bound form for POST validation using initial or model instance."""
     return _build_form(form_class, initial_data, request=request)
+
+
+def _resolve_form_class(
+    form_class: object,
+    request: HttpRequest,
+    url_kwargs: dict[str, object],
+    dep_cache: dict[str, Any] | None = None,
+    dep_stack: list[str] | None = None,
+) -> type[django_forms.Form]:
+    """Return a concrete form class, calling `form_class` as a factory if needed.
+
+    Accepts either an already-built `Form` subclass or a callable that
+    returns one. Factory callables are dependency-resolved against the
+    current request and URL kwargs before invocation, so admin-style
+    pages can produce a form class shaped by `ModelAdmin.get_form()`.
+    """
+    if isinstance(form_class, type):
+        return cast("type[django_forms.Form]", form_class)
+    if not callable(form_class):
+        msg = f"form_class must be a Form subclass or callable, got {form_class!r}"
+        raise TypeError(msg)
+    cache = dep_cache if dep_cache is not None else {}
+    stack = dep_stack if dep_stack is not None else []
+    resolved = resolver.resolve_dependencies(
+        form_class,
+        request=request,
+        _cache=cache,
+        _stack=stack,
+        **url_kwargs,
+    )
+    produced = form_class(**resolved)
+    if not isinstance(produced, type):
+        msg = f"form_class factory must return a Form subclass, got {produced!r}"
+        raise TypeError(msg)
+    return cast("type[django_forms.Form]", produced)
 
 
 def _normalize_handler_response(
@@ -190,12 +232,20 @@ class FormActionDispatch:
                 dep_stack,
             )
 
+        resolved_form_class = _resolve_form_class(
+            form_class,
+            request,
+            url_kwargs,
+            dep_cache,
+            dep_stack,
+        )
+
         return FormActionDispatch._dispatch_with_form(
             backend,
             request,
             action_name,
             handler,
-            form_class,
+            resolved_form_class,
             url_kwargs,
             dep_cache,
             dep_stack,

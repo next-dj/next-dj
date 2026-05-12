@@ -1,0 +1,36 @@
+<section class="rounded-lg border border-border bg-card p-6 space-y-4">
+  <header>
+    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{{ block.verbose_name_plural }}</h3>
+  </header>
+  {{ block.management_form }}
+  {% if block.non_form_errors %}
+    <ul class="text-xs text-destructive">
+      {% for err in block.non_form_errors %}<li>{{ err }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+  <div class="space-y-3">
+    {% for row in block.rows %}
+      <div class="rounded-md border border-border p-3">
+        {{ row.hidden_html|safe }}
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {% for info in row.fields %}
+            {% component "form_field" info=info %}
+          {% endfor %}
+        </div>
+        {% if row.delete_field %}
+          <label class="mt-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
+            <input type="checkbox" name="{{ row.delete_field.html_name }}" {% if row.delete_field.value %}checked{% endif %}>
+            <span>Delete</span>
+          </label>
+        {% endif %}
+        {% if row.errors %}
+          <ul class="mt-1 space-y-0.5 text-xs text-destructive">
+            {% for field, errors in row.errors.items %}
+              {% for err in errors %}<li>{{ field }}: {{ err }}</li>{% endfor %}
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</section>

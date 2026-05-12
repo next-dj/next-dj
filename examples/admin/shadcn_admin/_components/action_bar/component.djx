@@ -1,0 +1,17 @@
+{% if actions %}
+  <form id="{{ form_id|default:'bulk-action-form' }}" method="post" action="{{ post_url }}" class="flex items-center gap-2">
+    {% csrf_token %}
+    <input type="hidden" name="_next_form_action" value="{{ action_name }}">
+    {% for key, val in url_params %}
+      <input type="hidden" name="_url_param_{{ key }}" value="{{ val }}">
+    {% endfor %}
+    <label class="text-xs font-medium text-muted-foreground" for="bulk-action-select">Action</label>
+    <select id="bulk-action-select" name="action" class="h-9 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring">
+      <option value="">—</option>
+      {% for choice in actions %}
+        <option value="{{ choice.name }}">{{ choice.description }}</option>
+      {% endfor %}
+    </select>
+    {% component "button" type="submit" text="Apply" variant="outline" size="sm" %}
+  </form>
+{% endif %}

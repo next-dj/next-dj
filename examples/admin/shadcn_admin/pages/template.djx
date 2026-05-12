@@ -1,0 +1,13 @@
+<div class="space-y-8">
+  {% #component "page_header" title="Dashboard" description="Models registered with django.contrib.admin, rendered through next.dj." %}{% /component %}
+
+  {% if app_list %}
+    <div class="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+      {% for app in app_list %}
+        {% component "app_card" app=app %}
+      {% endfor %}
+    </div>
+  {% else %}
+    {% #component "empty_state" title="No models registered" description="Add `@admin.register(...)` to expose models in this dashboard." %}{% /component %}
+  {% endif %}
+</div>

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+{% component "page_head" title="next.dj admin" %}
+<body class="min-h-screen bg-background text-foreground">
+  {% if is_auth_page %}
+    <main class="flex min-h-screen items-center justify-center px-4 py-12">
+  {% else %}
+    <div class="flex min-h-screen w-full">
+      {% component "admin_sidebar" brand="next.dj admin" app_list=app_list %}
+      <div class="flex flex-1 flex-col">
+        <header class="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-6">
+          <div class="flex items-center gap-3 text-sm">{{ breadcrumbs_html|default:""|safe }}</div>
+          <div class="flex items-center gap-3 text-sm">
+            {% if user.is_authenticated %}
+              <span class="text-muted-foreground">{{ user.get_username }}</span>
+              {% form @action="admin:logout" class="inline" %}
+                {% component "button" type="submit" text="Sign out" variant="outline" size="sm" %}
+              {% endform %}
+            {% else %}
+              {% component "button" href="/admin/login/" text="Sign in" variant="outline" size="sm" %}
+            {% endif %}
+          </div>
+        </header>
+        <main class="flex-1 overflow-y-auto px-6 py-8">
+  {% endif %}
+
+  {% block template %}{% endblock template %}
+
+  {% if is_auth_page %}
+    </main>
+  {% else %}
+        </main>
+      </div>
+    </div>
+  {% endif %}
+  {% collect_scripts %}
+</body>
+</html>

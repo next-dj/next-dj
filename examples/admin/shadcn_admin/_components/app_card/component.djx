@@ -1,0 +1,23 @@
+{% #component "card" %}
+  {% #slot "content" %}
+    <div class="flex items-center justify-between">
+      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{{ app.name }}</h3>
+      <span class="text-xs text-muted-foreground">{{ app.models|length }} model{{ app.models|length|pluralize }}</span>
+    </div>
+    <ul class="mt-3 divide-y divide-border">
+      {% for model in app.models %}
+        <li class="flex items-center justify-between py-2">
+          <a href="/admin/{{ app.app_label }}/{{ model.object_name|lower }}/" class="text-sm font-medium text-foreground hover:text-primary">
+            {{ model.name|capfirst }}
+          </a>
+          <div class="flex items-center gap-2 text-xs">
+            {% if model.add_url %}
+              <a href="/admin/{{ app.app_label }}/{{ model.object_name|lower }}/add/" class="rounded-full bg-muted px-2 py-0.5 text-muted-foreground hover:bg-accent">Add</a>
+            {% endif %}
+            <a href="/admin/{{ app.app_label }}/{{ model.object_name|lower }}/" class="rounded-full bg-muted px-2 py-0.5 text-muted-foreground hover:bg-accent">Browse</a>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% /slot %}
+{% /component %}
