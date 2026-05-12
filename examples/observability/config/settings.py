@@ -68,7 +68,9 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
-STATICFILES_DIRS = [BASE_DIR / "static"]
+
+SHARED_DIR = BASE_DIR.parent / "_shared"
+STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -84,7 +86,10 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            "DIRS": [],
+            # `instrument/` owns the shared HTML envelope. The file router
+            # walks both this project-level root and `obs/dashboards/` so
+            # every dashboard sees the same chrome.
+            "DIRS": [str(BASE_DIR / "instrument")],
             "PAGES_DIR": "dashboards",
             "OPTIONS": {
                 "context_processors": [],
@@ -94,7 +99,7 @@ NEXT_FRAMEWORK = {
     "DEFAULT_COMPONENT_BACKENDS": [
         {
             "BACKEND": "obs.backends.CountingComponentsBackend",
-            "DIRS": [],
+            "DIRS": [str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_widgets",
         },
     ],

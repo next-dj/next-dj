@@ -1,0 +1,3 @@
+<nav class="flex items-center gap-1 {{ extra }}">
+  {% set_slot "content" %}
+</nav>

@@ -5,11 +5,12 @@
     {% endfor %}
   </ul>
 {% else %}
-  <div class="space-y-3 rounded border border-dashed border-slate-300 bg-white p-6 text-center">
-    <p class="text-sm text-slate-500">No notes yet for this tenant.</p>
-    <a href="{% url 'next:page_notes_new' %}"
-       class="inline-block rounded-lg accent-bar px-4 py-2 text-sm font-medium text-white hover:opacity-90">
-      + New note
-    </a>
-  </div>
+  {% #component "empty_state" title="No notes yet for this tenant" icon="📝" %}
+    {% #slot "actions" %}
+      <a href="{% url 'next:page_notes_new' %}"
+         class="inline-block rounded-md accent-bar px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+        + New note
+      </a>
+    {% /slot %}
+  {% /component %}
 {% endif %}

@@ -1,11 +1,38 @@
-{% block template %}
-<section class="space-y-4">
-  <h1 class="text-3xl font-bold">{{ greeting }}</h1>
-  <p class="text-slate-600">
-    Copy this folder, rename <code class="rounded bg-slate-100 px-1">myapp</code>,
-    and start building. The <code class="rounded bg-slate-100 px-1">_widgets</code>
-    directory is your components scope, <code class="rounded bg-slate-100 px-1">routes</code>
-    is your pages directory, and the settings module wires both.
-  </p>
-</section>
-{% endblock %}
+<div class="space-y-8">
+  {% component "page_header"
+      title=greeting
+      description="Copy this folder, rename `myapp`, and start building. The shared UI kit lives in examples/_shared/_components/ and is wired into config/settings.py through DEFAULT_COMPONENT_BACKENDS DIRS." %}
+
+  <div class="grid gap-4 sm:grid-cols-2">
+    {% #component "card" title="Pages" description="`routes/` holds your page tree. Each `page.py` adds context, each `template.djx` renders." %}
+      {% #slot "content" %}
+        <p class="text-sm text-muted-foreground">
+          The router scans your <code class="rounded bg-muted px-1">routes/</code> directory and skips the components folder declared in settings.
+        </p>
+      {% /slot %}
+    {% /component %}
+
+    {% #component "card" title="Components" description="`_widgets/` is your per-app scope. Names like `button` or `card` come from the shared kit." %}
+      {% #slot "content" %}
+        <p class="text-sm text-muted-foreground">
+          Compose shadcn-style primitives with <code class="rounded bg-muted px-1">{% verbatim %}{% component "name" %}{% endverbatim %}</code>.
+        </p>
+      {% /slot %}
+    {% /component %}
+  </div>
+
+  {% #component "alert" variant="info" title="Up next" %}
+    {% #slot "content" %}
+      Drop a <code class="rounded bg-muted px-1">page.py</code> next to a <code class="rounded bg-muted px-1">template.djx</code> under
+      <code class="rounded bg-muted px-1">routes/</code> to add a new screen.
+    {% /slot %}
+  {% /component %}
+
+  <div class="flex flex-wrap gap-3">
+    {% component "button" text="Primary action" variant="default" %}
+    {% component "button" text="Secondary" variant="secondary" %}
+    {% component "button" text="Outline" variant="outline" %}
+    {% component "button" text="Ghost" variant="ghost" %}
+    {% component "button" text="Destructive" variant="destructive" %}
+  </div>
+</div>

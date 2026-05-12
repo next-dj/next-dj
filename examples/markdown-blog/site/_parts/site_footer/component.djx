@@ -1,0 +1,3 @@
+<footer class="border-t border-border bg-background py-6 text-center text-xs text-muted-foreground">
+  © {{ site_year }} next.dj blog
+</footer>

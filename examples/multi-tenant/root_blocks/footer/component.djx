@@ -1,6 +1,6 @@
-<footer class="border-t bg-white text-xs text-slate-500">
-  <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
+<footer class="border-t border-border bg-background text-xs text-muted-foreground">
+  <div class="mx-auto flex w-full max-w-container items-center justify-between px-4 py-4">
     <span>Multi-tenant notes — a next.dj showcase example.</span>
-    <span class="text-slate-400">root_blocks/footer/</span>
+    <span class="text-muted-foreground">root_blocks/footer/</span>
   </div>
 </footer>

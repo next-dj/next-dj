@@ -1,0 +1,10 @@
+<div class="space-y-2 {{ extra }}">
+  {% if label %}
+    <label {% if for_id %}for="{{ for_id }}"{% endif %} class="text-sm font-medium leading-none text-foreground">
+      {{ label }}{% if required %} <span aria-hidden="true" class="text-destructive">*</span>{% endif %}
+    </label>
+  {% endif %}
+  {% set_slot "control" %}
+  {% if help %}<p class="text-xs text-muted-foreground">{{ help }}</p>{% endif %}
+  {% if error %}<p class="text-xs font-medium text-destructive">{{ error }}</p>{% endif %}
+</div>

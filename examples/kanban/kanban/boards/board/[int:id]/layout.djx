@@ -1,24 +1,20 @@
-<section class="space-y-6">
+<div class="space-y-6">
   <header class="flex items-end justify-between">
-    <div>
-      <p class="text-xs uppercase tracking-wide text-slate-400">
+    <div class="space-y-1">
+      <p class="text-xs uppercase tracking-wide text-muted-foreground">
         Board #{{ board.id }}
       </p>
-      <h1 class="text-2xl font-semibold text-slate-900">{{ board.title }}</h1>
+      <h1 class="text-2xl font-semibold tracking-tight text-foreground">{{ board.title }}</h1>
     </div>
-    <nav class="flex items-center gap-2 text-sm">
-      <a href="/board/{{ board.id }}/"
-         class="rounded-md border px-3 py-1 {% if not settings_active %}bg-slate-900 text-white{% else %}border-slate-300 bg-white text-slate-700{% endif %}">
-        Board
-      </a>
-      <a href="/board/{{ board.id }}/settings/"
-         class="rounded-md border px-3 py-1 {% if settings_active %}bg-slate-900 text-white{% else %}border-slate-300 bg-white text-slate-700{% endif %}">
-        Settings
-      </a>
-    </nav>
+    {% #component "nav" %}
+      {% #slot "content" %}
+        {% component "nav_link" url_name="next:page_board_int_id" url_kwargs=board_url_kwargs label="Board" variant="tabs" %}
+        {% component "nav_link" url_name="next:page_board_int_id_settings" url_kwargs=board_url_kwargs label="Settings" variant="tabs" %}
+      {% /slot %}
+    {% /component %}
   </header>
 
-  <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+  <div class="rounded-md border border-border bg-card p-4 shadow-sm">
     {% block template %}{% endblock template %}
   </div>
-</section>
+</div>

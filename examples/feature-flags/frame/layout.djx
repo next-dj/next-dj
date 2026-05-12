@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+{% component "page_head" title="next.dj — Feature flags admin" %}
+<body class="min-h-screen flex flex-col">
+  {% #component "app_shell" brand="next.dj flags" brand_href="/" brand_icon="🚩" %}
+    {% #slot "actions" %}
+      {% component "nav_link" url_name="next:page_" label="Active" variant="bar" %}
+      {% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="Admin" variant="bar" %}
+      {% component "nav_link" url_name="next:page_demo" label="Demo" variant="bar" %}
+    {% /slot %}
+    {% #slot "content" %}
+      {% block template %}{% endblock template %}
+    {% /slot %}
+  {% /component %}
+  {% collect_scripts %}
+</body>
+</html>

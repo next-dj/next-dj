@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+{% component "page_head" title="next.dj — Markdown blog" tailwind_plugins="typography" %}
+<body class="min-h-screen flex flex-col">
+  {% #component "app_shell" brand="next.dj blog" brand_href="/" brand_icon="✒️" %}
+    {% #slot "actions" %}
+      {% component "nav_link" url_name="next:page_" label="Home" variant="bar" %}
+      {% component "nav_link" url_name="next:page_about" label="About" variant="bar" %}
+    {% /slot %}
+    {% #slot "content" %}
+      <p class="-mt-4 mb-6 text-sm text-muted-foreground">{{ site_tagline }}</p>
+      {% block template %}{% endblock template %}
+    {% /slot %}
+    {% #slot "page_footer" %}
+      {% component "site_footer" %}
+    {% /slot %}
+  {% /component %}
+  {% collect_scripts %}
+</body>
+</html>

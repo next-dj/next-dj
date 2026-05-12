@@ -1,0 +1,9 @@
+<textarea
+  name="{{ name }}"
+  {% if id %}id="{{ id }}"{% endif %}
+  rows="{{ rows|default:4 }}"
+  {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+  {% if required %}required{% endif %}
+  {% if disabled %}disabled{% endif %}
+  class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 {{ extra }}"
+>{{ value|default_if_none:'' }}</textarea>

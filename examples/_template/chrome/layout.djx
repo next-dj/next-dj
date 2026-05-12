@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html lang="en">
+{% component "page_head" title="Next.dj example template" %}
+<body class="min-h-screen flex flex-col">
+  {% #component "app_shell" brand="Template example" brand_href="/" brand_icon="✨" %}
+    {% #slot "content" %}
+      {% block template %}{% endblock template %}
+    {% /slot %}
+  {% /component %}
+  {% collect_scripts %}
+</body>
+</html>

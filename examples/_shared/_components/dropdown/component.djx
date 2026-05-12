@@ -1,0 +1,8 @@
+<details class="relative inline-block {{ extra }}">
+  <summary class="list-none cursor-pointer inline-flex h-10 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-accent">
+    {% #set_slot "trigger" %}{{ label|default:'Menu' }}<span aria-hidden="true">▾</span>{% /set_slot %}
+  </summary>
+  <div class="absolute right-0 z-10 mt-1 min-w-[12rem] rounded-md border border-border bg-popover py-1 text-sm text-popover-foreground shadow-lg" data-ui-dropdown-menu>
+    {% set_slot "items" %}
+  </div>
+</details>

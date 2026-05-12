@@ -1,0 +1,1 @@
+<div aria-hidden="true" class="animate-pulse rounded-md bg-muted {{ extra }}" style="width: {{ width|default:'100%' }}; height: {{ height|default:'1rem' }};"></div>

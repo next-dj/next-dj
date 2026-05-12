@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+{% component "page_head" title="next.dj — URL shortener" %}
+<body class="min-h-screen flex flex-col">
+  {% #component "app_shell" brand="next.dj shortener" brand_href="/" brand_icon="🔗" %}
+    {% #slot "actions" %}
+      {% component "nav_link" url_name="next:page_admin" active_when="page_admin" label="admin" variant="bar" %}
+    {% /slot %}
+    {% #slot "content" %}
+      {% block template %}{% endblock template %}
+    {% /slot %}
+  {% /component %}
+  {% collect_scripts %}
+</body>
+</html>

@@ -68,7 +68,9 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
-STATICFILES_DIRS = [BASE_DIR / "static"]
+
+SHARED_DIR = BASE_DIR.parent / "_shared"
+STATICFILES_DIRS = [BASE_DIR / "static", SHARED_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -77,7 +79,10 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
-            "DIRS": [],
+            # `marketplace/` is the project-level page root. It owns the
+            # shared HTML envelope wrapped around `catalog/storefront/`
+            # and every nested catalog route.
+            "DIRS": [str(BASE_DIR / "marketplace")],
             "PAGES_DIR": "storefront",
             "OPTIONS": {
                 "context_processors": [
@@ -89,7 +94,7 @@ NEXT_FRAMEWORK = {
     "DEFAULT_COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
-            "DIRS": [],
+            "DIRS": [str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_cards",
         },
     ],

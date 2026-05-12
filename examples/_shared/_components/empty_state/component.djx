@@ -1,0 +1,6 @@
+<div class="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/20 px-6 py-12 text-center {{ extra }}">
+  {% if icon %}<div aria-hidden="true" class="text-3xl">{{ icon }}</div>{% endif %}
+  {% if title %}<p class="text-sm font-medium text-foreground">{{ title }}</p>{% endif %}
+  {% if description %}<p class="max-w-sm text-sm text-muted-foreground">{{ description }}</p>{% endif %}
+  {% #set_slot "actions" %}{% /set_slot %}
+</div>

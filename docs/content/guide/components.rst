@@ -338,6 +338,30 @@ The ``examples/shortener/shortener/routes/_widgets/link_card/`` component uses s
   Content between the tags is the default when the caller does not pass that slot.
   If there is **no** default body, use the void form ``{% set_slot "name" %}`` (same idea as short ``{% slot "name" %}`` at the call site).
 
+.. _components-slots-and-props:
+
+**Slots and props share no namespace**
+
+Slot content is delivered under a ``slot_<name>`` key in the render context.
+Props travel under their bare key. The two namespaces never collide:
+
+- A prop with the same name as a slot does **not** override the slot's
+  default body. ``{% component "card" description="hi" %}`` against a card
+  template that contains ``{% #set_slot "description" %}<i>fallback</i>{% /set_slot %}``
+  emits ``<i>fallback</i>`` exactly because no ``description`` slot was
+  passed. The ``description`` prop is available through ``{{ description }}``
+  as usual.
+- A caller-provided slot wins over its default. Passing
+  ``{% #slot "description" %}<b>real</b>{% /slot %}`` swaps the fallback
+  out for ``<b>real</b>``.
+- An explicitly empty slot renders nothing. Writing
+  ``{% #slot "description" %}{% /slot %}`` at the call site emits the
+  empty string instead of falling back to the default body — the caller
+  asked for that slot to be silent.
+
+If a component template needs to interpolate slot content as a Django
+variable, read it from the prefixed key directly: ``{{ slot_avatar }}``.
+
 Components are available in ``template.djx`` and ``layout.djx`` without a ``{% load %}`` (they are in builtins).
 
 **Nesting**

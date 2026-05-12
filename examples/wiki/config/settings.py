@@ -69,6 +69,9 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+SHARED_DIR = BASE_DIR.parent / "_shared"
+STATICFILES_DIRS = [SHARED_DIR / "static"]
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 NEXT_FRAMEWORK = {
@@ -76,7 +79,11 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "wiki.backends.HybridRouterBackend",
             "APP_DIRS": True,
-            "DIRS": [],
+            # `shell/` carries the shared HTML envelope. The hybrid file
+            # router walks both this root and the per-app `wiki/routes/`
+            # tree, so the layout applies to file routes and database
+            # articles alike.
+            "DIRS": [str(BASE_DIR / "shell")],
             "PAGES_DIR": "routes",
             "OPTIONS": {
                 "context_processors": [
@@ -88,7 +95,7 @@ NEXT_FRAMEWORK = {
     "DEFAULT_COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
-            "DIRS": [],
+            "DIRS": [str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_blocks",
         },
     ],

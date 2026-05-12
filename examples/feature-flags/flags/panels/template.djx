@@ -1,51 +1,49 @@
-<section class="space-y-8">
-  <header class="space-y-2">
-    <h1 class="text-3xl font-bold">Feature flags</h1>
-    <p class="text-slate-600">
-      Server-side gating via a composite <code class="rounded bg-slate-100 px-1">feature_guard</code>
-      component that pulls state from a <code class="rounded bg-slate-100 px-1">LocMemCache</code>.
-      Toggle flags from the <a class="text-slate-900 underline" href="{% url 'next:page_admin' %}">admin</a>
-      and watch the cache invalidate via a <code class="rounded bg-slate-100 px-1">post_save</code> receiver.
-    </p>
-  </header>
+<div class="space-y-8">
+  {% component "page_header"
+      title="Feature flags"
+      description="Server-side gating via a composite feature_guard component that pulls state from LocMemCache. Toggle flags from /admin/ and watch the cache invalidate via a post_save receiver." %}
 
-  <section class="grid grid-cols-1 gap-3 md:grid-cols-2">
-    <div class="rounded-xl border bg-white p-4 shadow-sm">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-emerald-700">Enabled</h2>
-      {% if active_flags %}
-        <ul class="mt-3 space-y-2">
-          {% for flag in active_flags %}
-            <li class="flex items-start justify-between gap-2">
-              <div>
-                <p class="font-medium">{{ flag.label }}</p>
-                <p class="text-xs text-slate-500"><code>{{ flag.name }}</code></p>
-              </div>
-              <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">on</span>
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="mt-3 text-sm text-slate-500">No flags are enabled.</p>
-      {% endif %}
-    </div>
+  <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+    {% #component "card" %}
+      {% #slot "content" %}
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-success">Enabled</h2>
+        {% if active_flags %}
+          <ul class="mt-3 space-y-2">
+            {% for flag in active_flags %}
+              <li class="flex items-start justify-between gap-2">
+                <div>
+                  <p class="font-medium">{{ flag.label }}</p>
+                  <p class="text-xs text-muted-foreground"><code>{{ flag.name }}</code></p>
+                </div>
+                {% component "badge" variant="success" text="on" %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="mt-3 text-sm text-muted-foreground">No flags are enabled.</p>
+        {% endif %}
+      {% /slot %}
+    {% /component %}
 
-    <div class="rounded-xl border bg-white p-4 shadow-sm">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Disabled</h2>
-      {% if disabled_flags %}
-        <ul class="mt-3 space-y-2">
-          {% for flag in disabled_flags %}
-            <li class="flex items-start justify-between gap-2">
-              <div>
-                <p class="font-medium">{{ flag.label }}</p>
-                <p class="text-xs text-slate-500"><code>{{ flag.name }}</code></p>
-              </div>
-              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">off</span>
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="mt-3 text-sm text-slate-500">Nothing disabled.</p>
-      {% endif %}
-    </div>
-  </section>
-</section>
+    {% #component "card" %}
+      {% #slot "content" %}
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Disabled</h2>
+        {% if disabled_flags %}
+          <ul class="mt-3 space-y-2">
+            {% for flag in disabled_flags %}
+              <li class="flex items-start justify-between gap-2">
+                <div>
+                  <p class="font-medium">{{ flag.label }}</p>
+                  <p class="text-xs text-muted-foreground"><code>{{ flag.name }}</code></p>
+                </div>
+                {% component "badge" variant="muted" text="off" %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="mt-3 text-sm text-muted-foreground">Nothing disabled.</p>
+        {% endif %}
+      {% /slot %}
+    {% /component %}
+  </div>
+</div>

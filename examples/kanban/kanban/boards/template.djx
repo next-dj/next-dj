@@ -1,28 +1,24 @@
-<section class="space-y-6">
-  <header class="flex items-end justify-between">
-    <div>
-      <h1 class="text-2xl font-semibold text-slate-900">Boards</h1>
-      <p class="text-sm text-slate-500">
-        Active boards your team is working on. Archived boards are hidden.
+<div class="space-y-6">
+  {% #component "page_header" title="Boards" description="Active boards your team is working on. Archived boards are hidden." %}
+    {% #slot "actions" %}
+      <p class="text-xs uppercase tracking-wide text-muted-foreground">
+        {{ archived_count }} archived
       </p>
-    </div>
-    <p class="text-xs uppercase tracking-wide text-slate-400">
-      {{ archived_count }} archived
-    </p>
-  </header>
+    {% /slot %}
+  {% /component %}
 
   {% if boards %}
     <ul class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {% for board in boards %}
-        <li class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <li class="rounded-md border border-border bg-card p-4 shadow-sm hover:shadow-md transition-shadow">
           <a href="/board/{{ board.id }}/" class="block space-y-2">
-            <div class="text-xs uppercase tracking-wide text-slate-400">
+            <div class="text-xs uppercase tracking-wide text-muted-foreground">
               {{ board.slug }}
             </div>
-            <div class="text-lg font-semibold text-slate-900">
+            <div class="text-lg font-semibold text-foreground">
               {{ board.title }}
             </div>
-            <div class="text-xs text-slate-500">
+            <div class="text-xs text-muted-foreground">
               created {{ board.created_at|date:"M j, Y" }}
             </div>
           </a>
@@ -30,8 +26,6 @@
       {% endfor %}
     </ul>
   {% else %}
-    <p class="rounded-md border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
-      No active boards. Run the demo migrations to seed two example boards.
-    </p>
+    {% component "empty_state" title="No active boards" description="Run the demo migrations to seed two example boards." icon="📋" %}
   {% endif %}
-</section>
+</div>

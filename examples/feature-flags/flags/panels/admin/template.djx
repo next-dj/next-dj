@@ -1,48 +1,37 @@
-<section class="space-y-6">
-  <div>
-    <h2 class="text-lg font-semibold">Bulk toggle</h2>
-    <p class="text-sm text-slate-600">
-      Check the rows you want enabled and submit. Saving triggers a
-      <code class="rounded bg-slate-100 px-1">post_save</code> receiver that invalidates
-      the per-flag cache entry, so the next read reflects the new state.
-    </p>
-  </div>
+<div class="space-y-6">
+  {% #component "section" title="Bulk toggle" description="Check the rows you want enabled and submit. Saving triggers a post_save receiver that invalidates the per-flag cache entry, so the next read reflects the new state." %}
+    {% #slot "content" %}
+      {% if flags %}
+        {% form @action="bulk_toggle" class="space-y-3" %}
+          <ul class="space-y-2">
+            {% for flag in flags %}
+              <li class="flex items-start justify-between gap-4 rounded-md border border-border bg-card p-4 shadow-sm">
+                <label class="flex flex-1 items-start gap-3 cursor-pointer">
+                  <input type="checkbox"
+                         name="enabled_names"
+                         value="{{ flag.name }}"
+                         {% if flag.enabled %}checked{% endif %}
+                         class="mt-1 h-4 w-4 rounded border-border text-primary">
+                  <span>
+                    <span class="block font-medium">{{ flag.label }}</span>
+                    <span class="block text-xs text-muted-foreground"><code>{{ flag.name }}</code></span>
+                    {% if flag.description %}
+                      <span class="mt-1 block text-sm text-muted-foreground">{{ flag.description }}</span>
+                    {% endif %}
+                  </span>
+                </label>
+                <div class="shrink-0">
+                  {% component "toggle_preview" flag_name=flag.name %}
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
 
-  {% if flags %}
-    {% form @action="bulk_toggle" class="space-y-3" %}
-      <ul class="space-y-2">
-        {% for flag in flags %}
-          <li class="flex items-start justify-between gap-4 rounded-xl border bg-white p-4 shadow-sm">
-            <label class="flex flex-1 items-start gap-3 cursor-pointer">
-              <input type="checkbox"
-                     name="enabled_names"
-                     value="{{ flag.name }}"
-                     {% if flag.enabled %}checked{% endif %}
-                     class="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500">
-              <span>
-                <span class="block font-medium">{{ flag.label }}</span>
-                <span class="block text-xs text-slate-500"><code>{{ flag.name }}</code></span>
-                {% if flag.description %}
-                  <span class="mt-1 block text-sm text-slate-600">{{ flag.description }}</span>
-                {% endif %}
-              </span>
-            </label>
-            <div class="shrink-0">
-              {% component "toggle_preview" flag_name=flag.name %}
-            </div>
-          </li>
-        {% endfor %}
-      </ul>
-
-      <button type="submit"
-              class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
-        Save toggles
-      </button>
-    {% endform %}
-  {% else %}
-    <p class="rounded-xl border bg-white p-4 text-sm text-slate-500 shadow-sm">
-      No flags defined yet. Create a few via <code class="rounded bg-slate-100 px-1">manage.py shell</code>
-      or the Django admin.
-    </p>
-  {% endif %}
-</section>
+          {% component "button" type="submit" text="Save toggles" variant="default" %}
+        {% endform %}
+      {% else %}
+        {% component "empty_state" title="No flags defined yet" description="Create a few via `manage.py shell` or the Django admin." icon="📭" %}
+      {% endif %}
+    {% /slot %}
+  {% /component %}
+</div>

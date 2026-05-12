@@ -1,41 +1,34 @@
-<section class="space-y-4">
-  <div>
-    <h2 class="text-lg font-semibold">Render counters</h2>
-    <p class="text-sm text-slate-600">
-      A <code class="rounded bg-slate-100 px-1">page_rendered</code> receiver bumps a
-      counter in <code class="rounded bg-slate-100 px-1">LocMemCache</code> every time
-      a page finishes rendering. Counts reset when the process restarts.
-    </p>
-  </div>
+<div class="space-y-6">
+  {% #component "section" title="Render counters" description="A page_rendered receiver bumps a counter in LocMemCache every time a page finishes rendering. Counts reset when the process restarts." %}
+    {% #slot "content" %}
+      {% #component "card" %}
+        {% #slot "content" %}
+          {% if render_counts %}
+            {% #component "table" %}
+              {% #slot "content" %}
+                <thead class="bg-muted/50">
+                  <tr>
+                    <th class="h-10 px-4 text-left align-middle text-xs font-medium uppercase tracking-wide text-muted-foreground">Page</th>
+                    <th class="h-10 px-4 text-left align-middle text-xs font-medium uppercase tracking-wide text-muted-foreground">Renders</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-border">
+                  {% for page, count in render_counts.items %}
+                    <tr class="transition-colors hover:bg-muted/40">
+                      <td class="px-4 py-3 align-middle text-sm font-mono">{{ page }}</td>
+                      <td class="px-4 py-3 align-middle text-sm">{{ count }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              {% /slot %}
+            {% /component %}
+          {% else %}
+            <p class="text-sm text-muted-foreground">No renders recorded yet.</p>
+          {% endif %}
+        {% /slot %}
+      {% /component %}
+    {% /slot %}
+  {% /component %}
 
-  <div class="rounded-xl border bg-white p-4 shadow-sm">
-    {% if render_counts %}
-      <table class="w-full text-sm">
-        <thead class="text-left text-slate-500">
-          <tr><th class="py-1">Page</th><th class="py-1">Renders</th></tr>
-        </thead>
-        <tbody>
-          {% for page, count in render_counts.items %}
-            <tr class="border-t">
-              <td class="py-1 font-mono">{{ page }}</td>
-              <td class="py-1">{{ count }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="text-sm text-slate-500">No renders recorded yet.</p>
-    {% endif %}
-  </div>
-
-  <div class="rounded-xl border bg-white p-4 shadow-sm">
-    <p class="text-xs uppercase tracking-wide text-slate-500">
-      <code class="rounded bg-slate-100 px-1">feature_guard</code> component renders
-    </p>
-    <p class="mt-1 text-3xl font-bold">{{ feature_guard_count }}</p>
-    <p class="mt-1 text-xs text-slate-500">
-      Driven by the <code class="rounded bg-slate-100 px-1">component_rendered</code>
-      signal, filtered to the <code>feature_guard</code> component.
-    </p>
-  </div>
-</section>
+  {% component "stat_card" label="feature_guard component renders" value=feature_guard_count hint="Driven by the component_rendered signal, filtered to feature_guard." %}
+</div>

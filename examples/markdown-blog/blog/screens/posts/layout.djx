@@ -1,15 +1,15 @@
 <article class="space-y-6">
-  <a href="{% url 'next:page_' %}" class="text-sm text-slate-500 hover:text-slate-900">← Back to posts</a>
+  <a href="{% url 'next:page_' %}" class="text-sm text-muted-foreground hover:text-foreground">← Back to posts</a>
 
-  <header class="space-y-1 border-b pb-4">
-    <h1 class="text-3xl font-bold">{{ post.title }}</h1>
-    <div class="flex items-center justify-between text-sm text-slate-500">
+  <header class="space-y-1 border-b border-border pb-4">
+    <h1 class="text-3xl font-bold tracking-tight text-foreground">{{ post.title }}</h1>
+    <div class="flex items-center justify-between text-sm text-muted-foreground">
       <span>~ {{ reading_minutes }} min read · <code class="font-mono">/posts/{{ post.slug }}/</code></span>
       {% component "share_button" %}
     </div>
   </header>
 
-  <div class="prose prose-slate max-w-none">
+  <div class="prose prose-slate max-w-none text-foreground">
     {% block template %}{% endblock template %}
   </div>
 </article>

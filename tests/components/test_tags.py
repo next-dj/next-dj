@@ -4,6 +4,7 @@ from unittest.mock import patch
 import pytest
 from django.template import Context, Template
 from django.template.base import TemplateSyntaxError
+from django.utils.safestring import SafeString
 
 from next.components import ComponentInfo, components_manager
 from next.static import StaticCollector
@@ -184,6 +185,137 @@ class TestComponentTag:
         (called_info, called_collector) = spy.call_args.args
         assert called_info is info
         assert called_collector is collector
+
+    @pytest.mark.parametrize(
+        ("call_site", "expected_substring", "forbidden_substrings"),
+        [
+            # Void form passes ``description`` only as a prop. The slot
+            # was never injected so the default body must render.
+            (
+                '{% component "card" description="prop value" %}',
+                "<i>fallback</i>",
+                ("prop value",),
+            ),
+            # Block form passes ``description`` both as a prop and as a
+            # slot body. The injected slot wins over the prop and over
+            # the default body.
+            (
+                '{% #component "card" description="prop value" %}'
+                '{% #slot "description" %}<b>injected</b>{% /slot %}'
+                "{% /component %}",
+                "<b>injected</b>",
+                ("fallback", "prop value"),
+            ),
+        ],
+        ids=["prop-does-not-shadow-default", "slot-wins-over-same-named-prop"],
+    )
+    def test_block_component_slot_namespace_isolated_from_props(
+        self,
+        tmp_path: Path,
+        call_site: str,
+        expected_substring: str,
+        forbidden_substrings: tuple[str, ...],
+    ) -> None:
+        """End-to-end: props named like a slot never leak into the slot lookup.
+
+        The component template wraps its content in
+        ``{% #set_slot "description" %}<i>fallback</i>{% /set_slot %}``.
+        Earlier versions of the renderer mirrored slot content under the
+        unprefixed ``<name>`` key, so passing a ``description`` prop
+        caused the default body to be replaced by the prop value.
+        """
+        (tmp_path / "card.djx").write_text(
+            "<article>"
+            '{% #set_slot "description" %}<i>fallback</i>{% /set_slot %}'
+            "</article>",
+        )
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template("{% load components %}" + call_site)
+            result = t.render(
+                Context({"current_template_path": str(tmp_path / "page.djx")}),
+            )
+        assert expected_substring in result
+        for forbidden in forbidden_substrings:
+            assert forbidden not in result
+
+    @pytest.mark.parametrize(
+        ("call_site", "context_extra", "must_contain", "must_not_contain"),
+        [
+            # Plain string literal: Django's FilterExpression marks bare
+            # quoted literals as safe by convention, so without the
+            # component-side demotion the ``<slug>`` token would be
+            # parsed by the browser as a tag and disappear visually.
+            (
+                '{% component "card" body="visit /s/<slug>/ now" %}',
+                {},
+                ("/s/&lt;slug&gt;/",),
+                ("<slug>",),
+            ),
+            # Explicit ``|safe`` on the literal opts back in to raw HTML
+            # so callers can still inject pre-built markup when needed.
+            (
+                '{% component "card" body="<em>raw</em>"|safe %}',
+                {},
+                ("<em>raw</em>",),
+                ("&lt;em&gt;",),
+            ),
+            # A variable whose value is already a ``SafeString`` keeps
+            # its safe marker through the resolver.
+            (
+                '{% component "card" body=html_blob %}',
+                {"html_blob": "<b>safe</b>"},
+                ("<b>safe</b>",),
+                ("&lt;b&gt;",),
+            ),
+        ],
+        ids=["literal-escapes", "literal-safe-opt-in", "variable-stays-safe"],
+    )
+    def test_component_props_demote_safe_literals_for_text_display(
+        self,
+        tmp_path: Path,
+        call_site: str,
+        context_extra: dict[str, str],
+        must_contain: tuple[str, ...],
+        must_not_contain: tuple[str, ...],
+    ) -> None:
+        """Plain string literals reach ``{{ prop }}`` as text, not as HTML.
+
+        Earlier the renderer relied on ``FilterExpression.resolve`` which
+        auto-marks bare quoted literals as safe, so something like
+        ``description="visit /s/<slug>/"`` ended up interpolated as raw
+        HTML and the ``<slug>`` token was eaten by the browser parser.
+        ``ComponentNode._resolved_props`` now strips the safe marker from
+        literals without a filter chain, so component props behave like
+        user-facing text by default while ``|safe`` (or a safe variable)
+        stays available as an explicit opt-in.
+        """
+        (tmp_path / "card.djx").write_text("<article>{{ body }}</article>")
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=tmp_path / "card.djx",
+            module_path=None,
+            is_simple=True,
+        )
+        ctx = {"current_template_path": str(tmp_path / "page.djx")}
+        for key, value in context_extra.items():
+            ctx[key] = SafeString(value)
+        with patch.object(components_manager, "get_component", return_value=info):
+            t = Template("{% load components %}" + call_site)
+            result = t.render(Context(ctx))
+        for needle in must_contain:
+            assert needle in result
+        for forbidden in must_not_contain:
+            assert forbidden not in result
 
     def test_block_component_with_slots_passes_slot_content(
         self, tmp_path: Path
@@ -536,3 +668,55 @@ class TestSetSlotTag:
         """{% set_slot "" %} raises."""
         with pytest.raises(TemplateSyntaxError, match="quoted slot name"):
             Template('{% load components %}{% set_slot "" %}')
+
+    @pytest.mark.parametrize(
+        ("context_data", "expected_substring", "forbidden_substrings"),
+        [
+            # No slot key in context: prop with the same name as the slot
+            # must not shadow the default body. Earlier versions fell back
+            # to the unprefixed ``<name>`` key, which leaked props into
+            # the slot lookup.
+            (
+                {"description": "prop value"},
+                "<span>default</span>",
+                ("prop value",),
+            ),
+            # Both slot_<name> and a same-named prop are present: the
+            # caller-injected slot wins over both the prop and the
+            # default fallback body.
+            (
+                {"slot_description": "<em>real</em>", "description": "prop"},
+                "<em>real</em>",
+                ("prop", "default"),
+            ),
+        ],
+        ids=["prop-does-not-shadow-default", "slot-wins-over-same-named-prop"],
+    )
+    def test_set_slot_isolation_from_props(
+        self,
+        context_data: dict[str, str],
+        expected_substring: str,
+        forbidden_substrings: tuple[str, ...],
+    ) -> None:
+        """Slot lookup honours ``slot_<name>`` only and never falls back to props."""
+        t = Template(
+            "{% load components %}"
+            '{% #set_slot "description" %}<span>default</span>{% /set_slot %}',
+        )
+        result = t.render(Context(context_data))
+        assert expected_substring in result
+        for forbidden in forbidden_substrings:
+            assert forbidden not in result
+
+    def test_set_slot_renders_empty_when_slot_injected_empty(self) -> None:
+        """An explicitly empty slot renders nothing and skips the fallback body.
+
+        Passing ``{% #slot "x" %}{% /slot %}`` at the call site sets
+        ``slot_x`` to an empty string. The default body must not run in
+        that case — the caller asked for the slot to render empty.
+        """
+        t = Template(
+            '{% load components %}{% #set_slot "label" %}fallback{% /set_slot %}',
+        )
+        result = t.render(Context({"slot_label": ""}))
+        assert result == ""

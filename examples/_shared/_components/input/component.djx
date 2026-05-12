@@ -1,0 +1,12 @@
+<input
+  type="{{ type|default:'text' }}"
+  name="{{ name }}"
+  {% if id %}id="{{ id }}"{% endif %}
+  {% if value is not None %}value="{{ value }}"{% endif %}
+  {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+  {% if autocomplete %}autocomplete="{{ autocomplete }}"{% endif %}
+  {% if required %}required{% endif %}
+  {% if disabled %}disabled{% endif %}
+  {% if autofocus %}autofocus{% endif %}
+  class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 {{ extra }}"
+/>

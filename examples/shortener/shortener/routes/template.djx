@@ -1,35 +1,29 @@
-<section class="space-y-8">
-  <header class="space-y-2">
-    <h1 class="text-3xl font-bold">Shrink a link</h1>
-    <p class="text-slate-600">
-      Paste a URL, get a short slug, and every visit to
-      <code class="rounded bg-slate-100 px-1">/s/&lt;slug&gt;/</code> is counted
-      in LocMemCache. Run <code class="rounded bg-slate-100 px-1">manage.py flush_clicks</code>
-      to persist the counters.
-    </p>
-  </header>
+<div class="space-y-8">
+  {% component "page_header"
+      title="Shrink a link"
+      description="Paste a URL, get a short slug, and every visit to /s/<slug>/ is counted in LocMemCache. Run `manage.py flush_clicks` to persist the counters." %}
 
-  {% form @action="create_link" class="space-y-3 rounded-xl border bg-white p-4 shadow-sm" %}
-    <label class="block text-sm font-medium text-slate-700" for="id_url">Long URL</label>
-    {{ form.url }}
+  {% form @action="create_link" class="space-y-3 rounded-lg border border-border bg-card p-4 shadow-sm" %}
+    {% #component "field" label="Long URL" for_id="id_url" %}
+      {% #slot "control" %}{{ form.url }}{% /slot %}
+    {% /component %}
     {% if form.errors %}
-      <p class="text-sm text-rose-600">{{ form.url.errors|first }}</p>
+      {% component "alert" variant="destructive" text=form.url.errors|first %}
     {% endif %}
-    <button type="submit" class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
-      Shorten
-    </button>
+    {% component "button" type="submit" text="Shorten" variant="default" %}
   {% endform %}
 
-  <section class="space-y-3">
-    <h2 class="text-lg font-semibold">Latest shortened links</h2>
-    {% if recent_links %}
-      <ul class="space-y-2">
-        {% for link in recent_links %}
-          <li>{% component "link_card" %}</li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p class="text-sm text-slate-500">No links yet. Create one above.</p>
-    {% endif %}
-  </section>
-</section>
+  {% #component "section" title="Latest shortened links" %}
+    {% #slot "content" %}
+      {% if recent_links %}
+        <ul class="space-y-2">
+          {% for link in recent_links %}
+            <li>{% component "link_card" %}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        {% component "empty_state" title="No links yet" description="Create one above to see it here." icon="🪄" %}
+      {% endif %}
+    {% /slot %}
+  {% /component %}
+</div>

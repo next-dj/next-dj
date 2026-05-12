@@ -70,6 +70,9 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+SHARED_DIR = BASE_DIR.parent / "_shared"
+STATICFILES_DIRS = [SHARED_DIR / "static"]
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 NEXT_FRAMEWORK = {
@@ -90,7 +93,7 @@ NEXT_FRAMEWORK = {
     "DEFAULT_COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
-            "DIRS": [BASE_DIR / "root_blocks"],
+            "DIRS": [str(BASE_DIR / "root_blocks"), str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_blocks",
         },
     ],
