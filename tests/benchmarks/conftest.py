@@ -1,5 +1,3 @@
-"""Bench-only conftest: auto-apply ``perf`` marker and shared bench fixtures."""
-
 from __future__ import annotations
 
 from pathlib import Path

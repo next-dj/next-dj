@@ -1,5 +1,3 @@
-"""End-to-end: discovery → collector → manager.inject produces final HTML."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

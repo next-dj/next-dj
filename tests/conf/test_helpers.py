@@ -1,5 +1,3 @@
-"""Tests for next.conf.helpers."""
-
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 

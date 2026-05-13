@@ -71,6 +71,17 @@ from .dispatch import (
 )
 from .manager import FormActionManager, form_action_manager
 from .markers import DForm, FormProvider
+from .serializers import (
+    FieldKind,
+    FieldSpec,
+    FormSectionSpec,
+    FormsetRowSpec,
+    FormsetSpec,
+    FormSpec,
+    field_spec,
+    form_spec,
+    formset_spec,
+)
 from .uid import (
     FORM_ACTION_REVERSE_NAME,
     URL_NAME_FORM_ACTION,
@@ -97,6 +108,8 @@ __all__ = [
     "DecimalField",
     "EmailField",
     "EmailInput",
+    "FieldKind",
+    "FieldSpec",
     "FileField",
     "FloatField",
     "Form",
@@ -106,6 +119,10 @@ __all__ = [
     "FormActionManager",
     "FormActionOptions",
     "FormProvider",
+    "FormSectionSpec",
+    "FormSpec",
+    "FormsetRowSpec",
+    "FormsetSpec",
     "HiddenInput",
     "ImageField",
     "IntegerField",
@@ -137,7 +154,10 @@ __all__ = [
     "action",
     "build_form_namespace_for_action",
     "checks",
+    "field_spec",
     "form_action_manager",
+    "form_spec",
+    "formset_spec",
     "page",
     "signals",
     "validated_next_form_page_path",

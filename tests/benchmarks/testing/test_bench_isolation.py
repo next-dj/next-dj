@@ -1,9 +1,3 @@
-"""Benchmarks for ``next.testing.isolation`` reset helpers.
-
-These run between every test in many suites, so a regression here
-multiplies across an entire test session.
-"""
-
 from __future__ import annotations
 
 import pytest

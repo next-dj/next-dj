@@ -1,12 +1,3 @@
-"""Benchmarks for ``next.forms.manager.FormActionManager``.
-
-Pins the cost of the lazy ``_ensure_backends`` path, the cold
-``_reload_config`` path, and the manager-level ``register_action`` /
-``get_action_url`` / ``__iter__`` wrappers. These run on every request
-through the form-action subsystem, so any regression here multiplies
-across a real workload.
-"""
-
 from __future__ import annotations
 
 import pytest

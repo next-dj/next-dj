@@ -1,12 +1,3 @@
-"""Configure Django settings for the pytest suite.
-
-`setup()` is idempotent. It wires project-root onto `sys.path`, calls
-`settings.configure()` with the test configuration, registers form
-actions that must exist before the URL conf loads, and finally runs
-`django.setup()`. The root `conftest.py` invokes it once at import
-time.
-"""
-
 from __future__ import annotations
 
 import sys

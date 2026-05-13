@@ -64,6 +64,14 @@ Rendering (``next.forms.rendering``)
    :undoc-members:
    :show-inheritance:
 
+Serializers (``next.forms.serializers``)
+----------------------------------------
+
+.. automodule:: next.forms.serializers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 UID helpers (``next.forms.uid``)
 --------------------------------
 

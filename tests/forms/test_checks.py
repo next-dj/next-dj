@@ -1,5 +1,3 @@
-"""Tests for next.forms check functions."""
-
 import pytest
 
 from next.forms import RegistryFormActionBackend

@@ -210,13 +210,10 @@ ignore = [
     "INP001",
     "S105",
 ]
-"tests/__init__.py" = ["D104"]
-"tests/pages/__init__.py" = ["D104"]
-"tests/pages/*" = ["INP001", "D104"]
-"tests/site_pages/__init__.py" = ["D104"]
-"tests/site_pages/*" = ["INP001", "D104"]
-"tests/forms/__init__.py" = ["D104"]
-"tests/forms/*" = ["INP001", "D104"]
+"tests/**/*.py" = ["D100", "D104"]
+"tests/pages/*" = ["INP001"]
+"tests/site_pages/*" = ["INP001"]
+"tests/forms/*" = ["INP001"]
 "**/{test*,conftest}.py" = [
     "ANN001", "ANN201", "ANN202",
     "ARG001", "ARG002", "ARG003",

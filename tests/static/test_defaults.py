@@ -1,5 +1,3 @@
-"""Tests for the bootstrap that wires built-in CSS and JS kinds."""
-
 from __future__ import annotations
 
 from next.static import default_kinds, default_placeholders

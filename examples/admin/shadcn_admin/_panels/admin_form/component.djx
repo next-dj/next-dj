@@ -8,16 +8,16 @@
   {% /component %}
 
   {% form @action=form_state.action_name class="space-y-4" %}
-    {% if form_state.non_field_errors %}
+    {% if form_state.form_spec.non_field_errors %}
       {% #component "alert" variant="destructive" %}
         {% #slot "content" %}
-          <ul>{% for err in form_state.non_field_errors %}<li>{{ err }}</li>{% endfor %}</ul>
+          <ul>{% for err in form_state.form_spec.non_field_errors %}<li>{{ err }}</li>{% endfor %}</ul>
         {% /slot %}
       {% /component %}
     {% endif %}
 
     <div class="space-y-4">
-      {% for section in form_state.sections %}
+      {% for section in form_state.form_spec.sections %}
         {% component "form_section" section=section %}
       {% endfor %}
       {% for block in form_state.inlines %}

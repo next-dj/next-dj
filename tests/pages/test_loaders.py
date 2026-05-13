@@ -1,5 +1,3 @@
-"""Tests for next.pages.loaders."""
-
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Never

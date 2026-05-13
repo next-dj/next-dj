@@ -4,8 +4,6 @@ from typing import Any
 from django import forms as django_forms
 from django.contrib import messages
 from django.contrib.admin.options import ModelAdmin
-from django.contrib.admin.utils import flatten_fieldsets
-from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
 from django.core.exceptions import ValidationError
 from django.db.models import Model
 from django.forms.models import BaseInlineFormSet
@@ -14,7 +12,7 @@ from shadcn_admin import utils
 
 from next.components import component
 from next.deps import Depends, resolver
-from next.forms import BaseModelForm, action
+from next.forms import BaseModelForm, action, form_spec, formset_spec
 
 
 _LOG_CHANGE_MESSAGE = "Changed via shadcn-admin form"
@@ -85,65 +83,6 @@ class AdminFormSpec:
         if self.instance is None:
             return None
         return utils.delete_url(self.app_label, self.model_name, self.instance.pk)
-
-
-@dataclass(frozen=True, slots=True)
-class WidgetInfo:
-    """Normalized widget descriptor passed to `form_field/component.djx`.
-
-    `kind` is the only branch the template inspects (textarea / checkbox /
-    select / select_multi / input). `input_type` is set when kind=input
-    so the template emits the right HTML5 type without re-scanning widget
-    class names.
-    """
-
-    field: django_forms.BoundField
-    kind: str
-    input_type: str
-    selected_strs: tuple[str, ...]
-    is_extra: bool
-
-    @classmethod
-    def from_bound(
-        cls,
-        bound_field: django_forms.BoundField,
-        *,
-        is_extra: bool = False,
-    ) -> "WidgetInfo":
-        """Inspect the bound field's widget once and produce a normalized descriptor.
-
-        `isinstance` checks cover both stock Django widgets and the
-        `Admin*` subclasses Django swaps in for `ModelAdmin.get_form`
-        (`AdminTextareaWidget`, `AdminDateWidget`, …). `input_type`
-        comes straight from the widget so HTML5 types stay in sync.
-        """
-        widget = bound_field.field.widget
-        if isinstance(widget, RelatedFieldWidgetWrapper):
-            widget = widget.widget
-        if isinstance(widget, django_forms.Textarea):
-            kind, input_type = "textarea", ""
-        elif isinstance(widget, django_forms.CheckboxInput):
-            kind, input_type = "checkbox", ""
-        elif isinstance(widget, django_forms.SelectMultiple):
-            kind, input_type = "select_multi", ""
-        elif isinstance(widget, django_forms.Select):
-            kind, input_type = "select", ""
-        else:
-            kind = "input"
-            input_type = getattr(widget, "input_type", "text")
-        selected: tuple[str, ...] = ()
-        if kind == "select_multi":
-            raw = bound_field.value() or []
-            if not isinstance(raw, (list, tuple)):
-                raw = [raw]  # pragma: no cover
-            selected = tuple(str(v) for v in raw)
-        return cls(
-            field=bound_field,
-            kind=kind,
-            input_type=input_type,
-            selected_strs=selected,
-            is_extra=is_extra,
-        )
 
 
 def _build_inline_formsets(spec: AdminFormSpec) -> list[BaseInlineFormSet]:
@@ -238,76 +177,6 @@ def admin_change_form_factory(
     return _build_form_class(admin_spec)
 
 
-def _build_sections(
-    spec: AdminFormSpec,
-    bound: django_forms.Form,
-) -> list[dict[str, Any]]:
-    fieldsets = spec.model_admin.get_fieldsets(spec.request, spec.instance)
-    rendered: set[str] = set()
-    sections: list[dict[str, Any]] = []
-    for label, opts in fieldsets:
-        infos = [
-            WidgetInfo.from_bound(bound[name])
-            for name in opts.get("fields", [])
-            if name in bound.fields
-        ]
-        for info in infos:
-            rendered.add(info.field.name)
-        sections.append(
-            {
-                "label": label or "",
-                "description": opts.get("description") or "",
-                "fields": infos,
-            }
-        )
-    flat = flatten_fieldsets(fieldsets) if fieldsets else []
-    leftover = [
-        WidgetInfo.from_bound(bound[name])
-        for name in bound.fields
-        if name not in rendered and (not flat or name in flat)
-    ]
-    if leftover:  # pragma: no cover
-        sections.append({"label": "", "description": "", "fields": leftover})
-    return sections
-
-
-def _serialize_formset(formset: BaseInlineFormSet) -> dict[str, Any]:
-    rows: list[dict[str, Any]] = []
-    for inline_form in formset.forms:
-        is_extra = inline_form.empty_permitted and not inline_form.instance.pk
-        visible_names = [
-            name
-            for name in inline_form.fields
-            if name != "DELETE" and not inline_form[name].is_hidden
-        ]
-        hidden_html = "".join(
-            str(inline_form[name])
-            for name in inline_form.fields
-            if inline_form[name].is_hidden
-        )
-        rows.append(
-            {
-                "fields": [
-                    WidgetInfo.from_bound(inline_form[name], is_extra=is_extra)
-                    for name in visible_names
-                ],
-                "hidden_html": hidden_html,
-                "delete_field": (
-                    inline_form["DELETE"] if "DELETE" in inline_form.fields else None
-                ),
-                "errors": inline_form.errors,
-            }
-        )
-    return {
-        "prefix": formset.prefix,
-        "verbose_name_plural": str(formset.model._meta.verbose_name_plural),
-        "management_form": formset.management_form,
-        "rows": rows,
-        "non_form_errors": list(formset.non_form_errors()),
-        "can_delete": formset.can_delete,
-    }
-
-
 @component.context("form_state")
 def form_state(
     request: HttpRequest,
@@ -323,7 +192,7 @@ def form_state(
         bound.is_valid()
     else:
         bound = form_cls(instance=spec.instance)
-    sections = _build_sections(spec, bound)
+    fieldsets = spec.model_admin.get_fieldsets(spec.request, spec.instance)
     formsets = _build_inline_formsets(spec)
     if request.method == "POST":  # pragma: no cover
         for fs in formsets:
@@ -335,11 +204,8 @@ def form_state(
         "is_change": spec.is_change,
         "verbose_name": str(spec.model._meta.verbose_name),
         "form": bound,
-        "sections": sections,
-        "inlines": [_serialize_formset(fs) for fs in formsets],
-        "non_field_errors": (
-            bound.non_field_errors() if hasattr(bound, "non_field_errors") else None
-        ),
+        "form_spec": form_spec(bound, fieldsets=fieldsets),
+        "inlines": [formset_spec(fs) for fs in formsets],
         "action_name": "admin:change" if spec.is_change else "admin:add",
         "title": "Edit" if spec.is_change else "Add",
         "changelist_url": spec.changelist_url,

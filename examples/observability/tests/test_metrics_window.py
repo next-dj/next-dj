@@ -1,10 +1,3 @@
-"""Bucket-boundary tests for `metrics.read_window`.
-
-The cumulative side of the counter store is covered in `test_unit.py`.
-This module pins the clock with `time-machine` so the bucket-floor
-arithmetic and the window-edge math are exercised deterministically.
-"""
-
 import pytest
 from django.core.cache import cache
 from obs import metrics

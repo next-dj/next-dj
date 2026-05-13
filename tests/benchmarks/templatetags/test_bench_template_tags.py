@@ -1,10 +1,3 @@
-"""Benchmarks for ``next.templatetags``.
-
-Template tags sit on the per-render path. Direct numbers for tag parse
-and render help catch regressions the transitive benches (components,
-static) might miss.
-"""
-
 from __future__ import annotations
 
 import pytest

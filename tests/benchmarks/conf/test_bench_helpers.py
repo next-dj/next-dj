@@ -1,10 +1,3 @@
-"""Benchmarks for ``next.conf.helpers.extend_default_backend``.
-
-The helper runs only at Django boot time, so these numbers guard against
-surprise regressions (e.g. an expensive deep-copy or merge rewrite),
-not per-request cost.
-"""
-
 from __future__ import annotations
 
 import pytest
