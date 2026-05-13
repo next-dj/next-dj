@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any
 
 from django import forms as django_forms
 from django.contrib import messages
@@ -13,6 +13,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from shadcn_admin import utils
 
 from next.components import component
+from next.deps import Depends, resolver
 from next.forms import BaseModelForm, action
 
 
@@ -186,8 +187,6 @@ def _build_form_class(spec: AdminFormSpec) -> type[django_forms.Form]:
     base = spec.model_admin.get_form(spec.request, spec.instance, change=spec.is_change)
 
     class AdminForm(base, BaseModelForm):  # type: ignore[misc, valid-type]
-        _admin_spec: ClassVar[AdminFormSpec] = spec
-
         @classmethod
         def get_initial(cls) -> Model | None:
             return spec.instance
@@ -209,25 +208,34 @@ def _build_form_class(spec: AdminFormSpec) -> type[django_forms.Form]:
     return AdminForm
 
 
-def admin_add_form_factory(
+@resolver.dependency("admin_spec")
+def admin_spec(
     request: HttpRequest,
     app_label: str,
     model_name: str,
+    pk: int | None = None,
+) -> AdminFormSpec:
+    """Resolve `(model, ModelAdmin, instance)` once per dispatch.
+
+    Registered as a named dependency so `Depends("admin_spec")` shares a
+    single resolution across factory, `get_initial`, action handler, and
+    any re-render component context within the same POST.
+    """
+    return AdminFormSpec.resolve(request, app_label, model_name, pk=pk)
+
+
+def admin_add_form_factory(
+    admin_spec: AdminFormSpec = Depends("admin_spec"),
 ) -> type[django_forms.Form]:
     """Per-request form class for the add view."""
-    return _build_form_class(AdminFormSpec.resolve(request, app_label, model_name))
+    return _build_form_class(admin_spec)
 
 
 def admin_change_form_factory(
-    request: HttpRequest,
-    app_label: str,
-    model_name: str,
-    pk: int,
+    admin_spec: AdminFormSpec = Depends("admin_spec"),
 ) -> type[django_forms.Form]:
     """Per-request form class for the change view."""
-    return _build_form_class(
-        AdminFormSpec.resolve(request, app_label, model_name, pk=pk)
-    )
+    return _build_form_class(admin_spec)
 
 
 def _build_sections(
@@ -303,12 +311,10 @@ def _serialize_formset(formset: BaseInlineFormSet) -> dict[str, Any]:
 @component.context("form_state")
 def form_state(
     request: HttpRequest,
-    app_label: str,
-    model_name: str,
+    spec: AdminFormSpec = Depends("admin_spec"),
     pk: int | None = None,
 ) -> dict[str, Any]:
     """Build add/change context — binds the form to POST so re-render shows errors."""
-    spec = AdminFormSpec.resolve(request, app_label, model_name, pk=pk)
     form_cls = spec.model_admin.get_form(
         spec.request, spec.instance, change=spec.is_change
     )
@@ -379,29 +385,17 @@ def _redirect_after_save(spec: AdminFormSpec, obj: Model) -> HttpResponseRedirec
 
 @action("admin:add", form_class=admin_add_form_factory)
 def handle_add(
-    request: HttpRequest,
     form: django_forms.ModelForm,
-    app_label: str,
-    model_name: str,
+    spec: AdminFormSpec = Depends("admin_spec"),
 ) -> HttpResponse:
     """Save a new object and its inline formsets, then redirect."""
-    spec = AdminFormSpec.resolve(request, app_label, model_name)
     return _persist(form, spec, change=False)
 
 
 @action("admin:change", form_class=admin_change_form_factory)
 def handle_change(
-    request: HttpRequest,
     form: django_forms.ModelForm,
-    app_label: str,
-    model_name: str,
-    pk: int,
+    spec: AdminFormSpec = Depends("admin_spec"),
 ) -> HttpResponse:
-    """Persist main form and inline formsets via `ModelAdmin.save_model`.
-
-    `pk` is part of the action signature so the URL kwarg is echoed back
-    as a `_url_param_pk` hidden field on the rendered form. The instance
-    comes from `admin_change_form_factory` through `get_initial`.
-    """
-    spec = AdminFormSpec.resolve(request, app_label, model_name, pk=pk)
+    """Persist main form and inline formsets via `ModelAdmin.save_model`."""
     return _persist(form, spec, change=True)

@@ -586,7 +586,7 @@ class TestActivityLog:
         assert entry.app_label == "library"
         assert entry.model_name == "tag"
         assert entry.object_repr == "Thriller"
-        # Form-bearing action captured user via _admin_spec.
+        # Form-bearing action captured user via dep_cache["admin_spec"].
         assert entry.user is not None
 
     def test_bulk_action_records_entry_without_user(self, admin_client):

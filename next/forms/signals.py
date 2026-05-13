@@ -7,10 +7,13 @@ for a name. The sender is the backend class. The keyword arguments are
 The `action_dispatched` signal fires after a handler runs and the
 response has been coerced. The sender is `FormActionDispatch`. The
 keyword arguments are `action_name`, `form`, `url_kwargs`,
-`duration_ms`, and `response_status`. `form` is the bound form
-instance after successful validation, or `None` for handler-only
-actions registered without a `form_class`. `url_kwargs` is a copy of
-the URL kwargs the dispatcher resolved before invoking the handler.
+`duration_ms`, `response_status`, and `dep_cache`. `form` is the
+bound form instance after successful validation, or `None` for
+handler-only actions registered without a `form_class`. `url_kwargs`
+is a copy of the URL kwargs the dispatcher resolved before invoking
+the handler. `dep_cache` is a snapshot of the dispatch DI cache so
+receivers can read named dependencies (`Depends("name")` values)
+resolved during this dispatch without re-running their providers.
 
 The `form_validation_failed` signal fires when the bound form fails
 validation during dispatch. The sender is `FormActionDispatch`. The

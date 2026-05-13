@@ -7,6 +7,10 @@ import pytest
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 
+from next.components.context import component as component_ctx
+from next.components.info import ComponentInfo
+from next.components.renderers import _inject_component_context
+from next.deps import REQUEST_DEP_CACHE_ATTR, Depends, resolver
 from next.forms import (
     Form,
     FormActionDispatch,
@@ -18,11 +22,54 @@ from next.forms import (
     page,
 )
 from next.forms.dispatch import _resolve_form_class
+from next.forms.signals import action_dispatched
+from next.pages.registry import PageContextRegistry
 
 
 PAGE_MODULE_FOR_FORM_TESTS = (
     Path(__file__).resolve().parent.parent / "site_pages" / "page.py"
 ).resolve()
+
+
+def _run_component_context(tmp_path: Path, request: object) -> object:
+    """Register a `@component.context` referencing `Depends("token")` and invoke it.
+
+    Returns the value the consumer wrote under the `out` key.
+    """
+    module_path = tmp_path / "component.py"
+    module_path.write_text("")
+
+    def provide(token: str = Depends("token")) -> str:
+        return token
+
+    component_ctx._registry.register(module_path, "out", provide)
+    try:
+        info = ComponentInfo(
+            name="t",
+            scope_root=tmp_path,
+            scope_relative="t",
+            template_path=None,
+            module_path=module_path,
+            is_simple=False,
+        )
+        context_data: dict[str, object] = {}
+        _inject_component_context(info, context_data, request)
+        return context_data["out"]
+    finally:
+        component_ctx._registry._registry.pop(module_path.resolve(), None)
+
+
+def _run_page_context(tmp_path: Path, request: object) -> object:
+    """Register a `@context` referencing `Depends("token")` and invoke `collect_context`."""
+    page_file = tmp_path / "page.py"
+    page_file.write_text("")
+
+    def provide(token: str = Depends("token")) -> str:
+        return token
+
+    registry = PageContextRegistry()
+    registry.register_context(page_file, "out", provide)
+    return registry.collect_context(page_file, request).context_data["out"]
 
 
 class TestFormActionDispatch:
@@ -470,3 +517,136 @@ class TestResolveFormClass:
         request = mock_http_request(method="POST")
         with pytest.raises(TypeError, match="factory must return a Form subclass"):
             _resolve_form_class(bad_factory, request, {})
+
+
+class TestDispatchSharedDepCache:
+    """Dispatch threads a single dep_cache through factory, handler, and signals."""
+
+    def test_dispatch_attaches_dep_cache_to_request(self, mock_http_request) -> None:
+        """``FormActionDispatch.dispatch`` sets ``request._next_dep_cache`` to a dict."""
+        backend = RegistryFormActionBackend()
+
+        def handler() -> str:
+            return "ok"
+
+        backend.register_action("only_handler", handler, options=FormActionOptions())
+
+        mock_post = MagicMock()
+        mock_post.items.return_value = []
+        request = mock_http_request(method="POST", POST=mock_post)
+
+        meta = backend.get_meta("only_handler")
+        assert meta is not None
+        FormActionDispatch.dispatch(backend, request, "only_handler", meta)
+
+        assert isinstance(getattr(request, REQUEST_DEP_CACHE_ATTR, None), dict)
+
+    def test_action_dispatched_signal_carries_dep_cache(
+        self, mock_http_request
+    ) -> None:
+        """``action_dispatched`` payload includes a ``dep_cache`` snapshot."""
+
+        @resolver.dependency("greeting")
+        def greeting() -> str:
+            return "hi"
+
+        backend = RegistryFormActionBackend()
+
+        def handler(greeting: str = Depends("greeting")) -> str:
+            return greeting
+
+        backend.register_action("dep_handler", handler, options=FormActionOptions())
+
+        seen: dict[str, object] = {}
+
+        def receiver(**kwargs: object) -> None:
+            seen.update(kwargs)
+
+        action_dispatched.connect(receiver)
+        try:
+            mock_post = MagicMock()
+            mock_post.items.return_value = []
+            request = mock_http_request(method="POST", POST=mock_post)
+            meta = backend.get_meta("dep_handler")
+            assert meta is not None
+            FormActionDispatch.dispatch(backend, request, "dep_handler", meta)
+        finally:
+            action_dispatched.disconnect(receiver)
+            resolver._dependency_callables.pop("greeting", None)
+
+        assert "dep_cache" in seen
+        assert isinstance(seen["dep_cache"], dict)
+        assert seen["dep_cache"].get("greeting") == "hi"
+
+    def test_depends_provider_invoked_once_across_phases(
+        self, mock_http_request
+    ) -> None:
+        """A ``Depends("name")`` shared by factory and handler resolves exactly once.
+
+        The dispatcher threads a single ``dep_cache`` through
+        ``_resolve_form_class``, ``form.get_initial``, and the handler
+        (see ``FormActionDispatch._dispatch_with_form``). The resolver's
+        named-dependency cache keys on the ``Depends`` name, so any
+        subsequent phase that asks for the same name hits the cache.
+        """
+        calls = {"n": 0}
+
+        @resolver.dependency("widget")
+        def make_widget() -> str:
+            calls["n"] += 1
+            return "w"
+
+        class WForm(Form):
+            name = django_forms.CharField(max_length=10, required=False)
+
+        def factory(widget: str = Depends("widget")) -> type[Form]:
+            assert widget == "w"
+            return WForm
+
+        def handler_like(widget: str = Depends("widget")) -> str:
+            return widget
+
+        request = mock_http_request(method="POST")
+        dep_cache: dict[str, object] = {}
+        dep_stack: list[str] = []
+
+        try:
+            cls = _resolve_form_class(factory, request, {}, dep_cache, dep_stack)
+            assert cls is WForm
+            resolved = resolver.resolve_dependencies(
+                handler_like,
+                request=request,
+                _cache=dep_cache,
+                _stack=dep_stack,
+            )
+        finally:
+            resolver._dependency_callables.pop("widget", None)
+
+        assert resolved["widget"] == "w"
+        assert calls["n"] == 1
+
+    @pytest.mark.parametrize(
+        "run_consumer",
+        [_run_component_context, _run_page_context],
+        ids=["component_context", "page_context"],
+    )
+    def test_request_scope_cache_rejoined_by_consumer(
+        self, mock_http_request, tmp_path, run_consumer
+    ) -> None:
+        """Re-render consumers reuse ``request._next_dep_cache`` instead of re-resolving."""
+        calls = {"n": 0}
+
+        @resolver.dependency("token")
+        def make_token() -> str:
+            calls["n"] += 1
+            return "fresh"
+
+        try:
+            request = mock_http_request(method="POST")
+            setattr(request, REQUEST_DEP_CACHE_ATTR, {"token": "preloaded"})
+            value = run_consumer(tmp_path, request)
+        finally:
+            resolver._dependency_callables.pop("token", None)
+
+        assert value == "preloaded"
+        assert calls["n"] == 0

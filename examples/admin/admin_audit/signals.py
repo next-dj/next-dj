@@ -21,6 +21,7 @@ def log_admin_action(
     form: django_forms.BaseForm | None = None,
     url_kwargs: dict[str, Any] | None = None,
     response_status: int = 0,
+    dep_cache: dict[str, Any] | None = None,
     **_: object,
 ) -> None:
     """Append one `AdminActivityLog` row for every dispatched admin action."""
@@ -28,7 +29,7 @@ def log_admin_action(
     if kind is None:
         return
     kwargs = url_kwargs or {}
-    spec = getattr(form, "_admin_spec", None) if form is not None else None
+    spec = (dep_cache or {}).get("admin_spec")
     user = None
     if spec is not None and spec.request.user.is_authenticated:
         user = spec.request.user

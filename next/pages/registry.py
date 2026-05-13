@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from django.http import HttpRequest
 
-from next.deps import DependencyResolver, resolver
+from next.deps import DependencyResolver, get_request_dep_cache, resolver
 
 from .context import ContextResult
 from .signals import context_registered
@@ -132,7 +132,12 @@ class PageContextRegistry:
         context_data: dict[str, Any] = {}
         js_context: dict[str, Any] = {}
         js_context_serializers: dict[str, JsContextSerializer] = {}
-        dep_cache: dict[str, Any] = {}
+        # Reuse the dispatch dep_cache during a validation-failure re-render
+        # so Depends("name") providers resolved by the form action are not
+        # recomputed when the same name is referenced from page or component
+        # context callables.
+        shared = get_request_dep_cache(request)
+        dep_cache: dict[str, Any] = shared if shared is not None else {}
         dep_stack: list[str] = []
 
         inherited_context = self._collect_inherited_context(

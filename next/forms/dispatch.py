@@ -13,7 +13,7 @@ from django.http import (
     HttpResponseRedirect,
 )
 
-from next.deps import RESERVED_KEYS, resolver
+from next.deps import REQUEST_DEP_CACHE_ATTR, RESERVED_KEYS, resolver
 from next.utils import caller_source_path
 
 from .base import BaseModelForm
@@ -221,6 +221,10 @@ class FormActionDispatch:
         url_kwargs = _url_kwargs_from_post(request)
         dep_cache: dict[str, Any] = {}
         dep_stack: list[str] = []
+        # Attach the dispatch dep_cache to the request so a re-render after
+        # validation failure (page context + component context) can rejoin
+        # the same DI cache and reuse Depends("name") values resolved here.
+        setattr(request, REQUEST_DEP_CACHE_ATTR, dep_cache)
 
         if form_class is None:
             return FormActionDispatch._dispatch_handler_only(
@@ -281,6 +285,7 @@ class FormActionDispatch:
             url_kwargs=dict(url_kwargs),
             duration_ms=duration_ms,
             response_status=response.status_code,
+            dep_cache=dict(dep_cache),
         )
         return response
 
@@ -344,6 +349,7 @@ class FormActionDispatch:
             url_kwargs=dict(url_kwargs),
             duration_ms=duration_ms,
             response_status=response.status_code,
+            dep_cache=dict(dep_cache),
         )
         return response
 

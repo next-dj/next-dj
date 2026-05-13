@@ -256,6 +256,9 @@ ignore-fully-untyped = false
 mark-parentheses = true
 fixture-parentheses = true
 
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["next.deps.Depends"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
