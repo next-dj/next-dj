@@ -1,8 +1,14 @@
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
-from next.testing import clear_loaded_dirs, eager_load_pages, loaders
+from next.testing import (
+    clear_loaded_dirs,
+    eager_load_components,
+    eager_load_pages,
+    loaders,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -67,3 +73,28 @@ class TestEagerLoadPages:
         clear_loaded_dirs()
         loaded = eager_load_pages(tmp_path)
         assert len(loaded) == 1
+
+
+class TestEagerLoadComponents:
+    def test_invokes_ensure_loaded_on_every_backend(self, monkeypatch) -> None:
+        called: list[str] = []
+
+        b1 = MagicMock()
+        b1._ensure_loaded = lambda: called.append("b1")
+        b2 = MagicMock()
+        b2._ensure_loaded = lambda: called.append("b2")
+        manager = MagicMock()
+        manager._backends = [b1, b2]
+        manager._ensure_backends = lambda: called.append("ensure")
+
+        monkeypatch.setattr(loaders, "components_manager", manager)
+        eager_load_components()
+        assert called == ["ensure", "b1", "b2"]
+
+    def test_backend_without_ensure_loaded_is_skipped(self, monkeypatch) -> None:
+        bare = object()
+        manager = MagicMock()
+        manager._backends = [bare]
+        monkeypatch.setattr(loaders, "components_manager", manager)
+        eager_load_components()
+        manager._ensure_backends.assert_called_once()

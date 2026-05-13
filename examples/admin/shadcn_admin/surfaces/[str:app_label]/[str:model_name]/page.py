@@ -13,8 +13,9 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.safestring import SafeString, mark_safe
 from shadcn_admin import utils
 
-from next.forms import action
+from next.forms import action, redirect_to_origin
 from next.pages import context
+from next.urls import with_query
 
 
 _EMPTY = mark_safe("&mdash;")
@@ -32,7 +33,6 @@ def _columns(
     model: type[Model],
     model_admin: ModelAdmin,
 ) -> list[dict[str, Any]]:
-    base_params = {k: v for k, v in cl.params.items() if k != "o"}
     ordering_columns = cl.get_ordering_field_columns()
     sortable_by = cl.sortable_by
     columns: list[dict[str, Any]] = []
@@ -40,18 +40,18 @@ def _columns(
         is_sortable = sortable_by is None or name in sortable_by
         direction = ordering_columns.get(index)
         prefix = "-" if direction == "asc" else ""
-        sort_params = {**base_params, "o": f"{prefix}{index}"} if is_sortable else None
+        sort_url = (
+            with_query("", **{**cl.params, "o": f"{prefix}{index}"})
+            if is_sortable
+            else None
+        )
         columns.append(
             {
                 "name": name,
                 "label": str(label_for_field(name, model, model_admin=model_admin)),
                 "sortable": is_sortable,
                 "direction": direction,
-                "sort_url": (
-                    "?" + "&".join(f"{k}={v}" for k, v in sort_params.items())
-                    if sort_params is not None
-                    else None
-                ),
+                "sort_url": sort_url,
             }
         )
     return columns
@@ -95,7 +95,7 @@ def _pagination(cl: ChangeList) -> dict[str, Any]:
     num_pages = cl.paginator.num_pages
 
     def page_url(p: int) -> str:
-        return "?" + "&".join(f"{k}={v}" for k, v in {**cl.params, "p": str(p)}.items())
+        return with_query("", **{**cl.params, "p": str(p)})
 
     return {
         "count": cl.result_count,
@@ -180,21 +180,15 @@ def bulk_action(
     app_label: str,
     model_name: str,
 ) -> HttpResponse:
-    """Run a Django admin bulk action against the selected queryset.
-
-    `response_action` returns either `None` (action handled, fall through)
-    or an `HttpResponse`. For action functions that themselves return
-    `None`, Django wraps the result in
-    `HttpResponseRedirect(request.get_full_path())` — i.e. the form-action
-    URL, which only accepts POST. We replace any such redirect with one
-    pointing at the changelist so a user (or test client following the
-    302) lands on a real GET endpoint.
-    """
+    """Run a Django admin bulk action and redirect to the origin changelist."""
     _, model_admin = utils.resolve_model_admin(app_label, model_name)
     response = model_admin.response_action(
         request,
         queryset=model_admin.get_queryset(request),
     )
     if response is None or isinstance(response, HttpResponseRedirect):
-        return HttpResponseRedirect(utils.changelist_url(app_label, model_name))
+        return redirect_to_origin(
+            request,
+            fallback=utils.changelist_url(app_label, model_name),
+        )
     return response  # pragma: no cover

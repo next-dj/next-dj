@@ -12,7 +12,13 @@ from shadcn_admin import utils
 
 from next.components import component
 from next.deps import Depends, resolver
-from next.forms import BaseModelForm, action, form_spec, formset_spec
+from next.forms import (
+    BaseModelForm,
+    action,
+    cleanup_extra_initial,
+    form_spec,
+    formset_spec,
+)
 
 
 _LOG_CHANGE_MESSAGE = "Changed via shadcn-admin form"
@@ -100,15 +106,7 @@ def _build_inline_formsets(spec: AdminFormSpec) -> list[BaseInlineFormSet]:
             )
         else:
             fs = formset_cls(instance=parent, prefix=prefix)
-        # Extra rows ship blank: drop model-default initial so the user sees
-        # empty inputs and submitting unfilled rows does not flip
-        # `has_changed()` to True (which would otherwise trigger required-
-        # field validation on rows the user intended to skip).
-        for inline_form in fs.forms:
-            if inline_form.empty_permitted and not inline_form.instance.pk:
-                inline_form.initial = {}
-                for fld in inline_form.fields.values():
-                    fld.initial = None
+        cleanup_extra_initial(fs)
         formsets.append(fs)
     return formsets
 

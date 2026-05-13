@@ -102,16 +102,15 @@ class TestAuth:
         assert r2.status_code == 302
         assert r2["Location"].startswith("/admin/login/")
 
-    def test_bad_credentials_flash_error(self, client, admin_user):
+    def test_bad_credentials_renders_form_error(self, client, admin_user):
+        rendered = _extract_form_inputs(client.get("/admin/login/").content.decode())
         r = client.post_action(
             "admin:login",
-            {"username": "admin", "password": "wrong", "next": "/admin/"},
+            {**rendered, "username": "admin", "password": "wrong", "next": "/admin/"},
         )
-        assert r.status_code == 302
-        assert r["Location"] == "/admin/login/"
-        # Anonymous user picks up the flash on the next request.
-        followup = client.get("/admin/login/")
-        assert "Invalid username or password." in followup.content.decode()
+        assert r.status_code == 200
+        body = r.content.decode()
+        assert "Please enter a correct" in body or "correct username" in body
 
 
 class TestChangelist:

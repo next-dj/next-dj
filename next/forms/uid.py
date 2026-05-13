@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from django.conf import settings
+from django.http import HttpResponseRedirect
 
 
 if TYPE_CHECKING:
@@ -59,9 +60,31 @@ def validated_next_form_page_path(request: HttpRequest) -> Path | None:  # noqa:
     return p
 
 
+def _validated_origin_path(raw: object) -> str | None:
+    """Return `raw` as a same-site path or `None`."""
+    if not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    if not raw.startswith("/") or raw.startswith("//"):
+        return None
+    return raw
+
+
+def redirect_to_origin(
+    request: HttpRequest,
+    fallback: str = "/",
+) -> HttpResponseRedirect:
+    """Redirect back to the page that rendered the form."""
+    origin: str | None = None
+    if hasattr(request, "POST"):
+        origin = _validated_origin_path(request.POST.get("_next_form_origin"))
+    return HttpResponseRedirect(origin or fallback)
+
+
 __all__ = [
     "FORM_ACTION_REVERSE_NAME",
     "URL_NAME_FORM_ACTION",
     "_make_uid",
+    "redirect_to_origin",
     "validated_next_form_page_path",
 ]

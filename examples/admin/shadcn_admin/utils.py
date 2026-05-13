@@ -3,21 +3,8 @@ from django.contrib import admin
 from django.contrib.admin.options import ModelAdmin
 from django.db.models import Model
 from django.http import Http404, HttpRequest
-from django.urls import reverse
 
-
-_NS = "next"
-# Route names are auto-derived by the file router from the page tree:
-# `prepare_url_name` snake-cases the URL path (parameters included), and
-# `URL_NAME_TEMPLATE` prefixes with `page_`. Centralising the names here
-# keeps the ugly-but-stable identifiers in one place.
-_CHANGELIST_NAME = f"{_NS}:page_str_app_label_str_model_name"
-_ADD_NAME = f"{_NS}:page_str_app_label_str_model_name_add"
-_CHANGE_NAME = f"{_NS}:page_str_app_label_str_model_name_int_pk_change"
-_DELETE_NAME = f"{_NS}:page_str_app_label_str_model_name_int_pk_delete"
-_HISTORY_NAME = f"{_NS}:page_str_app_label_str_model_name_int_pk_history"
-_DASHBOARD_NAME = f"{_NS}:page_"
-_LOGIN_NAME = f"{_NS}:page_login"
+from next.urls import page_reverse
 
 
 # Path prefixes the auth middleware compares against. Kept as literals
@@ -60,41 +47,47 @@ def resolve_object_or_404(
 
 def dashboard_url() -> str:
     """URL of the admin dashboard (`/admin/`)."""
-    return reverse(_DASHBOARD_NAME)
+    return page_reverse()
 
 
 def login_url() -> str:
     """URL of the login page."""
-    return reverse(_LOGIN_NAME)
+    return page_reverse("login")
 
 
 def changelist_url(app_label: str, model_name: str) -> str:
     """URL of the changelist page for one model."""
-    return reverse(
-        _CHANGELIST_NAME,
-        kwargs={"app_label": app_label, "model_name": model_name},
+    return page_reverse(
+        "[str:app_label]/[str:model_name]",
+        app_label=app_label,
+        model_name=model_name,
     )
 
 
 def add_url(app_label: str, model_name: str) -> str:
     """URL of the add view for one model."""
-    return reverse(
-        _ADD_NAME,
-        kwargs={"app_label": app_label, "model_name": model_name},
+    return page_reverse(
+        "[str:app_label]/[str:model_name]/add",
+        app_label=app_label,
+        model_name=model_name,
     )
 
 
 def change_url(app_label: str, model_name: str, pk: int | str) -> str:
     """URL of the change view for one model instance."""
-    return reverse(
-        _CHANGE_NAME,
-        kwargs={"app_label": app_label, "model_name": model_name, "pk": pk},
+    return page_reverse(
+        "[str:app_label]/[str:model_name]/[int:pk]/change",
+        app_label=app_label,
+        model_name=model_name,
+        pk=pk,
     )
 
 
 def delete_url(app_label: str, model_name: str, pk: int | str) -> str:
     """URL of the delete confirmation view for one model instance."""
-    return reverse(
-        _DELETE_NAME,
-        kwargs={"app_label": app_label, "model_name": model_name, "pk": pk},
+    return page_reverse(
+        "[str:app_label]/[str:model_name]/[int:pk]/delete",
+        app_label=app_label,
+        model_name=model_name,
+        pk=pk,
     )

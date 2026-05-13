@@ -267,6 +267,21 @@ class TestFormTagRender:
         assert "_next_form_page" in html
         assert str(PAGE_MODULE_FOR_FORM_TESTS) in html
 
+    def test_includes_next_form_origin_hidden(self, form_engine, csrf_request) -> None:
+        """Form emits `_next_form_origin` hidden field set to `request.path`."""
+        csrf_request.path = "/admin/library/book/1/change/"
+        t = form_engine.from_string('{% form @action="test_submit" %}x{% endform %}')
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert "_next_form_origin" in html
+        assert "/admin/library/book/1/change/" in html
+
     def test_requires_current_page_module_path(self, form_engine, csrf_request) -> None:
         """Without current_page_module_path, {% form %} raises ImproperlyConfigured."""
         t = form_engine.from_string('{% form @action="test_submit" %}x{% endform %}')

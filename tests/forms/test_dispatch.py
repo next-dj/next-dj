@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django import forms as django_forms
-from django.http import HttpRequest, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponseRedirect, QueryDict
 
 from next.components.context import component as component_ctx
 from next.components.info import ComponentInfo
@@ -21,7 +21,12 @@ from next.forms import (
     form_action_manager,
     page,
 )
-from next.forms.dispatch import _resolve_form_class
+from next.forms.dispatch import (
+    _bind_form_for_post,
+    _form_action_context_callable,
+    _form_from_initial_data,
+    _resolve_form_class,
+)
 from next.forms.signals import action_dispatched
 from next.pages.registry import PageContextRegistry
 
@@ -470,14 +475,15 @@ class TestResolveFormClass:
     """`_resolve_form_class`: type passthrough, factory call, error paths."""
 
     def test_form_class_type_returned_as_is(self, mock_http_request) -> None:
-        """A `Form` subclass is returned unchanged without DI resolution."""
+        """A `Form` subclass returns `(cls, {})` without DI resolution."""
 
         class F(Form):
             name = django_forms.CharField(max_length=10)
 
         request = mock_http_request(method="POST")
-        out = _resolve_form_class(F, request, {})
-        assert out is F
+        cls, init_kwargs = _resolve_form_class(F, request, {})
+        assert cls is F
+        assert init_kwargs == {}
 
     def test_factory_callable_resolves_per_request(self, mock_http_request) -> None:
         """A callable factory is invoked with DI-resolved kwargs each call."""
@@ -493,14 +499,29 @@ class TestResolveFormClass:
             return F
 
         request = mock_http_request(method="POST")
-        out = _resolve_form_class(
+        cls, init_kwargs = _resolve_form_class(
             factory,
             request,
             {"model_name": "tag"},
         )
-        assert out is F
+        assert cls is F
+        assert init_kwargs == {}
         assert seen["model_name"] == "tag"
         assert seen["request"] is request
+
+    def test_factory_can_return_class_and_init_kwargs(self, mock_http_request) -> None:
+        """A factory returning `(cls, init_kwargs)` propagates kwargs through."""
+
+        class F(Form):
+            name = django_forms.CharField(max_length=10)
+
+        def factory(request: HttpRequest) -> tuple[type[Form], dict[str, object]]:
+            return F, {"prefix": "x", "use_required_attribute": False}
+
+        request = mock_http_request(method="POST")
+        cls, init_kwargs = _resolve_form_class(factory, request, {})
+        assert cls is F
+        assert init_kwargs == {"prefix": "x", "use_required_attribute": False}
 
     def test_non_callable_raises_typeerror(self, mock_http_request) -> None:
         """An object that is neither a type nor callable is a configuration error."""
@@ -509,7 +530,7 @@ class TestResolveFormClass:
             _resolve_form_class("not-a-form", request, {})
 
     def test_factory_returning_non_type_raises(self, mock_http_request) -> None:
-        """A factory must return a class; returning an instance is a hard error."""
+        """A factory must return a class or `(cls, init_kwargs)`."""
 
         def bad_factory(request: HttpRequest) -> object:
             return "not-a-class"
@@ -517,6 +538,95 @@ class TestResolveFormClass:
         request = mock_http_request(method="POST")
         with pytest.raises(TypeError, match="factory must return a Form subclass"):
             _resolve_form_class(bad_factory, request, {})
+
+
+class _CustomInitForm(django_forms.Form):
+    """Form whose constructor takes extra kwargs (mimicking AuthenticationForm)."""
+
+    name = django_forms.CharField(max_length=10, required=False)
+
+    def __init__(
+        self,
+        *args: object,
+        label_suffix: str = "",
+        **kwargs: object,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.label_suffix = label_suffix
+
+
+class TestFormClassInitKwargs:
+    """Factory returning `(cls, init_kwargs)` bypasses get_initial."""
+
+    @pytest.mark.parametrize(
+        ("bound", "suffix"),
+        [(False, "?"), (True, "!")],
+        ids=("unbound", "bound"),
+    )
+    def test_form_built_with_init_kwargs(
+        self, mock_http_request, bound, suffix
+    ) -> None:
+        if bound:
+            mock_post = MagicMock()
+            mock_post.get.return_value = "ok"
+            request = mock_http_request(method="POST", POST=mock_post, FILES=None)
+            form = _bind_form_for_post(
+                _CustomInitForm, request, None, init_kwargs={"label_suffix": suffix}
+            )
+        else:
+            form = _form_from_initial_data(
+                _CustomInitForm, None, init_kwargs={"label_suffix": suffix}
+            )
+        assert isinstance(form, _CustomInitForm)
+        assert form.label_suffix == suffix
+
+    def test_context_callable_uses_init_kwargs(self, mock_http_request) -> None:
+        def factory(request: HttpRequest) -> tuple[type[django_forms.Form], dict]:
+            return _CustomInitForm, {"label_suffix": "@"}
+
+        ctx_func = _form_action_context_callable(factory)
+        request = mock_http_request(method="GET")
+        ns = ctx_func(request)
+        assert isinstance(ns.form, _CustomInitForm)
+        assert ns.form.label_suffix == "@"
+
+    def test_dispatch_uses_init_kwargs_and_skips_get_initial(
+        self, mock_http_request
+    ) -> None:
+        def factory(
+            request: HttpRequest,
+        ) -> tuple[type[django_forms.Form], dict]:
+            return _CustomInitForm, {"label_suffix": "$"}
+
+        captured: dict[str, object] = {}
+
+        def handler(form: _CustomInitForm) -> HttpResponseRedirect:
+            captured["form"] = form
+            return HttpResponseRedirect("/")
+
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            "init_kwargs_action",
+            handler,
+            options=FormActionOptions(form_class=factory),
+        )
+
+        post = QueryDict(mutable=True)
+        post["name"] = "x"
+        request = mock_http_request(
+            method="POST",
+            POST=post,
+            FILES=QueryDict(),
+        )
+        meta = backend.get_meta("init_kwargs_action")
+        assert meta is not None
+        response = FormActionDispatch.dispatch(
+            backend, request, "init_kwargs_action", meta
+        )
+        assert response.status_code == 302
+        bound = captured["form"]
+        assert isinstance(bound, _CustomInitForm)
+        assert bound.label_suffix == "$"
 
 
 class TestDispatchSharedDepCache:
@@ -611,7 +721,7 @@ class TestDispatchSharedDepCache:
         dep_stack: list[str] = []
 
         try:
-            cls = _resolve_form_class(factory, request, {}, dep_cache, dep_stack)
+            cls, _ = _resolve_form_class(factory, request, {}, dep_cache, dep_stack)
             assert cls is WForm
             resolved = resolver.resolve_dependencies(
                 handler_like,

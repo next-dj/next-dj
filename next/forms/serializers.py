@@ -21,12 +21,7 @@ FieldKind = Literal["textarea", "checkbox", "select", "select_multi", "input"]
 
 @dataclass(frozen=True, slots=True)
 class FieldSpec:
-    """Render-time descriptor for one `BoundField`.
-
-    Templates branch on `kind`. `bound` is kept for any attribute the spec
-    does not pre-compute (label, html_name, id_for_label, errors, help_text,
-    underlying `Field` via `bound.field.choices` / `.required`).
-    """
+    """Render-time descriptor for one `BoundField`."""
 
     bound: BoundField
     kind: FieldKind
@@ -38,12 +33,7 @@ class FieldSpec:
 
 @dataclass(frozen=True, slots=True)
 class FormsetRowSpec:
-    """One row inside a `FormsetSpec`.
-
-    `hidden_html` is the concatenation of every hidden BoundField rendered by
-    Django (so already HTML-escaped at the field level). Templates render it
-    with `{{ row.hidden_html|safe }}` to drop the wrapping escape.
-    """
+    """One row inside a `FormsetSpec`. Render `hidden_html` with `|safe`."""
 
     fields: tuple[FieldSpec, ...]
     hidden_html: str
@@ -82,15 +72,7 @@ class FormSpec:
 
 
 def field_spec(bound: BoundField, *, is_extra: bool = False) -> FieldSpec:
-    """Classify a `BoundField` into a `FieldSpec`.
-
-    The kind branch uses `isinstance` on base `django.forms` widgets, so
-    `Admin*Widget` subclasses and any third-party widgets in the same
-    hierarchy classify correctly without name enumeration. `input_type`
-    comes straight from the widget so HTML5 types (`email`, `number`,
-    `date`, `password`, `url`) propagate to the template without an
-    extra lookup table.
-    """
+    """Classify a `BoundField` into a `FieldSpec`."""
     widget = bound.field.widget
     if isinstance(widget, RelatedFieldWidgetWrapper):
         widget = widget.widget
@@ -125,15 +107,7 @@ def field_spec(bound: BoundField, *, is_extra: bool = False) -> FieldSpec:
 
 
 def formset_spec(formset: BaseFormSet) -> FormsetSpec:
-    """Build a `FormsetSpec` from a Django formset.
-
-    Hidden inputs are concatenated as one `SafeString` so the row template
-    can drop them all with one `{{ row.hidden_html|safe }}` instead of
-    iterating. `delete_field` is set when the formset has `can_delete=True`
-    and the row exposes Django's standard `DELETE` field. `is_extra` flags
-    blank rows the user has not started filling so the row template can
-    suppress required-field markers.
-    """
+    """Build a `FormsetSpec` from a Django formset."""
     rows: list[FormsetRowSpec] = []
     for row_form in formset.forms:
         # Plain `BaseFormSet` rows do not expose `.instance`; treat absent
@@ -181,13 +155,7 @@ def formset_spec(formset: BaseFormSet) -> FormsetSpec:
 def _flatten_fieldset_names(
     fieldsets: Iterable[tuple[str | None, Mapping[str, Any]]],
 ) -> set[str]:
-    """Return the flat set of field names referenced by `fieldsets`.
-
-    Matches `django.contrib.admin.utils.flatten_fieldsets` semantics without
-    pulling `django.contrib.admin` into this module: a `fields` entry may be
-    a flat sequence of names or a nested tuple/list (the admin uses nested
-    tuples to render multiple fields on one row).
-    """
+    """Flat set of field names referenced by `fieldsets` (nested tuples allowed)."""
     out: set[str] = set()
     for _, opts in fieldsets:
         for entry in opts.get("fields", ()):
@@ -202,14 +170,7 @@ def form_spec(
     form: BaseForm,
     fieldsets: Sequence[tuple[str | None, Mapping[str, Any]]] | None = None,
 ) -> FormSpec:
-    """Group `form`'s fields into sections.
-
-    `fieldsets` is the same `(label, opts)` structure `ModelAdmin.get_fieldsets`
-    returns. Fields present in `form.fields` but missing from any fieldset are
-    collected into a trailing unlabelled section so a misconfigured fieldset
-    list still renders every input. Pass `fieldsets=None` to wrap the entire
-    form in one unlabelled section.
-    """
+    """Group `form`'s fields into sections per Django admin `(label, opts)`."""
     sections: tuple[FormSectionSpec, ...]
     if fieldsets is None:
         all_fields = tuple(field_spec(form[name]) for name in form.fields)

@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 
-from next.testing import NextClient, eager_load_pages
+from next.testing import NextClient, eager_load_components, eager_load_pages
 
 
 EXAMPLE_ROOT = Path(__file__).resolve().parent
@@ -32,16 +32,7 @@ django_admin.autodiscover()
 @pytest.fixture(autouse=True, scope="session")
 def _load_pages() -> None:
     eager_load_pages(EXAMPLE_ROOT / "shadcn_admin" / "surfaces")
-    # Trigger component module loading so `@action` handlers declared inside
-    # composite components (admin_form's add/change/delete actions) register
-    # before tests resolve URLs directly via `post_action`.
-    from next.components import components_manager  # noqa: PLC0415
-
-    components_manager._ensure_backends()
-    for backend in components_manager._backends:
-        ensure = getattr(backend, "_ensure_loaded", None)
-        if callable(ensure):
-            ensure()
+    eager_load_components()
 
 
 @pytest.fixture(autouse=True)

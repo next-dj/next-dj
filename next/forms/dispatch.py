@@ -31,6 +31,9 @@ if TYPE_CHECKING:
     from .backends import FormActionBackend
 
 
+_FACTORY_TUPLE_LEN = 2
+
+
 def _get_caller_path(back_count: int = 1) -> Path:
     """Return the path of the module that called into us, skipping frames here."""
     return caller_source_path(
@@ -87,11 +90,22 @@ def _build_form(
     initial_data: object,
     *,
     request: HttpRequest | None,
+    init_kwargs: dict[str, Any] | None = None,
 ) -> django_forms.Form:
-    """Build a form, bound to POST data when `request` is given."""
+    """Build a form, bound to POST when `request` is given.
+
+    Non-empty `init_kwargs` bypass `get_initial` and pass `**init_kwargs`
+    straight to the form constructor.
+    """
     post_data = request.POST if request is not None else None
     files = request.FILES if request is not None and hasattr(request, "FILES") else None
     bound = request is not None
+    if init_kwargs:
+        # Pass data/files by keyword so init kwargs can also bind names
+        # that collide with the first positional slot.
+        if bound:
+            return form_class(data=post_data, files=files, **init_kwargs)
+        return form_class(**init_kwargs)
     if _is_model_instance(initial_data):
         if not issubclass(form_class, BaseModelForm):
             msg = "instance parameter only supported for ModelForm"
@@ -108,9 +122,11 @@ def _build_form(
 def _form_from_initial_data(
     form_class: type[django_forms.Form],
     initial_data: object,
+    *,
+    init_kwargs: dict[str, Any] | None = None,
 ) -> django_forms.Form:
     """Build an unbound form from `get_initial` result (dict or model instance)."""
-    return _build_form(form_class, initial_data, request=None)
+    return _build_form(form_class, initial_data, request=None, init_kwargs=init_kwargs)
 
 
 def _form_action_context_callable(
@@ -122,13 +138,18 @@ def _form_action_context_callable(
         url_kwargs = _url_kwargs_from_resolver_or_post(request)
         dep_cache: dict[str, Any] = {}
         dep_stack: list[str] = []
-        resolved_form_class = _resolve_form_class(
+        resolved_form_class, init_kwargs = _resolve_form_class(
             form_class,
             request,
             url_kwargs,
             dep_cache,
             dep_stack,
         )
+        if init_kwargs:
+            form_instance = _form_from_initial_data(
+                resolved_form_class, None, init_kwargs=init_kwargs
+            )
+            return types.SimpleNamespace(form=form_instance)
         if not hasattr(resolved_form_class, "get_initial"):
             msg = f"Form class {resolved_form_class} must have get_initial method"
             raise TypeError(msg)
@@ -150,9 +171,13 @@ def _bind_form_for_post(
     form_class: type[django_forms.Form],
     request: HttpRequest,
     initial_data: object,
+    *,
+    init_kwargs: dict[str, Any] | None = None,
 ) -> django_forms.Form:
-    """Return a bound form for POST validation using initial or model instance."""
-    return _build_form(form_class, initial_data, request=request)
+    """Return a bound form for POST validation."""
+    return _build_form(
+        form_class, initial_data, request=request, init_kwargs=init_kwargs
+    )
 
 
 def _resolve_form_class(
@@ -161,16 +186,15 @@ def _resolve_form_class(
     url_kwargs: dict[str, object],
     dep_cache: dict[str, Any] | None = None,
     dep_stack: list[str] | None = None,
-) -> type[django_forms.Form]:
-    """Return a concrete form class, calling `form_class` as a factory if needed.
+) -> tuple[type[django_forms.Form], dict[str, Any]]:
+    """Return `(form_class, init_kwargs)` for the dispatch.
 
-    Accepts either an already-built `Form` subclass or a callable that
-    returns one. Factory callables are dependency-resolved against the
-    current request and URL kwargs before invocation, so admin-style
-    pages can produce a form class shaped by `ModelAdmin.get_form()`.
+    A factory may return a `Form` subclass or `(cls, init_kwargs)`; the
+    latter bypasses `get_initial` and passes `**init_kwargs` to the form
+    constructor.
     """
     if isinstance(form_class, type):
-        return cast("type[django_forms.Form]", form_class)
+        return cast("type[django_forms.Form]", form_class), {}
     if not callable(form_class):
         msg = f"form_class must be a Form subclass or callable, got {form_class!r}"
         raise TypeError(msg)
@@ -184,10 +208,17 @@ def _resolve_form_class(
         **url_kwargs,
     )
     produced = form_class(**resolved)
+    if isinstance(produced, tuple) and len(produced) == _FACTORY_TUPLE_LEN:
+        cls, init_kwargs = produced
+        if isinstance(cls, type) and isinstance(init_kwargs, dict):
+            return (
+                cast("type[django_forms.Form]", cls),
+                cast("dict[str, Any]", init_kwargs),
+            )
     if not isinstance(produced, type):
         msg = f"form_class factory must return a Form subclass, got {produced!r}"
         raise TypeError(msg)
-    return cast("type[django_forms.Form]", produced)
+    return cast("type[django_forms.Form]", produced), {}
 
 
 def _normalize_handler_response(
@@ -236,7 +267,7 @@ class FormActionDispatch:
                 dep_stack,
             )
 
-        resolved_form_class = _resolve_form_class(
+        resolved_form_class, init_kwargs = _resolve_form_class(
             form_class,
             request,
             url_kwargs,
@@ -253,6 +284,7 @@ class FormActionDispatch:
             url_kwargs,
             dep_cache,
             dep_stack,
+            init_kwargs=init_kwargs,
         )
 
     @staticmethod
@@ -299,19 +331,26 @@ class FormActionDispatch:
         url_kwargs: dict[str, object],
         dep_cache: dict[str, Any],
         dep_stack: list[str],
+        *,
+        init_kwargs: dict[str, Any] | None = None,
     ) -> HttpResponse:
-        if not hasattr(form_class, "get_initial"):
-            msg = f"Form class {form_class} must have get_initial method"
-            raise TypeError(msg)
-        resolved = resolver.resolve_dependencies(
-            form_class.get_initial,
-            request=request,
-            _cache=dep_cache,
-            _stack=dep_stack,
-            **url_kwargs,
-        )
-        initial_data = form_class.get_initial(**resolved)
-        form = _bind_form_for_post(form_class, request, initial_data)
+        if init_kwargs:
+            form = _bind_form_for_post(
+                form_class, request, None, init_kwargs=init_kwargs
+            )
+        else:
+            if not hasattr(form_class, "get_initial"):
+                msg = f"Form class {form_class} must have get_initial method"
+                raise TypeError(msg)
+            resolved = resolver.resolve_dependencies(
+                form_class.get_initial,
+                request=request,
+                _cache=dep_cache,
+                _stack=dep_stack,
+                **url_kwargs,
+            )
+            initial_data = form_class.get_initial(**resolved)
+            form = _bind_form_for_post(form_class, request, initial_data)
         if not form.is_valid():
             if form_validation_failed.receivers:
                 error_count = sum(len(errors) for errors in form.errors.values())

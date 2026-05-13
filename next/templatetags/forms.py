@@ -19,6 +19,7 @@ from next.forms import build_form_namespace_for_action, form_action_manager
 
 
 _NEXT_FORM_PAGE = "_next_form_page"
+_NEXT_FORM_ORIGIN = "_next_form_origin"
 
 
 if TYPE_CHECKING:
@@ -206,6 +207,15 @@ class FormNode(template.Node):
                     '<input type="hidden" name="{}" value="{}">',
                     _NEXT_FORM_PAGE,
                     escape(next_form_page),
+                )
+            )
+        origin = getattr(request, "path", None)
+        if origin:
+            inputs.append(
+                format_html(
+                    '<input type="hidden" name="{}" value="{}">',
+                    _NEXT_FORM_ORIGIN,
+                    escape(origin),
                 )
             )
 
