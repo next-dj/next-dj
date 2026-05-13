@@ -1,0 +1,35 @@
+<div class="space-y-6">
+  {% #component "page_header" title=form_state.title description=form_state.verbose_name %}
+    {% if form_state.is_change %}
+      {% #slot "actions" %}
+        {% component "button" href=form_state.delete_url text="Delete" variant="outline" %}
+      {% /slot %}
+    {% endif %}
+  {% /component %}
+
+  {% form @action=form_state.action_name class="space-y-4" %}
+    {% if form_state.non_field_errors %}
+      {% #component "alert" variant="destructive" %}
+        {% #slot "content" %}
+          <ul>{% for err in form_state.non_field_errors %}<li>{{ err }}</li>{% endfor %}</ul>
+        {% /slot %}
+      {% /component %}
+    {% endif %}
+
+    <div class="space-y-4">
+      {% for section in form_state.sections %}
+        {% component "form_section" section=section %}
+      {% endfor %}
+      {% for block in form_state.inlines %}
+        {% component "inline_formset" block=block %}
+      {% endfor %}
+    </div>
+
+    <div class="flex items-center justify-end gap-2 pt-2">
+      {% component "button" href=form_state.changelist_url text="Cancel" variant="outline" %}
+      {% component "button" type="submit" name="_save_addanother" text="Save and add another" variant="outline" %}
+      {% component "button" type="submit" name="_save_continue" text="Save and continue editing" variant="outline" %}
+      {% component "button" type="submit" text="Save" variant="default" %}
+    </div>
+  {% endform %}
+</div>

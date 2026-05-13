@@ -44,6 +44,7 @@ class Book(models.Model):
     summary = models.TextField(blank=True)
     published_at = models.DateField(null=True, blank=True)
     price = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    is_featured = models.BooleanField(default=False)
 
     class Meta:
         ordering: ClassVar = ["-published_at", "title"]

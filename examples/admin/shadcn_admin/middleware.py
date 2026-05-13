@@ -1,17 +1,15 @@
-"""Gate everything under `/admin/` behind `AdminSite.has_permission`.
-
-Anonymous or non-staff users are redirected to the login page. The login
-and form-action endpoints are exempt so the redirect itself can complete
-and so users can POST credentials.
-"""
-
 from collections.abc import Callable
 
 from django.contrib import admin
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 
+from shadcn_admin import utils
 
-_EXEMPT_PREFIXES = ("/admin/login/", "/admin/_next/", "/static/")
+
+# Literal path prefixes for `startswith` checks. `_next` is the URL
+# segment under which next.dj mounts its form-action endpoints, and
+# `/static/` covers asset URLs that should never bounce to the login.
+_EXEMPT_PREFIXES = (utils.LOGIN_URL, "/admin/_next/", "/static/")
 
 
 class AdminPermissionMiddleware:
@@ -25,9 +23,9 @@ class AdminPermissionMiddleware:
         """Gate admin paths; let exempt prefixes pass through unchanged."""
         path = request.path
         if (
-            path.startswith("/admin/")
+            path.startswith(utils.ADMIN_PREFIX)
             and not any(path.startswith(p) for p in _EXEMPT_PREFIXES)
             and not admin.site.has_permission(request)
         ):
-            return HttpResponseRedirect(f"/admin/login/?next={path}")
+            return HttpResponseRedirect(f"{utils.login_url()}?next={path}")
         return self.get_response(request)

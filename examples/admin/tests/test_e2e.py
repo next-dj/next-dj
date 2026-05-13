@@ -1,13 +1,7 @@
-"""End-to-end checks for the shadcn admin example.
-
-Each phase of the example has at least one happy-path test plus a
-representative failure mode. Together they replace the manual curl/shell
-checks used while building the example.
-"""
-
 import re
 
 import pytest
+from admin_audit.models import AdminActivityLog
 from library.models import Author, Book, Chapter, Tag
 
 
@@ -48,6 +42,11 @@ def _extract_form_inputs(body: str) -> dict[str, str]:
 
 
 class TestDashboard:
+    def test_bare_root_redirects_to_admin(self, client):
+        r = client.get("/")
+        assert r.status_code == 302
+        assert r["Location"] == "/admin/"
+
     def test_unauthenticated_redirects_to_login(self, client):
         r = client.get("/admin/")
         assert r.status_code == 302
@@ -103,13 +102,16 @@ class TestAuth:
         assert r2.status_code == 302
         assert r2["Location"].startswith("/admin/login/")
 
-    def test_bad_credentials_redirect_with_error_flag(self, client, admin_user):
+    def test_bad_credentials_flash_error(self, client, admin_user):
         r = client.post_action(
             "admin:login",
             {"username": "admin", "password": "wrong", "next": "/admin/"},
         )
         assert r.status_code == 302
-        assert r["Location"] == "/admin/login/?error=1"
+        assert r["Location"] == "/admin/login/"
+        # Anonymous user picks up the flash on the next request.
+        followup = client.get("/admin/login/")
+        assert "Invalid username or password." in followup.content.decode()
 
 
 class TestChangelist:
@@ -287,6 +289,10 @@ class TestChangeView:
         assert tag.name == "New"
         assert tag.slug == "new"
 
+    def test_change_get_unknown_pk_404(self, admin_client):
+        r = admin_client.get("/admin/library/tag/99999/change/")
+        assert r.status_code == 404
+
 
 class TestDeleteView:
     def test_delete_get_renders_confirmation(self, admin_client):
@@ -433,11 +439,12 @@ class TestHistoryView:
 
 
 class TestInlineValidationFailure:
-    """Inline formset with a partially-filled row fails validation on both flows.
+    """Inline formset with a partially-filled row re-renders the form with errors.
 
     Filling `chapters-0-number` makes the row "intent to save", so the empty
-    required `chapters-0-title` flips the formset to invalid. The handler
-    answers 400 from the same code path on add and change.
+    required `chapters-0-title` flips the formset to invalid. `AdminForm.clean()`
+    raises `ValidationError` and the framework re-renders the origin page with
+    the bound form, so the user keeps their typed data and sees the row error.
     """
 
     @pytest.mark.parametrize(
@@ -445,7 +452,9 @@ class TestInlineValidationFailure:
         [("add", "admin:add"), ("change", "admin:change")],
         ids=("add", "change"),
     )
-    def test_inline_invalid_returns_400(self, admin_client, flow, action_name):
+    def test_inline_invalid_rerenders_with_errors(
+        self, admin_client, flow, action_name
+    ):
         author = Author.objects.create(full_name="A. Author")
         if flow == "add":
             get_url = "/admin/library/book/add/"
@@ -467,6 +476,222 @@ class TestInlineValidationFailure:
             "chapters-0-word_count": "10",
         }
         r = admin_client.post_action(action_name, payload)
-        assert r.status_code == 400
+        assert r.status_code == 200
+        body = r.content.decode()
+        # User's typed title is echoed back so they don't have to retype.
+        assert "Book with bad chapter" in body
         if flow == "add":
             assert not Book.objects.filter(title="Book with bad chapter").exists()
+
+
+class TestSaveContinue:
+    """`_save_continue` and `_save_addanother` route to change/add instead of changelist."""
+
+    def test_save_continue_redirects_to_change(self, admin_client):
+        r = admin_client.post_action(
+            "admin:add",
+            {
+                "_url_param_app_label": "library",
+                "_url_param_model_name": "tag",
+                "name": "Drama",
+                "slug": "drama",
+                "_save_continue": "1",
+            },
+        )
+        assert r.status_code == 302
+        tag = Tag.objects.get(slug="drama")
+        assert r["Location"] == f"/admin/library/tag/{tag.pk}/change/"
+
+    def test_save_addanother_redirects_to_add(self, admin_client):
+        r = admin_client.post_action(
+            "admin:add",
+            {
+                "_url_param_app_label": "library",
+                "_url_param_model_name": "tag",
+                "name": "Comedy",
+                "slug": "comedy",
+                "_save_addanother": "1",
+            },
+        )
+        assert r.status_code == 302
+        assert r["Location"] == "/admin/library/tag/add/"
+        assert Tag.objects.filter(slug="comedy").exists()
+
+    def test_save_continue_on_change_keeps_pk(self, admin_client):
+        tag = Tag.objects.create(name="Old", slug="old")
+        r = admin_client.post_action(
+            "admin:change",
+            {
+                "_url_param_app_label": "library",
+                "_url_param_model_name": "tag",
+                "_url_param_pk": str(tag.pk),
+                "name": "Renamed",
+                "slug": "renamed",
+                "_save_continue": "1",
+            },
+        )
+        assert r.status_code == 302
+        assert r["Location"] == f"/admin/library/tag/{tag.pk}/change/"
+        tag.refresh_from_db()
+        assert tag.name == "Renamed"
+
+
+class TestCustomBulkAction:
+    """`mark_as_published` is registered on BookAdmin and reachable through admin:bulk_action."""
+
+    def test_action_present_in_changelist(self, admin_client):
+        r = admin_client.get("/admin/library/book/")
+        body = r.content.decode()
+        assert 'value="mark_as_published"' in body
+        # Description has `%(verbose_name_plural)s` interpolated.
+        assert "Mark selected books as published" in body
+
+    def test_action_updates_status(self, admin_client):
+        author = Author.objects.create(full_name="A")
+        b1 = Book.objects.create(title="One", author=author, status=Book.DRAFT)
+        b2 = Book.objects.create(title="Two", author=author, status=Book.DRAFT)
+        r = admin_client.post_action(
+            "admin:bulk_action",
+            {
+                "_url_param_app_label": "library",
+                "_url_param_model_name": "book",
+                "action": "mark_as_published",
+                "_selected_action": [str(b1.pk), str(b2.pk)],
+            },
+        )
+        assert r.status_code == 302
+        b1.refresh_from_db()
+        b2.refresh_from_db()
+        assert b1.status == Book.PUBLISHED
+        assert b2.status == Book.PUBLISHED
+
+
+class TestActivityLog:
+    """`action_dispatched` receiver writes one row per admin:* action."""
+
+    def test_add_records_entry(self, admin_client):
+        admin_client.post_action(
+            "admin:add",
+            {
+                "_url_param_app_label": "library",
+                "_url_param_model_name": "tag",
+                "name": "Thriller",
+                "slug": "thriller",
+            },
+        )
+        entries = list(AdminActivityLog.objects.all())
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry.action == "add"
+        assert entry.app_label == "library"
+        assert entry.model_name == "tag"
+        assert entry.object_repr == "Thriller"
+        # Form-bearing action captured user via _admin_spec.
+        assert entry.user is not None
+
+    def test_bulk_action_records_entry_without_user(self, admin_client):
+        author = Author.objects.create(full_name="A")
+        book = Book.objects.create(title="B", author=author)
+        admin_client.post_action(
+            "admin:bulk_action",
+            {
+                "_url_param_app_label": "library",
+                "_url_param_model_name": "book",
+                "action": "mark_as_published",
+                "_selected_action": [str(book.pk)],
+            },
+        )
+        entries = list(AdminActivityLog.objects.filter(action="bulk_action"))
+        assert len(entries) == 1
+        # No form attached to handler-only action, so user stays empty.
+        assert entries[0].user is None
+
+    def test_activity_page_renders_rows(self, admin_client):
+        AdminActivityLog.objects.create(
+            action="add",
+            app_label="library",
+            model_name="tag",
+            object_repr="Sample tag",
+            response_status=302,
+        )
+        r = admin_client.get("/admin/activity/")
+        assert r.status_code == 200
+        body = r.content.decode()
+        assert "Sample tag" in body
+        assert "library.tag" in body
+
+
+class TestFlashMessages:
+    """`django.contrib.messages` round-trips through the flash_messages component."""
+
+    def test_add_flashes_success(self, admin_client):
+        r = admin_client.post_action(
+            "admin:add",
+            {
+                "_url_param_app_label": "library",
+                "_url_param_model_name": "tag",
+                "name": "Mystery",
+                "slug": "mystery",
+            },
+            follow=True,
+        )
+        body = r.content.decode()
+        assert "The tag Mystery was added successfully." in body
+
+    def test_change_flashes_success(self, admin_client):
+        tag = Tag.objects.create(name="Old", slug="old")
+        r = admin_client.post_action(
+            "admin:change",
+            {
+                "_url_param_app_label": "library",
+                "_url_param_model_name": "tag",
+                "_url_param_pk": str(tag.pk),
+                "name": "New",
+                "slug": "new",
+            },
+            follow=True,
+        )
+        body = r.content.decode()
+        assert "The tag New was updated successfully." in body
+
+    def test_delete_flashes_success(self, admin_client):
+        tag = Tag.objects.create(name="Doomed", slug="doomed")
+        r = admin_client.post_action(
+            "admin:delete",
+            {
+                "_url_param_app_label": "library",
+                "_url_param_model_name": "tag",
+                "_url_param_pk": str(tag.pk),
+            },
+            follow=True,
+        )
+        body = r.content.decode()
+        assert "The tag Doomed was deleted successfully." in body
+
+    def test_bulk_action_flashes_message_user(self, admin_client):
+        """Django's `ModelAdmin.message_user` writes via the messages framework."""
+        author = Author.objects.create(full_name="A")
+        Book.objects.create(title="X", author=author, status=Book.DRAFT)
+        r = admin_client.post_action(
+            "admin:bulk_action",
+            {
+                "_url_param_app_label": "library",
+                "_url_param_model_name": "book",
+                "action": "mark_as_published",
+                "_selected_action": [str(Book.objects.get(title="X").pk)],
+            },
+            follow=True,
+        )
+        body = r.content.decode()
+        # Django formats the auto-message as "1 book was marked as published."
+        # (the `%(verbose_name)s` placeholder lands in the message text).
+        assert "marked as published" in body.lower()
+
+    def test_login_success_flashes_welcome(self, client, admin_user):
+        r = client.post_action(
+            "admin:login",
+            {"username": "admin", "password": "admin-pass", "next": "/admin/"},
+            follow=True,
+        )
+        body = r.content.decode()
+        assert "Welcome, admin." in body

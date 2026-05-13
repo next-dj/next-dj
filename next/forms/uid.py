@@ -24,7 +24,15 @@ def _make_uid(action_name: str) -> str:
 
 
 def validated_next_form_page_path(request: HttpRequest) -> Path | None:  # noqa: PLR0911
-    """Return a trusted `page.py` path from POST `_next_form_page`, or `None`."""
+    """Return a trusted `page.py` path from POST `_next_form_page`, or `None`.
+
+    Accepts both real `page.py` files and virtual ones — directories whose
+    only source is a sibling `template.djx` (the file router already emits
+    routes for those; see `FilesystemTreeDispatcher._visit`). The downstream
+    renderer (`_load_python_module_memo`, `_load_static_body`) tolerates a
+    missing module and falls back to the template, so virtual pages survive
+    the re-render path on form-validation failures.
+    """
     if not hasattr(request, "POST"):
         return None
     raw = request.POST.get("_next_form_page")
@@ -37,7 +45,9 @@ def validated_next_form_page_path(request: HttpRequest) -> Path | None:  # noqa:
         p = Path(raw_stripped).resolve()
     except OSError:
         return None
-    if p.name != "page.py" or not p.is_file():
+    if p.name != "page.py":
+        return None
+    if not p.is_file() and not (p.parent / "template.djx").is_file():
         return None
     base = getattr(settings, "BASE_DIR", None)
     if base is None:

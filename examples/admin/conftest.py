@@ -31,7 +31,7 @@ django_admin.autodiscover()
 
 @pytest.fixture(autouse=True, scope="session")
 def _load_pages() -> None:
-    eager_load_pages(EXAMPLE_ROOT / "shadcn_admin" / "pages")
+    eager_load_pages(EXAMPLE_ROOT / "shadcn_admin" / "surfaces")
     # Trigger component module loading so `@action` handlers declared inside
     # composite components (admin_form's add/change/delete actions) register
     # before tests resolve URLs directly via `post_action`.

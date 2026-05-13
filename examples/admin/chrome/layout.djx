@@ -1,0 +1,8 @@
+<!DOCTYPE html>
+<html lang="en">
+{% component "page_head" title="next.dj admin" %}
+<body class="min-h-screen bg-background text-foreground">
+  {% block template %}{% endblock template %}
+  {% collect_scripts %}
+</body>
+</html>

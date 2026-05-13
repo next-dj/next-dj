@@ -1,6 +1,8 @@
 from typing import ClassVar
 
 from django.contrib import admin
+from django.db.models import QuerySet
+from django.http import HttpRequest
 
 from library.models import Author, Book, Chapter, Tag
 
@@ -27,13 +29,27 @@ class TagAdmin(admin.ModelAdmin):
 
 @admin.register(Book)
 class BookAdmin(admin.ModelAdmin):
-    list_display = ("title", "author", "status", "published_at", "price")
-    list_filter = ("status", "tags")
+    list_display = ("title", "author", "status", "is_featured", "published_at", "price")
+    list_filter = ("status", "tags", "is_featured")
     search_fields = ("title", "summary", "author__full_name")
     autocomplete_fields = ("author",)
     filter_horizontal = ("tags",)
     inlines: ClassVar = [ChapterInline]
     date_hierarchy = "published_at"
+    actions: ClassVar = ["mark_as_published"]
+
+    @admin.action(description="Mark selected %(verbose_name_plural)s as published")
+    def mark_as_published(
+        self,
+        request: HttpRequest,
+        queryset: QuerySet[Book],
+    ) -> None:
+        """Flip the selected books to `published` status in a single UPDATE."""
+        updated = queryset.update(status=Book.PUBLISHED)
+        self.message_user(
+            request,
+            f"{updated} book(s) marked as published.",
+        )
 
 
 @admin.register(Chapter)

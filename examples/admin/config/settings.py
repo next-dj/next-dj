@@ -17,7 +17,9 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "next",
+    "shadcn_admin",
     "library",
+    "admin_audit",
 ]
 
 MIDDLEWARE = [
@@ -82,9 +84,14 @@ NEXT_FRAMEWORK = {
     "DEFAULT_PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
-            "APP_DIRS": False,
-            "DIRS": [str(BASE_DIR / "shadcn_admin" / "pages")],
-            "PAGES_DIR": "pages",
+            # `chrome/` is the project-level page root. It only holds
+            # `layout.djx` — the outermost HTML envelope (DOCTYPE,
+            # `<body>`, `{% collect_scripts %}`) that wraps every page.
+            # Per-app routes live under each app's `surfaces/` tree,
+            # picked up by `APP_DIRS=True` + `PAGES_DIR="surfaces"`.
+            "APP_DIRS": True,
+            "DIRS": [str(BASE_DIR / "chrome")],
+            "PAGES_DIR": "surfaces",
             "OPTIONS": {"context_processors": []},
         },
     ],
@@ -92,10 +99,10 @@ NEXT_FRAMEWORK = {
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [
-                str(BASE_DIR / "shadcn_admin" / "_components"),
+                str(BASE_DIR / "shadcn_admin" / "_panels"),
                 str(SHARED_DIR / "_components"),
             ],
-            "COMPONENTS_DIR": "_components",
+            "COMPONENTS_DIR": "_panels",
         },
     ],
 }

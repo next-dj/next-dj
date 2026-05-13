@@ -1,0 +1,17 @@
+<section class="rounded-lg border border-border bg-card p-6 space-y-4">
+  {% if section.label %}
+    <header>
+      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{{ section.label }}</h3>
+      {% if section.description %}
+        <p class="mt-1 text-xs text-muted-foreground">{{ section.description }}</p>
+      {% endif %}
+    </header>
+  {% endif %}
+  <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+    {% for info in section.fields %}
+      <div class="{% if info.kind == 'textarea' %}md:col-span-2{% endif %}">
+        {% component "form_field" info=info %}
+      </div>
+    {% endfor %}
+  </div>
+</section>

@@ -1,0 +1,53 @@
+{% with required=info.field.field.required field_value=info.field.value %}
+<div class="space-y-1.5{% if info.field.errors %} text-destructive{% endif %}">
+  {% if info.kind != "checkbox" %}
+    <label for="{{ info.field.id_for_label }}" class="block text-sm font-medium text-foreground">
+      {{ info.field.label }}{% if required and not info.is_extra %} <span class="text-destructive">*</span>{% endif %}
+    </label>
+  {% endif %}
+  <div class="block">
+    {% if info.kind == "textarea" %}
+      <textarea name="{{ info.field.html_name }}" id="{{ info.field.id_for_label }}" rows="4"
+                class="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                {% if required and not info.is_extra %}required{% endif %}>{% if not info.is_extra %}{{ field_value|default_if_none:'' }}{% endif %}</textarea>
+    {% elif info.kind == "checkbox" %}
+      <label class="inline-flex items-center gap-2 text-sm">
+        <input type="checkbox" name="{{ info.field.html_name }}" id="{{ info.field.id_for_label }}"
+               class="h-4 w-4 rounded border-input"
+               {% if field_value and not info.is_extra %}checked{% endif %}>
+        <span>{{ info.field.label }}</span>
+      </label>
+    {% elif info.kind == "select" %}
+      <select name="{{ info.field.html_name }}" id="{{ info.field.id_for_label }}"
+              class="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring">
+        {% for value, label in info.field.field.choices %}
+          <option value="{{ value }}" {% if not info.is_extra and field_value|stringformat:'s' == value|stringformat:'s' %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    {% elif info.kind == "select_multi" %}
+      <select name="{{ info.field.html_name }}" id="{{ info.field.id_for_label }}" multiple size="8"
+              class="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring">
+        {% for value, label in info.field.field.choices %}
+          <option value="{{ value }}" {% if not info.is_extra and value|stringformat:'s' in info.selected_strs %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    {% else %}
+      <input type="{{ info.input_type }}"
+             name="{{ info.field.html_name }}" id="{{ info.field.id_for_label }}"
+             value="{% if not info.is_extra %}{{ field_value|default_if_none:'' }}{% endif %}"
+             class="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+             {% if required and not info.is_extra %}required{% endif %}>
+    {% endif %}
+  </div>
+  {% if info.field.help_text %}
+    <p class="text-xs text-muted-foreground">{{ info.field.help_text|safe }}</p>
+  {% endif %}
+  {% if info.field.errors %}
+    <ul class="space-y-0.5 text-xs text-destructive">
+      {% for error in info.field.errors %}
+        <li>{{ error }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</div>
+{% endwith %}
