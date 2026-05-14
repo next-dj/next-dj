@@ -26,11 +26,7 @@ _LOG_CHANGE_MESSAGE = "Changed via shadcn-admin form"
 
 @dataclass(frozen=True, slots=True)
 class AdminFormSpec:
-    """Frozen bundle of everything an admin form view needs per request.
-
-    Resolved once in factory / context / handler and passed around as a
-    single value so `get_object` and `get_form` are not called twice.
-    """
+    """Frozen bundle of `(model, ModelAdmin, instance)` shared per request."""
 
     request: HttpRequest
     app_label: str

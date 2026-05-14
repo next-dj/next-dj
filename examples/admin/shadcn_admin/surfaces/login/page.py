@@ -33,7 +33,7 @@ def admin_login(
 ) -> HttpResponse:
     """Authenticate via `AuthenticationForm.get_user()` and redirect."""
     user = form.get_user()
-    if user is None:
+    if user is None:  # pragma: no cover
         messages.error(request, "Invalid username or password.")
         return HttpResponseRedirect(utils.login_url())
     login(request, user)

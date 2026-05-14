@@ -33,12 +33,12 @@ page.
 |-----|-------------|
 | `/admin/login/` | Username and password sign-in. `AdminPermissionMiddleware` redirects every other path here for anonymous or non-staff users. |
 | `/admin/` | Dashboard with one card per registered app and quick links to each model's changelist and Add page. |
-| `/admin/<app_label>/<model_name>/` | Changelist. `list_display` columns, sortable headers (`?o=<n>`), search box (when `search_fields` is set), `list_filter` aside, paginated results, bulk-action bar. |
+| `/admin/<app_label>/<model_name>/` | Changelist with `list_display` columns, sortable headers (`?o=<n>`), search box (`search_fields`), `list_filter` aside, pagination, bulk-action bar. |
 | `/admin/<app_label>/<model_name>/add/` | Add view. Fieldsets from `ModelAdmin.get_fieldsets`, widgets from `ModelAdmin.get_form`, inline formsets. |
 | `/admin/<app_label>/<model_name>/<pk>/change/` | Change view. Bound form plus inline formsets bound to existing rows. |
 | `/admin/<app_label>/<model_name>/<pk>/delete/` | Confirmation page. Lists protected references and dependent objects from `admin.utils.get_deleted_objects`. |
 | `/admin/<app_label>/<model_name>/<pk>/history/` | `LogEntry` rows for the object with Added / Changed / Deleted labels and the change message. |
-| `/admin/activity/` | Activity feed from `admin_audit.AdminActivityLog`, written by an `action_dispatched` receiver — one row per `admin:add` / `admin:change` / `admin:delete` / `admin:bulk_action`. |
+| `/admin/activity/` | Activity feed from `admin_audit.AdminActivityLog`, written by an `action_dispatched` receiver. One row per `admin:add` / `admin:change` / `admin:delete` / `admin:bulk_action`. |
 
 A `library` app ships demo models. `Author`, `Tag`, `Book` (FK to
 Author, M2M to Tag, `autocomplete_fields=("author",)`,
@@ -50,8 +50,8 @@ number, autocomplete, and tabular inlines.
 
 A second Django app `admin_audit` ships one model
 (`AdminActivityLog`) and one signal receiver. It hangs off the
-framework's `action_dispatched` signal and writes a row per dispatch;
-no change to `library` or `shadcn_admin` is required for it to work.
+framework's `action_dispatched` signal and writes a row per dispatch.
+No change to `library` or `shadcn_admin` is required for it to work.
 
 ## How to run
 
@@ -226,7 +226,7 @@ inline row fails, `clean()` raises `ValidationError`, so
 origin page through its `form_validation_failed` machinery — the
 inputs stay populated, the inline rows show their per-field errors,
 and the user never sees a bare 400. No core change is required for
-this; `Form.clean()` raising `ValidationError` is the same path the
+this. `Form.clean()` raising `ValidationError` is the same path the
 framework already uses for field-level errors.
 
 ### 6. Save and continue / Save and add another
@@ -384,4 +384,18 @@ quoted action name keeps the original control flow.
 - [`next/templatetags/forms.py`](../../next/templatetags/forms.py) for
   `{% form %}` argument compilation.
 - [`docs/content/guide/forms.rst`](../../docs/content/guide/forms.rst)
-  for the form-action lifecycle.
+  for the form-action lifecycle, including the factory pattern used by
+  sections 4 and 5 above.
+- [`docs/content/guide/pages-and-templates.rst`](../../docs/content/guide/pages-and-templates.rst)
+  for the chrome / surfaces layering shown in section 1.
+- [`docs/content/guide/components.rst`](../../docs/content/guide/components.rst)
+  for the component lookup configured under `_panels/`.
+- [`docs/content/guide/context.rst`](../../docs/content/guide/context.rst)
+  for `@context` and `inherit_context` used by `app_list` and
+  `is_auth_page`.
+- [`docs/content/guide/dependency-injection.rst`](../../docs/content/guide/dependency-injection.rst)
+  for `@resolver.dependency` and `Depends("name")` used by the
+  `admin_spec` registration in section 4.
+- [`docs/content/guide/file-router.rst`](../../docs/content/guide/file-router.rst)
+  for the `[str:app_label]/[int:pk]/` directory naming under
+  `surfaces/`.

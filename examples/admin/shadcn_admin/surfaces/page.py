@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Any
 
 from django.apps import apps
@@ -14,7 +15,9 @@ _AUTH_PREFIXES = (utils.LOGIN_URL, "/admin/logout/")
 @context("app_list", inherit_context=True)
 def app_list(request: HttpRequest) -> list[dict[str, Any]]:
     """Return the app/model tree visible to `request` for sidebar and dashboard."""
-    apps_index: dict[str, dict[str, Any]] = {}
+    grouped: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+    # admin.site._registry is Django-internal but unavoidable for an
+    # admin-style enumeration. No public API exposes the registered map.
     for model, model_admin in admin.site._registry.items():
         if not model_admin.has_module_permission(request):
             continue
@@ -22,16 +25,8 @@ def app_list(request: HttpRequest) -> list[dict[str, Any]]:
         if True not in perms.values():  # pragma: no cover
             continue
         app_label = model._meta.app_label
-        app = apps_index.setdefault(
-            app_label,
-            {
-                "name": apps.get_app_config(app_label).verbose_name,
-                "app_label": app_label,
-                "models": [],
-            },
-        )
         model_name = model._meta.model_name
-        app["models"].append(
+        grouped[app_label].append(
             {
                 "name": model._meta.verbose_name_plural,
                 "object_name": model._meta.object_name,
@@ -42,9 +37,17 @@ def app_list(request: HttpRequest) -> list[dict[str, Any]]:
                 ),
             }
         )
-    for app in apps_index.values():
-        app["models"].sort(key=lambda m: m["name"])
-    return sorted(apps_index.values(), key=lambda a: a["name"].lower())
+    return sorted(
+        (
+            {
+                "name": apps.get_app_config(app_label).verbose_name,
+                "app_label": app_label,
+                "models": sorted(models, key=lambda m: m["name"]),
+            }
+            for app_label, models in grouped.items()
+        ),
+        key=lambda a: a["name"].lower(),
+    )
 
 
 @context("is_auth_page", inherit_context=True)

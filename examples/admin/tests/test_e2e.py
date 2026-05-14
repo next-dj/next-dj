@@ -63,13 +63,9 @@ class TestDashboard:
         """Each chrome piece — sidebar, topbar, app card — appears exactly once."""
         r = admin_client.get("/admin/")
         body = r.content.decode()
-        # admin shell wrapper around the entire page
         assert body.count('class="flex min-h-screen w-full"') == 1
-        # topbar with sign-out / breadcrumbs
         assert body.count('class="flex h-14 shrink-0') == 1
-        # dashboard description (page_header) renders once
         assert body.count("Models registered with django.contrib.admin") == 1
-        # each app appears in sidebar (once) + dashboard card (once)
         assert body.count("Authentication and Authorization") == 2
         assert body.count(">Library<") == 2
 
@@ -89,15 +85,12 @@ class TestAuth:
         )
         assert r.status_code == 302
         assert r["Location"] == "/admin/"
-        # session is logged in: subsequent request goes through
         r2 = client.get("/admin/")
         assert r2.status_code == 200
 
     def test_logout_clears_session(self, admin_client):
-        # already logged in via fixture
         r = admin_client.post_action("admin:logout", {})
         assert r.status_code == 302
-        # the next request is unauthenticated, so redirected back to login
         r2 = admin_client.get("/admin/")
         assert r2.status_code == 302
         assert r2["Location"].startswith("/admin/login/")
@@ -156,7 +149,6 @@ class TestChangelist:
         [
             "/admin/library/nonexistent/",
             "/admin/nonexistent_app/foo/",
-            # `auth.Permission` exists but `admin.site` does not register it.
             "/admin/auth/permission/",
         ],
         ids=("unknown_model", "unknown_app", "unregistered_model"),
@@ -173,16 +165,12 @@ class TestChangelist:
     def test_changelist_title_is_capitalized(self, admin_client):
         r = admin_client.get("/admin/library/tag/")
         body = r.content.decode()
-        # `verbose_name_plural` is lowercase by Django convention, but the
-        # changelist page header capitalises it.
         assert ">Tags<" in body
 
     def test_changelist_without_filters_omits_sidebar(self, admin_client):
-        # Tag admin has no `list_filter`, so the filters panel must not render.
         r = admin_client.get("/admin/library/tag/")
         body = r.content.decode()
         assert "Filters" not in body
-        # filters_panel adds a `md:w-60` aside; without filters it is absent.
         assert "md:w-60" not in body
 
     def test_pagination_links_render_on_overflow(self, admin_client):
@@ -224,7 +212,6 @@ class TestBulkAction:
                 "action": "",
             },
         )
-        # response_action returns None when nothing is selected — handler redirects.
         assert r.status_code == 302
         assert r["Location"] == "/admin/library/book/"
 
@@ -348,7 +335,6 @@ class TestInlines:
         r = admin_client.get(f"/admin/library/book/{book.pk}/change/")
         assert r.status_code == 200
         body = r.content.decode()
-        # autocomplete_fields = ("author",) should render as a <select>
         assert 'name="author"' in body
         assert '<select name="author"' in body
 
@@ -389,10 +375,8 @@ class TestInlines:
     def test_change_book_with_inline_create(self, admin_client):
         author = Author.objects.create(full_name="A. Author")
         book = Book.objects.create(title="Book", author=author)
-        # Get the change page to discover formset management form values
         get = admin_client.get(f"/admin/library/book/{book.pk}/change/")
         hiddens = _extract_form_hiddens(get.content.decode())
-        # The default ChapterInline has extra=1, so we have 0 existing + 1 extra row
         payload = {
             **hiddens,
             "title": "Book",
@@ -430,7 +414,7 @@ class TestHistoryView:
         assert r.status_code == 200
         body = r.content.decode()
         assert "Changed" in body
-        assert "admin" in body  # username
+        assert "admin" in body
 
     def test_history_unknown_pk_404(self, admin_client):
         r = admin_client.get("/admin/library/tag/99999/history/")
@@ -471,13 +455,12 @@ class TestInlineValidationFailure:
             "summary": "",
             "price": "0",
             "chapters-0-number": "1",
-            "chapters-0-title": "",  # required, empty → invalid
+            "chapters-0-title": "",
             "chapters-0-word_count": "10",
         }
         r = admin_client.post_action(action_name, payload)
         assert r.status_code == 200
         body = r.content.decode()
-        # User's typed title is echoed back so they don't have to retype.
         assert "Book with bad chapter" in body
         if flow == "add":
             assert not Book.objects.filter(title="Book with bad chapter").exists()
@@ -542,7 +525,6 @@ class TestCustomBulkAction:
         r = admin_client.get("/admin/library/book/")
         body = r.content.decode()
         assert 'value="mark_as_published"' in body
-        # Description has `%(verbose_name_plural)s` interpolated.
         assert "Mark selected books as published" in body
 
     def test_action_updates_status(self, admin_client):
@@ -585,7 +567,6 @@ class TestActivityLog:
         assert entry.app_label == "library"
         assert entry.model_name == "tag"
         assert entry.object_repr == "Thriller"
-        # Form-bearing action captured user via dep_cache["admin_spec"].
         assert entry.user is not None
 
     def test_bulk_action_records_entry_without_user(self, admin_client):
@@ -602,7 +583,6 @@ class TestActivityLog:
         )
         entries = list(AdminActivityLog.objects.filter(action="bulk_action"))
         assert len(entries) == 1
-        # No form attached to handler-only action, so user stays empty.
         assert entries[0].user is None
 
     def test_activity_page_renders_rows(self, admin_client):
@@ -682,8 +662,6 @@ class TestFlashMessages:
             follow=True,
         )
         body = r.content.decode()
-        # Django formats the auto-message as "1 book was marked as published."
-        # (the `%(verbose_name)s` placeholder lands in the message text).
         assert "marked as published" in body.lower()
 
     def test_login_success_flashes_welcome(self, client, admin_user):

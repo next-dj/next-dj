@@ -10,13 +10,17 @@ DEBUG = True
 ALLOWED_HOSTS: list[str] = ["*"]
 
 INSTALLED_APPS = [
+    # Django contrib.
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.admin",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # next.dj framework.
     "next",
+    # Project apps. shadcn_admin renders the UI, library is the demo
+    # domain, admin_audit observes admin actions via signals.
     "shadcn_admin",
     "library",
     "admin_audit",

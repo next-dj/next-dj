@@ -35,8 +35,8 @@ def _columns(
 ) -> list[dict[str, Any]]:
     ordering_columns = cl.get_ordering_field_columns()
     sortable_by = cl.sortable_by
-    columns: list[dict[str, Any]] = []
-    for index, name in enumerate(visible):
+
+    def entry(index: int, name: str) -> dict[str, Any]:
         is_sortable = sortable_by is None or name in sortable_by
         direction = ordering_columns.get(index)
         prefix = "-" if direction == "asc" else ""
@@ -45,16 +45,15 @@ def _columns(
             if is_sortable
             else None
         )
-        columns.append(
-            {
-                "name": name,
-                "label": str(label_for_field(name, model, model_admin=model_admin)),
-                "sortable": is_sortable,
-                "direction": direction,
-                "sort_url": sort_url,
-            }
-        )
-    return columns
+        return {
+            "name": name,
+            "label": str(label_for_field(name, model, model_admin=model_admin)),
+            "sortable": is_sortable,
+            "direction": direction,
+            "sort_url": sort_url,
+        }
+
+    return [entry(i, name) for i, name in enumerate(visible)]
 
 
 def _row_cell(

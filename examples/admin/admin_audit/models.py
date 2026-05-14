@@ -5,14 +5,7 @@ from django.db import models
 
 
 class AdminActivityLog(models.Model):
-    """One row per `action_dispatched` for any `admin:*` action.
-
-    Records the action name, target model, object repr, response status,
-    and the user when the dispatched action carries a form (so an admin
-    form factory could attach the spec). Form-less actions (`admin:delete`,
-    `admin:bulk_action`) leave `user` empty because the signal payload has
-    no request reference.
-    """
+    """One row per `action_dispatched` for any `admin:*` action."""
 
     ACTION_ADD = "add"
     ACTION_CHANGE = "change"

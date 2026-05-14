@@ -24,6 +24,8 @@ def resolve_model_admin(
     except LookupError as exc:
         msg = str(exc)
         raise Http404(msg) from exc
+    # admin.site._registry is Django-internal but unavoidable for an
+    # admin-style enumeration. No public API exposes the registered map.
     model_admin = admin.site._registry.get(model)
     if model_admin is None:
         msg = f"Model {app_label}.{model_name} is not registered with admin."
@@ -41,7 +43,8 @@ def resolve_object_or_404(
     model, model_admin = resolve_model_admin(app_label, model_name)
     obj = model_admin.get_object(request, pk)
     if obj is None:
-        raise Http404
+        msg = f"Object {app_label}.{model_name} with pk={pk} not found."
+        raise Http404(msg)
     return model, model_admin, obj
 
 

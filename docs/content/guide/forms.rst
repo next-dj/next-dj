@@ -343,7 +343,7 @@ cheap and tests pin a stable shape.
            "inlines": [formset_spec(fs) for fs in inlines],
        }
 
-.. code-block:: html
+.. code-block:: htmldjango
 
    {% for section in form_state.form_spec.sections %}
      <fieldset><legend>{{ section.label }}</legend>
