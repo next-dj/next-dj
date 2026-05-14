@@ -1,10 +1,3 @@
-"""Benchmarks for ``next.forms.backends.FormActionFactory``.
-
-Pins the cost of resolving a backend dotted path through the framework
-import cache (warm) versus a fresh import (cold). The factory runs once
-per backend entry on first use of the manager.
-"""
-
 from __future__ import annotations
 
 import pytest

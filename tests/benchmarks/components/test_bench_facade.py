@@ -1,10 +1,3 @@
-"""Benchmarks for ``next.components.facade.render_component`` signal overhead.
-
-``render_component`` emits ``component_rendered`` after every render. These
-benches quantify the Signal.send cost with and without an attached
-receiver so regressions there are visible as soon as they land.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

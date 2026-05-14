@@ -1,5 +1,3 @@
-"""Tests for next.pages watch path helpers."""
-
 from pathlib import Path
 from unittest.mock import patch
 

@@ -26,6 +26,7 @@ Each example is a complete mini-product with e2e tests and a dedicated README.
 | [`kanban/`](kanban/) | Custom `StaticBackend` that registers a `.jsx` kind through the public `KindRegistry`, multi-level `@context(serialize=True)` with `DeepMergePolicy`, `HashContentDedup` on co-located CSS, composite components with React JSX |
 | [`live-polls/`](live-polls/) | Server-Sent Events stream from a `threading.Condition` broker with per-poll monotonic revisions, signal-driven fan-out using the bound form on `action_dispatched`, locally bundled Vue 3 SFC subscribing through `EventSource`, custom `.vue` asset kind, three-level nested layouts with `inherit_context=True` |
 | [`observability/`](observability/) | Every signal group wired through one receiver each, custom `ComponentsBackend` and `DedupStrategy`, `JsContextSerializer` swapped both globally and per-decorator on `live_stats`, React sparkline via CDN-loaded Babel-standalone, nested layout with filter form action |
+| [`admin/`](admin/) | Full Django admin UI on next.dj: shadcn-style templates over `ModelAdmin.get_changelist_instance()`/`get_form()`/`get_inline_instances()`/`get_actions()`, request-aware form factories via `@action(form_class=callable)`, two page roots (admin shell + auth shell), middleware guard for `/admin/`, LogEntry history |
 
 ## Running any example
 

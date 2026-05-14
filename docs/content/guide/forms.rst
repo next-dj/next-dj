@@ -285,6 +285,90 @@ The form instance is available inside the ``{% form %}`` tag:
        <button type="submit">Submit</button>
    {% endform %}
 
+Custom rendering with ``field_spec`` / ``form_spec`` / ``formset_spec``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When you render forms in custom templates (a design system, an
+admin-style UI, anything that does not call ``{{ form.as_p }}``),
+:mod:`next.forms.serializers` provides three frozen-dataclass builders
+that flatten Django's form/formset/widget machinery into a stable shape:
+
+- ``field_spec(bound_field)`` returns a :class:`~next.forms.FieldSpec`
+  with ``kind`` (one of ``textarea``, ``checkbox``, ``select``,
+  ``select_multi``, ``input``), ``input_type`` (the HTML5 type from the
+  widget — ``text``, ``email``, ``date``, ``password``, …), the
+  pre-computed bound ``value``, the ``selected`` tuple for multi-selects,
+  and the original ``bound`` :class:`~django.forms.BoundField` for any
+  attribute the spec does not pre-compute (``label``, ``html_name``,
+  ``id_for_label``, ``errors``, ``help_text``, ``bound.field.choices``,
+  ``bound.field.required``).
+- ``formset_spec(formset)`` returns a :class:`~next.forms.FormsetSpec`
+  with ``prefix``, ``verbose_name_plural``, ``management_form``, a tuple
+  of :class:`~next.forms.FormsetRowSpec` rows, ``non_form_errors``, and
+  ``can_delete``. Each row pre-rolls every hidden ``BoundField`` into a
+  single ``hidden_html`` string (render with ``{{ row.hidden_html|safe }}``)
+  and flags blank extra rows via ``row.is_extra``.
+- ``form_spec(form, fieldsets=...)`` groups fields into a tuple of
+  :class:`~next.forms.FormSectionSpec`. ``fieldsets`` accepts Django's
+  ``(label, opts)`` admin shape (``opts["fields"]`` may nest tuples for
+  multi-column rows). Pass ``fieldsets=None`` to wrap every field in one
+  unlabelled section.
+
+Why use them: the ``kind`` branch makes a template render a Django form
+without inspecting widget classes, ``Admin*Widget`` subclasses and
+third-party widgets in the same hierarchy classify correctly via
+``isinstance`` against the base ``django.forms`` widgets, and
+``RelatedFieldWidgetWrapper`` is unwrapped transparently. The dataclasses
+are ``frozen=True, slots=True`` so attribute access in templates stays
+cheap and tests pin a stable shape.
+
+.. code-block:: python
+
+   from next.components import component
+   from next.forms import form_spec, formset_spec
+
+   @component.context("form_state")
+   def form_state(request, model_admin, instance):
+       bound = model_admin.get_form(request, instance)(instance=instance)
+       inlines = [
+           inline.get_formset(request, instance)(instance=instance)
+           for inline in model_admin.get_inline_instances(request, instance)
+       ]
+       return {
+           "form": bound,
+           "form_spec": form_spec(
+               bound,
+               fieldsets=model_admin.get_fieldsets(request, instance),
+           ),
+           "inlines": [formset_spec(fs) for fs in inlines],
+       }
+
+.. code-block:: htmldjango
+
+   {% for section in form_state.form_spec.sections %}
+     <fieldset><legend>{{ section.label }}</legend>
+       {% for info in section.fields %}
+         {% if info.kind == "textarea" %}
+           <textarea name="{{ info.bound.html_name }}"
+                     {% if info.bound.field.required %}required{% endif %}>{{ info.value|default_if_none:"" }}</textarea>
+         {% elif info.kind == "select_multi" %}
+           <select name="{{ info.bound.html_name }}" multiple>
+             {% for v, label in info.bound.field.choices %}
+               <option value="{{ v }}" {% if v|stringformat:"s" in info.selected %}selected{% endif %}>{{ label }}</option>
+             {% endfor %}
+           </select>
+         {% else %}
+           <input type="{{ info.input_type }}" name="{{ info.bound.html_name }}"
+                  value="{{ info.value|default_if_none:"" }}">
+         {% endif %}
+       {% endfor %}
+     </fieldset>
+   {% endfor %}
+
+Working reference: ``examples/admin/shadcn_admin/_panels/admin_form/``
+uses all three builders to render Django ``ModelAdmin`` forms with
+inline formsets and admin-style fieldsets.
+
 Handler Responses
 ~~~~~~~~~~~~~~~~~
 
@@ -1101,9 +1185,12 @@ The signals emitted by :mod:`next.forms.signals` let external code observe actio
   Kwargs: ``action_name``, ``uid``, ``form_class``, ``namespace``.
 * ``action_dispatched`` fires after a backend finishes dispatch for a request.
   Kwargs: ``action_name``, ``duration_ms``, ``response_status``, ``form``,
-  ``url_kwargs``. ``form`` is the bound form post-validation, or ``None`` for
-  handler-only actions. ``url_kwargs`` is a copy of the resolved kwargs so
-  receivers can route on the action payload without re-querying state.
+  ``url_kwargs``, ``dep_cache``. ``form`` is the bound form post-validation,
+  or ``None`` for handler-only actions. ``url_kwargs`` is a copy of the
+  resolved kwargs so receivers can route on the action payload without
+  re-querying state. ``dep_cache`` is a snapshot of named ``Depends("…")``
+  values resolved during the dispatch — receivers can read those without
+  re-running their providers (e.g. ``dep_cache.get("admin_spec")``).
 * ``form_validation_failed`` fires after a submitted form fails validation.
   Kwargs: ``action_name``, ``error_count``, ``field_names``.
 

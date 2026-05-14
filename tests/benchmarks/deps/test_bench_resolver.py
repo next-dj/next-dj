@@ -1,10 +1,3 @@
-"""Benchmarks for ``next.deps.resolver.DependencyResolver``.
-
-``resolve_dependencies`` walks a callable's signature on every render —
-of a page, a component, or a form handler. Baseline numbers here make
-regressions in the provider chain visible immediately.
-"""
-
 from __future__ import annotations
 
 from unittest.mock import MagicMock

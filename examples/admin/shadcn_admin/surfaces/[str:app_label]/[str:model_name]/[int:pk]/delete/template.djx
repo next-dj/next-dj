@@ -1,0 +1,43 @@
+<div class="space-y-6">
+  {% #component "page_header" title="Delete" description=delete_state.obj_repr %}{% /component %}
+
+  {% if delete_state.protected %}
+    {% #component "alert" variant="destructive" %}
+      {% #slot "content" %}
+        <p>This object cannot be deleted because it is referenced by protected objects:</p>
+        <ul class="mt-2 list-disc pl-5">
+          {% for p in delete_state.protected %}<li>{{ p }}</li>{% endfor %}
+        </ul>
+      {% /slot %}
+    {% /component %}
+  {% elif delete_state.perms_needed %}
+    {% #component "alert" variant="warning" %}
+      {% #slot "content" %}
+        <p>You lack the following permissions to delete related objects: {{ delete_state.perms_needed|join:", " }}.</p>
+      {% /slot %}
+    {% /component %}
+  {% endif %}
+
+  <section class="rounded-lg border border-border bg-card p-6 space-y-4">
+    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Will be deleted</h3>
+    <p class="text-sm">{{ delete_state.verbose_name }} <span class="font-medium">{{ delete_state.obj_repr }}</span> together with the following related objects:</p>
+    {% if delete_state.model_count %}
+      <ul class="list-disc pl-5 text-sm text-muted-foreground">
+        {% for name, count in delete_state.model_count %}
+          <li>{{ count }} × {{ name }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+
+  {% if delete_state.can_delete %}
+    {% form @action="admin:delete" class="flex items-center justify-end gap-2 pt-2" %}
+      {% component "button" href=delete_state.change_url text="Cancel" variant="outline" %}
+      {% component "button" type="submit" text="Yes, delete" variant="destructive" %}
+    {% endform %}
+  {% else %}
+    <div class="flex items-center justify-end gap-2 pt-2">
+      {% component "button" href=delete_state.change_url text="Back" variant="outline" %}
+    </div>
+  {% endif %}
+</div>

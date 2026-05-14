@@ -1,11 +1,3 @@
-"""Benchmarks for ``next.forms.checks``.
-
-`manage.py check` runs both the collision check and the
-`DEFAULT_FORM_ACTION_BACKENDS` shape check on every startup. These benches
-pin the happy path and both error paths so a future regression to the
-import-cached lookup surfaces as a measurable slowdown.
-"""
-
 from __future__ import annotations
 
 import pytest

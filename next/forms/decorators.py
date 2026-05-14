@@ -17,7 +17,9 @@ if TYPE_CHECKING:
 def action(
     name: str,
     *,
-    form_class: type[django_forms.Form] | None = None,
+    form_class: type[django_forms.Form]
+    | Callable[..., type[django_forms.Form]]
+    | None = None,
     namespace: str | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Register a named form action. Names must be unique across the project.
@@ -25,6 +27,12 @@ def action(
     Pass `namespace="app_label"` to prefix the stored key with
     `"app_label:"`, which lets two apps use the same short name without
     colliding. Reverse is by the namespaced name.
+
+    `form_class` may be a `Form` subclass or a callable that returns one
+    when called. Factory callables are dependency-resolved at dispatch
+    time with the request and URL kwargs, which lets admin-style
+    handlers shape the form per request (for example via
+    `ModelAdmin.get_form()`).
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:

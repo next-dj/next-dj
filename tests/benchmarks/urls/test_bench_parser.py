@@ -1,5 +1,3 @@
-"""Benchmarks for ``next.urls.parser.URLPatternParser``."""
-
 from __future__ import annotations
 
 import pytest

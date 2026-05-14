@@ -1,0 +1,7 @@
+{% if flashes %}
+  <div class="mb-6 space-y-2">
+    {% for flash in flashes %}
+      {% component "alert" variant=flash.variant text=flash.text %}
+    {% endfor %}
+  </div>
+{% endif %}

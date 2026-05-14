@@ -1,13 +1,3 @@
-"""Benchmarks for ``next.static.serializers``.
-
-The serializer runs on every ``@context(serialize=True)`` value that lands
-in ``window.Next.context``. These benches establish a baseline for:
-
-- ``resolve_serializer()`` cold and warm cost (no imp cache by design);
-- ``JsonJsContextSerializer.dumps`` on differently shaped payloads;
-- the pydantic branch when the optional dependency is installed.
-"""
-
 from __future__ import annotations
 
 import pytest

@@ -5,8 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django import forms as django_forms
-from django.http import HttpRequest, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponseRedirect, QueryDict
 
+from next.components.context import component as component_ctx
+from next.components.info import ComponentInfo
+from next.components.renderers import _inject_component_context
+from next.deps import REQUEST_DEP_CACHE_ATTR, Depends, resolver
 from next.forms import (
     Form,
     FormActionDispatch,
@@ -17,11 +21,60 @@ from next.forms import (
     form_action_manager,
     page,
 )
+from next.forms.dispatch import (
+    _bind_form_for_post,
+    _form_action_context_callable,
+    _form_from_initial_data,
+    _resolve_form_class,
+)
+from next.forms.signals import action_dispatched
+from next.pages.registry import PageContextRegistry
 
 
 PAGE_MODULE_FOR_FORM_TESTS = (
     Path(__file__).resolve().parent.parent / "site_pages" / "page.py"
 ).resolve()
+
+
+def _run_component_context(tmp_path: Path, request: object) -> object:
+    """Register a `@component.context` referencing `Depends("token")` and invoke it.
+
+    Returns the value the consumer wrote under the `out` key.
+    """
+    module_path = tmp_path / "component.py"
+    module_path.write_text("")
+
+    def provide(token: str = Depends("token")) -> str:
+        return token
+
+    component_ctx._registry.register(module_path, "out", provide)
+    try:
+        info = ComponentInfo(
+            name="t",
+            scope_root=tmp_path,
+            scope_relative="t",
+            template_path=None,
+            module_path=module_path,
+            is_simple=False,
+        )
+        context_data: dict[str, object] = {}
+        _inject_component_context(info, context_data, request)
+        return context_data["out"]
+    finally:
+        component_ctx._registry._registry.pop(module_path.resolve(), None)
+
+
+def _run_page_context(tmp_path: Path, request: object) -> object:
+    """Register a `@context` referencing `Depends("token")` and invoke `collect_context`."""
+    page_file = tmp_path / "page.py"
+    page_file.write_text("")
+
+    def provide(token: str = Depends("token")) -> str:
+        return token
+
+    registry = PageContextRegistry()
+    registry.register_context(page_file, "out", provide)
+    return registry.collect_context(page_file, request).context_data["out"]
 
 
 class TestFormActionDispatch:
@@ -416,3 +469,294 @@ class TestFormDispatchRenderFragmentBranches:
             TypeError, match="instance parameter only supported for ModelForm"
         ):
             FormActionDispatch.dispatch(backend, request, "test_action", meta)
+
+
+class TestResolveFormClass:
+    """`_resolve_form_class`: type passthrough, factory call, error paths."""
+
+    def test_form_class_type_returned_as_is(self, mock_http_request) -> None:
+        """A `Form` subclass returns `(cls, {})` without DI resolution."""
+
+        class F(Form):
+            name = django_forms.CharField(max_length=10)
+
+        request = mock_http_request(method="POST")
+        cls, init_kwargs = _resolve_form_class(F, request, {})
+        assert cls is F
+        assert init_kwargs == {}
+
+    def test_factory_callable_resolves_per_request(self, mock_http_request) -> None:
+        """A callable factory is invoked with DI-resolved kwargs each call."""
+
+        class F(Form):
+            name = django_forms.CharField(max_length=10)
+
+        seen: dict[str, object] = {}
+
+        def factory(request: HttpRequest, model_name: str) -> type[Form]:
+            seen["request"] = request
+            seen["model_name"] = model_name
+            return F
+
+        request = mock_http_request(method="POST")
+        cls, init_kwargs = _resolve_form_class(
+            factory,
+            request,
+            {"model_name": "tag"},
+        )
+        assert cls is F
+        assert init_kwargs == {}
+        assert seen["model_name"] == "tag"
+        assert seen["request"] is request
+
+    def test_factory_can_return_class_and_init_kwargs(self, mock_http_request) -> None:
+        """A factory returning `(cls, init_kwargs)` propagates kwargs through."""
+
+        class F(Form):
+            name = django_forms.CharField(max_length=10)
+
+        def factory(request: HttpRequest) -> tuple[type[Form], dict[str, object]]:
+            return F, {"prefix": "x", "use_required_attribute": False}
+
+        request = mock_http_request(method="POST")
+        cls, init_kwargs = _resolve_form_class(factory, request, {})
+        assert cls is F
+        assert init_kwargs == {"prefix": "x", "use_required_attribute": False}
+
+    def test_non_callable_raises_typeerror(self, mock_http_request) -> None:
+        """An object that is neither a type nor callable is a configuration error."""
+        request = mock_http_request(method="POST")
+        with pytest.raises(TypeError, match="Form subclass or callable"):
+            _resolve_form_class("not-a-form", request, {})
+
+    def test_factory_returning_non_type_raises(self, mock_http_request) -> None:
+        """A factory must return a class or `(cls, init_kwargs)`."""
+
+        def bad_factory(request: HttpRequest) -> object:
+            return "not-a-class"
+
+        request = mock_http_request(method="POST")
+        with pytest.raises(TypeError, match="factory must return a Form subclass"):
+            _resolve_form_class(bad_factory, request, {})
+
+
+class _CustomInitForm(django_forms.Form):
+    """Form whose constructor takes extra kwargs (mimicking AuthenticationForm)."""
+
+    name = django_forms.CharField(max_length=10, required=False)
+
+    def __init__(
+        self,
+        *args: object,
+        label_suffix: str = "",
+        **kwargs: object,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.label_suffix = label_suffix
+
+
+class TestFormClassInitKwargs:
+    """Factory returning `(cls, init_kwargs)` bypasses get_initial."""
+
+    @pytest.mark.parametrize(
+        ("bound", "suffix"),
+        [(False, "?"), (True, "!")],
+        ids=("unbound", "bound"),
+    )
+    def test_form_built_with_init_kwargs(
+        self, mock_http_request, bound, suffix
+    ) -> None:
+        if bound:
+            mock_post = MagicMock()
+            mock_post.get.return_value = "ok"
+            request = mock_http_request(method="POST", POST=mock_post, FILES=None)
+            form = _bind_form_for_post(
+                _CustomInitForm, request, None, init_kwargs={"label_suffix": suffix}
+            )
+        else:
+            form = _form_from_initial_data(
+                _CustomInitForm, None, init_kwargs={"label_suffix": suffix}
+            )
+        assert isinstance(form, _CustomInitForm)
+        assert form.label_suffix == suffix
+
+    def test_context_callable_uses_init_kwargs(self, mock_http_request) -> None:
+        def factory(request: HttpRequest) -> tuple[type[django_forms.Form], dict]:
+            return _CustomInitForm, {"label_suffix": "@"}
+
+        ctx_func = _form_action_context_callable(factory)
+        request = mock_http_request(method="GET")
+        ns = ctx_func(request)
+        assert isinstance(ns.form, _CustomInitForm)
+        assert ns.form.label_suffix == "@"
+
+    def test_dispatch_uses_init_kwargs_and_skips_get_initial(
+        self, mock_http_request
+    ) -> None:
+        def factory(
+            request: HttpRequest,
+        ) -> tuple[type[django_forms.Form], dict]:
+            return _CustomInitForm, {"label_suffix": "$"}
+
+        captured: dict[str, object] = {}
+
+        def handler(form: _CustomInitForm) -> HttpResponseRedirect:
+            captured["form"] = form
+            return HttpResponseRedirect("/")
+
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            "init_kwargs_action",
+            handler,
+            options=FormActionOptions(form_class=factory),
+        )
+
+        post = QueryDict(mutable=True)
+        post["name"] = "x"
+        request = mock_http_request(
+            method="POST",
+            POST=post,
+            FILES=QueryDict(),
+        )
+        meta = backend.get_meta("init_kwargs_action")
+        assert meta is not None
+        response = FormActionDispatch.dispatch(
+            backend, request, "init_kwargs_action", meta
+        )
+        assert response.status_code == 302
+        bound = captured["form"]
+        assert isinstance(bound, _CustomInitForm)
+        assert bound.label_suffix == "$"
+
+
+class TestDispatchSharedDepCache:
+    """Dispatch threads a single dep_cache through factory, handler, and signals."""
+
+    def test_dispatch_attaches_dep_cache_to_request(self, mock_http_request) -> None:
+        """``FormActionDispatch.dispatch`` sets ``request._next_dep_cache`` to a dict."""
+        backend = RegistryFormActionBackend()
+
+        def handler() -> str:
+            return "ok"
+
+        backend.register_action("only_handler", handler, options=FormActionOptions())
+
+        mock_post = MagicMock()
+        mock_post.items.return_value = []
+        request = mock_http_request(method="POST", POST=mock_post)
+
+        meta = backend.get_meta("only_handler")
+        assert meta is not None
+        FormActionDispatch.dispatch(backend, request, "only_handler", meta)
+
+        assert isinstance(getattr(request, REQUEST_DEP_CACHE_ATTR, None), dict)
+
+    def test_action_dispatched_signal_carries_dep_cache(
+        self, mock_http_request
+    ) -> None:
+        """``action_dispatched`` payload includes a ``dep_cache`` snapshot."""
+
+        @resolver.dependency("greeting")
+        def greeting() -> str:
+            return "hi"
+
+        backend = RegistryFormActionBackend()
+
+        def handler(greeting: str = Depends("greeting")) -> str:
+            return greeting
+
+        backend.register_action("dep_handler", handler, options=FormActionOptions())
+
+        seen: dict[str, object] = {}
+
+        def receiver(**kwargs: object) -> None:
+            seen.update(kwargs)
+
+        action_dispatched.connect(receiver)
+        try:
+            mock_post = MagicMock()
+            mock_post.items.return_value = []
+            request = mock_http_request(method="POST", POST=mock_post)
+            meta = backend.get_meta("dep_handler")
+            assert meta is not None
+            FormActionDispatch.dispatch(backend, request, "dep_handler", meta)
+        finally:
+            action_dispatched.disconnect(receiver)
+            resolver._dependency_callables.pop("greeting", None)
+
+        assert "dep_cache" in seen
+        assert isinstance(seen["dep_cache"], dict)
+        assert seen["dep_cache"].get("greeting") == "hi"
+
+    def test_depends_provider_invoked_once_across_phases(
+        self, mock_http_request
+    ) -> None:
+        """A ``Depends("name")`` shared by factory and handler resolves exactly once.
+
+        The dispatcher threads a single ``dep_cache`` through
+        ``_resolve_form_class``, ``form.get_initial``, and the handler
+        (see ``FormActionDispatch._dispatch_with_form``). The resolver's
+        named-dependency cache keys on the ``Depends`` name, so any
+        subsequent phase that asks for the same name hits the cache.
+        """
+        calls = {"n": 0}
+
+        @resolver.dependency("widget")
+        def make_widget() -> str:
+            calls["n"] += 1
+            return "w"
+
+        class WForm(Form):
+            name = django_forms.CharField(max_length=10, required=False)
+
+        def factory(widget: str = Depends("widget")) -> type[Form]:
+            assert widget == "w"
+            return WForm
+
+        def handler_like(widget: str = Depends("widget")) -> str:
+            return widget
+
+        request = mock_http_request(method="POST")
+        dep_cache: dict[str, object] = {}
+        dep_stack: list[str] = []
+
+        try:
+            cls, _ = _resolve_form_class(factory, request, {}, dep_cache, dep_stack)
+            assert cls is WForm
+            resolved = resolver.resolve_dependencies(
+                handler_like,
+                request=request,
+                _cache=dep_cache,
+                _stack=dep_stack,
+            )
+        finally:
+            resolver._dependency_callables.pop("widget", None)
+
+        assert resolved["widget"] == "w"
+        assert calls["n"] == 1
+
+    @pytest.mark.parametrize(
+        "run_consumer",
+        [_run_component_context, _run_page_context],
+        ids=["component_context", "page_context"],
+    )
+    def test_request_scope_cache_rejoined_by_consumer(
+        self, mock_http_request, tmp_path, run_consumer
+    ) -> None:
+        """Re-render consumers reuse ``request._next_dep_cache`` instead of re-resolving."""
+        calls = {"n": 0}
+
+        @resolver.dependency("token")
+        def make_token() -> str:
+            calls["n"] += 1
+            return "fresh"
+
+        try:
+            request = mock_http_request(method="POST")
+            setattr(request, REQUEST_DEP_CACHE_ATTR, {"token": "preloaded"})
+            value = run_consumer(tmp_path, request)
+        finally:
+            resolver._dependency_callables.pop("token", None)
+
+        assert value == "preloaded"
+        assert calls["n"] == 0

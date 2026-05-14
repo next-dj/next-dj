@@ -1,0 +1,22 @@
+<nav class="flex items-center justify-between gap-3 pt-2 text-sm" aria-label="Pagination">
+  <div class="text-muted-foreground">
+    {% if pagination.count == pagination.full_count %}
+      {{ pagination.count }} item{{ pagination.count|pluralize }}
+    {% else %}
+      {{ pagination.count }} of {{ pagination.full_count }} items
+    {% endif %}
+    · page {{ pagination.page }} of {{ pagination.num_pages }}
+  </div>
+  <div class="flex items-center gap-2">
+    {% if pagination.has_previous %}
+      {% component "button" href=pagination.previous_url text="Previous" variant="outline" size="sm" %}
+    {% else %}
+      {% component "button" text="Previous" variant="outline" size="sm" disabled=True %}
+    {% endif %}
+    {% if pagination.has_next %}
+      {% component "button" href=pagination.next_url text="Next" variant="outline" size="sm" %}
+    {% else %}
+      {% component "button" text="Next" variant="outline" size="sm" disabled=True %}
+    {% endif %}
+  </div>
+</nav>

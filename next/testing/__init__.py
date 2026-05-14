@@ -17,7 +17,7 @@ from .isolation import (
     reset_page_cache,
     reset_registries,
 )
-from .loaders import clear_loaded_dirs, eager_load_pages
+from .loaders import clear_loaded_dirs, eager_load_components, eager_load_pages
 from .patching import (
     StaticCollectorProxy,
     override_component_backends,
@@ -47,6 +47,7 @@ __all__ = [
     "capture_framework_signals",
     "capture_signals",
     "clear_loaded_dirs",
+    "eager_load_components",
     "eager_load_pages",
     "find_anchor",
     "make_resolution_context",

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from django.conf import settings
+from django.http import HttpResponseRedirect
 
 
 if TYPE_CHECKING:
@@ -24,7 +25,15 @@ def _make_uid(action_name: str) -> str:
 
 
 def validated_next_form_page_path(request: HttpRequest) -> Path | None:  # noqa: PLR0911
-    """Return a trusted `page.py` path from POST `_next_form_page`, or `None`."""
+    """Return a trusted `page.py` path from POST `_next_form_page`, or `None`.
+
+    Accepts both real `page.py` files and virtual ones — directories whose
+    only source is a sibling `template.djx` (the file router already emits
+    routes for those; see `FilesystemTreeDispatcher._visit`). The downstream
+    renderer (`_load_python_module_memo`, `_load_static_body`) tolerates a
+    missing module and falls back to the template, so virtual pages survive
+    the re-render path on form-validation failures.
+    """
     if not hasattr(request, "POST"):
         return None
     raw = request.POST.get("_next_form_page")
@@ -37,7 +46,9 @@ def validated_next_form_page_path(request: HttpRequest) -> Path | None:  # noqa:
         p = Path(raw_stripped).resolve()
     except OSError:
         return None
-    if p.name != "page.py" or not p.is_file():
+    if p.name != "page.py":
+        return None
+    if not p.is_file() and not (p.parent / "template.djx").is_file():
         return None
     base = getattr(settings, "BASE_DIR", None)
     if base is None:
@@ -49,9 +60,31 @@ def validated_next_form_page_path(request: HttpRequest) -> Path | None:  # noqa:
     return p
 
 
+def _validated_origin_path(raw: object) -> str | None:
+    """Return `raw` as a same-site path or `None`."""
+    if not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    if not raw.startswith("/") or raw.startswith("//"):
+        return None
+    return raw
+
+
+def redirect_to_origin(
+    request: HttpRequest,
+    fallback: str = "/",
+) -> HttpResponseRedirect:
+    """Redirect back to the page that rendered the form."""
+    origin: str | None = None
+    if hasattr(request, "POST"):
+        origin = _validated_origin_path(request.POST.get("_next_form_origin"))
+    return HttpResponseRedirect(origin or fallback)
+
+
 __all__ = [
     "FORM_ACTION_REVERSE_NAME",
     "URL_NAME_FORM_ACTION",
     "_make_uid",
+    "redirect_to_origin",
     "validated_next_form_page_path",
 ]

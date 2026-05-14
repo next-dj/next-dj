@@ -8,11 +8,28 @@ in-progress) without collapsing `None`-valued hits into misses.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 
 _IN_PROGRESS: object = object()
 _CACHE_MISS: object = object()
+
+
+REQUEST_DEP_CACHE_ATTR: Final[str] = "_next_dep_cache"
+
+
+def get_request_dep_cache(request: object | None) -> dict[str, Any] | None:
+    """Return the dispatch-scoped dep cache attached to `request`, or `None`.
+
+    `FormActionDispatch.dispatch` attaches its `dep_cache` dict to the
+    request so downstream renderers (page context, component context)
+    can rejoin the same DI cache during a validation-failure re-render.
+    Consumers wrap the returned dict in `DependencyCache` to share state.
+    """
+    if request is None:
+        return None
+    cache = getattr(request, REQUEST_DEP_CACHE_ATTR, None)
+    return cache if isinstance(cache, dict) else None
 
 
 class DependencyCycleError(Exception):

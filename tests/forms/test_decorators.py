@@ -366,6 +366,30 @@ class TestValidatedNextFormPagePath:
         req.POST = {"_next_form_page": str(p.resolve())}
         assert validated_next_form_page_path(req) is None
 
+    def test_virtual_page_with_sibling_template(self, tmp_path, monkeypatch) -> None:
+        """Virtual `page.py` (only `template.djx` exists alongside) is accepted."""
+        page_dir = tmp_path / "project" / "leaf"
+        page_dir.mkdir(parents=True)
+        (page_dir / "template.djx").write_text("<p>ok</p>")
+        virtual = page_dir / "page.py"
+        req = HttpRequest()
+        req.method = "POST"
+        req.POST = {"_next_form_page": str(virtual)}
+        monkeypatch.setattr("django.conf.settings.BASE_DIR", tmp_path / "project")
+        result = validated_next_form_page_path(req)
+        assert result == virtual.resolve()
+
+    def test_missing_page_py_and_no_template(self, tmp_path, monkeypatch) -> None:
+        """Non-existent page.py with no sibling template.djx yields None."""
+        page_dir = tmp_path / "project" / "leaf"
+        page_dir.mkdir(parents=True)
+        virtual = page_dir / "page.py"
+        req = HttpRequest()
+        req.method = "POST"
+        req.POST = {"_next_form_page": str(virtual)}
+        monkeypatch.setattr("django.conf.settings.BASE_DIR", tmp_path / "project")
+        assert validated_next_form_page_path(req) is None
+
     def test_base_dir_none(self, monkeypatch) -> None:
         """Missing ``settings.BASE_DIR`` yields None."""
         req = HttpRequest()

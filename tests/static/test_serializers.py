@@ -1,5 +1,3 @@
-"""Tests for JS-context serializer protocol and built-in implementations."""
-
 from __future__ import annotations
 
 import datetime as dt

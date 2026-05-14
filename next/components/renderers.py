@@ -16,7 +16,7 @@ from django.middleware.csrf import get_token
 from django.template import Context as DjangoTemplateContext, Template
 from django.utils.functional import SimpleLazyObject
 
-from next.deps import resolver
+from next.deps import get_request_dep_cache, resolver
 from next.deps.cache import DependencyCache
 
 from .context import component
@@ -83,7 +83,8 @@ def _inject_component_context(
 
     collector: StaticCollector | None = context_data.get("_static_collector")
 
-    cache = DependencyCache()
+    shared = get_request_dep_cache(request)
+    cache = DependencyCache(backing_dict=shared) if shared else DependencyCache()
     stack: list[str] = []
 
     for ctx_func in ctx_funcs:

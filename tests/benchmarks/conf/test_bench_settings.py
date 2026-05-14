@@ -1,5 +1,3 @@
-"""Benchmarks for ``next.conf.settings.NextFrameworkSettings``."""
-
 from __future__ import annotations
 
 import pytest

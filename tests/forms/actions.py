@@ -1,9 +1,3 @@
-"""Standalone form action registrations used across form tests.
-
-Imported by tests/conftest.py to register actions before Django's URLconf loads.
-No pytest imports — this module must be importable without pytest.
-"""
-
 from django import forms
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 

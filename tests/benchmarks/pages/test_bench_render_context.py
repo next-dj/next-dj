@@ -1,11 +1,3 @@
-"""Benchmarks for ``Page.build_render_context`` and the ``page_rendered`` signal.
-
-``build_render_context`` runs on every HTTP page render and collects every
-``@context`` value the page (and its layout ancestors) declare. The heavy
-cases here show how cost scales with context-function count and how much
-``page_rendered.send`` adds when listeners are attached.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

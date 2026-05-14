@@ -1,5 +1,3 @@
-"""Tests for URL pattern parsing and page URL pattern creation."""
-
 import pytest
 
 from next.urls import FileRouterBackend, URLPatternParser

@@ -1,5 +1,3 @@
-"""Tests for next.pages check functions."""
-
 from pathlib import Path
 from unittest.mock import MagicMock
 

@@ -1,5 +1,3 @@
-"""Benchmarks for ``next.apps.autoreload`` install/uninstall wiring."""
-
 from __future__ import annotations
 
 import pytest

@@ -13,6 +13,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+from next.components import components_manager
+
 
 _loaded_dirs: set[Path] = set()
 
@@ -66,4 +68,13 @@ def clear_loaded_dirs() -> None:
     _loaded_dirs.clear()
 
 
-__all__ = ["clear_loaded_dirs", "eager_load_pages"]
+def eager_load_components() -> None:
+    """Import every registered `component.py` so decorators register before tests."""
+    components_manager._ensure_backends()
+    for backend in components_manager._backends:
+        ensure = getattr(backend, "_ensure_loaded", None)
+        if callable(ensure):
+            ensure()
+
+
+__all__ = ["clear_loaded_dirs", "eager_load_components", "eager_load_pages"]

@@ -1,5 +1,3 @@
-"""Benchmarks for ``next.static.collector.StaticCollector``."""
-
 from __future__ import annotations
 
 import pytest

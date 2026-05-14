@@ -1,0 +1,30 @@
+<div class="space-y-6">
+  {% #component "page_header" title="History" description=history_state.obj_repr %}{% /component %}
+
+  {% if history_state.rows %}
+    <div class="overflow-x-auto rounded-lg border border-border bg-card">
+      <table class="w-full text-sm">
+        <thead class="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+          <tr>
+            <th class="px-3 py-2 text-left font-medium">When</th>
+            <th class="px-3 py-2 text-left font-medium">User</th>
+            <th class="px-3 py-2 text-left font-medium">Action</th>
+            <th class="px-3 py-2 text-left font-medium">Details</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-border">
+          {% for row in history_state.rows %}
+            <tr>
+              <td class="px-3 py-2 align-top text-xs text-muted-foreground">{{ row.time|date:"Y-m-d H:i:s" }}</td>
+              <td class="px-3 py-2 align-top">{{ row.user|default:"—" }}</td>
+              <td class="px-3 py-2 align-top"><span class="rounded-full bg-muted px-2 py-0.5 text-xs">{{ row.action }}</span></td>
+              <td class="px-3 py-2 align-top">{{ row.message|default:"—" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    {% #component "empty_state" title="No history yet" description="Changes to this record will appear here." %}{% /component %}
+  {% endif %}
+</div>

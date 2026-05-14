@@ -1,5 +1,3 @@
-"""Tests for next.pages.registry."""
-
 from unittest.mock import MagicMock
 
 import pytest

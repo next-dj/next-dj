@@ -1,5 +1,3 @@
-"""Tests for next.pages.signals: template_loaded, context_registered, page_rendered."""
-
 from pathlib import Path
 from typing import Any
 

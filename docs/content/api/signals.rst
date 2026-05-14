@@ -64,9 +64,10 @@ Each signal's sender and kwargs are documented on its subsystem page:
   the source ``config``.
 - :mod:`next.forms.signals` — ``action_registered``, ``action_dispatched``,
   ``form_validation_failed``. ``action_dispatched`` carries the bound
-  ``form`` (``None`` for handler-only actions) and a copy of the
-  resolved ``url_kwargs`` so receivers can route on action payload
-  without re-querying state.
+  ``form`` (``None`` for handler-only actions), a copy of the resolved
+  ``url_kwargs``, and a ``dep_cache`` snapshot of every named
+  ``Depends("…")`` value resolved during the dispatch so receivers can
+  read those without re-running their providers.
 - :mod:`next.static.signals` — ``asset_registered``, ``backend_loaded``,
   ``collector_finalized``, ``html_injected``. The latter two carry the
   active :class:`~django.http.HttpRequest` (or ``None`` for renders outside

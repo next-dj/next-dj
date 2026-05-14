@@ -1,0 +1,4 @@
+<div class="w-full max-w-md space-y-4 text-center">
+  <p class="text-sm text-muted-foreground">You have been signed out.</p>
+  {% component "button" href="/admin/login/" text="Sign in again" variant="outline" %}
+</div>
