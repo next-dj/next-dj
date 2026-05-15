@@ -57,7 +57,17 @@ extensions = [
     "myst_parser",
     "sphinx_design",
     "sphinx_copybutton",
+    "sphinxcontrib.mermaid",
+    "sphinx_reredirects",
+    "sphinx.ext.todo",
 ]
+
+# show TODO admonitions while content is in flight
+todo_include_todos = True
+
+# mermaid configuration
+mermaid_output_format = "raw"
+mermaid_init_js = "mermaid.initialize({startOnLoad:true, theme:'default'});"
 
 # autodoc configuration
 autodoc_default_options = {
@@ -89,10 +99,52 @@ templates_path = ["_templates"]
 
 # list of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "content/guide/**",
+    "content/api/**",
+    "content/reference/**",
+    "content/architecture/**",
+    "content/contributing/documentation-guide.rst",
+    "content/contributing/contributing.rst",
+]
 
-# 404 and content/guide/index are intentionally not in toctree (no nav entry)
-suppress_warnings = ["toc.not_included"]
+# 404 page is intentionally not in toctree
+# autodoc cross-references to stdlib types (Path, HttpRequest, etc.) generate noisy
+# warnings that we do not want to treat as errors during this phase of the rewrite
+suppress_warnings = ["toc.not_included", "ref.class", "autodoc"]
+
+# legacy URL redirects (sphinx-reredirects)
+redirects = {
+    "content/guide/getting-started": "../intro/install.html",
+    "content/guide/file-router": "../topics/file-router.html",
+    "content/guide/pages-and-templates": "../topics/pages.html",
+    "content/guide/components": "../topics/components.html",
+    "content/guide/context": "../topics/context.html",
+    "content/guide/forms": "../topics/forms/index.html",
+    "content/guide/dependency-injection": "../topics/dependency-injection.html",
+    "content/guide/static-assets": "../topics/static-assets/index.html",
+    "content/guide/autoreload": "../internals/autoreload.html",
+    "content/guide/testing": "../topics/testing.html",
+    "content/guide/project-layout": "../topics/project-layout.html",
+    "content/guide/extending": "../topics/extending.html",
+    "content/api/reference": "../ref/index.html",
+    "content/api/pages": "../ref/pages.html",
+    "content/api/components": "../ref/components.html",
+    "content/api/urls": "../ref/urls.html",
+    "content/api/forms": "../ref/forms.html",
+    "content/api/static": "../ref/static.html",
+    "content/api/deps": "../ref/deps.html",
+    "content/api/server": "../ref/server.html",
+    "content/api/testing": "../ref/testing.html",
+    "content/api/signals": "../ref/signals.html",
+    "content/api/conf": "../ref/conf.html",
+    "content/api/apps": "../ref/apps.html",
+    "content/reference/system-checks": "../ref/system-checks.html",
+    "content/contributing/documentation-guide": "writing-documentation.html",
+}
 
 # the name of the Pygments (syntax highlighting) style to use
 pygments_style = "sphinx"

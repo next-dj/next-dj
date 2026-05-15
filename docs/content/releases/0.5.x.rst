@@ -1,0 +1,163 @@
+.. _releases-0-5-x:
+
+Release Notes 0.5.x
+===================
+
+This page lists the verified additions and changes in the 0.5 line.
+
+.. contents::
+   :local:
+   :depth: 2
+
+Highlights
+----------
+
+The 0.5 line introduces the testing module, the pluggable form action backends, the typed query string provider, the router reload signal, the module asset kind, dynamic component props, the per key JS context serializer, the frozen form specs, the formset helpers, the URL reverse helpers, per project page DIRS, and the Django admin example.
+
+New Features
+------------
+
+next.testing
+~~~~~~~~~~~~
+
+``next.testing`` ships nine submodules (``client``, ``signals``, ``isolation``, ``actions``, ``rendering``, ``loaders``, ``html``, ``patching``, ``deps``).
+``NextClient`` boots the file router and registers actions on creation.
+``SignalRecorder`` captures payloads inside a context manager.
+``reset_registries`` clears every framework registry between tests.
+
+See :doc:`/content/topics/testing`.
+
+Pluggable Form Action Backends
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``DEFAULT_FORM_ACTION_BACKENDS`` lets projects insert audit logging, rate limiting, geo blocking, and other checks into the dispatch chain.
+``extend_default_backend`` adds entries without dropping the defaults.
+
+See :doc:`/content/topics/forms/backends`.
+
+Typed Query String Provider
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to the requested type.
+Supports scalar types and ``list[T]`` for repeated keys, bracket suffix, and comma format.
+
+See :doc:`/content/topics/dependency-injection`.
+
+Router Manager Reload
+~~~~~~~~~~~~~~~~~~~~~
+
+``router_manager.reload()`` rebuilds the active pattern list and emits ``router_reloaded``.
+Useful for custom router backends that read URLs from the database.
+
+See :doc:`/content/howto/reload-routes-from-code`.
+
+Module Asset Kind
+~~~~~~~~~~~~~~~~~
+
+The ``module`` kind renders ``<script type="module" src="...">`` for ``.mjs`` files.
+``StaticBackend.render_module_tag`` is the override point.
+
+See :doc:`/content/topics/static-assets/asset-kinds`.
+
+Dynamic Component Props
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``{% component %}`` template tag resolves ``key=expression`` props through Django ``FilterExpression``.
+Plain string props such as ``key="value"`` still pass through unchanged.
+
+See :doc:`/content/topics/components`.
+
+Per Key JS Context Serializer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``@context("key", serialize=True, serializer=fn)`` overrides the project wide serializer for a single key.
+
+See :doc:`/content/topics/static-assets/js-context`.
+
+Frozen Form Specs
+~~~~~~~~~~~~~~~~~
+
+``next.forms.serializers`` ships ``FieldSpec``, ``FormsetSpec``, ``FormsetRowSpec``, ``FormSectionSpec``, ``FormSpec``.
+Use them to render forms in custom templates or to ship form layout to a JSON consumer.
+
+See :doc:`/content/topics/forms/serializers`.
+
+Formset Helpers
+~~~~~~~~~~~~~~~
+
+``next.forms.formsets.cleanup_extra_initial`` drops initial values from blank extra rows so untouched rows skip validation.
+
+See :doc:`/content/topics/forms/formsets`.
+
+URL Reverse Helpers
+~~~~~~~~~~~~~~~~~~~
+
+``page_reverse`` reverses a file router URL from a directory template.
+``with_query`` composes the query string of an existing URL.
+
+See :doc:`/content/topics/url-reversing`.
+
+Per Project Page DIRS
+~~~~~~~~~~~~~~~~~~~~~
+
+``DEFAULT_PAGE_BACKENDS["DIRS"]`` lets a project share a root layout across applications.
+The ``examples/_shared`` and ``examples/_template`` layouts demonstrate the pattern.
+
+See :doc:`/content/topics/multi-project`.
+
+Django Admin Example
+~~~~~~~~~~~~~~~~~~~~
+
+``examples/admin`` shows how to run Django admin alongside next.dj pages.
+The example uses frozen form specs to render forms inside the admin chrome.
+
+See :doc:`/content/howto/integrate-django-admin`.
+
+Signal Changes
+--------------
+
+components_registered
+~~~~~~~~~~~~~~~~~~~~~
+
+Emitted once per bulk registration cycle with every newly registered component in the payload.
+Replaces a per-component emission pattern.
+
+action_dispatched
+~~~~~~~~~~~~~~~~~
+
+The payload now includes the bound ``form`` instance and the captured ``url_kwargs`` dict.
+
+router_reloaded
+~~~~~~~~~~~~~~~
+
+New signal.
+Emitted by ``router_manager.reload()`` after the resolver cache is cleared.
+
+See :doc:`/content/topics/signals` for the full catalog.
+
+Shared Dependency Cache
+-----------------------
+
+Form dispatch reuses the request scoped dependency cache between the initial render and the failure re-render.
+Custom providers must therefore be idempotent across a render cycle.
+
+See :doc:`/content/internals/action-dispatch`.
+
+Removed
+-------
+
+No public APIs were removed in the 0.5 line.
+
+Migration Notes
+---------------
+
+A project that upgraded from 0.4 needs no code changes for the new features.
+The new defaults and the new modules opt in only.
+Existing tests continue to work, the new ``NextClient`` is an additional option.
+
+See Also
+--------
+
+.. seealso::
+
+   :doc:`/content/intro/whatsnext` for where to look for each topic.

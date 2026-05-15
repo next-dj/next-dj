@@ -1,0 +1,174 @@
+.. _topics-forms-overview:
+
+Forms Overview
+==============
+
+The forms subsystem registers Python callables as named actions, exposes them under stable URLs, and dispatches form submissions through a validation pipeline.
+A failed submission re-renders the origin page with the bound form, errors, and a fresh CSRF token.
+This page covers the mental model behind that pipeline.
+
+.. contents::
+   :local:
+   :depth: 2
+
+Overview
+--------
+
+Five things make a form work.
+
+Form class.
+   A Django ``Form`` or ``ModelForm`` mixed with ``next.forms.Form``.
+   The mixin allows the framework to register the form identity for re-render.
+
+Action.
+   A Python callable decorated with ``@action("name", form_class=...)``.
+   The decorator records the callable in a registry and assigns it a stable UID.
+
+Template tag.
+   ``{% form @action="name" %}`` resolves the action UID, posts to ``/_next/form/<uid>/``, and injects a CSRF token.
+
+Dispatch endpoint.
+   The framework registers one URL per action.
+   The endpoint loads the form class, binds POST data, calls the handler when valid.
+
+Re-render pipeline.
+   On validation failure the framework finds the origin page module and renders it again with the bound form in scope.
+
+Concepts
+--------
+
+Origin Page
+~~~~~~~~~~~
+
+The dispatcher needs to know which page rendered the form.
+The ``{% form %}`` tag emits a hidden ``_next_form_page`` field with the absolute path to the current ``page.py``.
+A submission without that field, or with a path outside ``BASE_DIR``, returns HTTP 400.
+
+Action Name
+~~~~~~~~~~~
+
+Every action has a unique name.
+The framework hashes the name into a 16 character UID that becomes part of the URL.
+Two actions with the same hash are reported by a system check at startup.
+
+Use a namespace prefix to keep names from colliding across apps.
+
+.. code-block:: python
+   :caption: namespaced action
+
+   from next.forms import action
+
+
+   @action("save", namespace="notes")
+   def save_note(...): ...
+
+The template references ``@action="notes:save"``.
+
+Handler Signature
+~~~~~~~~~~~~~~~~~
+
+A handler receives only the parameters it declares.
+The dependency resolver fills each parameter from a provider.
+
+.. code-block:: python
+   :caption: handler with multiple parameters
+
+   from django.http import HttpRequest, HttpResponseRedirect
+
+   from next.forms import action
+   from next.urls.markers import DUrl
+
+
+   @action("update_note", form_class=NoteForm)
+   def update_note(
+       request: HttpRequest,
+       note_id: DUrl[int],
+       form: NoteForm,
+   ) -> HttpResponseRedirect:
+       form.save()
+       return HttpResponseRedirect("/")
+
+The handler does not see anything it does not ask for.
+
+Validation Outcomes
+~~~~~~~~~~~~~~~~~~~
+
+A submission has three outcomes.
+
+Valid form.
+   The dispatcher calls the handler with the bound form.
+   The return value travels back to the client.
+
+Invalid form.
+   The dispatcher returns the rendered origin page with the bound form in scope and an HTTP 200 status.
+   No handler is called.
+
+Bad request.
+   The submission is missing required dispatch fields or points at an invalid origin page.
+   The dispatcher returns HTTP 400 without invoking the handler.
+
+Where to Declare Actions
+------------------------
+
+The framework imports action modules during application startup.
+Place the ``@action`` decorator in any of these files and the registration runs without manual imports.
+
+- ``page.py`` next to the page that uses the action.
+- ``component.py`` next to a component that wraps a form.
+- A dedicated ``actions.py`` in your application package.
+
+A single Python module can register many actions.
+Each action stays addressable by name from any template in the project.
+
+Quick Start
+-----------
+
+The smallest end-to-end form has three parts.
+
+.. code-block:: python
+   :caption: notes/forms.py
+
+   from django import forms
+
+   from next.forms import Form
+
+
+   class ContactForm(Form):
+       email = forms.EmailField()
+       message = forms.CharField(widget=forms.Textarea)
+
+.. code-block:: python
+   :caption: notes/routes/page.py
+
+   from django.http import HttpResponseRedirect
+
+   from next.forms import action
+
+
+   @action("contact", form_class=ContactForm)
+   def contact(form: ContactForm) -> HttpResponseRedirect:
+       send_email(form.cleaned_data["email"], form.cleaned_data["message"])
+       return HttpResponseRedirect("/")
+
+.. code-block:: jinja
+   :caption: notes/routes/template.djx
+
+   {% form @action="contact" method="post" %}
+     {{ form.email }}
+     {{ form.message }}
+     <button type="submit">Send</button>
+   {% endform %}
+
+The template tag wires the form to the action.
+The handler receives the validated form.
+A failed validation re-renders the page with the bound form in place.
+
+See Also
+--------
+
+.. seealso::
+
+   :doc:`actions` for handler patterns.
+   :doc:`templates` for the ``{% form %}`` tag.
+   :doc:`validation-rerender` for the re-render pipeline.
+   :doc:`backends` for swapping the dispatch backend.
