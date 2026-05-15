@@ -51,7 +51,7 @@ Read :doc:`overview` first, then jump to the page that matches the part you are 
    templates
    modelforms
    formsets
-   serializers
    validation-rerender
+   serializers
    backends
    signals

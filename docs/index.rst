@@ -94,17 +94,11 @@ Sponsors
    content/intro/index
 
 .. toctree::
-   :caption: Topic Guides
+   :caption: Guides
    :hidden:
    :maxdepth: 1
 
    content/topics/index
-
-.. toctree::
-   :caption: How-To
-   :hidden:
-   :maxdepth: 1
-
    content/howto/index
 
 .. toctree::
@@ -115,51 +109,19 @@ Sponsors
    content/ref/index
 
 .. toctree::
-   :caption: Internals
+   :caption: Going Further
    :hidden:
    :maxdepth: 1
 
    content/internals/index
-
-.. toctree::
-   :caption: Deployment
-   :hidden:
-   :maxdepth: 1
-
    content/deployment/index
-
-.. toctree::
-   :caption: Security
-   :hidden:
-   :maxdepth: 1
-
    content/security/index
 
 .. toctree::
-   :caption: FAQ
+   :caption: Help and Project
    :hidden:
    :maxdepth: 1
 
    content/faq/index
-
-.. toctree::
-   :caption: Release Notes
-   :hidden:
-   :maxdepth: 1
-
-   content/releases/index
-
-.. toctree::
-   :caption: Contributing
-   :hidden:
-   :maxdepth: 1
-
    content/contributing/index
-
-.. toctree::
-   :caption: Reference Material
-   :hidden:
-   :maxdepth: 1
-
-   content/misc/design-philosophy
-   content/misc/glossary
+   content/misc/index

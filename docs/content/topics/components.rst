@@ -180,33 +180,24 @@ Templates rarely need to pass loop variables explicitly.
 
 The ``note_card`` template can reference ``{{ note }}`` directly.
 
-Dynamic Prop Forwarding
-~~~~~~~~~~~~~~~~~~~~~~~
-
-The ``{% component %}`` tag also accepts a ``**props`` form when you have a precomputed dict of values to forward.
-
-.. code-block:: jinja
-   :caption: dict forwarding
-
-   {% component "card" **card_props %}
-
-The dict is unpacked into the component scope.
-Keys with non identifier characters are rejected at parse time.
-
 Slots
 -----
 
 A slot is a named area inside a component template that the caller fills with content.
+The component template marks the slot location with ``{% set_slot %}``.
+The caller fills it with ``{% #slot %}`` inside a ``{% #component %}`` block.
+
+The component template uses the short void form of ``{% set_slot %}`` for a slot with no default, or the block form to declare a fallback body.
 
 .. code-block:: jinja
    :caption: _components/card/component.djx
 
    <article class="card">
      {% if title %}<h2>{{ title }}</h2>{% endif %}
-     {% slot "content" %}{% endslot %}
+     {% #set_slot "content" %}<p>Nothing here yet.</p>{% /set_slot %}
    </article>
 
-Callers fill the slot with the block form.
+Callers fill the slot with ``{% #slot %}`` inside the block form of ``{% component %}``.
 
 .. code-block:: jinja
    :caption: filling a slot
@@ -217,17 +208,9 @@ Callers fill the slot with the block form.
      {% /slot %}
    {% /component %}
 
-Set Slots
-~~~~~~~~~
-
-Use ``{% set_slot %}`` from outside a component to pre define slot content before calling the component.
-The slot value travels into the next ``{% component %}`` call.
-
-.. code-block:: jinja
-   :caption: pre filling a slot
-
-   {% #set_slot "content" %}<p>Pre defined</p>{% /set_slot %}
-   {% component "card" title="News" %}
+A caller-supplied ``{% #slot %}`` wins over the component's fallback body.
+When the caller omits the slot the component renders its own ``{% #set_slot %}`` default instead.
+Slot content reaches the component template under the ``slot_<name>`` key, so ``{% set_slot "content" %}`` and ``{{ slot_content }}`` resolve the same value.
 
 Component Context
 -----------------
@@ -253,7 +236,7 @@ Use ``@component.context("name")`` to publish named values that the template can
    def href(note: Note) -> str:
        return f"/notes/{note.id}/"
 
-Component context functions take DI parameters the same way page context does.
+Component context functions take :doc:`DI parameters <dependency-injection>` the same way page context does.
 The framework resolves parameters from the surrounding template scope, from URL kwargs, from the request, or from any registered provider.
 
 Inherited Component Context

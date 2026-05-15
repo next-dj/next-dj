@@ -94,7 +94,7 @@ A create page renders the unbound form and saves it on submission.
 .. code-block:: jinja
    :caption: notes/routes/notes/new/template.djx
 
-   {% form @action="create_note" method="post" %}
+   {% form @action="create_note" %}
      {{ form.title }}
      {{ form.body }}
      <button type="submit">Create</button>
@@ -229,8 +229,8 @@ Add a ``@context("form")`` that constructs the form with the user attached, or p
 System Checks
 -------------
 
-The framework validates ModelForm registrations through the standard ``next.E041`` check.
-A handler that declares ``form: NoteForm`` without ``form_class=NoteForm`` on the decorator fires the warning.
+The forms subsystem contributes the same ``next.E041`` collision check that flags two ``@action`` registrations sharing a name.
+A handler that declares a ``form`` parameter still needs ``form_class`` on the decorator, otherwise no form is bound and the ``form`` parameter resolves to ``None`` at dispatch time.
 
 Run ``uv run python manage.py check`` after every form definition change.
 

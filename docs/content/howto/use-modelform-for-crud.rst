@@ -113,7 +113,7 @@ Templates
 .. code-block:: jinja
    :caption: notes/routes/notes/new/template.djx
 
-   {% form @action="create_note" method="post" %}
+   {% form @action="create_note" %}
      {{ form.title }}
      {{ form.body }}
      <button type="submit">Create</button>
@@ -122,7 +122,7 @@ Templates
 .. code-block:: jinja
    :caption: notes/routes/notes/[id]/edit/template.djx
 
-   {% form @action="update_note" method="post" id=note.id %}
+   {% form @action="update_note" %}
      {{ form.title }}
      {{ form.body }}
      <button type="submit">Save</button>
@@ -131,7 +131,7 @@ Templates
 .. code-block:: jinja
    :caption: notes/routes/notes/[id]/template.djx
 
-   {% form @action="delete_note" method="post" id=note.id %}
+   {% form @action="delete_note" %}
      <input type="hidden" name="confirm" value="on">
      <button type="submit" class="danger">Delete</button>
    {% endform %}

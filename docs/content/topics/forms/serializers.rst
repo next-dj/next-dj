@@ -4,7 +4,7 @@ Frozen Form Specs
 =================
 
 The forms subsystem ships frozen dataclass descriptors that describe a form, a formset, or a single field as plain Python data.
-The specs survive across re-render because the framework caches them on the request and reuses them after a failed POST.
+Each descriptor is a frozen dataclass, so it is hashable and safe to cache or compare across renders.
 Use them when you need to inspect a form structure from Python or to render forms in a custom template engine.
 
 .. contents::
@@ -50,11 +50,13 @@ The module provides three constructor helpers.
 
    spec_one_field = field_spec(form["title"])
    spec_one_formset = formset_spec(my_formset)
-   spec_one_form = form_spec(form, sections=[
-       ("Basic info", "", ["title", "body"]),
-       ("Meta", "Optional", ["tags", "is_public"]),
+   spec_one_form = form_spec(form, [
+       ("Basic info", {"fields": ["title", "body"]}),
+       ("Meta", {"fields": ["tags", "is_public"], "description": "Optional"}),
    ])
 
+The second argument of ``form_spec`` is a Django admin style ``fieldsets`` sequence of ``(label, options)`` pairs.
+Each ``options`` mapping carries a ``fields`` list and an optional ``description``.
 Each helper returns a frozen instance ready to pass into a template.
 
 Using a Spec in Templates

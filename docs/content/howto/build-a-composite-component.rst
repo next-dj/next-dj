@@ -12,7 +12,7 @@ Solution
 --------
 
 Create a component folder under the components root with three files.
-``component.djx`` holds the markup with a ``{% slot %}`` placeholder.
+``component.djx`` holds the markup with a ``{% set_slot %}`` placeholder.
 ``component.py`` declares context functions and computed values.
 ``component.css`` ships the style sheet.
 
@@ -30,7 +30,7 @@ Create the folder ``notes/_components/info_card/`` with three files.
        {% if subtitle %}<small>{{ subtitle }}</small>{% endif %}
      </header>
      <div class="info-card__body">
-       {% slot "content" %}{% endslot %}
+       {% set_slot "content" %}
      </div>
    </article>
 

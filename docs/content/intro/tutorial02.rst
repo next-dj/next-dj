@@ -106,7 +106,7 @@ The bracketed segment is a URL parameter that the file router captures as ``id``
    def fetch_note(note_id: DUrl[int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
-The ``DUrl[int]`` marker tells the dependency injector to pull the captured ``id`` value from the URL, coerce it to an integer, and pass it to the function.
+The ``DUrl[int]`` marker tells the :doc:`dependency injector </content/topics/dependency-injection>` to pull the captured ``id`` value from the URL, coerce it to an integer, and pass it to the function.
 The parameter name in the signature can be anything, here ``note_id`` reads better than ``id`` which shadows the Python builtin.
 
 Add the matching template.

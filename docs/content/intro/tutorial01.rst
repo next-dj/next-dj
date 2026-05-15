@@ -189,5 +189,5 @@ The next part wraps every page in a layout and shares site-wide context.
 .. seealso::
 
    :doc:`tutorial02` adds a layout and shared context.
-   :doc:`/content/topics/file-router` covers route shapes, parameters, and groups.
+   :doc:`/content/topics/file-router` covers route shapes, captured parameters, and virtual routes.
    :doc:`/content/ref/pages` lists every public API on ``next.pages``.

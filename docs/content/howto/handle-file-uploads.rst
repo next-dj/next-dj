@@ -66,7 +66,7 @@ Render the form with the right encoding type.
 .. code-block:: jinja
    :caption: notes/routes/attachments/template.djx
 
-   {% form @action="upload_attachment" method="post" enctype="multipart/form-data" %}
+   {% form @action="upload_attachment" enctype="multipart/form-data" %}
      {{ form.title }}
      {{ form.file }}
      <button type="submit">Upload</button>

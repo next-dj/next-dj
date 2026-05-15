@@ -161,4 +161,5 @@ See Also
    :doc:`backends` for static backend customisation.
    :doc:`deduplication` for the dedup strategy.
    :doc:`/content/topics/signals` for the full signal catalog.
+   :doc:`/content/internals/static-pipeline` for where each signal fires in the pipeline.
    :doc:`/content/ref/signals` for the public API.

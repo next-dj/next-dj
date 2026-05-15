@@ -151,10 +151,15 @@ A project can ship project-specific components alongside the shared kit.
 The list order matters.
 Earlier entries win when the same component name appears twice.
 
+.. note::
+
+   A project-specific component that shares a name with a shared component shadows the shared one without any warning.
+   Place the project ``DIRS`` entry before the shared entry only when the override is intentional.
+
 Hot Reload
 ----------
 
-Each component root contributes its own watch spec to the autoreloader.
+Each component root contributes its own watch spec to the :doc:`autoreloader </content/internals/autoreload>`.
 A change inside ``_shared/_components/`` fires the autoreload pipeline across every project that uses the development server.
 
 The ``components_registered`` signal includes the full set after each reload so long-lived processes can refresh their caches.
@@ -190,3 +195,4 @@ See Also
    :doc:`file-router` for the URL routing rules across roots.
    :doc:`components` for the components subsystem.
    :doc:`/content/howto/share-components-across-projects` for a recipe.
+   :doc:`/content/internals/autoreload` for the watch spec pipeline.

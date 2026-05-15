@@ -28,7 +28,7 @@ Component context functions.
    ``@component.context("key")`` callables in ``component.py``.
 
 Form action handlers.
-   ``@action`` callables registered through ``next.forms``.
+   ``@action`` callables registered through :doc:`next.forms <forms/index>`.
 
 Every call site uses the same providers and the same markers.
 The resolver scans parameters in order, picks the first provider that can handle each parameter, and runs the function with the resolved values.
@@ -37,20 +37,25 @@ A parameter that no provider claims falls back to its default value or stays ``N
 Built In Providers
 ------------------
 
-The framework registers six providers by default.
+The framework registers eight providers by default.
 
 HttpRequest provider.
    A parameter annotated with ``HttpRequest`` or ``HttpRequest | None`` receives the current request.
 
-URL path provider.
+URL annotation provider.
    A parameter annotated ``DUrl[T]`` reads the captured URL segment with matching name and coerces it to ``T``.
-   A parameter whose name matches a URL segment also resolves automatically.
+
+URL kwargs provider.
+   A parameter whose name matches a captured URL segment resolves to that value automatically.
 
 Query string provider.
    A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
 
 Form provider.
    A parameter named ``form`` or annotated ``DForm[FormClass]`` receives the bound form during action dispatch.
+
+Context by default provider.
+   A parameter with a ``Context(...)`` default receives the named context value.
 
 Context by name provider.
    A parameter whose name matches a context key receives that context value.

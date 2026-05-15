@@ -52,7 +52,7 @@ The conftest isolates the next.dj registries between test modules.
        yield
        reset_registries()
 
-``reset_registries()`` clears every page, component, action, and signal binding between tests so that a stale module from another test does not bleed into the next one.
+``reset_registries()`` reloads the form-action and component backends from the current settings so that a test which swaps ``NEXT_FRAMEWORK`` does not bleed into the next one.
 Database access uses the standard ``db`` fixture from pytest-django, no extra fixture is needed.
 
 Write the First End-to-End Test

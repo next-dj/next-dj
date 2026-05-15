@@ -45,7 +45,7 @@ Dependency Markers
 Depends
 ~~~~~~~
 
-.. autofunction:: next.deps.Depends
+.. autoclass:: next.deps.Depends
    :no-index:
 
 Default argument that injects a named dependency registered through ``resolver.dependency``.
@@ -53,7 +53,7 @@ Default argument that injects a named dependency registered through ``resolver.d
 Context
 ~~~~~~~
 
-.. autofunction:: next.pages.Context
+.. autoclass:: next.pages.Context
    :no-index:
 
 Default argument that injects a context value by key.

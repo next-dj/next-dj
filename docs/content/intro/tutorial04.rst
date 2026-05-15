@@ -42,7 +42,7 @@ Create ``notes/forms.py``.
        confirm = BooleanField(required=True)
 
 ``next.forms.ModelForm`` and ``next.forms.Form`` are the framework form base classes.
-They participate in form dispatch.
+They participate in :doc:`form dispatch </content/topics/forms/index>`.
 A plain Django ``Form`` or ``ModelForm`` cannot be passed to ``@action`` because the dispatch pipeline expects the framework base class.
 ``next.forms`` also re-exports every Django form field and widget, so ``BooleanField`` and the rest are importable from one place.
 

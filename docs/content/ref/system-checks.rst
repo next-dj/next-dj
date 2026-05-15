@@ -12,6 +12,11 @@ Run them through ``uv run python manage.py check`` and the framework reports con
 Check Registration
 ------------------
 
+``next.checks.register_all`` registers every subsystem check during ``AppConfig.ready``.
+
+Shared Helpers
+~~~~~~~~~~~~~~
+
 .. automodule:: next.checks.common
    :members:
 

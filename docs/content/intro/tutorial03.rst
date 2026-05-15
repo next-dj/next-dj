@@ -21,7 +21,7 @@ Walkthrough
 Create the Component Folder
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The component backend looks for component folders under the configured root.
+The :doc:`component </content/topics/components>` backend looks for component folders under the configured root.
 :doc:`install` set ``COMPONENTS_DIR`` to ``_components``, so a component named ``note_card`` lives at ``notes/_components/note_card/``.
 The framework treats the folder name as the component name.
 
@@ -64,7 +64,7 @@ The HTML now uses an ``<article>`` per note instead of an ``<li>`` block.
 Add Co-located CSS
 ~~~~~~~~~~~~~~~~~~
 
-Place a CSS file next to ``component.djx`` and the static pipeline picks it up automatically.
+Place a CSS file next to ``component.djx`` and the :doc:`static pipeline </content/topics/static-assets/index>` picks it up automatically.
 
 .. code-block:: css
    :caption: notes/_components/note_card/component.css

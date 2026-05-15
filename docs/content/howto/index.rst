@@ -73,19 +73,19 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    :maxdepth: 1
 
    add-a-page
+   reverse-urls
+   reload-routes-from-code
    share-context-across-pages
    build-a-composite-component
+   share-components-across-projects
    add-a-new-asset-kind
    add-a-custom-stem
    write-a-static-backend
+   override-the-js-context-serializer
    handle-file-uploads
    use-modelform-for-crud
    use-formsets
-   reverse-urls
-   override-the-js-context-serializer
-   reload-routes-from-code
    write-a-form-action-backend
    extend-a-default-backend
    test-a-page-with-actions
    integrate-django-admin
-   share-components-across-projects

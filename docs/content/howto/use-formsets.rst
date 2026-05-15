@@ -62,7 +62,7 @@ Render the formset.
 .. code-block:: jinja
    :caption: notes/routes/notes/bulk/template.djx
 
-   {% form @action="bulk_create" method="post" %}
+   {% form @action="bulk_create" %}
      {{ form.management_form }}
      {% for row in form %}
        <fieldset>
@@ -88,8 +88,8 @@ Use ``cleanup_extra_initial`` to strip default values from untouched rows so the
    from next.forms.formsets import cleanup_extra_initial
 
 
-   def build_formset(queryset) -> NoteFormSet:
-       formset = NoteFormSet(queryset=queryset)
+   def build_formset(initial: list[dict]) -> NoteFormSet:
+       formset = NoteFormSet(initial=initial)
        cleanup_extra_initial(formset)
        return formset
 

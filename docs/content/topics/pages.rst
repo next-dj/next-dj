@@ -37,7 +37,7 @@ A page module can supply its body through three mechanisms.
 
 ``render`` function on the page module.
    Highest priority.
-   Receives DI-resolved arguments and returns either a string body or any ``HttpResponse`` subclass.
+   Receives :doc:`DI-resolved <dependency-injection>` arguments and returns either a string body or any ``HttpResponse`` subclass.
 
 ``template`` module attribute.
    A plain string assigned at module level.
@@ -47,7 +47,7 @@ Sibling ``template.djx`` file.
    The default source for most pages.
    Loaded through the ``DjxTemplateLoader`` and composed with the layout chain.
 
-The framework runs context processors, the static collector, and the ``page_rendered`` signal once per request regardless of which source produced the body.
+The framework runs context processors, the :doc:`static collector <static-assets/index>`, and the ``page_rendered`` signal once per request regardless of which source produced the body.
 When two sources are declared at the same level the lower priority one is silently dropped and ``uv run python manage.py check`` emits a warning.
 
 The render Function
@@ -211,10 +211,10 @@ Include ``DjxTemplateLoader`` explicitly when you still want sibling ``template.
 Loader Contract
 ~~~~~~~~~~~~~~~
 
-A loader implements four methods.
+A loader sets one class attribute and implements three methods.
 
 ``source_name``.
-   String used by the system check to name the loader in conflict warnings.
+   Class attribute string used by the system check to name the loader in conflict warnings.
 
 ``can_load(file_path)``.
    Boolean check that decides whether the loader recognises a directory.

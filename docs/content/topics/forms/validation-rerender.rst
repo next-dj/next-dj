@@ -37,16 +37,15 @@ A failing form does not redirect, the user stays on the same URL.
 What Survives Re-render
 -----------------------
 
-Two important things carry over from the initial render.
+One important thing carries over from the initial render.
 
 Dependency cache.
-   Every value produced by the resolver during the initial render is stored on the request.
-   The re-render reuses each value without rerunning the provider.
+   Every value produced by the resolver during dispatch is stored on the request under ``REQUEST_DEP_CACHE_ATTR``.
+   The re-render reuses each cached value without rerunning the provider.
    A custom DI provider must therefore be idempotent across a render cycle.
 
-Frozen form spec.
-   The dispatcher serialises the form layout into a ``FormSpec`` (see :doc:`serializers`).
-   The spec lives on the request and is available to context functions that need to introspect the form structure.
+The frozen ``FormSpec`` descriptors in :doc:`serializers` are a separate user-facing tool.
+The dispatcher does not attach a ``FormSpec`` to the request on its own.
 
 What Restarts on Re-render
 --------------------------
@@ -85,15 +84,11 @@ The dispatcher does not rerun the validation of any other form.
 Influencing the Re-render
 -------------------------
 
-Two hooks let a page customise the re-render output.
+One hook lets a page customise the re-render output.
 
 Custom ``form`` context.
    Override ``@context("form")`` to construct the form in a particular way on the initial render.
    The dispatcher reuses the same key when populating the bound failing form on re-render.
-
-Custom ``form_var`` argument.
-   Use the ``form_var`` keyword on ``{% form %}`` to publish the bound form under a different name.
-   Templates with several forms read each by its own variable.
 
 Server Side Effects Before Validation
 -------------------------------------
@@ -105,6 +100,11 @@ This guarantee makes it safe to put database writes and external calls inside th
 A page level context function that has external side effects runs on every render including re-render.
 Move side effects into the handler or into a custom provider whose result is cached on the request.
 
+.. note::
+
+   A context function that writes to the database or calls an external service runs a second time on every validation failure.
+   Keep context functions read only and put writes inside the action handler where they run once on success.
+
 Signals
 -------
 
@@ -112,11 +112,11 @@ Two signals fire during the validation pipeline.
 
 ``form_validation_failed``.
    Fires when ``form.is_valid()`` returns false.
-   Payload includes the bound form, the request, the action name, and the captured URL kwargs.
+   Payload carries ``action_name``, ``error_count``, and ``field_names``.
 
 ``action_dispatched``.
    Fires after the handler returns successfully.
-   Payload includes the bound form, the request, the URL kwargs, and the handler return value.
+   Payload carries ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
 
 See :doc:`signals` for the full list and payload shapes.
 

@@ -21,7 +21,8 @@ Add the directory whitelist to the backend and reject every path that falls outs
 Content Hash
 ------------
 
-The default ``StaticBackend`` appends a SHA-256 hash slice to every asset URL.
+The default ``StaticFilesBackend`` resolves asset URLs through Django staticfiles.
+Pair it with ``ManifestStaticFilesStorage`` so each URL carries a content hash slice.
 Two consequences flow from the hash.
 
 Cache busting.
@@ -37,27 +38,21 @@ Subresource Integrity
 ---------------------
 
 Subresource Integrity (SRI) attributes let the browser verify the file contents before executing scripts or applying stylesheets.
-A custom backend adds the ``integrity`` and ``crossorigin`` attributes.
+A custom backend overrides the renderer methods to add the ``integrity`` and ``crossorigin`` attributes.
 
 .. code-block:: python
    :caption: notes/backends.py
 
-   import base64
-   import hashlib
-
-   from next.static.backends import StaticBackend
-   from next.static.assets import Asset
+   from next.static import StaticFilesBackend
 
 
-   class SriBackend(StaticBackend):
-       def integrity(self, asset: Asset) -> str:
-           digest = hashlib.sha384(asset.content).digest()
-           return "sha384-" + base64.b64encode(digest).decode()
-
-       def render_link_tag(self, asset: Asset, **attrs: str) -> str:
-           url = self.url(asset)
-           integrity = self.integrity(asset)
+   class SriBackend(StaticFilesBackend):
+       def render_link_tag(self, url, *, request=None) -> str:
+           integrity = self._integrity_for(url)
            return f'<link rel="stylesheet" href="{url}" integrity="{integrity}" crossorigin>'
+
+       def _integrity_for(self, url: str) -> str:
+           ...
 
 Apply the same pattern to ``render_script_tag`` and ``render_module_tag``.
 
@@ -129,13 +124,13 @@ Inline script without nonce under strict CSP.
    The browser drops the script.
    Add the nonce attribute or move the script into a co-located file.
 
-Mixed content on hash query string.
+Mixed content on a CDN host.
    A ``http://`` page that loads a ``https://`` CDN asset triggers mixed content warnings.
    Serve the HTML over HTTPS in production.
 
 Long lived service worker.
    A service worker that caches by path keeps stale assets when the hash changes.
-   Key the cache on the full URL including the hash query string.
+   Key the cache on the full URL, which already carries the content hash in the filename.
 
 See Also
 --------

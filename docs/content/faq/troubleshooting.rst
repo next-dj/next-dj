@@ -51,17 +51,11 @@ CSRF token is missing or stale.
 The ``{% form %}`` tag injects the token automatically.
 Manual forms need ``{% csrf_token %}`` plus a fresh cookie.
 
-next.E040 collision
+next.E041 collision
 ~~~~~~~~~~~~~~~~~~~
 
-Two actions share the same UID.
-Add a ``namespace=`` prefix to one of them or rename one.
-
-next.E041 missing form_class
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-A handler that declares a ``form`` parameter must register with ``form_class=``.
-Add the form class to the decorator.
+Two actions are registered under the same name by different handlers.
+Rename one of them or change its namespace to avoid the collision.
 
 Components
 ----------

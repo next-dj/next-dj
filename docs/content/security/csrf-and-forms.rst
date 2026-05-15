@@ -64,6 +64,8 @@ AJAX Submissions
 JavaScript code that posts to the dispatch URL must include both fields in the request body.
 The standard Django approach reads the token from the cookie or from a meta tag.
 
+The simplest way to obtain the origin path is to read the hidden ``_next_form_page`` field that the rendered ``{% form %}`` tag already emits.
+
 .. code-block:: javascript
    :caption: fetch wrapper
 
@@ -72,16 +74,19 @@ The standard Django approach reads the token from the cookie or from a meta tag.
      .find((row) => row.startsWith("csrftoken="))
      .split("=")[1];
 
+   const formElement = document.querySelector("form");
+   const originPath = formElement.elements._next_form_page.value;
+
    fetch("/_next/form/<uid>/", {
      method: "POST",
      headers: {"X-CSRFToken": token},
      body: new URLSearchParams({
-       _next_form_page: Next.page.module,
+       _next_form_page: originPath,
        title: "From JS",
      }),
    });
 
-The ``Next.page.module`` field is published into the browser through the JS context.
+To post without a rendered form, publish the page module path with ``@context("page_module", serialize=True)`` so it reaches ``window.Next.context``.
 
 Cross Origin Requests
 ---------------------

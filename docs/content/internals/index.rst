@@ -5,16 +5,13 @@ Internals
 
 The internals section explains how next.dj works under the hood.
 Each page traces one pipeline with a mermaid diagram, lists the modules involved, and points at the public hooks used to extend it.
-
-.. rubric:: Entry points
+The pages read top to bottom, from a whole-framework map down to each subsystem pipeline.
 
 :doc:`overview`
    Map of every subsystem with a signals fan out diagram.
 
 :doc:`request-lifecycle`
    End to end path of an HTTP request.
-
-.. rubric:: Subsystem pipelines
 
 :doc:`page-discovery`
    Page modules, layouts, context.
@@ -36,8 +33,6 @@ Each page traces one pipeline with a mermaid diagram, lists the modules involved
 
 :doc:`autoreload`
    Watchers, route reload, signals.
-
-.. rubric:: For contributors
 
 :doc:`contributing-notes`
    Internal guidelines for the framework itself.

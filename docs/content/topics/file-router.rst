@@ -16,7 +16,7 @@ Overview
 A directory under a configured page root becomes a URL segment.
 A directory with a ``page.py`` becomes a navigable URL.
 A directory with only a ``template.djx`` becomes a virtual route that renders static markup.
-A bracketed segment such as ``[slug]`` is captured as a URL parameter and exposed to the page through the dependency resolver.
+A bracketed segment such as ``[slug]`` is captured as a URL parameter and exposed to the page through the :doc:`dependency resolver <dependency-injection>`.
 
 The router does not need an entry in ``urls.py`` per page.
 Adding a directory adds a URL.

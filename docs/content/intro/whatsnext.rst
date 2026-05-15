@@ -10,7 +10,7 @@ By Subsystem
 ------------
 
 Routing.
-   :doc:`/content/topics/file-router` covers static segments, captured parameters, optional segments, and per-project page roots.
+   :doc:`/content/topics/file-router` covers static segments, captured parameters, wildcard segments, and per-project page roots.
    :doc:`/content/topics/url-reversing` covers ``page_reverse`` and ``with_query`` for building URLs in Python.
 
 Pages and layouts.

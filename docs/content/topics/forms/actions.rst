@@ -128,11 +128,10 @@ HttpResponse subclasses.
    ``HttpResponseRedirect``, ``JsonResponse``, ``StreamingHttpResponse``, and your own subclasses all work.
 
 String.
-   Wrapped in ``HttpResponse(content=string)`` for backwards compatibility.
+   Wrapped in an ``HttpResponse`` by the dispatcher.
 
-Tuple ``(response, signal_payload)``.
-   The first element becomes the response.
-   The second element is merged into the ``action_dispatched`` signal payload.
+Object with a ``url`` attribute.
+   Coerced into an ``HttpResponseRedirect`` to that URL.
 
 None.
    The dispatcher returns the rendered origin page.

@@ -31,8 +31,9 @@ Pick the backend list.
      - Component discovery and rendering.
    * - ``DEFAULT_STATIC_BACKENDS``
      - Static collector and asset rendering.
-   * - ``DEFAULT_FORM_ACTION_BACKENDS``
-     - Form dispatch.
+
+The helper supports these three backend list settings.
+``DEFAULT_FORM_ACTION_BACKENDS`` is not patchable through ``extend_default_backend`` and must be written by hand.
 
 Call the helper with the setting name and the keys to override.
 

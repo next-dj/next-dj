@@ -15,7 +15,7 @@ Read the overview to learn the mental model, install the package, then walk thro
 :doc:`install`
    Install the package, register it in Django, and serve a single page.
 
-.. rubric:: Tutorial
+.. rubric:: Build the Notes App
 
 :doc:`tutorial01`
    Create the Notes application, model the data, and serve the index page.
@@ -31,8 +31,6 @@ Read the overview to learn the mental model, install the package, then walk thro
 
 :doc:`tutorial05`
    Test pages end to end and use the development server.
-
-.. rubric:: After the tutorial
 
 :doc:`whatsnext`
    Where to go for deeper topics, recipes, and reference material.

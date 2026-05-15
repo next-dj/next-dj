@@ -14,7 +14,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`url-reversing`
    ``page_reverse`` and ``with_query`` helpers.
 
-.. rubric:: Pages and Templates
+.. rubric:: Pages, Layouts, and Components
 
 :doc:`pages`
    Page modules, body sources, render functions, template loaders.
@@ -25,17 +25,13 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`context`
    ``@context`` and ``@component.context`` patterns and inheritance.
 
-.. rubric:: Components
-
 :doc:`components`
    Simple and composite components, props, slots, co-located assets.
 
-.. rubric:: Forms
+.. rubric:: Forms and Static Assets
 
 :doc:`forms/index`
    Actions, templates, modelforms, formsets, dispatch internals, signals.
-
-.. rubric:: Static Assets
 
 :doc:`static-assets/index`
    Co-located files, deduplication, asset kinds, backends, JS context.
@@ -70,13 +66,13 @@ Read the topic that matches the part you are touching, then jump to the referenc
    url-reversing
    pages
    layouts
-   components
    context
+   components
+   forms/index
+   static-assets/index
    dependency-injection
    signals
    testing
    extending
    project-layout
    multi-project
-   forms/index
-   static-assets/index

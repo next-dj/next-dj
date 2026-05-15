@@ -49,7 +49,7 @@ Action Name
 
 Every action has a unique name.
 The framework hashes the name into a 16 character UID that becomes part of the URL.
-Two actions with the same hash are reported by a system check at startup.
+Two actions registered under the same name from different handlers are reported by the ``next.E041`` system check.
 
 Use a namespace prefix to keep names from colliding across apps.
 
@@ -68,7 +68,7 @@ Handler Signature
 ~~~~~~~~~~~~~~~~~
 
 A handler receives only the parameters it declares.
-The dependency resolver fills each parameter from a provider.
+The :doc:`dependency resolver </content/topics/dependency-injection>` fills each parameter from a provider.
 
 .. code-block:: python
    :caption: handler with multiple parameters
@@ -153,7 +153,7 @@ The smallest end-to-end form has three parts.
 .. code-block:: jinja
    :caption: notes/routes/template.djx
 
-   {% form @action="contact" method="post" %}
+   {% form @action="contact" %}
      {{ form.email }}
      {{ form.message }}
      <button type="submit">Send</button>

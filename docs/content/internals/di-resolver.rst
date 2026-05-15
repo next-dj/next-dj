@@ -41,10 +41,10 @@ Modules
 
 ``next.deps.resolver``.
    ``DependencyResolver`` plus the singleton ``resolver`` instance.
-   Implements the ``dispatch`` method that runs a callable with resolved parameters.
+   Exposes ``resolve``, ``resolve_dependencies``, and ``resolve_with_template_context`` to run a callable with resolved parameters.
 
 ``next.deps.providers``.
-   Provider base classes and the built in providers.
+   The ``ParameterProvider`` protocol, the ``RegisteredParameterProvider`` base class, and the ``ProviderRegistry``.
 
 ``next.deps.cache``.
    ``REQUEST_DEP_CACHE_ATTR`` constant, ``DependencyCycleError`` exception, ``get_request_dep_cache`` accessor.
@@ -53,7 +53,7 @@ Modules
    ``ResolutionContext`` value object passed to every provider.
 
 ``next.deps.markers``.
-   ``Depends`` and ``DDependencyBase`` plus the registry of marker classes.
+   ``Depends``, ``DDependencyBase``, and the ``DependsProvider`` that resolves ``Depends`` markers.
 
 Provider Order
 --------------
@@ -62,18 +62,18 @@ The resolver iterates providers in registration order.
 Each provider declares whether it can handle a parameter through ``can_handle``.
 The first provider that returns ``True`` produces the value.
 
-The built in order, from first to last, is.
+The built in providers are.
 
-1. ``HttpRequestProvider``.
-2. ``UrlParameterProvider``.
-3. ``DQueryProvider``.
-4. ``DFormProvider``.
-5. ``ContextByNameProvider``.
-6. ``DependsProvider``.
-7. ``DDependencyProvider`` (handles ``DUrl``, ``DQuery``, ``DForm``, and any registered marker subclass).
+- ``HttpRequestProvider`` for ``HttpRequest`` parameters.
+- ``UrlByAnnotationProvider`` for ``DUrl`` annotated parameters.
+- ``UrlKwargsProvider`` for plain parameters that match a captured URL kwarg.
+- ``QueryParamProvider`` for ``DQuery`` annotated parameters.
+- ``ContextByDefaultProvider`` and ``ContextByNameProvider`` for ``Context`` markers and context keys.
+- ``DependsProvider`` for parameters whose default is a ``Depends`` marker.
+- ``FormProvider`` for ``DForm`` annotated parameters.
 
 Custom providers register through ``RegisteredParameterProvider``.
-A subclass joins the chain at the position chosen by its ``priority`` class attribute.
+A subclass joins the chain when its module is imported, in subclass definition order.
 
 ResolutionContext
 -----------------

@@ -14,7 +14,7 @@ Overview
 --------
 
 A context function is a Python callable that returns a value.
-The framework calls it at request time, resolves its parameters through the dependency injector, and publishes the result under a key that the template can render.
+The framework calls it at request time, resolves its parameters through the :doc:`dependency injector <dependency-injection>`, and publishes the result under a key that the template can render.
 
 Three call sites share the same decorator surface.
 
@@ -166,7 +166,7 @@ Declaring the parameter as ``str`` would break the second run.
 Serialization for the Browser
 -----------------------------
 
-next.dj ships a JavaScript object named ``Next`` to the browser through the static pipeline.
+next.dj ships a JavaScript object named ``Next`` to the browser through the :doc:`static pipeline <static-assets/index>`.
 Any context value can opt into serialisation through the ``serialize`` argument.
 
 .. code-block:: python
@@ -189,9 +189,12 @@ Per Key Serializer
 ~~~~~~~~~~~~~~~~~~
 
 Pass ``serializer=`` to override the default for a single key.
+The value must be an object that implements the ``JsContextSerializer`` protocol, a ``dumps(value)`` method that returns a JSON string.
 
 .. code-block:: python
    :caption: custom serializer per key
+
+   import json
 
    from pydantic import BaseModel
 
@@ -203,15 +206,17 @@ Pass ``serializer=`` to override the default for a single key.
        title: str
 
 
-   def pydantic_serializer(value: NoteOut) -> dict:
-       return value.model_dump()
+   class PydanticSerializer:
+       def dumps(self, value: NoteOut) -> str:
+           return json.dumps(value.model_dump(), separators=(",", ":"))
 
 
-   @context("featured", serialize=True, serializer=pydantic_serializer)
+   @context("featured", serialize=True, serializer=PydanticSerializer())
    def featured() -> NoteOut:
        return NoteOut(id=1, title="Hello")
 
-The framework calls the function before JSON encoding so any Python value can reach the browser.
+The framework calls ``dumps`` on the value before it reaches the browser so any Python value can be encoded.
+The framework also ships ``next.static.PydanticJsContextSerializer`` for the common pydantic case.
 
 Project Wide Serializer
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -239,7 +244,7 @@ Page context.
 Component context.
    Resolves once per component render.
    The framework forwards the surrounding template scope into the component.
-   ``inherit_context=True`` makes the value reachable from nested component calls and from slot content.
+   The ``@component.context`` decorator has no ``inherit_context`` flag because component context never flows beyond the component that declares it.
 
 A component context function can ask for any value that the template forwards, plus any value that the dependency injector knows how to produce.
 This includes the request, captured URL parameters, query strings, and custom providers.

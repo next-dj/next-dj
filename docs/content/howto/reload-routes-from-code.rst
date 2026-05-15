@@ -74,8 +74,6 @@ Verification
 
 Add a row to the underlying table and confirm that the next request resolves the new URL without restarting the server.
 
-The system check ``next.W044`` warns when a backend opts out of automatic reload and the project does not subscribe to ``router_reloaded`` either.
-
 See Also
 --------
 

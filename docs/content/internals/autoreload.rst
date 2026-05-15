@@ -25,23 +25,22 @@ Pipeline
        Collect --> Specs[Watch specs]
        Specs --> WatchReady[(watch_specs_ready)]
        Specs --> Watcher[Django autoreload]
-       Watcher -- file change --> Diff[Diff route set]
-       Diff -- changed --> Reload[router_manager.reload]
-       Reload --> RouterReloaded[(router_reloaded)]
-       Diff -- code only --> InProcess[In process reset]
        Watcher -- python module change --> ProcessRestart[Django reloader restarts process]
+       Watcher -- tick --> Diff[NextStatReloader diffs route set]
+       Diff -- changed --> Notify[notify_file_changed]
+       Notify --> ProcessRestart
 
 Modules
 -------
 
 ``next.server.autoreload``.
-   ``NextStatReloader`` runs the Django autoreloader and decides whether to fully restart or to reset in process state.
+   ``NextStatReloader`` extends the Django stat reloader and also restarts the process when the discovered route set changes.
 
 ``next.server.watcher``.
    ``iter_all_autoreload_watch_specs`` collects watch specs from every registered subsystem.
 
 ``next.server.roots``.
-   Helper that resolves the page roots, components roots, and stem patterns into concrete glob specs.
+   ``get_framework_filesystem_roots_for_linking`` returns the canonical page and component directory roots for build tooling.
 
 ``next.server.signals``.
    ``watch_specs_ready`` fires once after the collector completes.
@@ -62,25 +61,24 @@ The aggregator deduplicates the specs and emits ``watch_specs_ready`` with the f
 Reload Decisions
 ----------------
 
-Two kinds of changes happen.
+Two kinds of changes trigger a reload.
 
 Python module change.
    Django's reloader restarts the process.
    The framework re-imports every page and component at boot.
 
-Filesystem only change.
-   The framework calls ``router_manager.reload`` to rebuild the route set in process.
-   This avoids restarting the worker on every saved HTML file.
+Route set change.
+   ``NextStatReloader`` diffs the discovered route set on every tick.
+   A new or removed page directory calls ``notify_file_changed`` so Django restarts the process even when no watched file mtime changed.
 
-The decision is taken by ``NextStatReloader`` and depends on the file extension and the configured page roots.
+The route set diff is taken by ``NextStatReloader`` from the configured page roots.
+A custom router that builds routes from another source rebuilds them through ``router_manager.reload``, which is the public API covered in :doc:`/content/howto/reload-routes-from-code`.
 
 Signals
 -------
 
-The autoreload pipeline fires two signals.
-
-- ``watch_specs_ready`` after the aggregator completes.
-- ``router_reloaded`` after each in process reload.
+The autoreload pipeline fires ``watch_specs_ready`` after the aggregator completes.
+A call to ``router_manager.reload`` fires ``router_reloaded`` after each in process route rebuild.
 
 Long lived processes subscribe to ``router_reloaded`` to refresh cached URL references.
 Custom routers subscribe to ``watch_specs_ready`` to register additional patterns.

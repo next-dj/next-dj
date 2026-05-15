@@ -35,17 +35,25 @@ Components
    Block form.
    Renders a component and substitutes child content through slots.
 
-.. describe:: {% slot "<name>" %}{% endslot %}
+.. describe:: {% slot "<name>" %}
 
-   Placeholder inside a component template where caller content is substituted.
+   Void form.
+   Fills a named slot from the caller inside a ``{% #component %}`` block.
 
 .. describe:: {% #slot "<name>" %}...{% /slot %}
 
-   Block form for declaring slot content from the caller.
+   Block form.
+   Fills a named slot with body content from the caller inside a ``{% #component %}`` block.
+
+.. describe:: {% set_slot "<name>" %}
+
+   Void form.
+   Marks a slot location inside a component template, with no default body.
 
 .. describe:: {% #set_slot "<name>" %}...{% /set_slot %}
 
-   Pre defines slot content for the next ``{% component %}`` call.
+   Block form.
+   Marks a slot location inside a component template, with a fallback body used when the caller omits the slot.
 
 Static Pipeline
 ---------------

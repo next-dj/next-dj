@@ -37,7 +37,7 @@ Is next.dj production ready
 ---------------------------
 
 The 0.5 line is the current active series.
-The project is still pre 1.0 so breaking changes can happen between minor versions, always documented in :doc:`/content/releases/index`.
+The project is still pre 1.0 so breaking changes can happen between minor versions.
 
 Where does the name come from
 -----------------------------

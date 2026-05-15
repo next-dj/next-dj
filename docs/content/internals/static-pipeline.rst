@@ -13,7 +13,7 @@ Overview
 --------
 
 The static pipeline has two stages.
-Discovery runs once at startup and produces a registry of ``Asset`` records.
+Discovery runs once at startup and produces a registry of ``StaticAsset`` records.
 Collection runs once per request and produces an ordered list of assets that the layout emits.
 
 Discovery and Injection

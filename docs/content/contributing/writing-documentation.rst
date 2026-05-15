@@ -37,8 +37,6 @@ The layout follows the Django convention.
      - Threat model and best practices.
    * - ``faq/``
      - Common questions in three buckets.
-   * - ``releases/``
-     - Per release notes.
    * - ``misc/``
      - Glossary and design philosophy.
    * - ``contributing/``

@@ -16,11 +16,11 @@ The Five Mechanisms
 
 Backend.
    Replace or augment a complete subsystem.
-   Used for URL routing, components, forms dispatch, static pipeline, and JS context serialization.
+   Used for URL routing, components, forms dispatch, the :doc:`static pipeline <static-assets/index>`, and JS context serialization.
 
 Registry.
    Add new entries to a global list at startup.
-   Used for asset kinds, custom stems, dependency providers, and DI markers.
+   Used for asset kinds, custom stems, :doc:`dependency injection <dependency-injection>` providers, and DI markers.
 
 Protocol.
    Implement a runtime contract.
@@ -160,7 +160,7 @@ The framework calls the strategy at a well known point in the pipeline.
      - ``UrlDedup``
    * - JS context conflict policy
      - ``JS_CONTEXT_POLICY`` in static backend ``OPTIONS``
-     - ``LastWinsPolicy``
+     - ``FirstWinsPolicy``
    * - JS context serializer
      - ``JS_CONTEXT_SERIALIZER`` settings key
      - ``JsonJsContextSerializer``
@@ -224,6 +224,7 @@ See Also
 .. seealso::
 
    :doc:`signals` for the observation points.
+   :doc:`dependency-injection` for the provider registry and custom markers.
    :doc:`/content/howto/extend-a-default-backend` for the helper details.
    :doc:`/content/ref/conf` for the configuration surface.
    :doc:`/content/internals/index` for how each subsystem composes.

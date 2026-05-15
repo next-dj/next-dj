@@ -37,7 +37,7 @@ System Checks
 
 Every check lives next to the subsystem it validates.
 The codes follow ``next.E<NN>`` for errors and ``next.W<NN>`` for warnings.
-A new check registers through ``next.checks.common.register_all``.
+A new check registers through ``next.checks.register_all``.
 
 Signals
 ~~~~~~~
@@ -45,11 +45,6 @@ Signals
 Every signal lives in a ``signals`` submodule of its subsystem.
 The aggregator ``next.signals`` re-exports each name.
 A new signal adds an entry to the aggregator and to the topic catalog in ``docs/content/topics/signals.rst``.
-
-Migration Notes
----------------
-
-Existing applications that upgrade across breaking changes find a migration guide in :doc:`/content/releases/index`.
 
 Testing the Framework
 ---------------------

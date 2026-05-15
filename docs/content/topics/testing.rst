@@ -19,7 +19,7 @@ The module provides nine submodules.
    ``NextClient`` extends Django's test client and boots the file router.
 
 ``next.testing.isolation``.
-   ``reset_registries`` clears every framework registry between tests.
+   ``reset_registries`` reloads the form-action and component backends between tests.
 
 ``next.testing.actions``.
    Helpers to invoke registered actions without crafting POST bodies.
@@ -79,8 +79,8 @@ Add an ``autouse`` fixture in ``conftest.py`` to clear every registry between te
        yield
        reset_registries()
 
-The helper clears page, component, action, signal, and static registries.
-A test that registers a page or a context function therefore does not pollute the next test.
+The helper reloads the form-action and component backends from the current settings.
+``reset_page_cache`` is a separate helper that drops the page template cache when a test rewrites template files on disk.
 
 NextClient
 ----------
@@ -100,7 +100,7 @@ Use it for end to end HTTP tests.
 
 The client mirrors Django's ``Client`` API.
 ``get``, ``post``, ``put``, ``delete``, and ``patch`` all work.
-The client automatically follows redirects with ``follow=True``.
+Pass ``follow=True`` to a request to follow redirects, exactly as with Django's ``Client``.
 
 Posting to Actions
 ~~~~~~~~~~~~~~~~~~
@@ -187,16 +187,21 @@ HTML Utilities
    :caption: html assertions
 
    from next.testing.html import assert_has_class, find_anchor
+   from next.testing.rendering import render_component_by_name
 
 
    def test_index_links_to_note() -> None:
        html = NextClient().get("/").content.decode()
-       anchor = find_anchor(html, "First")
-       assert anchor is not None
+       anchor = find_anchor(html, text="First")
+       assert "First" in anchor
 
 
    def test_card_class() -> None:
-       html = render_component_by_name("note_card", note=note)
+       html = render_component_by_name(
+           "note_card",
+           at="notes/routes/page.py",
+           context={"note": note},
+       )
        assert_has_class(html, "note-card")
 
 ``find_anchor`` returns the matching anchor tag.
@@ -243,7 +248,8 @@ Resolution Context Doubles
 --------------------------
 
 ``next.testing.make_resolution_context`` builds a ``ResolutionContext`` for unit tests on providers.
-``next.testing.resolve_call`` runs a callable through the resolver with a given context.
+``next.testing.resolve_call`` resolves a callable's dependencies and returns the kwargs mapping.
+Both accept the same loose keyword arguments, ``request``, ``form``, ``url_kwargs``, and ``context_data``.
 
 .. code-block:: python
    :caption: provider unit test
@@ -253,8 +259,9 @@ Resolution Context Doubles
 
    def test_provider_handles_int(db) -> None:
        context = make_resolution_context(url_kwargs={"id": 7})
-       value = resolve_call(my_view, context)
-       assert value is not None
+       assert context.url_kwargs["id"] == 7
+       kwargs = resolve_call(my_view, url_kwargs={"id": 7})
+       assert "note" in kwargs
 
 Use this for testing custom providers without booting the router.
 

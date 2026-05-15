@@ -19,7 +19,7 @@ The block form is the standard shape.
 .. code-block:: jinja
    :caption: notes/routes/template.djx
 
-   {% form @action="create_note" method="post" %}
+   {% form @action="create_note" %}
      {{ form.title }}
      {{ form.body }}
      <button type="submit">Save</button>
@@ -28,8 +28,8 @@ The block form is the standard shape.
 The tag does five things.
 
 1. Looks up the action name in the registry and resolves its UID.
-2. Emits a ``<form>`` element with ``action`` set to ``/_next/form/<uid>/``.
-3. Injects a CSRF token through ``{% csrf_token %}``.
+2. Emits a ``<form method="post">`` element with ``action`` set to ``/_next/form/<uid>/``.
+3. Emits a hidden ``csrfmiddlewaretoken`` input with the current CSRF token.
 4. Emits a hidden ``_next_form_page`` field with the absolute path to the current ``page.py``.
 5. Publishes a ``form`` variable inside the block, either the unbound form on a GET or the bound form on a re-rendered failure.
 
@@ -45,40 +45,44 @@ It accepts either a plain name or a namespaced name.
    {% form @action="create_note" %}...{% endform %}
    {% form @action="notes:save" %}...{% endform %}
 
-A name that does not exist in the registry raises ``TemplateSyntaxError`` at render time.
-Templates therefore catch typos immediately during development.
+An opening tag without an ``@action`` argument raises ``TemplateSyntaxError`` at parse time.
+A name that is not in the registry resolves to an empty ``action`` attribute rather than raising.
 
-Method, Class, and Extra Attributes
------------------------------------
+Class and Extra Attributes
+--------------------------
 
-Every keyword on the opening tag becomes an attribute on the ``<form>`` element.
+Every ``key=value`` pair on the opening tag other than ``@action`` and ``method`` becomes a literal attribute on the ``<form>`` element.
 
 .. code-block:: jinja
    :caption: tag attributes
 
-   {% form @action="upload" method="post" enctype="multipart/form-data" class="card" %}
+   {% form @action="upload" enctype="multipart/form-data" class="card" %}
      {{ form.file }}
      <button type="submit">Upload</button>
    {% endform %}
 
-The dispatcher always processes POST submissions.
-Set ``method="post"`` explicitly to keep the rendered HTML self documenting.
+The dispatcher always processes POST submissions and the tag always renders ``method="post"``.
+A ``method`` argument on the tag is ignored.
 
 Captured URL Parameters
 -----------------------
 
-Pass captured URL parameters to the tag when the handler needs them.
+The tag does not need any argument to forward captured URL parameters.
+When the page URL captures a parameter the tag emits a hidden ``_url_param_<name>`` field for every captured kwarg in ``request.resolver_match.kwargs``.
 
 .. code-block:: jinja
    :caption: notes/routes/notes/[id]/template.djx
 
-   {% form @action="update_note" method="post" id=note.id %}
+   {% form @action="update_note" %}
      {{ form.title }}
      <button type="submit">Save</button>
    {% endform %}
 
-The ``id=note.id`` argument is encoded into the dispatch URL.
+A page whose URL captures ``id`` therefore posts a hidden ``_url_param_id`` field automatically.
 The handler receives the same value through ``DUrl[int]`` or any other URL marker.
+
+Any ``key=value`` pair on the opening tag other than ``@action`` and ``method`` is rendered as a literal attribute on the ``<form>`` element.
+The tag does not interpret extra pairs as URL parameters.
 
 The form Variable
 -----------------
@@ -118,43 +122,30 @@ Each call to ``{% form %}`` references a different action.
 The dispatcher routes submissions through the URL alone, so different forms do not interfere with each other.
 
 .. code-block:: jinja
-   :caption: index with create and search
+   :caption: index with search and create
 
-   {% form @action="search" method="get" class="search-form" %}
+   {% form @action="search" class="search-form" %}
      {{ form.query }}
      <button type="submit">Search</button>
    {% endform %}
 
-   {% form @action="create_note" method="post" class="create-form" %}
+   {% form @action="create_note" class="create-form" %}
      {{ form.title }}
      {{ form.body }}
      <button type="submit">Create</button>
    {% endform %}
 
+Every ``{% form %}`` tag renders a ``<form method="post">`` element.
+The dispatcher only processes POST submissions, so the tag always emits ``method="post"`` regardless of any ``method`` argument.
+
 A page can also publish multiple bound forms by registering several ``@context("...")`` functions with distinct keys.
-
-Custom Variable Names
-~~~~~~~~~~~~~~~~~~~~~
-
-The block accepts a ``form_var`` argument to rename the published variable.
-Use it when two forms render in the same block.
-
-.. code-block:: jinja
-   :caption: side by side forms
-
-   {% form @action="search" form_var="search_form" %}
-     {{ search_form.query }}
-   {% endform %}
-
-   {% form @action="create_note" form_var="create_form" %}
-     {{ create_form.title }}
-   {% endform %}
+The block always publishes the bound form under the name ``form``, so each ``{% form %}`` block sees its own form even when two blocks render on the same page.
 
 Manual CSRF
 -----------
 
-The tag injects ``{% csrf_token %}`` automatically.
-Add it manually only when you build the form element without the tag, for example in a plain ``<form>``.
+The tag emits the hidden ``csrfmiddlewaretoken`` input automatically.
+Add ``{% csrf_token %}`` manually only when you build the form element without the tag, for example in a plain ``<form>``.
 Even then, the dispatcher still requires the hidden ``_next_form_page`` field so a hand crafted form must include it.
 
 .. code-block:: jinja
@@ -177,7 +168,7 @@ Render them inline with each field or as a list at the top of the form.
 .. code-block:: jinja
    :caption: inline errors
 
-   {% form @action="create_note" method="post" %}
+   {% form @action="create_note" %}
      <div>
        {{ form.title }}
        {% if form.title.errors %}
@@ -190,7 +181,7 @@ Render them inline with each field or as a list at the top of the form.
 .. code-block:: jinja
    :caption: error list
 
-   {% form @action="create_note" method="post" %}
+   {% form @action="create_note" %}
      {% if form.errors %}
        <ul class="errors">
          {% for field, messages in form.errors.items %}
@@ -211,7 +202,7 @@ A tag block can be empty when the action does not need form fields.
 .. code-block:: jinja
    :caption: confirmation button
 
-   {% form @action="delete_note" method="post" id=note.id %}
+   {% form @action="delete_note" %}
      <button type="submit" class="danger">Delete</button>
    {% endform %}
 

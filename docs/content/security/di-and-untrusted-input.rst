@@ -21,7 +21,7 @@ Validate before use.
 
 Whitelist not blacklist.
    Decide what a value can be, reject everything else.
-   ``DUrl[int]`` already rejects non integer captures.
+   A directory named with the typed segment form such as ``[int:id]`` rejects non integer captures with ``404``.
 
 Never interpolate into queries.
    Use the ORM and parameter substitution.
@@ -31,7 +31,8 @@ URL Parameters
 --------------
 
 ``DUrl[int]`` coerces the captured value to ``int``.
-A malformed value triggers the Django converter validation and returns ``404`` before the page module runs.
+A value that fails coercion falls through as the raw string, so the page module still runs.
+Use a directory named with the typed segment form such as ``[int:id]`` to reject a non integer capture with ``404`` before the page module runs.
 
 ``DUrl[str]`` accepts any non slash value.
 Always validate the string before passing it into ORM lookups or external services.
@@ -115,9 +116,13 @@ The ``url_kwargs`` dict and ``request.GET`` are both untrusted.
 .. code-block:: python
    :caption: notes/providers.py
 
+   from typing import get_origin
+
    from django.http import Http404
 
    from next.deps import DDependencyBase, RegisteredParameterProvider
+
+   from notes.models import Link
 
 
    class DLink[T](DDependencyBase[T]):

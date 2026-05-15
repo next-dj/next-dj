@@ -51,6 +51,6 @@ The pipeline is fully pluggable through asset kinds, custom stems, and backends.
    deduplication
    asset-kinds
    custom-stems
-   backends
    js-context
+   backends
    signals
