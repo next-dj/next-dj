@@ -238,7 +238,8 @@ The resolver caches every produced value on the request.
 A second context function that asks for the same parameter receives the cached value, not a fresh call.
 
 The cache is also shared between the initial render of a form page and the re-render on validation failure.
-A handler that needs the request cache directly can call ``get_request_dep_cache``.
+``FormActionDispatch`` attaches its dependency cache to the request, and ``get_request_dep_cache`` reads it back.
+The function returns ``None`` outside a form dispatch, so callers handle the missing case.
 
 .. code-block:: python
    :caption: reading the cache
@@ -248,6 +249,8 @@ A handler that needs the request cache directly can call ``get_request_dep_cache
 
    def render(request) -> str:
        cache = get_request_dep_cache(request)
+       if cache is None:
+           return "No form dispatch cache on this request."
        return f"Cache has {len(cache)} entries."
 
 The constant ``REQUEST_DEP_CACHE_ATTR`` names the request attribute that holds the cache.

@@ -27,7 +27,7 @@ Receivers connect through the standard Django pattern.
 
    @receiver(action_dispatched)
    def log_action(sender, **kwargs) -> None:
-       print(kwargs["name"])
+       print(kwargs["action_name"])
 
 Connect receivers from ``AppConfig.ready`` so they exist before the first request.
 
@@ -37,12 +37,13 @@ action_registered
 Fires when ``@action`` joins the registry.
 Useful for discovery tools that build a catalogue of actions at startup.
 
-Payload.
-   ``sender`` is the form action manager class.
-   ``name`` is the registered name including namespace prefix.
-   ``handler`` is the decorated callable.
+Payload keyword arguments.
+   ``sender`` is the form action backend class.
+   ``action_name`` is the registered name including the namespace prefix.
+   ``uid`` is the dispatch UID.
    ``form_class`` is the form class associated with the action, or ``None``.
-   ``backends`` is the per action backend list, or an empty tuple.
+   ``namespace`` is the namespace prefix.
+   ``handler`` is the decorated callable.
 
 .. code-block:: python
    :caption: catalog receiver
@@ -59,7 +60,7 @@ Payload.
 
    @receiver(action_registered)
    def record(sender, **kwargs) -> None:
-       _catalog[kwargs["form_class"]].append(kwargs["name"])
+       _catalog[kwargs["form_class"]].append(kwargs["action_name"])
 
 action_dispatched
 -----------------
@@ -67,13 +68,14 @@ action_dispatched
 Fires after a handler runs successfully.
 The signal is the primary integration point for audit logs and metrics.
 
-Payload.
-   ``sender`` is the form action manager class.
-   ``name`` is the action name.
-   ``request`` is the HTTP request.
-   ``response`` is the handler return value.
+Payload keyword arguments.
+   ``sender`` is ``FormActionDispatch``.
+   ``action_name`` is the action name.
    ``form`` is the bound form when the action used ``form_class``, or ``None``.
-   ``url_kwargs`` is the captured URL parameters.
+   ``url_kwargs`` is the captured URL parameters dict.
+   ``duration_ms`` is the handler run time.
+   ``response_status`` is the HTTP status code of the response.
+   ``dep_cache`` is the request dependency cache dict.
 
 .. code-block:: python
    :caption: audit receiver
@@ -87,14 +89,15 @@ Payload.
 
    @receiver(action_dispatched)
    def write_audit(sender, **kwargs) -> None:
+       form = kwargs["form"]
        AuditEntry.objects.create(
-           user=kwargs["request"].user,
-           action=kwargs["name"],
-           data=kwargs["form"].cleaned_data if kwargs["form"] else {},
+           action=kwargs["action_name"],
+           status=kwargs["response_status"],
+           data=form.cleaned_data if form else {},
        )
 
-The handler return value is available through ``response``.
-Use it for cross-cutting analytics that need to inspect the redirect target or response status.
+The signal does not carry the request.
+Use ``response_status`` and ``duration_ms`` for cross cutting analytics.
 
 form_validation_failed
 ----------------------
@@ -102,12 +105,11 @@ form_validation_failed
 Fires when ``form.is_valid()`` returns false.
 Use it for alerting on suspicious failure rates, for analytics on form abandonment, or for tests that verify the failure path.
 
-Payload.
-   ``sender`` is the form action manager class.
-   ``name`` is the action name.
-   ``request`` is the HTTP request.
-   ``form`` is the bound form with errors.
-   ``url_kwargs`` is the captured URL parameters.
+Payload keyword arguments.
+   ``sender`` is ``FormActionDispatch``.
+   ``action_name`` is the action name.
+   ``error_count`` is the total number of field errors.
+   ``field_names`` is a tuple of the failing field names.
 
 .. code-block:: python
    :caption: failure rate metric
@@ -121,15 +123,15 @@ Payload.
 
    @receiver(form_validation_failed)
    def record_failure(sender, **kwargs) -> None:
-       emit("form.validation_failed", tags={"action": kwargs["name"]})
+       emit("form.validation_failed", tags={"action": kwargs["action_name"]})
 
 The signal fires once per failed submission, regardless of how many fields failed.
 
 Sender Identity
 ---------------
 
-Every signal uses the same ``sender``, the form action manager class.
-Filter on ``name`` instead of ``sender`` to react to a specific action.
+The dispatch signals use ``FormActionDispatch`` as ``sender``.
+Filter on ``action_name`` to react to a specific action.
 
 .. code-block:: python
    :caption: targeted receiver
@@ -141,9 +143,11 @@ Filter on ``name`` instead of ``sender`` to react to a specific action.
 
    @receiver(action_dispatched)
    def on_save_note(sender, **kwargs) -> None:
-       if kwargs["name"] != "create_note":
+       if kwargs["action_name"] != "create_note":
            return
-       send_notification(kwargs["form"].instance)
+       form = kwargs["form"]
+       if form is not None:
+           send_notification(form.instance)
 
 Connect Once
 ------------

@@ -1,23 +1,23 @@
 .. _howto-extend-backend:
 
-Extend a Default Backend Chain
-==============================
+Patch a Default Backend Entry
+=============================
 
 Problem
 -------
 
-You want to add one backend to a default chain without copying every framework default into your settings.
+You want to override one key of a default backend entry, such as ``PAGES_DIR`` or a value inside ``OPTIONS``, without copying the whole framework default into your settings.
 
 Solution
 --------
 
 Use ``next.conf.extend_default_backend``.
-The helper merges with the framework defaults and lets you control the position.
+The helper returns a deep copy of the default backend list with one entry patched by your overrides.
 
 Walkthrough
 -----------
 
-Pick the chain.
+Pick the backend list.
 
 .. list-table::
    :header-rows: 1
@@ -32,9 +32,9 @@ Pick the chain.
    * - ``DEFAULT_STATIC_BACKENDS``
      - Static collector and asset rendering.
    * - ``DEFAULT_FORM_ACTION_BACKENDS``
-     - Form dispatch pipeline.
+     - Form dispatch.
 
-Call the helper with the setting name and the backend you want to add.
+Call the helper with the setting name and the keys to override.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -42,62 +42,61 @@ Call the helper with the setting name and the backend you want to add.
    from next.conf import extend_default_backend
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": extend_default_backend(
-           "DEFAULT_STATIC_BACKENDS",
-           "notes.backends.CdnBackend",
-           position="last",
+       "DEFAULT_PAGE_BACKENDS": extend_default_backend(
+           "DEFAULT_PAGE_BACKENDS",
+           PAGES_DIR="routes",
        )
    }
 
-Positions
-~~~~~~~~~
+The helper returns the default ``DEFAULT_PAGE_BACKENDS`` list with the first entry ``PAGES_DIR`` set to ``routes`` and every other key kept.
 
-The ``position`` argument accepts four values.
+Override a Nested OPTIONS Key
+-----------------------------
 
-``first``.
-   Insert at index zero.
-
-``last``.
-   Append at the end.
-
-``before``.
-   Insert directly before ``target``.
-
-``after``.
-   Insert directly after ``target``.
-
-Provide ``target`` for ``before`` and ``after``.
+Nested dicts such as ``OPTIONS`` are merged, not replaced.
+Adjacent keys survive.
 
 .. code-block:: python
-   :caption: target relative position
+   :caption: config/settings.py
 
    from next.conf import extend_default_backend
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_ACTION_BACKENDS": extend_default_backend(
-           "DEFAULT_FORM_ACTION_BACKENDS",
-           "notes.backends.AuditBackend",
-           position="after",
-           target="next.forms.backends.OriginPageBackend",
-       )
-   }
-
-Single Backend Replacement
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-A dict argument overrides a single key inside the first entry without touching the chain length.
-
-.. code-block:: python
-   :caption: override one key
-
-   NEXT_FRAMEWORK = {
        "DEFAULT_PAGE_BACKENDS": extend_default_backend(
            "DEFAULT_PAGE_BACKENDS",
-           {"PAGES_DIR": "screens"},
+           OPTIONS={"context_processors": ["notes.context_processors.tenant"]},
        )
    }
 
-The helper merges the dict into the first backend entry.
+Patch a Specific Entry
+----------------------
+
+The ``index`` keyword selects which entry of the default list to patch.
+The default is ``0``, the first entry.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   extend_default_backend("DEFAULT_PAGE_BACKENDS", index=0, APP_DIRS=False)
+
+When to Write the List by Hand
+------------------------------
+
+``extend_default_backend`` patches an existing default entry.
+It does not add a new backend.
+To register a custom backend, write the full list yourself.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_FORM_ACTION_BACKENDS": [
+           {"BACKEND": "notes.backends.AuditedFormActionBackend"},
+       ]
+   }
+
+A custom backend usually subclasses the default, so it already inherits every default behaviour.
+See :doc:`/content/howto/write-a-form-action-backend`.
 
 Verification
 ------------
@@ -109,10 +108,12 @@ Print the resolved setting from a Django shell.
 
    uv run python manage.py shell -c "
    from next.conf import next_framework_settings
-   print(next_framework_settings.DEFAULT_STATIC_BACKENDS)
+   print(next_framework_settings.DEFAULT_PAGE_BACKENDS)
    "
 
-The list contains both the framework defaults and the new entry in the requested position.
+The list shows the default entry with your overrides applied.
+
+The helper raises ``ImproperlyConfigured`` for an unknown setting name and ``IndexError`` for an out of range ``index``.
 
 See Also
 --------

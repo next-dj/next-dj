@@ -146,10 +146,10 @@ When ``True`` ``component.py`` modules are imported on first render rather than 
 
 Default value ``False``.
 
-Extending Defaults
-------------------
+Patching Defaults
+-----------------
 
-Use ``next.conf.extend_default_backend`` to add a backend without replacing the full chain.
+Use ``next.conf.extend_default_backend`` to patch one key of a default backend entry without copying the whole default.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -157,12 +157,14 @@ Use ``next.conf.extend_default_backend`` to add a backend without replacing the 
    from next.conf import extend_default_backend
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_ACTION_BACKENDS": extend_default_backend(
-           "DEFAULT_FORM_ACTION_BACKENDS",
-           "notes.backends.AuditBackend",
-           position="last",
+       "DEFAULT_PAGE_BACKENDS": extend_default_backend(
+           "DEFAULT_PAGE_BACKENDS",
+           PAGES_DIR="routes",
        )
    }
+
+The helper returns a deep copy of the default list with the entry at ``index`` (default ``0``) patched by the keyword overrides.
+Nested dicts such as ``OPTIONS`` are merged.
 
 See :doc:`conf` for the helper API and :doc:`/content/howto/extend-a-default-backend` for the recipe.
 

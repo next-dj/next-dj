@@ -6,61 +6,58 @@ Add a Custom Stem
 Problem
 -------
 
-You want the discovery scanner to pick up files named ``module.mjs`` or ``vendor.css`` inside a component folder in addition to the default ``component.<ext>`` files.
+You want discovery to pick up a file named ``page.css`` next to ``template.djx``, or ``vendor.js`` inside a component folder, in addition to the default stems.
 
 Solution
 --------
 
-Add the stem name to ``NEXT_FRAMEWORK["DEFAULT_COMPONENT_STEMS"]``.
-The scanner expands the file search to include the new name with every registered extension.
+Register the stem through ``next.static.discovery.default_stems`` in ``AppConfig.ready``.
 
 Walkthrough
 -----------
 
-Pick the stem names.
+Register the stem under the appropriate role.
 
 .. code-block:: python
-   :caption: config/settings.py
+   :caption: notes/apps.py
 
-   NEXT_FRAMEWORK = {
-       "DEFAULT_COMPONENT_STEMS": ["component", "module", "vendor"],
-   }
+   from django.apps import AppConfig
 
-The list replaces the framework default ``["component"]``.
-Include ``component`` so the default behaviour still works.
+   from next.static.discovery import default_stems
+
+
+   class NotesConfig(AppConfig):
+       name = "notes"
+
+       def ready(self) -> None:
+           default_stems.register("template", "page")
+           default_stems.register("component", "vendor")
+
+The first argument is the role, one of ``template``, ``layout``, or ``component``.
+The second argument is the new stem.
 
 Ship a file with the new stem.
 
 .. code-block:: text
-   :caption: notes/_components/note_card/
+   :caption: notes/routes/
 
-   component.djx
-   component.css
-   module.mjs
-   vendor.css
+   page.py
+   template.djx
+   page.css
 
-The scanner registers ``module.mjs`` under the ``module`` kind and ``vendor.css`` under the ``css`` kind.
-Both files belong to the same owner (the ``note_card`` component) and load together when the component renders.
+Discovery now records ``page.css`` as a ``css`` asset owned by the page, because ``page`` is a registered stem under the ``template`` role and ``.css`` is the extension of the ``css`` kind.
 
-For Pages and Layouts
+Stem and Kind Pairing
 ~~~~~~~~~~~~~~~~~~~~~
 
-Set ``DEFAULT_PAGE_STEMS`` to extend the page side.
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_STEMS": ["template", "layout", "vendor"],
-   }
-
-A file named ``vendor.css`` next to ``template.djx`` ships with the page.
+A new stem participates in every registered kind.
+After registering ``vendor`` under the ``component`` role, discovery looks for ``vendor.css``, ``vendor.js``, and ``vendor.mjs`` inside component folders.
 
 Verification
 ------------
 
-Restart the server so the watch spec picks up the new file globs.
-Reload the page that uses the component and confirm that the new files appear in the rendered HTML.
+Restart the server so the autoreload watch specs pick up the new file globs.
+Reload a page that uses the file and confirm the asset appears in the rendered HTML.
 
 See Also
 --------

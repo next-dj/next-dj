@@ -91,14 +91,13 @@ Use ``SimpleUploadedFile`` to feed a fake file into ``NextClient``.
 
    from django.core.files.uploadedfile import SimpleUploadedFile
 
-   from next.forms.uid import action_url
    from next.testing.client import NextClient
 
 
    def test_upload(db) -> None:
        fake = SimpleUploadedFile("file.txt", b"hello")
-       response = NextClient().post(
-           action_url("upload_attachment"),
+       response = NextClient().post_action(
+           "upload_attachment",
            {"title": "First", "file": fake},
        )
        assert response.status_code == 302

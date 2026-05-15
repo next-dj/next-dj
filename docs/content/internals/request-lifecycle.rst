@@ -22,19 +22,19 @@ Pipeline
 .. mermaid::
 
    flowchart TB
-       Browser([Browser]) -- HTTP request --> Django[Django middleware]
-       Django --> Resolver[Django URL resolver]
-       Resolver -- "/_next/form/<uid>/" --> FormDispatch[Form dispatcher]
-       Resolver -- file routed path --> PageView[Page view]
-       PageView --> Loader[Page loader]
-       Loader --> ContextCtx[Run @context functions]
-       ContextCtx --> RenderBody[Render body source]
-       RenderBody --> LayoutChain[Compose layout chain]
-       LayoutChain --> CollectAssets[Static collector]
-       CollectAssets --> InjectTags[Emit collected tags]
-       InjectTags --> Response([HTTP response])
-       FormDispatch --> Validation{Form valid}
-       Validation -- yes --> Handler[Run handler]
+       Browser(["Browser"]) -- HTTP request --> Django["Django middleware"]
+       Django --> Resolver["Django URL resolver"]
+       Resolver -- form dispatch path --> FormDispatch["Form dispatcher"]
+       Resolver -- file routed path --> PageView["Page view"]
+       PageView --> Loader["Page loader"]
+       Loader --> ContextCtx["Run context functions"]
+       ContextCtx --> RenderBody["Render body source"]
+       RenderBody --> LayoutChain["Compose layout chain"]
+       LayoutChain --> CollectAssets["Static collector"]
+       CollectAssets --> InjectTags["Emit collected tags"]
+       InjectTags --> Response(["HTTP response"])
+       FormDispatch --> Validation{"Form valid"}
+       Validation -- yes --> Handler["Run handler"]
        Handler --> Response
        Validation -- no --> Loader
 

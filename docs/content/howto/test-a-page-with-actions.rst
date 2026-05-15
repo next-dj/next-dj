@@ -11,7 +11,7 @@ You want pytest to drive a page that posts to a registered action, asserts the r
 Solution
 --------
 
-Use ``NextClient`` for the HTTP round trip, ``action_url`` to build the dispatch URL, and ``SignalRecorder`` to capture the signal payload.
+Use ``NextClient.post_action`` for the HTTP round trip and ``SignalRecorder`` to capture the signal payload.
 
 Walkthrough
 -----------
@@ -40,7 +40,6 @@ Write the test.
    from notes.models import Note
 
    from next.forms.signals import action_dispatched
-   from next.forms.uid import action_url
    from next.testing.client import NextClient
    from next.testing.signals import SignalRecorder
 
@@ -49,17 +48,17 @@ Write the test.
        client = NextClient()
 
        with SignalRecorder(action_dispatched) as recorder:
-           response = client.post(
-               action_url("create_note"),
+           response = client.post_action(
+               "create_note",
                {"title": "First", "body": "Hello"},
            )
 
        assert response.status_code == 302
        assert response["Location"] == "/"
 
-       call = recorder.calls[-1]
-       assert call.kwargs["name"] == "create_note"
-       assert call.kwargs["form"].cleaned_data["title"] == "First"
+       event = recorder.events[-1]
+       assert event.kwargs["action_name"] == "create_note"
+       assert event.kwargs["form"].cleaned_data["title"] == "First"
 
        assert Note.objects.filter(title="First").exists()
 
@@ -69,12 +68,11 @@ Test the Failure Path
 .. code-block:: python
    :caption: tests/test_validation_failure.py
 
-   from next.forms.uid import action_url
    from next.testing.client import NextClient
 
 
    def test_blank_title_rerenders(db) -> None:
-       response = NextClient().post(action_url("create_note"), {"title": ""})
+       response = NextClient().post_action("create_note", {"title": ""})
        assert response.status_code == 200
        assert b"This field is required" in response.content
 

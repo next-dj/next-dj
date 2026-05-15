@@ -29,15 +29,14 @@ Pass the formset class as ``form_class``.
 .. code-block:: python
    :caption: notes/forms.py
 
-   from django import forms
    from django.forms import formset_factory
 
-   from next.forms import Form
+   from next.forms import ModelForm
 
    from notes.models import Note
 
 
-   class NoteRowForm(Form, forms.ModelForm):
+   class NoteRowForm(ModelForm):
        class Meta:
            model = Note
            fields = ("title", "body")

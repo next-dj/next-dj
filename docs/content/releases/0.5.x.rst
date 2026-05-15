@@ -30,8 +30,8 @@ See :doc:`/content/topics/testing`.
 Pluggable Form Action Backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``DEFAULT_FORM_ACTION_BACKENDS`` lets projects insert audit logging, rate limiting, geo blocking, and other checks into the dispatch chain.
-``extend_default_backend`` adds entries without dropping the defaults.
+``DEFAULT_FORM_ACTION_BACKENDS`` lets projects register a custom form action backend.
+A custom backend subclasses ``RegistryFormActionBackend`` and overrides ``dispatch`` to add audit logging, rate limiting, or other steps.
 
 See :doc:`/content/topics/forms/backends`.
 

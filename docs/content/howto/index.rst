@@ -58,7 +58,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    Plug a new validation pipeline into the dispatcher.
 
 :doc:`extend-a-default-backend`
-   Add a backend to a default chain without replacing it.
+   Patch one key of a default backend entry through ``extend_default_backend``.
 
 .. rubric:: Testing and integration
 

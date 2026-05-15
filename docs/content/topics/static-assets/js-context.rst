@@ -3,8 +3,8 @@
 JavaScript Context
 ==================
 
-next.dj ships a ``Next`` object to the browser that holds page context, URL kwargs, and a few framework keys.
-This page covers how to opt context values in, how the wire format is built, and how to swap the serializer that converts Python values into JavaScript.
+next.dj ships a ``Next`` object to the browser that holds context values marked for serialisation.
+This page covers how to opt a context value in, how to choose a serializer, and how the conflict policy resolves duplicate keys.
 
 .. contents::
    :local:
@@ -13,17 +13,8 @@ This page covers how to opt context values in, how the wire format is built, and
 The Next Object
 ---------------
 
-The framework injects one ``<script>`` per page that defines ``window.Next`` before any other ``{% collect_scripts %}`` output.
-The object has three top level fields.
-
-``context``.
-   The map of context keys that opted into serialization.
-
-``url_kwargs``.
-   The captured URL parameters for the current page.
-
-``page``.
-   Metadata about the current page including its URL name and the absolute path of its ``page.py``.
+The static manager injects a runtime script that defines ``window.Next`` before the collected scripts run.
+Context values opted into serialisation land under ``window.Next.context``.
 
 Opting In
 ---------
@@ -40,171 +31,164 @@ Pass ``serialize=True`` on the ``@context`` decorator.
    def note_count() -> int:
        return 5
 
-The value lands at ``Next.context.note_count`` in the browser.
-Functions without ``serialize=True`` stay on the server side only.
+The value lands at ``window.Next.context.note_count`` in the browser.
+A context function without ``serialize=True`` stays server side only.
 
-Per Key Serializer
-------------------
+Serializers
+-----------
 
-Override the serializer for a single key through the ``serializer`` argument.
+A serializer turns a Python value into JSON text.
+It implements the ``JsContextSerializer`` protocol, which has one method, ``dumps``.
 
-.. code-block:: python
-   :caption: per key serializer
+The framework ships two implementations.
 
-   from pydantic import BaseModel
+``JsonJsContextSerializer``.
+   The process wide default.
+   Encodes through Django ``DjangoJSONEncoder``.
 
-   from next.pages import context
-
-
-   class NoteOut(BaseModel):
-       id: int
-       title: str
-
-
-   def to_dict(value: NoteOut) -> dict:
-       return value.model_dump()
-
-
-   @context("featured", serialize=True, serializer=to_dict)
-   def featured() -> NoteOut:
-       return NoteOut(id=1, title="Hello")
-
-The framework calls the function before JSON encoding.
-Use this for Pydantic models, dataclasses, NumPy arrays, or any other type that JSON cannot encode directly.
+``PydanticJsContextSerializer``.
+   Encodes Pydantic models through ``model_dump``.
+   Falls back to ``DjangoJSONEncoder`` for plain values.
 
 Project Wide Serializer
 -----------------------
 
-Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to a dotted path that points at a callable.
+Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to the dotted path of a serializer class.
 
 .. code-block:: python
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "JS_CONTEXT_SERIALIZER": "notes.serializers.json_context",
+       "JS_CONTEXT_SERIALIZER": "next.static.PydanticJsContextSerializer",
    }
 
-The callable receives a dict and returns a dict.
-The framework JSON encodes the result.
+``resolve_serializer`` reads the setting on every call.
+When the key is absent the framework uses ``JsonJsContextSerializer``.
+
+Per Key Serializer
+------------------
+
+Pass ``serializer=`` on a single ``@context`` decorator to route one key through a custom serializer.
+The override applies only to that key.
+
+.. code-block:: python
+   :caption: per key serializer
+
+   from next.pages import context
+   from next.static import PydanticJsContextSerializer
+
+
+   @context("featured", serialize=True, serializer=PydanticJsContextSerializer())
+   def featured() -> object:
+       return load_featured_note()
+
+The collector routes the ``featured`` key through the supplied serializer and every other key through the project default.
+
+Writing a Serializer
+--------------------
+
+A serializer is any class with a ``dumps`` method.
 
 .. code-block:: python
    :caption: notes/serializers.py
 
-   from datetime import datetime
+   import json
+
+   from django.core.serializers.json import DjangoJSONEncoder
 
 
-   def json_context(payload: dict) -> dict:
-       result = {}
-       for key, value in payload.items():
-           if isinstance(value, datetime):
-               result[key] = value.isoformat()
-           else:
-               result[key] = value
-       return result
+   class CompactSerializer:
+       """Serialise context values with sorted keys for stable output."""
 
-The project wide serializer runs before per key serializers.
-Use it to apply universal conversions and let per key overrides handle specialised types.
+       def dumps(self, value: object) -> str:
+           return json.dumps(
+               value,
+               cls=DjangoJSONEncoder,
+               separators=(",", ":"),
+               sort_keys=True,
+           )
 
-Wire Format
------------
+Point ``JS_CONTEXT_SERIALIZER`` at the dotted path of the class.
+The framework instantiates it through ``resolve_serializer``.
 
-The framework emits a script of this shape.
+Key Conflict Policy
+-------------------
 
-.. code-block:: html
-   :caption: rendered output
+Two context functions can mark the same key for serialisation.
+The collector resolves the conflict through a JS context policy.
 
-   <script id="next-context" type="application/json">
-   {"context": {"note_count": 5}, "url_kwargs": {"id": 7}, "page": {"name": "next:page_notes_id", "module": "/abs/path/to/page.py"}}
-   </script>
-   <script>
-   window.Next = JSON.parse(document.getElementById("next-context").textContent);
-   </script>
+The framework ships four policies in ``next.static.collector``.
 
-Two scripts run.
-The first holds the JSON payload.
-The second parses it and assigns to ``window.Next``.
+``FirstWinsPolicy``.
+   Keeps the first value, ignores later ones.
+
+``LastWinsPolicy``.
+   Keeps the last value.
+
+``RaiseOnConflictPolicy``.
+   Raises on a duplicate key.
+
+``DeepMergePolicy``.
+   Merges nested dicts when both values are dicts.
+
+Configure the policy through the first static backend ``OPTIONS``.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_STATIC_BACKENDS": [
+           {
+               "BACKEND": "next.static.StaticFilesBackend",
+               "OPTIONS": {
+                   "JS_CONTEXT_POLICY": "next.static.collector.DeepMergePolicy",
+               },
+           }
+       ]
+   }
 
 Reading on the Client
 ---------------------
 
-Any inline script or co-located JS can read ``Next``.
+Co-located JS and inline scripts read ``window.Next.context``.
 
 .. code-block:: javascript
    :caption: notes/_components/note_card/component.js
 
    document.addEventListener("DOMContentLoaded", () => {
-     const count = Next.context.note_count ?? 0;
+     const count = window.Next.context.note_count ?? 0;
      console.log(`There are ${count} notes.`);
    });
 
-The framework injects ``Next`` before ``{% collect_scripts %}`` emits the co-located scripts so the variable is always defined when component scripts run.
+The runtime script defines ``window.Next`` before the collected scripts run.
 
-Key Conflict
-------------
+Runtime Script Options
+----------------------
 
-A page that registers two context functions with the same key is a configuration error.
-The framework reports the conflict through ``next.E090`` at startup with the file location of both functions.
+The setting ``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]`` is a dict that configures the runtime script builder.
+The builder controls how and where the ``Next`` script is injected through a ``ScriptInjectionPolicy``.
+The default policy is ``AUTO``, which injects the runtime script before the collected scripts.
 
-Excluding Keys
---------------
+Common Patterns
+---------------
 
-Pass ``serialize=False`` to explicitly opt a value out of serialization when a global serializer would otherwise pick it up.
+Hydrate a Component
+~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: python
-   :caption: explicit opt out
+Mark the data a client component needs with ``serialize=True``.
+The component reads ``window.Next.context`` without a second request.
 
-   from next.pages import context
+Pydantic Models to the Browser
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-
-   @context("secret_token", serialize=False)
-   def token() -> str:
-       return load_secret_token()
-
-The value reaches the template but not the browser.
-
-JSContextSerializer Class
--------------------------
-
-For more elaborate transformations use the ``next.static.serializers.JsContextSerializer`` base class.
-
-.. code-block:: python
-   :caption: subclass
-
-   from next.static.serializers import JsContextSerializer
-
-
-   class JsonContextSerializer(JsContextSerializer):
-       def serialize_value(self, key: str, value: object) -> object:
-           if key.startswith("secret_"):
-               return None
-           return super().serialize_value(key, value)
-
-Point ``JS_CONTEXT_SERIALIZER`` at the dotted path of the subclass.
-The framework instantiates it once per process.
-
-Browser Side Patterns
----------------------
-
-Hydrating a Component
-~~~~~~~~~~~~~~~~~~~~~
-
-Use ``Next.context`` to hydrate a React or Vue component without a separate XHR.
-
-Page Specific Configuration
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Use ``Next.url_kwargs`` to read captured URL parameters from the client.
-
-Feature Flags
-~~~~~~~~~~~~~
-
-Pass feature flag values through ``Next.context`` and gate client side features on them.
+Set ``JS_CONTEXT_SERIALIZER`` to ``PydanticJsContextSerializer`` so context functions can return Pydantic models directly.
 
 See Also
 --------
 
 .. seealso::
 
-   :doc:`/content/topics/context` for ``@context`` and ``serialize`` flags.
+   :doc:`/content/topics/context` for the ``@context`` decorator.
+   :doc:`backends` for the ``JS_CONTEXT_POLICY`` option.
    :doc:`/content/howto/override-the-js-context-serializer` for a recipe.
    :doc:`/content/ref/static` for the serializer API.

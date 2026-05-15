@@ -3,8 +3,8 @@
 Co-located Files
 ================
 
-A co-located file is an asset that lives in the same directory as the page, component, or layout that owns it.
-The framework discovers these files through a stem convention and attaches each one to its owner so the collector adds it to the request when the owner renders.
+A co-located file is an asset that lives in the same directory as the page, layout, or component that owns it.
+Discovery pairs each file with its owner through a stem convention so the collector adds it when the owner renders.
 
 .. contents::
    :local:
@@ -14,21 +14,19 @@ Stem Convention
 ---------------
 
 A stem is the filename without the extension.
-Three stems carry special meaning by default.
+Discovery groups stems into three roles.
 
-``component``.
-   Owned by a composite component.
-   Lives next to ``component.djx``.
+``template`` role.
+   Default stem ``template``.
+   Matches files next to a ``template.djx``.
 
-``layout``.
-   Owned by a layout.
-   Lives next to ``layout.djx``.
+``layout`` role.
+   Default stem ``layout``.
+   Matches files next to a ``layout.djx``.
 
-``template``.
-   Owned by a page module.
-   Lives next to ``template.djx``.
-
-The framework also recognises ``module`` for ES module style scripts.
+``component`` role.
+   Default stem ``component``.
+   Matches files inside a component folder next to ``component.djx``.
 
 .. code-block:: text
    :caption: layout
@@ -37,7 +35,6 @@ The framework also recognises ``module`` for ES module style scripts.
      component.djx
      component.css
      component.js
-     component.mjs
    notes/routes/
      layout.djx
      layout.css
@@ -49,40 +46,42 @@ The framework also recognises ``module`` for ES module style scripts.
 Recognised Extensions
 ---------------------
 
-Each stem accepts several extensions out of the box.
+Each stem accepts the extension of every registered asset kind.
+The framework ships three kinds.
 
 .. list-table::
    :header-rows: 1
-   :widths: 35 35 30
+   :widths: 35 30 35
 
-   * - Stem
-     - Extension
+   * - Extension
      - Kind
-   * - ``component``, ``layout``, ``template``
-     - ``.css``
+     - Slot
+   * - ``.css``
      - ``css``
-   * - ``component``, ``layout``, ``template``
-     - ``.js``
+     - ``styles``
+   * - ``.js``
      - ``js``
-   * - ``component``, ``layout``, ``template``
-     - ``.mjs``
+     - ``scripts``
+   * - ``.mjs``
      - ``module``
+     - ``scripts``
 
-Extensions are configurable through :doc:`asset-kinds`.
-Custom stems extend the set through :doc:`custom-stems`.
+A file named ``component.mjs`` is therefore picked up as a ``module`` asset.
+Custom kinds extend the set through :doc:`asset-kinds`.
+Custom stems extend the recognised filenames through :doc:`custom-stems`.
 
 How Discovery Works
 -------------------
 
-Discovery happens once during startup and after each filesystem reload.
+Discovery happens at startup and after each filesystem reload.
 
-1. The discovery scanner walks every page root that the router walks.
-2. For each component, page, and layout directory the scanner looks for files that match a registered stem.
-3. Each match becomes an ``Asset`` record stored in the registry.
-4. The registry is the input for the per request collector.
+1. ``AssetDiscovery`` walks every page and component root.
+2. For each owner directory, the scanner combines every registered stem of the appropriate role with every registered kind extension.
+3. Each match becomes a ``StaticAsset`` record.
+4. The records feed the per request collector.
 
-The scan is incremental.
-The autoreload watcher tracks the page roots, so adding a file does not require a restart.
+A file that does not match a registered stem and kind pair is ignored.
+Discovery does not warn on unknown files because the folder may hold documentation or fixtures.
 
 Asset Ownership
 ---------------
@@ -94,65 +93,51 @@ The owner determines when the collector adds the asset to the request.
    :header-rows: 1
    :widths: 30 70
 
-   * - Stem
+   * - Role
      - Trigger
    * - ``component``
      - The component is rendered through ``{% component %}``.
    * - ``layout``
      - The layout renders as part of the layout chain.
    * - ``template``
-     - The page renders, before any inner components.
+     - The page renders.
 
 A component referenced twice on the same page contributes the asset once.
-Two pages that share the same component receive separate collectors.
-
-Multiple Files per Stem
------------------------
-
-Each owner can ship at most one file per stem and extension pair.
-A component with both ``component.css`` and ``component.css.map`` is fine because ``.map`` is not a registered extension.
-
-Two CSS files in one component folder are a configuration error.
-Reorganise the styles or rename one of the files.
-The system check ``next.W050`` reports the conflict at startup.
+The collector deduplicates entries through its dedup strategy, see :doc:`deduplication`.
 
 Loading Order
 -------------
 
-Inside one owner the framework follows insertion order.
-Across owners the order is layout chain, page, component in template order.
-The collector preserves the order so the rendered HTML mirrors the discovery sequence.
-
-See :doc:`overview` for the order rules.
+The collector preserves insertion order.
+Layout assets enter first as the layout chain unfolds from the root.
+Page assets follow.
+Component assets enter in the order the components appear in the template.
 
 Hot Reload
 ----------
 
-The discovery scanner participates in the autoreload pipeline.
-Adding ``component.css`` to a component folder triggers a router reload signal and the collector picks up the new asset on the next request.
-
-Removing a file works the same way.
-The asset disappears from the registry and templates that referenced it through the standard tags simply stop including it.
+The discovery scanner contributes watch specs to the autoreloader.
+Adding ``component.css`` to a component folder triggers a reload and the collector picks up the new asset on the next request.
 
 Recipes
 -------
 
-CSS Reset for the Whole Site
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Site Wide Reset
+~~~~~~~~~~~~~~~
 
 Place ``layout.css`` next to the root ``layout.djx``.
-Every page below that layout inherits the reset because the layout chain always emits the root layout assets first.
+Every page below the layout inherits the reset because layout assets enter the collector first.
 
 Per Section Styles
 ~~~~~~~~~~~~~~~~~~
 
 Add a ``layout.css`` next to an inner layout.
-The styles apply only to pages below that layout, the upper layouts and other sections are unaffected.
+The styles apply only to pages below that layout.
 
-Component Specific JS Behaviour
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Component Behaviour
+~~~~~~~~~~~~~~~~~~~
 
-Use ``component.js`` for behaviour that should run on every page that includes the component.
+Use ``component.js`` for behaviour that runs on every page that includes the component.
 Use ``component.mjs`` when the script depends on ECMAScript module imports.
 
 See Also
@@ -161,6 +146,6 @@ See Also
 .. seealso::
 
    :doc:`overview` for the pipeline trace.
-   :doc:`template-tags` for the injection point in the template.
+   :doc:`template-tags` for the injection point in the layout.
    :doc:`asset-kinds` for the kind to extension mapping.
    :doc:`custom-stems` for extra stem names.

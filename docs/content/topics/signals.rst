@@ -41,13 +41,13 @@ Pages
    :widths: 30 70
 
    * - Name
-     - Payload
+     - Payload keyword arguments
    * - ``template_loaded``
-     - ``sender`` is the loader, ``template_path`` is the resolved path, ``page_module_path`` is the page module file.
+     - ``sender`` is ``Page``. ``file_path`` is the resolved page module path.
    * - ``context_registered``
-     - ``sender`` is the page manager class, ``key`` is the context name, ``callable`` is the function, ``inherit_context`` is the inheritance flag.
+     - ``sender`` is ``PageContextRegistry``. ``file_path`` is the page module path. ``key`` is the context name.
    * - ``page_rendered``
-     - ``sender`` is the page manager class, ``request`` is the HTTP request, ``page_module_path`` is the page file, ``html`` is the rendered body.
+     - ``sender`` is ``Page``. ``file_path`` is the page module path. ``duration_ms`` is the render time. ``styles_count`` and ``scripts_count`` are the collected asset counts. ``context_keys`` is a tuple of every context key.
 
 Components
 ~~~~~~~~~~
@@ -57,15 +57,15 @@ Components
    :widths: 35 65
 
    * - Name
-     - Payload
+     - Payload keyword arguments
    * - ``component_registered``
-     - ``sender`` is the components manager, ``name`` is the component name, ``path`` is the component folder.
+     - ``sender`` is ``ComponentRegistry``. ``info`` is the ``ComponentInfo`` record.
    * - ``components_registered``
-     - ``sender`` is the components manager, ``components`` is a tuple of every component registered in the current bulk cycle.
+     - ``sender`` is ``ComponentRegistry``. ``infos`` is a tuple of every ``ComponentInfo`` registered in the current bulk cycle.
    * - ``component_backend_loaded``
-     - ``sender`` is the components manager, ``backend`` is the backend instance, ``options`` is the config dict.
+     - ``sender`` is ``ComponentsManager``. ``backend`` is the backend instance. ``config`` is the config dict.
    * - ``component_rendered``
-     - ``sender`` is the components manager, ``name`` is the component, ``html`` is the rendered fragment, ``request`` is the HTTP request.
+     - ``sender`` is the components manager class. ``info`` is the ``ComponentInfo``. ``template_path`` is the resolved template path.
 
 Dependency Injection
 ~~~~~~~~~~~~~~~~~~~~
@@ -75,9 +75,9 @@ Dependency Injection
    :widths: 30 70
 
    * - Name
-     - Payload
+     - Payload keyword arguments
    * - ``provider_registered``
-     - ``sender`` is the resolver, ``provider`` is the class that joined the registry.
+     - ``sender`` is the provider class that joined the registry. No extra keyword arguments.
 
 URLs
 ~~~~
@@ -87,11 +87,11 @@ URLs
    :widths: 30 70
 
    * - Name
-     - Payload
+     - Payload keyword arguments
    * - ``route_registered``
-     - ``sender`` is the router manager class, ``pattern`` is the URL pattern, ``name`` is the URL name.
+     - ``sender`` is ``FileRouterBackend``. ``url_path`` is the URL path. ``file_path`` is the page module path.
    * - ``router_reloaded``
-     - ``sender`` is the router manager class.
+     - ``sender`` is the ``RouterManager`` class. No extra keyword arguments.
 
 Forms
 ~~~~~
@@ -101,13 +101,13 @@ Forms
    :widths: 35 65
 
    * - Name
-     - Payload
+     - Payload keyword arguments
    * - ``action_registered``
-     - ``sender`` is the form action manager class, ``name`` is the action name, ``handler`` is the callable, ``form_class`` is the form class, ``backends`` is the per-action backend tuple.
+     - ``sender`` is the form action backend class. ``action_name`` is the name. ``uid`` is the dispatch UID. ``form_class`` is the form class. ``namespace`` is the namespace prefix. ``handler`` is the callable.
    * - ``action_dispatched``
-     - ``sender`` is the form action manager class, ``name`` is the action name, ``request`` is the HTTP request, ``response`` is the handler return value, ``form`` is the bound form, ``url_kwargs`` is the captured kwargs.
+     - ``sender`` is ``FormActionDispatch``. ``action_name`` is the name. ``form`` is the bound form or ``None``. ``url_kwargs`` is the captured kwargs dict. ``duration_ms`` is the handler time. ``response_status`` is the HTTP status. ``dep_cache`` is the request dependency cache dict.
    * - ``form_validation_failed``
-     - ``sender`` is the form action manager class, ``name`` is the action name, ``request`` is the HTTP request, ``form`` is the bound failing form, ``url_kwargs`` is the captured kwargs.
+     - ``sender`` is ``FormActionDispatch``. ``action_name`` is the name. ``error_count`` is the total error count. ``field_names`` is a tuple of the failing field names.
 
 Static Pipeline
 ~~~~~~~~~~~~~~~
@@ -117,15 +117,15 @@ Static Pipeline
    :widths: 30 70
 
    * - Name
-     - Payload
+     - Payload keyword arguments
    * - ``asset_registered``
-     - ``sender`` is the discovery class, ``asset`` is the asset record, ``owner`` is the component or page that owns it.
+     - ``sender`` is the ``StaticAsset`` instance. ``collector`` is the collector. ``backend`` is the active static backend.
    * - ``collector_finalized``
-     - ``sender`` is the static manager class, ``request`` is the HTTP request, ``collector`` is the collector instance.
+     - ``sender`` is the collector. ``page_path`` is the page module path. ``request`` is the HTTP request.
    * - ``html_injected``
-     - ``sender`` is the static manager class, ``bucket`` is the bucket name, ``html`` is the rendered HTML, ``request`` is the HTTP request.
+     - ``sender`` is the static manager. ``html_before`` and ``html_after`` are the HTML around injection. ``collector`` is the collector. ``placeholders_replaced`` is a tuple of slot names. ``injected_bytes`` is the size delta. ``request`` is the HTTP request.
    * - ``backend_loaded``
-     - ``sender`` is the static manager class, ``backend`` is the backend class, ``options`` is the config dict.
+     - ``sender`` is the backend class. ``config`` is the config dict. ``instance`` is the backend instance.
 
 Server and Configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -135,11 +135,11 @@ Server and Configuration
    :widths: 35 65
 
    * - Name
-     - Payload
+     - Payload keyword arguments
    * - ``watch_specs_ready``
-     - ``sender`` is the autoreload watcher class, ``specs`` is the collected watch spec list.
+     - ``sender`` is ``iter_all_autoreload_watch_specs``. ``specs`` is the collected watch spec list.
    * - ``settings_reloaded``
-     - ``sender`` is the settings class, ``settings`` is the new ``NextFrameworkSettings`` snapshot.
+     - ``sender`` is the ``NextFrameworkSettings`` class. No extra keyword arguments.
 
 Receiver Patterns
 -----------------
@@ -170,7 +170,7 @@ Use ``django.dispatch.receiver`` to connect a callable to a signal.
 
    @receiver(action_dispatched)
    def log_dispatch(sender, **kwargs) -> None:
-       print(kwargs["name"])
+       print(kwargs["action_name"])
 
 Multiple Receivers
 ~~~~~~~~~~~~~~~~~~
@@ -187,21 +187,23 @@ Test isolation utilities in ``next.testing.signals`` already disconnect for you 
 Test Helpers
 ------------
 
-The ``SignalRecorder`` from ``next.testing.signals`` captures payloads for assertions.
+The ``SignalRecorder`` from ``next.testing.signals`` captures events for assertions.
+Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwargs`` attributes.
 
 .. code-block:: python
    :caption: test using a recorder
 
    from next.signals import action_dispatched
+   from next.testing.client import NextClient
    from next.testing.signals import SignalRecorder
 
 
-   def test_emits_action(client) -> None:
+   def test_emits_action(db) -> None:
        with SignalRecorder(action_dispatched) as recorder:
-           client.post("/_next/form/abc/", {"title": "Hello"})
+           NextClient().post_action("create_note", {"title": "Hello"})
 
-       assert len(recorder.calls) == 1
-       assert recorder.calls[0].kwargs["name"] == "create_note"
+       assert len(recorder.events) == 1
+       assert recorder.events[0].kwargs["action_name"] == "create_note"
 
 See :doc:`testing` for the full testing surface.
 

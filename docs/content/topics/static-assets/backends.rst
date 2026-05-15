@@ -3,9 +3,9 @@
 Static Backends
 ===============
 
-A backend converts an in memory ``Asset`` into the URL and HTML that the browser receives.
-The framework ships a default backend that hashes content, points at ``STATIC_URL``, and emits minimal tags.
-A custom backend can rewrite URLs, add integrity attributes, inject a CDN host, or override the rendered HTML entirely.
+A static backend resolves an asset file to a public URL and renders the link, script, and module tags.
+The framework ships ``StaticFilesBackend``.
+A custom backend rewrites URLs, adds attributes, or points at a CDN.
 
 .. contents::
    :local:
@@ -14,197 +14,180 @@ A custom backend can rewrite URLs, add integrity attributes, inject a CDN host, 
 Backend Contract
 ----------------
 
-A backend subclasses ``next.static.backends.StaticBackend`` and implements at least one method.
+A backend subclasses ``next.static.StaticBackend``, an abstract base class.
+The constructor receives the full backend entry from ``DEFAULT_STATIC_BACKENDS``, a dict of the shape ``{"BACKEND": "...", "OPTIONS": {...}}``.
+
+The only abstract method is ``register_file``.
 
 .. code-block:: python
-   :caption: notes/backends.py
+   :caption: register_file contract
 
-   from next.static.backends import StaticBackend
-   from next.static.assets import Asset
+   def register_file(
+       self,
+       source_path: Path,
+       logical_name: str,
+       kind: str,
+   ) -> str:
+       """Return the public URL for a co-located asset file."""
 
+``source_path`` is the absolute path to the file.
+``logical_name`` is the path without an extension, such as ``components/card``.
+``kind`` is a registered asset kind.
+The method raises ``RuntimeError`` when the asset cannot be resolved.
 
-   class HashedBackend(StaticBackend):
-       def url(self, asset: Asset) -> str:
-           return f"{self.base_url}{asset.relative_path}?h={asset.content_hash[:8]}"
+Renderer methods are not abstract.
+A backend adds the renderer methods that its registered kinds reference, see :doc:`asset-kinds`.
 
-The base class implements ``url``, ``render_link_tag``, ``render_script_tag``, and ``render_module_tag``.
-Override only the methods you need to change.
+The Default Backend
+-------------------
 
-Override Points
----------------
+``StaticFilesBackend`` resolves assets through Django staticfiles.
+Assets live in the ``next/`` staticfiles namespace, so manifest storage, S3 storage, and CDN settings apply automatically.
 
-``url``.
-   Computes the final URL for an asset.
-   The default reads from ``STATIC_URL`` and appends a content hash.
+The backend ships three renderer methods.
 
-``render_link_tag``.
-   Renders the ``<link rel="stylesheet">`` element.
+- ``render_link_tag`` for the ``css`` kind.
+- ``render_script_tag`` for the ``js`` kind.
+- ``render_module_tag`` for the ``module`` kind.
 
-``render_script_tag``.
-   Renders the ``<script src="...">`` element.
+Each method takes the URL and an optional ``request`` keyword.
+The default backend ignores ``request``.
 
-``render_module_tag``.
-   Renders the ``<script type="module" src="...">`` element.
+Configuring the Default Backend
+--------------------------------
 
-Each render method receives the asset plus any keyword arguments passed on the template tag.
+``StaticFilesBackend`` reads three option keys for the rendered tag markup.
 
-Configuring a Backend
----------------------
+``css_tag``.
+   Format string for ``<link>`` tags.
+   Must contain the ``{url}`` placeholder.
 
-Set ``NEXT_FRAMEWORK["DEFAULT_STATIC_BACKENDS"]`` to a list of dotted paths.
+``js_tag``.
+   Format string for ``<script>`` tags.
+
+``module_tag``.
+   Format string for ``<script type="module">`` tags.
 
 .. code-block:: python
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
        "DEFAULT_STATIC_BACKENDS": [
-           "notes.backends.HashedBackend",
+           {
+               "BACKEND": "next.static.StaticFilesBackend",
+               "OPTIONS": {
+                   "css_tag": '<link rel="stylesheet" href="{url}" crossorigin>',
+                   "js_tag": '<script src="{url}" defer></script>',
+                   "module_tag": '<script type="module" src="{url}" crossorigin></script>',
+               },
+           }
        ]
    }
 
-A list of two or more entries lets several backends contribute to one render.
-The first backend that returns a non-empty result wins.
+Bake attributes such as ``crossorigin``, ``defer``, or ``integrity`` directly into the format string.
+This covers most customisation without a subclass.
 
-Request Aware Backends
-----------------------
+Dedup and JS Context Options
+----------------------------
 
-A backend can read the request to vary its output per visitor.
-Override the constructor to accept a request keyword.
+The first backend ``OPTIONS`` also carries two pipeline level keys.
 
-.. code-block:: python
-   :caption: per request backend
+``DEDUP_STRATEGY``.
+   Dotted path to a dedup strategy, see :doc:`deduplication`.
 
-   from django.http import HttpRequest
-
-   from next.static.backends import StaticBackend
-   from next.static.assets import Asset
-
-
-   class CdnBackend(StaticBackend):
-       def __init__(self, *, request: HttpRequest | None = None) -> None:
-           super().__init__()
-           self.request = request
-
-       def url(self, asset: Asset) -> str:
-           cdn = "https://cdn.example.com"
-           if self.request and self.request.user.is_staff:
-               cdn = "https://staff-cdn.example.com"
-           return f"{cdn}{asset.relative_path}?h={asset.content_hash[:8]}"
-
-The framework instantiates the backend with the request when it is available.
-Backends that do not take a request keyword continue to work, the framework calls them with positional arguments.
-
-Subresource Integrity
----------------------
-
-Add integrity attributes by overriding ``render_link_tag``.
-
-.. code-block:: python
-   :caption: SRI backend
-
-   import hashlib
-
-   from next.static.backends import StaticBackend
-   from next.static.assets import Asset
-
-
-   class SriBackend(StaticBackend):
-       def integrity(self, asset: Asset) -> str:
-           digest = hashlib.sha384(asset.content).digest()
-           return "sha384-" + base64.b64encode(digest).decode()
-
-       def render_link_tag(self, asset: Asset, **attrs: str) -> str:
-           url = self.url(asset)
-           return (
-               f'<link rel="stylesheet" href="{url}" '
-               f'integrity="{self.integrity(asset)}" crossorigin>'
-           )
-
-Apply the same pattern to script tags and module tags.
-
-JS Context Serializer
----------------------
-
-The static pipeline ships the page context to the browser through a serializer.
-Override ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to control the wire format.
-
-See :doc:`js-context` for the contract and patterns.
-
-Tag Templates
--------------
-
-A backend can render through Django template strings instead of inline f-strings.
-
-.. code-block:: python
-   :caption: template based backend
-
-   from django.template import Template, Context
-
-   from next.static.backends import StaticBackend
-
-
-   class TemplateBackend(StaticBackend):
-       link_template = Template(
-           '<link rel="stylesheet" href="{{ url }}" data-asset="{{ asset.name }}">'
-       )
-
-       def render_link_tag(self, asset, **attrs):
-           ctx = Context({"url": self.url(asset), "asset": asset})
-           return self.link_template.render(ctx)
-
-This is useful when the rendered HTML must follow a specific design system that pure string concatenation cannot express cleanly.
-
-Collector Strategy
-------------------
-
-The collector calls the backend at emission time.
-Two strategies live on the collector itself.
-
-``CollectStrategy``.
-   Decides how the collector merges assets.
-   The default is ordered insertion.
-
-``DedupStrategy``.
-   Decides how the collector deduplicates entries.
-   See :doc:`deduplication`.
-
-A backend usually does not override either, but ``NEXT_FRAMEWORK`` can replace them through ``STATIC_COLLECT`` and ``STATIC_DEDUP``.
-
-extend_default_backend
-----------------------
-
-When you want to add a backend without replacing the framework defaults, use the helper.
+``JS_CONTEXT_POLICY``.
+   Dotted path to a JS context conflict policy, see :doc:`js-context`.
 
 .. code-block:: python
    :caption: config/settings.py
 
-   from next.conf import extend_default_backend
-
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": extend_default_backend(
-           "DEFAULT_STATIC_BACKENDS",
-           "notes.backends.HashedBackend",
-           position="last",
-       ),
+       "DEFAULT_STATIC_BACKENDS": [
+           {
+               "BACKEND": "next.static.StaticFilesBackend",
+               "OPTIONS": {
+                   "DEDUP_STRATEGY": "next.static.collector.HashContentDedup",
+                   "JS_CONTEXT_POLICY": "next.static.collector.DeepMergePolicy",
+               },
+           }
+       ]
    }
 
-The helper supports ``before``, ``after``, ``first``, and ``last`` positions, plus an optional ``target`` for relative placement.
+Writing a Custom Backend
+------------------------
+
+Subclass ``StaticFilesBackend`` to keep the staticfiles resolution and change only the rendered markup.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   import base64
+   import hashlib
+   from pathlib import Path
+
+   from next.static import StaticFilesBackend
+
+
+   class SriBackend(StaticFilesBackend):
+       def render_link_tag(self, url, *, request=None) -> str:
+           return f'<link rel="stylesheet" href="{url}" crossorigin>'
+
+       def render_script_tag(self, url, *, request=None) -> str:
+           return f'<script src="{url}" crossorigin></script>'
+
+Subclass the abstract ``StaticBackend`` directly only when the project resolves assets from a source other than Django staticfiles, such as a build manifest.
+
+Registering a Backend
+---------------------
+
+List the dotted path of the backend in ``DEFAULT_STATIC_BACKENDS``.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_STATIC_BACKENDS": [
+           {
+               "BACKEND": "notes.backends.SriBackend",
+               "OPTIONS": {},
+           }
+       ]
+   }
+
+The ``StaticsFactory`` builds the backend instance from the config dict and emits the ``backend_loaded`` signal.
+
+Request Aware Output
+--------------------
+
+Every renderer method accepts a ``request`` keyword.
+A custom backend can vary its output per request, for example to pick a CDN host based on the tenant.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   from next.static import StaticFilesBackend
+
+
+   class TenantPrefixBackend(StaticFilesBackend):
+       def render_link_tag(self, url, *, request=None) -> str:
+           prefix = getattr(getattr(request, "tenant", None), "cdn", "")
+           return f'<link rel="stylesheet" href="{prefix}{url}">'
+
+The manager passes the current request to every renderer call.
+See ``examples/multi-tenant`` for a worked tenant prefix backend.
 
 Signals
 -------
 
-A backend that registers itself fires ``backend_loaded`` once at startup.
-Use the signal to log which backend is active in production.
+The ``backend_loaded`` signal fires once per backend when the factory builds it.
+The payload carries ``sender`` as the backend class, ``config`` as the config dict, and ``instance`` as the backend instance.
 
 System Checks
 -------------
 
-The framework validates backend registration at startup.
-
-- ``next.E080`` reports an unknown backend dotted path.
-- ``next.E081`` reports a backend class that does not inherit from ``StaticBackend``.
-
-Run ``uv run python manage.py check`` after every backend change.
+The static checks validate the backend configuration at startup.
+They use the codes ``next.E036``, ``next.E037``, ``next.E038``, ``next.W030``, ``next.W031``, and ``next.W042``.
+Run ``uv run python manage.py check`` after editing the backend list.
 
 Common Patterns
 ---------------
@@ -212,26 +195,25 @@ Common Patterns
 Cache Busting
 ~~~~~~~~~~~~~
 
-Use the default backend in production.
-The content hash in the URL invalidates browser caches when the file changes.
+Use the default backend with ``ManifestStaticFilesStorage``.
+The manifest filename changes when the content changes, which invalidates browser caches.
 
-Multi CDN
-~~~~~~~~~
+Subresource Integrity
+~~~~~~~~~~~~~~~~~~~~~
 
-Two backends, one for CSS and one for JS.
-Each backend points at the CDN host that serves the appropriate kind.
+Subclass ``StaticFilesBackend`` and override ``render_link_tag`` and ``render_script_tag`` to add an ``integrity`` attribute.
 
 Per Tenant CDN
 ~~~~~~~~~~~~~~
 
-Use a request aware backend that reads the tenant from the host header and chooses a CDN host accordingly.
+Use a request aware backend that reads the tenant from the request and chooses a CDN host.
 
 See Also
 --------
 
 .. seealso::
 
-   :doc:`js-context` for the JS context serializer.
+   :doc:`asset-kinds` for renderer method selection.
    :doc:`deduplication` for the dedup strategy.
+   :doc:`js-context` for the JS context policy.
    :doc:`/content/howto/write-a-static-backend` for a recipe.
-   :doc:`/content/internals/static-pipeline` for the dispatcher view.

@@ -50,38 +50,35 @@ Components
 Static Pipeline
 ---------------
 
-.. describe:: {% collect_styles attrs="..." %}
+.. describe:: {% collect_styles %}
 
-   Emits one ``<link rel="stylesheet">`` per CSS asset collected during the request.
+   Marks the placeholder slot where collected CSS link tags are injected.
+   Takes no arguments.
 
-.. describe:: {% #collect_styles %}...{% /collect_styles %}
+.. describe:: {% collect_scripts %}
 
-   Block form.
-   Renders the body before the collected output.
+   Marks the placeholder slot where collected JS and module tags are injected.
+   Takes no arguments.
 
-.. describe:: {% collect_scripts attrs="..." %}
+.. describe:: {% use_style "<url>" %}
 
-   Emits ``<script>`` and ``<script type="module">`` for every JS and module asset.
+   Registers an external CSS URL on the active collector.
+   The asset is prepended so shared dependencies load before co-located styles.
 
-.. describe:: {% #collect_scripts %}...{% /collect_scripts %}
+.. describe:: {% use_script "<url>" %}
 
-   Block form.
-   Renders the body after the collected output.
+   Registers an external JS URL on the active collector.
+   The asset is prepended the same way as ``use_style``.
 
-.. describe:: {% #inline_style %}...{% /inline_style %}
+.. describe:: {% #use_style %}...{% /use_style %}
 
-   Inline ``<style>`` block.
-   Participates in deduplication by content hash.
+   Inline CSS block.
+   The body is rendered with the template context and deduplicated by content.
 
-.. describe:: {% #inline_script %}...{% /inline_script %}
+.. describe:: {% #use_script %}...{% /use_script %}
 
-   Inline ``<script>`` block.
-   Participates in deduplication by content hash.
-
-.. describe:: {% collect_bucket "<name>" %}
-
-   Emits every asset assigned to a custom bucket.
-   Use for preload links, font tags, or any non standard collection.
+   Inline JS block.
+   The body is rendered with the template context and deduplicated by content.
 
 Tag Loading
 -----------

@@ -3,165 +3,127 @@
 Deduplication
 =============
 
-The collector emits each asset exactly once per request even when multiple components reference the same file.
-This page covers the deduplication contract, how the framework computes asset identity, and how to write a custom deduplication strategy.
+The collector emits each asset once per request even when several components reference the same file.
+This page covers the bundled dedup strategies, how the collector applies them, and how to plug a custom strategy.
 
 .. contents::
    :local:
    :depth: 2
 
-Default Strategy
-----------------
+Overview
+--------
 
-The framework ships a hash-based deduplication strategy.
-Two assets are considered identical when their content hashes match.
+The collector holds a dedup strategy.
+A strategy reduces a ``StaticAsset`` to a hashable key.
+The collector ignores any asset whose key was already recorded.
 
-The collector stores an ordered set keyed by hash.
-A second add with the same hash is a no-op.
-The same component referenced from a layout and a page therefore contributes its CSS exactly once.
+The framework ships three strategies.
 
-Identity Sources
-----------------
+``UrlDedup``.
+   The default.
+   Keys URL assets by their URL and kind.
+   Keys inline assets by their body and kind.
 
-Three pieces of identity drive the dedup decision.
+``HashContentDedup``.
+   Keys URL assets by the SHA hash of the file at ``source_path``.
+   Two files with identical content deduplicate even at different paths.
+   Falls back to URL keying when ``source_path`` is absent.
 
-Content hash.
-   A SHA-256 hash of the file content.
-   Two files with the same bytes are dedup equal even when they live at different paths.
+``IdentityDedup``.
+   Disables deduplication.
+   Every registration yields a unique key, so every asset is emitted.
 
-Asset kind.
-   ``css``, ``js``, ``module``, and custom kinds are kept in separate buckets.
-   A ``component.css`` and a ``component.js`` with identical bytes are not merged.
+Choosing a Strategy
+-------------------
 
-Owner.
-   Each asset still remembers its owner.
-   The dedup result keeps the earliest owner and the earliest insertion point in the order.
-
-Inline Assets
--------------
-
-Inline ``{% inline_style %}`` and ``{% inline_script %}`` blocks participate in deduplication.
-The content hash drives identity, so the same snippet declared from two components emits once.
-
-.. code-block:: jinja
-   :caption: identical inline blocks
-
-   {% #inline_script %}
-     console.log("hello");
-   {% /inline_script %}
-
-   {% #inline_script %}
-     console.log("hello");
-   {% /inline_script %}
-
-Only one ``<script>`` element appears in the output.
-
-Custom Strategy
----------------
-
-The default strategy lives in ``next.static.collector.HashContentDedup``.
-Override it through ``NEXT_FRAMEWORK["STATIC_DEDUP"]``.
+The collector takes the strategy through its constructor.
+The static manager builds the collector per request and reads the strategy dotted path from the first static backend ``OPTIONS``.
 
 .. code-block:: python
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "STATIC_DEDUP": "notes.dedup.PathDedup",
+       "DEFAULT_STATIC_BACKENDS": [
+           {
+               "BACKEND": "next.static.StaticFilesBackend",
+               "OPTIONS": {
+                   "DEDUP_STRATEGY": "next.static.collector.HashContentDedup",
+               },
+           }
+       ]
    }
 
-The class implements three methods.
+The ``DEDUP_STRATEGY`` value is a dotted path to a callable that returns a strategy instance.
+When the key is absent the collector uses ``UrlDedup``.
 
-``fingerprint(asset)``.
-   Returns a hashable identity for the asset.
-
-``register(fingerprint, asset)``.
-   Stores the asset under the fingerprint.
-   Returns ``True`` when the asset was new, ``False`` when it was already present.
-
-``ordered()``.
-   Returns the unique assets in insertion order.
-
-The default ``HashContentDedup`` fingerprints by content hash.
-A ``PathDedup`` strategy can fingerprint by absolute path when content hashing is too expensive for the workload.
-
-.. code-block:: python
-   :caption: path based strategy
-
-   from pathlib import Path
-
-   from next.static.collector import DedupStrategy
-   from next.static.assets import Asset
-
-
-   class PathDedup(DedupStrategy):
-       def __init__(self) -> None:
-           self._assets: dict[Path, Asset] = {}
-
-       def fingerprint(self, asset: Asset) -> Path:
-           return asset.path
-
-       def register(self, fingerprint: Path, asset: Asset) -> bool:
-           if fingerprint in self._assets:
-               return False
-           self._assets[fingerprint] = asset
-           return True
-
-       def ordered(self) -> list[Asset]:
-           return list(self._assets.values())
-
-The strategy is instantiated per request, so it can hold per-request state without leaking between users.
-
-Manual Skip
------------
-
-Two attributes on the ``Asset`` dataclass let owners opt out of deduplication.
-
-``dedup``.
-   Set to ``False`` to always emit the asset, even when an identical fingerprint exists.
-   Use for marketing pixels and other assets that intentionally fire once per occurrence.
-
-``required``.
-   Set to ``True`` to emit the asset first, before any other asset of the same kind.
-   Use for critical CSS that needs to land before the rest of the bucket.
-
-Both fields default to safe values, hash-based dedup with insertion order.
-
-Hashing Costs
+Inline Assets
 -------------
 
-Hashing happens once per asset at discovery time, not per request.
-The result lives in the asset registry so the per request cost is a dictionary lookup.
+Inline ``{% #use_style %}`` and ``{% #use_script %}`` blocks participate in deduplication.
+The strategy keys them by the rendered body, so two identical inline blocks collapse to one.
+Inline blocks always append, they never prepend.
 
-For very large repositories, ``NEXT_FRAMEWORK["STATIC_HASH"]`` switches to a faster algorithm such as ``blake2b`` or ``xxhash``.
+Writing a Custom Strategy
+-------------------------
+
+A strategy implements the ``DedupStrategy`` protocol.
+The protocol has one method, ``key``, which returns a hashable value.
 
 .. code-block:: python
-   :caption: alternative hash
+   :caption: notes/dedup.py
+
+   from next.static import StaticAsset
+   from next.static.collector import UrlDedup
+
+
+   class PathDedup:
+       """Deduplicate URL assets by absolute source path."""
+
+       def __init__(self) -> None:
+           self._fallback = UrlDedup()
+
+       def key(self, asset: StaticAsset) -> object:
+           if asset.source_path is not None:
+               return ("path", str(asset.source_path), asset.kind)
+           return self._fallback.key(asset)
+
+Point the backend ``OPTIONS`` at the new strategy.
+
+.. code-block:: python
+   :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "STATIC_HASH": "blake2b",
+       "DEFAULT_STATIC_BACKENDS": [
+           {
+               "BACKEND": "next.static.StaticFilesBackend",
+               "OPTIONS": {
+                   "DEDUP_STRATEGY": "notes.dedup.PathDedup",
+               },
+           }
+       ]
    }
 
-The default ``sha256`` is appropriate for any size below a few thousand assets.
+The collector instantiates the strategy once per request.
+A strategy can therefore hold per request state.
 
 Common Patterns
 ---------------
 
-Shared Vendor CSS
-~~~~~~~~~~~~~~~~~
+Shared Vendor File
+~~~~~~~~~~~~~~~~~~
 
-Place a vendor CSS file in the root layout.
-Components that depend on the same file via a different path still deduplicate because the bytes are identical.
+The default ``UrlDedup`` already collapses two references to the same vendor URL.
+No configuration is needed for the common case.
 
-Section Specific Reset
-~~~~~~~~~~~~~~~~~~~~~~
+Content Aware Dedup
+~~~~~~~~~~~~~~~~~~~
 
-Use ``required=True`` on a layout asset that must load before component overrides.
-The collector emits it first regardless of insertion order.
+Switch to ``HashContentDedup`` when the same content ships from two different paths and should emit once.
 
-Tracking Pixel
-~~~~~~~~~~~~~~
+Disable Dedup
+~~~~~~~~~~~~~
 
-Mark the tracking pixel with ``dedup=False`` so the collector emits it every time the owner renders, useful when the pixel includes per-page query parameters.
+Switch to ``IdentityDedup`` for debugging, to confirm exactly which owners registered which assets.
 
 See Also
 --------
@@ -169,5 +131,5 @@ See Also
 .. seealso::
 
    :doc:`overview` for the collector trace.
-   :doc:`backends` for the rendered output.
+   :doc:`backends` for the backend ``OPTIONS`` surface.
    :doc:`/content/ref/static` for the public API.

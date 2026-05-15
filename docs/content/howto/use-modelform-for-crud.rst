@@ -147,7 +147,6 @@ Tests assert the same flow.
 .. code-block:: python
    :caption: tests/test_crud.py
 
-   from next.forms.uid import action_url
    from next.testing.client import NextClient
 
    from notes.models import Note
@@ -155,12 +154,14 @@ Tests assert the same flow.
 
    def test_crud_flow(db) -> None:
        client = NextClient()
-       client.post(action_url("create_note"), {"title": "T", "body": ""})
+       client.post_action("create_note", {"title": "T", "body": ""})
        note = Note.objects.get(title="T")
-       client.post(action_url("update_note"), {"title": "T2", "body": ""}, id=note.id)
+       client.post_action("update_note", {"title": "T2", "body": "", "_url_param_id": note.id})
        assert Note.objects.get(pk=note.id).title == "T2"
-       client.post(action_url("delete_note"), {"confirm": "on"}, id=note.id)
+       client.post_action("delete_note", {"confirm": "on", "_url_param_id": note.id})
        assert not Note.objects.filter(pk=note.id).exists()
+
+The ``_url_param_id`` key in the POST data mirrors the hidden field that the ``{% form %}`` tag emits for a captured URL parameter.
 
 See Also
 --------

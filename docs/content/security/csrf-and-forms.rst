@@ -34,20 +34,13 @@ A submission that fails either check returns HTTP 400 and the handler does not r
 Manual Forms
 ------------
 
-A hand crafted ``<form>`` element must include both fields.
+The ``{% form %}`` tag is the supported way to render a form.
+It builds the dispatch URL, injects the CSRF token, and emits the hidden ``_next_form_page`` field.
+A hand crafted ``<form>`` element bypasses these guarantees, so prefer the tag.
 
-.. code-block:: jinja
-   :caption: manual form
-
-   <form action="/_next/form/{{ action_uid }}/" method="post">
-     {% csrf_token %}
-     <input type="hidden" name="_next_form_page" value="{{ current_page_module_path }}">
-     <input type="text" name="title">
-     <button type="submit">Save</button>
-   </form>
+When a hand crafted form is unavoidable, render the tag once and copy the generated markup, or keep the form inside a ``{% form %}`` block and add only the extra fields you need.
 
 The ``current_page_module_path`` variable is published by the framework on every rendered page.
-The ``action_uid`` for a registered action comes from ``next.forms.uid.action_url``.
 
 GET Forms
 ---------

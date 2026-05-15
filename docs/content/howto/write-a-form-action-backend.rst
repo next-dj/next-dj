@@ -6,12 +6,12 @@ Write a Form Action Backend
 Problem
 -------
 
-You want every form dispatch to go through a custom validation step such as audit logging, rate limiting, or country based blocking.
+You want every form dispatch to run an extra step such as audit logging or rate limiting, transactional with the dispatch itself.
 
 Solution
 --------
 
-Subclass ``next.forms.backends.FormActionBackend``, implement ``dispatch``, and add the dotted path to ``NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]``.
+Subclass ``next.forms.RegistryFormActionBackend``, override ``dispatch``, and register the dotted path in ``NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]``.
 
 Walkthrough
 -----------
@@ -23,75 +23,79 @@ Write the backend.
 
    from django.http import HttpRequest, HttpResponse
 
-   from next.forms.backends import FormActionBackend
-   from next.forms.dispatch import DispatchContext
+   from next.forms import RegistryFormActionBackend
 
    from notes.models import AuditEntry
 
 
-   class AuditBackend(FormActionBackend):
-       def dispatch(
-           self,
-           request: HttpRequest,
-           context: DispatchContext,
-       ) -> HttpResponse | None:
-           AuditEntry.objects.create(
-               user=getattr(request.user, "pk", None),
-               action=context.action_name,
-           )
-           return None
+   class AuditedFormActionBackend(RegistryFormActionBackend):
+       """Registry backend that writes an audit row per dispatch."""
 
-The backend returns ``None`` to continue the chain.
-Return an ``HttpResponse`` to short circuit, or raise ``ValidationError`` to surface a form error.
+       def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
+           action_name = self._uid_to_name.get(uid)
+           if action_name is None:
+               return super().dispatch(request, uid)
+           response = super().dispatch(request, uid)
+           AuditEntry.objects.create(
+               action_name=action_name,
+               response_status=response.status_code,
+           )
+           return response
+
+The override calls ``super().dispatch`` to run the standard validation and handler pipeline.
+The ``self._uid_to_name`` mapping resolves the UID to an action name.
+An unknown UID returns 404 from the parent dispatch, so the override skips it.
 
 Register the backend.
 
 .. code-block:: python
    :caption: config/settings.py
 
-   from next.conf import extend_default_backend
-
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_ACTION_BACKENDS": extend_default_backend(
-           "DEFAULT_FORM_ACTION_BACKENDS",
-           "notes.backends.AuditBackend",
-           position="after",
-           target="next.forms.backends.OriginPageBackend",
-       ),
+       "DEFAULT_FORM_ACTION_BACKENDS": [
+           {"BACKEND": "notes.backends.AuditedFormActionBackend"},
+       ]
    }
 
-The audit backend now runs after the origin page check and before the form dispatch.
+The custom backend replaces ``RegistryFormActionBackend`` because it already inherits every default behaviour.
 
-Per Action Backends
-~~~~~~~~~~~~~~~~~~~
+Block a Dispatch
+~~~~~~~~~~~~~~~~
 
-Apply a backend to a single action through the decorator argument.
+Return an ``HttpResponse`` before calling ``super().dispatch`` to short circuit.
 
 .. code-block:: python
-   :caption: per action
+   :caption: notes/backends.py
 
-   from next.forms import action
+   from django.http import HttpResponse
+
+   from next.forms import RegistryFormActionBackend
 
 
-   @action("create_note", form_class=NoteForm, backends=["notes.backends.AuditBackend"])
-   def create_note(form): ...
+   class RateLimitedBackend(RegistryFormActionBackend):
+       def dispatch(self, request, uid) -> HttpResponse:
+           if self._over_limit(request):
+               return HttpResponse(status=429)
+           return super().dispatch(request, uid)
 
-The per action backends run in addition to the project defaults.
+       def _over_limit(self, request) -> bool:
+           return False
 
 Verification
 ------------
 
 Submit a form, then query the audit table.
-The row appears with the correct action name and user.
+The row appears with the correct action name and response status.
 
-Check the system check output.
+Run the system checks.
 
 .. code-block:: bash
    :caption: shell
 
    uv run python manage.py check
 
-A misconfigured dotted path or a class that does not inherit ``FormActionBackend`` fires ``next.E060`` or ``next.E061``.
+A misconfigured ``DEFAULT_FORM_ACTION_BACKENDS`` entry fires ``next.E044``.
+A backend class that does not subclass ``FormActionBackend`` fires ``next.E045``.
 
 See Also
 --------
@@ -99,4 +103,4 @@ See Also
 .. seealso::
 
    :doc:`/content/topics/forms/backends` for the topic guide.
-   :doc:`extend-a-default-backend` for the helper details.
+   ``examples/audit-forms`` for a worked dual channel audit.

@@ -6,79 +6,71 @@ Override the JS Context Serializer
 Problem
 -------
 
-The default JSON serializer does not know how to encode Pydantic models, ``datetime`` instances, or other non standard types that you publish through ``@context(serialize=True)``.
+The default JSON serializer does not know how to encode Pydantic models or other custom types that you publish through ``@context(serialize=True)``.
 
 Solution
 --------
 
-Point ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` at a callable that converts the context map before JSON encoding.
+Point ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` at a serializer class, or pass ``serializer=`` on a single ``@context`` decorator.
 
 Walkthrough
 -----------
 
-Write the serializer.
+Use the Bundled Pydantic Serializer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: python
-   :caption: notes/serializers.py
-
-   from datetime import datetime
-
-   from pydantic import BaseModel
-
-
-   def serialize_value(value: object) -> object:
-       if isinstance(value, datetime):
-           return value.isoformat()
-       if isinstance(value, BaseModel):
-           return value.model_dump()
-       return value
-
-
-   def json_context(payload: dict[str, object]) -> dict[str, object]:
-       return {key: serialize_value(value) for key, value in payload.items()}
-
-Wire it up.
+The framework ships ``PydanticJsContextSerializer``.
+Point the setting at it.
 
 .. code-block:: python
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "JS_CONTEXT_SERIALIZER": "notes.serializers.json_context",
+       "JS_CONTEXT_SERIALIZER": "next.static.PydanticJsContextSerializer",
    }
 
-The framework calls the function once per render and JSON encodes the result.
-
-Per Key Override
-~~~~~~~~~~~~~~~~
-
-For per key conversions, pass ``serializer=`` directly on the decorator.
+Context functions can now return Pydantic models directly.
 
 .. code-block:: python
-   :caption: per key
+   :caption: notes/routes/page.py
+
+   from pydantic import BaseModel
 
    from next.pages import context
 
 
-   @context("note", serialize=True, serializer=lambda v: v.model_dump())
-   def note() -> NoteOut:
+   class NoteOut(BaseModel):
+       id: int
+       title: str
+
+
+   @context("featured", serialize=True)
+   def featured() -> NoteOut:
        return NoteOut(id=1, title="Hello")
 
-Class Based Serializer
-~~~~~~~~~~~~~~~~~~~~~~
+Write a Custom Serializer
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Subclass ``JsContextSerializer`` for stateful logic.
+A serializer is any class with a ``dumps`` method that returns a JSON string.
 
 .. code-block:: python
    :caption: notes/serializers.py
 
-   from next.static.serializers import JsContextSerializer
+   import json
+
+   from django.core.serializers.json import DjangoJSONEncoder
 
 
-   class StrictJsContextSerializer(JsContextSerializer):
-       def serialize_value(self, key: str, value: object) -> object:
-           if key.startswith("secret_"):
-               return None
-           return super().serialize_value(key, value)
+   class SortedSerializer:
+       """Serialise context values with sorted keys for stable output."""
+
+       def dumps(self, value: object) -> str:
+           return json.dumps(
+               value,
+               cls=DjangoJSONEncoder,
+               separators=(",", ":"),
+               sort_keys=True,
+           )
 
 Point the setting at the class.
 
@@ -86,8 +78,27 @@ Point the setting at the class.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "JS_CONTEXT_SERIALIZER": "notes.serializers.StrictJsContextSerializer",
+       "JS_CONTEXT_SERIALIZER": "notes.serializers.SortedSerializer",
    }
+
+Per Key Override
+~~~~~~~~~~~~~~~~
+
+Pass ``serializer=`` on a single ``@context`` to route one key through a custom serializer.
+
+.. code-block:: python
+   :caption: per key
+
+   from next.pages import context
+   from next.static import PydanticJsContextSerializer
+
+
+   @context("note", serialize=True, serializer=PydanticJsContextSerializer())
+   def note() -> object:
+       return load_note()
+
+The override applies only to the ``note`` key.
+Every other key uses the project serializer.
 
 Verification
 ------------

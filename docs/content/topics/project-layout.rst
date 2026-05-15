@@ -112,7 +112,7 @@ When you need to override a single key inside ``DEFAULT_PAGE_BACKENDS`` without 
    NEXT_FRAMEWORK = {
        "DEFAULT_PAGE_BACKENDS": extend_default_backend(
            "DEFAULT_PAGE_BACKENDS",
-           {"PAGES_DIR": "screens"},
+           PAGES_DIR="screens",
        )
    }
 

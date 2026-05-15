@@ -19,12 +19,12 @@ Connect receivers from ``AppConfig.ready`` so they exist before the first reques
 asset_registered
 ----------------
 
-Fires once per asset when discovery records it in the registry.
+Fires once per asset when discovery records it on the collector.
 
-Payload.
-   ``sender`` is the asset discovery class.
-   ``asset`` is the ``Asset`` instance.
-   ``owner`` is the page module, component name, or layout path.
+Payload keyword arguments.
+   ``sender`` is the ``StaticAsset`` instance.
+   ``collector`` is the request scoped collector.
+   ``backend`` is the active static backend.
 
 .. code-block:: python
    :caption: enumerate registered assets
@@ -36,45 +36,42 @@ Payload.
 
    @receiver(asset_registered)
    def log_asset(sender, **kwargs) -> None:
-       print(kwargs["asset"].relative_path, kwargs["owner"])
+       print(sender.kind, sender.url or "inline")
 
 collector_finalized
 -------------------
 
 Fires once per request after the collector has gathered every asset for the response.
-The signal runs before any template tag emits its bucket so receivers can mutate the set.
+The signal runs before the static manager replaces the placeholder slots.
 
-Payload.
-   ``sender`` is the static manager class.
+Payload keyword arguments.
+   ``sender`` is the request scoped collector.
+   ``page_path`` is the page module path.
    ``request`` is the HTTP request.
-   ``collector`` is the request scoped collector.
 
 .. code-block:: python
-   :caption: adding a runtime asset
+   :caption: inspecting the collected set
 
    from django.dispatch import receiver
 
-   from next.static.assets import Asset
    from next.static.signals import collector_finalized
 
 
    @receiver(collector_finalized)
-   def add_runtime_pixel(sender, **kwargs) -> None:
-       collector = kwargs["collector"]
-       collector.add(Asset.inline("js", "console.log('hello');"))
-
-Use this signal sparingly.
-Most assets should be co-located, the signal is for runtime decisions that depend on the request body.
+   def count_assets(sender, **kwargs) -> None:
+       styles = sender.assets_in_slot("styles")
+       scripts = sender.assets_in_slot("scripts")
+       print(f"{len(styles)} styles, {len(scripts)} scripts")
 
 backend_loaded
 --------------
 
-Fires once at startup for each registered backend.
+Fires once for each registered backend when the factory builds it.
 
-Payload.
-   ``sender`` is the static manager class.
-   ``backend`` is the backend class.
-   ``options`` is the configuration dict.
+Payload keyword arguments.
+   ``sender`` is the backend class.
+   ``config`` is the config dict.
+   ``instance`` is the backend instance.
 
 .. code-block:: python
    :caption: log the active backend
@@ -86,33 +83,34 @@ Payload.
 
    @receiver(backend_loaded)
    def log_backend(sender, **kwargs) -> None:
-       print("backend", kwargs["backend"].__name__)
+       print("backend", sender.__name__)
 
 html_injected
 -------------
 
-Fires after the template tags have rendered the collected output.
-Subscribers receive the final HTML string for the bucket so they can post process the markup.
+Fires after the static manager replaces the placeholder slots with rendered tags.
 
-Payload.
-   ``sender`` is the static manager class.
-   ``bucket`` is the bucket name (``styles`` or ``scripts``).
-   ``html`` is the rendered HTML string.
+Payload keyword arguments.
+   ``sender`` is the static manager.
+   ``html_before`` and ``html_after`` are the HTML around injection.
+   ``collector`` is the collector.
+   ``placeholders_replaced`` is a tuple of the slot names that were replaced.
+   ``injected_bytes`` is the size delta.
    ``request`` is the HTTP request.
 
 .. code-block:: python
-   :caption: validation hook
+   :caption: size metric
 
    from django.dispatch import receiver
+
+   from metrics import emit
 
    from next.static.signals import html_injected
 
 
    @receiver(html_injected)
-   def assert_module_loads(sender, **kwargs) -> None:
-       html = kwargs["html"]
-       if kwargs["bucket"] == "scripts" and "type=\"module\"" not in html:
-           raise RuntimeError("Expected at least one module script.")
+   def record_injection(sender, **kwargs) -> None:
+       emit("static.injected_bytes", value=kwargs["injected_bytes"])
 
 The receiver runs inside the request lifecycle.
 Heavy work should defer to a background task.

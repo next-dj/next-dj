@@ -22,15 +22,15 @@ Discovery and Injection
 .. mermaid::
 
    flowchart LR
-       Walk[Filesystem walk] --> StemMatch[Match stem and extension]
-       StemMatch --> Discovery[AssetDiscovery]
-       Discovery --> Registry[Asset registry]
-       Registry --> Request[Request]
-       Request --> Collector[StaticCollector]
-       Collector --> Dedup[Dedup strategy]
-       Dedup --> Backend[StaticBackend]
-       Backend --> Tags[Render link or script tags]
-       Tags --> HTML[Final HTML]
+       Walk["Filesystem walk"] --> StemMatch["Match stem and extension"]
+       StemMatch --> Discovery["AssetDiscovery"]
+       Discovery --> Registry["Asset registry"]
+       Registry --> Request["Request"]
+       Request --> Collector["StaticCollector"]
+       Collector --> Dedup["Dedup strategy"]
+       Dedup --> Backend["StaticFilesBackend"]
+       Backend --> Tags["Render link or script tags"]
+       Tags --> HTML["Final HTML"]
 
 Collector Slots
 ---------------
@@ -40,88 +40,86 @@ The collector keeps assets in named slots that map to template tags.
 .. mermaid::
 
    flowchart TB
-       Trigger[Layout, page, or component renders] --> Pick{Pick slot}
-       Pick -- styles --> StylesSlot[styles slot]
-       Pick -- scripts --> ScriptsSlot[scripts slot]
-       Pick -- custom --> CustomSlot[custom bucket]
-       StylesSlot --> Finalize[collector_finalized]
+       Trigger["Layout, page, or component renders"] --> Pick{"Pick slot"}
+       Pick -- styles --> StylesSlot["styles slot"]
+       Pick -- scripts --> ScriptsSlot["scripts slot"]
+       StylesSlot --> Finalize["collector_finalized"]
        ScriptsSlot --> Finalize
-       CustomSlot --> Finalize
-       Finalize --> EmitStyles[{% collect_styles %}]
-       Finalize --> EmitScripts[{% collect_scripts %}]
-       Finalize --> EmitBucket[{% collect_bucket %}]
-       EmitStyles --> Injected[html_injected]
+       Finalize --> EmitStyles["collect_styles tag"]
+       Finalize --> EmitScripts["collect_scripts tag"]
+       EmitStyles --> Injected["html_injected"]
        EmitScripts --> Injected
-       EmitBucket --> Injected
 
 Modules
 -------
 
 ``next.static.discovery``.
-   Walks the filesystem and produces ``Asset`` records.
-   Honours the stem and kind registries.
+   ``AssetDiscovery`` walks the filesystem and produces ``StaticAsset`` records.
+   Honours the ``default_stems`` and ``default_kinds`` registries.
 
 ``next.static.assets``.
-   ``Asset`` dataclass and ``Asset.inline`` factory.
+   The ``StaticAsset`` frozen dataclass and the ``KindRegistry`` plus the ``default_kinds`` instance.
 
 ``next.static.collector``.
-   ``StaticCollector`` plus ``DedupStrategy`` implementations including ``HashContentDedup``.
+   ``StaticCollector`` plus the dedup strategies ``UrlDedup``, ``HashContentDedup``, ``IdentityDedup`` and the JS context policies.
 
 ``next.static.backends``.
-   ``StaticBackend`` base class with ``url``, ``render_link_tag``, ``render_script_tag``, ``render_module_tag``.
-   The default ``StaticFilesBackend`` is bundled.
+   ``StaticBackend`` abstract base class plus the bundled ``StaticFilesBackend`` and the ``StaticsFactory``.
 
 ``next.static.manager``.
-   Orchestrates discovery and the per request collector lifecycle.
+   ``StaticManager`` orchestrates discovery and the per request collector lifecycle.
 
 ``next.static.scripts``.
-   Inline script and inline style management.
+   ``NextScriptBuilder`` and ``ScriptInjectionPolicy`` for the ``Next`` runtime script.
 
 ``next.static.serializers``.
-   ``JsContextSerializer`` base class for the ``Next`` browser object.
+   ``JsContextSerializer`` protocol plus ``JsonJsContextSerializer`` and ``PydanticJsContextSerializer``.
 
 ``next.static.defaults``.
-   Default asset kinds (css, js, module) and default stems.
+   ``register_defaults`` registers the built in ``css``, ``js``, and ``module`` kinds and the ``styles`` and ``scripts`` slots.
 
 Asset Kinds
 -----------
 
-Each kind maps an extension to a renderer and a bucket.
-The default registry holds three kinds.
+Each kind maps an extension to a placeholder slot and a backend renderer method.
+``register_defaults`` registers three kinds through ``default_kinds``.
 
-- ``css`` to ``render_link_tag`` in the ``styles`` bucket.
-- ``js`` to ``render_script_tag`` in the ``scripts`` bucket.
-- ``module`` to ``render_module_tag`` in the ``scripts`` bucket.
+- ``css`` with extension ``.css``, slot ``styles``, renderer ``render_link_tag``.
+- ``js`` with extension ``.js``, slot ``scripts``, renderer ``render_script_tag``.
+- ``module`` with extension ``.mjs``, slot ``scripts``, renderer ``render_module_tag``.
 
-The ``module`` kind is interesting because it lives on ``StaticBackend`` (specifically in ``next.static.backends``) as ``render_module_tag``.
-A custom backend can override the method to add ``crossorigin``, ``integrity``, or any other attribute.
+The renderer name is a method on the active static backend.
+The manager looks the method up with ``getattr`` per asset.
+``StaticFilesBackend`` ships all three methods.
 
 Dedup
 -----
 
-The default strategy fingerprints by content hash.
-Two files with the same bytes deduplicate even when they sit at different paths.
+The collector holds a dedup strategy.
+The default is ``UrlDedup``, which keys by URL and kind.
+``HashContentDedup`` keys by content hash.
+``IdentityDedup`` disables deduplication.
 
-The strategy is swappable through ``NEXT_FRAMEWORK["STATIC_DEDUP"]``.
+The strategy is selected through the ``DEDUP_STRATEGY`` key in the first static backend ``OPTIONS``.
 
 Signals
 -------
 
 The pipeline fires four signals.
 
-- ``asset_registered`` once per asset on discovery.
+- ``asset_registered`` once per asset when the collector records it.
 - ``collector_finalized`` once per request after the collector closes its set.
-- ``html_injected`` once per bucket after the template tag emits the HTML.
-- ``backend_loaded`` once per backend instance.
+- ``html_injected`` once per request after the manager replaces the placeholder slots.
+- ``backend_loaded`` once per backend instance when the factory builds it.
 
 Extension Points
 ----------------
 
-- Subclass ``StaticBackend`` to change the rendered output.
-- Subclass ``DedupStrategy`` to replace the dedup decision.
-- Add an entry to ``DEFAULT_ASSET_KINDS`` to recognise a new extension.
-- Add an entry to ``DEFAULT_COMPONENT_STEMS`` or ``DEFAULT_PAGE_STEMS`` to recognise a new filename.
-- Subscribe to ``collector_finalized`` to inject runtime assets.
+- Subclass ``StaticFilesBackend`` to change the rendered output.
+- Implement the ``DedupStrategy`` protocol and point ``DEDUP_STRATEGY`` at it.
+- Call ``default_kinds.register`` in ``AppConfig.ready`` to recognise a new extension.
+- Call ``default_stems.register`` in ``AppConfig.ready`` to recognise a new filename.
+- Subscribe to ``collector_finalized`` to inspect the collected set.
 
 See Also
 --------

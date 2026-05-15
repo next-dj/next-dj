@@ -79,17 +79,32 @@ Use a context processor to publish the nonce.
        request._csp_nonce = nonce
        return {"csp_nonce": nonce}
 
-Pass the nonce on every inline tag and on every ``{% collect_styles %}`` and ``{% collect_scripts %}`` call.
+Bake the nonce into the backend tag templates so every collected ``<script>`` and ``<link>`` carries it.
 
-.. code-block:: jinja
-   :caption: layout
+.. code-block:: python
+   :caption: config/settings.py
 
-   {% collect_styles nonce=csp_nonce %}
-   {% collect_scripts nonce=csp_nonce %}
+   NEXT_FRAMEWORK = {
+       "DEFAULT_STATIC_BACKENDS": [
+           {
+               "BACKEND": "notes.backends.NonceBackend",
+               "OPTIONS": {},
+           }
+       ]
+   }
 
-   {% #inline_script nonce=csp_nonce %}
-     console.log("hello");
-   {% /inline_script %}
+A request aware backend reads the nonce from the request and writes it into each tag.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   from next.static import StaticFilesBackend
+
+
+   class NonceBackend(StaticFilesBackend):
+       def render_script_tag(self, url, *, request=None) -> str:
+           nonce = getattr(request, "_csp_nonce", "")
+           return f'<script src="{url}" nonce="{nonce}"></script>'
 
 Send the matching ``Content-Security-Policy`` header from middleware.
 

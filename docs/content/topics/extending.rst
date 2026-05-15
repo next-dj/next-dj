@@ -24,11 +24,11 @@ Registry.
 
 Protocol.
    Implement a runtime contract.
-   Used for template loaders, asset discovery, and per-action backends.
+   Used for template loaders, dedup strategies, and JS context serializers.
 
 Strategy.
    Swap an internal algorithm.
-   Used for static deduplication, collector ordering, and signal cache.
+   Used for static deduplication and the JS context conflict policy.
 
 Signal.
    Observe a lifecycle event without changing it.
@@ -67,19 +67,28 @@ Subclass an abstract base class and register the dotted path in ``NEXT_FRAMEWORK
      - ``next.static.serializers.JsContextSerializer``
 
 A backend always implements the full contract.
-Use ``extend_default_backend`` to add a backend without dropping the defaults.
+A custom backend usually subclasses the default so it inherits every default behaviour.
 
 .. code-block:: python
-   :caption: extending a default chain
+   :caption: registering a custom backend
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_FORM_ACTION_BACKENDS": [
+           {"BACKEND": "notes.backends.AuditedFormActionBackend"},
+       ]
+   }
+
+To patch one key of a default backend entry rather than replace it, use ``extend_default_backend``.
+
+.. code-block:: python
+   :caption: patching a default entry
 
    from next.conf import extend_default_backend
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_ACTION_BACKENDS": extend_default_backend(
-           "DEFAULT_FORM_ACTION_BACKENDS",
-           "notes.backends.AuditBackend",
-           position="after",
-           target="next.forms.backends.OriginPageBackend",
+       "DEFAULT_PAGE_BACKENDS": extend_default_backend(
+           "DEFAULT_PAGE_BACKENDS",
+           PAGES_DIR="routes",
        )
    }
 
@@ -87,30 +96,26 @@ Registries
 ----------
 
 A registry is a process wide map populated at startup.
-Register entries through settings or through a helper module.
+Register entries in ``AppConfig.ready`` or through a settings key.
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 35 35
+   :widths: 30 70
 
    * - Target
-     - Settings key
-     - Helper module
+     - How to register
    * - Asset kinds
-     - ``DEFAULT_ASSET_KINDS``
-     - ``next.static.kind_registry``
-   * - Component stems
-     - ``DEFAULT_COMPONENT_STEMS``
-     - n/a
-   * - Page stems
-     - ``DEFAULT_PAGE_STEMS``
-     - n/a
+     - ``next.static.default_kinds.register`` in ``AppConfig.ready``.
+   * - Asset stems
+     - ``next.static.discovery.default_stems.register`` in ``AppConfig.ready``.
+   * - Placeholder slots
+     - ``next.static.default_placeholders.register`` in ``AppConfig.ready``.
    * - Dependency providers
-     - n/a
-     - ``next.deps.resolver`` plus ``RegisteredParameterProvider``
+     - Subclass ``RegisteredParameterProvider``, imported in ``AppConfig.ready``.
+   * - Named dependencies
+     - ``next.deps.resolver.dependency`` decorator.
    * - Template loaders
-     - ``TEMPLATE_LOADERS``
-     - n/a
+     - The ``TEMPLATE_LOADERS`` settings key.
 
 The registry pattern is the right choice when the framework already knows how to consume the values and just needs to learn about a new entry.
 
@@ -128,10 +133,10 @@ Implement the methods listed in the protocol and pass the class to the framework
      - Defined in
    * - Template loader
      - ``next.pages.loaders.TemplateLoader``
-   * - Asset discovery rule
-     - ``next.static.discovery.AssetDiscoveryRule``
-   * - Per action backend
-     - ``next.forms.backends.FormActionBackend``
+   * - Dedup strategy
+     - ``next.static.collector.DedupStrategy``
+   * - JS context serializer
+     - ``next.static.JsContextSerializer``
 
 Protocols differ from backends in that they implement a single hook.
 A template loader handles file discovery for one extension.
@@ -145,20 +150,20 @@ The framework calls the strategy at a well known point in the pipeline.
 
 .. list-table::
    :header-rows: 1
-   :widths: 40 30 30
+   :widths: 35 35 30
 
    * - Strategy
-     - Setting
+     - Configured through
      - Default
    * - Static dedup
-     - ``STATIC_DEDUP``
-     - ``HashContentDedup``
-   * - Static collect
-     - ``STATIC_COLLECT``
-     - ``OrderedCollect``
+     - ``DEDUP_STRATEGY`` in static backend ``OPTIONS``
+     - ``UrlDedup``
+   * - JS context conflict policy
+     - ``JS_CONTEXT_POLICY`` in static backend ``OPTIONS``
+     - ``LastWinsPolicy``
    * - JS context serializer
-     - ``JS_CONTEXT_SERIALIZER``
-     - ``JsContextSerializer``
+     - ``JS_CONTEXT_SERIALIZER`` settings key
+     - ``JsonJsContextSerializer``
 
 Use a strategy when the customisation is a single algorithm rather than a complete subsystem.
 

@@ -36,7 +36,7 @@ Add the pytest configuration.
    addopts = --tb=short
 
 Add a ``conftest.py`` at the project root.
-The conftest enables a database for every test and isolates the next.dj registries between modules.
+The conftest isolates the next.dj registries between test modules.
 
 .. code-block:: python
    :caption: conftest.py
@@ -52,12 +52,8 @@ The conftest enables a database for every test and isolates the next.dj registri
        yield
        reset_registries()
 
-
-   @pytest.fixture
-   def db(transactional_db):
-       return transactional_db
-
 ``reset_registries()`` clears every page, component, action, and signal binding between tests so that a stale module from another test does not bleed into the next one.
+Database access uses the standard ``db`` fixture from pytest-django, no extra fixture is needed.
 
 Write the First End-to-End Test
 -------------------------------
@@ -106,7 +102,7 @@ Test the Create Action
 ----------------------
 
 The framework gives each action a stable URL.
-The test client posts to that URL like any other endpoint.
+``NextClient.post_action`` resolves an action name to its URL and posts in one call.
 
 .. code-block:: python
    :caption: tests/test_notes_actions.py
@@ -114,50 +110,44 @@ The test client posts to that URL like any other endpoint.
    from django.urls import reverse
    from notes.models import Note
 
-   from next.forms.uid import action_url
    from next.testing.client import NextClient
 
 
    def test_create_note_action(db) -> None:
        client = NextClient()
-       url = action_url("create_note")
-       response = client.post(url, {"title": "From test", "body": "body"})
+       response = client.post_action("create_note", {"title": "From test", "body": "body"})
        assert response.status_code == 302
        assert Note.objects.filter(title="From test").exists()
        assert response["Location"] == reverse("next:page_")
 
-``action_url("create_note")`` reverses the action UID into the dispatch endpoint that ``{% form %}`` posts to.
-The redirect target should match ``next:page_`` because the handler returns ``HttpResponseRedirect(reverse("next:page_"))``.
+``post_action`` looks the action name up through ``resolve_action_url`` and posts the data to the dispatch endpoint.
+The redirect target matches ``next:page_`` because the handler returns ``HttpResponseRedirect(reverse("next:page_"))``.
 
 Capture Action Signals
 ----------------------
 
 Every dispatch fires the ``action_dispatched`` signal.
-``SignalRecorder`` collects payloads so the test can assert what happened.
+``SignalRecorder`` collects events so the test can assert what happened.
 
 .. code-block:: python
    :caption: tests/test_notes_signals.py
 
-   from notes.models import Note
-
    from next.forms.signals import action_dispatched
-   from next.forms.uid import action_url
    from next.testing.client import NextClient
    from next.testing.signals import SignalRecorder
 
 
    def test_create_emits_action_dispatched(db) -> None:
        with SignalRecorder(action_dispatched) as recorder:
-           NextClient().post(action_url("create_note"), {"title": "Signal", "body": ""})
+           NextClient().post_action("create_note", {"title": "Signal", "body": ""})
 
-       assert len(recorder.calls) == 1
-       call = recorder.calls[0]
-       assert call.kwargs["name"] == "create_note"
-       assert isinstance(call.kwargs["form"], Note._meta.model_field_map["title"].__class__) is False
-       assert call.kwargs["form"].cleaned_data["title"] == "Signal"
+       assert len(recorder.events) == 1
+       event = recorder.events[0]
+       assert event.kwargs["action_name"] == "create_note"
+       assert event.kwargs["form"].cleaned_data["title"] == "Signal"
 
 ``SignalRecorder`` is a context manager that subscribes to the signal on entry and unsubscribes on exit.
-Each captured call exposes ``args``, ``kwargs``, and ``sender``.
+Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwargs`` attributes.
 
 Test Validation Failure
 -----------------------
@@ -170,7 +160,7 @@ The pipeline re-renders the origin page with the bound form and a non-zero error
 
    def test_create_with_blank_title_rerenders(db) -> None:
        client = NextClient()
-       response = client.post(action_url("create_note"), {"title": "", "body": "x"})
+       response = client.post_action("create_note", {"title": "", "body": "x"})
        assert response.status_code == 200
        assert b"This field is required" in response.content
 
@@ -237,9 +227,9 @@ Test sees stale routes from another test module.
    Ensure that ``reset_registries()`` runs in an ``autouse`` fixture.
    Without it a page registered in one test stays in the registry for the next test.
 
-``action_url`` returns ``None``.
+``post_action`` raises an unknown action error.
    Make sure the action module is imported before the test runs.
-   Tests in ``tests/`` next to ``notes/`` will import ``notes`` because pytest places the project root on ``sys.path``.
+   Tests in ``tests/`` next to ``notes/`` import ``notes`` because pytest places the project root on ``sys.path``.
 
 Autoreloader does not pick up a change.
    Confirm that the changed file lives under one of the configured page roots.

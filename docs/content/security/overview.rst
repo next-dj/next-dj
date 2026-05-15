@@ -88,8 +88,8 @@ System Checks
 
 The framework system checks cover configuration mistakes that affect security.
 
-- ``next.E041`` reports an action that handles ``form`` without declaring ``form_class``.
-- ``next.E060`` reports an unknown dispatch backend dotted path.
+- ``next.E041`` reports two actions registered under the same name from different handlers.
+- ``next.E045`` reports a form action backend that does not subclass ``FormActionBackend``.
 - ``next.E020`` reports a component name collision that could mask a third party component.
 
 Run them with ``uv run python manage.py check``.

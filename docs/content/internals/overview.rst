@@ -66,28 +66,28 @@ The diagram below shows which subsystem emits each signal and the typical receiv
 .. mermaid::
 
    flowchart LR
-       Pages[next.pages]
-       Components[next.components]
-       URLs[next.urls]
-       Forms[next.forms]
-       Static[next.static]
-       Deps[next.deps]
-       Server[next.server]
-       Conf[next.conf]
-       Audit[Audit and metrics]
-       Cache[Cache invalidation]
-       Watch[Long lived listeners]
+       Pages["next.pages"]
+       Components["next.components"]
+       URLs["next.urls"]
+       Forms["next.forms"]
+       Static["next.static"]
+       Deps["next.deps"]
+       Server["next.server"]
+       Conf["next.conf"]
+       Audit["Audit and metrics"]
+       Cache["Cache invalidation"]
+       Watch["Long lived listeners"]
 
-       Pages -- template_loaded, context_registered, page_rendered --> Audit
-       Components -- component_registered, components_registered, component_rendered --> Audit
-       URLs -- route_registered, router_reloaded --> Watch
-       Forms -- action_registered, action_dispatched, form_validation_failed --> Audit
-       Forms -- action_dispatched --> Cache
-       Static -- asset_registered, collector_finalized, html_injected, backend_loaded --> Audit
-       Deps -- provider_registered --> Audit
-       Server -- watch_specs_ready --> Watch
-       Conf -- settings_reloaded --> Watch
-       Conf -- settings_reloaded --> Cache
+       Pages -- "template_loaded, context_registered, page_rendered" --> Audit
+       Components -- "component_registered, components_registered, component_rendered" --> Audit
+       URLs -- "route_registered, router_reloaded" --> Watch
+       Forms -- "action_registered, action_dispatched, form_validation_failed" --> Audit
+       Forms -- "action_dispatched" --> Cache
+       Static -- "asset_registered, collector_finalized, html_injected, backend_loaded" --> Audit
+       Deps -- "provider_registered" --> Audit
+       Server -- "watch_specs_ready" --> Watch
+       Conf -- "settings_reloaded" --> Watch
+       Conf -- "settings_reloaded" --> Cache
 
 Subsystem Dependencies
 ----------------------

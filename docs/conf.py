@@ -103,12 +103,6 @@ exclude_patterns = [
     "_build",
     "Thumbs.db",
     ".DS_Store",
-    "content/guide/**",
-    "content/api/**",
-    "content/reference/**",
-    "content/architecture/**",
-    "content/contributing/documentation-guide.rst",
-    "content/contributing/contributing.rst",
 ]
 
 # 404 page is intentionally not in toctree

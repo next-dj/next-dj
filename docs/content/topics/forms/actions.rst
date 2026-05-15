@@ -52,7 +52,7 @@ Action Names and Namespaces
 ---------------------------
 
 Names hash into a 16 character UID that becomes the path of the dispatch URL.
-Two actions with the same hash are reported by ``django.core.exceptions.ImproperlyConfigured`` at startup with both file locations.
+Two ``@action`` calls that register the same name from different handlers are reported by the ``next.E041`` system check.
 
 .. code-block:: python
    :caption: collision-free naming
@@ -224,15 +224,18 @@ Templates reference both names.
 .. code-block:: jinja
    :caption: notes/routes/notes/[id]/template.djx
 
-   {% form @action="update_note" method="post" id=note.id %}
+   {% form @action="update_note" %}
      {{ form.title }}
      {{ form.body }}
      <button type="submit">Save</button>
    {% endform %}
 
-   {% form @action="delete_note" method="post" id=note.id %}
+   {% form @action="delete_note" %}
      <button type="submit" class="danger">Delete</button>
    {% endform %}
+
+Both forms render on a page whose URL captures ``id``.
+The ``{% form %}`` tag emits a hidden ``_url_param_id`` field for every captured URL parameter, so each handler resolves ``DUrl[int]`` without any extra tag argument.
 
 Component Actions
 -----------------
@@ -258,8 +261,9 @@ System Checks
 
 The forms subsystem contributes Django system checks.
 
-- ``next.E040`` reports two actions with the same UID.
-- ``next.E041`` reports a missing ``form_class`` when the handler signature includes a ``form`` parameter.
+- ``next.E041`` reports two ``@action`` registrations that share a name but come from different handlers.
+- ``next.E044`` reports a malformed ``DEFAULT_FORM_ACTION_BACKENDS`` entry.
+- ``next.E045`` reports a backend that does not subclass ``FormActionBackend``.
 
 Run them through ``uv run python manage.py check``.
 

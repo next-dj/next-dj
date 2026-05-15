@@ -27,23 +27,24 @@ Create ``notes/forms.py``.
 .. code-block:: python
    :caption: notes/forms.py
 
-   from django import forms
    from notes.models import Note
 
-   from next.forms import Form
+   from next.forms import BooleanField, Form, ModelForm
 
 
-   class NoteForm(Form, forms.ModelForm):
+   class NoteForm(ModelForm):
        class Meta:
            model = Note
            fields = ("title", "body")
 
 
    class DeleteNoteForm(Form):
-       confirm = forms.BooleanField(required=True)
+       confirm = BooleanField(required=True)
 
-``next.forms.Form`` is a mixin that participates in form dispatch.
-A plain ``Form`` or ``ModelForm`` cannot be passed to ``@action`` because the dispatch pipeline expects the mixin to register the form identity.
+``next.forms.ModelForm`` and ``next.forms.Form`` are the framework form base classes.
+They participate in form dispatch.
+A plain Django ``Form`` or ``ModelForm`` cannot be passed to ``@action`` because the dispatch pipeline expects the framework base class.
+``next.forms`` also re-exports every Django form field and widget, so ``BooleanField`` and the rest are importable from one place.
 
 Register the Create Action
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -88,7 +89,7 @@ The ``{% form %}`` tag points to the action by name.
    :caption: notes/routes/template.djx
 
    <section class="note-create">
-     {% form @action="create_note" method="post" class="note-form" %}
+     {% form @action="create_note" class="note-form" %}
        <label>
          Title
          {{ form.title }}
@@ -115,6 +116,7 @@ The ``{% form %}`` tag points to the action by name.
    </ul>
 
 The tag resolves the action UID, builds a stable POST URL, and injects a CSRF token automatically.
+The rendered form always uses ``method="post"``, so you do not write the method yourself.
 The ``form`` variable inside the block is the unbound form on a GET and the bound form on a validation failure.
 
 Reload ``/``, submit the form with a title, and confirm that the index lists a new note.
@@ -162,7 +164,7 @@ The framework reuses that name when the action fails validation so the template 
    :caption: notes/routes/notes/[id]/edit/template.djx
 
    <h2>Edit {{ note.title }}</h2>
-   {% form @action="update_note" method="post" %}
+   {% form @action="update_note" %}
      <label>Title {{ form.title }}</label>
      <label>Body {{ form.body }}</label>
      <button type="submit">Save</button>
@@ -198,14 +200,15 @@ Extend the detail template.
      <small>{{ note.created_at|date:"Y-m-d H:i" }}</small>
      <p>
        <a href="{% url 'next:page_notes_id_edit' id=note.id %}">Edit</a>
-       {% form @action="delete_note" method="post" id=note.id %}
+       {% form @action="delete_note" %}
          <input type="hidden" name="confirm" value="on">
          <button type="submit" class="button-danger">Delete</button>
        {% endform %}
      </p>
    </article>
 
-The ``id=note.id`` argument to ``{% form %}`` propagates the captured URL parameter into the action endpoint so the handler can resolve it.
+The detail page URL captures ``id``.
+The ``{% form %}`` tag emits a hidden ``_url_param_id`` field automatically for every captured URL parameter, so the handler resolves ``DUrl[int]`` without any extra argument on the tag.
 Add the handler to the detail page.
 
 .. code-block:: python

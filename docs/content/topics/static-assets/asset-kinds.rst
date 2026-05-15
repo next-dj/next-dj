@@ -3,9 +3,8 @@
 Asset Kinds
 ===========
 
-An asset kind binds an extension to a backend method and to a bucket inside the collector.
-The framework ships three kinds out of the box.
-You can register more kinds for ``.ts``, ``.jsx``, ``.vue``, or any other format that the project ships.
+An asset kind binds a file extension to a placeholder slot and to a backend renderer method.
+The framework ships three kinds and lets projects register more.
 
 .. contents::
    :local:
@@ -14,160 +13,184 @@ You can register more kinds for ``.ts``, ``.jsx``, ``.vue``, or any other format
 Built In Kinds
 --------------
 
-Three kinds are registered at startup.
+``register_defaults`` registers three kinds at startup through ``next.static.default_kinds``.
 
-``css``.
-   Source extension ``.css``.
-   Rendered through ``StaticBackend.render_link_tag`` into ``<link rel="stylesheet">``.
+.. list-table::
+   :header-rows: 1
+   :widths: 20 25 25 30
 
-``js``.
-   Source extension ``.js``.
-   Rendered through ``StaticBackend.render_script_tag`` into ``<script src="...">``.
+   * - Kind
+     - Extension
+     - Slot
+     - Renderer method
+   * - ``css``
+     - ``.css``
+     - ``styles``
+     - ``render_link_tag``
+   * - ``js``
+     - ``.js``
+     - ``scripts``
+     - ``render_script_tag``
+   * - ``module``
+     - ``.mjs``
+     - ``scripts``
+     - ``render_module_tag``
 
-``module``.
-   Source extension ``.mjs``.
-   Rendered through ``StaticBackend.render_module_tag`` into ``<script type="module" src="...">``.
+The static subsystem does not privilege CSS or JS in core code.
+The three built in kinds register through the same public API that a project uses for a new kind.
 
-The collector keeps each kind in its own bucket.
-``{% collect_styles %}`` emits the ``css`` bucket.
-``{% collect_scripts %}`` emits the ``js`` and ``module`` buckets in that order.
+The Registry
+------------
 
-Registering a Custom Kind
--------------------------
+The kind registry is ``next.static.default_kinds``, an instance of ``KindRegistry``.
+A kind registration carries four pieces of information.
 
-Add a kind through ``NEXT_FRAMEWORK["DEFAULT_ASSET_KINDS"]``.
+``kind``.
+   A non empty Python identifier such as ``css`` or ``jsx``.
 
-.. code-block:: python
-   :caption: config/settings.py
+``extension``.
+   The file suffix, starting with a dot, such as ``.jsx``.
+   Discovery looks for files matching ``{stem}{extension}``.
 
-   NEXT_FRAMEWORK = {
-       "DEFAULT_ASSET_KINDS": {
-           "jsx": {
-               "extension": ".jsx",
-               "renderer": "notes.static.render_jsx",
-               "bucket": "scripts",
-           }
-       }
-   }
+``slot``.
+   The name of the placeholder slot that buckets the asset at render time.
+   The bundled slots are ``styles`` and ``scripts``.
 
-The settings merge with the framework defaults.
-Only the kinds you declare appear in the project, the built ins remain unchanged.
+``renderer``.
+   The method name that the active static backend exposes for rendering this kind.
+   The manager looks the method up with ``getattr`` on the backend per asset.
 
-Renderer Contract
------------------
+Registering a Kind
+------------------
 
-A renderer is a callable that receives the backend, the asset, and any attributes from the template tag.
-
-.. code-block:: python
-   :caption: notes/static.py
-
-   from next.static.assets import Asset
-   from next.static.backends import StaticBackend
-
-
-   def render_jsx(backend: StaticBackend, asset: Asset, **attrs: str) -> str:
-       url = backend.url(asset)
-       return f'<script type="text/babel" src="{url}"></script>'
-
-The renderer returns the HTML string.
-The framework escapes attribute values, but the rendered HTML itself is treated as safe.
-
-Bucket Selection
-----------------
-
-The ``bucket`` field decides which template tag emits the asset.
-
-- ``styles`` becomes part of ``{% collect_styles %}``.
-- ``scripts`` becomes part of ``{% collect_scripts %}``.
-- Any other name becomes a new bucket.
-  Emit it through ``{% collect_bucket "name" %}`` from the template tag library.
-
-Custom buckets are useful for preload hints, font links, and other tags that share asset semantics but render in a different place.
-
-Registering Through the API
----------------------------
-
-The Python API also accepts kind registration.
+Register kinds in ``AppConfig.ready`` so the kind exists before the first request.
 
 .. code-block:: python
    :caption: notes/apps.py
 
    from django.apps import AppConfig
 
-   from next.static import kind_registry
-
-   from notes.static import render_jsx
+   from next.static import default_kinds
 
 
    class NotesConfig(AppConfig):
        name = "notes"
 
        def ready(self) -> None:
-           kind_registry.register(
-               name="jsx",
+           default_kinds.register(
+               "jsx",
                extension=".jsx",
-               renderer=render_jsx,
-               bucket="scripts",
+               slot="scripts",
+               renderer="render_script_tag",
            )
 
-Use this when the kind depends on conditional configuration that does not fit in settings.
+The ``jsx`` kind now lands in the ``scripts`` slot and renders through ``render_script_tag``.
+A repeated call with identical parameters is idempotent.
+A repeated call with different parameters raises ``ValueError``.
 
-Module Kind Details
--------------------
+Renderer Methods
+----------------
 
-The ``module`` kind renders ``<script type="module" src="...">`` through ``StaticBackend.render_module_tag``.
-A custom backend can override the method to add ``crossorigin`` or ``integrity`` attributes.
+The ``renderer`` value is a method name on the static backend.
+The bundled ``StaticFilesBackend`` exposes three.
+
+- ``render_link_tag`` for stylesheets.
+- ``render_script_tag`` for scripts.
+- ``render_module_tag`` for module scripts.
+
+A custom kind reuses one of these methods, or a custom backend can add a new method.
 
 .. code-block:: python
-   :caption: custom backend that adds crossorigin
+   :caption: notes/backends.py
 
-   from next.static.backends import StaticBackend
+   from next.static import StaticFilesBackend
 
 
-   class CrossOriginBackend(StaticBackend):
-       def render_module_tag(self, asset, **attrs) -> str:
-           url = self.url(asset)
-           return f'<script type="module" src="{url}" crossorigin></script>'
+   class BabelBackend(StaticFilesBackend):
+       def render_babel_tag(self, url: str, *, request=None) -> str:
+           return f'<script type="text/babel" src="{url}"></script>'
 
-See :doc:`backends` for the full contract.
+.. code-block:: python
+   :caption: notes/apps.py
+
+   default_kinds.register(
+       "jsx",
+       extension=".jsx",
+       slot="scripts",
+       renderer="render_babel_tag",
+   )
+
+The backend is registered through ``DEFAULT_STATIC_BACKENDS``, see :doc:`backends`.
+
+Placeholder Slots
+-----------------
+
+A slot is the location where the static manager injects rendered tags.
+The slot registry is ``next.static.default_placeholders``.
+The framework registers two slots, ``styles`` and ``scripts``, each with an HTML comment token.
+
+Register a new slot when a kind should inject somewhere other than the standard two slots.
+
+.. code-block:: python
+   :caption: notes/apps.py
+
+   from next.static import default_kinds, default_placeholders
+
+
+   class NotesConfig(AppConfig):
+       name = "notes"
+
+       def ready(self) -> None:
+           default_placeholders.register("preload", token="<!-- next:preload -->")
+           default_kinds.register(
+               "font",
+               extension=".woff2",
+               slot="preload",
+               renderer="render_link_tag",
+           )
+
+The layout must contain the slot token, or a template tag that emits it, for the manager to find a place to inject.
+
+Module Kind
+-----------
+
+The ``module`` kind renders ``<script type="module" src="...">`` through ``render_module_tag``.
+Customise the rendered output through the ``module_tag`` option on the backend, see :doc:`backends`.
 
 System Checks
 -------------
 
-The framework validates kind registration at startup.
-
-- ``next.E070`` reports a kind whose extension is empty or duplicated.
-- ``next.E071`` reports an unknown renderer dotted path.
-
-Run ``uv run python manage.py check`` after every kind registration change.
+The static subsystem contributes Django system checks.
+A misregistered kind surfaces during ``uv run python manage.py check``.
+The static checks use the codes ``next.E036``, ``next.E037``, ``next.E038``, ``next.W030``, ``next.W031``, and ``next.W042``.
 
 Common Patterns
 ---------------
 
-TypeScript
-~~~~~~~~~~
+JSX Through a Module Script
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Register a ``ts`` kind that points at a build hook.
-The renderer can either reference a pre built JS file or run a compiler in development.
+Register a ``jsx`` kind that points at ``render_module_tag`` when the JSX is pre compiled into modules.
+See ``examples/kanban``.
+
+JSX Through Babel
+~~~~~~~~~~~~~~~~~
+
+Register a ``jsx`` kind with a custom backend renderer method that emits a Babel script tag.
+See ``examples/observability``.
 
 Vue Single File Components
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Register a ``vue`` kind that maps to a custom stem.
-See ``examples/live-polls`` for a worked setup.
-
-Font Preloads
-~~~~~~~~~~~~~
-
-Register a ``font`` kind in a ``preload`` bucket.
-The template renders preload links separately from styles and scripts.
+Register a ``vue`` kind paired with a custom stem.
+See ``examples/live-polls``.
 
 See Also
 --------
 
 .. seealso::
 
-   :doc:`custom-stems` for filename conventions.
+   :doc:`custom-stems` for recognising new filenames.
    :doc:`backends` for the renderer methods.
    :doc:`/content/howto/add-a-new-asset-kind` for a recipe.
    :doc:`/content/ref/static` for the public API.

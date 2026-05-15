@@ -22,20 +22,20 @@ Pipeline
 .. mermaid::
 
    flowchart TB
-       Template[{% form %} tag] -- POST --> Endpoint[/_next/form/uid/]
-       Endpoint --> Lookup[Resolve action]
-       Lookup --> Origin{Origin page valid}
-       Origin -- no --> BadRequest[HTTP 400]
-       Origin -- yes --> Build[Build form]
-       Build --> Validate{Form valid}
-       Validate -- yes --> Handler[Run handler]
-       Handler --> Response[Handler response]
-       Validate -- no --> FrozenSpec[Save frozen FormSpec]
-       FrozenSpec --> ShareCache[Reuse dep cache]
-       ShareCache --> RenderOrigin[Render origin page]
-       RenderOrigin --> RerenderHTML[HTTP 200 with bound form]
-       Handler --> ActionDispatched[(action_dispatched)]
-       Validate -- no --> FormFailed[(form_validation_failed)]
+       Template["form tag in template"] -- POST --> Endpoint["form dispatch endpoint"]
+       Endpoint --> Lookup["Resolve action"]
+       Lookup --> Origin{"Origin page valid"}
+       Origin -- no --> BadRequest["HTTP 400"]
+       Origin -- yes --> Build["Build form"]
+       Build --> Validate{"Form valid"}
+       Validate -- yes --> Handler["Run handler"]
+       Handler --> Response["Handler response"]
+       Validate -- no --> FrozenSpec["Save frozen FormSpec"]
+       FrozenSpec --> ShareCache["Reuse dep cache"]
+       ShareCache --> RenderOrigin["Render origin page"]
+       RenderOrigin --> RerenderHTML["HTTP 200 with bound form"]
+       Handler --> ActionDispatched["action_dispatched signal"]
+       Validate -- no --> FormFailed["form_validation_failed signal"]
 
 Modules
 -------
@@ -51,11 +51,10 @@ Modules
    Manages the bound form, the dependency cache reuse, and the response selection.
 
 ``next.forms.backends``.
-   ``FormActionBackend`` contract plus the bundled backends ``OriginPageBackend``, ``FormDispatchBackend``, ``RateLimitBackend``, ``AuditBackend``.
-   ``RegistryFormActionBackend`` is the default chain entry that ties the manager to the dispatcher.
+   ``FormActionBackend`` abstract contract, ``RegistryFormActionBackend`` default implementation, and ``FormActionFactory``.
 
 ``next.forms.uid``.
-   ``action_url``, ``redirect_to_origin``, ``validated_next_form_page_path``, ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``.
+   ``redirect_to_origin`` and ``validated_next_form_page_path`` helpers for the origin page round trip.
 
 ``next.forms.markers``.
    ``DForm`` annotation and ``FormProvider`` class.
@@ -73,18 +72,18 @@ The hidden ``_next_form_page`` field on every rendered form carries the absolute
 The dispatcher resolves the path to an existing file under ``BASE_DIR``.
 Anything else returns HTTP 400.
 
-Backend Chain
--------------
+Backends
+--------
 
-The dispatcher iterates the configured backends in order.
-Each backend implements ``dispatch(request, context)`` and can return ``HttpResponse`` to short circuit, raise ``ValidationError`` to surface a form error, or return ``None`` to continue.
+The ``DEFAULT_FORM_ACTION_BACKENDS`` setting lists the active backends.
+Each backend is a full implementation of the ``FormActionBackend`` contract, not a step in a middleware chain.
+A backend owns the registry, the URL generation, and the dispatch for every action it registers.
 
-The default chain holds two entries.
+The default value registers ``RegistryFormActionBackend``.
+Its ``dispatch`` method resolves the UID, validates the origin page, builds the form, and runs the pipeline through ``FormActionDispatch``.
 
-1. ``OriginPageBackend`` checks the hidden field.
-2. ``FormDispatchBackend`` builds the form, runs validation, and either calls the handler or fires the re-render path.
-
-A project that adds ``RateLimitBackend`` or ``AuditBackend`` does so through ``extend_default_backend``.
+A project customises dispatch by subclassing ``RegistryFormActionBackend`` and overriding ``dispatch``.
+The override calls ``super().dispatch`` to keep the standard pipeline.
 
 Frozen Form Spec
 ----------------
@@ -115,8 +114,8 @@ The pipeline fires three signals.
 Extension Points
 ----------------
 
-- Subclass ``FormActionBackend`` to add a step to the chain.
-- Use ``extend_default_backend`` to inject the backend at a precise position.
+- Subclass ``RegistryFormActionBackend`` and override ``dispatch`` to wrap the standard pipeline.
+- Register the custom backend through ``DEFAULT_FORM_ACTION_BACKENDS``.
 - Subscribe to ``action_dispatched`` for audit and cache invalidation.
 - Subscribe to ``form_validation_failed`` for alerting on failure rates.
 

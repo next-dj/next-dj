@@ -6,50 +6,66 @@ Write a Static Backend
 Problem
 -------
 
-You want collected assets to load from a CDN host with subresource integrity attributes and a cache-busting query string.
+You want collected assets to render with extra attributes such as ``crossorigin`` or to load from a CDN host.
 
 Solution
 --------
 
-Subclass ``next.static.backends.StaticBackend``, override ``url``, ``render_link_tag``, and ``render_script_tag``, and register the dotted path in ``DEFAULT_STATIC_BACKENDS``.
+For attribute only changes, set the ``css_tag``, ``js_tag``, and ``module_tag`` options on the default backend.
+For URL rewriting, subclass ``StaticFilesBackend`` and override the renderer methods.
 
 Walkthrough
 -----------
 
-Write the backend.
+Attributes Through Options
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The simplest customisation needs no Python.
+Bake the attributes into the tag format strings.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_STATIC_BACKENDS": [
+           {
+               "BACKEND": "next.static.StaticFilesBackend",
+               "OPTIONS": {
+                   "css_tag": '<link rel="stylesheet" href="{url}" crossorigin>',
+                   "js_tag": '<script src="{url}" defer crossorigin></script>',
+                   "module_tag": '<script type="module" src="{url}" crossorigin></script>',
+               },
+           }
+       ]
+   }
+
+The format string must contain the ``{url}`` placeholder.
+
+Subclass for URL Rewriting
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When the URL itself must change, subclass ``StaticFilesBackend`` and override the renderer methods.
 
 .. code-block:: python
    :caption: notes/backends.py
 
-   import base64
-   import hashlib
-
-   from next.static.assets import Asset
-   from next.static.backends import StaticBackend
+   from next.static import StaticFilesBackend
 
 
    CDN = "https://cdn.example.com"
 
 
-   class CdnIntegrityBackend(StaticBackend):
-       def url(self, asset: Asset) -> str:
-           return f"{CDN}{asset.relative_path}?h={asset.content_hash[:8]}"
+   class CdnBackend(StaticFilesBackend):
+       def render_link_tag(self, url, *, request=None) -> str:
+           return f'<link rel="stylesheet" href="{CDN}{url}">'
 
-       def integrity(self, asset: Asset) -> str:
-           digest = hashlib.sha384(asset.content).digest()
-           return "sha384-" + base64.b64encode(digest).decode()
+       def render_script_tag(self, url, *, request=None) -> str:
+           return f'<script src="{CDN}{url}" defer></script>'
 
-       def render_link_tag(self, asset: Asset, **attrs: str) -> str:
-           return (
-               f'<link rel="stylesheet" href="{self.url(asset)}" '
-               f'integrity="{self.integrity(asset)}" crossorigin>'
-           )
+       def render_module_tag(self, url, *, request=None) -> str:
+           return f'<script type="module" src="{CDN}{url}"></script>'
 
-       def render_script_tag(self, asset: Asset, **attrs: str) -> str:
-           return (
-               f'<script src="{self.url(asset)}" '
-               f'integrity="{self.integrity(asset)}" crossorigin></script>'
-           )
+Each renderer method receives the URL and an optional ``request`` keyword.
 
 Register the backend.
 
@@ -58,44 +74,40 @@ Register the backend.
 
    NEXT_FRAMEWORK = {
        "DEFAULT_STATIC_BACKENDS": [
-           "notes.backends.CdnIntegrityBackend",
+           {"BACKEND": "notes.backends.CdnBackend", "OPTIONS": {}}
        ]
    }
 
-The configured backend replaces the default ``StaticBackend``.
-Every emitted link and script now points at the CDN host with an integrity attribute.
+Request Aware Output
+~~~~~~~~~~~~~~~~~~~~
+
+A renderer can read the request to vary its output per visitor.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   from next.static import StaticFilesBackend
+
+
+   class TenantBackend(StaticFilesBackend):
+       def render_link_tag(self, url, *, request=None) -> str:
+           prefix = getattr(getattr(request, "tenant", None), "cdn", "")
+           return f'<link rel="stylesheet" href="{prefix}{url}">'
+
+The static manager passes the current request to every renderer call.
 
 Verification
 ------------
 
 Reload a page and inspect the HTML.
-Every ``<link>`` and ``<script>`` tag contains ``integrity="sha384-..."`` and ``crossorigin``.
+Every ``<link>`` and ``<script>`` tag carries the new attributes or the CDN host.
 
 Run ``uv run python manage.py check`` and confirm the backend is registered.
-
-Extending Default Backends
---------------------------
-
-Keep the default behaviour and add the backend as a second option using ``extend_default_backend``.
-
-.. code-block:: python
-   :caption: alternative wiring
-
-   from next.conf import extend_default_backend
-
-   NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": extend_default_backend(
-           "DEFAULT_STATIC_BACKENDS",
-           "notes.backends.CdnIntegrityBackend",
-           position="last",
-       )
-   }
 
 See Also
 --------
 
 .. seealso::
 
-   :doc:`/content/topics/static-assets/backends` for the contract.
-   :doc:`extend-a-default-backend` for the helper details.
-   :doc:`/content/internals/static-pipeline` for the dispatcher view.
+   :doc:`/content/topics/static-assets/backends` for the backend contract.
+   :doc:`/content/topics/static-assets/asset-kinds` for the renderer methods.

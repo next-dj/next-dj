@@ -44,7 +44,7 @@ Static Backend
 
    NEXT_FRAMEWORK = {
        "DEFAULT_STATIC_BACKENDS": [
-           "notes.backends.CdnBackend",
+           {"BACKEND": "notes.backends.CdnBackend", "OPTIONS": {}},
        ]
    }
 
@@ -58,14 +58,14 @@ JS Context Serializer
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "JS_CONTEXT_SERIALIZER": "notes.serializers.JsContextSerializer",
+       "JS_CONTEXT_SERIALIZER": "next.static.PydanticJsContextSerializer",
    }
 
 Set the serializer when context values include types beyond the standard JSON set.
-A class that handles ``datetime``, ``Decimal``, Pydantic models, and dataclasses keeps the browser side consistent across pages.
+``PydanticJsContextSerializer`` handles Pydantic models and falls back to the Django JSON encoder for plain values.
 
-Page Backends With CDN
-----------------------
+Page Backends With Context Processors
+-------------------------------------
 
 .. code-block:: python
    :caption: config/settings.py
@@ -75,33 +75,30 @@ Page Backends With CDN
    NEXT_FRAMEWORK = {
        "DEFAULT_PAGE_BACKENDS": extend_default_backend(
            "DEFAULT_PAGE_BACKENDS",
-           {"OPTIONS": {"context_processors": [
-               "myapp.context_processors.csp_nonce",
-               "myapp.context_processors.tenant",
-           ]}},
+           OPTIONS={"context_processors": [
+               "notes.context_processors.csp_nonce",
+               "notes.context_processors.tenant",
+           ]},
        )
    }
 
-Use ``extend_default_backend`` to add production specific context processors without dropping the framework defaults.
+Use ``extend_default_backend`` to patch the default page backend entry with production context processors.
+The ``OPTIONS`` dict is merged, so the other default keys survive.
 
-Form Action Backends
---------------------
+Form Action Backend
+-------------------
 
 .. code-block:: python
    :caption: config/settings.py
 
-   from next.conf import extend_default_backend
-
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_ACTION_BACKENDS": extend_default_backend(
-           "DEFAULT_FORM_ACTION_BACKENDS",
-           "next.forms.backends.RateLimitBackend",
-           position="before",
-           target="next.forms.backends.FormDispatchBackend",
-       )
+       "DEFAULT_FORM_ACTION_BACKENDS": [
+           {"BACKEND": "notes.backends.RateLimitedFormActionBackend"},
+       ]
    }
 
-Add the rate limit backend in production for endpoints exposed to anonymous users.
+Register a custom backend that subclasses ``RegistryFormActionBackend`` and rate limits dispatch for endpoints exposed to anonymous users.
+See :doc:`/content/howto/write-a-form-action-backend`.
 
 Template Loaders
 ----------------
@@ -126,8 +123,6 @@ Full Example
 
    from pathlib import Path
 
-   from next.conf import extend_default_backend
-
 
    BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -142,7 +137,7 @@ Full Example
                "DIRS": [str(BASE_DIR / "chrome")],
                "PAGES_DIR": "routes",
                "OPTIONS": {"context_processors": [
-                   "myapp.context_processors.tenant",
+                   "notes.context_processors.tenant",
                ]},
            }
        ],
@@ -153,15 +148,12 @@ Full Example
            }
        ],
        "DEFAULT_STATIC_BACKENDS": [
-           "notes.backends.CdnBackend",
+           {"BACKEND": "notes.backends.CdnBackend", "OPTIONS": {}},
        ],
-       "DEFAULT_FORM_ACTION_BACKENDS": extend_default_backend(
-           "DEFAULT_FORM_ACTION_BACKENDS",
-           "next.forms.backends.RateLimitBackend",
-           position="before",
-           target="next.forms.backends.FormDispatchBackend",
-       ),
-       "JS_CONTEXT_SERIALIZER": "notes.serializers.JsContextSerializer",
+       "DEFAULT_FORM_ACTION_BACKENDS": [
+           {"BACKEND": "notes.backends.RateLimitedFormActionBackend"},
+       ],
+       "JS_CONTEXT_SERIALIZER": "next.static.PydanticJsContextSerializer",
    }
 
 See Also

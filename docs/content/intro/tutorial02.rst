@@ -95,7 +95,6 @@ The bracketed segment is a URL parameter that the file router captures as ``id``
 .. code-block:: python
    :caption: notes/routes/notes/[id]/page.py
 
-   from django.http import Http404
    from django.shortcuts import get_object_or_404
    from notes.models import Note
 
