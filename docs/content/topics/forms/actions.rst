@@ -195,6 +195,34 @@ Pass a ``ModelForm`` to handle create and edit flows in one decorator.
 
 See :doc:`modelforms` for ``get_initial`` patterns that preload the instance from the request.
 
+Dynamic Form Class
+------------------
+
+The ``form_class`` argument also accepts a factory callable.
+The framework resolves the factory through the dependency injector and the factory returns a tuple of the form class and the initial keyword arguments.
+
+.. code-block:: python
+   :caption: notes/routes/login/page.py
+
+   from typing import Any
+
+   from django.contrib.auth.forms import AuthenticationForm
+   from django.http import HttpRequest, HttpResponse
+
+   from next.forms import action
+
+
+   def login_form_factory(request: HttpRequest) -> tuple[type[AuthenticationForm], dict[str, Any]]:
+       return AuthenticationForm, {"request": request}
+
+
+   @action("login", form_class=login_form_factory)
+   def login(request: HttpRequest, form: AuthenticationForm) -> HttpResponse:
+       ...
+
+Use a factory when the form needs constructor arguments that only exist at request time, such as the request itself or the current tenant.
+The template can also reference the action through a variable, ``{% form @action=action_name %}``, when the name is computed in context.
+
 Multiple Actions on One Page
 ----------------------------
 

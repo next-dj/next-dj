@@ -288,6 +288,32 @@ Return ``JsonResponse`` from ``render`` for a JSON endpoint that still benefits 
    def render(request) -> JsonResponse:
        return JsonResponse({"status": "ok"})
 
+Streaming Response
+~~~~~~~~~~~~~~~~~~
+
+Return ``StreamingHttpResponse`` from ``render`` for Server Sent Events or any long lived stream.
+The response is returned verbatim, so the layout chain and the static collector are skipped.
+
+.. code-block:: python
+   :caption: notes/routes/notes/[id]/stream/page.py
+
+   from django.http import StreamingHttpResponse
+
+   from notes.models import Note
+   from notes.providers import DNote
+
+
+   def render(note: DNote[Note]) -> StreamingHttpResponse:
+       return StreamingHttpResponse(
+           event_stream(note.pk),
+           content_type="text/event-stream",
+           headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+       )
+
+A synchronous generator works under WSGI and the development server.
+An ASGI deployment can yield from an async generator instead.
+See ``examples/live-polls`` for a worked SSE broker.
+
 Markdown Blog Post
 ~~~~~~~~~~~~~~~~~~
 

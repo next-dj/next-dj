@@ -136,6 +136,33 @@ Inherited context follows the layout tree, not the URL tree.
 The page itself can shadow an inherited value by declaring a context function with the same key.
 The page level value takes precedence for that one request.
 
+Inherited Function That Names a URL Parameter
+---------------------------------------------
+
+A subtle case appears when an inherited context function has the same name as a captured URL parameter, and its own parameter also carries that name.
+The framework runs the function twice.
+The first run receives the raw URL value, a string.
+The second run receives the value the first run produced, already resolved.
+
+Leave the parameter untyped and short circuit on the resolved type.
+
+.. code-block:: python
+   :caption: notes/routes/notes/[category]/page.py
+
+   from notes.models import Category
+
+   from next.pages import context
+
+
+   @context("category", inherit_context=True)
+   def category(category: object) -> Category:
+       if isinstance(category, Category):
+           return category
+       return Category.objects.get(slug=category)
+
+The ``isinstance`` guard makes the second run a no op.
+Declaring the parameter as ``str`` would break the second run.
+
 Serialization for the Browser
 -----------------------------
 

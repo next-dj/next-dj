@@ -305,6 +305,50 @@ Three surfaces let you replace or augment the router.
 Subclass ``FileRouterBackend`` to add additional patterns or augment URL names without writing a backend from scratch.
 See :doc:`extending` for a worked example.
 
+Database Driven Routes
+----------------------
+
+A hybrid backend combines file routes with routes built from database rows.
+Subclass ``FileRouterBackend`` and override ``generate_urls`` to append one named pattern per row.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   from django.apps import apps as django_apps
+   from django.urls import path
+
+   from next.urls import FileRouterBackend
+
+
+   class HybridRouterBackend(FileRouterBackend):
+       """File router that also publishes one named URL per Article row."""
+
+       def generate_urls(self):
+           urls = list(super().generate_urls())
+           catchall = self._find_catchall(urls)
+           if catchall is None:
+               return urls
+           urls.extend(self._article_aliases(catchall.callback))
+           return urls
+
+       def _article_aliases(self, view):
+           article = django_apps.get_model("notes", "Article")
+           return [
+               path(
+                   f"wiki/{slug}/",
+                   view,
+                   kwargs={"slug": slug},
+                   name=f"wiki_article_{slug}",
+               )
+               for slug in article.objects.values_list("slug", flat=True)
+           ]
+
+The aliases target the catchall file route and bind a fixed ``slug`` kwarg.
+The catchall page renders both the generic capture and the alias through the same dependency injection flow.
+
+Register the backend in ``DEFAULT_PAGE_BACKENDS`` and call ``router_manager.reload()`` from a model signal so the alias set rebuilds when a row changes.
+See ``examples/wiki`` for the complete pattern.
+
 See Also
 --------
 

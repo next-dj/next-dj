@@ -139,6 +139,10 @@ Pre dispatch redirect from handler.
    A handler that returns ``HttpResponseRedirect`` skips the re-render path entirely.
    Use this on success, never on validation failure.
 
+Virtual page origin.
+   A directory with a ``template.djx`` and no ``page.py`` is a virtual route.
+   It re-renders correctly on validation failure because the dispatcher composes the body from the template loader, not from a page module.
+
 Common Patterns
 ---------------
 

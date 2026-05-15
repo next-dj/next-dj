@@ -266,7 +266,7 @@ docstring-code-format = true
 docstring-code-line-length = "dynamic"
 
 [tool.doc8]
-max-line-length = 200
+ignore = ["D001"]
 ignore-path = [
     "docs/_build",
     "docs/_static",

@@ -356,6 +356,26 @@ Ship a folder of reusable components under a project directory listed in ``DIRS`
 Every application sees the same set, which keeps the design system consistent.
 See :doc:`multi-project` for the multi project version of this pattern.
 
+Conditional Rendering
+~~~~~~~~~~~~~~~~~~~~~
+
+A composite component can define a ``render`` function in ``component.py``.
+The function receives DI-resolved parameters and returns the component body as a string.
+Return an empty string to render nothing, which turns the component into a server side gate.
+
+.. code-block:: python
+   :caption: _components/feature_guard/component.py
+
+   from next.components import component
+
+
+   def render(flag_enabled: bool = False) -> str:
+       if not flag_enabled:
+           return ""
+       return "<div class='feature'>New feature</div>"
+
+See ``examples/feature-flags`` for a feature guard built this way.
+
 See Also
 --------
 

@@ -189,6 +189,34 @@ Validation Failure
 A failing validation re-renders the origin page with the bound formset in scope.
 Field errors render on each row through ``row.errors`` and non field errors render through ``form.non_form_errors``.
 
+Validating an Inline Formset
+----------------------------
+
+When a parent form owns an inline formset, validate the formset inside the parent form ``clean`` method.
+Raising ``ValidationError`` from ``clean`` routes the failure through the standard re-render pipeline instead of producing a bare error response.
+
+.. code-block:: python
+   :caption: notes/forms.py
+
+   from django.core.exceptions import ValidationError
+
+   from next.forms import ModelForm
+
+
+   class NoteForm(ModelForm):
+       class Meta:
+           model = Note
+           fields = ("title",)
+
+       def clean(self):
+           cleaned = super().clean()
+           if self.row_formset is not None and not self.row_formset.is_valid():
+               raise ValidationError("Fix the rows before saving.")
+           return cleaned
+
+The parent page re-renders with both the parent form errors and the row errors in scope.
+See ``examples/admin`` for a worked inline formset.
+
 See Also
 --------
 

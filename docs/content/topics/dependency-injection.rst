@@ -206,6 +206,34 @@ The base classes are ``RegisteredParameterProvider`` and ``DDependencyBase``.
            except model_cls.DoesNotExist as exc:
                raise Http404 from exc
 
+Resolving From URL or POST
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+One marker can serve both a page render and a form action handler.
+A page render captures the identifier in the URL.
+A form action carries it in the POST body.
+The provider checks both sources so the same ``DNote[Note]`` parameter works in either call site.
+
+.. code-block:: python
+   :caption: notes/providers.py
+
+   class NoteProvider(RegisteredParameterProvider):
+       def can_handle(self, param, _context) -> bool:
+           return get_origin(param.annotation) is DNote
+
+       def resolve(self, param, context):
+           (model_cls,) = get_args(param.annotation)
+           pk = context.url_kwargs.get("id")
+           if pk is None and context.request is not None:
+               pk = context.request.POST.get("note_id")
+           try:
+               return model_cls.objects.get(pk=pk)
+           except model_cls.DoesNotExist as exc:
+               raise Http404 from exc
+
+The form template carries the identifier in a hidden input so the POST branch can read it.
+See ``examples/kanban`` for a marker that serves both call sites.
+
 Use the new marker.
 
 .. code-block:: python
