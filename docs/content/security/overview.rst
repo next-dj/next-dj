@@ -13,13 +13,13 @@ This page lists the Django mechanisms that apply unchanged and the framework spe
 Django Guarantees Used Unchanged
 --------------------------------
 
-The framework does not bypass any standard Django middleware.
+The framework does not bypass any standard :doc:`Django middleware <django:topics/http/middleware>`.
 
-- CSRF tokens flow through the standard ``CsrfViewMiddleware``.
-- Session management uses the standard ``SessionMiddleware``.
-- Authentication uses ``AuthenticationMiddleware`` and the standard auth backends.
+- CSRF tokens flow through the standard :doc:`CsrfViewMiddleware <django:ref/csrf>`.
+- Session management uses the standard :doc:`SessionMiddleware <django:topics/http/sessions>`.
+- Authentication uses ``AuthenticationMiddleware`` and the standard :doc:`auth backends <django:topics/auth/index>`.
 - Permissions checking, password hashing, and signed cookies remain unchanged.
-- Django template engine auto escaping is active for every page and component template.
+- Django template engine :doc:`auto escaping <django:ref/templates/language>` is active for every page and component template.
 
 A standard ``MIDDLEWARE`` block in ``settings.py`` is therefore enough to inherit the full Django security baseline.
 
@@ -52,7 +52,7 @@ XSS.
    Context functions that return ``mark_safe`` strings or HTML strings bypass escaping.
 
 SQL injection.
-   The Django ORM uses parameterised queries.
+   The :doc:`Django ORM <django:topics/db/queries>` uses parameterised queries.
    Raw SQL inside a custom provider must use ``params``.
 
 Mass assignment.

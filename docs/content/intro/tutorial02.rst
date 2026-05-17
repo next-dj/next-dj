@@ -107,6 +107,7 @@ The bracketed segment is a URL parameter that the file router captures as ``id``
        return get_object_or_404(Note, pk=note_id)
 
 The ``DUrl[int]`` marker tells the :doc:`dependency injector </content/topics/dependency-injection>` to pull the captured ``id`` value from the URL, coerce it to an integer, and pass it to the function.
+The :func:`~django.shortcuts.get_object_or_404` shortcut is the standard Django way to fetch a row or return a 404 response.
 The parameter name in the signature can be anything, here ``note_id`` reads better than ``id`` which shadows the Python builtin.
 
 Add the matching template.

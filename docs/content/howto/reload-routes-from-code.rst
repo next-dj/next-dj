@@ -11,7 +11,7 @@ A custom router backend reads URLs from a database table and you need to rebuild
 Solution
 --------
 
-Call ``router_manager.reload()`` from a signal receiver on the relevant Django model.
+Call ``router_manager.reload()`` from a :doc:`signal receiver <django:topics/signals>` on the relevant Django model.
 The framework clears the Django URL resolver cache, rebuilds every backend, and emits a ``router_reloaded`` signal.
 
 Walkthrough

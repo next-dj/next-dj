@@ -15,7 +15,7 @@ Overview
 --------
 
 Every signal lives in ``next.forms.signals``.
-Receivers connect through the standard Django pattern.
+Receivers connect through the standard :doc:`Django signals <django:topics/signals>` pattern.
 
 .. code-block:: python
    :caption: notes/receivers.py

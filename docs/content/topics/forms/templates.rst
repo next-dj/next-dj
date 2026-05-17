@@ -145,7 +145,7 @@ Manual CSRF
 -----------
 
 The tag emits the hidden ``csrfmiddlewaretoken`` input automatically.
-Add ``{% csrf_token %}`` manually only when you build the form element without the tag, for example in a plain ``<form>``.
+Add Django's :doc:`{% csrf_token %} <django:ref/csrf>` manually only when you build the form element without the tag, for example in a plain ``<form>``.
 Even then, the dispatcher still requires the hidden ``_next_form_page`` field so a hand crafted form must include it.
 
 .. code-block:: jinja

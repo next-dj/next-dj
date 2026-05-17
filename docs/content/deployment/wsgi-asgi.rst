@@ -28,7 +28,7 @@ The difference lies in how Django dispatches the request.
 WSGI Configuration
 ------------------
 
-A standard ``config/wsgi.py`` works without modification.
+A standard ``config/wsgi.py`` works without modification. See Django's :doc:`WSGI deployment guide <django:howto/deployment/wsgi/index>`.
 
 .. code-block:: python
    :caption: config/wsgi.py
@@ -54,7 +54,7 @@ Tune based on the expected concurrency and the average request duration.
 ASGI Configuration
 ------------------
 
-A standard ``config/asgi.py`` works without modification.
+A standard ``config/asgi.py`` works without modification. See Django's :doc:`ASGI deployment guide <django:howto/deployment/asgi/index>`.
 
 .. code-block:: python
    :caption: config/asgi.py

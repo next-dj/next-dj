@@ -40,6 +40,14 @@ class TestExtendDefaultBackend:
         assert b[0]["PAGES_DIR"] == "screens"
         assert a[0] is not b[0]
 
+    def test_patches_form_action_backends(self) -> None:
+        patched = extend_default_backend(
+            "DEFAULT_FORM_ACTION_BACKENDS",
+            OPTIONS={"strict": True},
+        )
+        assert patched[0]["BACKEND"] == "next.forms.RegistryFormActionBackend"
+        assert patched[0]["OPTIONS"] == {"strict": True}
+
     def test_raises_for_unknown_key(self) -> None:
         with pytest.raises(ImproperlyConfigured, match="Unknown backend list"):
             extend_default_backend("URL_NAME_TEMPLATE")

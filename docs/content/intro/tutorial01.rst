@@ -21,7 +21,7 @@ Walkthrough
 Model the Note
 ~~~~~~~~~~~~~~
 
-Create a single model that represents a note.
+Create a single :doc:`Django model <django:topics/db/models>` that represents a note.
 Keep the fields minimal so the tutorial stays focused on the framework.
 
 .. code-block:: python
@@ -41,7 +41,7 @@ Keep the fields minimal so the tutorial stays focused on the framework.
        def __str__(self) -> str:
            return self.title
 
-Apply the migration and seed two rows so the index page has something to render.
+Apply the :doc:`migration <django:topics/migrations>` and seed two rows so the index page has something to render.
 
 .. code-block:: bash
    :caption: shell

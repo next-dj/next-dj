@@ -3,7 +3,7 @@
 Static Signals
 ==============
 
-The static pipeline emits four Django signals that cover discovery, collector lifecycle, backend loading, and HTML injection.
+The static pipeline emits four :doc:`Django signals <django:topics/signals>` that cover discovery, collector lifecycle, backend loading, and HTML injection.
 Subscribe to them to integrate with observability tools, asset caches, or content delivery hooks.
 
 .. contents::

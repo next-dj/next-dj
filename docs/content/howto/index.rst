@@ -18,10 +18,19 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`reload-routes-from-code`
    Trigger router reload at runtime.
 
+:doc:`write-a-router-backend`
+   Implement a router backend that reads URLs from a database.
+
+:doc:`read-query-parameters`
+   Read query-string values with the ``DQuery`` marker.
+
 .. rubric:: Context and components
 
 :doc:`share-context-across-pages`
    Publish values once for an entire page tree.
+
+:doc:`resolve-feature-flags-with-di`
+   Resolve feature flags through a custom dependency provider.
 
 :doc:`build-a-composite-component`
    Build a component that takes content through slots.
@@ -42,6 +51,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 
 :doc:`override-the-js-context-serializer`
    Replace the default JSON serializer for the ``Next`` object.
+
+:doc:`build-a-custom-asset-backend`
+   Add a custom asset kind with its own renderer.
 
 .. rubric:: Forms
 
@@ -68,6 +80,15 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`integrate-django-admin`
    Run Django admin alongside next.dj pages.
 
+:doc:`observe-framework-signals`
+   Receive framework signals in production receivers.
+
+:doc:`scope-requests-per-tenant`
+   Scope every request to one tenant across the stack.
+
+:doc:`stream-live-updates-with-sse`
+   Push live updates to the browser with server-sent events.
+
 .. toctree::
    :hidden:
    :maxdepth: 1
@@ -75,13 +96,17 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    add-a-page
    reverse-urls
    reload-routes-from-code
+   write-a-router-backend
+   read-query-parameters
    share-context-across-pages
    build-a-composite-component
    share-components-across-projects
+   resolve-feature-flags-with-di
    add-a-new-asset-kind
    add-a-custom-stem
    write-a-static-backend
    override-the-js-context-serializer
+   build-a-custom-asset-backend
    handle-file-uploads
    use-modelform-for-crud
    use-formsets
@@ -89,3 +114,6 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    extend-a-default-backend
    test-a-page-with-actions
    integrate-django-admin
+   observe-framework-signals
+   scope-requests-per-tenant
+   stream-live-updates-with-sse

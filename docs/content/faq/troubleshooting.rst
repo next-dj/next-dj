@@ -18,7 +18,7 @@ Page does not appear at the expected URL
 Confirm that the directory contains a ``page.py`` plus a ``template.djx`` (or any other body source).
 Confirm that the application is listed in ``INSTALLED_APPS`` and ``APP_DIRS=True`` in the page backend.
 
-Run ``uv run python manage.py check`` and resolve every warning.
+Run ``uv run python manage.py check`` and resolve every warning. The command runs Django's :doc:`system check framework <django:ref/checks>` together with the next.dj checks.
 
 Page renders without layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

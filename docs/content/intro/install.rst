@@ -45,7 +45,7 @@ The same instructions work with any other names if you adapt the imports.
 Add next.dj to INSTALLED_APPS
 -----------------------------
 
-Open ``config/settings.py`` and register both ``next`` and your application.
+Open ``config/settings.py`` and register both ``next`` and your application in :doc:`INSTALLED_APPS <django:ref/applications>`.
 
 .. code-block:: python
    :caption: config/settings.py

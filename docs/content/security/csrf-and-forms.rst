@@ -15,7 +15,7 @@ Standard Path
 The ``{% form %}`` tag emits a CSRF token automatically.
 A bound page renders ``<input type="hidden" name="csrfmiddlewaretoken" value="...">`` inside the form element.
 
-Django ``CsrfViewMiddleware`` validates the token on every POST to ``/_next/form/<uid>/``.
+Django's :doc:`CsrfViewMiddleware <django:ref/csrf>` validates the token on every POST to ``/_next/form/<uid>/``.
 A missing or stale token returns HTTP 403.
 
 Origin Validation

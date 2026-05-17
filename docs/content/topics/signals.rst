@@ -3,7 +3,7 @@
 Signals
 =======
 
-next.dj emits Django signals from every subsystem.
+next.dj emits :doc:`Django signals <django:topics/signals>` from every subsystem.
 A signal is the right integration point when external code needs to react to a framework event without subclassing or monkey patching.
 This page lists every signal, its payload, and the typical patterns for receiver functions.
 

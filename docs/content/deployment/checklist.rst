@@ -18,7 +18,7 @@ Django Settings
 - ``CSRF_TRUSTED_ORIGINS`` includes every public origin.
 - ``DATABASES`` uses a production engine and a managed credential store.
 
-Run the standard Django deployment check.
+Run the standard :doc:`Django deployment check <django:howto/deployment/checklist>`.
 
 .. code-block:: bash
    :caption: shell

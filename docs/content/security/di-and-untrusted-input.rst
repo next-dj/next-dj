@@ -24,8 +24,8 @@ Whitelist not blacklist.
    A directory named with the typed segment form such as ``[int:id]`` rejects non integer captures with ``404``.
 
 Never interpolate into queries.
-   Use the ORM and parameter substitution.
-   Raw SQL needs ``cursor.execute(sql, params)``.
+   Use the :doc:`ORM <django:topics/db/queries>` and parameter substitution.
+   :doc:`Raw SQL <django:topics/db/sql>` needs ``cursor.execute(sql, params)``.
 
 URL Parameters
 --------------

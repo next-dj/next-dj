@@ -121,9 +121,9 @@ Each subsystem keeps a flat module layout.
    * - ``next.forms``
      - ``manager``, ``dispatch``, ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``checks``, ``signals``.
    * - ``next.static``
-     - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``scripts``, ``serializers``, ``defaults``, ``checks``, ``signals``.
+     - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``scripts``, ``serializers``, ``defaults``, ``finders``, ``checks``, ``signals``.
    * - ``next.deps``
-     - ``resolver``, ``providers``, ``cache``, ``context``, ``markers``, ``signals``.
+     - ``resolver``, ``providers``, ``cache``, ``context``, ``markers``, ``checks``, ``signals``.
    * - ``next.server``
      - ``autoreload``, ``watcher``, ``roots``, ``checks``, ``signals``.
    * - ``next.conf``

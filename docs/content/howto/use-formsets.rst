@@ -11,7 +11,7 @@ You want a single page that submits several form rows at once.
 Solution
 --------
 
-Build the formset with ``formset_factory``, register an action that takes the formset as its ``form`` parameter, and render every row in the template.
+Build the formset with Django's :doc:`formset_factory <django:topics/forms/formsets>`, register an action that takes the formset as its ``form`` parameter, and render every row in the template.
 
 Walkthrough
 -----------

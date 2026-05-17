@@ -3,7 +3,7 @@
 ModelForm Support
 =================
 
-A ``ModelForm`` adapts a Django model to a form.
+A :doc:`ModelForm <django:topics/forms/modelforms>` adapts a Django model to a form.
 next.dj supports ModelForms anywhere a plain ``Form`` works.
 This page covers the ``next.forms.ModelForm`` mixin, the ``get_initial`` hook that pre fills create and edit pages, and the patterns for routing instance lookups through the dependency injector.
 
@@ -263,3 +263,4 @@ See Also
    :doc:`formsets` for collections of model instances.
    :doc:`/content/howto/use-modelform-for-crud` for a step-by-step recipe.
    :doc:`/content/ref/forms` for the public API.
+   :doc:`Django ModelForm <django:topics/forms/modelforms>` and :func:`~django.shortcuts.get_object_or_404` for the underlying Django behaviour.

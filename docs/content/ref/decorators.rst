@@ -20,6 +20,7 @@ Decorators
 
 Registers a context function on a page module or layout module.
 Pass ``inherit_context=True`` to publish the value to every descendant page.
+Pass ``serialize=True`` to expose the return value to the browser under ``window.Next.context``, and ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 
 @component.context
 ~~~~~~~~~~~~~~~~~~

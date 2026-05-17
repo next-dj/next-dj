@@ -6,7 +6,7 @@ Integrate Django Admin
 Problem
 -------
 
-You want Django admin and next.dj pages to coexist in the same project.
+You want the :doc:`Django admin <django:ref/contrib/admin/index>` and next.dj pages to coexist in the same project.
 The admin uses Django URL patterns and templates while the pages live under the file router.
 
 Solution

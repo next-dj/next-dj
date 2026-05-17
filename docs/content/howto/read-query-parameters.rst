@@ -1,0 +1,177 @@
+.. _howto-read-query-parameters:
+
+Read Query Parameters
+=====================
+
+Problem
+-------
+
+A listing page needs the search term, page number, and selected filters from the query string.
+You want typed values without writing ``request.GET.get(...)`` plumbing in every callable.
+
+Solution
+--------
+
+Annotate a ``@context`` parameter with the ``DQuery[T]`` marker.
+The framework reads :attr:`request.GET <django:django.http.HttpRequest.GET>`, coerces the value to the annotated type, and injects it.
+``DQuery`` supports ``str``, ``int``, ``bool``, ``float``, and ``list[T]`` for multi-value parameters.
+
+Walkthrough
+-----------
+
+Read a Single Parameter
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Declare the parameter with a type and a default.
+The default is used when the key is absent from the query string.
+
+.. code-block:: python
+   :caption: storefront/page.py
+
+   from catalog.models import Product
+
+   from next.pages import context
+   from next.urls import DQuery
+
+
+   DEFAULT_FEATURED = 3
+   MAX_FEATURED = 12
+
+
+   @context("featured")
+   def featured(show: DQuery[int] = DEFAULT_FEATURED) -> list[Product]:
+       count = max(1, min(MAX_FEATURED, show))
+       return list(
+           Product.objects.filter(in_stock=True)
+           .select_related("category")
+           .order_by("-created_at")[:count],
+       )
+
+A request to ``/?show=8`` injects ``show=8`` as an ``int``.
+A request to ``/`` injects the default ``3``.
+Clamp the value yourself, since the marker only coerces the type.
+
+Read Several Typed Parameters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A single callable can mix scalar and list parameters.
+Each annotation drives its own coercion.
+
+.. code-block:: python
+   :caption: storefront/catalog/page.py
+
+   from next.pages import context
+   from next.urls import DQuery
+
+
+   @context("results")
+   def results(
+       q: DQuery[str] = "",
+       page: DQuery[int] = 1,
+       in_stock: DQuery[bool] = False,
+       brand: DQuery[list[str]] = (),
+   ) -> dict:
+       ...
+
+``DQuery[list[str]]`` accepts three wire formats.
+The plain repeated form ``?brand=Acme&brand=Globex`` emitted by ``<form method="get">`` wins first.
+The bracket suffix ``?brand[]=Acme&brand[]=Globex`` emitted by axios is the second fallback.
+The comma-delimited form ``?brand=Acme,Globex`` is the third fallback.
+
+Build a Typed Snapshot With a Provider
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When several callables need the same filter set, parse it once into a frozen dataclass.
+``get_multi_values`` reads a multi-value parameter through the same three wire formats as ``DQuery[list[T]]``.
+
+.. code-block:: python
+   :caption: catalog/providers.py
+
+   from dataclasses import dataclass
+
+   from next.urls import get_multi_values
+
+
+   @dataclass(frozen=True, slots=True)
+   class Filters:
+       q: str = ""
+       brands: tuple[str, ...] = ()
+       in_stock: bool = False
+       sort: str = "newest"
+
+
+   def parse_filters(request):
+       g = request.GET
+       return Filters(
+           q=g.get("q", "").strip(),
+           brands=tuple(get_multi_values(request, "brand")),
+           in_stock=g.get("in_stock") in {"1", "true", "on"},
+           sort=g.get("sort") or "newest",
+       )
+
+Render the Form
+~~~~~~~~~~~~~~~~
+
+Search is idempotent, so the filter form uses ``method="get"`` and posts back to the same page.
+A bookmarked URL reproduces the same listing.
+Reserve ``@action`` for POST side effects such as creating or deleting rows.
+
+.. code-block:: jinja
+   :caption: storefront/catalog/_cards/filter_panel/component.djx
+
+   <form method="get" action="{{ submit_url }}" data-filter-form>
+     <input name="q" type="search" value="{{ current_filters.q }}"/>
+     {% for brand in all_brands %}
+       <label>
+         <input type="checkbox" name="brand" value="{{ brand }}"
+                {% if brand in current_filters.brands %}checked{% endif %}/>
+         {{ brand }}
+       </label>
+     {% endfor %}
+     {% component "button" type="submit" text="Apply filters" variant="default" %}
+   </form>
+
+Share the Snapshot Across a Layout Chain
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Register a resolved value with ``inherit_context=True`` so nested pages receive the same instance through DI.
+Child callables ask for it by parameter name and never re-read the query string or re-query.
+
+.. code-block:: python
+   :caption: storefront/catalog/[category]/page.py
+
+   from catalog.models import Category
+   from django.http import Http404
+
+   from next.pages import context
+
+
+   @context("category", inherit_context=True)
+   def category(category: object) -> Category:
+       if isinstance(category, Category):
+           return category
+       try:
+           return Category.objects.get(slug=category)
+       except Category.DoesNotExist as exc:
+           raise Http404 from exc
+
+Verification
+------------
+
+Open the listing page with a faceted query string and confirm the response reflects every parameter.
+
+.. code-block:: bash
+   :caption: shell
+
+   uv run python manage.py runserver
+
+Visiting ``/catalog/?q=iphone&brand=Acme&brand=Globex&in_stock=1&page=2`` filters by search term, two brands, and stock, on the second page.
+The bracket form ``?brand[]=Acme&brand[]=Globex`` and the comma form ``?brand=Acme,Globex`` produce the same listing.
+
+See Also
+--------
+
+.. seealso::
+
+   :doc:`/content/topics/dependency-injection` for the built-in providers.
+   :doc:`/content/howto/reverse-urls` for building query strings from code.

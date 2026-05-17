@@ -65,11 +65,181 @@ Server
 .. automodule:: next.server.checks
    :members:
 
-Common Codes
-------------
+Check Code Reference
+--------------------
 
-The codes follow the Django convention ``next.X<NN>`` where ``X`` is ``E`` for errors and ``W`` for warnings.
-Inspect the source of each check for the full list of codes and the conditions that trigger them.
+The codes follow the :doc:`Django convention <django:ref/checks>` ``next.X<NN>`` where ``X`` is ``E`` for errors and ``W`` for warnings.
+
+Errors
+~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 12 58 30
+
+   * - Code
+     - Condition
+     - Source
+   * - ``next.E001``
+     - ``NEXT_FRAMEWORK`` is not a dict, or ``DEFAULT_PAGE_BACKENDS`` is not a list.
+     - ``next.urls.checks``
+   * - ``next.E002``
+     - A ``DEFAULT_PAGE_BACKENDS`` or ``DEFAULT_COMPONENT_BACKENDS`` entry is not a dict.
+     - ``next.urls.checks``, ``next.components.checks``
+   * - ``next.E003``
+     - A page backend entry does not specify ``BACKEND``.
+     - ``next.urls.checks``
+   * - ``next.E004``
+     - A page backend entry names an unknown backend.
+     - ``next.urls.checks``
+   * - ``next.E005``
+     - The file router ``APP_DIRS`` value is not a boolean.
+     - ``next.urls.checks``
+   * - ``next.E006``
+     - The file router ``DIRS`` or ``OPTIONS`` has the wrong shape or an unknown key.
+     - ``next.urls.checks``
+   * - ``next.E007``
+     - The router manager fails to initialize.
+     - ``next.checks.common``
+   * - ``next.E008``
+     - A ``[param]`` directory uses invalid parameter syntax.
+     - ``next.pages.checks``
+   * - ``next.E009``
+     - A ``[[args]]`` directory uses invalid or incomplete args syntax.
+     - ``next.pages.checks``
+   * - ``next.E010``
+     - A parameter directory is missing its ``page.py`` file.
+     - ``next.pages.checks``
+   * - ``next.E011``
+     - An error was raised while checking page functions.
+     - ``next.pages.checks``
+   * - ``next.E012``
+     - A ``page.py`` has no ``render`` function, ``template`` attribute, or ``template.djx``.
+     - ``next.pages.checks``
+   * - ``next.E013``
+     - A page ``render`` attribute is not callable.
+     - ``next.pages.checks``
+   * - ``next.E014``
+     - An error was raised while checking URL conflicts.
+     - ``next.urls.checks``
+   * - ``next.E015``
+     - The same URL pattern is defined in more than one location.
+     - ``next.urls.checks``
+   * - ``next.E016``
+     - An error was raised while collecting patterns from a router.
+     - ``next.urls.checks``
+   * - ``next.E019``
+     - ``request`` is missing from the template context (required for ``{% form %}`` and CSRF).
+     - ``next.pages.checks``
+   * - ``next.E020``
+     - A component name is registered more than once within the same scope.
+     - ``next.components.checks``
+   * - ``next.E021``
+     - A ``component.py`` imports ``context`` from ``next.pages`` instead of ``next.components``.
+     - ``next.components.checks``
+   * - ``next.E022``
+     - ``DEFAULT_PAGE_BACKENDS`` is empty.
+     - ``next.urls.checks``
+   * - ``next.E023``
+     - ``DEFAULT_COMPONENT_BACKENDS`` is not a list.
+     - ``next.components.checks``
+   * - ``next.E024``
+     - A file router entry is missing ``PAGES_DIR``.
+     - ``next.urls.checks``
+   * - ``next.E025``
+     - A file router entry is missing ``APP_DIRS``.
+     - ``next.urls.checks``
+   * - ``next.E026``
+     - A file router entry is missing ``OPTIONS``.
+     - ``next.urls.checks``
+   * - ``next.E027``
+     - A ``COMPONENTS_DIR`` or ``PAGES_DIR`` value is not a string.
+     - ``next.components.checks``, ``next.urls.checks``
+   * - ``next.E028``
+     - A route repeats the same bracket parameter name.
+     - ``next.urls.checks``
+   * - ``next.E029``
+     - A keyless ``@context`` callable is not annotated as returning a dict.
+     - ``next.pages.checks``
+   * - ``next.E030``
+     - An error was raised while checking router pages.
+     - ``next.pages.checks``
+   * - ``next.E031``
+     - A component backend entry is missing a required key.
+     - ``next.components.checks``
+   * - ``next.E032``
+     - A component backend ``BACKEND`` or ``DIRS`` value has the wrong type.
+     - ``next.components.checks``
+   * - ``next.E033``
+     - ``DEFAULT_COMPONENT_BACKENDS`` is empty.
+     - ``next.components.checks``
+   * - ``next.E034``
+     - A component name uses the shared root namespace on more than one page tree.
+     - ``next.components.checks``
+   * - ``next.E035``
+     - A configuration dict has unknown keys.
+     - ``next.checks.common``
+   * - ``next.E036``
+     - A static backend dotted path fails to import.
+     - ``next.static.checks``
+   * - ``next.E037``
+     - A static backend entry is not a dict, or the class is not a ``StaticBackend`` subclass.
+     - ``next.static.checks``
+   * - ``next.E038``
+     - ``DEFAULT_STATIC_BACKENDS`` contains a duplicate ``BACKEND`` entry.
+     - ``next.static.checks``
+   * - ``next.E040``
+     - A configured context processor does not accept a ``request`` parameter.
+     - ``next.pages.checks``
+   * - ``next.E041``
+     - A form action name is registered by more than one handler.
+     - ``next.forms.checks``
+   * - ``next.E042``
+     - A ``TEMPLATE_LOADERS`` entry is not a dotted-path string.
+     - ``next.pages.checks``
+   * - ``next.E043``
+     - A ``TEMPLATE_LOADERS`` entry cannot be imported or is not a ``TemplateLoader`` subclass.
+     - ``next.pages.checks``
+   * - ``next.E044``
+     - A form action backend entry has the wrong shape or cannot be imported.
+     - ``next.forms.checks``
+   * - ``next.E045``
+     - A form action backend class does not subclass ``FormActionBackend``.
+     - ``next.forms.checks``
+
+Warnings
+~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 12 58 30
+
+   * - Code
+     - Condition
+     - Source
+   * - ``next.W001``
+     - A ``layout.djx`` is missing the required ``{% block template %}``.
+     - ``next.pages.checks``
+   * - ``next.W002``
+     - A ``page.py`` has no body source and will render nothing.
+     - ``next.pages.checks``
+   * - ``next.W030``
+     - ``DEFAULT_STATIC_BACKENDS`` is empty, so the framework falls back to ``StaticFilesBackend``.
+     - ``next.static.checks``
+   * - ``next.W031``
+     - An ``OPTIONS`` tag template is missing the ``{url}`` placeholder.
+     - ``next.static.checks``
+   * - ``next.W042``
+     - ``JS_CONTEXT_SERIALIZER`` is set but does not resolve to a usable serializer.
+     - ``next.static.checks``
+   * - ``next.W043``
+     - A ``page.py`` declares more than one body source and the lower-priority ones are ignored.
+     - ``next.pages.checks``
+
+.. note::
+
+   Codes are assigned per check and are not contiguous. Inspect the source of each
+   subsystem module above for the exact message text and trigger conditions.
 
 See Also
 --------

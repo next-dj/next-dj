@@ -12,6 +12,7 @@ Solution
 --------
 
 Add a ``FileField`` or ``ImageField`` to the form, render the form with ``enctype="multipart/form-data"``, and call ``form.save()`` from the handler.
+See Django's :doc:`file uploads <django:topics/http/file-uploads>` and :doc:`managing files <django:topics/files>` for how Django stores the uploaded data.
 
 Walkthrough
 -----------

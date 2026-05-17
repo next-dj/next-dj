@@ -19,7 +19,7 @@ A formset action looks like any other action but takes the entire formset as a s
 The ``form`` value in the handler is the bound formset, not an individual form.
 
 The ``next.forms.Form`` and ``next.forms.ModelForm`` mixins apply to each row form inside the formset.
-Use Django's standard factory functions to build the formset class.
+Use Django's standard :doc:`factory functions <django:topics/forms/formsets>` to build the formset class.
 
 Registering a Formset Action
 ----------------------------
@@ -226,3 +226,4 @@ See Also
    :doc:`validation-rerender` for the re-render pipeline.
    :doc:`/content/howto/use-formsets` for a recipe.
    :doc:`/content/ref/forms` for the public API.
+   :doc:`Django formsets <django:topics/forms/formsets>` for ``formset_factory``, ``modelformset_factory``, and ``inlineformset_factory``.
