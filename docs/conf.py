@@ -59,11 +59,7 @@ extensions = [
     "sphinx_copybutton",
     "sphinxcontrib.mermaid",
     "sphinx_reredirects",
-    "sphinx.ext.todo",
 ]
-
-# show TODO admonitions while content is in flight
-todo_include_todos = True
 
 # mermaid configuration
 mermaid_output_format = "raw"
@@ -141,13 +137,18 @@ redirects = {
 }
 
 # the name of the Pygments (syntax highlighting) style to use
-pygments_style = "sphinx"
+# Shibuya derives both light and dark code styles from this base
+pygments_style = "github-light-default"
 
 # html theme (Shibuya)
 html_theme = "shibuya"
 html_theme_options = {
-    "accent_color": "violet",
+    "accent_color": "indigo",
+    "color_mode": "auto",
+    "dark_code": True,
     "page_layout": "default",
+    "light_logo": "_static/img/logos/next-dj-wordmark-light.svg",
+    "dark_logo": "_static/img/logos/next-dj-wordmark-dark.svg",
     "github_url": "https://github.com/next-dj/next-dj",
     "globaltoc_expand_depth": 2,
     "toctree_collapse": False,
@@ -159,7 +160,9 @@ html_theme_options = {
 
 # html static files
 html_static_path = ["_static"]
-html_css_files = ["custom.css"]
+html_css_files = ["css/tokens.css", "css/theme.css", "css/landing.css"]
+html_js_files = ["js/landing.js"]
+html_favicon = "_static/img/favicon.svg"
 
 # ensure _static and _static/images exist
 import os

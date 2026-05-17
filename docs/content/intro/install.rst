@@ -24,7 +24,7 @@ Inside a project virtualenv, install it through your usual package manager.
 .. code-block:: bash
    :caption: shell
 
-   uv pip install next-dj
+   uv add next.dj
    # or
    pip install next-dj
 

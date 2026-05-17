@@ -1,0 +1,7 @@
+{# next.dj override of Shibuya's base template.
+   Drops the site footer ("Made with Sphinx…") from every documentation page.
+   Content pages reach this through layout/default.html, which extends base.html
+   directly rather than through layout.html. #}
+{%- extends "!base.html" -%}
+
+{%- block footer -%}{%- endblock -%}
