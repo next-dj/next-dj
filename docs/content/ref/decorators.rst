@@ -15,7 +15,7 @@ Decorators
 @context
 ~~~~~~~~
 
-.. autofunction:: next.pages.context
+.. autodata:: next.pages.context
    :no-index:
 
 Registers a context function on a page module (``page.py``).

@@ -5,8 +5,10 @@
 built-in providers that ship with the framework. Subclasses of the ABC
 join the module-level `_registry` through `__init_subclass__`, which
 lets the resolver instantiate them on first use without importing
-them explicitly. `ProviderRegistry` is a lightweight list-style helper
-kept around for tests and future external consumers.
+them explicitly. The resolver consults providers in ascending
+`priority` order, so a lower `priority` value is checked first.
+`ProviderRegistry` is a lightweight list-style helper kept around for
+tests and future external consumers.
 """
 
 from __future__ import annotations
@@ -42,7 +44,8 @@ class RegisteredParameterProvider(ABC):
     """Auto-registered base used by built-in providers shipped with the framework."""
 
     resolver: ClassVar[DependencyResolver]
-    _registry: ClassVar[list[type]] = []
+    _registry: ClassVar[list[type[RegisteredParameterProvider]]] = []
+    priority: ClassVar[int] = 100
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Track concrete subclasses for lazy instantiation by the resolver."""

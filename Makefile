@@ -155,7 +155,7 @@ dev-setup: # setup development environment
 
 docs: # build documentation
 	uv sync --locked --group docs
-	uv run sphinx-build docs docs/_build
+	uv run sphinx-build -a -E docs docs/_build
 
 docs-serve: docs # build and serve documentation
 	@echo "Opening documentation in browser..."

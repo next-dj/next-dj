@@ -50,7 +50,7 @@ Modules
    ``REQUEST_DEP_CACHE_ATTR`` constant, ``DependencyCycleError`` exception, ``get_request_dep_cache`` accessor.
 
 ``next.deps.context``.
-   ``ResolutionContext`` value object passed to every provider.
+   ``ResolutionContext`` value object passed to every provider, plus the ``RESERVED_KEYS`` frozenset of names excluded from name-based resolution.
 
 ``next.deps.markers``.
    ``Depends``, ``DDependencyBase``, and the ``DependsProvider`` that resolves ``Depends`` markers.
@@ -58,17 +58,19 @@ Modules
 Provider Order
 --------------
 
-The resolver iterates providers in registration order.
+The resolver iterates providers in ascending ``priority`` order.
 Each provider declares whether it can handle a parameter through ``can_handle``.
 The first provider that returns ``True`` produces the value.
 
-The built in providers, in registration order, are ``DependsProvider``, ``ContextByDefaultProvider``,
-``ContextByNameProvider``, ``FormProvider``, ``HttpRequestProvider``, ``UrlByAnnotationProvider``,
-``UrlKwargsProvider``, and ``QueryParamProvider``.
+Every ``RegisteredParameterProvider`` subclass carries a ``priority`` class attribute, and the resolver sorts the registry by it.
+The eight built-in providers pin the values ``10`` through ``80``, which yields
+``DependsProvider``, ``ContextByDefaultProvider``, ``ContextByNameProvider``, ``FormProvider``,
+``HttpRequestProvider``, ``UrlByAnnotationProvider``, ``UrlKwargsProvider``, and ``QueryParamProvider``.
 
 See :doc:`/content/topics/dependency-injection` for the single source of truth on this order and what each provider matches.
 
 Custom providers register through ``RegisteredParameterProvider``.
+A subclass that does not set ``priority`` inherits the default ``100``, so it is consulted after every built-in provider.
 A subclass joins the chain when its module is imported, in subclass definition order.
 
 Depends Forms

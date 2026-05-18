@@ -273,15 +273,12 @@ Use ``@component.context("key")`` to publish a value under that key for the temp
    :caption: _components/note_card/component.py
 
    from notes.models import Note
-
    from next.components import component
-
 
    @component.context("preview")
    def preview(note: Note) -> str:
        words = note.body.split()
        return " ".join(words[:12])
-
 
    @component.context("href")
    def href(note: Note) -> str:
@@ -416,7 +413,6 @@ When ``component.py`` defines no ``render`` function, the component renders its 
    :caption: _components/feature_guard/component.py
 
    from next.components import component
-
 
    def render(flag_enabled: bool = False) -> str:
        if not flag_enabled:

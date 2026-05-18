@@ -118,10 +118,8 @@ The ``redirect_to_origin`` helper sends the user back to whichever page rendered
    :caption: notes/routes/page.py
 
    from django.http import HttpRequest
-
    from next.forms import action, redirect_to_origin
    from next.urls import DUrl
-
 
    @action("toggle_favourite")
    def toggle_favourite(note_id: DUrl["id", int], request: HttpRequest):

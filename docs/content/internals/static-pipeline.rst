@@ -67,7 +67,7 @@ An inline init script feeds the serialized JS context into ``Next._init``.
        Init --> Wrapped
 
 The ``DISABLED`` policy skips the wrap entirely and the ``MANUAL`` policy builds the fragments on request without injecting them.
-The policy is read from the ``NEXT_JS_OPTIONS`` setting.
+The policy is read from the ``NEXT_JS_OPTIONS`` key of ``NEXT_FRAMEWORK``.
 
 Modules
 -------

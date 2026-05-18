@@ -22,9 +22,7 @@ Register the stem under the appropriate role.
    :caption: notes/apps.py
 
    from django.apps import AppConfig
-
    from next.static.discovery import default_stems
-
 
    class NotesConfig(AppConfig):
        name = "notes"

@@ -45,11 +45,8 @@ A custom backend overrides the renderer methods to add the ``integrity`` and ``c
 
    import base64
    import hashlib
-
    from django.contrib.staticfiles.storage import staticfiles_storage
-
    from next.static import StaticFilesBackend
-
 
    class SriBackend(StaticFilesBackend):
        def render_link_tag(self, url, *, request=None) -> str:
@@ -76,7 +73,6 @@ Use a context processor to publish the nonce.
 
    import secrets
 
-
    def csp_nonce(request) -> dict:
        nonce = secrets.token_urlsafe(16)
        request._csp_nonce = nonce
@@ -89,7 +85,6 @@ A request aware backend reads the nonce from the request and writes it into each
    :caption: notes/backends.py
 
    from next.static import StaticFilesBackend
-
 
    class NonceBackend(StaticFilesBackend):
        def render_script_tag(self, url, *, request=None) -> str:

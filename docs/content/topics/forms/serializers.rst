@@ -118,6 +118,8 @@ Each field carries a ``FieldKind`` literal that classifies the widget.
    * - ``input``
      - Every other widget. ``input_type`` carries the HTML input type.
 
+Admin ``RelatedFieldWidgetWrapper`` widgets are unwrapped to their inner widget before classification.
+
 The framework classifies the widget once when constructing the spec.
 Custom renderers can branch on ``kind`` without re instantiating the widget.
 
@@ -156,7 +158,7 @@ Render a Form in a Different Engine
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Use the spec to ship form structure to a Jinja2 macro or a JSON consumer.
-The dataclass form works well with ``dataclasses.asdict`` for converting to a plain dict before serialisation.
+Each spec is a frozen dataclass, so a custom renderer can read its fields directly or build its own plain-dict projection.
 
 Snapshot Diffing
 ~~~~~~~~~~~~~~~~

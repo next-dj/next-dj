@@ -105,10 +105,8 @@ exclude_patterns = [
     ".DS_Store",
 ]
 
-# 404 page is intentionally not in toctree
-# autodoc cross-references to stdlib types (Path, HttpRequest, etc.) generate noisy
-# warnings that we do not want to treat as errors during this phase of the rewrite
-suppress_warnings = ["toc.not_included", "ref.class", "autodoc"]
+# the 404 page is intentionally kept out of every toctree
+suppress_warnings = ["toc.not_included"]
 
 # URL redirects for moved pages (sphinx-reredirects)
 redirects = {
@@ -140,8 +138,6 @@ redirects = {
     "content/contributing/documentation-guide": "writing-documentation.html",
 }
 
-# the name of the Pygments (syntax highlighting) style to use
-# Shibuya derives both light and dark code styles from this base
 pygments_style = "github-light-default"
 
 # html theme (Shibuya)
@@ -149,7 +145,7 @@ html_theme = "shibuya"
 html_theme_options = {
     "accent_color": "indigo",
     "color_mode": "auto",
-    "dark_code": True,
+    "dark_code": False,
     "page_layout": "default",
     "light_logo": "_static/img/logos/next-dj-wordmark-light.svg",
     "dark_logo": "_static/img/logos/next-dj-wordmark-dark.svg",

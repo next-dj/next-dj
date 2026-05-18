@@ -24,7 +24,6 @@ Define the model.
 
    from django.db import models
 
-
    class Attachment(models.Model):
        title = models.CharField(max_length=120)
        file = models.FileField(upload_to="attachments/")
@@ -35,9 +34,7 @@ Define the form.
    :caption: notes/forms.py
 
    from next.forms import ModelForm
-
    from notes.models import Attachment
-
 
    class AttachmentForm(ModelForm):
        class Meta:
@@ -51,11 +48,8 @@ Register the action.
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
-
    from next.forms import action
-
    from notes.forms import AttachmentForm
-
 
    @action("upload_attachment", form_class=AttachmentForm)
    def upload_attachment(form: AttachmentForm) -> HttpResponseRedirect:
@@ -99,7 +93,6 @@ A production deployment serves the same files through the web server instead.
    from django.conf.urls.static import static
    from django.urls import include, path
 
-
    urlpatterns = [
        path("", include("next.urls")),
    ]
@@ -122,9 +115,7 @@ Use ``SimpleUploadedFile`` to feed a fake file into ``NextClient``.
    :caption: tests/test_upload.py
 
    from django.core.files.uploadedfile import SimpleUploadedFile
-
    from next.testing.client import NextClient
-
 
    def test_upload(db) -> None:
        fake = SimpleUploadedFile("file.txt", b"hello")

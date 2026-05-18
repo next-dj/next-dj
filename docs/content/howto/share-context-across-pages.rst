@@ -22,9 +22,7 @@ Add the context function to the segment's ``page.py``.
    :caption: notes/routes/page.py
 
    from notes.models import Note
-
    from next.pages import context
-
 
    @context("note_count", inherit_context=True)
    def note_count() -> int:
@@ -56,7 +54,6 @@ Drop the flag for values that should stay local to the current page only.
    :caption: notes/routes/page.py (local only)
 
    from next.pages import context
-
 
    @context("nav_links")
    def nav_links() -> list:

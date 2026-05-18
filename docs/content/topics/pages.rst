@@ -55,7 +55,8 @@ Custom template loaders.
 
 See *Render Order* below for the per-request sequence and the ``render`` short-circuit.
 Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
-When two sources are declared at the same level the higher-priority source is used and the others are never consulted, and ``uv run python manage.py check`` reports ``next.W043`` for it.
+When a page directory declares more than one body source, ``next.W043`` reports it.
+The highest-priority source is used and the others are never consulted.
 
 Render Order
 ------------
@@ -83,9 +84,7 @@ The most common shape is ``request`` plus captured URL parameters and marker-dri
    :caption: notes/routes/reports/[int:report_id]/page.py
 
    from notes.models import Report
-
    from next.urls import DUrl
-
 
    def render(request, report_id: DUrl[int]) -> str:
        report = Report.objects.get(pk=report_id)
@@ -151,7 +150,6 @@ A ``@context`` decorator publishes one or more values into the template scope.
 
    from next.pages import context
 
-
    @context("notes")
    def all_notes() -> list:
        return list(Note.objects.all())
@@ -178,7 +176,6 @@ See :doc:`context` for that flag and the other ways to vary the decorator.
 
    from next.pages import context
 
-
    @context
    def post_context(post: Post) -> dict[str, object]:
        return {
@@ -199,11 +196,8 @@ Register additional loaders in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to support
    :caption: notes/loaders.py
 
    from pathlib import Path
-
    import markdown
-
    from next.pages.loaders import TemplateLoader
-
 
    class MarkdownTemplateLoader(TemplateLoader):
        source_name = "template.md"
@@ -274,8 +268,8 @@ When more than one body source applies the framework picks the highest priority 
 The template loaders have no fixed numbering between them.
 ``DjxTemplateLoader`` matches the sibling ``template.djx``, but a custom loader placed before it in ``TEMPLATE_LOADERS`` is consulted first and wins when both could load the same directory.
 
-Two sources at the same level are also flagged.
-The higher-priority source is used and the others are never consulted, and the check ``next.W043`` points at the file when this happens.
+When a page directory declares more than one body source, ``next.W043`` reports it.
+The highest-priority source is used and the others are never consulted.
 
 Common Patterns
 ---------------
@@ -289,9 +283,7 @@ A page that always redirects elsewhere uses a ``render`` function that returns `
    :caption: notes/routes/login/page.py
 
    from django.http import HttpResponseRedirect
-
    from next.urls import page_reverse
-
 
    def render(request) -> HttpResponseRedirect:
        return HttpResponseRedirect(page_reverse("auth/login"))
@@ -306,7 +298,6 @@ Return ``JsonResponse`` from ``render`` for a JSON endpoint that still benefits 
 
    from django.http import JsonResponse
 
-
    def render(request) -> JsonResponse:
        return JsonResponse({"status": "ok"})
 
@@ -319,10 +310,8 @@ Reach for ``StreamingHttpResponse`` when the body is produced incrementally, suc
    :caption: notes/routes/notes/[id]/stream/page.py
 
    from django.http import StreamingHttpResponse
-
    from notes.models import Note
    from notes.providers import DNote
-
 
    def render(note: DNote[Note]) -> StreamingHttpResponse:
        return StreamingHttpResponse(

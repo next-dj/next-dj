@@ -4,7 +4,7 @@ Overview
 ========
 
 next.dj is a framework built on Django that turns the filesystem into your URL router, layout tree, and component registry.
-It adds file-based routing, layouts and context, components, and form dispatch while leaving the ORM, admin, auth, and migrations to Django.
+It extends a regular Django project while leaving the ORM, admin, auth, and migrations to Django.
 
 This page describes the mental model.
 Read it once before the tutorial, then refer back when the layout of a real project surprises you.
@@ -65,9 +65,6 @@ Action
 Context function
    A callable decorated with ``@context`` that publishes a value into the template scope.
 
-DI marker
-   A typed annotation such as ``DUrl`` that the resolver fills from the request.
-
 Expand these definitions, spelling rules for route names, and the full term list in :doc:`/content/misc/glossary`.
 For design rationale, see :doc:`/content/misc/design-philosophy`.
 
@@ -77,17 +74,16 @@ A Minimal Project
 Once installed, the smallest next.dj project is the three files below plus a one-line edit to ``config/urls.py``.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from next.pages import context
-
 
    @context("title")
    def page_title() -> str:
        return "Notes"
 
 .. code-block:: jinja
-   :caption: notes/routes/template.djx
+   :caption: notes/pages/template.djx
 
    <h1>{{ title }}</h1>
 
@@ -100,15 +96,23 @@ Once installed, the smallest next.dj project is the three files below plus a one
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
                "APP_DIRS": True,
-               "PAGES_DIR": "routes",
+               "PAGES_DIR": "pages",
                "OPTIONS": {"context_processors": []},
            }
        ],
    }
 
-Add ``include("next.urls")`` to ``config/urls.py``.
+.. code-block:: python
+   :caption: config/urls.py
+
+   from django.urls import include, path
+
+   urlpatterns = [
+       path("", include("next.urls")),
+   ]
+
 The URL ``/`` then renders ``<h1>Notes</h1>``.
-Every new directory under ``routes/`` adds another page without touching the URL configuration.
+Every new directory under ``pages/`` adds another page without touching the URL configuration.
 
 When to Read the Tutorial
 -------------------------

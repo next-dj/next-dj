@@ -115,7 +115,7 @@ Register entries in ``AppConfig.ready`` or through a settings key.
 
 The registry pattern is the right choice when the framework already knows how to consume the values and only needs to learn about a new entry.
 
-The asset-stem registry is the extension point for teaching the static discovery scanner about a new filename inside a component.
+The asset-stem registry is the extension point for teaching the static discovery scanner about a new asset filename next to a page, layout, or component.
 ``default_stems`` is not re-exported from the ``next.static`` package, so the registration requires the deep import ``from next.static.discovery import default_stems``.
 Call ``default_stems.register(...)`` from ``AppConfig.ready`` so the new stem is known before the first component scan.
 
@@ -123,15 +123,13 @@ Call ``default_stems.register(...)`` from ``AppConfig.ready`` so the new stem is
    :caption: notes/apps.py
 
    from django.apps import AppConfig
-
    from next.static.discovery import default_stems
-
 
    class NotesConfig(AppConfig):
        name = "notes"
 
        def ready(self) -> None:
-           default_stems.register("styles", "theme")
+           default_stems.register("component", "theme")
 
 Autoreload Watch Specs
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -150,11 +148,8 @@ Register the spec from ``AppConfig.ready`` so it is in place before the watcher 
    :caption: notes/apps.py
 
    from pathlib import Path
-
    from django.apps import AppConfig
-
    from next.server import register_autoreload_watch_spec
-
 
    class NotesConfig(AppConfig):
        name = "notes"
@@ -241,7 +236,7 @@ Use the entries below as a quick map.
 
 - **Add a new URL pattern source.** Subclass ``RouterBackend`` and register it under ``DEFAULT_PAGE_BACKENDS``.
 - **Recognise a new asset extension.** Register through the kind registry (``default_kinds``).
-- **Recognise a new filename inside a component.** Register a custom stem (``default_stems``).
+- **Recognise a new asset filename next to a page, layout, or component.** Register a custom stem (``default_stems``).
 - **Validate every dispatch.** Implement a form action backend.
 - **Log every dispatch.** Subscribe to the ``action_dispatched`` signal.
 - **Change how URLs land in HTML.** Customise a static backend.

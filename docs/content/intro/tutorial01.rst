@@ -14,7 +14,9 @@ Prerequisites
 
 You have followed :doc:`install` and you can serve a placeholder page at ``http://127.0.0.1:8000/``.
 You have a Django application named ``notes`` registered in ``INSTALLED_APPS``.
-Directory layout maps to URLs through the file router. See :doc:`/content/topics/file-router` and :doc:`/content/topics/pages` when you need the rules behind ``routes/``.
+From :doc:`install` your ``config/urls.py`` already forwards URLs to next.dj through ``include("next.urls")``.
+If ``/`` does not respond, revisit :doc:`install`.
+Directory layout maps to URLs through the file router. See :doc:`/content/topics/file-router` and :doc:`/content/topics/pages` when you need the rules behind ``pages/``.
 
 Walkthrough
 -----------
@@ -29,7 +31,6 @@ Keep the fields minimal so the tutorial stays focused on the framework.
    :caption: notes/models.py
 
    from django.db import models
-
 
    class Note(models.Model):
        title = models.CharField(max_length=120)
@@ -49,28 +50,27 @@ Apply the :doc:`migration <django:topics/migrations>` and seed two rows so the i
 
    uv run python manage.py makemigrations notes
    uv run python manage.py migrate
-   uv run python manage.py shell -c "
+   uv run python manage.py shell <<'PY'
    from notes.models import Note
    Note.objects.create(title='First note', body='Hello, next.dj.')
    Note.objects.create(title='Second note', body='Pages are directories.')
-   "
+   PY
 
 Add the Index Page
 ~~~~~~~~~~~~~~~~~~
 
-The file router treats the ``notes/routes/`` directory as the page root for the application.
+The file router treats the ``notes/pages/`` directory as the page root for the application.
 The directory that contains a ``page.py`` becomes a URL.
-``notes/routes/page.py`` therefore answers the empty path ``/``.
+``notes/pages/page.py`` therefore answers the empty path ``/``.
+The router scans every application listed in ``INSTALLED_APPS`` for a ``pages/`` directory.
 
 Create the page module.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from notes.models import Note
-
    from next.pages import context
-
 
    @context("notes")
    def recent_notes() -> list[Note]:
@@ -79,7 +79,7 @@ Create the page module.
 Create the template.
 
 .. code-block:: jinja
-   :caption: notes/routes/template.djx
+   :caption: notes/pages/template.djx
 
    <!doctype html>
    <html>
@@ -100,12 +100,6 @@ Create the template.
 The framework composes the body of ``template.djx`` with any ancestor ``layout.djx``.
 You do not have a layout yet, so the page renders standalone.
 
-Confirming App Discovery
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The ``APP_DIRS`` flag from :doc:`install` already handles discovery, so no extra change to ``settings.py`` is required.
-The router scans every application listed in ``INSTALLED_APPS`` for a ``routes/`` directory.
-
 Run the Server
 ~~~~~~~~~~~~~~
 
@@ -122,7 +116,7 @@ Trace the URL Name
 ~~~~~~~~~~~~~~~~~~
 
 Every file-routed page receives a stable URL name in the ``next`` namespace.
-For ``notes/routes/page.py`` that name is ``next:page_``.
+For ``notes/pages/page.py`` that name is ``next:page_``.
 Open a Django shell and reverse it to confirm.
 
 .. code-block:: bash
@@ -139,15 +133,15 @@ You will use these names from templates through the standard ``{% url %}`` tag.
 Inspect Through System Checks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-next.dj contributes a Django system check that confirms each page module is loadable.
-A page module that raises an import error surfaces as a framework error with a ``next.E`` code naming the ``page.py`` path.
+next.dj contributes Django system checks for the page configuration.
+They confirm each ``page.py`` has a render function or a paired template, that parameter directories carry a ``page.py``, and that the request context processor is installed.
 See :doc:`/content/ref/system-checks` for the full catalog.
-Run it and confirm no warnings remain.
+Run them and confirm no warnings remain.
 
 .. code-block:: bash
    :caption: shell
 
-   uv run python manage.py check notes
+   uv run python manage.py check
 
 Checkpoint
 ----------
@@ -161,7 +155,7 @@ At the end of this part the project layout looks like this.
      models.py
      migrations/
        0001_initial.py
-     routes/
+     pages/
        page.py
        template.djx
 
@@ -172,10 +166,10 @@ Common Pitfalls
 ---------------
 
 Page module is not discovered.
-   Confirm that ``notes`` is in ``INSTALLED_APPS`` and that ``NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"][0]["APP_DIRS"]`` is ``True``.
+   Confirm that ``NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"][0]["APP_DIRS"]`` is ``True``.
 
 Template renders without the notes loop.
-   Make sure ``notes/routes/template.djx`` sits next to ``notes/routes/page.py``.
+   Make sure ``notes/pages/template.djx`` sits next to ``notes/pages/page.py``.
    The framework pairs a ``page.py`` with the ``template.djx`` in the same directory.
 
 ImportError for ``Note``.

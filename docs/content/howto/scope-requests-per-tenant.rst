@@ -29,12 +29,9 @@ A missing header is a ``400`` and an unknown slug is a ``404``.
    :caption: notes/middleware.py
 
    from django.http import HttpResponse, HttpResponseBadRequest
-
    from notes.models import Tenant
 
-
    HEADER_NAME = "HTTP_X_TENANT"
-
 
    class TenantMiddleware:
        def __init__(self, get_response):
@@ -92,12 +89,10 @@ The provider matches the bare ``DTenant`` annotation when a request carries a te
    from next.deps import DDependencyBase, RegisteredParameterProvider
    from notes.access import get_active_tenant
 
-
    class DTenant(DDependencyBase["Tenant"]):
        """DI marker that resolves to the active `Tenant` for the request."""
 
        __slots__ = ()
-
 
    class TenantProvider(RegisteredParameterProvider):
        def can_handle(self, param, context):
@@ -118,13 +113,12 @@ Import the module from ``AppConfig.ready`` so the auto-registry wires the provid
 
    from django.apps import AppConfig
 
-
    class NotesConfig(AppConfig):
        default_auto_field = "django.db.models.BigAutoField"
        name = "notes"
 
        def ready(self):
-           from notes import providers  # noqa: F401, PLC0415
+           from notes import providers  # noqa: F401
 
 A page context function now requests the tenant by name and type, and the resolver hands back the model instance.
 Keep real annotations in these modules, because the resolver compares parameter annotations by identity.
@@ -134,9 +128,7 @@ Keep real annotations in these modules, because the resolver compares parameter 
 
    from notes.models import Note
    from notes.providers import DTenant
-
    from next.pages import context
-
 
    @context("notes")
    def notes(active_tenant: DTenant) -> list[Note]:
@@ -153,9 +145,7 @@ A ``@context(..., inherit_context=True)`` callable on the workspace root publish
 
    from notes.models import Note
    from notes.providers import DTenant
-
    from next.pages import context
-
 
    @context("tenant", inherit_context=True)
    def tenant(active_tenant: DTenant) -> "Tenant":
@@ -172,7 +162,6 @@ List it in the page backend ``OPTIONS`` so the file router runs it.
    :caption: notes/context_processors.py
 
    from notes.access import get_active_tenant
-
 
    def tenant_theme(request):
        """Surface per-tenant CSS variables to every page template."""

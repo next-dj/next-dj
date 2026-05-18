@@ -15,8 +15,7 @@ Prerequisites
 You have finished :doc:`tutorial03`.
 The ``note_card`` component renders each note and the static collector emits its CSS and JS.
 
-Handlers receive ``request``, forms, and URL segments through the same dependency resolver as pages.
-When this part introduces ``DUrl`` and other markers, read :doc:`/content/topics/dependency-injection` alongside if you want the full rules before continuing.
+Action handlers resolve ``request``, the form, and URL segments through the same dependency injection used by pages, covered in :doc:`/content/topics/dependency-injection`.
 
 Walkthrough
 -----------
@@ -31,15 +30,12 @@ Create ``notes/forms.py``.
    :caption: notes/forms.py
 
    from notes.models import Note
-
    from next.forms import BooleanField, Form, ModelForm
-
 
    class NoteForm(ModelForm):
        class Meta:
            model = Note
            fields = ("title", "body")
-
 
    class DeleteNoteForm(Form):
        confirm = BooleanField(required=True)
@@ -52,26 +48,23 @@ A plain Django ``Form`` or ``ModelForm`` cannot be passed to ``@action`` because
 Register the Create Action
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Action handlers live wherever you want, the framework discovers them by import.
-The natural home is next to the page that exposes the form.
-Update ``notes/routes/page.py``.
+An ``@action`` handler registers when its module is imported.
+Placing it in the page's ``page.py`` means the file router imports it on the first request, so the natural home is next to the page that exposes the form.
+Update ``notes/pages/page.py``.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
    from notes.forms import NoteForm
    from notes.models import Note
-
    from next.forms import action
    from next.pages import context
-
 
    @context("notes")
    def recent_notes() -> list[Note]:
        return list(Note.objects.all())
-
 
    @action("create_note", form_class=NoteForm)
    def create_note(form: NoteForm) -> HttpResponseRedirect:
@@ -89,7 +82,7 @@ Add the form to the index template.
 The ``{% form %}`` tag points to the action by name.
 
 .. code-block:: jinja
-   :caption: notes/routes/template.djx
+   :caption: notes/pages/template.djx
 
    <section class="note-create">
      {% form @action="create_note" class="note-form" %}
@@ -127,44 +120,39 @@ Reload ``/``, submit the form with a title, and confirm that the index lists a n
 Edit a Note
 ~~~~~~~~~~~
 
-Create a new page at ``notes/routes/notes/[id]/edit/``.
-The page renders the same ``NoteForm`` pre-filled with the existing note.
+Create a new page at ``notes/pages/notes/[id]/edit/``.
+The action binds ``NoteForm`` to the existing note through a ``form_class`` factory.
 
 .. code-block:: python
-   :caption: notes/routes/notes/[id]/edit/page.py
+   :caption: notes/pages/notes/[id]/edit/page.py
 
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
    from django.urls import reverse
    from notes.forms import NoteForm
    from notes.models import Note
-
    from next.forms import action
    from next.pages import context
    from next.urls import DUrl
-
 
    @context("note")
    def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
+   def note_edit_form(note_id: DUrl["id", int]) -> tuple[type[NoteForm], dict]:
+       note = get_object_or_404(Note, pk=note_id)
+       return NoteForm, {"instance": note}
 
-   @context("form")
-   def edit_form(note: Note) -> NoteForm:
-       return NoteForm(instance=note)
+   @action("update_note", form_class=note_edit_form)
+   def update_note(form: NoteForm) -> HttpResponseRedirect:
+       note = form.save()
+       return HttpResponseRedirect(reverse("next:page_notes_id", kwargs={"id": note.id}))
 
-
-   @action("update_note", form_class=NoteForm)
-   def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
-       form.instance = get_object_or_404(Note, pk=note_id)
-       form.save()
-       return HttpResponseRedirect(reverse("next:page_notes_id", kwargs={"id": note_id}))
-
-The ``@context("form")`` function publishes a pre-filled bound form to the template.
-The framework reuses that name when the action fails validation so the template renders the user input plus the errors.
+The factory passed to ``form_class`` is dependency-resolved at dispatch time, so it receives the captured URL ``id`` and returns the form class paired with the ``instance`` to bind.
+The dispatcher builds and validates that bound form before it calls ``update_note``, so the handler only saves it.
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/[id]/edit/template.djx
+   :caption: notes/pages/notes/[id]/edit/template.djx
 
    <h2>Edit {{ note.title }}</h2>
    {% form @action="update_note" %}
@@ -174,10 +162,13 @@ The framework reuses that name when the action fails validation so the template 
      <a href="{% url 'next:page_notes_id' id=note.id %}">Cancel</a>
    {% endform %}
 
+The ``{% form %}`` tag builds and binds the form for the named action itself.
+The ``form`` variable inside the block is the form for ``update_note``, pre-filled because the ``form_class`` factory bound it to the note instance.
+
 Add a link from the detail page.
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/[id]/template.djx
+   :caption: notes/pages/notes/[id]/template.djx
 
    <article>
      <h2>{{ note.title }}</h2>
@@ -195,7 +186,7 @@ Delete uses the same dispatch but does not need its own page because a single bu
 Extend the detail template.
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/[id]/template.djx
+   :caption: notes/pages/notes/[id]/template.djx
 
    <article>
      <h2>{{ note.title }}</h2>
@@ -212,26 +203,25 @@ Extend the detail template.
 
 The detail page URL captures ``id``.
 The ``{% form %}`` tag emits a hidden ``_url_param_id`` field automatically for every captured URL parameter, so the handler resolves ``DUrl["id", int]`` without any extra argument on the tag.
+The ``confirm`` input is different.
+It is a real field on ``DeleteNoteForm``, so the markup posts it explicitly, while the tag adds ``_url_param_id`` for you because it is a captured URL parameter.
 Add the handler to the detail page.
 
 .. code-block:: python
-   :caption: notes/routes/notes/[id]/page.py
+   :caption: notes/pages/notes/[id]/page.py
 
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
    from django.urls import reverse
    from notes.forms import DeleteNoteForm
    from notes.models import Note
-
    from next.forms import action
    from next.pages import context
    from next.urls import DUrl
 
-
    @context("note")
    def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
-
 
    @action("delete_note", form_class=DeleteNoteForm)
    def delete_note(note_id: DUrl["id", int], form: DeleteNoteForm) -> HttpResponseRedirect:
@@ -265,7 +255,11 @@ The Notes application is functionally complete.
      migrations/
      _components/
        note_card/
-     routes/
+         component.djx
+         component.py
+         component.css
+         component.js
+     pages/
        layout.djx
        page.py
        template.djx
@@ -293,8 +287,8 @@ CSRF token missing.
    Plain ``<form method="post">`` markup without the tag still needs ``{% csrf_token %}``.
 
 Edit form does not show the existing data.
-   The page must publish a bound form through ``@context("form")``.
-   Without the context function the framework renders an unbound form even when the URL points at a real note.
+   The ``{% form %}`` tag builds the form for the named action, so a plain ``@context("form")`` value never reaches it.
+   Pass a ``form_class`` factory to ``@action`` that resolves the URL ``id`` and returns the form class with the bound ``instance``.
 
 See :doc:`/content/faq/troubleshooting` for the full catalog of errors and fixes.
 

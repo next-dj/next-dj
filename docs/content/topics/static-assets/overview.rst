@@ -52,7 +52,7 @@ Asset Kinds
 -----------
 
 A kind binds a file extension to a placeholder slot and a backend renderer method.
-The framework registers three kinds at startup through ``register_defaults``.
+The framework registers the two placeholder slots and three asset kinds at startup through ``register_defaults``.
 
 .. list-table::
    :header-rows: 1

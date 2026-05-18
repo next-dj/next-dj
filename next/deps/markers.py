@@ -45,6 +45,8 @@ class Depends:
 class DependsProvider(RegisteredParameterProvider):
     """Provider that resolves parameters whose default is a `Depends` marker."""
 
+    priority = 10
+
     def __init__(self, resolver: DependencyResolver) -> None:
         """Store the resolver used for nested dependency calls."""
         self._resolver = resolver

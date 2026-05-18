@@ -23,7 +23,7 @@ Built In Providers
 ------------------
 
 The framework registers eight providers.
-They are consulted in registration order and the first match wins, so the list below is also the priority order.
+Each one carries an explicit ``priority`` value, the resolver consults them from lowest to highest, and the first match wins.
 
 1. Named dependency provider.
    A parameter with default ``Depends(...)`` receives the resolved dependency.
@@ -56,10 +56,8 @@ The URL path provider coerces the captured segment to the requested type.
    :caption: notes/routes/notes/[int:note_id]/page.py
 
    from notes.models import Note
-
    from next.pages import context
    from next.urls import DUrl
-
 
    @context("note")
    def note(note_id: DUrl[int]) -> Note:
@@ -108,7 +106,6 @@ The query provider reads from ``request.GET``.
 
    from next.pages import context
    from next.urls import DQuery
-
 
    @context("results")
    def results(query: DQuery[str] = "") -> list:
@@ -164,7 +161,6 @@ Two markers reach into the request-scoped context.
    from next.deps import Depends
    from next.pages import Context, context
 
-
    @context("ready_message")
    def ready_message(
        theme: dict | None = Depends("layout_theme"),
@@ -181,7 +177,6 @@ Use ``resolver.dependency`` to register a callable that any handler can ask for 
    :caption: notes/deps.py
 
    from next.deps import resolver
-
 
    @resolver.dependency("layout_theme")
    def layout_theme() -> dict:
@@ -201,11 +196,9 @@ When two of them ask for each other, directly or through a longer chain, resolut
 
    from next.deps import Depends, resolver
 
-
    @resolver.dependency("profile")
    def profile(settings: dict = Depends("settings")) -> dict:
        return {"theme": settings["theme"]}
-
 
    @resolver.dependency("settings")
    def settings(profile: dict = Depends("profile")) -> dict:
@@ -228,11 +221,9 @@ Here ``settings`` does not need ``profile`` at all, so the fix is to drop that p
 
    from next.deps import Depends, resolver
 
-
    @resolver.dependency("settings")
    def settings() -> dict:
        return {"theme": "light"}
-
 
    @resolver.dependency("profile")
    def profile(settings: dict = Depends("settings")) -> dict:
@@ -250,16 +241,12 @@ The base classes are ``RegisteredParameterProvider`` and ``DDependencyBase``.
    :caption: notes/providers.py
 
    from typing import get_args, get_origin
-
    from django.http import Http404
    from notes.models import Note
-
    from next.deps import DDependencyBase, RegisteredParameterProvider
-
 
    class DNote[T](DDependencyBase[T]):
        __slots__ = ()
-
 
    class NoteProvider(RegisteredParameterProvider):
        def can_handle(self, param, _context) -> bool:
@@ -289,9 +276,7 @@ Use the new marker.
 
    from notes.models import Note
    from notes.providers import DNote
-
    from next.pages import context
-
 
    @context("note")
    def note(note: DNote[Note]) -> Note:
@@ -321,7 +306,6 @@ The function returns ``None`` outside a form dispatch, so callers handle the mis
    :caption: reading the cache
 
    from next.deps.cache import get_request_dep_cache
-
 
    def render(request) -> str:
        cache = get_request_dep_cache(request)
@@ -366,14 +350,11 @@ A custom provider can publish a value once and let several context functions ask
    :caption: custom provider
 
    from notes.providers import DNote
-
    from next.pages import context
-
 
    @context("breadcrumbs")
    def breadcrumbs(note: DNote[Note]) -> list:
        return [{"label": "Home", "href": "/"}, {"label": note.title}]
-
 
    @context("note_count")
    def note_count(note: DNote[Note]) -> int:

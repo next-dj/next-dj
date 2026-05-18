@@ -55,10 +55,8 @@ The :doc:`dependency resolver </content/topics/dependency-injection>` fills each
    :caption: handler with multiple parameters
 
    from django.http import HttpRequest, HttpResponseRedirect
-
    from next.forms import action
    from next.urls import DUrl
-
 
    @action("update_note", form_class=NoteForm)
    def update_note(

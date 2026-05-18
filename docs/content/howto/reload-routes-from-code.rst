@@ -24,11 +24,8 @@ Wire the receiver.
 
    from django.db.models.signals import post_delete, post_save
    from django.dispatch import receiver
-
    from next.urls import router_manager
-
    from notes.models import Note
-
 
    @receiver(post_save, sender=Note)
    @receiver(post_delete, sender=Note)
@@ -41,7 +38,6 @@ Connect the receiver from ``AppConfig.ready`` so it runs at startup.
    :caption: notes/apps.py
 
    from django.apps import AppConfig
-
 
    class NotesConfig(AppConfig):
        name = "notes"
@@ -61,9 +57,7 @@ Long lived processes that cache URL references can listen to ``router_reloaded``
    :caption: cache invalidation
 
    from django.dispatch import receiver
-
    from next.urls.signals import router_reloaded
-
 
    @receiver(router_reloaded)
    def drop_url_cache(**_kwargs) -> None:

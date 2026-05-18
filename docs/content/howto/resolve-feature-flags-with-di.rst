@@ -30,23 +30,18 @@ The provider claims any parameter whose annotation origin is ``DFlag`` and reads
    :caption: flags/providers.py
 
    from typing import TYPE_CHECKING, get_args, get_origin
-
    from next.deps import DDependencyBase, RegisteredParameterProvider
-
    from .cache import get_cached_flag
-
 
    if TYPE_CHECKING:
        import inspect
 
        from next.deps.context import ResolutionContext
 
-
    class DFlag[T](DDependencyBase[T]):
        """Annotate a parameter with `DFlag[Flag]` to inject the matching `Flag`."""
 
        __slots__ = ()
-
 
    class FlagProvider(RegisteredParameterProvider):
        """Resolve `DFlag[...]` parameters by looking up `flag_name`."""
@@ -78,18 +73,14 @@ A read-through helper stores both hits and a missing sentinel, so a repeated loo
    :caption: flags/cache.py
 
    from django.core.cache import cache
-
    from .models import Flag
-
 
    FLAG_PREFIX = "flags:flag:"
    MISSING_SENTINEL = "__missing__"
    FLAG_CACHE_TTL = 300
 
-
    def _key(name: str) -> str:
        return f"{FLAG_PREFIX}{name}"
-
 
    def get_cached_flag(name: str) -> Flag | None:
        """Fetch a `Flag` through LocMemCache. Return `None` when absent."""
@@ -107,7 +98,6 @@ A read-through helper stores both hits and a missing sentinel, so a repeated loo
        cache.set(key, flag, FLAG_CACHE_TTL)
        return flag
 
-
    def invalidate_flag(name: str) -> None:
        """Drop the cached entry for `name` so the next read refetches from DB."""
        cache.delete(_key(name))
@@ -123,16 +113,13 @@ The next ``get_cached_flag`` call refetches from the database.
 
    from django.db.models.signals import post_delete, post_save
    from django.dispatch import receiver
-
    from .cache import invalidate_flag
    from .models import Flag
-
 
    @receiver(post_save, sender=Flag)
    def _invalidate_on_save(sender: type[Flag], instance: Flag, **_: object) -> None:  # noqa: ARG001
        """Drop the cached entry so the next read reflects the updated row."""
        invalidate_flag(instance.name)
-
 
    @receiver(post_delete, sender=Flag)
    def _invalidate_on_delete(sender: type[Flag], instance: Flag, **_: object) -> None:  # noqa: ARG001
@@ -151,14 +138,13 @@ The receivers connect to the model signals.
 
    from django.apps import AppConfig
 
-
    class FlagsConfig(AppConfig):
        default_auto_field = "django.db.models.BigAutoField"
        name = "flags"
 
        def ready(self) -> None:
            """Import provider and receiver modules so DI and signals wire up."""
-           from flags import providers, receivers  # noqa: F401, PLC0415
+           from flags import providers, receivers  # noqa: F401
 
 The imports run at ready time, not at module top level.
 Importing ``receivers`` earlier would reach ``@receiver(post_save, sender=Flag)`` before the app registry knows ``Flag``.
@@ -176,7 +162,6 @@ When the flag is off ``render`` returns an empty string, so the gated block coll
    from flags.models import Flag
    from flags.providers import DFlag
 
-
    _BANNER = Template(
        '<article data-feature-guard="{{ flag.name }}"'
        ' class="rounded-xl border border-emerald-300 bg-emerald-50 p-4">'
@@ -184,7 +169,6 @@ When the flag is off ``render`` returns an empty string, so the gated block coll
        '<p class="mt-1 text-sm">{{ description }}</p>'
        "</article>",
    )
-
 
    def render(flag: DFlag[Flag]) -> str:
        """Return the gated banner when the flag is enabled, otherwise empty."""

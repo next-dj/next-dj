@@ -26,7 +26,6 @@ Register the admin in ``urls.py``.
    from django.contrib import admin
    from django.urls import include, path
 
-
    urlpatterns = [
        path("admin/", admin.site.urls),
        path("", include("next.urls")),
@@ -65,9 +64,7 @@ Standard Django admin registration applies.
    :caption: notes/admin.py
 
    from django.contrib import admin
-
    from notes.models import Note
-
 
    @admin.register(Note)
    class NoteAdmin(admin.ModelAdmin):
@@ -82,9 +79,7 @@ Use ``reverse`` from inside the file router.
    :caption: notes/routes/page.py
 
    from django.urls import reverse
-
    from next.pages import context
-
 
    @context("admin_url")
    def admin_url() -> str:

@@ -35,14 +35,11 @@ Context functions can now return Pydantic models directly.
    :caption: notes/routes/page.py
 
    from pydantic import BaseModel
-
    from next.pages import context
-
 
    class NoteOut(BaseModel):
        id: int
        title: str
-
 
    @context("featured", serialize=True)
    def featured() -> NoteOut:

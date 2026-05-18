@@ -47,9 +47,7 @@ The decorator takes a single key and the function returns the value.
    :caption: notes/routes/page.py
 
    from notes.models import Note
-
    from next.pages import context
-
 
    @context("notes")
    def recent_notes() -> list[Note]:
@@ -66,7 +64,6 @@ Decorating a function with bare ``@context`` and returning a dict merges every k
    :caption: shared dependency
 
    from next.pages import context
-
 
    @context
    def post_context(post: Post) -> dict[str, object]:
@@ -88,7 +85,6 @@ The inherit_context Flag
 
    from next.pages import context
 
-
    @context("site_name", inherit_context=True)
    def site_name() -> str:
        return "Notes"
@@ -105,9 +101,7 @@ Treat ``context("key")`` as a callable that registers an existing function.
    :caption: registering an external function
 
    from notes.cache import pending_clicks
-
    from next.pages import context
-
 
    context("pending_clicks")(pending_clicks)
 
@@ -138,14 +132,11 @@ The factory takes its own dependency-injected arguments, so it can ask for the r
    :caption: notes/routes/notes/[int:note_id]/page.py
 
    from notes.models import Note
-
    from next.pages import Context, context
    from next.urls import DUrl
 
-
    def load_note(note_id: DUrl[int]) -> Note:
        return Note.objects.get(pk=note_id)
-
 
    @context("word_count")
    def word_count(note: Note = Context(load_note)) -> int:
@@ -223,9 +214,7 @@ Leave the parameter untyped and return early if it is already an instance of the
    :caption: notes/routes/notes/[category]/page.py
 
    from notes.models import Category
-
    from next.pages import context
-
 
    @context("category", inherit_context=True)
    def category(category: object) -> Category:
@@ -283,10 +272,8 @@ Publish the page title from each page.
    :caption: notes/routes/notes/[id]/page.py
 
    from notes.models import Note
-
    from next.pages import context
    from next.urls import DUrl
-
 
    @context("page_title")
    def page_title(note_id: DUrl[int]) -> str:
@@ -315,7 +302,6 @@ Combine a context function with the ``DQuery[T]`` marker to read filters from th
 
    from next.pages import context
    from next.urls import DQuery
-
 
    @context("active_tag")
    def active_tag(tag: DQuery[str] = "") -> str:

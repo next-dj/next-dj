@@ -46,6 +46,7 @@ It accepts either a plain name or a namespaced name.
    {% form @action="create_note" %}...{% endform %}
    {% form @action="notes:save" %}...{% endform %}
 
+The bare ``action="..."`` spelling without the ``@`` is also accepted and equivalent, with ``@action`` being the recommended spelling.
 An opening tag without an ``@action`` argument raises ``TemplateSyntaxError`` at parse time.
 A name that is not in the registry resolves to an empty ``action`` attribute rather than raising.
 
@@ -120,9 +121,7 @@ A page can override the default by publishing its own ``form`` context.
 
    from notes.forms import NoteForm
    from notes.models import Note
-
    from next.pages import context
-
 
    @context("form")
    def edit_form(note: Note) -> NoteForm:
@@ -210,7 +209,7 @@ Render them inline with each field or as a list at the top of the form.
 Empty Form Bodies
 -----------------
 
-A tag block with only a submit button is the confirmation pattern covered in :ref:`Actions Without form_class <topics-forms-actions>`.
+A tag block with only a submit button is the confirmation pattern covered in :ref:`Actions Without form_class <topics-forms-actions-no-form-class>`.
 
 Common Patterns
 ---------------

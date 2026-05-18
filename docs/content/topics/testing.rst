@@ -95,9 +95,7 @@ Add an ``autouse`` fixture in ``conftest.py`` to clear every registry between te
    :caption: conftest.py
 
    import pytest
-
    from next.testing.isolation import reset_registries
-
 
    @pytest.fixture(autouse=True)
    def _next_isolation():
@@ -121,10 +119,8 @@ Three narrower helpers are also available when only one registry needs resetting
       :caption: conftest.py, eager loading with lazy modules
 
       import pytest
-
       from next.testing.isolation import reset_registries
       from next.testing.loaders import eager_load_components
-
 
       @pytest.fixture(autouse=True)
       def _next_isolation():
@@ -154,7 +150,6 @@ Use it for end to end HTTP tests.
 
    from next.testing.client import NextClient
 
-
    def test_index() -> None:
        response = NextClient().get("/")
        assert response.status_code == 200
@@ -173,7 +168,6 @@ Posting to Actions
 
    from next.testing.client import NextClient
 
-
    def test_create_note(db) -> None:
        response = NextClient().post_action("create_note", {"title": "Test", "body": ""})
        assert response.status_code == 302
@@ -190,7 +184,6 @@ Use ``next.testing.rendering`` to render a page without an HTTP round trip.
    :caption: render isolation
 
    from next.testing.rendering import render_page
-
 
    def test_index_body() -> None:
        html = render_page("notes/routes/page.py")
@@ -210,7 +203,6 @@ Capture Signals
    from next.signals import action_dispatched
    from next.testing.client import NextClient
    from next.testing.signals import SignalRecorder
-
 
    def test_emits(db) -> None:
        with SignalRecorder(action_dispatched) as recorder:
@@ -256,7 +248,6 @@ Two convenience wrappers cover the common multi-signal cases.
    from next.testing.client import NextClient
    from next.testing.signals import capture_signals
 
-
    def test_dispatch_and_render(db) -> None:
        with capture_signals(action_dispatched, page_rendered) as recorder:
            NextClient().post_action("create_note", {"title": "hi"})
@@ -278,7 +269,6 @@ Action Helpers
 
    from next.testing.actions import build_form_for, resolve_action_url
 
-
    def test_form_validates(db) -> None:
        url = resolve_action_url("create_note")
        form = build_form_for("create_note", {"title": "Direct", "body": ""})
@@ -296,12 +286,10 @@ HTML Utilities
    from next.testing.html import assert_has_class, find_anchor
    from next.testing.rendering import render_component_by_name
 
-
    def test_index_links_to_note() -> None:
        html = NextClient().get("/").content.decode()
        anchor = find_anchor(html, text="First")
        assert "First" in anchor
-
 
    def test_card_class() -> None:
        html = render_component_by_name(
@@ -350,7 +338,6 @@ Its ``.collector`` attribute holds the collector built inside the block, so a te
 
    from next.testing.patching import override_next_settings
 
-
    def test_with_strict_context() -> None:
        with override_next_settings(STRICT_CONTEXT=True):
            response = NextClient().get("/")
@@ -369,7 +356,6 @@ Both accept the same loose keyword arguments, ``request``, ``form``, ``url_kwarg
    :caption: provider unit test
 
    from next.testing.deps import make_resolution_context
-
 
    def test_context_carries_url_kwargs() -> None:
        context = make_resolution_context(url_kwargs={"id": 7})
@@ -406,7 +392,6 @@ Pytest can run ``manage.py check`` as part of the suite.
    :caption: check test
 
    from django.core.management import call_command
-
 
    def test_no_check_warnings() -> None:
        call_command("check", verbosity=0)

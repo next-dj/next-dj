@@ -38,9 +38,7 @@ They wrap a plain cache key so the broker stays decoupled from the cache backend
    import threading
    from collections import defaultdict
    from collections.abc import Iterator
-
    from django.core.cache import cache
-
 
    class PollBroker:
        def __init__(self) -> None:
@@ -55,7 +53,6 @@ They wrap a plain cache key so the broker stays decoupled from the cache backend
            with condition:
                self._revisions[snapshot.poll_id] += 1
                condition.notify_all()
-
 
    broker = PollBroker()
 
@@ -117,7 +114,6 @@ Keepalive frames begin with ``:`` so clients ignore them while proxies still see
        lines.extend(f"data: {part}" for part in body.split("\n"))
        return ("\n".join(lines) + "\n\n").encode("utf-8")
 
-
    def format_keepalive() -> bytes:
        return b": keepalive\n\n"
 
@@ -139,7 +135,6 @@ See :doc:`/content/topics/dependency-injection` for how to define custom markers
    from polls.broker import broker
    from polls.models import Poll
    from polls.providers import DPoll
-
 
    def render(poll: DPoll[Poll]) -> StreamingHttpResponse:
        return StreamingHttpResponse(
@@ -166,13 +161,10 @@ The signal carries the bound form after validation, so the receiver knows which 
 
    from django import forms as django_forms
    from django.dispatch import receiver
-
    from next.forms.signals import action_dispatched
    from polls.broker import broker, build_snapshot
 
-
    VOTE_ACTION_NAME = "polls:vote"
-
 
    @receiver(action_dispatched)
    def broadcast_vote(
@@ -218,7 +210,6 @@ A raw ``.vue`` file is not browser-loadable, so the asset is served only after a
    :caption: polls/apps.py
 
    from next.static import default_kinds
-
 
    class PollsConfig(AppConfig):
        name = "polls"

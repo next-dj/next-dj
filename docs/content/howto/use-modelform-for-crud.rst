@@ -23,17 +23,13 @@ Define the form.
    :caption: notes/forms.py
 
    from django import forms
-
    from next.forms import Form, ModelForm
-
    from notes.models import Note
-
 
    class NoteForm(ModelForm):
        class Meta:
            model = Note
            fields = ("title", "body")
-
 
    class DeleteNoteForm(Form):
        confirm = forms.BooleanField()
@@ -46,11 +42,8 @@ Create Page
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
-
    from next.forms import action
-
    from notes.forms import NoteForm
-
 
    @action("create_note", form_class=NoteForm)
    def create_note(form: NoteForm) -> HttpResponseRedirect:
@@ -69,19 +62,15 @@ Update Page
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
    from django.urls import reverse
-
    from next.forms import action
    from next.pages import context
    from next.urls import DUrl
-
    from notes.forms import NoteForm
    from notes.models import Note
-
 
    @context("form")
    def edit_form(note_id: DUrl["id", int]) -> NoteForm:
        return NoteForm(instance=get_object_or_404(Note, pk=note_id))
-
 
    @action("update_note", form_class=NoteForm)
    def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
@@ -97,13 +86,10 @@ Delete Action
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
-
    from next.forms import action
    from next.urls import DUrl
-
    from notes.forms import DeleteNoteForm
    from notes.models import Note
-
 
    @action("delete_note", form_class=DeleteNoteForm)
    def delete_note(form: DeleteNoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
@@ -151,9 +137,7 @@ Tests assert the same flow.
    :caption: tests/test_crud.py
 
    from next.testing.client import NextClient
-
    from notes.models import Note
-
 
    def test_crud_flow(db) -> None:
        client = NextClient()

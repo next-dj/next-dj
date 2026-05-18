@@ -20,9 +20,7 @@ Subclass the framework's ``ModelForm`` base class.
    :caption: notes/forms.py
 
    from next.forms import ModelForm
-
    from notes.models import Note
-
 
    class NoteForm(ModelForm):
        class Meta:
@@ -31,7 +29,6 @@ Subclass the framework's ``ModelForm`` base class.
 
 ``next.forms.ModelForm`` adds the ``get_initial`` classmethod that ``next.forms.Form`` also adds for plain forms.
 The dispatcher calls ``get_initial`` to compute the initial bound state of the form before binding the POST body.
-The hidden ``_next_form_page`` field on every rendered form is what lets the dispatcher re-render the origin page when validation fails.
 
 get_initial
 -----------
@@ -43,11 +40,8 @@ A ModelForm can return either a dict for fresh creation or an instance for editi
    :caption: notes/forms.py
 
    from django.http import Http404, HttpRequest
-
    from next.forms import ModelForm
-
    from notes.models import Note
-
 
    class NoteForm(ModelForm):
        class Meta:
@@ -79,11 +73,8 @@ A create page renders the unbound form and saves it on submission.
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
-
    from next.forms import action
-
    from notes.forms import NoteForm
-
 
    @action("create_note", form_class=NoteForm)
    def create_note(form: NoteForm) -> HttpResponseRedirect:
@@ -112,19 +103,15 @@ An edit page reuses the same form class and saves the bound instance.
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
    from django.urls import reverse
-
    from next.forms import action
    from next.pages import context
    from next.urls import DUrl
-
    from notes.forms import NoteForm
    from notes.models import Note
-
 
    @context("note")
    def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
-
 
    @action("update_note", form_class=NoteForm)
    def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
@@ -145,15 +132,11 @@ A custom DI provider can centralise the instance lookup.
    :caption: notes/providers.py
 
    from typing import get_args, get_origin
-
    from django.http import Http404
-
    from next.deps import DDependencyBase, RegisteredParameterProvider
-
 
    class DInstance[T](DDependencyBase[T]):
        __slots__ = ()
-
 
    class InstanceProvider(RegisteredParameterProvider):
        def can_handle(self, param, _context) -> bool:
@@ -174,13 +157,10 @@ The handler can now take the instance directly.
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
-
    from next.forms import action
-
    from notes.forms import NoteForm
    from notes.models import Note
    from notes.providers import DInstance
-
 
    @action("update_note", form_class=NoteForm)
    def update_note(

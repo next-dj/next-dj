@@ -119,17 +119,13 @@ body {
 /* outermost card */
 .literal-block-wrapper,
 div[class*="highlight-"] {
+  border: 1px solid var(--ndj-code-border);
   border-radius: var(--ndj-radius);
   overflow: hidden;
 }
 
-.dark-code .literal-block-wrapper,
-.dark-code div[class*="highlight-"] {
-  border: 1px solid var(--ndj-term-border);
-}
-
 /* inside a captioned wrapper the body div is no longer the card */
-.dark-code .literal-block-wrapper div[class*="highlight-"] {
+.literal-block-wrapper div[class*="highlight-"] {
   border: 0;
   border-radius: 0;
 }
@@ -149,11 +145,10 @@ pre.literal-block {
   line-height: 1.6;
 }
 
-/* dark code body — the landing terminal palette, beats Shibuya's
-   .light .dark-code rule by targeting the surfaces directly */
-.dark-code .highlight,
-.dark-code .highlight pre {
-  background-color: var(--ndj-term-bg);
+/* code body — one surface for the whole card in either theme */
+.highlight,
+.highlight pre {
+  background-color: var(--ndj-code-bg);
 }
 
 /* caption — a terminal title bar with traffic-light dots */
@@ -164,9 +159,9 @@ pre.literal-block {
   font-weight: 500;
   letter-spacing: 0.01em;
   padding: 0.62rem 1.1rem;
-  color: var(--ndj-term-muted);
-  background-color: var(--ndj-term-bg);
-  border-bottom: 1px solid var(--ndj-term-border);
+  color: var(--ndj-code-caption-text);
+  background-color: var(--ndj-code-bg);
+  border-bottom: 1px solid var(--ndj-code-border);
 }
 
 .code-block-caption::before {

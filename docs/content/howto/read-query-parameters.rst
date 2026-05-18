@@ -29,14 +29,11 @@ The default is used when the key is absent from the query string.
    :caption: storefront/page.py
 
    from catalog.models import Product
-
    from next.pages import context
    from next.urls import DQuery
 
-
    DEFAULT_FEATURED = 3
    MAX_FEATURED = 12
-
 
    @context("featured")
    def featured(show: DQuery[int] = DEFAULT_FEATURED) -> list[Product]:
@@ -90,7 +87,6 @@ Each annotation drives its own coercion.
    from next.pages import context
    from next.urls import DQuery
 
-
    @context("results")
    def results(
        q: DQuery[str] = "",
@@ -112,9 +108,7 @@ When several callables need the same filter set, parse it once into a frozen dat
    :caption: catalog/providers.py
 
    from dataclasses import dataclass
-
    from next.urls import get_multi_values
-
 
    @dataclass(frozen=True, slots=True)
    class Filters:
@@ -123,13 +117,12 @@ When several callables need the same filter set, parse it once into a frozen dat
        in_stock: bool = False
        sort: str = "newest"
 
-
    def parse_filters(request):
        g = request.GET
        return Filters(
            q=g.get("q", "").strip(),
            brands=tuple(get_multi_values(request, "brand")),
-           in_stock=g.get("in_stock") in {"1", "true", "on"},
+           in_stock=g.get("in_stock") in {"1", "true", "yes"},
            sort=g.get("sort") or "newest",
        )
 
@@ -168,10 +161,8 @@ Child callables then ask for ``category`` by parameter name and never re-query.
 
    from catalog.models import Category
    from django.http import Http404
-
    from next.pages import context
    from next.urls import DUrl
-
 
    @context("category", inherit_context=True)
    def category(category: DUrl[str]) -> Category:
@@ -186,9 +177,7 @@ A descendant page reads the resolved instance back through its parameter name.
    :caption: storefront/catalog/[category]/products/page.py
 
    from catalog.models import Category, Product
-
    from next.pages import context
-
 
    @context("products")
    def products(category: Category) -> list[Product]:

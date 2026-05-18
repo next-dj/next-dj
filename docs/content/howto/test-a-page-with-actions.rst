@@ -22,9 +22,7 @@ Set up pytest plus pytest-django and an isolation fixture (see :doc:`/content/to
    :caption: conftest.py
 
    import pytest
-
    from next.testing import reset_registries
-
 
    @pytest.fixture(autouse=True)
    def _next_isolation():
@@ -38,11 +36,9 @@ Write the test.
    :caption: tests/test_create_flow.py
 
    from notes.models import Note
-
    from next.forms.signals import action_dispatched
    from next.testing.client import NextClient
    from next.testing.signals import SignalRecorder
-
 
    def test_create_flow(db) -> None:
        client = NextClient()
@@ -70,7 +66,6 @@ Test the Failure Path
 
    from next.testing.client import NextClient
 
-
    def test_blank_title_rerenders(db) -> None:
        response = NextClient().post_action("create_note", {"title": ""})
        assert response.status_code == 200
@@ -87,7 +82,6 @@ For tests that focus on template output, render the page directly.
    :caption: tests/test_template.py
 
    from next.testing.rendering import render_page
-
 
    def test_template_renders_form() -> None:
        html = render_page("notes/routes/page.py")

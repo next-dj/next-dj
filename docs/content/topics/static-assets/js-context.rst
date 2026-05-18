@@ -72,7 +72,6 @@ The override applies only to that key.
    from next.pages import context
    from next.static import PydanticJsContextSerializer
 
-
    @context("featured", serialize=True, serializer=PydanticJsContextSerializer())
    def featured() -> object:
        return load_featured_note()
@@ -91,9 +90,7 @@ A serializer is any class with a ``dumps`` method.
    :caption: notes/serializers.py
 
    import json
-
    from django.core.serializers.json import DjangoJSONEncoder
-
 
    class CompactSerializer:
        """Serialise context values with sorted keys for stable output."""
@@ -155,7 +152,6 @@ The protocol has one method, ``merge(existing, key, value)``, which returns the 
    :caption: notes/policies.py
 
    from typing import Any
-
 
    class NamespacePolicy:
        """Group conflicting keys under a per-key list."""
@@ -232,6 +228,8 @@ Template Tag Customisation
 
 The ``NEXT_JS_OPTIONS`` dict also accepts ``preload_template``, ``script_tag_template``, and ``init_template`` keys.
 Each is an HTML string with a single placeholder.
+The ``preload_template`` and ``script_tag_template`` use the ``{url}`` placeholder.
+The ``init_template`` uses the ``{payload}`` placeholder, which receives the serialized JS context.
 Use them to add attributes such as ``nonce``, ``async``, or ``crossorigin`` without writing a custom backend.
 
 .. code-block:: python
@@ -243,8 +241,8 @@ Use them to add attributes such as ``nonce``, ``async``, or ``crossorigin`` with
        }
    }
 
-The ``{url}`` placeholder is the only supported substitution.
-The template is formatted with Python ``str.format``, not Django templates.
+A template carries only its own placeholder, ``{url}`` or ``{payload}``, and no other substitution is supported.
+The templates are formatted with Python ``str.format``, not Django templates.
 For per-request values such as CSP nonces, use a custom static backend instead.
 
 See Also

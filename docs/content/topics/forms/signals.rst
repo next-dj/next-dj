@@ -26,13 +26,10 @@ The payload carries ``action_name``, ``uid``, ``form_class``, ``namespace``, and
    :caption: notes/receivers.py
 
    import logging
-
    from django.dispatch import receiver
-
    from next.forms.signals import action_registered
 
    logger = logging.getLogger("notes.actions")
-
 
    @receiver(action_registered)
    def record_action(sender, *, action_name, uid, **kwargs) -> None:
@@ -66,11 +63,9 @@ The signal does not pass ``request``. Read what you need from ``dep_cache`` or h
    :caption: notes/receivers.py
 
    from django.dispatch import receiver
-
    from next.forms.signals import action_dispatched
 
    SLOW_MS = 250.0
-
 
    @receiver(action_dispatched)
    def warn_on_slow_action(sender, *, action_name, duration_ms, **kwargs) -> None:
@@ -109,9 +104,7 @@ The dispatcher only builds the payload and sends the signal when at least one re
    :caption: notes/receivers.py
 
    from django.dispatch import receiver
-
    from next.forms.signals import form_validation_failed
-
 
    @receiver(form_validation_failed)
    def count_failures(sender, *, action_name, error_count, field_names, **kwargs) -> None:

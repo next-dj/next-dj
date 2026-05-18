@@ -15,6 +15,7 @@ Overview
 
 The dispatcher runs at ``/_next/form/<uid>/`` where the UID is a 16 character hash of the action name.
 The dispatcher loads the action handler, builds the form, runs the validation chain, and either calls the handler or re-renders the origin page.
+Any non-POST method short-circuits before that work and returns HTTP 405.
 
 Pipeline
 --------
@@ -23,6 +24,7 @@ Pipeline
 
    flowchart TB
        Template["form tag in template"] -- POST --> Endpoint["form dispatch endpoint"]
+       Template -- "non-POST" --> NotAllowed["HTTP 405"]
        Endpoint --> Lookup["Resolve action by UID"]
        Lookup -- unknown UID --> NotFound["HTTP 404"]
        Lookup -- found --> Build["Build form"]
@@ -105,7 +107,7 @@ One signal fires at import time, the other two fire per request.
 
 - ``action_registered`` fires at import time, once per ``@action`` when the registry receives it.
 - ``form_validation_failed`` fires at request time, once per failing submission.
-- ``action_dispatched`` fires at request time, once per successful handler invocation, with the bound form and the URL kwargs in the payload.
+- ``action_dispatched`` fires at request time, once per successful handler invocation, with the action name, the bound form (``None`` for form-less actions), the URL kwargs, the handler duration, the response status, and the dispatch dependency cache in the payload.
 
 Extension Points
 ----------------

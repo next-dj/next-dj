@@ -28,7 +28,6 @@ Create the page module.
 
    from next.pages import context
 
-
    @context("body")
    def about_body() -> str:
        return "Hello from the about page."

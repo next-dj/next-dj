@@ -34,9 +34,7 @@ A standard ``config/wsgi.py`` works without modification. See Django's :doc:`WSG
    :caption: config/wsgi.py
 
    import os
-
    from django.core.wsgi import get_wsgi_application
-
 
    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
    application = get_wsgi_application()
@@ -61,9 +59,7 @@ A standard ``config/asgi.py`` works without modification. See Django's :doc:`ASG
    :caption: config/asgi.py
 
    import os
-
    from django.core.asgi import get_asgi_application
-
 
    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
    application = get_asgi_application()
@@ -102,7 +98,6 @@ A pure ``render`` function avoids the layout chain and the static collector.
    :caption: notes/routes/healthz/page.py
 
    from django.http import HttpRequest, JsonResponse
-
 
    def render(request: HttpRequest) -> JsonResponse:
        return JsonResponse({"status": "ok"})

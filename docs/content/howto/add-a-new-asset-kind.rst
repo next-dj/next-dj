@@ -22,9 +22,7 @@ Register the kind.
    :caption: notes/apps.py
 
    from django.apps import AppConfig
-
    from next.static import default_kinds
-
 
    class NotesConfig(AppConfig):
        name = "notes"
@@ -64,7 +62,6 @@ When the new kind needs a tag shape that the bundled methods do not produce, add
    :caption: notes/backends.py
 
    from next.static import StaticFilesBackend
-
 
    class BabelBackend(StaticFilesBackend):
        def render_babel_tag(self, url: str, *, request=None) -> str:

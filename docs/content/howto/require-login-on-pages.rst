@@ -31,7 +31,6 @@ The middleware lets the login page and static assets through, and redirects ever
    from django.shortcuts import redirect
    from django.urls import reverse
 
-
    class LoginRequiredMiddleware:
        def __init__(self, get_response):
            self._get_response = get_response
@@ -71,7 +70,6 @@ Mount Django's :doc:`auth views <django:topics/auth/default>` before the file ro
    from django.contrib.auth import views as auth_views
    from django.urls import include, path
 
-
    urlpatterns = [
        path("login/", auth_views.LoginView.as_view(), name="login"),
        path("logout/", auth_views.LogoutView.as_view(), name="logout"),
@@ -88,9 +86,7 @@ A ``@context`` callable asks for the request by annotation and reads ``request.u
    :caption: notes/routes/page.py
 
    from django.http import HttpRequest
-
    from next.pages import context
-
 
    @context("greeting")
    def greeting(request: HttpRequest) -> str:
@@ -108,9 +104,7 @@ Django renders the ``403`` handler for an anonymous request.
 
    from django.core.exceptions import PermissionDenied
    from django.http import HttpRequest
-
    from next.pages import context
-
 
    @context("notes")
    def notes(request: HttpRequest) -> list:

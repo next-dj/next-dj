@@ -104,10 +104,8 @@ Name your directories without hyphens when you want the parameter name and the d
    :caption: routes/posts/[int:post_id]/page.py
 
    from notes.models import Note
-
    from next.pages import context
    from next.urls import DUrl
-
 
    @context("note")
    def fetch_note(post_id: DUrl[int]) -> Note:
@@ -327,9 +325,7 @@ A backend that reads from a database or other dynamic source needs to rebuild it
    from django.db.models.signals import post_delete, post_save
    from django.dispatch import receiver
    from notes.models import Note
-
    from next.urls import router_manager
-
 
    @receiver(post_save, sender=Note)
    @receiver(post_delete, sender=Note)

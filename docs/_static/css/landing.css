@@ -344,6 +344,14 @@ html.dark .ndj-hero-swoosh {
   gap: clamp(3rem, 6.5vw, 5.5rem);
 }
 
+.ndj-feature-more {
+  max-width: 44rem;
+  margin: clamp(2.5rem, 5vw, 4rem) auto 0;
+  text-align: center;
+  color: var(--sy-c-light);
+  font-size: 1.02rem;
+}
+
 .ndj-feature {
   display: grid;
   grid-template-columns: 1fr 1fr;

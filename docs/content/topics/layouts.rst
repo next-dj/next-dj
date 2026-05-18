@@ -89,14 +89,11 @@ Use it to publish values that the layout markup needs and, with ``inherit_contex
    :caption: notes/routes/page.py
 
    from notes.models import Note
-
    from next.pages import context
-
 
    @context("site_name", inherit_context=True)
    def site_name() -> str:
        return "Notes"
-
 
    @context("note_count", inherit_context=True)
    def note_count() -> int:

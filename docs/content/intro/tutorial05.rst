@@ -7,7 +7,8 @@ Goal
 ----
 
 This final part covers the development workflow.
-You install pytest, write end-to-end tests against the Notes application with ``NextClient``, capture signals with ``SignalRecorder``, and learn how the autoreloader picks up file router changes without a server restart.
+You install pytest and write end-to-end tests against the Notes application with ``NextClient`` and ``SignalRecorder``.
+You also learn how the autoreloader picks up file router changes without a server restart.
 
 Prerequisites
 -------------
@@ -22,7 +23,7 @@ Walkthrough
 Install Test Dependencies
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The framework ships its own ``next.testing`` module of framework-agnostic helpers.
+next.dj ships the ``next.testing`` package, and its helpers work with Django ``TestCase``, stdlib ``unittest``, and pytest alike.
 This tutorial drives it with pytest and pytest-django, which you install separately.
 
 .. code-block:: bash
@@ -41,23 +42,28 @@ Add the pytest configuration.
    addopts = --tb=short
 
 Add a ``conftest.py`` at the project root.
-The conftest isolates the next.dj registries between test modules.
+The conftest imports every ``page.py`` so actions register before the tests run.
 
 .. code-block:: python
    :caption: conftest.py
 
+   from pathlib import Path
    import pytest
-
    from next.testing.isolation import reset_registries
+   from next.testing.loaders import eager_load_pages
 
+   PAGES_DIR = Path(__file__).resolve().parent / "notes" / "pages"
 
    @pytest.fixture(autouse=True)
    def _next_dj_isolation():
+       eager_load_pages(PAGES_DIR)
        reset_registries()
        yield
        reset_registries()
 
-``reset_registries()`` reloads the form-action and component backends from the current settings so that a test which swaps ``NEXT_FRAMEWORK`` does not bleed into the next one.
+``eager_load_pages`` walks ``notes/pages`` and imports every ``page.py``, which runs the ``@action`` and ``@context`` registrations that the file router would otherwise defer to the first request.
+``reset_registries()`` reloads the form-action and component backends from the current settings, so a test that swaps ``NEXT_FRAMEWORK`` does not bleed into the next one.
+It does not touch page routing or the page cache.
 Database access uses the standard ``db`` fixture from pytest-django, no extra fixture is needed.
 
 Write the First End-to-End Test
@@ -70,21 +76,17 @@ Create ``tests/test_notes_e2e.py``.
 
    import pytest
    from notes.models import Note
-
    from next.testing.client import NextClient
-
 
    @pytest.fixture
    def client() -> NextClient:
        return NextClient()
-
 
    def test_index_lists_notes(client, db) -> None:
        Note.objects.create(title="First", body="hello")
        response = client.get("/")
        assert response.status_code == 200
        assert "First" in response.content.decode()
-
 
    def test_detail_renders_note(client, db) -> None:
        note = Note.objects.create(title="Second", body="world")
@@ -95,7 +97,7 @@ Create ``tests/test_notes_e2e.py``.
 ``NextClient`` extends Django's test client with two shortcuts for form actions.
 ``post_action`` resolves an action name to its URL and POSTs in one call.
 ``get_action_url`` returns that URL without dispatching.
-The router itself is built lazily through Django's URL resolver, the same as in production.
+The router itself is built lazily through Django's URL resolver, exactly as in production.
 Use the same ``client.get`` and ``client.post`` calls you already know.
 
 Run the tests.
@@ -115,9 +117,7 @@ The framework gives each action a stable URL.
 
    from django.urls import reverse
    from notes.models import Note
-
    from next.testing.client import NextClient
-
 
    def test_create_note_action(db) -> None:
        client = NextClient()
@@ -142,20 +142,20 @@ Every dispatch fires the ``action_dispatched`` signal.
    from next.testing.client import NextClient
    from next.testing.signals import SignalRecorder
 
-
    def test_create_emits_action_dispatched(db) -> None:
        with SignalRecorder(action_dispatched) as recorder:
            NextClient().post_action("create_note", {"title": "Signal", "body": ""})
 
-       assert len(recorder.events) == 1
-       event = recorder.events[0]
+       assert len(recorder) == 1
+       event = recorder.first_for(action_dispatched)
        assert event.kwargs["action_name"] == "create_note"
        assert event.kwargs["form"].cleaned_data["title"] == "Signal"
 
-``next.signals`` re-exports every framework signal under one import path.
-The owning submodule path ``next.forms.signals`` also works if you prefer it.
+``action_dispatched`` is re-exported from ``next.signals`` and also lives on its owning module ``next.forms.signals``.
 ``SignalRecorder`` is a context manager that subscribes to the signal on entry and unsubscribes on exit.
+It accepts several signals at once and exposes ``first_for``, ``last_for``, and ``events_for`` to query the captured events per signal.
 Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwargs`` attributes.
+The ``action_dispatched`` payload carries ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
 
 Test Validation Failure
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -190,18 +190,23 @@ Run the server and create a new page in a separate terminal.
 .. code-block:: bash
    :caption: shell, terminal 2
 
-   mkdir -p notes/routes/about
-   cat > notes/routes/about/page.py <<'PY'
-   from next.pages import context
+   mkdir -p notes/pages/about
 
+Add the two page files.
+
+.. code-block:: python
+   :caption: notes/pages/about/page.py
+
+   from next.pages import context
 
    @context("body")
    def about_body() -> str:
        return "Hello from a new page."
-   PY
-   cat > notes/routes/about/template.djx <<'JINJA'
+
+.. code-block:: jinja
+   :caption: notes/pages/about/template.djx
+
    <p>{{ body }}</p>
-   JINJA
 
 Within a second the server picks up the change.
 Open ``http://127.0.0.1:8000/about/`` and confirm that the new page is served without a manual restart.
@@ -232,17 +237,17 @@ The development server reloads page and component changes without a manual resta
 Common Pitfalls
 ---------------
 
-Test sees stale routes from another test module.
-   Ensure that ``reset_registries()`` runs in an ``autouse`` fixture.
-   Without it a page registered in one test stays in the registry for the next test.
-
 ``post_action`` raises an unknown action error.
-   Make sure the action module is imported before the test runs.
-   Tests in ``tests/`` next to ``notes/`` import ``notes`` because pytest places the project root on ``sys.path``.
+   An ``@action`` handler registers only when its ``page.py`` is imported.
+   Call ``eager_load_pages`` in the test setup so every handler registers before the first dispatch.
+
+Tests that rewrite page files on disk see stale handlers.
+   ``eager_load_pages`` memoises each directory it has already imported.
+   Call ``clear_loaded_dirs()`` from ``next.testing.loaders`` to drop that memo when a test edits ``page.py`` files between runs.
 
 Autoreloader does not pick up a change.
-   Confirm that the changed file lives under one of the configured page roots.
-   Files outside ``notes/routes/`` do not trigger a router reload.
+   Confirm that the changed file lives under one of the watched roots.
+   The reloader watches ``page.py`` files under the page roots and ``component.py`` files under the component roots, so files elsewhere do not trigger a router reload.
 
 Next Steps
 ----------

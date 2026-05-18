@@ -53,7 +53,6 @@ Add the shared directory to each project.
    BASE_DIR = Path(__file__).resolve().parent.parent
    SHARED_DIR = BASE_DIR.parent.parent / "_shared"
 
-
    NEXT_FRAMEWORK = {
        "DEFAULT_COMPONENT_BACKENDS": [
            {

@@ -117,7 +117,6 @@ Connect once at startup.
 
    from django.apps import AppConfig
 
-
    class NotesConfig(AppConfig):
        name = "notes"
 
@@ -130,13 +129,10 @@ Use ``django.dispatch.receiver`` to connect a callable to a signal.
    :caption: notes/receivers.py
 
    import logging
-
    from django.dispatch import receiver
-
    from next.signals import action_dispatched
 
    logger = logging.getLogger(__name__)
-
 
    @receiver(action_dispatched)
    def log_dispatch(sender, **kwargs) -> None:
@@ -152,7 +148,7 @@ Disconnecting
 ~~~~~~~~~~~~~
 
 Call ``signal.disconnect`` when a receiver should stop firing.
-Test isolation utilities in ``next.testing.signals`` already disconnect for you between tests.
+The ``SignalRecorder`` from ``next.testing.signals`` disconnects its receivers on context-manager exit, or when ``stop()`` is called explicitly.
 
 Test Helpers
 ------------
@@ -166,7 +162,6 @@ Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwar
    from next.signals import action_dispatched
    from next.testing.client import NextClient
    from next.testing.signals import SignalRecorder
-
 
    def test_emits_action(db) -> None:
        with SignalRecorder(action_dispatched) as recorder:

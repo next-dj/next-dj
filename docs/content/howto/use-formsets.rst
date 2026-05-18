@@ -23,17 +23,13 @@ Define the row form and the formset.
 
    from django import forms
    from django.forms import formset_factory
-
    from next.forms import ModelForm
-
    from notes.models import Note
-
 
    class NoteRowForm(ModelForm):
        class Meta:
            model = Note
            fields = ("title", "body")
-
 
    NoteFormSet = formset_factory(NoteRowForm, extra=3, can_delete=True)
 
@@ -44,11 +40,8 @@ Register the action.
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
-
    from next.forms import action
-
    from notes.forms import NoteFormSet
-
 
    @action("bulk_create", form_class=NoteFormSet)
    def bulk_create(form: NoteFormSet) -> HttpResponseRedirect:
@@ -88,7 +81,6 @@ Use ``cleanup_extra_initial`` to clear initial values from blank extra rows befo
    :caption: notes/forms.py
 
    from next.forms.formsets import cleanup_extra_initial
-
 
    def build_formset(initial: list[dict]) -> NoteFormSet:
        formset = NoteFormSet(initial=initial)

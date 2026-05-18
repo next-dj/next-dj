@@ -61,6 +61,8 @@ class ContextResult:
 class ContextByDefaultProvider(RegisteredParameterProvider):
     """Resolve parameters whose default value is a `Context` instance."""
 
+    priority = 20
+
     def __init__(self, resolver: DependencyResolver) -> None:
         """Store the dependency resolver used for callable context sources."""
         self._resolver = resolver
@@ -104,6 +106,8 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
 
 class ContextByNameProvider(RegisteredParameterProvider):
     """Inject context_data values when the parameter name is already a key."""
+
+    priority = 30
 
     def can_handle(self, param: inspect.Parameter, context: object) -> bool:
         """Return True when context_data already contains this parameter name."""

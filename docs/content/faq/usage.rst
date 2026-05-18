@@ -106,11 +106,8 @@ Reconstruct the query string from the validated fields instead.
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
-
    from next.forms import action
-
    from notes.forms import SearchForm
-
 
    @action("search", form_class=SearchForm)
    def search(form: SearchForm) -> HttpResponseRedirect:
@@ -129,11 +126,8 @@ Return any ``HttpResponseBase`` subclass.
 .. code-block:: python
 
    from django.http import HttpResponse
-
    from next.forms import action
-
    from notes.forms import NoteForm
-
 
    @action("create_note", form_class=NoteForm)
    def create_note(form: NoteForm) -> HttpResponse:

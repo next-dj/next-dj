@@ -72,11 +72,8 @@ The most common customisation overrides ``dispatch`` to wrap the standard dispat
    :caption: notes/backends.py
 
    from django.http import HttpRequest, HttpResponse
-
    from next.forms import RegistryFormActionBackend
-
    from notes.models import AuditEntry
-
 
    class AuditedFormActionBackend(RegistryFormActionBackend):
        """Registry backend that writes an audit row per dispatch."""

@@ -87,7 +87,6 @@ The dotted strings sit beside the file router include and Django resolves them w
 
    from django.urls import include, path
 
-
    urlpatterns = [
        path("", include("next.urls")),
    ]
@@ -103,11 +102,9 @@ A ``handler500`` view receives only the request.
 
    from django.shortcuts import render
 
-
    def not_found(request, exception):
        """Render the branded 404 page."""
        return render(request, "404.html", status=404)
-
 
    def server_error(request):
        """Render the branded 500 page."""

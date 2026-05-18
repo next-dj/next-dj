@@ -75,7 +75,7 @@ Default value.
        }
    ]
 
-The ``OPTIONS`` dict accepts ``JS_CONTEXT_POLICY``, a dotted path to a conflict-resolution class that decides what happens when two context functions publish the same key for serialisation.
+The first static backend's ``OPTIONS`` dict accepts ``JS_CONTEXT_POLICY``, a dotted path to a conflict-resolution class the static manager applies when two context functions publish the same key for serialisation.
 See :doc:`/content/topics/static-assets/js-context` under *Key Conflict Policy* for the available policies and an example.
 
 DEFAULT_FORM_ACTION_BACKENDS

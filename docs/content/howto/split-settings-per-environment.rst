@@ -48,7 +48,6 @@ Define ``NEXT_FRAMEWORK`` here in full so the framework configuration has one so
 
    from pathlib import Path
 
-
    BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
    INSTALLED_APPS = [
@@ -84,7 +83,6 @@ Override for Development
 
    from config.settings.base import *  # noqa: F403
 
-
    DEBUG = True
 
    ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
@@ -118,9 +116,7 @@ Override for Production
    :caption: config/settings/prod.py
 
    import os
-
    from config.settings.base import *  # noqa: F403
-
 
    DEBUG = False
 
@@ -141,7 +137,6 @@ Default it to ``config.settings.dev`` so local commands need no extra flag.
    :caption: manage.py
 
    import os
-
 
    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 

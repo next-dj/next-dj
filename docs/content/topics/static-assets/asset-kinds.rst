@@ -69,9 +69,7 @@ Register kinds in ``AppConfig.ready`` so the kind exists before the first reques
    :caption: notes/apps.py
 
    from django.apps import AppConfig
-
    from next.static import default_kinds
-
 
    class NotesConfig(AppConfig):
        name = "notes"
@@ -105,7 +103,6 @@ A custom kind reuses one of these methods, or a custom backend can add a new met
 
    from next.static import StaticFilesBackend
 
-
    class BabelBackend(StaticFilesBackend):
        def render_babel_tag(self, url: str, *, request=None) -> str:
            return f'<script type="text/babel" src="{url}"></script>'
@@ -135,7 +132,6 @@ Register a new slot when a kind should inject somewhere other than the standard 
    :caption: notes/apps.py
 
    from next.static import default_kinds, default_placeholders
-
 
    class NotesConfig(AppConfig):
        name = "notes"

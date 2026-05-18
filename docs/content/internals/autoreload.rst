@@ -129,11 +129,8 @@ Call ``register_autoreload_watch_spec`` from ``next.server`` inside ``AppConfig.
    :caption: myapp/apps.py
 
    from pathlib import Path
-
    from django.apps import AppConfig
-
    from next.server import register_autoreload_watch_spec
-
 
    class MyAppConfig(AppConfig):
        name = "myapp"

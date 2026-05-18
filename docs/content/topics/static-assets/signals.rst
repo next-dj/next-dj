@@ -26,14 +26,10 @@ The payload carries ``collector`` and ``backend``.
    :caption: count discovered assets per kind
 
    from collections import Counter
-
    from django.dispatch import receiver
-
    from next.static.signals import asset_registered
 
-
    asset_counts: Counter = Counter()
-
 
    @receiver(asset_registered)
    def track_asset(sender, **kwargs) -> None:
@@ -65,9 +61,7 @@ The payload carries ``config`` and ``instance``.
    :caption: inspect collected slots per request
 
    from django.dispatch import receiver
-
    from next.static.signals import collector_finalized
-
 
    @receiver(collector_finalized)
    def count_assets(sender, **kwargs) -> None:

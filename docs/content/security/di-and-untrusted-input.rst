@@ -42,10 +42,8 @@ Always validate the string before passing it into ORM lookups or external servic
 
    from django.shortcuts import get_object_or_404
    from notes.models import Note
-
    from next.pages import context
    from next.urls import DUrl
-
 
    @context("note")
    def note(slug: DUrl[str]) -> Note:
@@ -67,7 +65,6 @@ Validate the resulting values against business rules.
 
    from next.pages import context
    from next.urls import DQuery
-
 
    @context("page")
    def page_number(page: DQuery[int] = 1) -> int:
@@ -100,7 +97,6 @@ Add a custom validator when the type alone is not enough.
 
    from django.core.exceptions import ValidationError
 
-
    def positive_only(value: int) -> None:
        if value <= 0:
            raise ValidationError("Value must be positive.")
@@ -117,17 +113,12 @@ The ``url_kwargs`` dict and ``request.GET`` are both untrusted.
    :caption: notes/providers.py
 
    from typing import get_origin
-
    from django.http import Http404
-
    from next.deps import DDependencyBase, RegisteredParameterProvider
-
    from notes.models import Link
-
 
    class DLink[T](DDependencyBase[T]):
        __slots__ = ()
-
 
    class LinkProvider(RegisteredParameterProvider):
        def can_handle(self, param, _context) -> bool:
@@ -154,10 +145,8 @@ Validate destination URLs before passing them to ``HttpResponseRedirect``.
 
    from django.http import HttpResponseRedirect
    from django.urls import resolve, Resolver404
-
    from next.forms import action
    from next.urls import DQuery
-
 
    @action("login", form_class=LoginForm)
    def login(form: LoginForm, next_url: DQuery[str] = "/"):

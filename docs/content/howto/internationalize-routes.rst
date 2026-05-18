@@ -69,7 +69,6 @@ Every routed URL now resolves under ``/en/`` and ``/de/``, and the prefix-free U
    from django.conf.urls.i18n import i18n_patterns
    from django.urls import include, path
 
-
    urlpatterns = i18n_patterns(
        path("", include("next.urls")),
    )
@@ -97,9 +96,7 @@ A ``@context`` callable returns the already-translated string.
    :caption: shop/routes/page.py
 
    from django.utils.translation import gettext as _
-
    from next.pages import context
-
 
    @context("heading")
    def heading() -> str:

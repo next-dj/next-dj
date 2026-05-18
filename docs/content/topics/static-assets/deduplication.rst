@@ -76,7 +76,6 @@ The protocol has one method, ``key``, which returns a hashable value.
    from next.static import StaticAsset
    from next.static.collector import UrlDedup
 
-
    class PathDedup:
        """Deduplicate URL assets by absolute source path."""
 

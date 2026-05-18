@@ -39,7 +39,6 @@ Create the folder ``notes/_components/info_card/`` with three files.
 
    from next.components import component
 
-
    @component.context("subtitle")
    def subtitle(subtitle: str = "") -> str:
        return subtitle.strip()

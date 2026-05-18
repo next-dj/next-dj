@@ -74,9 +74,7 @@ Use a CDN aware backend to point asset URLs at a CDN host.
 
    from next.static import StaticFilesBackend
 
-
    CDN = "https://cdn.example.com"
-
 
    class CdnBackend(StaticFilesBackend):
        def render_link_tag(self, url, *, request=None) -> str:

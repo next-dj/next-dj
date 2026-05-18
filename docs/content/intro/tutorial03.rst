@@ -39,8 +39,7 @@ Create the directory and an empty template.
      {% if note.body %}<p>{{ note.body }}</p>{% endif %}
    </article>
 
-Components reference variables by name.
-``note`` will come from the surrounding template context that the framework forwards into the component automatically.
+Components reference variables by name, so ``note`` resolves from the surrounding template context.
 
 Use the Component
 ~~~~~~~~~~~~~~~~~
@@ -48,7 +47,7 @@ Use the Component
 Replace the inline markup in the index template with a call to ``note_card``.
 
 .. code-block:: jinja
-   :caption: notes/routes/template.djx
+   :caption: notes/pages/template.djx
 
    <ul class="note-list">
      {% for note in notes %}
@@ -88,8 +87,14 @@ Place a CSS file next to ``component.djx`` and the :doc:`static pipeline </conte
      font-size: 0.85rem;
    }
 
+   .note-card--expanded {
+     transform: scale(1.02);
+     background: #f5f5f5;
+   }
+
 The framework finds ``component.css`` by stem.
 When a page renders a component that has co-located styles, the static collector adds the file to the current request slot.
+Asset discovery runs for composite components such as ``note_card``, the kind this tutorial builds, while a simple ``.djx`` component carries no co-located assets.
 
 Wire the Collector Into the Layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -97,7 +102,7 @@ Wire the Collector Into the Layout
 Tell the layout where to emit the collected style and script tags.
 
 .. code-block:: jinja
-   :caption: notes/routes/layout.djx
+   :caption: notes/pages/layout.djx
 
    <!doctype html>
    <html>
@@ -159,9 +164,7 @@ Add a ``component.py`` next to the template.
    :caption: notes/_components/note_card/component.py
 
    from notes.models import Note
-
    from next.components import component
-
 
    @component.context("preview")
    def preview(note: Note) -> str:
@@ -184,11 +187,6 @@ Refer to the new value in the component template.
 
 Reload ``/`` and confirm that each note shows a short preview, capped at twelve words.
 
-Inspect the Collected Output
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-View the page source in the browser to see the ``<link>`` and ``<script>`` tags the collector injected.
-
 Checkpoint
 ----------
 
@@ -206,7 +204,7 @@ Your project tree now looks like this.
          component.py
          component.css
          component.js
-     routes/
+     pages/
        layout.djx
        page.py
        template.djx

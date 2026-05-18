@@ -148,10 +148,8 @@ To inspect what the resolver would actually inject, use ``resolve_call`` from ``
 .. code-block:: python
 
    from next.testing import resolve_call, make_resolution_context
-
    from notes.providers import DTenant
    from notes.routes.notes.page import notes
-
 
    resolved = resolve_call(notes, url_kwargs={"tenant_slug": "acme"})
    print(resolved)
@@ -176,7 +174,6 @@ Re-register the provider inside the test or in a ``setUp`` method that runs afte
 
    from next.testing import reset_registries
    from myapp.providers import TenantProvider
-
 
    class TenantProviderTests(TestCase):
        def setUp(self):

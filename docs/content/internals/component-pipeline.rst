@@ -36,8 +36,8 @@ Modules
 -------
 
 ``next.components.scanner``.
-   Walks every page tree for folders matching ``COMPONENTS_DIR``.
-   Emits one ``ComponentInfo`` per folder.
+   Scans one component directory.
+   Emits one ``ComponentInfo`` per ``.djx`` file for simple components, and one per sub-directory holding ``component.djx`` or ``component.py`` for composite components.
 
 ``next.components.registry``.
    ``ComponentRegistry`` stores entries in order.

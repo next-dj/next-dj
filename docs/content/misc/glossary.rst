@@ -61,7 +61,8 @@ Terms used throughout the next.dj documentation.
       Wraps every descendant page.
 
    JS context policy
-      Algorithm class such as ``FirstWinsPolicy`` or ``DeepMergePolicy`` that resolves duplicate serialised keys for ``window.Next.context``.
+      Algorithm class that resolves duplicate serialised keys for ``window.Next.context``.
+      The built-in classes are ``FirstWinsPolicy``, ``LastWinsPolicy``, ``RaiseOnConflictPolicy``, and ``DeepMergePolicy``.
       Selected through ``JS_CONTEXT_POLICY`` inside static backend ``OPTIONS``. See :doc:`/content/topics/static-assets/js-context`.
 
    NextScriptBuilder

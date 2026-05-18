@@ -127,9 +127,7 @@ Subclass ``StaticFilesBackend`` to keep the staticfiles resolution and change on
    import base64
    import hashlib
    from pathlib import Path
-
    from next.static import StaticFilesBackend
-
 
    class SriBackend(StaticFilesBackend):
        def render_link_tag(self, url, *, request=None) -> str:
@@ -175,7 +173,6 @@ A custom backend can vary its output per request, for example to pick a CDN host
 
    from next.static import StaticFilesBackend
 
-
    class TenantPrefixBackend(StaticFilesBackend):
        def render_link_tag(self, url, *, request=None) -> str:
            prefix = getattr(getattr(request, "tenant", None), "cdn", "")
@@ -194,8 +191,10 @@ System Checks
 -------------
 
 The static checks validate the backend configuration at startup.
-They use the codes ``next.E036``, ``next.E037``, ``next.E038``, ``next.W030``, ``next.W031``, and ``next.W042``.
+They use the codes ``next.E036``, ``next.E037``, ``next.E038``, ``next.W030``, and ``next.W031``.
 Run ``uv run python manage.py check`` after editing the backend list.
+
+A separate check, ``next.W042``, validates the ``JS_CONTEXT_SERIALIZER`` setting, see :doc:`js-context`.
 
 The ``next.W031`` check validates the ``css_tag`` and ``js_tag`` templates.
 The ``module_tag`` template is not checked, so verify it contains ``{url}`` yourself.

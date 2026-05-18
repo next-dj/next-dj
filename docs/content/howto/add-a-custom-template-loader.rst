@@ -25,9 +25,7 @@ That string appears in diagnostics such as the ``next.W043`` body-source warning
    :caption: notes/loaders.py
 
    from pathlib import Path
-
    from next.pages.loaders import TemplateLoader
-
 
    class MarkdownTemplateLoader(TemplateLoader):
        """Load sibling ``template.md`` files as plain text bodies."""

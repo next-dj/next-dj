@@ -123,11 +123,9 @@ Compose both helpers when the base URL needs both reversal and query parameters.
 
    from next.urls import page_reverse, with_query
 
-
    def filtered_notes_url(*, tag: str | None = None, page: int = 1) -> str:
        base = page_reverse("notes")
        return with_query(base, tag=tag, page=page)
-
 
    filtered_notes_url(tag="python", page=2)
    # "/notes/?tag=python&page=2"
@@ -151,10 +149,8 @@ An action handler can return an ``HttpResponseRedirect`` to a reversed page URL.
 
    from django.http import HttpResponseRedirect
    from notes.forms import NoteForm
-
    from next.forms import action
    from next.urls import page_reverse
-
 
    @action("create_note", form_class=NoteForm)
    def create_note(form: NoteForm) -> HttpResponseRedirect:
@@ -170,10 +166,8 @@ A component can compute a URL through ``@component.context``.
    :caption: _components/note_link/component.py
 
    from notes.models import Note
-
    from next.components import component
    from next.urls import page_reverse
-
 
    @component.context("href")
    def href(note: Note) -> str:
@@ -189,7 +183,6 @@ Pagination
 
    from next.urls import with_query
 
-
    def page_link(request, page: int) -> str:
        return with_query(request.get_full_path(), page=page)
 
@@ -203,10 +196,8 @@ Both helpers are pure functions and are safe to call from tests without any Djan
 
    from next.urls import page_reverse, with_query
 
-
    def test_page_reverse_empty() -> None:
        assert page_reverse() == "/"
-
 
    def test_with_query_drops_none() -> None:
        assert with_query("/?a=1", a=None) == "/"

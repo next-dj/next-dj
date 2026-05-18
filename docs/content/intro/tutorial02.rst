@@ -14,7 +14,6 @@ Prerequisites
 
 You have finished :doc:`tutorial01`.
 The index page at ``/`` lists two seeded notes from the database.
-The same layout flow supports :doc:`tutorial03`, which factors UI into components, and :doc:`tutorial04`, which adds form actions on these routes.
 
 Walkthrough
 -----------
@@ -23,10 +22,10 @@ Add a Root Layout
 ~~~~~~~~~~~~~~~~~
 
 A ``layout.djx`` placed in any directory wraps every page below it.
-For the Notes application the most common layout sits next to the page tree at ``notes/routes/layout.djx``.
+For the Notes application the most common layout sits next to the page tree at ``notes/pages/layout.djx``.
 
 .. code-block:: jinja
-   :caption: notes/routes/layout.djx
+   :caption: notes/pages/layout.djx
 
    <!doctype html>
    <html>
@@ -50,10 +49,10 @@ The framework substitutes the body of each page into that block.
 Reverse names such as ``next:page_`` come from the file router.
 See :doc:`/content/topics/file-router` for how directories become URLs and :doc:`/content/topics/url-reversing` for helpers such as ``page_reverse``.
 
-Remove the now redundant HTML envelope from ``notes/routes/template.djx`` and keep only the page body.
+Remove the now redundant HTML envelope from ``notes/pages/template.djx`` and keep only the page body.
 
 .. code-block:: jinja
-   :caption: notes/routes/template.djx
+   :caption: notes/pages/template.djx
 
    <ul>
      {% for note in notes %}
@@ -69,19 +68,17 @@ Refresh ``http://127.0.0.1:8000/`` to confirm that the layout renders the title 
 Share Site Context
 ~~~~~~~~~~~~~~~~~~
 
-The layout references ``site_name`` and ``tagline``, but no page produces them yet.
+The layout references ``site_name`` and ``tagline``, but no page module produces them yet.
 Add a ``page.py`` next to ``layout.djx`` to publish those values with ``inherit_context=True`` so every descendant page can read them.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from next.pages import context
-
 
    @context("site_name", inherit_context=True)
    def site_name() -> str:
        return "Notes"
-
 
    @context("tagline", inherit_context=True)
    def tagline() -> str:
@@ -93,34 +90,29 @@ Without that flag the layout would still render but pages further down the tree 
 Add the Detail Page
 ~~~~~~~~~~~~~~~~~~~
 
-Create a new directory ``notes/routes/notes/[id]/``.
+Create a new directory ``notes/pages/notes/[id]/``.
 The bracketed segment is a URL parameter that the file router captures as ``id``.
 
 .. code-block:: python
-   :caption: notes/routes/notes/[id]/page.py
+   :caption: notes/pages/notes/[id]/page.py
 
    from django.shortcuts import get_object_or_404
    from notes.models import Note
-
    from next.pages import context
    from next.urls import DUrl
-
 
    @context("note")
    def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
-The ``DUrl["id", int]`` marker tells the :doc:`dependency injector </content/topics/dependency-injection>` to pull a captured URL value, coerce it, and pass it to the function.
-The first argument is the captured segment name, here ``id`` from the ``[id]`` directory.
-The second argument is the coercion type, here ``int``.
-The parameter name in the signature is free, ``note_id`` reads better than ``id`` which shadows the Python builtin.
-Because the parameter name differs from the captured segment, the segment name must be given explicitly as the first argument.
+The ``DUrl["id", int]`` marker tells the :doc:`dependency injector </content/topics/dependency-injection>` to read the ``id`` segment captured by the ``[id]`` directory and coerce it to ``int``.
+The segment name is given explicitly because the parameter ``note_id`` differs from the captured segment.
 The :func:`~django.shortcuts.get_object_or_404` shortcut is the standard Django way to fetch a row or return a 404 response.
 
 Add the matching template.
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/[id]/template.djx
+   :caption: notes/pages/notes/[id]/template.djx
 
    <article>
      <h2>{{ note.title }}</h2>
@@ -136,10 +128,10 @@ Trace the Layout Stack
 ~~~~~~~~~~~~~~~~~~~~~~
 
 The detail page renders inside the same root layout because every ancestor ``layout.djx`` wraps every descendant page.
-Drop a second layout inside ``notes/routes/notes/`` to wrap only the detail pages.
+Drop a second layout inside ``notes/pages/notes/`` to wrap only the detail pages.
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/layout.djx
+   :caption: notes/pages/notes/layout.djx
 
    <section>
      <nav>
@@ -155,24 +147,10 @@ Use Counts Across Pages
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Add a small bit of inherited context that the layout reads on every page.
+Append the ``note_count`` function to the existing ``notes/pages/page.py`` and add ``from notes.models import Note`` at the top of the file.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
-
-   from notes.models import Note
-
-   from next.pages import context
-
-
-   @context("site_name", inherit_context=True)
-   def site_name() -> str:
-       return "Notes"
-
-
-   @context("tagline", inherit_context=True)
-   def tagline() -> str:
-       return "A small tutorial application."
-
+   :caption: notes/pages/page.py
 
    @context("note_count", inherit_context=True)
    def note_count() -> int:
@@ -181,7 +159,7 @@ Add a small bit of inherited context that the layout reads on every page.
 Reference the count in the layout.
 
 .. code-block:: jinja
-   :caption: notes/routes/layout.djx
+   :caption: notes/pages/layout.djx
 
    <header>
      <a href="{% url 'next:page_' %}"><h1>{{ site_name }}</h1></a>
@@ -196,9 +174,9 @@ Checkpoint
 Your project tree looks like this.
 
 .. code-block:: text
-   :caption: notes/routes layout
+   :caption: notes/pages layout
 
-   routes/
+   pages/
      layout.djx
      page.py
      template.djx

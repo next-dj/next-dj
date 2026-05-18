@@ -14,7 +14,7 @@
     <div class="ndj-section-head">
       <h2 class="ndj-section-title">Core building blocks</h2>
       <p class="ndj-section-sub">
-        Six patterns next.dj adds, each shown in real project source.
+        The patterns next.dj adds, each shown in real project source.
       </p>
     </div>
 
@@ -39,7 +39,6 @@
           <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> notes.models <span class="c-kw">import</span> Note
 <span class="c-kw">from</span> next.pages <span class="c-kw">import</span> context
 <span class="c-kw">from</span> next.urls <span class="c-kw">import</span> DUrl
-
 
 <span class="c-deco">@context</span>(<span class="c-str">"note"</span>)
 <span class="c-kw">def</span> <span class="c-fn">note</span>(post_id: DUrl[<span class="c-kw">int</span>]) -> Note:
@@ -90,7 +89,6 @@
           <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> django.http <span class="c-kw">import</span> HttpResponseRedirect
 <span class="c-kw">from</span> next.forms <span class="c-kw">import</span> action
 <span class="c-kw">from</span> notes.forms <span class="c-kw">import</span> NoteForm
-
 
 <span class="c-deco">@action</span>(<span class="c-str">"create_note"</span>, form_class=NoteForm)
 <span class="c-kw">def</span> <span class="c-fn">create_note</span>(form: NoteForm) -> HttpResponseRedirect:
@@ -149,7 +147,6 @@
 <span class="c-kw">from</span> next.pages <span class="c-kw">import</span> context
 <span class="c-kw">from</span> next.urls <span class="c-kw">import</span> DUrl
 
-
 <span class="c-deco">@context</span>(<span class="c-str">"note"</span>)
 <span class="c-kw">def</span> <span class="c-fn">note</span>(
     request: HttpRequest,
@@ -178,7 +175,6 @@
           {{ mockbar("notes/tests/test_actions.py") }}
           <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> next.testing.client <span class="c-kw">import</span> NextClient
 
-
 <span class="c-kw">def</span> <span class="c-fn">test_create_note</span>():
     response = <span class="c-fn">NextClient</span>().<span class="c-fn">post_action</span>(
         <span class="c-str">"create_note"</span>, {<span class="c-str">"title"</span>: <span class="c-str">"Test"</span>, <span class="c-str">"body"</span>: <span class="c-str">""</span>},
@@ -188,5 +184,11 @@
       </article>
 
     </div>
+
+    <p class="ndj-feature-more">
+      These are the core blocks. next.dj ships more — layouts, signals,
+      autoreload, deployment, and the full reference live in the
+      <a href="{{ pathto('content/topics/index') }}">documentation</a>.
+    </p>
   </div>
 </section>

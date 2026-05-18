@@ -33,13 +33,10 @@ The framework emits these signals on hot rendering paths, so receivers stay sync
    :caption: obs/receivers.py
 
    from django.dispatch import receiver
-
    from next.pages.signals import page_rendered
    from next.components.signals import component_rendered
    from next.forms.signals import action_dispatched, form_validation_failed
-
    from .metrics import incr
-
 
    @receiver(page_rendered)
    def on_page_rendered(
@@ -51,17 +48,14 @@ The framework emits these signals on hot rendering paths, so receivers stay sync
        if duration_ms is not None:
            incr("pages.duration_ms_total", str(file_path), by=int(duration_ms) or 1)
 
-
    @receiver(component_rendered)
    def on_component_rendered(info: object = None, **_kwargs: object) -> None:
        name = getattr(info, "name", "<unknown>")
        incr("components.rendered", str(name))
 
-
    @receiver(action_dispatched)
    def on_action_dispatched(action_name: str | None = None, **_kwargs: object) -> None:
        incr("forms.action_dispatched", str(action_name))
-
 
    @receiver(form_validation_failed)
    def on_form_validation_failed(
@@ -84,7 +78,6 @@ The ``html_injected`` payload carries ``injected_bytes``, which is useful as a p
    :caption: obs/receivers.py
 
    from django.dispatch import receiver
-
    from next.static.signals import (
        asset_registered,
        backend_loaded,
@@ -94,23 +87,19 @@ The ``html_injected`` payload carries ``injected_bytes``, which is useful as a p
 
    from .metrics import incr
 
-
    @receiver(asset_registered)
    def on_asset_registered(**_kwargs: object) -> None:
        incr("static", "asset_registered")
 
-
    @receiver(collector_finalized)
    def on_collector_finalized(**_kwargs: object) -> None:
        incr("static", "collector_finalized")
-
 
    @receiver(html_injected)
    def on_html_injected(injected_bytes: int | None = None, **_kwargs: object) -> None:
        incr("static", "html_injected")
        if injected_bytes:
            incr("static", "injected_bytes_total", by=int(injected_bytes))
-
 
    @receiver(backend_loaded)
    def on_static_backend_loaded(**_kwargs: object) -> None:
@@ -127,16 +116,12 @@ The URL subsystem emits ``route_registered`` for each route discovered during a 
    :caption: obs/receivers.py
 
    from django.dispatch import receiver
-
    from next.urls.signals import route_registered, router_reloaded
-
    from .metrics import incr
-
 
    @receiver(route_registered)
    def on_route_registered(url_path: str | None = None, **_kwargs: object) -> None:
        incr("urls.route", str(url_path))
-
 
    @receiver(router_reloaded)
    def on_router_reloaded(**_kwargs: object) -> None:
@@ -151,7 +136,6 @@ Import the receivers module from ``AppConfig.ready`` so the ``@receiver`` decora
    :caption: obs/apps.py
 
    from django.apps import AppConfig
-
 
    class ObsConfig(AppConfig):
        name = "obs"

@@ -25,7 +25,6 @@ Reverse a Static Page
 
    from next.urls import page_reverse
 
-
    url = page_reverse()             # "/"
    url = page_reverse("blog")       # "/blog/"
    url = page_reverse("about/team") # "/about/team/"
@@ -37,7 +36,6 @@ Reverse a Captured Page
    :caption: captured params
 
    from next.urls import page_reverse
-
 
    url = page_reverse("notes/[id]", id=7)
    # "/notes/7/"
@@ -56,7 +54,6 @@ Add Query Parameters
 
    from next.urls import page_reverse, with_query
 
-
    url = with_query(page_reverse("search"), query="next.dj", page=2)
    # "/search/?query=next.dj&page=2"
 
@@ -70,12 +67,9 @@ Use Inside an Action Handler
    :caption: notes/routes/page.py
 
    from django.http import HttpResponseRedirect
-
    from next.forms import action
    from next.urls import page_reverse
-
    from notes.forms import NoteForm
-
 
    @action("create_note", form_class=NoteForm)
    def create_note(form: NoteForm) -> HttpResponseRedirect:
@@ -90,7 +84,6 @@ Use Inside a Component
 
    from next.components import component
    from next.urls import page_reverse
-
 
    @component.context("href")
    def href(note) -> str:

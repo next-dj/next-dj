@@ -138,8 +138,8 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    extend-a-default-backend
    test-a-page-with-actions
    test-a-component-in-isolation
-   split-settings-per-environment
    integrate-django-admin
-   observe-framework-signals
    scope-requests-per-tenant
+   observe-framework-signals
    stream-live-updates-with-sse
+   split-settings-per-environment

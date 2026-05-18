@@ -30,17 +30,13 @@ Pass the formset class as ``form_class``.
    :caption: notes/forms.py
 
    from django.forms import formset_factory
-
    from next.forms import ModelForm
-
    from notes.models import Note
-
 
    class NoteRowForm(ModelForm):
        class Meta:
            model = Note
            fields = ("title", "body")
-
 
    NoteFormSet = formset_factory(NoteRowForm, extra=3, can_delete=True)
 
@@ -49,11 +45,8 @@ Pass the formset class as ``form_class``.
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
-
    from next.forms import action
-
    from notes.forms import NoteFormSet
-
 
    @action("bulk_create_notes", form_class=NoteFormSet)
    def bulk_create_notes(form: NoteFormSet) -> HttpResponseRedirect:
@@ -104,7 +97,6 @@ The framework helper drops those initial values so untouched rows pass validatio
 
    from next.forms.formsets import cleanup_extra_initial
 
-
    def build_formset(initial) -> NoteFormSet:
        formset = NoteFormSet(initial=initial)
        cleanup_extra_initial(formset)
@@ -122,17 +114,13 @@ Use ``modelformset_factory`` for editing several existing instances.
    :caption: notes/forms.py
 
    from django.forms import modelformset_factory
-
    from next.forms import ModelForm
-
    from notes.models import Note
-
 
    class NoteForm(ModelForm):
        class Meta:
            model = Note
            fields = ("title", "body")
-
 
    NoteEditFormSet = modelformset_factory(Note, form=NoteForm, extra=0, can_delete=True)
 
@@ -141,19 +129,15 @@ Use ``modelformset_factory`` for editing several existing instances.
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
-
    from next.forms import action
    from next.pages import context
-
    from notes.forms import NoteEditFormSet
    from notes.models import Note
-
 
    @context("form")
    def edit_formset() -> NoteEditFormSet:
        formset = NoteEditFormSet(queryset=Note.objects.all())
        return formset
-
 
    @action("edit_all_notes", form_class=NoteEditFormSet)
    def edit_all_notes(form: NoteEditFormSet) -> HttpResponseRedirect:
@@ -203,9 +187,7 @@ The handler builds the formset and assigns it to the form before calling ``form.
    :caption: notes/forms.py
 
    from django.core.exceptions import ValidationError
-
    from next.forms import ModelForm
-
 
    class NoteForm(ModelForm):
        class Meta:
@@ -225,15 +207,12 @@ The handler builds the formset and assigns it to the form before calling ``form.
    from django.forms import inlineformset_factory
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
-
    from next.forms import action
    from next.urls import DUrl
-
    from notes.forms import NoteForm
    from notes.models import Note, Row
 
    RowFormSet = inlineformset_factory(Note, Row, fields=("label",), extra=1)
-
 
    @action("update_note", form_class=NoteForm)
    def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:

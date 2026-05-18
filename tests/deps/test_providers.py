@@ -1,18 +1,21 @@
 import importlib.util
 import inspect
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import pytest
 from django.http import HttpRequest
 
-from next.deps import resolver
+from next.deps import DependencyResolver, resolver
+from next.deps.markers import DependsProvider
 from next.deps.providers import ProviderRegistry
 from next.forms import DForm, FormProvider
-from next.pages.context import ContextByNameProvider
+from next.pages.context import ContextByDefaultProvider, ContextByNameProvider
 from next.urls import (
     DUrl,
     HttpRequestProvider,
+    QueryParamProvider,
     UrlByAnnotationProvider,
     UrlKwargsProvider,
 )
@@ -336,3 +339,37 @@ class TestProviderRegistry:
         reg.clear()
         assert len(reg) == 0
         assert reg.get_providers() == ()
+
+
+class TestProviderPriority:
+    """Built-in providers are consulted in an explicit, pinned priority order."""
+
+    EXPECTED_ORDER: ClassVar[list[str]] = [
+        "DependsProvider",
+        "ContextByDefaultProvider",
+        "ContextByNameProvider",
+        "FormProvider",
+        "HttpRequestProvider",
+        "UrlByAnnotationProvider",
+        "UrlKwargsProvider",
+        "QueryParamProvider",
+    ]
+
+    def test_builtin_priorities_are_pinned(self) -> None:
+        """Each built-in provider declares its documented priority value."""
+        assert DependsProvider.priority == 10
+        assert ContextByDefaultProvider.priority == 20
+        assert ContextByNameProvider.priority == 30
+        assert FormProvider.priority == 40
+        assert HttpRequestProvider.priority == 50
+        assert UrlByAnnotationProvider.priority == 60
+        assert UrlKwargsProvider.priority == 70
+        assert QueryParamProvider.priority == 80
+
+    def test_resolver_consults_builtins_in_priority_order(self) -> None:
+        """The lazy auto-registry yields the built-in providers in priority order."""
+        instance = DependencyResolver()
+        instance._ensure_providers()
+        names = [type(p).__name__ for p in instance._providers]
+        builtins = [name for name in names if name in self.EXPECTED_ORDER]
+        assert builtins == self.EXPECTED_ORDER

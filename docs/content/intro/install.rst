@@ -19,7 +19,6 @@ Install the Package
 -------------------
 
 Install the project package from PyPI.
-The published name matches ``name`` in the package metadata (``next.dj`` in ``pyproject.toml``).
 
 .. code-block:: bash
    :caption: shell
@@ -64,13 +63,12 @@ Open ``config/settings.py`` and register both ``next`` and your application in :
    ]
 
 The ``next`` app registers system checks, template tags, autoreload hooks, and signal connections at startup.
-Place it before your application so that those hooks run first.
 
 Configure NEXT_FRAMEWORK
 ------------------------
 
 Tell next.dj where to look for pages and components.
-The values below treat each Django application as a self-contained unit.
+With ``APP_DIRS`` set to ``True`` and ``DIRS`` left empty, each installed app carries its own ``pages/`` and ``_components/`` directories.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -81,28 +79,33 @@ The values below treat each Django application as a self-contained unit.
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
                "APP_DIRS": True,
-               "PAGES_DIR": "routes",
+               "PAGES_DIR": "pages",
                "OPTIONS": {"context_processors": []},
            }
        ],
        "DEFAULT_COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
+               "DIRS": [],
                "COMPONENTS_DIR": "_components",
            }
        ],
    }
 
-The built-in default for ``PAGES_DIR`` is ``pages``.
-This guide sets it to ``routes`` as a naming convention, so the tutorial uses ``routes/`` throughout.
+``PAGES_DIR`` is set to ``pages``, the built-in default, so next.dj scans a ``pages/`` directory inside each app.
+``_components`` is the per-application folder the component backend scans, covered in :doc:`tutorial03`.
 A ``FileRouterBackend`` entry must carry an ``OPTIONS`` key.
 
 Keep ``django.template.context_processors.request`` in the ``OPTIONS`` of your ``TEMPLATES`` setting.
 A fresh ``django-admin startproject`` already includes it, and ``manage.py check`` reports ``next.E019`` if it is missing.
-Omitting it makes ``manage.py check`` report ``next.E026``.
 
 Mount the Router
 ----------------
+
+.. note::
+
+   Without this ``include("next.urls")`` edit Django never reaches the file router.
+   Every page returns a 404 until the line is in place.
 
 Forward all unmatched URLs to next.dj by adding one line to ``config/urls.py``.
 
@@ -116,7 +119,7 @@ Forward all unmatched URLs to next.dj by adding one line to ``config/urls.py``.
    ]
 
 URLs declared above the ``include`` keep working.
-Anything not matched by Django falls through to the file router, which resolves it against your ``routes/`` tree.
+Anything not matched by Django falls through to the file router, which resolves it against your ``pages/`` tree.
 
 Create Your First Page
 ----------------------
@@ -124,17 +127,16 @@ Create Your First Page
 Create one page in the ``notes`` application to confirm the wiring.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from next.pages import context
-
 
    @context("title")
    def page_title() -> str:
        return "Notes"
 
 .. code-block:: jinja
-   :caption: notes/routes/template.djx
+   :caption: notes/pages/template.djx
 
    <!doctype html>
    <html>
@@ -143,7 +145,7 @@ Create one page in the ``notes`` application to confirm the wiring.
      </body>
    </html>
 
-The directory ``notes/routes/`` is the page root for the application.
+The directory ``notes/pages/`` is the page root for the application.
 The ``page.py`` plus ``template.djx`` pair turns the empty path into a rendered URL.
 
 Run the Server
@@ -162,8 +164,7 @@ Open ``http://127.0.0.1:8000/`` and you should see the ``Notes`` heading.
 Verify the Install
 ------------------
 
-next.dj contributes several Django system checks.
-Run them once to confirm the configuration matches the framework expectations.
+Run the Django system checks once to confirm the configuration matches the framework expectations.
 
 .. code-block:: bash
    :caption: shell

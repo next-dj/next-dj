@@ -97,6 +97,8 @@ class HttpRequestProvider(RegisteredParameterProvider):
     without giving up dependency injection.
     """
 
+    priority = 50
+
     def can_handle(self, param: inspect.Parameter, context: object) -> bool:
         """Return True when the parameter expects `HttpRequest` and a request exists."""
         if getattr(context, "request", None) is None:
@@ -125,6 +127,8 @@ class HttpRequestProvider(RegisteredParameterProvider):
 
 class UrlByAnnotationProvider(RegisteredParameterProvider):
     """Fill `DUrl[...]` parameters from `url_kwargs`."""
+
+    priority = 60
 
     def can_handle(self, param: inspect.Parameter, _context: object) -> bool:
         """Return True when the parameter uses a `DUrl` annotation."""
@@ -158,6 +162,8 @@ def _url_type_hint(args: tuple[object, ...]) -> type:
 class UrlKwargsProvider(RegisteredParameterProvider):
     """Fill parameters by name from `url_kwargs`."""
 
+    priority = 70
+
     def can_handle(self, param: inspect.Parameter, context: object) -> bool:
         """Return True when `url_kwargs` contains this parameter name."""
         return param.name in (getattr(context, "url_kwargs", {}) or {})
@@ -178,6 +184,8 @@ class UrlKwargsProvider(RegisteredParameterProvider):
 
 class QueryParamProvider(RegisteredParameterProvider):
     """Resolve `DQuery[...]` parameters from `request.GET`."""
+
+    priority = 80
 
     def can_handle(
         self,

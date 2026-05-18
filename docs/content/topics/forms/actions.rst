@@ -20,11 +20,8 @@ The Decorator
    :caption: notes/routes/page.py
 
    from django.http import HttpResponseRedirect
-
    from next.forms import action
-
    from notes.forms import NoteForm
-
 
    @action("create_note", form_class=NoteForm)
    def create_note(form: NoteForm) -> HttpResponseRedirect:
@@ -61,11 +58,9 @@ Two distinct names that hash to the same UID raise ``ImproperlyConfigured`` at i
 
    from next.forms import action
 
-
    @action("save", namespace="notes")
    def save_note(form):
        form.save()
-
 
    @action("save", namespace="comments")
    def save_comment(form):
@@ -85,16 +80,13 @@ The handler can take any parameters the dependency injector knows how to resolve
 
    from django.conf import settings
    from django.http import HttpRequest, HttpResponseRedirect
-
    from next.forms import action
    from next.urls import DUrl
-
 
    @action("simple", form_class=NoteForm)
    def simple(form: NoteForm) -> HttpResponseRedirect:
        form.save()
        return HttpResponseRedirect("/")
-
 
    @action("with_request", form_class=NoteForm)
    def with_request(form: NoteForm, request: HttpRequest) -> HttpResponseRedirect:
@@ -102,13 +94,11 @@ The handler can take any parameters the dependency injector knows how to resolve
        form.save()
        return HttpResponseRedirect("/")
 
-
    @action("with_url", form_class=NoteForm)
    def with_url(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
        form.instance = Note.objects.get(pk=note_id)
        form.save()
        return HttpResponseRedirect("/")
-
 
    @action("gated_create", form_class=NoteForm)
    def gated_create(form: NoteForm, request: HttpRequest) -> HttpResponseRedirect:
@@ -141,6 +131,8 @@ None.
    For a handler-only action it returns an empty HTTP 204 response.
    Return a redirect or a string explicitly when a handler-only action needs a visible result.
 
+.. _topics-forms-actions-no-form-class:
+
 Actions Without form_class
 --------------------------
 
@@ -150,7 +142,6 @@ Drop ``form_class`` to handle non form POST submissions such as confirmation but
    :caption: confirmation action
 
    from next.forms import action
-
 
    @action("delete_note")
    def delete_note(note_id: DUrl["id", int]) -> HttpResponseRedirect:
@@ -173,13 +164,10 @@ An edit handler additionally loads the instance the form updates.
    :caption: edit flow
 
    from django.shortcuts import get_object_or_404
-
    from next.forms import action
    from next.urls import DUrl
-
    from notes.forms import NoteForm
    from notes.models import Note
-
 
    @action("update_note", form_class=NoteForm)
    def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
@@ -210,19 +198,15 @@ The factory is dependency-resolved, so it can declare ``request: HttpRequest``, 
    :caption: notes/routes/login/page.py
 
    from typing import Any
-
    from django.contrib.auth import login as auth_login
    from django.contrib.auth.forms import AuthenticationForm
    from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
-
    from next.forms import action
-
 
    def login_form_factory(
        request: HttpRequest,
    ) -> tuple[type[AuthenticationForm], dict[str, Any]]:
        return AuthenticationForm, {"request": request}
-
 
    @action("login", form_class=login_form_factory)
    def login(request: HttpRequest, form: AuthenticationForm) -> HttpResponse:
@@ -238,16 +222,12 @@ A factory that returns a bare class picks the form per request without changing 
    :caption: choosing a class per request
 
    from django.http import HttpResponse, HttpResponseRedirect
-
    from next.forms import action
    from next.urls import DUrl
-
    from reports.forms import DailyReportForm, WeeklyReportForm
-
 
    def report_form_factory(kind: DUrl["kind", str]) -> type:
        return WeeklyReportForm if kind == "weekly" else DailyReportForm
-
 
    @action("submit_report", form_class=report_form_factory)
    def submit_report(form) -> HttpResponse:
@@ -274,13 +254,11 @@ Each lives at its own URL so the dispatcher can tell them apart.
 
    from next.forms import action
 
-
    @action("update_note", form_class=NoteForm)
    def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
        form.instance = Note.objects.get(pk=note_id)
        form.save()
        return HttpResponseRedirect("/")
-
 
    @action("delete_note")
    def delete_note(note_id: DUrl["id", int]) -> HttpResponseRedirect:
@@ -315,7 +293,6 @@ The action stays valid wherever the component renders.
    :caption: _components/comment_box/component.py
 
    from next.forms import action
-
 
    @action("post_comment", form_class=CommentForm, namespace="comments")
    def post_comment(form: CommentForm) -> HttpResponseRedirect:

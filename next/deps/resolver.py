@@ -45,12 +45,15 @@ class DependencyResolver:
         self._resolve_call_stack: list[Callable[..., Any]] = []
 
     def _get_providers(self) -> list[ParameterProvider]:
-        """Instantiate every registered `RegisteredParameterProvider` subclass."""
+        """Instantiate registered subclasses in ascending `priority` order."""
         result: list[ParameterProvider] = []
-        for cls in RegisteredParameterProvider._registry:
+        ordered = sorted(
+            RegisteredParameterProvider._registry, key=lambda cls: cls.priority
+        )
+        for cls in ordered:
             sig = inspect.signature(cls)
             if "resolver" in sig.parameters:
-                result.append(cls(resolver=self))
+                result.append(cast("Any", cls)(resolver=self))
             else:
                 result.append(cls())
         return result

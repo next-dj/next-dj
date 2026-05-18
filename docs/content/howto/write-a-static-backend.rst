@@ -54,9 +54,7 @@ When the URL itself must change, subclass ``StaticFilesBackend`` and override th
 
    from next.static import StaticFilesBackend
 
-
    CDN = "https://cdn.example.com"
-
 
    class CdnBackend(StaticFilesBackend):
        def render_link_tag(self, url, *, request=None) -> str:
@@ -91,7 +89,6 @@ A renderer can read the request to vary its output per visitor.
 
    from next.static import StaticFilesBackend
 
-
    class TenantBackend(StaticFilesBackend):
        def render_link_tag(self, url, *, request=None) -> str:
            prefix = getattr(getattr(request, "tenant", None), "cdn", "")
@@ -112,9 +109,7 @@ Leave absolute URLs untouched.
    from next.static import StaticFilesBackend
    from notes.access import get_active_tenant
 
-
    PREFIX_FORMAT = "/_t/{slug}"
-
 
    class TenantPrefixStaticBackend(StaticFilesBackend):
        def render_link_tag(self, url, *, request=None) -> str:
@@ -125,7 +120,6 @@ Leave absolute URLs untouched.
 
        def render_module_tag(self, url, *, request=None) -> str:
            return super().render_module_tag(_prefixed(url, request))
-
 
    def _prefixed(url, request):
        tenant = get_active_tenant(request) if request is not None else None

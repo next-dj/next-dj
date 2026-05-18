@@ -22,11 +22,8 @@ Write the backend.
    :caption: notes/backends.py
 
    from django.http import HttpRequest, HttpResponse
-
    from next.forms import RegistryFormActionBackend
-
    from notes.models import AuditEntry
-
 
    class AuditedFormActionBackend(RegistryFormActionBackend):
        """Registry backend that writes an audit row per dispatch."""
@@ -68,9 +65,7 @@ Return an ``HttpResponse`` before calling ``super().dispatch`` to short circuit.
    :caption: notes/backends.py
 
    from django.http import HttpResponse
-
    from next.forms import RegistryFormActionBackend
-
 
    class RateLimitedBackend(RegistryFormActionBackend):
        def dispatch(self, request, uid) -> HttpResponse:
