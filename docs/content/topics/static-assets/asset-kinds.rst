@@ -160,9 +160,9 @@ Customise the rendered output through the ``module_tag`` key in the backend ``OP
 System Checks
 -------------
 
-The static subsystem contributes Django system checks.
-A misregistered kind surfaces during ``uv run python manage.py check``.
-The static checks use the codes ``next.E036``, ``next.E037``, ``next.E038``, ``next.W030``, ``next.W031``, and ``next.W042``.
+The static system checks validate the backend configuration only.
+They do not validate kind registration.
+A bad call to ``default_kinds.register`` raises ``ValueError`` at startup, before any check runs.
 
 Common Patterns
 ---------------

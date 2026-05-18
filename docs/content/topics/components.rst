@@ -26,12 +26,12 @@ Component Shapes
 The backend recognises two shapes.
 
 Simple component.
-   A single ``component.djx`` file in a component folder.
-   The folder name is the component name.
+   A single ``.djx`` file placed directly in a component namespace directory.
+   The file stem is the component name.
    No Python module is required.
 
 Composite component.
-   A folder with both ``component.djx`` and ``component.py``.
+   A folder containing ``component.py``, ``component.djx``, or both.
    The Python module declares context functions and optional render logic.
    The folder name remains the component name.
 
@@ -65,7 +65,7 @@ When the URL router walks the page trees it skips directories that match a confi
 The backend recognises three sources for components.
 
 App page trees.
-   The URL router walk registers each page tree's component folders with the components backend.
+   As the URL router walks each page tree it calls ``register_components_folder_from_router_walk``, which pushes every ``COMPONENTS_DIR`` folder it finds into the ``FileComponentsBackend``.
    A folder named ``COMPONENTS_DIR`` under that tree is a components root for the application.
 
 Project directories.
@@ -103,7 +103,7 @@ This prevents accidental collisions across apps that happen to use the same name
 Two scope rules apply.
 
 Local scope.
-   Components in the same page tree are visible from every template in that tree.
+   Components are visible to templates in their own directory and below, scoped by the folder that holds them.
 
 Global scope.
    Components in directories listed under ``DIRS`` are visible from every template, regardless of tree.
@@ -290,9 +290,18 @@ Use ``@component.context("key")`` to publish a value under that key for the temp
 Component context functions take :doc:`DI parameters <dependency-injection>` the same way page context does.
 The framework resolves parameters from the surrounding template scope, from URL kwargs, from the request, or from any registered provider.
 
+.. note::
+
+   Registration raises ``ValueError`` in two cases.
+   The first is a key reserved for dependency injection, such as ``request``.
+   The second is a duplicate registration, where the same key, or an unkeyed callable, is registered twice in one ``component.py`` with a different function.
+
 Pass ``serialize=True`` and optionally ``serializer=`` to include the return value in ``window.Next.context``.
 The behaviour is identical to ``@context`` on a page module.
 See :doc:`static-assets/js-context` for the serialization options.
+
+An unkeyed ``@component.context`` returning a dict serializes each key of that dict separately.
+A keyed ``@component.context`` serializes its return value under the given key.
 
 Co-located Static Assets
 ------------------------
@@ -320,11 +329,17 @@ See :doc:`static-assets/deduplication` for the dedup rules.
 Module Loading
 --------------
 
-By default the framework imports every discovered ``component.py`` during ``AppConfig.ready``, so the side effects of ``@component.context`` are visible from the first request.
+A configured component root is a ``DIRS`` entry of a ``DEFAULT_COMPONENT_BACKENDS`` backend.
+By default the framework imports every ``component.py`` found under those roots during ``AppConfig.ready``.
+The bulk import runs the side effects of ``@component.context`` so they are visible from the first request.
 A ``component.py`` may also register a form action with ``@action``, which the same import makes visible.
 See :doc:`/content/topics/forms/actions` for the action decorator.
-Set ``LAZY_COMPONENT_MODULES`` to skip the bulk import for modules discovered only from configured component roots.
-Those modules run on first resolve instead.
+
+A ``component.py`` inside a ``_components`` folder beside page files is not part of this bulk import.
+The URL router imports those modules as it walks the page trees and generates URL patterns.
+
+Set ``LAZY_COMPONENT_MODULES`` to skip the bulk import for modules under configured component roots, leaving them to import on first resolve.
+See :ref:`ref-settings` for the exact behaviour.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -333,11 +348,6 @@ Those modules run on first resolve instead.
        "LAZY_COMPONENT_MODULES": True,
    }
 
-Discovery still runs during ``AppConfig.ready`` so the visibility scope tree is built before any component resolves.
-Modules discovered from ``DIRS`` entries defer their import until the component first resolves.
-Modules discovered from ``_components`` folders next to page files still load during the router filesystem walk when URL patterns are generated.
-See :ref:`ref-settings` for the exact split between the two paths.
-
 Hot Reload
 ----------
 
@@ -345,7 +355,10 @@ The development server picks up new and changed component folders without a rest
 Each component root contributes its own watch spec.
 A change inside the folder fires the autoreload pipeline and the runserver reloads with the updated component set.
 
-The framework also emits four signals during the lifecycle.
+Lifecycle Signals
+-----------------
+
+The framework emits four signals during the component lifecycle.
 
 - ``component_registered`` fires when an individual component enters the registry.
 - ``components_registered`` fires once after a bulk discovery, with a list of every component that registered during the cycle.
@@ -396,6 +409,8 @@ Return an empty string to render nothing, which turns the component into a serve
 A ``render`` function takes over completely.
 The component template and ``@component.context`` callables do not run for that component.
 The function may return a string or an :class:`~django.http.HttpResponse`.
+
+When ``component.py`` defines no ``render`` function, the component renders its template and runs every ``@component.context`` callable as usual.
 
 .. code-block:: python
    :caption: _components/feature_guard/component.py

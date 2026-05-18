@@ -212,6 +212,7 @@ A co-located ``.vue`` single-file component reads it on mount and opens one ``Ev
    });
 
 Register the ``.vue`` extension as a custom asset kind from ``AppConfig.ready`` so discovery picks up the co-located file and emits a module script tag.
+A raw ``.vue`` file is not browser-loadable, so the asset is served only after a build step compiles it to a browser-loadable module.
 
 .. code-block:: python
    :caption: polls/apps.py

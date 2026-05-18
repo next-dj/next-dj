@@ -16,7 +16,7 @@ Check Registration
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
 The imported modules are ``next.conf.checks``, ``next.pages.checks``, ``next.urls.checks``, ``next.components.checks``, ``next.forms.checks``, ``next.server.checks``, and ``next.static.checks``.
 
-Most of these modules register checks. ``next.server.checks`` is a placeholder with no registered checks yet.
+Most of these modules register checks. ``next.server.checks`` registers no Django system checks.
 The dependency injection layer contributes no Django system checks.
 
 Shared Helpers
@@ -69,7 +69,7 @@ Configuration
 Server
 ~~~~~~
 
-``next.server.checks`` is a placeholder module with no registered checks yet, as noted under Check Registration.
+``next.server.checks`` registers no Django system checks, as noted under Check Registration.
 
 Dependency Injection
 ~~~~~~~~~~~~~~~~~~~~

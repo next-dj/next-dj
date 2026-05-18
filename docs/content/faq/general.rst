@@ -50,24 +50,8 @@ Django's ``manage.py`` plus the framework system checks cover the operational su
 Which symbols are safe to depend on
 ------------------------------------
 
-Three tiers describe the public API.
-
-Stable.
-   Decorators, form base classes, template tags, marker types, and the documented settings keys.
-   Import these from the top-level ``next.*`` packages.
-
-Advanced.
-   Backend base classes, factory helpers, and frozen spec types.
-   Their signatures are intentionally stable.
-   Use them when writing a custom backend or a custom renderer.
-
-Internal hooks.
-   Symbols whose names start with a single underscore, plus private submodule internals.
-   Some packages re-export these names for testing and backend authoring convenience, but that does not make them part of the public API.
-   Application code must not import them.
-   A backend or extension author may use them when extending the dispatch or discovery pipelines, accepting that the names can change without notice.
-
-See :doc:`/content/ref/forms` for a concrete example of how the tier model applies to ``next.forms``.
+Anything exported from a top-level ``next.*`` package is safe to import, while symbols whose names start with a single underscore are internal and may change without notice.
+See :doc:`/content/ref/forms` for a concrete example of how the API tiers apply to ``next.forms``.
 
 See Also
 --------

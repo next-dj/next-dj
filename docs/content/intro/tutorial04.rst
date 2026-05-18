@@ -244,7 +244,8 @@ How Re-render Works
 ~~~~~~~~~~~~~~~~~~~
 
 A failing validation re-renders the origin page rather than producing an error page.
-The re-render keeps the request scoped DI cache and runs the same context functions, so the surrounding page content stays consistent.
+The re-render keeps the request scoped DI cache, so it reuses the values the page already computed for this request.
+It runs the same context functions, so the surrounding page content stays consistent.
 See :doc:`/content/topics/forms/validation-rerender` for the full re-render contract.
 
 You can confirm this by submitting the create form with an empty title.

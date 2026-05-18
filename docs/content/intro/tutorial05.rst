@@ -209,7 +209,7 @@ Open ``http://127.0.0.1:8000/about/`` and confirm that the new page is served wi
 .. note::
 
    The autoreloader emits a ``router_reloaded`` signal each time the route set changes.
-   Long-running processes such as websocket subscribers listen for that signal to refresh cached references.
+   See :doc:`/content/howto/observe-framework-signals` for how to listen for it.
 
 Checkpoint
 ----------

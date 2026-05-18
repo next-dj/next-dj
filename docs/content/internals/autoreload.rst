@@ -107,10 +107,8 @@ Signals
 -------
 
 The autoreload pipeline fires ``watch_specs_ready`` after the watch-spec aggregation completes.
-The sender is the ``iter_all_autoreload_watch_specs`` function itself, so a receiver connected with ``sender=iter_all_autoreload_watch_specs`` fires only for the watch-spec aggregation.
-A call to ``router_manager.reload`` fires ``router_reloaded`` after each in process route rebuild.
+The sender is the ``iter_all_autoreload_watch_specs`` function itself, so a receiver connected with ``sender=iter_all_autoreload_watch_specs`` fires only for that aggregation.
 
-Long lived processes subscribe to ``router_reloaded`` to refresh cached URL references.
 Custom routers subscribe to ``watch_specs_ready`` to register additional patterns.
 
 Extension Points

@@ -8,7 +8,7 @@ This page maps them and shows how signals flow between them.
 
 .. note::
 
-   If you want to know *how to extend* the framework rather than *how it works inside*, read :doc:`/content/topics/extending` first.
+   If you want to know how to extend the framework rather than how it works inside, read :doc:`/content/topics/extending` first.
    That page covers the five extension mechanisms and the decision tree for choosing between them.
    The pages here explain the implementation.
 

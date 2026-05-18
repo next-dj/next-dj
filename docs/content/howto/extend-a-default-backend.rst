@@ -1,7 +1,7 @@
 .. _howto-extend-backend:
 
-Patch a Default Backend Entry
-=============================
+Extend a Default Backend Entry
+==============================
 
 Problem
 -------

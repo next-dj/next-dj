@@ -105,7 +105,8 @@ The collector deduplicates inline entries by the rendered body, so two identical
 Placement Rules
 ---------------
 
-Place ``{% collect_styles %}`` and ``{% collect_scripts %}`` exactly once each in the layout chain.
+Place each ``{% collect_styles %}`` and ``{% collect_scripts %}`` tag once in the layout chain.
+A token that appears twice is replaced in both spots.
 The recommended placement is the outermost layout.
 
 - ``{% collect_styles %}`` inside ``<head>``.
@@ -128,6 +129,7 @@ Customise it through the backend ``OPTIONS`` keys ``css_tag``, ``js_tag``, and `
                "OPTIONS": {
                    "css_tag": '<link rel="stylesheet" href="{url}" media="screen">',
                    "js_tag": '<script src="{url}" defer></script>',
+                   "module_tag": '<script type="module" src="{url}"></script>',
                },
            }
        ]

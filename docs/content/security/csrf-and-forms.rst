@@ -19,7 +19,8 @@ Django's :doc:`CsrfViewMiddleware <django:ref/csrf>` validates the token on ever
 A missing or stale token returns HTTP 403.
 
 The tag also depends on ``request`` existing in the template context so Django can render the CSRF field.
-If ``manage.py check`` reports ``next.E019``, add ``django.template.context_processors.request`` to your template ``OPTIONS`` (or an equivalent processor) so layouts receive ``request``.
+If ``manage.py check`` reports ``next.E019``, add ``django.template.context_processors.request`` to the ``OPTIONS.context_processors`` list of your Django ``TEMPLATES`` entry.
+An equivalent processor that supplies ``request`` works as well, so layouts receive ``request``.
 
 Origin Validation
 -----------------

@@ -18,7 +18,7 @@ Resolver
    :members:
    :exclude-members: resolver
 
-.. data:: next.deps.resolver
+.. data:: next.deps.resolver.resolver
 
    The shared ``DependencyResolver`` singleton used by pages, form actions, and component renderers throughout the framework.
    Import it as ``from next.deps import resolver`` when you need to call ``resolver.resolve_dependencies`` from a custom provider or a test helper.
@@ -69,7 +69,8 @@ See :doc:`signals` for the ``provider_registered`` signal.
 Checks
 ------
 
-``next.deps.checks`` is reserved for the dependency injection system checks and is currently empty.
+``next.deps.checks`` is the home for dependency injection system checks.
+The dependency injection layer registers no Django system checks.
 
 See Also
 --------

@@ -25,13 +25,14 @@ The block form is the standard shape.
      <button type="submit">Save</button>
    {% endform %}
 
-The tag does five things.
+The tag does six things.
 
 1. Looks up the action name in the registry and resolves its UID.
 2. Emits a ``<form method="post">`` element with ``action`` set to ``/_next/form/<uid>/``.
 3. Emits a hidden ``csrfmiddlewaretoken`` input with the current CSRF token.
 4. Emits a hidden ``_next_form_page`` field with the absolute path to the current ``page.py``.
-5. Publishes a ``form`` variable inside the block, either the unbound form on a GET or the bound form on a re-rendered failure.
+5. Emits a hidden ``_next_form_origin`` field with the request path of the rendering page, consumed by ``redirect_to_origin``.
+6. Publishes a ``form`` variable inside the block, either the unbound form on a GET or the bound form on a re-rendered failure.
 
 The Action Reference
 --------------------
@@ -209,16 +210,7 @@ Render them inline with each field or as a list at the top of the form.
 Empty Form Bodies
 -----------------
 
-A tag block can be empty when the action does not need form fields.
-
-.. code-block:: jinja
-   :caption: confirmation button
-
-   {% form @action="delete_note" %}
-     <button type="submit" class="danger">Delete</button>
-   {% endform %}
-
-The submission still triggers the dispatcher and runs the handler.
+A tag block with only a submit button is the confirmation pattern covered in :ref:`Actions Without form_class <topics-forms-actions>`.
 
 Common Patterns
 ---------------

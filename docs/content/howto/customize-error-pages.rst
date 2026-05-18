@@ -12,6 +12,8 @@ Solution
 --------
 
 Error handling sits in Django's URL resolver, not in the file router.
+The file router has no error-page convention of its own.
+A ``page.py`` that raises ``Http404`` or an unhandled exception routes through Django's own handlers.
 Define ``handler404`` and ``handler500`` in the root URLconf, or rely on the convention that Django renders ``404.html`` and ``500.html`` from the template directories when ``DEBUG`` is off.
 The file router include stays unchanged.
 

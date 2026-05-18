@@ -32,31 +32,24 @@ Dispatch endpoint.
 Re-render pipeline.
    On validation failure the framework renders the origin page again with the bound form in scope.
 
-The pages in this section cover each piece in depth.
-
 Concepts
 --------
 
 Origin Page
 ~~~~~~~~~~~
 
-The dispatcher needs to know which page rendered the form.
-The ``{% form %}`` tag emits a hidden ``_next_form_page`` field with the absolute path to the current ``page.py``.
-A submission without that field, or with a path outside ``BASE_DIR``, returns HTTP 400.
+The ``{% form %}`` tag emits a hidden ``_next_form_page`` field with the absolute path to the current ``page.py``, so the dispatcher knows which page to re-render on failure.
 
 Action Name
 ~~~~~~~~~~~
 
-Every action has a unique name.
-The framework hashes the name into a 16 character UID that becomes part of the URL.
-A namespace prefix keeps short names from colliding across apps.
+The framework hashes each action name into a 16 character UID that becomes part of the dispatch URL.
 See :doc:`actions` for the namespace syntax and the ``next.E041`` collision rules.
 
 Handler Signature
 ~~~~~~~~~~~~~~~~~
 
-A handler receives only the parameters it declares.
-The :doc:`dependency resolver </content/topics/dependency-injection>` fills each parameter from a provider.
+The :doc:`dependency resolver </content/topics/dependency-injection>` fills each handler parameter from a provider, and the handler receives only the parameters it declares.
 
 .. code-block:: python
    :caption: handler with multiple parameters
@@ -76,24 +69,19 @@ The :doc:`dependency resolver </content/topics/dependency-injection>` fills each
        form.save()
        return HttpResponseRedirect("/")
 
-The handler does not see anything it does not ask for.
-
 Validation Outcomes
 ~~~~~~~~~~~~~~~~~~~
 
 A submission has three outcomes.
 
 Valid form.
-   The dispatcher calls the handler with the bound form.
-   The return value travels back to the client.
+   The dispatcher calls the handler with the bound form and its return value travels back to the client.
 
 Invalid form.
-   The dispatcher returns the rendered origin page with the bound form in scope and an HTTP 200 status.
-   No handler is called.
+   The dispatcher re-renders the origin page with the bound form in scope and an HTTP 200 status, with no handler called.
 
 Bad request.
    A submission missing the ``_next_form_page`` field or pointing at an invalid origin page returns HTTP 400.
-   A successful handler that returns a response is unaffected.
 
 Where to Declare Actions
 ------------------------

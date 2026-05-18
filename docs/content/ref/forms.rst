@@ -76,8 +76,8 @@ Markers
 Dispatch
 ~~~~~~~~
 
-``FormActionDispatch`` and ``build_form_namespace_for_action`` are the stable public members of this module.
-The underscore-prefixed helpers (``_bind_form_for_post``, ``_normalize_handler_response``, and similar symbols) are internal hooks documented here for reference.
+``FormActionDispatch`` and ``build_form_namespace_for_action`` are the public members of this module, in the Advanced tier described above.
+The underscore-prefixed helpers (``_bind_form_for_post``, ``_normalize_handler_response``, and similar symbols) are internal hooks listed in ``next.forms.dispatch.__all__`` and excluded from the autodoc surface below.
 Treat them as the ``Internal hooks`` tier described above.
 
 .. automodule:: next.forms.dispatch

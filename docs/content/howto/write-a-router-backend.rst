@@ -114,6 +114,8 @@ Catch ``django.db.utils.DatabaseError`` because the backend can run before migra
        ]
 
 Each alias gets a unique reverse name of ``wiki_article_<slug>`` so templates can call :func:`~django.urls.reverse` per article.
+Patterns mounted through ``include("next.urls")`` carry the ``next`` application namespace, so the lookup is ``reverse("next:wiki_article_<slug>")``.
+Names a custom backend registers land in the same ``next`` namespace.
 
 Register the Backend
 ~~~~~~~~~~~~~~~~~~~~~
@@ -171,7 +173,7 @@ Verification
 ------------
 
 Add a row to the underlying table.
-The next request resolves ``/wiki/<slug>/`` and ``reverse("wiki_article_<slug>")`` succeeds without a server restart.
+The next request resolves ``/wiki/<slug>/`` and ``reverse("next:wiki_article_<slug>")`` succeeds without a server restart.
 
 Run ``uv run python manage.py check`` and confirm the backend is registered.
 

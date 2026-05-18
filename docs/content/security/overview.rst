@@ -54,6 +54,7 @@ XSS.
 SQL injection.
    The :doc:`Django ORM <django:topics/db/queries>` uses parameterised queries.
    Raw SQL inside a custom provider must use ``params``.
+   See :doc:`di-and-untrusted-input` for the custom-provider validation pattern.
 
 Mass assignment.
    Use ``ModelForm.Meta.fields`` to whitelist editable fields.

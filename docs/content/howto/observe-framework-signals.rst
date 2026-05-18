@@ -6,7 +6,8 @@ Observe Framework Signals
 Problem
 -------
 
-You run next.dj in production and want metrics, tracing, or audit records driven by what the framework actually does on every request, such as page renders, component lookups, action dispatches, and asset injection.
+You run next.dj in production and want metrics, tracing, or audit records driven by what the framework actually does on every request.
+The events worth observing include page renders, component lookups, action dispatches, and asset injection.
 
 Solution
 --------

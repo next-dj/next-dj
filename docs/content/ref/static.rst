@@ -45,11 +45,7 @@ Manager
 Scripts
 ~~~~~~~
 
-``NextScriptBuilder.from_options`` reads the ``NEXT_JS_OPTIONS`` dict and accepts the keys ``preload_template``, ``script_tag_template``, ``init_template``, and ``policy``.
-
-The ``ScriptInjectionPolicy`` members carry the string values ``"auto"``, ``"disabled"``, and ``"manual"``.
-The policy is configured through ``NEXT_JS_OPTIONS["policy"]``, given either as a ``ScriptInjectionPolicy`` member or as one of those string values.
-Any other value raises ``ValueError`` when the builder is constructed.
+See :doc:`/content/topics/static-assets/js-context` for the runtime script options and the ``NEXT_JS_OPTIONS`` keys.
 
 .. automodule:: next.static.scripts
    :members:
@@ -57,8 +53,7 @@ Any other value raises ``ValueError`` when the builder is constructed.
 JS Context Serializer
 ~~~~~~~~~~~~~~~~~~~~~
 
-``StaticCollector.add_js_context`` and ``NextScriptBuilder.init_script`` delegate value encoding to the configured ``JsContextSerializer``.
-``resolve_serializer`` reads ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` on every call and verifies the resolved instance satisfies the protocol.
+See :doc:`/content/topics/static-assets/js-context` for how the serializer is chosen and configured.
 
 .. automodule:: next.static.serializers
    :members:

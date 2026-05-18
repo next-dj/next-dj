@@ -63,11 +63,13 @@ Two distinct names that hash to the same UID raise ``ImproperlyConfigured`` at i
 
 
    @action("save", namespace="notes")
-   def save_note(form): ...
+   def save_note(form):
+       form.save()
 
 
    @action("save", namespace="comments")
-   def save_comment(form): ...
+   def save_comment(form):
+       form.save()
 
 Templates address each action through ``@action="notes:save"`` and ``@action="comments:save"``.
 
@@ -209,8 +211,9 @@ The factory is dependency-resolved, so it can declare ``request: HttpRequest``, 
 
    from typing import Any
 
+   from django.contrib.auth import login as auth_login
    from django.contrib.auth.forms import AuthenticationForm
-   from django.http import HttpRequest, HttpResponse
+   from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 
    from next.forms import action
 
@@ -223,17 +226,23 @@ The factory is dependency-resolved, so it can declare ``request: HttpRequest``, 
 
    @action("login", form_class=login_form_factory)
    def login(request: HttpRequest, form: AuthenticationForm) -> HttpResponse:
-       ...
+       auth_login(request, form.get_user())
+       return HttpResponseRedirect("/")
 
 ``AuthenticationForm`` requires ``request`` as its first constructor argument and has no ``get_initial`` method, so the tuple shape fits.
 
 A factory that returns a bare class picks the form per request without changing the constructor call.
+``WeeklyReportForm`` and ``DailyReportForm`` are two ``next.forms.Form`` subclasses defined in the project that share the dispatch URL of a single action.
 
 .. code-block:: python
    :caption: choosing a class per request
 
+   from django.http import HttpResponse, HttpResponseRedirect
+
    from next.forms import action
    from next.urls import DUrl
+
+   from reports.forms import DailyReportForm, WeeklyReportForm
 
 
    def report_form_factory(kind: DUrl["kind", str]) -> type:

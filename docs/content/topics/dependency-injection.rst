@@ -7,8 +7,6 @@ The dependency resolver inspects the signature of every callable that the framew
 A page context function asks for a query string value, a layout asks for the current request, an action handler asks for the form and a URL parameter.
 The resolver answers all of those calls through the same pipeline.
 
-This page covers the built in markers, how to read URL and query values, how to publish named dependencies, how to write a custom provider, and how the request-scoped cache prevents redundant work.
-
 .. contents::
    :local:
    :depth: 2
@@ -16,24 +14,9 @@ This page covers the built in markers, how to read URL and query values, how to 
 Overview
 --------
 
-The resolver runs at four call sites.
-
-Page context functions.
-   ``@context("key")`` and unkeyed ``@context`` callables in ``page.py``.
-
-Page render function.
-   The optional ``render`` function on a page module.
-
-Component context functions.
-   ``@component.context("key")`` callables in ``component.py``.
-
-Form action handlers.
-   ``@action`` callables registered through :doc:`next.forms <forms/index>`.
-
+The resolver runs at four call sites: page context functions, the page render function, component context functions, and ``@action`` form handlers.
 Every call site shares one provider list and one set of markers.
-For each parameter the resolver walks that provider list and picks the first provider whose ``can_handle`` returns ``True``.
-A parameter that no provider claims falls back to its declared default, or stays ``None`` when it has none.
-Functions written for unit tests can therefore declare ``request: HttpRequest | None = None`` and still work both inside and outside the framework.
+For each parameter the resolver picks the first provider whose ``can_handle`` returns ``True``, falling back to the declared default when none claims it.
 Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
 
 Built In Providers
@@ -369,10 +352,7 @@ Keep DI types runtime importable.
 Resolver Lifecycle
 ------------------
 
-A custom provider joins the resolver by importing its module, which runs ``RegisteredParameterProvider.__init_subclass__``.
-The resolver instantiates the full registry the first time it resolves a callable, then reuses that list.
-Register custom providers from ``AppConfig.ready`` so they exist before that first resolution.
-The ``provider_registered`` signal fires once per provider as the class enters the registry.
+The resolver builds its provider registry on first use and reuses it, so register custom providers from ``AppConfig.ready`` and see :doc:`/content/internals/di-resolver` for the full lifecycle.
 
 Common Patterns
 ---------------

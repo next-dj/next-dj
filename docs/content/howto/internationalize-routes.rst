@@ -132,6 +132,8 @@ Start the server and request the same route under two prefixes.
 Visiting ``/en/`` renders the English text and ``/de/`` renders the German text.
 A request to the prefix-free URL redirects to the language picked from the request.
 
+Once the router include is wrapped in ``i18n_patterns``, ``page_reverse`` returns a URL carrying the active language prefix.
+
 See Also
 --------
 

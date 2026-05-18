@@ -15,10 +15,7 @@ Overview
 --------
 
 The smallest page is a folder that contains a ``page.py`` and a sibling ``template.djx``.
-The framework resolves the page body.
-It then calls every ``@context`` function declared in ``page.py`` to build the template variables.
-It then wraps the rendered body in the closest ancestor ``layout.djx``.
-See *Render Order* below for the exact sequence.
+See *Render Order* below for the exact sequence the framework runs to produce the body.
 
 Pages share four pluggable parts.
 
@@ -58,7 +55,7 @@ Custom template loaders.
 
 See *Render Order* below for the per-request sequence and the ``render`` short-circuit.
 Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
-When two sources are declared at the same level the lower priority one is dropped at render time without an error, and ``uv run python manage.py check`` reports a warning for it.
+When two sources are declared at the same level the higher-priority source is used and the others are never consulted, and ``uv run python manage.py check`` reports ``next.W043`` for it.
 
 Render Order
 ------------
@@ -81,7 +78,6 @@ The render Function
 
 The ``render`` function takes any DI-resolved parameters the resolver can fill.
 The most common shape is ``request`` plus captured URL parameters and marker-driven values.
-Pull the data ``render`` needs through the dependency injector directly, since *Render Order* above shows it runs before the ``@context`` callables.
 
 .. code-block:: python
    :caption: notes/routes/reports/[int:report_id]/page.py
@@ -279,7 +275,7 @@ The template loaders have no fixed numbering between them.
 ``DjxTemplateLoader`` matches the sibling ``template.djx``, but a custom loader placed before it in ``TEMPLATE_LOADERS`` is consulted first and wins when both could load the same directory.
 
 Two sources at the same level are also flagged.
-The check ``next.W043`` points at the file when this happens.
+The higher-priority source is used and the others are never consulted, and the check ``next.W043`` points at the file when this happens.
 
 Common Patterns
 ---------------
@@ -351,10 +347,18 @@ System Checks
 
 The pages subsystem contributes Django system checks. The ``check_page_functions`` check inspects every ``page.py`` and reports the following.
 
-- ``next.E012`` — the page module has no ``render`` function, no ``template`` attribute, and no ``template.djx`` file.
-- ``next.E013`` — the page module defines a ``render`` attribute that is not callable.
-- ``next.W002`` — the page directory has no body source and no ``layout.djx`` in the same directory, so the page renders nothing.
-- ``next.W043`` — more than one body source is declared in the same directory. The highest priority one wins and the others are dropped.
+``next.E012``.
+   The page module has no ``render`` function, no ``template`` attribute, and no ``template.djx`` file.
+
+``next.E013``.
+   The page module defines a ``render`` attribute that is not callable.
+
+``next.W002``.
+   The page directory has no body source and no ``layout.djx`` in the same directory, so the page renders nothing.
+
+``next.W043``.
+   More than one body source is declared in the same directory.
+   The highest priority one is used and the others are never consulted.
 
 Run them through ``uv run python manage.py check``.
 

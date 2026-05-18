@@ -4,7 +4,7 @@ Production Settings
 ===================
 
 This page lists recommended ``NEXT_FRAMEWORK`` values for production.
-Each entry explains *why* the production value differs from the development default.
+Each entry explains why the production value differs from the development default.
 For the full list of available keys, their defaults, and their semantics, see :doc:`/content/ref/settings`.
 
 Each snippet below sets one key on an existing ``NEXT_FRAMEWORK`` dict.

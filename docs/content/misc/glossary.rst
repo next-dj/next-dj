@@ -38,7 +38,7 @@ Terms used throughout the next.dj documentation.
       A Python callable decorated with ``@context("key")`` that publishes a value to the template scope.
 
    DI marker
-      A signal that asks the resolver for a specific source of data.
+      A typed annotation or default-value object that asks the resolver for a specific source of data.
       An annotation marker is written in the type position, for example ``param: DUrl[int]``, and covers ``DUrl``, ``DQuery``, and ``DForm``.
       A default-value marker is written as the parameter default, for example ``param: str = Context()``, and covers ``Context`` and ``Depends``.
 

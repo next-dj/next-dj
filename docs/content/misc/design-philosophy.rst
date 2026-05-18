@@ -14,7 +14,7 @@ Stay Inside Django
 ------------------
 
 Ordinary Django concerns stay in place. See :ref:`intro-overview-django-unchanged` in :doc:`/content/intro/overview` for the split.
-This page explains *why* routing, layouts, components, assets, and form dispatch sit on that base and what trade-offs follow.
+This page explains why routing, layouts, components, assets, and form dispatch sit on that base and what trade-offs follow.
 
 Filesystem as a Single Source of Truth
 --------------------------------------

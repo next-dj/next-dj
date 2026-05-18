@@ -32,7 +32,7 @@ _T = TypeVar("_T")
 
 
 class DUrl(DDependencyBase[_T]):
-    """Annotation for a path or query parameter with optional type coercion.
+    """Annotation for a captured URL path parameter with optional type coercion.
 
     Use `DUrl[SomeType]` to read the captured segment that matches the
     parameter name and coerce it. Use `DUrl["param"]` to read a named

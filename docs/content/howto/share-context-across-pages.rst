@@ -1,4 +1,4 @@
-.. _howto-share-context:
+.. _howto-share-context-across-pages:
 
 Share Context Across Pages
 ==========================
@@ -60,7 +60,7 @@ Drop the flag for values that should stay local to the current page only.
 
    @context("nav_links")
    def nav_links() -> list:
-       return [...]
+       return [{"label": "Home", "href": "/"}]
 
 Without ``inherit_context=True`` the value is available only when ``notes/routes/page.py`` handles the request directly.
 Descendant routes do not receive it.

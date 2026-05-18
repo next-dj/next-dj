@@ -10,14 +10,11 @@ This page covers the public surface of the module and the patterns for testing p
    :local:
    :depth: 2
 
-Overview
---------
+Choose the Right Helper
+-----------------------
 
 ``next.testing`` groups its helpers into focused submodules covering the client, isolation, signal capture, rendering, loaders, HTML assertions, patching, action helpers, and dependency context builders.
 The table below maps each testing goal to the helper and its import path.
-
-Choose the Right Helper
------------------------
 
 .. list-table::
    :header-rows: 1
@@ -121,7 +118,7 @@ Three narrower helpers are also available when only one registry needs resetting
    After ``reset_registries()``, decorator side effects from those modules are absent until resolve time unless you call ``eager_load_components()`` from ``next.testing.loaders``, which imports every registered ``component.py`` regardless of the flag.
 
    .. code-block:: python
-      :caption: conftest.py — eager loading with lazy modules
+      :caption: conftest.py, eager loading with lazy modules
 
       import pytest
 
@@ -205,7 +202,7 @@ Use it for snapshot tests and template assertion tests that do not need URL rout
 Capture Signals
 ---------------
 
-``SignalRecorder`` subscribes to a single signal on enter and unsubscribes on exit.
+``SignalRecorder`` subscribes to one or more signals on enter and unsubscribes on exit.
 
 .. code-block:: python
    :caption: test with recorder
@@ -315,7 +312,8 @@ HTML Utilities
        assert_has_class(html, "note-card")
 
 ``find_anchor`` returns the matching anchor tag.
-It also accepts an ``href`` keyword that matches the anchor ``href`` exactly, and raises ``LookupError`` when no anchor matches the filters.
+It accepts an ``href`` keyword that matches the anchor ``href`` exactly and a ``text`` keyword that matches a substring against the anchor's stripped inner text.
+It raises ``LookupError`` when no anchor matches the filters.
 ``assert_has_class`` and ``assert_missing_class`` check the class list of the first tag in a fragment.
 
 Patching

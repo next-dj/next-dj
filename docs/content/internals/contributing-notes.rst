@@ -69,8 +69,8 @@ Always run the framework suite and the system checks before opening a pull reque
 Documentation Tests
 -------------------
 
-Add a regression test under ``tests/docs/`` when introducing a new public API or removing one.
-The test imports the name, confirms its presence in the reference, and prevents accidental removal.
+When introducing a new public API or removing one, add or update an import-presence test in the matching ``tests/<area>/`` suite so an accidental removal fails CI.
+The test imports the name and confirms its presence in the reference.
 
 Code Style
 ----------

@@ -17,22 +17,18 @@ The Pipeline
 Four parts make up the pipeline.
 
 Discovery.
-   ``AssetDiscovery`` walks the filesystem for files that match a registered stem and a registered kind.
-   It produces ``StaticAsset`` records.
+   ``AssetDiscovery`` produces ``StaticAsset`` records from files matching a registered stem and kind.
 
 Collector.
-   ``StaticCollector`` is a request scoped object that accumulates the assets touched by the current render.
-   It deduplicates entries through a pluggable strategy.
+   ``StaticCollector`` accumulates and deduplicates the assets touched by the current render.
 
 Backend.
-   A ``StaticBackend`` resolves on disk paths into URLs and renders the link, script, and module tags.
-   The bundled backend is ``StaticFilesBackend``.
+   A ``StaticBackend`` resolves on disk paths into URLs and renders the tags, ``StaticFilesBackend`` is the bundled one.
 
 Placeholder slots and template tags.
-   ``{% collect_styles %}`` and ``{% collect_scripts %}`` mark placeholder slots in the layout.
-   The static manager replaces each slot token with the rendered tags after the page renders.
+   ``{% collect_styles %}`` and ``{% collect_scripts %}`` mark the slots the static manager fills after the page renders.
 
-The pipeline runs once per request.
+"A Single Asset From Disk to HTML" below traces these four parts on a concrete file.
 
 StaticAsset
 -----------
@@ -173,8 +169,11 @@ The full set is in :doc:`/content/ref/static`.
 ``next.static.AssetDiscovery``.
    The filesystem scanner.
 
-``next.static.default_kinds`` and ``next.static.discovery.default_stems``.
-   The kind and stem registries.
+``next.static.default_kinds``.
+   The kind registry, exported from the package root.
+
+``next.static.discovery.default_stems``.
+   The stem registry, which lives at ``next.static.discovery`` rather than the package root.
 
 See :doc:`/content/ref/static` for the full reference.
 

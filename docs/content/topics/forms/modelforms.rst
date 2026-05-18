@@ -29,8 +29,9 @@ Subclass the framework's ``ModelForm`` base class.
            model = Note
            fields = ("title", "body")
 
-``next.forms.ModelForm`` provides the same identity tracking that ``next.forms.Form`` adds for plain forms.
-The dispatcher needs that identity to re-render the origin page when validation fails.
+``next.forms.ModelForm`` adds the ``get_initial`` classmethod that ``next.forms.Form`` also adds for plain forms.
+The dispatcher calls ``get_initial`` to compute the initial bound state of the form before binding the POST body.
+The hidden ``_next_form_page`` field on every rendered form is what lets the dispatcher re-render the origin page when validation fails.
 
 get_initial
 -----------
@@ -41,7 +42,7 @@ A ModelForm can return either a dict for fresh creation or an instance for editi
 .. code-block:: python
    :caption: notes/forms.py
 
-   from django.http import HttpRequest
+   from django.http import Http404, HttpRequest
 
    from next.forms import ModelForm
 
@@ -55,12 +56,12 @@ A ModelForm can return either a dict for fresh creation or an instance for editi
 
        @classmethod
        def get_initial(cls, request: HttpRequest, id: int | None = None) -> Note | dict:
-           if id is not None:
-               try:
-                   return Note.objects.get(pk=id)
-               except Note.DoesNotExist:
-                   pass
-           return {}
+           if id is None:
+               return {}
+           try:
+               return Note.objects.get(pk=id)
+           except Note.DoesNotExist as exc:
+               raise Http404 from exc
 
 The method runs through the dependency injector.
 Add captured URL parameters as keyword arguments and the framework fills them automatically.

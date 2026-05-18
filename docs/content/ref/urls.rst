@@ -22,6 +22,7 @@ Manager
 
 ``urlpatterns`` is a ``list`` subclass that rebuilds the router and form-action patterns on each access.
 A route added after import is therefore visible without a process restart.
+``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
 
 .. automodule:: next.urls.manager
    :members:
@@ -79,7 +80,15 @@ See :doc:`/content/internals/di-resolver` for the full provider registration seq
 Signals
 -------
 
-See :doc:`signals` and :doc:`/content/topics/signals` for the URL signals (``route_registered``, ``router_reloaded``).
+The URL subsystem fires two signals.
+
+``route_registered``.
+   Sent by ``FileRouterBackend`` once per registered route, with the ``url_path`` and ``file_path`` keyword arguments.
+
+``router_reloaded``.
+   Sent by the router manager class after the router rebuilds, with no keyword arguments.
+
+See :doc:`signals` and :doc:`/content/topics/signals` for the wider signal catalog.
 
 See Also
 --------

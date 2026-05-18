@@ -24,6 +24,9 @@ The value appears under ``window.Next.context.<key>``.
 Keys without the flag stay server-side only.
 Decorator shapes and inheritance rules live in :doc:`../context`.
 
+A value the active serializer cannot encode raises ``TypeError`` at the point the context function registers it.
+The error names the offending key.
+
 Serializers
 -----------
 
@@ -39,6 +42,8 @@ The framework ships two implementations.
 ``PydanticJsContextSerializer``.
    Encodes Pydantic models through ``model_dump``.
    Falls back to ``DjangoJSONEncoder`` for plain values.
+   Requires the ``pydantic`` package.
+   The class raises ``ImportError`` at construction when ``pydantic`` is not installed.
 
 Project Wide Serializer
 -----------------------
@@ -223,14 +228,14 @@ Accepted string values for ``policy`` are ``"auto"``, ``"disabled"``, and ``"man
    Review every ``component.js`` and inline script before switching away from ``AUTO``.
 
 Template Tag Customisation
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+--------------------------
 
 The ``NEXT_JS_OPTIONS`` dict also accepts ``preload_template``, ``script_tag_template``, and ``init_template`` keys.
 Each is an HTML string with a single placeholder.
 Use them to add attributes such as ``nonce``, ``async``, or ``crossorigin`` without writing a custom backend.
 
 .. code-block:: python
-   :caption: config/settings.py — adding a crossorigin attribute
+   :caption: config/settings.py, adding a crossorigin attribute
 
    NEXT_FRAMEWORK = {
        "NEXT_JS_OPTIONS": {
@@ -238,7 +243,8 @@ Use them to add attributes such as ``nonce``, ``async``, or ``crossorigin`` with
        }
    }
 
-The ``{url}`` placeholder is the only supported substitution. The template is formatted with Python ``str.format``, not Django templates.
+The ``{url}`` placeholder is the only supported substitution.
+The template is formatted with Python ``str.format``, not Django templates.
 For per-request values such as CSP nonces, use a custom static backend instead.
 
 See Also

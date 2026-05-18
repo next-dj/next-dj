@@ -96,6 +96,9 @@ The values below treat each Django application as a self-contained unit.
 The built-in default for ``PAGES_DIR`` is ``pages``.
 This guide sets it to ``routes`` as a naming convention, so the tutorial uses ``routes/`` throughout.
 A ``FileRouterBackend`` entry must carry an ``OPTIONS`` key.
+
+Keep ``django.template.context_processors.request`` in the ``OPTIONS`` of your ``TEMPLATES`` setting.
+A fresh ``django-admin startproject`` already includes it, and ``manage.py check`` reports ``next.E019`` if it is missing.
 Omitting it makes ``manage.py check`` report ``next.E026``.
 
 Mount the Router

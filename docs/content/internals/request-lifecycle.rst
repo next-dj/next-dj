@@ -70,7 +70,7 @@ After the body is in hand the view builds the render context and runs every ``@c
 Layout Chain
 ~~~~~~~~~~~~
 
-The framework walks every ancestor ``layout.djx`` from the page root to the page directory.
+The framework collects every ancestor ``layout.djx`` walking from the page directory up to the page root.
 Each layout substitutes the wrapped content into its ``{% block template %}`` placeholder.
 The innermost layout wraps the page body, the outermost layout wraps everything.
 

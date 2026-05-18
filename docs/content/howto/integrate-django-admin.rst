@@ -39,9 +39,11 @@ Confirm INSTALLED_APPS
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Add the admin and the auth apps that the admin depends on.
+The caption below assumes a single settings module.
+A project that split its settings places this in ``config/settings/base.py`` instead.
 
 .. code-block:: python
-   :caption: config/settings.py
+   :caption: config/settings/base.py
 
    INSTALLED_APPS = [
        "django.contrib.admin",

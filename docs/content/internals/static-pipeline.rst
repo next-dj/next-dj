@@ -34,21 +34,17 @@ Discovery and Injection
 Collector Slots
 ---------------
 
-The collector keeps assets in named slots that map to ``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholder tokens in templates.
+The collector keeps assets in named slots, one per registered slot, each backed by a placeholder token in templates.
 Each slot matches the ``collector slot`` term in :doc:`/content/misc/glossary`.
 
 .. mermaid::
 
    flowchart TB
-       Trigger["Layout, page, or component renders"] --> Pick{"Pick slot"}
-       Pick -- styles --> StylesSlot["styles slot"]
-       Pick -- scripts --> ScriptsSlot["scripts slot"]
-       StylesSlot --> Finalize["collector_finalized"]
-       ScriptsSlot --> Finalize
-       Finalize --> EmitStyles["collect_styles tag"]
-       Finalize --> EmitScripts["collect_scripts tag"]
-       EmitStyles --> Injected["html_injected"]
-       EmitScripts --> Injected
+       Trigger["Layout, page, or component renders"] --> Route["Route to slot named by KindRegistry.slot(kind)"]
+       Route --> Slot["Slot, for example styles or scripts"]
+       Slot --> Finalize["collector_finalized"]
+       Finalize --> Emit["collect tag for each slot"]
+       Emit --> Injected["html_injected"]
 
 Runtime Script Injection
 ------------------------

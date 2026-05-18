@@ -74,6 +74,8 @@ Use Inside an Action Handler
    from next.forms import action
    from next.urls import page_reverse
 
+   from notes.forms import NoteForm
+
 
    @action("create_note", form_class=NoteForm)
    def create_note(form: NoteForm) -> HttpResponseRedirect:

@@ -116,7 +116,7 @@ Remove or rename one entry so each backend class appears once.
 next.W042 unusable JS_CONTEXT_SERIALIZER
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``JS_CONTEXT_SERIALIZER`` is set but does not resolve to an object that implements the ``JsContextSerializer`` protocol (a ``dumps`` method).
+``JS_CONTEXT_SERIALIZER`` is set but does not resolve to a class that implements the ``JsContextSerializer`` protocol (a ``dumps`` method).
 Fix the dotted path or install optional dependencies such as ``pydantic`` when using ``PydanticJsContextSerializer``.
 
 Dependency Injection

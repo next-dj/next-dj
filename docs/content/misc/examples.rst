@@ -57,8 +57,8 @@ The **Primary docs** column points to the sections of this manual where the tech
 Shared assets
 -------------
 
-* `_shared <https://github.com/next-dj/next-dj/tree/main/examples/_shared>`__ — shared component palette consumed through ``DEFAULT_COMPONENT_BACKENDS`` ``DIRS``.
-* `_template <https://github.com/next-dj/next-dj/tree/main/examples/_template>`__ — empty scaffold to copy when starting a new example-shaped project.
+* `_shared <https://github.com/next-dj/next-dj/tree/main/examples/_shared>`__. A shared component palette consumed through ``DEFAULT_COMPONENT_BACKENDS`` ``DIRS``.
+* `_template <https://github.com/next-dj/next-dj/tree/main/examples/_template>`__. An empty scaffold to copy when starting a new example-shaped project.
 
 See Also
 --------

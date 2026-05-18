@@ -119,7 +119,7 @@ The shared directory ships static files alongside components.
    ]
 
 The Django static files finder picks up files from both directories.
-Co-located assets from shared components participate through the components backend.
+Co-located CSS and JS from shared components are emitted by the static collector.
 
 Shared Components Convention
 ----------------------------

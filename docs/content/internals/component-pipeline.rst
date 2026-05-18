@@ -63,7 +63,7 @@ Modules
 ``next.components.backends``.
    ``ComponentsBackend`` contract.
    ``FileComponentsBackend`` default implementation.
-   ``ComponentsFactory`` for dotted path lookup.
+   ``ComponentsFactory`` instantiates a backend from its ``BACKEND`` dotted path.
 
 ``next.components.watch``.
    Watch specs exposed to the autoreloader.

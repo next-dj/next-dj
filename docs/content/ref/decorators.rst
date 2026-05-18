@@ -75,6 +75,8 @@ DUrl
 
 Type annotation that injects the captured URL parameter with the matching name.
 Pass a generic argument to coerce the value to a type.
+The named form ``DUrl["key"]`` targets a segment by name and applies no coercion.
+The named-and-typed form ``DUrl["key", Type]`` targets a segment by name and coerces the value to ``Type``.
 
 DQuery
 ~~~~~~

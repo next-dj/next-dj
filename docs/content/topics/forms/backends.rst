@@ -91,8 +91,11 @@ The most common customisation overrides ``dispatch`` to wrap the standard dispat
 
 The override calls ``super().dispatch`` to run the standard pipeline and
 records the dispatch UID against the response status.
-The ``uid`` argument is the public dispatch key, so the override never
-touches a private attribute of the registry.
+The ``uid`` argument is the public dispatch key, so this override stays
+on the public surface.
+An override that needs the action name instead can read the private
+``_uid_to_name`` index, the supported way to recover the name inside a
+``dispatch`` override.
 An unknown UID returns 404 from the parent dispatch, and the audit row
 still records that outcome.
 

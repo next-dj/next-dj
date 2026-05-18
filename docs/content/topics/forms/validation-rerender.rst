@@ -19,7 +19,9 @@ The Origin Page
 Every rendered ``{% form %}`` tag emits a hidden ``_next_form_page`` field that contains the absolute path to the current ``page.py``.
 The dispatcher reads that field to know which page rendered the form.
 
-The dispatcher rejects submissions when the field is missing, when the path does not exist on disk, or when the path is outside ``BASE_DIR``.
+The dispatcher rejects a submission when the field is missing or blank, when its basename is not ``page.py``, or when resolving the path raises ``OSError``.
+It also rejects the submission when ``BASE_DIR`` is unset or when the resolved path falls outside ``BASE_DIR``.
+A path whose ``page.py`` does not exist is rejected too, unless a sibling ``template.djx`` stands in for it.
 Each rejection returns HTTP 400 with a structured error so it is easy to spot in logs.
 
 Virtual routes are fully supported as origin pages.
@@ -127,7 +129,8 @@ The ``redirect_to_origin`` helper sends the user back to whichever page rendered
        return redirect_to_origin(request, fallback="/notes/")
 
 ``redirect_to_origin(request, fallback="/")`` reads the hidden ``_next_form_origin`` field that the ``{% form %}`` tag emits with the request path of the rendering page.
-It validates the value as a same-site path. A value that does not start with a single ``/`` is rejected, which blocks open-redirect input.
+It accepts the value only when it is a string that starts with a single ``/``.
+A protocol-relative input beginning with ``//`` is rejected, which blocks open-redirect input.
 When the field is absent or fails validation the helper redirects to ``fallback`` instead.
 
 Origin Versus Page Fields

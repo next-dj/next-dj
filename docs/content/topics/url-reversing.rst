@@ -96,6 +96,8 @@ The helper takes a URL string and adds, replaces, or removes query parameters.
    with_query("/filter/", tag=["python", "django"])
    # "/filter/?tag=python&tag=django"
 
+An existing parameter with an empty value, such as ``?flag=``, is kept unless you pass that key explicitly.
+
 Multi Value Keys
 ~~~~~~~~~~~~~~~~
 
@@ -223,6 +225,7 @@ To read them in a page or component, annotate a parameter with the ``DQuery[T]``
 - Comma-delimited, ``?tag=a,b``.
 
 ``with_query`` emits the repeated-key form when you pass a list.
+To read a repeated parameter outside the resolver, call ``get_multi_values(request, name)`` from ``next.urls``, which returns every value for that key as a list.
 Captured **path** segments are separate. They flow through ``DUrl`` or plain URL kwargs as described in :doc:`dependency-injection`.
 
 See :doc:`/content/howto/read-query-parameters` for the full typed-query walkthrough.

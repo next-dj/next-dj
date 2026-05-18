@@ -99,8 +99,10 @@ Context Resolution
 1. URL kwargs from the matched route are seeded into the context dict.
 2. ``PageContextRegistry.collect_context`` runs in two sub-steps.
 
-   a. Inherited context — every ``@context(..., inherit_context=True)`` callable registered in ancestor ``page.py`` files, walked from the root inward toward the current page.
-   b. Page-level context — ``@context`` callables declared in the current ``page.py``, evaluated after inherited values are in place so the page can shadow any inherited key.
+   a. Inherited context.
+      Every ``@context(..., inherit_context=True)`` callable registered in ancestor ``page.py`` files, walked from the root inward toward the current page.
+   b. Page-level context.
+      The ``@context`` callables declared in the current ``page.py``, evaluated after inherited values are in place so the page can shadow any inherited key.
 
 3. Context processors merge ``OPTIONS.context_processors`` from each page backend entry with ``context_processors`` from the **first** ``TEMPLATES`` entry.
    The merge concatenates the page backend paths ahead of the Django paths and then deduplicates by dotted path.

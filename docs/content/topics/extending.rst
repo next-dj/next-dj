@@ -3,7 +3,8 @@
 Extending
 =========
 
-next.dj exposes five extension mechanisms you compose freely, each with its own purpose, scope, and lifecycle.
+next.dj exposes five extension mechanisms.
+Each section below states what its mechanism replaces and where to register it.
 
 .. contents::
    :local:

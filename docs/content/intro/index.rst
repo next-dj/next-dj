@@ -4,7 +4,8 @@ Getting Started
 ===============
 
 This section gets you from zero to a running next.dj project.
-Read the overview to learn the mental model, install the package, then walk through the five tutorial parts that build a small Notes application.
+Read the overview to learn the mental model, then install the package.
+The five tutorial parts build a small Notes application from there.
 
 .. rubric:: Read first
 

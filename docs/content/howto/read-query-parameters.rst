@@ -98,7 +98,7 @@ Each annotation drives its own coercion.
        in_stock: DQuery[bool] = False,
        brand: DQuery[list[str]] = (),
    ) -> dict:
-       ...
+       return {"q": q, "page": page, "in_stock": in_stock, "brands": list(brand)}
 
 List elements follow the same three wire formats described above under *Type Coercion*.
 

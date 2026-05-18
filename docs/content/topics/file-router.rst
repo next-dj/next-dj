@@ -82,7 +82,7 @@ The bracket syntax accepts every Django path converter.
      - Positive integers, including zero.
    * - ``[slug:name]``
      - ``<slug:name>``
-     - URL slugs of lowercase letters, digits, hyphens, and underscores.
+     - URL slugs of ASCII letters, digits, hyphens, and underscores.
    * - ``[uuid:name]``
      - ``<uuid:name>``
      - Canonical UUID strings.
@@ -257,7 +257,7 @@ Components Folder Skipping
 --------------------------
 
 The router shares its file walk with the components backend.
-Whatever name is set in ``DEFAULT_COMPONENT_BACKENDS[*]["COMPONENTS_DIR"]`` becomes a directory that the router does not enter.
+The name set in the first ``DEFAULT_COMPONENT_BACKENDS`` entry under ``COMPONENTS_DIR`` becomes a directory that the router does not enter.
 The default is ``_components``.
 Only that exact name is skipped, not every directory that starts with an underscore.
 

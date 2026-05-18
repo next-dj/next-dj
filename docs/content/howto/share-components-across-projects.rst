@@ -1,4 +1,4 @@
-.. _howto-share-components:
+.. _howto-share-components-across-projects:
 
 Share Components Across Projects
 ================================

@@ -4,7 +4,7 @@ What to Read Next
 =================
 
 The tutorial covers the core flow.
-After :doc:`tutorial05`, follow **topics → how-to guides → reference → internals** when you need depth beyond the Notes walkthrough.
+After :doc:`tutorial05`, read the topics, then the how-to guides, then the reference, then the internals when you need depth beyond the Notes walkthrough.
 
 The hubs below replace long subsystem-by-subsystem lists.
 

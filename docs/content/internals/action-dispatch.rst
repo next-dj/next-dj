@@ -23,17 +23,18 @@ Pipeline
 
    flowchart TB
        Template["form tag in template"] -- POST --> Endpoint["form dispatch endpoint"]
-       Endpoint --> Lookup["Resolve action"]
-       Lookup --> Origin{"Origin page valid"}
-       Origin -- no --> BadRequest["HTTP 400"]
-       Origin -- yes --> Build["Build form"]
+       Endpoint --> Lookup["Resolve action by UID"]
+       Lookup -- unknown UID --> NotFound["HTTP 404"]
+       Lookup -- found --> Build["Build form"]
        Build --> Validate{"Form valid"}
        Validate -- yes --> Handler["Run handler"]
        Handler --> Response["Handler response"]
-       Validate -- no --> ShareCache["Attach dep cache to request"]
+       Handler --> ActionDispatched["action_dispatched signal"]
+       Validate -- no --> Origin{"Origin page valid"}
+       Origin -- no --> BadRequest["HTTP 400"]
+       Origin -- yes --> ShareCache["Reuse dep cache on request"]
        ShareCache --> RenderOrigin["Render origin page"]
        RenderOrigin --> RerenderHTML["HTTP 200 with bound form"]
-       Handler --> ActionDispatched["action_dispatched signal"]
        Validate -- no --> FormFailed["form_validation_failed signal"]
 
 Modules
@@ -43,7 +44,8 @@ Modules
    ``@action`` decorator implementation.
 
 ``next.forms.manager``.
-   ``FormActionManager`` holds the registry of actions plus the lookup helpers.
+   ``FormActionManager`` aggregates the configured backends and yields their URL patterns.
+   The per-action registry lives on each ``RegistryFormActionBackend``, not on the manager.
 
 ``next.forms.dispatch``.
    ``FormActionDispatch`` runs the pipeline per request.
@@ -68,8 +70,9 @@ Origin Page Validation
 ----------------------
 
 The hidden ``_next_form_page`` field on every rendered form carries the absolute path to the origin ``page.py``.
-The dispatcher resolves the path to an existing file under ``BASE_DIR``.
-Anything else returns HTTP 400.
+The dispatcher resolves the path and accepts it only when the basename is ``page.py``, the resolved path lives under ``BASE_DIR``, and either the file exists or a sibling ``template.djx`` does.
+The sibling ``template.djx`` clause is the virtual-route exception: a directory routed by its template alone has no ``page.py`` on disk yet still resolves a valid origin.
+A blank field, an ``OSError`` while resolving, an unset ``BASE_DIR``, or a path outside ``BASE_DIR`` all return HTTP 400.
 
 Backends
 --------
@@ -98,11 +101,11 @@ The cache hangs on ``request`` under the attribute named ``REQUEST_DEP_CACHE_ATT
 Signals
 -------
 
-The pipeline fires three signals.
+One signal fires at import time, the other two fire per request.
 
-- ``action_registered`` once per ``@action`` when the registry receives it.
-- ``form_validation_failed`` once per failing submission.
-- ``action_dispatched`` once per successful handler invocation, with the bound form and the URL kwargs in the payload.
+- ``action_registered`` fires at import time, once per ``@action`` when the registry receives it.
+- ``form_validation_failed`` fires at request time, once per failing submission.
+- ``action_dispatched`` fires at request time, once per successful handler invocation, with the bound form and the URL kwargs in the payload.
 
 Extension Points
 ----------------

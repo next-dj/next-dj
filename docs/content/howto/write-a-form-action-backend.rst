@@ -43,7 +43,7 @@ Write the backend.
            return response
 
 The override calls ``super().dispatch`` to run the standard validation and handler pipeline.
-The ``self._uid_to_name`` mapping resolves the UID to an action name.
+The ``self._uid_to_name`` mapping is the private uid index on ``RegistryFormActionBackend``, the supported way to recover the action name inside a ``dispatch`` override.
 An unknown UID returns 404 from the parent dispatch, so the override skips it.
 
 Register the backend.

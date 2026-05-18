@@ -11,7 +11,9 @@ You need page bodies to load from a filename other than the default sibling ``te
 Solution
 --------
 
-Subclass ``next.pages.loaders.TemplateLoader``, implement ``can_load`` and ``load_template``, register the dotted path in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``, and keep ``next.pages.loaders.DjxTemplateLoader`` in the chain when you still want ``template.djx`` support.
+Subclass ``next.pages.loaders.TemplateLoader`` and implement ``can_load`` and ``load_template``.
+Register the dotted path in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]``.
+Keep ``next.pages.loaders.DjxTemplateLoader`` in the chain when you still want ``template.djx`` support.
 
 Walkthrough
 -----------

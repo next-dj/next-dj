@@ -33,7 +33,10 @@ The only abstract method is ``register_file``.
 ``source_path`` is the absolute path to the file.
 ``logical_name`` is the path without an extension, such as ``components/card``.
 ``kind`` is a registered asset kind.
-The method raises ``RuntimeError`` when the asset cannot be resolved.
+
+Discovery catches ``OSError`` and ``ValueError`` from ``register_file`` and logs a warning, dropping that one asset.
+Any other exception, including ``RuntimeError``, propagates and aborts the render.
+A custom backend that wants a soft fail for an unresolvable asset should raise ``ValueError``.
 
 Renderer methods are not abstract.
 A backend adds the renderer methods that its registered kinds reference, see :doc:`asset-kinds`.
@@ -134,6 +137,11 @@ Subclass ``StaticFilesBackend`` to keep the staticfiles resolution and change on
 
        def render_script_tag(self, url, *, request=None) -> str:
            return f'<script src="{url}" crossorigin></script>'
+
+       def render_module_tag(self, url, *, request=None) -> str:
+           return f'<script type="module" src="{url}" crossorigin></script>'
+
+Override ``render_module_tag`` as well, otherwise ``.mjs`` assets miss the attribute the override adds.
 
 Subclass the abstract ``StaticBackend`` directly only when the project resolves assets from a source other than Django staticfiles, such as a build manifest.
 
