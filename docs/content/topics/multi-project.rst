@@ -153,10 +153,10 @@ A project can ship project-specific components alongside the shared kit.
        ]
    }
 
-When the same component name appears in two roots, the visibility resolver scores each candidate by scope specificity rather than by ``DIRS`` order.
+When the same component name appears in two roots, the visibility resolver scores each candidate by scope specificity.
 A page-tree component visible from the template wins over a same-named component contributed through ``DIRS``.
-For two ``DIRS`` roots scored equally, the resolved winner is not a guaranteed contract, so avoid relying on a fixed ``DIRS`` position to shadow a shared component.
-Give project-specific components distinct names instead.
+When two ``DIRS`` roots score equally the resolver falls back to registration order, and roots are scanned in ``DIRS`` order, so an entry placed earlier in the list shadows a same-named component from a later entry.
+Prefer distinct names for project-specific components over relying on this ordering.
 
 Hot Reload
 ----------

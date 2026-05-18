@@ -117,6 +117,7 @@ class ComponentVisibilityResolver:
             OrderedDict()
         )
         self._scope_index: dict[Path, list[ComponentInfo]] = {}
+        self._registration_index: dict[ComponentInfo, int] = {}
         self._scope_index_registry_version = -1
         self._cached_registry_version = -1
         self._resolved_path_cache: dict[Path, Path] = {}
@@ -125,8 +126,10 @@ class ComponentVisibilityResolver:
         if self._scope_index_registry_version == self._registry.version:
             return
         self._scope_index = {}
-        for ci in self._registry.get_all():
+        self._registration_index = {}
+        for position, ci in enumerate(self._registry.get_all()):
             self._scope_index.setdefault(ci.resolved_scope_root, []).append(ci)
+            self._registration_index[ci] = position
         self._scope_index_registry_version = self._registry.version
 
     def _candidate_components(self, template_path: Path) -> list[ComponentInfo]:
@@ -165,17 +168,21 @@ class ComponentVisibilityResolver:
             self._result_cache.move_to_end(template_path)
             return self._result_cache[template_path]
 
-        candidates: list[tuple[int, str, ComponentInfo]] = []
+        candidates: list[tuple[int, str, int, ComponentInfo]] = []
         for component in self._candidate_components(template_path):
             score = self._calculate_visibility_score(component, template_path)
             if score is not None:
-                candidates.append((score, component.name, component))
+                position = self._registration_index[component]
+                candidates.append((score, component.name, position, component))
 
-        candidates.sort(key=lambda x: (-x[0], x[1]))
+        # Higher score wins. Equal score and name fall back to registration
+        # order, so the component discovered first shadows a later same-named
+        # one. Roots are scanned in DIRS order, so an earlier DIRS entry wins.
+        candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
 
         seen: set[str] = set()
         result: dict[str, ComponentInfo] = {}
-        for _score, name, info in candidates:
+        for _score, name, _position, info in candidates:
             if name not in seen:
                 result[name] = info
                 seen.add(name)

@@ -218,8 +218,10 @@ class FormActionFactory:
         """Return a single backend instance for one settings entry.
 
         The `BACKEND` key must be present and resolve to a `FormActionBackend`
-        subclass. The matching `next.E044` system check guarantees both before
-        the factory runs in production.
+        subclass. The `next.E044` system check guarantees the key is present
+        and importable. The `next.E045` system check guarantees the imported
+        class subclasses `FormActionBackend`. Both run before the factory does
+        in production.
         """
         backend_path = config["BACKEND"]
         backend_class = import_class_cached(backend_path)
