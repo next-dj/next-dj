@@ -87,6 +87,13 @@ intersphinx_mapping = {
     "django": ("https://docs.djangoproject.com/en/stable/", "https://docs.djangoproject.com/en/stable/_objects/"),
 }
 
+# intersphinx validates Django and Python targets on every build, so linkcheck
+# skips those hosts to avoid redundant requests and HTTP 429 rate limiting.
+linkcheck_ignore = [
+    r"https://docs\.djangoproject\.com/.*",
+    r"https://docs\.python\.org/.*",
+]
+
 # templates path
 templates_path = ["_templates"]
 
