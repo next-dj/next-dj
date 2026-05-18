@@ -15,7 +15,7 @@ Backends
 --------
 
 DEFAULT_PAGE_BACKENDS
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 List of page backend configurations.
 
@@ -43,7 +43,7 @@ A plain string that does not resolve to a directory is treated as a skip name: t
 See :doc:`/content/topics/file-router` for the full semantics including examples.
 
 DEFAULT_COMPONENT_BACKENDS
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 List of component backend configurations.
 
@@ -76,7 +76,7 @@ Default value.
    ]
 
 DEFAULT_FORM_ACTION_BACKENDS
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 List of form action backend configurations.
 
@@ -123,7 +123,7 @@ JavaScript Context
 ------------------
 
 NEXT_JS_OPTIONS
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
 Dict passed to ``NextScriptBuilder.from_options`` for the bundled ``next.min.js`` runtime: injection ``policy`` (``auto``, ``disabled``, or ``manual``), and optional string templates ``preload_template``, ``script_tag_template``, and ``init_template``.
 
@@ -134,7 +134,7 @@ Serialisation of ``window.Next.context`` is controlled by ``JS_CONTEXT_SERIALIZE
 See :doc:`/content/topics/static-assets/js-context` under *Runtime script options* for the full table and examples.
 
 JS_CONTEXT_SERIALIZER
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 Dotted path to a class that implements the ``JsContextSerializer`` protocol.
 The class is instantiated with no arguments and its ``dumps`` method encodes every value bound for ``window.Next.context``.
@@ -142,7 +142,7 @@ The class is instantiated with no arguments and its ``dumps`` method encodes eve
 Default value ``None``, which selects the built-in ``JsonJsContextSerializer``.
 
 The resolver reads this key on every call, so ``override_settings`` takes effect without a restart.
-A value that does not resolve to a usable serializer raises ``next.W042`` during ``manage.py check``.
+A value that does not resolve to a usable serializer triggers the ``next.W042`` warning during ``manage.py check`` and the framework falls back to ``JsonJsContextSerializer``.
 
 See :doc:`static` under *JS Context Serializer* for the protocol and the bundled serializers.
 
@@ -161,19 +161,30 @@ Default value ``False``.
 :doc:`/content/deployment/settings` explains when to turn this on in production.
 
 LAZY_COMPONENT_MODULES
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-When ``False``, the default, every ``component.py`` module is imported eagerly during ``AppConfig.ready`` so the ``@component.context`` and ``@action`` decorators run before the first request.
-When ``True``, that eager preload is skipped.
-A ``component.py`` module is then imported lazily the first time its component is rendered.
+When ``False``, the default, ``next.apps.components.install`` runs discovery on configured component roots then imports every ``component.py`` found there so ``@component.context`` and ``@action`` decorators run before the first HTTP request.
 
-Set it to ``True`` for projects with very large component trees where the eager import pass slows startup noticeably.
-The trade-off is that an import error in a component module surfaces late, at the first render that needs the component, rather than at boot time.
+When ``True``, that bulk import pass for configured roots alone is skipped.
+Each ``component.py`` discovered only through those roots is imported later the first time ``get_component`` resolves that component for rendering.
 
-Default value ``False`` (eager import at startup).
+Two paths interact:
+
+Configured component roots from ``DEFAULT_COMPONENT_BACKENDS``.
+   Lazy mode defers executing Python modules discovered solely through this scan until first resolve.
+
+``_components`` directories beside page files.
+   While the file router walks the page tree to emit URL patterns it registers those folders and imports each ``component.py`` it finds there.
+   That happens when Django first drives ``urlpatterns`` far enough to reach the folder.
+   ``LAZY_COMPONENT_MODULES`` does not defer this path.
+
+Set ``True`` when configured roots hold a very large tree and eager import slows ``AppConfig.ready``.
+Expect import errors from lazily loaded root modules when the component first resolves, and from router-discovered modules when URL generation reaches their folder.
+
+Default value ``False`` (eager import at startup for configured roots).
 
 See :doc:`/content/deployment/settings` for production defaults.
-For tests, ``next.testing`` helpers such as ``eager_load_components`` matter when lazy loading is enabled. See :doc:`/content/topics/testing`.
+For tests, ``eager_load_components`` imports every registered ``component.py`` even when this flag is ``True``. See :doc:`/content/topics/testing`.
 
 Patching Defaults
 -----------------

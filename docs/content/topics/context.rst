@@ -4,7 +4,7 @@ Context
 =======
 
 Context is the data that pages and components publish into their template scope.
-This page covers the four shapes of the ``@context`` decorator, how inheritance flows down the route tree, how component context differs from page context, how to expose values to the JavaScript bundle, and how to swap out the serializer that ships values to the browser.
+This page covers the two shapes of the ``@context`` decorator and the ways to vary them, how inheritance flows down the route tree, how component context differs from page context, how to expose values to the JavaScript bundle, and how to swap out the serializer that ships values to the browser.
 
 This page is the concept reference for context.
 Once you understand the decorator and the ``serialize`` flag here, :doc:`/content/topics/static-assets/js-context` covers the full ``window.Next.context`` mechanics and :doc:`/content/howto/override-the-js-context-serializer` walks through replacing the serializer.
@@ -30,10 +30,12 @@ Component context.
    ``@component.context("key")`` in a ``component.py``.
    Resolves once per component instance during render.
 
-The Decorator Shapes
---------------------
+The Decorator
+-------------
 
-The ``next.pages.context`` decorator accepts four shapes.
+The ``next.pages.context`` decorator has two shapes.
+One is a keyed single value, the other is an unkeyed dict.
+The ``inherit_context`` flag and direct registration, covered after the two shapes, vary how a function is registered.
 
 Keyed Single Value
 ~~~~~~~~~~~~~~~~~~
@@ -76,10 +78,10 @@ Decorating a function with bare ``@context`` and returning a dict merges every k
 This shape runs the dependency once.
 Two separate ``@context("post")`` and ``@context("comments")`` would each hit the resolver and possibly the database twice.
 
-Inherited Single Value
-~~~~~~~~~~~~~~~~~~~~~~
+The inherit_context Flag
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-``inherit_context=True`` makes the value visible to every descendant route, not only to the page that declares it.
+``inherit_context=True`` makes a keyed value visible to every descendant route, not only to the page that declares it.
 
 .. code-block:: python
    :caption: notes/routes/page.py
@@ -138,7 +140,7 @@ The factory takes its own dependency-injected arguments, so it can ask for the r
    from notes.models import Note
 
    from next.pages import Context, context
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
 
    def load_note(note_id: DUrl[int]) -> Note:
@@ -167,11 +169,9 @@ The framework computes the template scope in this order.
 1. URL kwargs from the matched route are seeded into the context dict.
 2. Inherited context functions from every ancestor ``page.py``, walked from the route root inward.
 3. Page level context functions declared in the current ``page.py``.
-4. Context processors collected from two sources: ``OPTIONS.context_processors`` on each page backend entry, plus the ``context_processors`` list from the **first** ``TEMPLATES`` entry in Django's ``TEMPLATES`` setting.
-   The two lists are merged in that order with duplicate dotted paths dropped, keeping the first occurrence, so a processor that appears in both sources runs only once.
-   Each processor's return dict is applied via ``update``. Because the processors run after every ``@context`` callable, a processor that returns the same key as step 2 or 3 overwrites the value those steps produced.
-   If ``settings.TEMPLATES`` contains several backend configurations, only the **first** entry participates here.
-   List every processor that next.dj should run either on that first entry or under ``OPTIONS.context_processors`` on the page backend.
+4. Context processors come from ``OPTIONS.context_processors`` on each page backend entry plus the ``context_processors`` list of the first ``TEMPLATES`` entry in Django settings.
+   The two lists merge in that order with duplicate dotted paths dropped, so a processor listed twice runs once.
+   Each processor return dict is applied with ``update`` after every ``@context`` callable, so a processor key overwrites a page or inherited value.
 5. Component context functions when a ``{% component %}`` tag is encountered during render.
 
 A later step that uses the same key overrides earlier values.
@@ -264,7 +264,7 @@ Publish the page title from each page.
    from notes.models import Note
 
    from next.pages import context
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
 
    @context("page_title")
@@ -293,7 +293,7 @@ Combine a context function with the ``DQuery[T]`` marker to read filters from th
    :caption: notes/routes/page.py
 
    from next.pages import context
-   from next.urls.markers import DQuery
+   from next.urls import DQuery
 
 
    @context("active_tag")
@@ -322,4 +322,5 @@ See Also
    :doc:`layouts` for layout composition rules.
    :doc:`dependency-injection` for the resolver and providers.
    :doc:`static-assets/js-context` for the browser side ``Next`` object.
-   :doc:`/content/ref/decorators` for the ``@context`` and ``@component.context`` APIs.
+   :doc:`/content/ref/decorators` for the page-side ``@context`` API.
+   :doc:`/content/ref/components` for the ``@component.context`` API.

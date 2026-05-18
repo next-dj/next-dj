@@ -6,7 +6,7 @@ Configuration Reference
 Module Summary
 --------------
 
-``next.conf`` exposes the typed settings access, the default merging logic, the import helpers, and the ``extend_default_backend`` helper used in settings files.
+``next.conf`` exposes ``NextFrameworkSettings`` and the process-wide ``next_framework_settings`` instance, the ``DEFAULTS``, ``USER_SETTING``, and ``IMPORT_STRINGS`` constants, the ``perform_import`` and ``import_class_cached`` helpers, the ``extend_default_backend`` helper used in settings files, and the ``settings_reloaded`` signal.
 
 Public API
 ----------

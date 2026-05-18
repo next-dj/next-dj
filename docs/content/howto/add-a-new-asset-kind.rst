@@ -37,7 +37,7 @@ Register the kind.
                renderer="render_module_tag",
            )
 
-The four arguments are the kind identifier, the file extension, the placeholder slot, and the backend renderer method name.
+See :doc:`/content/topics/static-assets/asset-kinds` for the ``register`` signature.
 The ``module`` style ``render_module_tag`` is reused here because pre compiled JSX ships as ES modules.
 
 Ship the file.

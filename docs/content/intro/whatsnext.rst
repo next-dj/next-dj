@@ -23,8 +23,8 @@ First Full-Stack App
 
 1. :doc:`install`
 2. :doc:`tutorial01` through :doc:`tutorial05`
-3. :doc:`/content/topics/file-router` — route shapes and captured segments.
-4. :doc:`/content/topics/context` and :doc:`/content/topics/dependency-injection` — shared scope and markers such as ``DUrl``.
+3. :doc:`/content/topics/file-router`
+4. :doc:`/content/topics/context` and :doc:`/content/topics/dependency-injection`
 5. :doc:`/content/topics/forms/index`
 6. :doc:`/content/topics/static-assets/index`
 7. :doc:`/content/deployment/checklist`
@@ -50,17 +50,9 @@ Multi-Tenant or Multi-Project Setup
 4. :doc:`/content/topics/dependency-injection`
 5. :doc:`/content/deployment/settings`
 
-Examples
---------
-
-The ``examples/`` directory contains several self-contained Django projects plus ``_shared`` UI kit assets and a ``_template`` scaffold.
-Run any example from its folder with ``migrate`` then ``runserver``.
-Conventions, commands, and a per-folder **Focus** summary are in the repository `examples README <https://github.com/next-dj/next-dj/blob/main/examples/README.md>`_.
-The documentation catalog with GitHub links and primary doc pointers lives in :doc:`/content/misc/examples`.
-
 Community
 ---------
 
-Source code lives at ``github.com/next-dj/next-dj``.
+Source code lives at the `next.dj repository <https://github.com/next-dj/next-dj>`_.
 File an issue or open a discussion when something is unclear.
 Contributions to the documentation are welcome, see :doc:`/content/contributing/index`.

@@ -23,6 +23,9 @@ Forms
    Accepts every HTML attribute as a keyword.
    Captured URL parameters from ``request.resolver_match.kwargs`` are emitted automatically as ``_url_param_<name>`` hidden inputs. They are not passed as tag arguments.
 
+   The tag requires ``request`` and ``current_page_module_path`` in the template context.
+   The file router supplies both, so ``{% form %}`` works only inside a file-routed page.
+
 Components
 ----------
 
@@ -59,13 +62,13 @@ Components
 Multiline tag bodies
 ~~~~~~~~~~~~~~~~~~~~
 
-The framework reinstalls Django’s template tag pattern with the ``re.DOTALL`` flag so a single ``{% ... %}`` token may span several lines.
+The framework reinstalls Django's template tag pattern with the ``re.DOTALL`` flag so a single ``{% ... %}`` token may span several lines.
 That allows readable block components and slots when the inner markup is long.
 
 .. caution::
 
    This changes template parsing for **every** template the process loads, not only DJX files.
-   If you rely on Django’s stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
+   If you rely on Django's stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
 
 Static Pipeline
 ---------------

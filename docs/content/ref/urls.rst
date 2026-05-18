@@ -20,6 +20,9 @@ Backends
 Manager
 ~~~~~~~
 
+``urlpatterns`` is a ``list`` subclass that rebuilds the router and form-action patterns on each access.
+A route added after import is therefore visible without a process restart.
+
 .. automodule:: next.urls.manager
    :members:
 
@@ -61,7 +64,7 @@ They are exported from ``next.urls`` for introspection and for authors writing c
    * - Provider
      - What it supplies
    * - ``HttpRequestProvider``
-     - Supplies the ``HttpRequest`` object for any parameter annotated or named ``request``.
+     - Supplies the ``HttpRequest`` object for any parameter annotated ``HttpRequest`` or ``HttpRequest | None``.
    * - ``UrlByAnnotationProvider``
      - Supplies a URL kwarg value for parameters annotated with ``DUrl[...]``.
    * - ``UrlKwargsProvider``
@@ -69,7 +72,7 @@ They are exported from ``next.urls`` for introspection and for authors writing c
    * - ``QueryParamProvider``
      - Supplies ``request.GET`` values for parameters annotated with ``DQuery[...]``.
 
-Use ``get_multi_values(request, key)`` to read a multi-value query string parameter directly without going through the resolver.
+Use ``get_multi_values(request, name)`` to read a multi-value query string parameter directly without going through the resolver.
 
 See :doc:`/content/internals/di-resolver` for the full provider registration sequence and the resolution order.
 

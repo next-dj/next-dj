@@ -1,7 +1,7 @@
 .. _intro-tutorial03:
 
-Tutorial Part 3 Components and Static Assets
-============================================
+Components and Static Assets
+============================
 
 Goal
 ----

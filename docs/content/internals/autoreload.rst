@@ -64,13 +64,14 @@ Modules
    ``get_framework_filesystem_roots_for_linking`` returns the canonical page and component directory roots for build tooling.
 
 ``next.server.signals``.
-   ``watch_specs_ready`` fires once after the collector completes.
+   ``watch_specs_ready`` fires once after ``iter_all_autoreload_watch_specs`` finishes building the spec list.
 
 Watch Specs
 -----------
 
 A watch spec is a tuple of a root path and one glob pattern.
-``iter_default_autoreload_watch_specs`` builds the built-in set.
+``iter_default_autoreload_watch_specs`` is an internal helper of ``next.server.watcher`` that builds the built-in set.
+User code calls ``iter_all_autoreload_watch_specs`` instead, which wraps the built-in set with the registered extra specs.
 
 - Each page root contributes a ``**/page.py`` spec.
 - Each page root paired with its components folder name contributes a ``**/<components>/**/component.py`` spec.
@@ -79,7 +80,8 @@ A watch spec is a tuple of a root path and one glob pattern.
 Only Python entrypoints are watched.
 ``.djx`` templates and co-located assets are deliberately omitted from the specs.
 
-``iter_all_autoreload_watch_specs`` appends the specs registered through ``register_autoreload_watch_spec``, deduplicates the combined list by resolved path and glob, and emits ``watch_specs_ready`` with the final list.
+``iter_all_autoreload_watch_specs`` appends the specs registered through ``register_autoreload_watch_spec``.
+It deduplicates the combined list by resolved path and glob, then emits ``watch_specs_ready`` with the final list.
 
 Reload Decisions
 ----------------
@@ -98,12 +100,13 @@ The route set diff is taken by ``NextStatReloader`` from the configured page roo
 A custom router that builds routes from another source rebuilds them through ``router_manager.reload``, which is the public API covered in :doc:`/content/howto/reload-routes-from-code`.
 
 A ``.djx`` edit triggers neither path.
-Templates are re-read on render and their cached compilation is invalidated by source mtime inside the page and component layers, so a saved edit shows up on the next request without a process restart.
+Templates are re-read on render and their cached compilation is invalidated by source mtime inside the page and component layers.
+A saved edit shows up on the next request without a process restart.
 
 Signals
 -------
 
-The autoreload pipeline fires ``watch_specs_ready`` after the aggregator completes.
+The autoreload pipeline fires ``watch_specs_ready`` after the watch-spec aggregation completes.
 The sender is the ``iter_all_autoreload_watch_specs`` function itself, so a receiver connected with ``sender=iter_all_autoreload_watch_specs`` fires only for the watch-spec aggregation.
 A call to ``router_manager.reload`` fires ``router_reloaded`` after each in process route rebuild.
 

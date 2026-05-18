@@ -24,7 +24,7 @@ Page renders without layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A layout must contain the placeholder block ``{% block template %}{% endblock template %}`` or its short form ``{% block template %}{% endblock %}``.
-Without the placeholder the framework drops the body silently.
+Without the placeholder the framework drops the body at render time without an error, and ``manage.py check`` reports ``next.W001``.
 
 Confirm that ``layout.djx`` sits in an ancestor directory.
 
@@ -32,8 +32,8 @@ next.W043 warning
 ~~~~~~~~~~~~~~~~~
 
 A page module declares more than one body source.
-Pick one of ``render``, ``template`` attribute, or sibling ``template.djx``.
-Remove the others.
+Keep exactly one body source.
+The choices are a ``render`` function, a ``template`` module attribute, or a sibling ``template.djx`` file.
 
 ``render`` raised ``TypeError``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -184,7 +184,8 @@ Verify that ``DIRS`` and ``APP_DIRS`` in your page backends do not overlap.
 Routes do not refresh
 ~~~~~~~~~~~~~~~~~~~~~
 
-For a custom router backend that reads from the database call ``router_manager.reload()`` after data changes.
+The bundled ``FileRouterBackend`` refreshes automatically when the dev server detects a filesystem change.
+The manual ``router_manager.reload()`` call is only for a custom backend that reads routes from a non-filesystem source such as a database.
 See :doc:`/content/howto/reload-routes-from-code`.
 
 Template tags look undefined
@@ -214,24 +215,18 @@ See :ref:`ref-settings` for the full description of this key.
 Components are not available at startup
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-By default ``LAZY_COMPONENT_MODULES = False``, which means ``component.py`` modules are imported during ``AppConfig.ready``.
+By default ``LAZY_COMPONENT_MODULES = False``, which means ``component.py`` modules under configured component roots are imported during ``AppConfig.ready``.
 If a module raises an import error at startup, the server does not start.
-Set ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK`` to defer imports to the first render.
-This hides startup errors but allows the server to boot and show the error on the page that uses the component instead.
+Set ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK`` to defer imports for those roots until first resolve.
+Components beside page routes may still load earlier when URL patterns are constructed.
+This hides some startup errors but surfaces them when the failing component or route branch is first touched.
 
 System Checks
 -------------
 
-Run system checks
-~~~~~~~~~~~~~~~~~
-
-.. code-block:: bash
-   :caption: shell
-
-   uv run python manage.py check
-
-The output lists every check that fired with a code and a hint.
-Most errors point at the configuration key that needs to change.
+``uv run python manage.py check`` runs every framework check and prints each
+one that fired with its code and a hint. The check codes referenced above are
+defined in full in :doc:`/content/ref/system-checks`.
 
 See Also
 --------

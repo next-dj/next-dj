@@ -93,6 +93,8 @@ Extension Points
 - Subclass ``FileRouterBackend`` to add patterns or augment naming.
 - Register a custom backend in ``RouterFactory`` and reference it through the settings dotted path.
 - Subscribe to ``route_registered`` to observe each new pattern.
+  It fires once per discovered pattern with ``sender=FileRouterBackend`` and the ``url_path`` and ``file_path`` keyword arguments.
+  See :doc:`/content/ref/signals`.
 
 See Also
 --------

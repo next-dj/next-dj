@@ -91,8 +91,8 @@ The owner determines when the collector adds the asset.
 Hot Reload
 ----------
 
-The autoreload watch specs use the stem list to build the file globs that the watcher monitors.
-Register stems during ``AppConfig.ready`` so the watch specs are complete at startup.
+Register stems during ``AppConfig.ready`` so the kind and stem registries are complete before the first request.
+A new co-located file under a registered stem is picked up on the next page load, see :doc:`overview`.
 
 Common Patterns
 ---------------

@@ -3,10 +3,8 @@
 Overview
 ========
 
-next.dj is a Django library that turns the filesystem into your URL router, your layout tree, and your component registry.
-It layers on top of Django, it does not replace it.
-next.dj takes over URL layout, context sharing, component composition, and form dispatch.
-Django keeps handling models, admin, ORM, auth, and migrations exactly as before.
+next.dj is a framework built on Django that turns the filesystem into your URL router, layout tree, and component registry.
+It adds file-based routing, layouts and context, components, and form dispatch while leaving the ORM, admin, auth, and migrations to Django.
 
 This page describes the mental model.
 Read it once before the tutorial, then refer back when the layout of a real project surprises you.
@@ -52,15 +50,31 @@ Key Terms
 
 You will see these nouns on every page.
 
-**Page**, **layout**, **component**, **action**, **context function**, **DI marker**.
+Page
+   A directory with a ``page.py`` module that the file router maps to a URL.
 
-Expand definitions, spelling rules for route names, and the full term list in :doc:`/content/misc/glossary`.
+Layout
+   A ``layout.djx`` template that wraps every page below it in the tree.
+
+Component
+   A reusable template fragment with its own context and co-located assets.
+
+Action
+   A handler registered with ``@action`` that receives a form submission.
+
+Context function
+   A callable decorated with ``@context`` that publishes a value into the template scope.
+
+DI marker
+   A typed annotation such as ``DUrl`` that the resolver fills from the request.
+
+Expand these definitions, spelling rules for route names, and the full term list in :doc:`/content/misc/glossary`.
 For design rationale, see :doc:`/content/misc/design-philosophy`.
 
-A Single-File Tour
-------------------
+A Minimal Project
+-----------------
 
-Once installed, the smallest next.dj project lives in three files.
+Once installed, the smallest next.dj project is the three files below plus a one-line edit to ``config/urls.py``.
 
 .. code-block:: python
    :caption: notes/routes/page.py
@@ -86,6 +100,7 @@ Once installed, the smallest next.dj project lives in three files.
                "BACKEND": "next.urls.FileRouterBackend",
                "APP_DIRS": True,
                "PAGES_DIR": "routes",
+               "OPTIONS": {"context_processors": []},
            }
        ],
    }

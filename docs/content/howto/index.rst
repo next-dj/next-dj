@@ -84,7 +84,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`extend-a-default-backend`
    Patch one key of a default backend entry through ``extend_default_backend``.
 
-.. rubric:: Testing and integration
+.. rubric:: Testing
 
 :doc:`test-a-page-with-actions`
    Test a page that posts to a registered action.
@@ -92,20 +92,22 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`test-a-component-in-isolation`
    Render and assert on one component without a page.
 
-:doc:`split-settings-per-environment`
-   Split settings into base, dev, and prod modules.
+.. rubric:: Integration and operations
 
 :doc:`integrate-django-admin`
    Run Django admin alongside next.dj pages.
 
-:doc:`observe-framework-signals`
-   Receive framework signals in production receivers.
-
 :doc:`scope-requests-per-tenant`
    Scope every request to one tenant across the stack.
 
+:doc:`observe-framework-signals`
+   Receive framework signals in production receivers.
+
 :doc:`stream-live-updates-with-sse`
    Push live updates to the browser with server-sent events.
+
+:doc:`split-settings-per-environment`
+   Split settings into base, dev, and prod modules.
 
 .. toctree::
    :hidden:

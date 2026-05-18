@@ -66,7 +66,7 @@ Each helper returns a frozen instance ready to pass into a template.
 
 ``field_spec`` accepts an ``is_extra`` keyword argument that defaults to ``False``.
 It sets the ``is_extra`` field on the resulting ``FieldSpec``, which flags a field that belongs to a blank extra formset row.
-``formset_spec`` sets this flag on every ``FieldSpec`` and ``FormsetRowSpec`` it builds, so a template can tell a blank trailing row apart from a populated one and style or hide it accordingly.
+``formset_spec`` computes ``is_extra`` per row and propagates it to every ``FieldSpec`` and ``FormsetRowSpec`` it builds, so a template can tell a blank trailing row apart from a populated one and style or hide it accordingly.
 A standalone ``field_spec`` call leaves ``is_extra`` at ``False`` unless the caller passes the argument.
 
 Using a Spec in Templates
@@ -94,7 +94,7 @@ Use them when the standard ``{% form %}`` tag does not match the layout you want
    {% endfor %}
 
 A custom renderer can read the same fields from Python.
-The dataclass shape is stable across releases.
+The dataclass exposes a fixed set of attributes.
 
 Field Kinds
 -----------
@@ -135,7 +135,7 @@ Idempotent providers.
 Cheap re-render.
    Form pages re-render quickly because layouts, context functions, and components reuse cached values.
 
-The framework exposes the cache through ``next.deps.cache.get_request_dep_cache`` when an action needs to read it.
+The framework exposes the cache through ``next.deps.get_request_dep_cache`` when an action needs to read it.
 
 Spec vs Bound Form
 ------------------

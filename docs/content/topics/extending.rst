@@ -3,9 +3,7 @@
 Extending
 =========
 
-next.dj exposes five extension mechanisms that you compose freely.
-Each mechanism has a different purpose, scope, and lifecycle.
-This page covers all five so you can pick the right one for the customisation you have in mind.
+next.dj exposes five extension mechanisms you compose freely, each with its own purpose, scope, and lifecycle.
 
 .. contents::
    :local:
@@ -62,9 +60,6 @@ Subclass an abstract base class and register the dotted path in ``NEXT_FRAMEWORK
    * - Static pipeline
      - ``DEFAULT_STATIC_BACKENDS``
      - ``next.static.backends.StaticBackend``
-   * - JS context serializer
-     - ``JS_CONTEXT_SERIALIZER``
-     - ``next.static.JsContextSerializer`` protocol, defined in ``next.static.serializers``
 
 A backend always implements the full contract.
 A custom backend usually subclasses the default so it inherits every default behaviour.
@@ -105,11 +100,11 @@ Register entries in ``AppConfig.ready`` or through a settings key.
    * - Target
      - How to register
    * - Asset kinds
-     - ``default_kinds.register(...)`` in ``AppConfig.ready``. Import ``default_kinds`` from ``next.static``.
+     - ``default_kinds.register(...)`` in ``AppConfig.ready``. Import ``default_kinds`` from ``next.static`` (top-level re-export).
    * - Asset stems
      - ``default_stems.register(...)`` in ``AppConfig.ready``. Import ``default_stems`` from ``next.static.discovery`` (deep import).
    * - Placeholder slots
-     - ``default_placeholders.register(...)`` in ``AppConfig.ready``. Import ``default_placeholders`` from ``next.static``.
+     - ``default_placeholders.register(...)`` in ``AppConfig.ready``. Import ``default_placeholders`` from ``next.static`` (top-level re-export).
    * - Dependency providers
      - Subclass ``RegisteredParameterProvider``, imported in ``AppConfig.ready``.
    * - Named dependencies
@@ -117,7 +112,7 @@ Register entries in ``AppConfig.ready`` or through a settings key.
    * - Template loaders
      - The ``TEMPLATE_LOADERS`` settings key.
 
-The registry pattern is the right choice when the framework already knows how to consume the values and just needs to learn about a new entry.
+The registry pattern is the right choice when the framework already knows how to consume the values and only needs to learn about a new entry.
 
 The asset-stem registry is the extension point for teaching the static discovery scanner about a new filename inside a component.
 ``default_stems`` is not re-exported from the ``next.static`` package, so the registration requires the deep import ``from next.static.discovery import default_stems``.
@@ -143,9 +138,8 @@ Autoreload Watch Specs
 The development reloader watches the page and component trees by default.
 Call ``register_autoreload_watch_spec`` from ``next.server`` to add a directory of your own.
 
-.. code-block:: python
-
-   register_autoreload_watch_spec(path: Path, glob: str) -> None
+.. function:: register_autoreload_watch_spec(path: Path, glob: str) -> None
+   :noindex:
 
 ``path`` is the filesystem root to watch.
 ``glob`` is a pattern relative to that root that selects the files whose changes trigger a reload.
@@ -179,8 +173,8 @@ When the watcher collects the final spec list it sends the ``watch_specs_ready``
 Subscribe to that signal to observe or audit the resolved spec set.
 See :doc:`/content/internals/autoreload` for the full watcher pipeline.
 
-Protocols
----------
+Protocols and Abstract Base Classes
+-----------------------------------
 
 A protocol is a structural contract.
 Implement the methods listed in the protocol and pass the class to the framework.
@@ -191,12 +185,13 @@ Implement the methods listed in the protocol and pass the class to the framework
 
    * - Protocol
      - Defined in
-   * - Template loader
-     - ``next.pages.loaders.TemplateLoader``
    * - Dedup strategy
      - ``next.static.collector.DedupStrategy``
    * - JS context serializer
      - ``next.static.JsContextSerializer``
+
+``next.pages.loaders.TemplateLoader`` is an abstract base class rather than a protocol.
+Subclass it explicitly and register the subclass through ``TEMPLATE_LOADERS``.
 
 Protocols differ from backends in that they implement a single hook.
 A template loader handles file discovery for one extension.
@@ -221,9 +216,10 @@ The framework calls the strategy at a well known point in the pipeline.
    * - JS context conflict policy
      - ``JS_CONTEXT_POLICY`` in static backend ``OPTIONS``
      - ``FirstWinsPolicy``
-   * - JS context serializer
-     - ``JS_CONTEXT_SERIALIZER`` settings key
-     - ``JsonJsContextSerializer``
+
+The JS context serializer is the ``JsContextSerializer`` protocol listed under
+*Protocols* above. Select an implementation with the ``JS_CONTEXT_SERIALIZER``
+setting. The default is ``JsonJsContextSerializer``.
 
 Use a strategy when the customisation is a single algorithm rather than a complete subsystem.
 

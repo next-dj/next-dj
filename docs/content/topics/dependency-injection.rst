@@ -30,16 +30,17 @@ Component context functions.
 Form action handlers.
    ``@action`` callables registered through :doc:`next.forms <forms/index>`.
 
-Every call site uses the same providers and the same markers.
-For each parameter the resolver walks its provider list and picks the first provider whose ``can_handle`` returns ``True``.
+Every call site shares one provider list and one set of markers.
+For each parameter the resolver walks that provider list and picks the first provider whose ``can_handle`` returns ``True``.
 A parameter that no provider claims falls back to its declared default, or stays ``None`` when it has none.
 Functions written for unit tests can therefore declare ``request: HttpRequest | None = None`` and still work both inside and outside the framework.
+Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
 
 Built In Providers
 ------------------
 
 The framework registers eight providers.
-They are consulted in a fixed order and the first match wins, so the list below is also the priority order.
+They are consulted in registration order and the first match wins, so the list below is also the priority order.
 
 1. Named dependency provider.
    A parameter with default ``Depends(...)`` receives the resolved dependency.
@@ -74,23 +75,45 @@ The URL path provider coerces the captured segment to the requested type.
    from notes.models import Note
 
    from next.pages import context
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
 
    @context("note")
    def note(note_id: DUrl[int]) -> Note:
        return Note.objects.get(pk=note_id)
 
-``DUrl[T]`` coerces the captured string value to ``T`` when ``T`` is ``int``, ``bool``, or ``float``. For any other type, including ``str``, the value is returned as-is.
+In the simplest form ``DUrl[T]`` matches the captured segment whose name
+equals the parameter name, then coerces the string value to ``T``. Coercion applies when ``T``
+is ``int``, ``bool``, or ``float``. For any other type, including ``str``,
+the value is returned as-is.
 ``bool`` treats ``"1"``, ``"true"``, and ``"yes"`` as ``True`` and everything else as ``False``.
 For wildcard ``[[name]]`` segments the captured value is the matched path string. Annotate as ``DUrl[str]`` or leave it unannotated.
+
+The marker has three forms.
+
+``DUrl[T]``.
+   Reads the captured segment that shares the parameter name and coerces
+   it to ``T``. Use it when the parameter name already matches the
+   directory segment.
+
+``DUrl["segment"]``.
+   Reads the named captured segment and returns it unchanged as a string.
+   Use it when the parameter name differs from the segment name and no
+   coercion is needed.
+
+``DUrl["segment", T]``.
+   Reads the named captured segment and coerces it to ``T``. Use it when
+   the parameter name differs from the segment name, for example
+   ``note_id: DUrl["id", int]`` for an ``[id]`` directory.
 
 .. note::
 
    ``[slug:name]`` and ``[uuid:name]`` in directory names are Django URL *converter* labels that control routing and validation (see :doc:`file-router`).
    They are not Python type annotations.
    The captured value for a slug segment is a ``str``. Annotate as ``DUrl[str]``.
-   The captured value for a UUID segment is a ``uuid.UUID`` object already converted by Django. Name the parameter to match the segment (e.g. ``my_id``) and let the URL kwargs provider supply it directly, or annotate ``DUrl[str]`` if you only need the string form.
+   The captured value for a UUID segment is a ``uuid.UUID`` object already converted by Django.
+   Name the parameter to match the segment (e.g. ``my_id``) and let the URL kwargs provider supply it directly.
+   Annotate ``DUrl[str]`` if you only need the string form.
 
 DQuery
 ~~~~~~
@@ -101,7 +124,7 @@ The query provider reads from ``request.GET``.
    :caption: notes/routes/search/page.py
 
    from next.pages import context
-   from next.urls.markers import DQuery
+   from next.urls import DQuery
 
 
    @context("results")
@@ -149,6 +172,8 @@ Two markers reach into the request-scoped context.
 
 ``Depends("name")``.
    Returns the result of a callable registered through ``next.deps.resolver.dependency``.
+   ``Depends`` also accepts a callable factory, a constant value, and a bare ``Depends()`` that falls back to the parameter name.
+   See :doc:`/content/internals/di-resolver` for the four forms.
 
 .. code-block:: python
    :caption: consuming context and depends
@@ -179,7 +204,7 @@ Use ``resolver.dependency`` to register a callable that any handler can ask for 
    def layout_theme() -> dict:
        return {"name": "Notes", "version": "1.0"}
 
-Imports inside ``AppConfig.ready`` ensure that the decorator runs before the first request.
+Import the module that defines the dependency from ``AppConfig.ready`` so the decorator runs before the first request.
 The registered callable can take any provider-resolved parameters because it is itself dispatched through the resolver.
 
 Diagnosing a Dependency Cycle
@@ -189,7 +214,7 @@ A named dependency may itself ask for other named dependencies through ``Depends
 When two of them ask for each other, directly or through a longer chain, resolution cannot terminate.
 
 .. code-block:: python
-   :caption: notes/deps.py — a cycle
+   :caption: notes/deps.py
 
    from next.deps import Depends, resolver
 
@@ -216,7 +241,7 @@ Break the cycle by removing one ``Depends`` edge.
 Here ``settings`` does not need ``profile`` at all, so the fix is to drop that parameter.
 
 .. code-block:: python
-   :caption: notes/deps.py — the fix
+   :caption: notes/deps.py
 
    from next.deps import Depends, resolver
 
@@ -259,29 +284,6 @@ The base classes are ``RegisteredParameterProvider`` and ``DDependencyBase``.
 
        def resolve(self, param, context):
            (model_cls,) = get_args(param.annotation)
-           pk = context.url_kwargs["id"]
-           try:
-               return model_cls.objects.get(pk=pk)
-           except model_cls.DoesNotExist as exc:
-               raise Http404 from exc
-
-Resolving From URL or POST
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-One marker can serve both a page render and a form action handler.
-A page render captures the identifier in the URL.
-A form action carries it in the POST body.
-The provider checks both sources so the same ``DNote[Note]`` parameter works in either call site.
-
-.. code-block:: python
-   :caption: notes/providers.py
-
-   class NoteProvider(RegisteredParameterProvider):
-       def can_handle(self, param, _context) -> bool:
-           return get_origin(param.annotation) is DNote
-
-       def resolve(self, param, context):
-           (model_cls,) = get_args(param.annotation)
            pk = context.url_kwargs.get("id")
            if pk is None and context.request is not None:
                pk = context.request.POST.get("note_id")
@@ -290,6 +292,10 @@ The provider checks both sources so the same ``DNote[Note]`` parameter works in 
            except model_cls.DoesNotExist as exc:
                raise Http404 from exc
 
+One marker can serve both a page render and a form action handler.
+A page render captures the identifier in the URL, while a form action carries
+it in the POST body. The ``resolve`` method above checks both sources, so the
+same ``DNote[Note]`` parameter works in either call site.
 The form template carries the identifier in a hidden input so the POST branch can read it.
 See ``examples/kanban`` for a marker that serves both call sites.
 
@@ -321,8 +327,8 @@ Import before resolution.
 Request Scoped Cache
 --------------------
 
-The resolver caches every produced value on the request.
-A second context function that asks for the same parameter receives the cached value, not a fresh call.
+The resolver caches every named dependency for the duration of one resolution pass.
+A second context function in the same page render that asks for the same dependency receives the cached value, not a fresh call.
 
 The cache is also shared between the initial render of a form page and the re-render on validation failure.
 ``FormActionDispatch`` attaches its dependency cache to the request, and ``get_request_dep_cache`` reads it back.

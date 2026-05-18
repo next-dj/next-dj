@@ -83,7 +83,7 @@ Mark template strings with the standard Django i18n tags.
 Load the ``i18n`` tag library at the top of the template.
 
 .. code-block:: jinja
-   :caption: shop/pages/template.djx
+   :caption: shop/routes/template.djx
 
    {% load i18n %}
 
@@ -94,7 +94,7 @@ Translate text built in Python with :func:`~django.utils.translation.gettext`.
 A ``@context`` callable returns the already-translated string.
 
 .. code-block:: python
-   :caption: shop/pages/page.py
+   :caption: shop/routes/page.py
 
    from django.utils.translation import gettext as _
 

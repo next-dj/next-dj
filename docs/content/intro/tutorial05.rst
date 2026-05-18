@@ -1,7 +1,7 @@
 .. _intro-tutorial05:
 
-Tutorial Part 5 Testing and Autoreload
-======================================
+Testing and Autoreload
+======================
 
 Goal
 ----
@@ -22,12 +22,13 @@ Walkthrough
 Install Test Dependencies
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The framework ships its own ``next.testing`` module, which depends on pytest and pytest-django.
+The framework ships its own ``next.testing`` module of framework-agnostic helpers.
+This tutorial drives it with pytest and pytest-django, which you install separately.
 
 .. code-block:: bash
    :caption: shell
 
-   uv pip install pytest pytest-django
+   uv add --dev pytest pytest-django
 
 Add the pytest configuration.
 
@@ -108,7 +109,6 @@ Test the Create Action
 ~~~~~~~~~~~~~~~~~~~~~~
 
 The framework gives each action a stable URL.
-``NextClient.post_action`` resolves an action name to its URL and posts in one call.
 
 .. code-block:: python
    :caption: tests/test_notes_actions.py

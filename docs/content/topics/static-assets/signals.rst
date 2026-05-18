@@ -17,6 +17,28 @@ Fires after a file is registered with a backend and added to the collector.
 The sender is the asset instance.
 The payload carries ``collector`` and ``backend``.
 
+.. note::
+
+   ``asset_registered`` fires once per discovered file inside the render hot path.
+   Keep receivers cheap and synchronous, and avoid I/O or database queries in them.
+
+.. code-block:: python
+   :caption: count discovered assets per kind
+
+   from collections import Counter
+
+   from django.dispatch import receiver
+
+   from next.static.signals import asset_registered
+
+
+   asset_counts: Counter = Counter()
+
+
+   @receiver(asset_registered)
+   def track_asset(sender, **kwargs) -> None:
+       asset_counts[sender.kind] += 1
+
 collector_finalized
 ~~~~~~~~~~~~~~~~~~~
 

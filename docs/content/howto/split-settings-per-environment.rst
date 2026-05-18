@@ -103,6 +103,10 @@ Override a single ``NEXT_FRAMEWORK`` key without rewriting the whole block by co
    NEXT_FRAMEWORK = {**NEXT_FRAMEWORK}  # noqa: F405
    NEXT_FRAMEWORK["STRICT_CONTEXT"] = False
 
+``extend_default_backend`` patches the backend-list keys.
+A flat key such as ``STRICT_CONTEXT`` is copied and reassigned as shown here.
+See :doc:`extend-a-default-backend` for the backend-list case.
+
 Override for Production
 ~~~~~~~~~~~~~~~~~~~~~~~
 

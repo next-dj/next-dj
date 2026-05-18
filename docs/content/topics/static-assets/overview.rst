@@ -3,7 +3,8 @@
 Static Assets Overview
 ======================
 
-The static pipeline finds CSS, JS, and module files that live next to pages and components, deduplicates them across the request, and injects link and script tags into placeholder slots inside the layout.
+The static pipeline finds CSS, JS, and module files that live next to pages and components.
+It deduplicates them across the request and injects link and script tags into placeholder slots inside the layout.
 This page covers the four moving pieces of the pipeline and traces a single asset from disk to the rendered HTML.
 
 .. contents::
@@ -142,9 +143,9 @@ Where Assets Live
 Hot Reload
 ----------
 
-Discovery registers watch specs with the autoreloader.
-Adding, renaming, or removing an asset triggers a reload.
-The collector picks up the new asset set on the next request.
+Co-located assets are not watched by the autoreloader.
+The collector re-runs discovery on every request, so a saved or added asset is picked up on the next page load without a process restart.
+A change to ``page.py`` or ``component.py`` does restart the process through the normal Python reloader.
 
 Production Build
 ----------------
@@ -158,6 +159,7 @@ Public API Touchpoints
 ----------------------
 
 The pipeline exposes several public names.
+The full set is in :doc:`/content/ref/static`.
 
 ``next.static.StaticCollector``.
    The request scoped collector.

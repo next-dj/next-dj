@@ -5,7 +5,8 @@ Contributing
 
 This section covers documentation contributions: how to write and structure new pages.
 
-For **code contributions** — setup, testing, benchmarks, and pull request process — read `CONTRIBUTING.md <https://github.com/next-dj/next-dj/blob/main/CONTRIBUTING.md>`_ in the repository root.
+Code contributions cover setup, testing, benchmarks, and the pull request process.
+Read `CONTRIBUTING.md <https://github.com/next-dj/next-dj/blob/main/CONTRIBUTING.md>`_ in the repository root for that workflow.
 
 For **internal framework conventions** (module layout, naming, signal and system-check rules) read :doc:`/content/internals/contributing-notes`.
 

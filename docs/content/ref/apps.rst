@@ -40,7 +40,9 @@ They are documented here for framework contributors and for projects that instru
    ``uninstall()`` restores the original ``StatReloader`` subclass. Test suites that call ``ready()`` multiple times use it to avoid double-patching.
 
 ``next.apps.components``.
-   Calls ``components_manager._ensure_backends()`` and triggers ``import_all_component_modules`` on each backend so component Python modules are imported before the first request arrives.
+   Calls ``components_manager._ensure_backends()`` then invokes ``_ensure_loaded()`` on each backend that defines it.
+   For ``FileComponentsBackend`` this discovers components and populates the registry.
+   Unless ``NEXT_FRAMEWORK["LAZY_COMPONENT_MODULES"]`` is true, it also imports every ``component.py`` found under configured component roots during startup so decorators run before the first request.
    Exposes a single ``install()`` callable.
 
 See Also

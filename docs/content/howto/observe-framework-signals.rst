@@ -149,8 +149,6 @@ Import the receivers module from ``AppConfig.ready`` so the ``@receiver`` decora
 .. code-block:: python
    :caption: obs/apps.py
 
-   from importlib import import_module
-
    from django.apps import AppConfig
 
 
@@ -158,7 +156,7 @@ Import the receivers module from ``AppConfig.ready`` so the ``@receiver`` decora
        name = "obs"
 
        def ready(self) -> None:
-           import_module(f"{self.name}.receivers")
+           from obs import receivers  # noqa: F401
 
 Verification
 ------------

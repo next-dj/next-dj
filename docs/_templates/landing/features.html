@@ -38,7 +38,7 @@
           {{ mockbar("routes/posts/[int:post_id]/page.py") }}
           <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> notes.models <span class="c-kw">import</span> Note
 <span class="c-kw">from</span> next.pages <span class="c-kw">import</span> context
-<span class="c-kw">from</span> next.urls.markers <span class="c-kw">import</span> DUrl
+<span class="c-kw">from</span> next.urls <span class="c-kw">import</span> DUrl
 
 
 <span class="c-deco">@context</span>(<span class="c-str">"note"</span>)
@@ -147,7 +147,7 @@
           <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> django.http <span class="c-kw">import</span> HttpRequest
 <span class="c-kw">from</span> next.deps <span class="c-kw">import</span> Depends
 <span class="c-kw">from</span> next.pages <span class="c-kw">import</span> context
-<span class="c-kw">from</span> next.urls.markers <span class="c-kw">import</span> DUrl
+<span class="c-kw">from</span> next.urls <span class="c-kw">import</span> DUrl
 
 
 <span class="c-deco">@context</span>(<span class="c-str">"note"</span>)

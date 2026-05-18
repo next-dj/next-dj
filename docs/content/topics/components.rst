@@ -14,7 +14,7 @@ This page covers the two component shapes, the rules for props and slots, how co
 Overview
 --------
 
-The default ``FileComponentsBackend`` walks each active page tree (the same roots the URL router uses) and treats every directory named ``COMPONENTS_DIR`` as a component namespace.
+The default ``FileComponentsBackend`` registers page-tree component folders through the URL router walk and walks the ``DIRS`` roots itself, treating every directory named ``COMPONENTS_DIR`` as a component namespace.
 Individual folders inside that directory register components. See ``next.components.scanner`` in :doc:`/content/internals/component-pipeline` if you need the exact walk order.
 
 Components compose freely.
@@ -38,7 +38,7 @@ Composite component.
 The two shapes share the same template syntax and the same call form.
 Composite components add Python logic when the template needs computed values that go beyond the surrounding template context.
 
-Multiline ``{% #component %}``, ``{% #slot %}``, and related tags are allowed: the framework enables ``re.DOTALL`` for Django’s tag lexer so tag bodies can wrap across lines.
+Multiline ``{% #component %}``, ``{% #slot %}``, and related tags are allowed. The framework enables ``re.DOTALL`` for Django's tag lexer so tag bodies can wrap across lines.
 See :ref:`ref-template-tags` under *Multiline tag bodies* for the global parsing caveat.
 
 .. code-block:: text
@@ -65,7 +65,7 @@ When the URL router walks the page trees it skips directories that match a confi
 The backend recognises three sources for components.
 
 App page trees.
-   Every page tree that the router walks is also walked by the components backend.
+   The URL router walk registers each page tree's component folders with the components backend.
    A folder named ``COMPONENTS_DIR`` under that tree is a components root for the application.
 
 Project directories.
@@ -109,7 +109,8 @@ Global scope.
    Components in directories listed under ``DIRS`` are visible from every template, regardless of tree.
 
 Two components with the same name in different scopes are valid only when one is local to a tree and the other is in another tree.
-Two components with the same name in the same scope are reported by ``next.E020`` and ``next.E034`` system checks.
+Two components with the same name in the same scope are reported by the ``next.E020`` system check.
+``next.E034`` reports one component name used at the root route scope of more than one page tree.
 
 Calling a Component
 -------------------
@@ -255,7 +256,12 @@ Callers fill the slot with ``{% #slot %}`` inside the block form of ``{% compone
 
 A caller-supplied ``{% #slot %}`` wins over the component's fallback body.
 When the caller omits the slot the component renders its own ``{% #set_slot %}`` default instead.
-Slot content reaches the component template under the ``slot_<name>`` key, so ``{% set_slot "content" %}`` and ``{{ slot_content }}`` resolve the same value.
+
+The void ``{% slot "name" %}`` form fills a slot whose content carries no children, mirroring the void and block split shown for ``{% component %}``.
+Use it when the slot value is supplied through a prop or left empty.
+Caller slot content reaches the component scope under the ``slot_<name>`` key.
+``{% set_slot "content" %}`` renders that injected content, or its own fallback body when no caller content was supplied.
+It is the supported way to place a slot because it also carries the fallback.
 
 Component Context
 -----------------
@@ -310,13 +316,11 @@ See :doc:`static-assets/deduplication` for the dedup rules.
 Module Loading
 --------------
 
-By default the components backend imports every discovered ``component.py`` when it initialises, so the side effects of ``@component.context`` and ``@action`` are visible from the first request.
-When ``NEXT_FRAMEWORK["LAZY_COMPONENT_MODULES"]`` is ``True``, Python execution of each module is deferred to the first render of that component instead.
-
-Lazy Loading
-~~~~~~~~~~~~
-
-To defer module imports to the first render of each component, set ``LAZY_COMPONENT_MODULES``.
+By default the framework imports every discovered ``component.py`` during ``AppConfig.ready``, so the side effects of ``@component.context`` are visible from the first request.
+A ``component.py`` may also register a form action with ``@action``, which the same import makes visible.
+See :doc:`/content/topics/forms/actions` for the action decorator.
+Set ``LAZY_COMPONENT_MODULES`` to skip the bulk import for modules discovered only from configured component roots.
+Those modules run on first resolve instead.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -325,8 +329,10 @@ To defer module imports to the first render of each component, set ``LAZY_COMPON
        "LAZY_COMPONENT_MODULES": True,
    }
 
-The filesystem scan still happens at startup so the visibility scope tree is ready.
-Only Python execution is deferred.
+Discovery still runs during ``AppConfig.ready`` so the visibility scope tree is built before any component resolves.
+Python modules under configured roots alone defer until first resolve.
+Components under ``_components`` next to page files still load during the router filesystem walk when URL patterns are generated.
+See :ref:`ref-settings` for the exact split between the two paths.
 
 Hot Reload
 ----------
@@ -335,18 +341,22 @@ The development server picks up new and changed component folders without a rest
 Each component root contributes its own watch spec.
 A change inside the folder fires the autoreload pipeline and the runserver reloads with the updated component set.
 
-The framework also emits two signals during the lifecycle.
+The framework also emits four signals during the lifecycle.
 
 - ``component_registered`` fires when an individual component enters the registry.
 - ``components_registered`` fires once after a bulk discovery, with a list of every component that registered during the cycle.
+- ``component_backend_loaded`` fires after a component backend is created from its config entry.
+- ``component_rendered`` fires after a component renders to HTML.
+
+See :doc:`/content/ref/signals` for the full signal catalog.
 
 System Checks
 -------------
 
 The components subsystem contributes Django system checks.
 
-- ``next.E020`` reports two components with the same name in the same tree.
-- ``next.E034`` reports global components with the same name across project roots.
+- ``next.E020`` reports two components with the same name in the same scope.
+- ``next.E034`` reports one component name used at the root route scope of more than one page tree.
 
 Run them with ``uv run python manage.py check``.
 
@@ -378,6 +388,10 @@ Conditional Rendering
 A composite component can define a ``render`` function in ``component.py``.
 The function receives DI-resolved parameters and returns the component body as a string.
 Return an empty string to render nothing, which turns the component into a server side gate.
+
+A ``render`` function takes over completely.
+The component template and ``@component.context`` callables do not run for that component.
+The function may return a string or an :class:`~django.http.HttpResponse`.
 
 .. code-block:: python
    :caption: _components/feature_guard/component.py

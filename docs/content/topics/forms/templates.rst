@@ -48,6 +48,22 @@ It accepts either a plain name or a namespaced name.
 An opening tag without an ``@action`` argument raises ``TemplateSyntaxError`` at parse time.
 A name that is not in the registry resolves to an empty ``action`` attribute rather than raising.
 
+Render-Time Failures
+--------------------
+
+The tag raises ``ImproperlyConfigured`` at render time in two cases.
+
+Missing ``request``.
+   The tag reads ``request`` from the template context to build the CSRF token and the hidden fields.
+   Add ``django.template.context_processors.request`` to ``TEMPLATES[*].OPTIONS.context_processors`` so the request reaches the context.
+
+Missing ``current_page_module_path``.
+   The tag reads ``current_page_module_path`` to emit the ``_next_form_page`` origin field.
+   The file router sets this variable on every rendered page.
+   Render the form through the file router rather than a hand-built view so the variable is present.
+
+The ``next.E019`` system check, described in :doc:`/content/security/csrf-and-forms`, catches the missing context processor before a request reaches the tag.
+
 Class and Extra Attributes
 --------------------------
 
@@ -69,7 +85,7 @@ Captured URL Parameters
 -----------------------
 
 The tag does not need any argument to forward captured URL parameters.
-When the page URL captures a parameter the tag emits a hidden ``_url_param_<name>`` field for every captured kwarg in ``request.resolver_match.kwargs``.
+When the page URL captures a parameter the tag emits a hidden ``_url_param_<name>`` field for every captured kwarg in ``request.resolver_match.kwargs``, skipping the dispatch ``uid`` and any name reserved by the dependency resolver.
 
 .. code-block:: jinja
    :caption: notes/routes/notes/[id]/template.djx
@@ -80,7 +96,7 @@ When the page URL captures a parameter the tag emits a hidden ``_url_param_<name
    {% endform %}
 
 A page whose URL captures ``id`` therefore posts a hidden ``_url_param_id`` field automatically.
-The handler receives the same value through ``DUrl[int]`` or any other URL marker.
+The handler receives the same value through ``DUrl["id", int]`` or any other URL marker.
 
 The form Variable
 -----------------
@@ -89,7 +105,8 @@ The block body has access to a variable named ``form``.
 The framework decides what to publish based on the request lifecycle.
 
 Initial render on GET.
-   The variable is an unbound form created by ``form_class.get_initial(request, **kwargs)``.
+   The variable is an unbound form.
+   The framework calls ``get_initial`` through the dependency resolver, then constructs the form from the returned initial data or model instance.
 
 Re-rendered page after a failing POST.
    The variable is the bound form with errors.

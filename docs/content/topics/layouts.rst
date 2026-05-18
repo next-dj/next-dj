@@ -72,7 +72,7 @@ The closing tag can be written either way.
      </body>
    </html>
 
-Without the placeholder the layout still renders, but the page body is dropped silently.
+Without the placeholder the layout still renders, but the page body is dropped at render time without an error.
 The ``check_layout_templates`` system check emits ``next.W001`` for any ``layout.djx`` that lacks a ``{% block template %}`` block.
 Run ``uv run python manage.py check`` to catch layouts that miss the placeholder.
 

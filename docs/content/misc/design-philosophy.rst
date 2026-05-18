@@ -47,8 +47,9 @@ The framework prefers data over class inheritance whenever it makes sense.
 Stable URLs
 -----------
 
-Every page gets a stable URL name in the ``next`` namespace.
-Reorganising directories renames URLs, but templates that use ``{% url %}`` keep working because the name reflects the new path.
+Every page gets a stable URL name derived from its directory path.
+The name is predictable, so a reader can reverse it without consulting a URL configuration file.
+Moving a directory changes both the URL and its name, and ``{% url %}`` calls must be updated to match.
 
 Small Public Surfaces
 ---------------------

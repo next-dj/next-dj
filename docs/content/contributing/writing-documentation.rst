@@ -91,7 +91,8 @@ Internals.
 One Canonical Source Per Fact
 ------------------------------
 
-Each technical fact — the resolution order for context, the exact order of startup hooks, a specific setting name — should have one canonical home in the documentation tree.
+Each technical fact has one canonical home in the documentation tree.
+Examples are the resolution order for context, the exact order of startup hooks, and a specific setting name.
 Other pages may reference it with ``.. seealso::`` or a sentence-level link, but they should not reproduce the fact independently.
 When the implementation changes, updating one page is enough.
 

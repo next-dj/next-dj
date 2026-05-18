@@ -12,7 +12,7 @@ This page answers high level questions about the project, its scope, and its lif
 What is next.dj and is it a Django replacement
 -----------------------------------------------
 
-next.dj is a Django library, not a replacement.
+next.dj is a framework built on Django, not a replacement for it.
 It adds file-based routing, a layout system, reusable components, and form dispatch on top of a regular Django project.
 See :doc:`/content/intro/overview`, especially :ref:`intro-overview-django-unchanged`, for what stays stock Django versus what the framework adds.
 
@@ -26,11 +26,6 @@ Is next.dj production ready
 
 next.dj is used in production.
 See `Which symbols are safe to depend on`_ below for guidance on the public API surface.
-
-Where does the name come from
------------------------------
-
-The name borrows from Next.js for the file routing inspiration and adds the ``.dj`` suffix to signal the Django ground floor.
 
 How do I follow the project
 ---------------------------
@@ -69,8 +64,8 @@ Advanced.
 Internal hooks.
    Symbols whose names start with a single underscore, plus private submodule internals.
    Some packages re-export these names for testing and backend authoring convenience, but that does not make them part of the public API.
-   Avoid them in application code.
-   Use them only when extending the dispatch or discovery pipelines.
+   Application code must not import them.
+   A backend or extension author may use them when extending the dispatch or discovery pipelines, accepting that the names can change without notice.
 
 See :doc:`/content/ref/forms` for a concrete example of how the tier model applies to ``next.forms``.
 

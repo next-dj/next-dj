@@ -28,7 +28,7 @@ Pass ``serialize=True`` to expose the return value to the browser under ``window
 @component.context
 ~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: next.components.context
+.. autodata:: next.components.context
    :no-index:
 
 Registers a component context function inside ``component.py``.
@@ -97,6 +97,7 @@ FormProvider
    :no-index:
 
 Provider class for injecting bound forms.
+Matches a ``DForm[...]`` annotation or any parameter named ``form``.
 
 DDependencyBase
 ~~~~~~~~~~~~~~~

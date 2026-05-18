@@ -36,7 +36,7 @@ Modules
 -------
 
 ``next.components.scanner``.
-   Walks every page root for folders matching ``COMPONENTS_DIR``.
+   Walks every page tree for folders matching ``COMPONENTS_DIR``.
    Emits one ``ComponentInfo`` per folder.
 
 ``next.components.registry``.
@@ -77,9 +77,11 @@ A component reference resolves through the visibility resolver.
 2. Look for a component folder inside any extra root directory.
    Each backend entry under ``DEFAULT_COMPONENT_BACKENDS`` reads its extra roots from the ``DIRS`` key.
    Within every root the scanner matches folders whose name equals the backend's ``COMPONENTS_DIR`` value.
-3. Pick the first match in registration order, which matches the order of backend entries.
+3. A component visible in the template's own page tree wins over a same-named component contributed through ``DIRS``.
+   When no local match exists, backend-entry order breaks remaining ties among the ``DIRS`` roots.
 
-Two components in the same scope with the same name are reported by ``next.E020`` and ``next.E034``.
+Two components in the same scope with the same name are reported by ``next.E020``.
+``next.E034`` reports one component name used at the root route scope of more than one page tree.
 
 Filter Expression Props
 -----------------------
@@ -104,7 +106,7 @@ The pipeline fires four signals.
 - ``component_registered`` once per component on startup or reload.
 - ``components_registered`` once per bulk discovery cycle with the full list.
 - ``component_backend_loaded`` once per backend instance.
-- ``component_rendered`` after each render with the resulting HTML.
+- ``component_rendered`` after each render, carrying the ``ComponentInfo`` and its ``template_path``.
 
 Extension Points
 ----------------

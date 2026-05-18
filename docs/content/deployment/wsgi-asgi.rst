@@ -48,7 +48,8 @@ Run with a production WSGI server such as ``gunicorn`` or ``uwsgi``.
 
    uv run gunicorn config.wsgi:application --workers 4 --bind 0.0.0.0:8000
 
-The default ``--workers`` count is the number of CPU cores plus one.
+The example uses four workers.
+Gunicorn's own default ``--workers`` count is the number of CPU cores plus one.
 Tune based on the expected concurrency and the average request duration.
 
 ASGI Configuration
@@ -100,10 +101,10 @@ A pure ``render`` function avoids the layout chain and the static collector.
 .. code-block:: python
    :caption: notes/routes/healthz/page.py
 
-   from django.http import JsonResponse
+   from django.http import HttpRequest, JsonResponse
 
 
-   def render(request) -> JsonResponse:
+   def render(request: HttpRequest) -> JsonResponse:
        return JsonResponse({"status": "ok"})
 
 Configure the load balancer or container orchestrator to hit ``/healthz/`` for liveness.

@@ -99,8 +99,9 @@ For Brotli or gzip support, generate the compressed files during the build.
    :caption: shell
 
    uv run python manage.py collectstatic --noinput
-   find STATIC_ROOT -type f \( -name "*.css" -o -name "*.js" \) -exec brotli -f -k {} \;
+   find ./staticfiles -type f \( -name "*.css" -o -name "*.js" \) -exec brotli -f -k {} \;
 
+The ``./staticfiles`` path stands for the directory configured as ``STATIC_ROOT``.
 Configure the web server or CDN to serve the pre compressed copies based on the ``Accept-Encoding`` header.
 
 Service Workers

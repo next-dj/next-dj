@@ -13,36 +13,8 @@ This page covers the public surface of the module and the patterns for testing p
 Overview
 --------
 
-The module provides nine submodules.
-
-``next.testing.client``.
-   ``NextClient`` is a thin subclass of Django's test client that adds form-action shortcuts.
-
-``next.testing.isolation``.
-   ``reset_registries`` reloads the form-action and component backends between tests.
-
-``next.testing.actions``.
-   Helpers to invoke registered actions without crafting POST bodies.
-
-``next.testing.signals``.
-   ``SignalRecorder`` captures payloads inside a context manager.
-
-``next.testing.rendering``.
-   Helpers to render a single page or component in isolation.
-
-``next.testing.loaders``.
-   ``eager_load_components()`` imports every ``component.py`` through the backend chain.
-   ``eager_load_pages(base_dir)`` imports every ``page.py`` under a given directory.
-   ``clear_loaded_dirs()`` drops the loader memoisation cache between self-test runs.
-
-``next.testing.html``.
-   HTML inspection helpers.
-
-``next.testing.patching``.
-   Context managers to swap framework parts at runtime.
-
-``next.testing.deps``.
-   Builders for ``ResolutionContext`` test doubles.
+``next.testing`` groups its helpers into focused submodules covering the client, isolation, signal capture, rendering, loaders, HTML assertions, patching, action helpers, and dependency context builders.
+The table below maps each testing goal to the helper and its import path.
 
 Choose the Right Helper
 -----------------------
@@ -91,7 +63,7 @@ Choose the Right Helper
      - ``eager_load_components``, ``eager_load_pages``, ``clear_loaded_dirs``
      - ``next.testing`` or ``next.testing.loaders``
    * - Clear registries between tests
-     - ``reset_registries`` (autouse fixture), or narrower ``reset_components`` / ``reset_form_actions`` / ``reset_page_cache``
+     - ``reset_registries`` (call from an autouse fixture), or narrower ``reset_components`` / ``reset_form_actions`` / ``reset_page_cache``
      - ``next.testing`` or ``next.testing.isolation``
 
 You can import everything above from the ``next.testing`` package. Submodule imports stay valid when you prefer explicit paths.
@@ -100,12 +72,12 @@ See :doc:`/content/ref/testing` for generated signatures.
 Boot the Suite
 --------------
 
-Add pytest plus pytest-django.
+Add pytest and pytest-django to the project's development dependencies.
 
 .. code-block:: bash
    :caption: shell
 
-   uv pip install pytest pytest-django
+   uv add --dev pytest pytest-django
 
 Configure ``DJANGO_SETTINGS_MODULE`` so the framework can load.
 
@@ -114,6 +86,8 @@ Configure ``DJANGO_SETTINGS_MODULE`` so the framework can load.
 
    [pytest]
    DJANGO_SETTINGS_MODULE = config.settings
+
+Run the suite with ``uv run pytest``.
 
 Isolate Registries
 ------------------
@@ -137,15 +111,14 @@ Add an ``autouse`` fixture in ``conftest.py`` to clear every registry between te
 The helper reloads the form-action and component backends from the current settings.
 Three narrower helpers are also available when only one registry needs resetting:
 
-- ``reset_components()`` — reloads only the component backends.
-- ``reset_form_actions()`` — reloads only the form-action backends.
-- ``reset_page_cache()`` — drops the page template cache. It is useful when a test rewrites template files on disk.
+- ``reset_components()`` reloads only the component backends.
+- ``reset_form_actions()`` reloads only the form-action backends.
+- ``reset_page_cache()`` drops the page template cache. It is useful when a test rewrites template files on disk.
 
 .. note::
 
-   When ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK``, ``component.py`` modules are not imported at startup.
-   After ``reset_registries()``, component registrations are absent until the first render triggers the import.
-   To make registrations visible before any HTTP request, call ``eager_load_components()`` from ``next.testing.loaders`` after ``reset_registries()``.
+   When ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK``, bulk import of ``component.py`` modules from configured component roots is skipped during ``AppConfig.ready``.
+   After ``reset_registries()``, decorator side effects from those modules are absent until resolve time unless you call ``eager_load_components()`` from ``next.testing.loaders``, which imports every registered ``component.py`` regardless of the flag.
 
    .. code-block:: python
       :caption: conftest.py — eager loading with lazy modules
@@ -167,6 +140,8 @@ Three narrower helpers are also available when only one registry needs resetting
 
    ``eager_load_pages(base_dir)`` is a separate helper that imports every ``page.py`` under a given directory.
    Use it when a test suite does not go through the full request cycle and must trigger ``@context`` and ``@action`` side-effects manually.
+   ``clear_loaded_dirs()`` drops the per-directory memoisation so a later ``eager_load_pages`` call re-imports.
+   It is needed only when a test rewrites ``page.py`` files on disk within a single session.
    See :ref:`ref-settings` for the full description of ``LAZY_COMPONENT_MODULES``.
 
 NextClient
@@ -248,7 +223,10 @@ Capture Signals
        assert event.kwargs["action_name"] == "create_note"
 
 The recorder holds a list of ``SignalEvent`` instances with ``signal``, ``sender``, and ``kwargs`` attributes.
-``SignalRecorder`` accepts one or more signals and exposes these public methods.
+``SignalRecorder`` accepts one or more signals and exposes these public members.
+
+``events``.
+   The full list of captured ``SignalEvent`` instances in emission order.
 
 ``start()``.
    Connects receivers for every tracked signal and returns the recorder. Called automatically on context entry.
@@ -332,11 +310,12 @@ HTML Utilities
        html = render_component_by_name(
            "note_card",
            at="notes/routes/page.py",
-           context={"note": note},
+           context={"note": {"title": "First"}},
        )
        assert_has_class(html, "note-card")
 
 ``find_anchor`` returns the matching anchor tag.
+It also accepts an ``href`` keyword that matches the anchor ``href`` exactly, and raises ``LookupError`` when no anchor matches the filters.
 ``assert_has_class`` and ``assert_missing_class`` check the class list of the first tag in a fragment.
 
 Patching
@@ -365,6 +344,9 @@ Patching
    * - ``StaticCollectorProxy``
      - Thin proxy around a collector for introspection in tests.
 
+A ``StaticCollectorProxy`` is yielded by ``patch_static_collector(capture=True)``.
+Its ``.collector`` attribute holds the collector built inside the block, so a test can assert on the emitted styles and scripts without parsing HTML.
+
 .. code-block:: python
    :caption: temporary settings
 
@@ -381,23 +363,22 @@ The patch reverts on exit, so the next test sees the original configuration.
 Resolution Context Doubles
 --------------------------
 
-``next.testing.make_resolution_context`` builds a ``ResolutionContext`` for unit tests on providers.
-``next.testing.resolve_call`` resolves a callable's dependencies and returns the kwargs mapping.
+``next.testing.deps.make_resolution_context`` builds a ``ResolutionContext`` for unit tests on providers.
+``next.testing.deps.resolve_call`` resolves a callable's dependencies and returns the kwargs mapping.
 Both accept the same loose keyword arguments, ``request``, ``form``, ``url_kwargs``, and ``context_data``.
 
 .. code-block:: python
    :caption: provider unit test
 
-   from next.testing import make_resolution_context, resolve_call
+   from next.testing.deps import make_resolution_context
 
 
-   def test_provider_handles_int(db) -> None:
+   def test_context_carries_url_kwargs() -> None:
        context = make_resolution_context(url_kwargs={"id": 7})
        assert context.url_kwargs["id"] == 7
-       kwargs = resolve_call(my_view, url_kwargs={"id": 7})
-       assert "note" in kwargs
 
-Use this for testing custom providers without booting the router.
+Pass ``resolve_call`` a callable whose annotated parameters a provider can fill, then assert on the returned mapping.
+Use these helpers for testing custom providers without booting the router.
 
 Common Patterns
 ---------------

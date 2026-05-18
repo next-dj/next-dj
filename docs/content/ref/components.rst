@@ -21,7 +21,9 @@ These are the names project code uses day-to-day.
 
 .. autodata:: next.components.component
 
-.. autofunction:: next.components.context
+.. autodata:: next.components.context
+
+   The ``@component.context`` decorator, bound from ``ComponentContextManager.context``. Registers a context function inside a ``component.py``.
 
 .. autofunction:: next.components.get_component
 
@@ -63,9 +65,6 @@ Context Pipeline
 .. autoclass:: next.components.ComponentContextRegistry
    :members:
 
-.. autoclass:: next.components.ContextFunction
-   :members:
-
 Renderers
 ~~~~~~~~~
 
@@ -92,6 +91,9 @@ They are exported for testing and advanced instrumentation.
 Prefer the Application Imports tier unless you are building framework tooling.
 
 .. autoclass:: next.components.ComponentInfo
+   :members:
+
+.. autoclass:: next.components.ContextFunction
    :members:
 
 .. autoclass:: next.components.ComponentRegistry

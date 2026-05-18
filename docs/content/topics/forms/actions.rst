@@ -54,6 +54,7 @@ Action Names and Namespaces
 
 Names hash into a 16 character UID that becomes the path of the dispatch URL.
 Two ``@action`` calls that register the same name from different handlers are reported by the ``next.E041`` system check.
+Two distinct names that hash to the same UID raise ``ImproperlyConfigured`` at import time.
 
 .. code-block:: python
    :caption: collision-free naming
@@ -80,10 +81,10 @@ The handler can take any parameters the dependency injector knows how to resolve
 .. code-block:: python
    :caption: typical handlers
 
+   from django.conf import settings
    from django.http import HttpRequest, HttpResponseRedirect
 
    from next.forms import action
-   from next.pages import Context
    from next.urls import DUrl
 
 
@@ -101,23 +102,22 @@ The handler can take any parameters the dependency injector knows how to resolve
 
 
    @action("with_url", form_class=NoteForm)
-   def with_url(form: NoteForm, note_id: DUrl[int]) -> HttpResponseRedirect:
+   def with_url(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
        form.instance = Note.objects.get(pk=note_id)
        form.save()
        return HttpResponseRedirect("/")
 
 
-   @action("with_context", form_class=NoteForm)
-   def with_context(
-       form: NoteForm,
-       feature_flag: str = Context("feature_flag"),
-   ) -> HttpResponseRedirect:
-       if feature_flag == "on":
+   @action("gated_create", form_class=NoteForm)
+   def gated_create(form: NoteForm, request: HttpRequest) -> HttpResponseRedirect:
+       if settings.NOTES_WRITE_ENABLED and request.user.is_authenticated:
            form.save()
        return HttpResponseRedirect("/")
 
 The injector fills each parameter from the first matching provider.
 Omitted parameters are not resolved and not passed to the handler.
+Action dispatch resolves ``request``, bound ``form``, captured URL parameters, and ``Depends`` providers.
+It does not resolve page context values, so a handler reads request state or settings directly instead of a ``Context`` marker.
 
 Return Types
 ------------
@@ -135,8 +135,9 @@ Object with a ``url`` attribute.
    Coerced into an ``HttpResponseRedirect`` to that URL.
 
 None.
-   The dispatcher returns the rendered origin page.
-   Use this when an action only needs a side effect on success and no special redirect.
+   For an action registered with a ``form_class`` the dispatcher returns the re-rendered origin page.
+   For a handler-only action it returns an empty HTTP 204 response.
+   Return a redirect or a string explicitly when a handler-only action needs a visible result.
 
 Actions Without form_class
 --------------------------
@@ -150,30 +151,21 @@ Drop ``form_class`` to handle non form POST submissions such as confirmation but
 
 
    @action("delete_note")
-   def delete_note(note_id: DUrl[int]) -> HttpResponseRedirect:
+   def delete_note(note_id: DUrl["id", int]) -> HttpResponseRedirect:
        Note.objects.filter(pk=note_id).delete()
        return HttpResponseRedirect("/")
 
 The template still uses ``{% form @action="delete_note" %}``.
-The dispatcher posts to the action URL without binding a form, which means the handler signature must not include a ``form`` parameter.
+The dispatcher posts to the action URL without binding a form.
+A ``form`` parameter in the handler signature resolves to ``None`` because no form is bound.
 
 ModelForm Actions
 -----------------
 
-Pass a ``ModelForm`` to handle create and edit flows in one decorator.
-
-.. code-block:: python
-   :caption: create flow
-
-   from next.forms import action
-
-   from notes.forms import NoteForm
-
-
-   @action("create_note", form_class=NoteForm)
-   def create_note(form: NoteForm) -> HttpResponseRedirect:
-       form.save()
-       return HttpResponseRedirect("/")
+A ``ModelForm`` handles create and edit flows.
+A create handler is the plain ``@action`` handler shown under *The Decorator* above.
+It saves the bound form and redirects.
+An edit handler additionally loads the instance the form updates.
 
 .. code-block:: python
    :caption: edit flow
@@ -188,7 +180,7 @@ Pass a ``ModelForm`` to handle create and edit flows in one decorator.
 
 
    @action("update_note", form_class=NoteForm)
-   def update_note(form: NoteForm, note_id: DUrl[int]) -> HttpResponseRedirect:
+   def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
        form.instance = get_object_or_404(Note, pk=note_id)
        form.save()
        return HttpResponseRedirect("/")
@@ -233,11 +225,9 @@ The factory is dependency-resolved, so it can declare ``request: HttpRequest``, 
    def login(request: HttpRequest, form: AuthenticationForm) -> HttpResponse:
        ...
 
-``AuthenticationForm`` requires ``request`` as its first constructor argument and has no ``get_initial`` method.
-The tuple shape supplies that argument and bypasses ``get_initial``, so the form binds cleanly.
+``AuthenticationForm`` requires ``request`` as its first constructor argument and has no ``get_initial`` method, so the tuple shape fits.
 
-When the factory returns a bare class instead of a tuple, the dispatcher takes the regular path.
-Use that shape to pick a form per request without changing the constructor call.
+A factory that returns a bare class picks the form per request without changing the constructor call.
 
 .. code-block:: python
    :caption: choosing a class per request
@@ -246,7 +236,7 @@ Use that shape to pick a form per request without changing the constructor call.
    from next.urls import DUrl
 
 
-   def report_form_factory(kind: DUrl[str]) -> type:
+   def report_form_factory(kind: DUrl["kind", str]) -> type:
        return WeeklyReportForm if kind == "weekly" else DailyReportForm
 
 
@@ -256,7 +246,8 @@ Use that shape to pick a form per request without changing the constructor call.
        return HttpResponseRedirect("/reports/")
 
 A factory that returns anything other than a class or a ``(class, dict)`` tuple raises ``TypeError`` at dispatch time.
-The template can reference the action through a variable when the name is computed in context.
+
+When the action name itself is computed at render time, the ``{% form %}`` tag accepts it through a context variable.
 
 .. code-block:: jinja
    :caption: action name from context
@@ -276,14 +267,14 @@ Each lives at its own URL so the dispatcher can tell them apart.
 
 
    @action("update_note", form_class=NoteForm)
-   def update_note(form: NoteForm, note_id: DUrl[int]) -> HttpResponseRedirect:
+   def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
        form.instance = Note.objects.get(pk=note_id)
        form.save()
        return HttpResponseRedirect("/")
 
 
    @action("delete_note")
-   def delete_note(note_id: DUrl[int]) -> HttpResponseRedirect:
+   def delete_note(note_id: DUrl["id", int]) -> HttpResponseRedirect:
        Note.objects.filter(pk=note_id).delete()
        return HttpResponseRedirect("/")
 
@@ -303,7 +294,7 @@ Templates reference both names.
    {% endform %}
 
 Both forms render on a page whose URL captures ``id``.
-The ``{% form %}`` tag emits a hidden ``_url_param_id`` field for every captured URL parameter, so each handler resolves ``DUrl[int]`` without any extra tag argument.
+The ``{% form %}`` tag emits a hidden ``_url_param_id`` field for every captured kwarg, skipping the dispatch ``uid`` and any name reserved by the dependency resolver, so each handler resolves ``DUrl["id", int]`` without any extra tag argument.
 
 Component Actions
 -----------------
@@ -330,7 +321,7 @@ System Checks
 The forms subsystem contributes Django system checks.
 
 - ``next.E041`` reports two ``@action`` registrations that share a name but come from different handlers.
-- ``next.E044`` reports a malformed ``DEFAULT_FORM_ACTION_BACKENDS`` entry.
+- ``next.E044`` reports a malformed or non-importable ``DEFAULT_FORM_ACTION_BACKENDS`` entry, including a non-string ``BACKEND`` path.
 - ``next.E045`` reports a backend that does not subclass ``FormActionBackend``.
 
 Run them through ``uv run python manage.py check``.

@@ -43,10 +43,10 @@ The Registry
 ------------
 
 The kind registry is ``next.static.default_kinds``, an instance of ``KindRegistry``.
-A kind registration carries four pieces of information.
+A kind registration is keyed by the ``kind`` identifier and carries three pieces of metadata.
 
 ``kind``.
-   A non empty Python identifier such as ``css`` or ``jsx``.
+   The registry key, a non empty Python identifier such as ``css`` or ``jsx``.
 
 ``extension``.
    The file suffix, starting with a dot, such as ``.jsx``.
@@ -155,7 +155,7 @@ Module Kind
 -----------
 
 The ``module`` kind renders ``<script type="module" src="...">`` through ``render_module_tag``.
-Customise the rendered output through the ``module_tag`` option on the backend, see :doc:`backends`.
+Customise the rendered output through the ``module_tag`` key in the backend ``OPTIONS`` mapping, see :doc:`backends`.
 
 System Checks
 -------------
@@ -167,7 +167,7 @@ The static checks use the codes ``next.E036``, ``next.E037``, ``next.E038``, ``n
 Common Patterns
 ---------------
 
-Custom asset kinds drive several worked projects, including JSX through a module script, JSX through a Babel renderer, and Vue single file components paired with a custom stem.
+Custom asset kinds drive worked projects, including the ``kanban`` example with a ``.jsx`` kind and the ``live-polls`` example with a Vue single file component kind.
 See :doc:`/content/misc/examples` for the runnable projects and their walkthroughs.
 
 See Also

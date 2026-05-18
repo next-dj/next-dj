@@ -33,113 +33,79 @@ Use the aggregator when a single module subscribes to events from several subsys
 Catalog
 -------
 
-Pages
-~~~~~
+Every signal the framework emits is listed below with the subsystem that
+emits it and the moment it fires. :doc:`/content/ref/signals` holds the
+canonical payload table, the ``sender`` value and the keyword arguments for
+each signal.
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 70
+   :widths: 26 18 56
 
-   * - Name
-     - Payload keyword arguments
+   * - Signal
+     - Subsystem
+     - When it fires
    * - ``template_loaded``
-     - ``sender`` is ``Page``. ``file_path`` is the resolved page module path.
+     - Pages
+     - After a template source is registered on a page.
    * - ``context_registered``
-     - ``sender`` is ``PageContextRegistry``. ``file_path`` is the page module path. ``key`` is the context name.
+     - Pages
+     - After a context callable is attached to a page module.
    * - ``page_rendered``
-     - ``sender`` is ``Page``. ``file_path`` is the page module path. ``duration_ms`` is the render time. ``styles_count`` and ``scripts_count`` are the collected asset counts. ``context_keys`` is a tuple of every key in the rendered context. It contains framework-internal keys such as ``request``, ``current_template_path``, ``_next_js_context``, and ``_static_collector`` alongside the user-declared context keys.
-
-Components
-~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 35 65
-
-   * - Name
-     - Payload keyword arguments
+     - Pages
+     - After the page renders to HTML and the static assets are injected.
    * - ``component_registered``
-     - ``sender`` is ``ComponentRegistry``. ``info`` is the ``ComponentInfo`` record.
+     - Components
+     - After a single component is registered.
    * - ``components_registered``
-     - ``sender`` is ``ComponentRegistry``. ``infos`` is a tuple of every ``ComponentInfo`` registered in the current bulk cycle.
+     - Components
+     - After a batch of components is registered.
    * - ``component_backend_loaded``
-     - ``sender`` is ``ComponentsManager``. ``backend`` is the backend instance. ``config`` is the config dict.
+     - Components
+     - After a component backend is created from its configuration entry.
    * - ``component_rendered``
-     - ``sender`` is the components manager class. ``info`` is the ``ComponentInfo``. ``template_path`` is the resolved template path.
-
-Dependency Injection
-~~~~~~~~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Name
-     - Payload keyword arguments
+     - Components
+     - After a component is rendered to HTML.
    * - ``provider_registered``
-     - ``sender`` is the provider class that joined the registry. No extra keyword arguments.
-
-URLs
-~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Name
-     - Payload keyword arguments
+     - Dependencies
+     - When a ``RegisteredParameterProvider`` subclass joins the registry.
    * - ``route_registered``
-     - ``sender`` is ``FileRouterBackend``. ``url_path`` is the URL path. ``file_path`` is the page module path.
+     - URLs
+     - After a URL pattern is created for a discovered page.
    * - ``router_reloaded``
-     - ``sender`` is the ``RouterManager`` class. No extra keyword arguments.
-
-Forms
-~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 35 65
-
-   * - Name
-     - Payload keyword arguments
+     - URLs
+     - After the router manager rebuilds its pattern set.
    * - ``action_registered``
-     - ``sender`` is the form action backend class. ``action_name`` is the name. ``uid`` is the dispatch UID. ``form_class`` is the form class. ``namespace`` is the namespace prefix. ``handler`` is the callable.
+     - Forms
+     - After the backend stores a handler for an action name.
    * - ``action_dispatched``
-     - ``sender`` is ``FormActionDispatch``. ``action_name`` is the name. ``form`` is the bound form or ``None``. ``url_kwargs`` is the captured kwargs dict. ``duration_ms`` is the handler time. ``response_status`` is the HTTP status. ``dep_cache`` is the request dependency cache dict.
+     - Forms
+     - After an action handler runs and the response is coerced.
    * - ``form_validation_failed``
-     - ``sender`` is ``FormActionDispatch``. ``action_name`` is the name. ``error_count`` is the total error count. ``field_names`` is a tuple of the failing field names.
-
-Static Pipeline
-~~~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Name
-     - Payload keyword arguments
+     - Forms
+     - When a bound form fails validation during dispatch.
    * - ``asset_registered``
-     - ``sender`` is the ``StaticAsset`` instance. ``collector`` is the collector. ``backend`` is the active static backend.
+     - Static
+     - After a file is registered with a backend and added to the collector.
    * - ``collector_finalized``
-     - ``sender`` is the collector. ``page_path`` is the page module path when the render comes from a page, or ``None`` for partial renders. ``request`` is the active ``HttpRequest`` or ``None`` outside a normal request cycle.
+     - Static
+     - When the static manager begins injection, after rendering completes.
    * - ``html_injected``
-     - ``sender`` is the static manager. ``html_before`` and ``html_after`` are the HTML around injection. ``collector`` is the collector. ``placeholders_replaced`` is a tuple of slot names. ``injected_bytes`` is the size delta. ``request`` is the active ``HttpRequest`` or ``None``.
+     - Static
+     - After placeholder replacement completes.
    * - ``backend_loaded``
-     - ``sender`` is the backend class. ``config`` is the config dict. ``instance`` is the backend instance.
-
-Server and Configuration
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 35 65
-
-   * - Name
-     - Payload keyword arguments
+     - Static
+     - After the static factory instantiates a backend.
    * - ``watch_specs_ready``
-     - ``sender`` is ``iter_all_autoreload_watch_specs``. ``specs`` is the collected watch spec list.
+     - Server
+     - After the reloader resolves the full list of watch specs.
    * - ``settings_reloaded``
-     - ``sender`` is the ``NextFrameworkSettings`` class. No extra keyword arguments.
+     - Configuration
+     - After the settings layer drops its caches.
+
+The forms and static signals have dedicated topic pages with worked receiver
+examples: :doc:`/content/topics/forms/signals` and
+:doc:`/content/topics/static-assets/signals`.
 
 Receiver Patterns
 -----------------
@@ -163,14 +129,18 @@ Use ``django.dispatch.receiver`` to connect a callable to a signal.
 .. code-block:: python
    :caption: notes/receivers.py
 
+   import logging
+
    from django.dispatch import receiver
 
    from next.signals import action_dispatched
 
+   logger = logging.getLogger(__name__)
+
 
    @receiver(action_dispatched)
    def log_dispatch(sender, **kwargs) -> None:
-       print(kwargs["action_name"])
+       logger.info("action dispatched: %s", kwargs["action_name"])
 
 Multiple Receivers
 ~~~~~~~~~~~~~~~~~~

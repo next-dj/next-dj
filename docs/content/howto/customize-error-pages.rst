@@ -12,7 +12,7 @@ Solution
 --------
 
 Error handling sits in Django's URL resolver, not in the file router.
-Define ``handler404`` and ``handler500`` in the root URLconf, or rely on the convention that Django renders ``404.html`` and ``500.html`` from the template directories when :doc:`DEBUG <django:ref/settings>` is off.
+Define ``handler404`` and ``handler500`` in the root URLconf, or rely on the convention that Django renders ``404.html`` and ``500.html`` from the template directories when ``DEBUG`` is off.
 The file router include stays unchanged.
 
 Walkthrough

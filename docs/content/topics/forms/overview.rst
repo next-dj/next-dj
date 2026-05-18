@@ -17,22 +17,22 @@ Overview
 Five things make a form work.
 
 Form class.
-   A Django ``Form`` or ``ModelForm`` mixed with ``next.forms.Form``.
-   The mixin allows the framework to register the form identity for re-render.
+   A subclass of ``next.forms.Form`` or ``next.forms.ModelForm``.
 
 Action.
    A Python callable decorated with ``@action("name", form_class=...)``.
-   The decorator records the callable in a registry and assigns it a stable UID.
 
 Template tag.
-   ``{% form @action="name" %}`` resolves the action UID, posts to ``/_next/form/<uid>/``, and injects a CSRF token.
+   ``{% form @action="name" %}`` resolves the action UID, posts to its dispatch URL, and injects a CSRF token.
 
 Dispatch endpoint.
-   The framework registers one URL per action.
-   The endpoint loads the form class, binds POST data, calls the handler when valid.
+   One URL per action that binds POST data and calls the handler when valid.
+   A non-POST request to a dispatch URL returns HTTP 405.
 
 Re-render pipeline.
-   On validation failure the framework finds the origin page module and renders it again with the bound form in scope.
+   On validation failure the framework renders the origin page again with the bound form in scope.
+
+The pages in this section cover each piece in depth.
 
 Concepts
 --------
@@ -49,20 +49,8 @@ Action Name
 
 Every action has a unique name.
 The framework hashes the name into a 16 character UID that becomes part of the URL.
-Two actions registered under the same name from different handlers are reported by the ``next.E041`` system check.
-
-Use a namespace prefix to keep names from colliding across apps.
-
-.. code-block:: python
-   :caption: namespaced action
-
-   from next.forms import action
-
-
-   @action("save", namespace="notes")
-   def save_note(...): ...
-
-The template references ``@action="notes:save"``.
+A namespace prefix keeps short names from colliding across apps.
+See :doc:`actions` for the namespace syntax and the ``next.E041`` collision rules.
 
 Handler Signature
 ~~~~~~~~~~~~~~~~~
@@ -82,7 +70,7 @@ The :doc:`dependency resolver </content/topics/dependency-injection>` fills each
    @action("update_note", form_class=NoteForm)
    def update_note(
        form: NoteForm,
-       note_id: DUrl[int],
+       note_id: DUrl["id", int],
        request: HttpRequest,
    ) -> HttpResponseRedirect:
        form.save()
@@ -104,8 +92,8 @@ Invalid form.
    No handler is called.
 
 Bad request.
-   The submission is missing required dispatch fields or points at an invalid origin page.
-   The dispatcher returns HTTP 400 without invoking the handler.
+   A submission missing the ``_next_form_page`` field or pointing at an invalid origin page returns HTTP 400.
+   A successful handler that returns a response is unaffected.
 
 Where to Declare Actions
 ------------------------
@@ -119,12 +107,6 @@ The framework automatically imports ``page.py`` files (when building URL pattern
 
 A single Python module can register many actions.
 Each action stays addressable by name from any template in the project.
-
-Putting It Together
--------------------
-
-A form is the form class, the ``@action`` handler, and the ``{% form %}`` tag working together.
-The template tag wires the form to the action, the handler receives the validated form, and a failed validation re-renders the page with the bound form in place.
 
 See :doc:`templates` for a worked end-to-end example and the full ``{% form %}`` tag reference.
 

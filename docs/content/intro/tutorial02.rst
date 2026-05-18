@@ -1,7 +1,7 @@
 .. _intro-tutorial02:
 
-Tutorial Part 2 Layouts and Context
-===================================
+Adding Layouts and Context
+==========================
 
 Goal
 ----
@@ -154,7 +154,7 @@ The root layout wraps the inner layout which wraps the detail template.
 Use Counts Across Pages
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Add a small bit of inherited context that demonstrates DI between context functions.
+Add a small bit of inherited context that the layout reads on every page.
 
 .. code-block:: python
    :caption: notes/routes/page.py
@@ -219,15 +219,15 @@ Layout shows but page body does not.
    The layout must contain ``{% block template %}{% endblock template %}``.
    Without the placeholder the framework still renders the layout but cannot inject the page body.
 
-DUrl returns a string instead of an int.
-   Pass the coercion type as the last argument, for example ``DUrl["id", int]``.
-
-DUrl parameter resolves to ``None``.
-   A ``DUrl`` parameter is matched against the captured segment by name.
-   When the parameter name does not match the segment, pass the segment name explicitly as the first argument, for example ``DUrl["id", int]`` for an ``[id]`` directory.
+``DUrl`` resolves to ``None`` when the captured segment is missing.
+   ``DUrl[T]`` reads the segment whose name matches the parameter and coerces to ``T`` for ``int``, ``bool``, ``float``, and ``str`` as described in :doc:`/content/topics/dependency-injection`.
+   ``DUrl["name"]`` returns the raw string for that segment.
+   When the Python parameter name differs from the segment, use ``DUrl["id", int]`` for an ``[id]`` directory.
 
 Inherited context not available in a descendant.
    Make sure the ``page.py`` that publishes the context sits in a directory above the page that consumes it, and the context function declares ``inherit_context=True``.
+
+See :doc:`/content/faq/troubleshooting` for the full catalog of errors and fixes.
 
 Next Steps
 ----------

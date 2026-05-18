@@ -13,7 +13,7 @@ Overview
 --------
 
 Discovery runs once at startup and again whenever the autoreload watcher fires.
-The result is a registry of pages keyed by directory path with the matching template loader, layout chain, and context registrations attached.
+The result is a set of Django URL patterns plus the context callables and layout chains attached to each ``page.py``.
 
 Pipeline
 --------
@@ -23,9 +23,9 @@ Pipeline
    flowchart LR
        Walk[Filesystem walk] --> Loaders[Template loaders]
        Loaders --> Manager[Page]
-       Manager --> Registry[Page registry]
+       Manager --> TemplateCache[Template cache]
        Manager --> ContextReg[Context registry]
-       Registry --> Render[Render request]
+       TemplateCache --> Render[Render request]
        ContextReg --> Render
        Render --> InheritedCtx[Inherited page.py context]
        InheritedCtx --> PageCtx[Page @context functions]
@@ -41,14 +41,15 @@ Modules
    Each loader recognises one extension and produces a body string for a given page directory.
 
 ``next.pages.manager``.
-   Coordinates discovery, registration, and rendering.
-   Holds the ``Page`` value object exposed through ``next.pages.Page``.
+   Defines the ``Page`` coordinator that loads templates, collects context, composes layouts, renders, and builds the page ``URLPattern``.
+   The process-wide singleton is exposed as ``next.pages.page`` and the class as ``next.pages.Page``.
+   The module also implements the ``@context`` decorator.
 
 ``next.pages.registry``.
    Stores ``PageContextEntry`` records and resolves context for a request.
 
 ``next.pages.context``.
-   Implements the ``@context`` decorator and the ``Context`` marker.
+   Defines the ``Context`` marker and the context-injection providers.
 
 ``next.pages.processors``.
    Discovers and imports the context processor callables listed in each page backend's ``OPTIONS.context_processors`` and in the first Django ``TEMPLATES`` entry.
@@ -60,12 +61,14 @@ Modules
 Render Path
 -----------
 
-1. The view loads the page module from disk (or the module cache).
-2. ``Page.build_render_context`` assembles the template scope — see `Context Resolution`_ below.
-3. The body source produces the page body string.
-4. The framework walks the ancestor layout chain inward (outermost layout first, innermost last).
+1. The view loads the page module through the mtime-keyed module memo, reading from disk only when the file changed.
+2. The body source produces the page body string.
+3. ``Page.build_render_context`` assembles the template scope, see `Context Resolution`_ below.
+4. The framework composes the ancestor layout chain, the innermost layout wrapping the page body first and each outer layout wrapping the result.
 5. Each layout substitutes the wrapped content into ``{% block template %}{% endblock template %}``.
 6. ``StaticManager.inject`` replaces ``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholder tokens with the rendered tags accumulated by the request-scoped ``StaticCollector``.
+
+When the body source is a ``render`` function that returns an ``HttpResponseBase``, the response is returned verbatim and steps 3 through 6 do not run.
 
 Layout Composition
 ------------------

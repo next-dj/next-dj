@@ -4,7 +4,8 @@ Pages
 =====
 
 A page is a directory under a configured page root that produces a body when its URL is requested.
-This page covers the three ways a page can produce that body, the priority rules between them, the contract for ``render`` functions, and how custom template loaders extend the discovery beyond ``template.djx``.
+This page covers the three ways a page can produce that body and the priority rules between them.
+It also covers the contract for ``render`` functions and how custom template loaders extend discovery beyond ``template.djx``.
 
 .. contents::
    :local:
@@ -14,7 +15,9 @@ Overview
 --------
 
 The smallest page is a folder that contains a ``page.py`` and a sibling ``template.djx``.
-The framework resolves the page body, then calls every ``@context`` function declared in ``page.py`` to build the template variables, then wraps the rendered body in the closest ancestor ``layout.djx``.
+The framework resolves the page body.
+It then calls every ``@context`` function declared in ``page.py`` to build the template variables.
+It then wraps the rendered body in the closest ancestor ``layout.djx``.
 See *Render Order* below for the exact sequence.
 
 Pages share four pluggable parts.
@@ -38,7 +41,8 @@ A page module can supply its body through these sources.
 
 ``render`` function on the page module.
    Highest priority.
-   Receives :doc:`DI-resolved <dependency-injection>` arguments and returns either a string body or any :class:`~django.http.HttpResponseBase` subclass (including :class:`~django.http.StreamingHttpResponse` and :class:`~django.http.FileResponse`).
+   Receives :doc:`DI-resolved <dependency-injection>` arguments.
+   Returns either a string body or any :class:`~django.http.HttpResponseBase` subclass, including :class:`~django.http.StreamingHttpResponse` and :class:`~django.http.FileResponse`.
 
 ``template`` module attribute.
    A plain string assigned at module level.
@@ -49,13 +53,12 @@ Sibling ``template.djx`` file.
    Loaded through the ``DjxTemplateLoader`` and composed with the layout chain.
 
 Custom template loaders.
-   Any loader registered in ``TEMPLATE_LOADERS`` other than ``DjxTemplateLoader``.
+   Any loader registered in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` other than ``DjxTemplateLoader``.
    Loaders run in declared order and the first one that matches supplies the body.
 
-When the body source produces a string, the framework runs context processors, the :doc:`static collector <static-assets/index>`, and the ``page_rendered`` signal once per request.
-When a ``render`` function returns an :class:`~django.http.HttpResponseBase` the pipeline short-circuits and those steps are skipped. See *Render Order* below.
+See *Render Order* below for the per-request sequence and the ``render`` short-circuit.
 Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
-When two sources are declared at the same level the lower priority one is silently dropped and ``uv run python manage.py check`` emits a warning.
+When two sources are declared at the same level the lower priority one is dropped at render time without an error, and ``uv run python manage.py check`` reports a warning for it.
 
 Render Order
 ------------
@@ -78,15 +81,14 @@ The render Function
 
 The ``render`` function takes any DI-resolved parameters the resolver can fill.
 The most common shape is ``request`` plus captured URL parameters and marker-driven values.
-Because ``render`` runs before the ``@context`` callables, it cannot receive a value those callables publish.
-Pull the data ``render`` needs through the dependency injector directly.
+Pull the data ``render`` needs through the dependency injector directly, since *Render Order* above shows it runs before the ``@context`` callables.
 
 .. code-block:: python
    :caption: notes/routes/reports/[int:report_id]/page.py
 
    from notes.models import Report
 
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
 
    def render(request, report_id: DUrl[int]) -> str:
@@ -123,7 +125,7 @@ When no ``render`` function exists the ``template`` attribute is consulted befor
 Use it for trivial pages where a separate template file would be noise.
 
 The ``template`` attribute also has a matching loader, ``PythonTemplateLoader`` in ``next.pages.loaders``, whose ``source_name`` is ``"template"``.
-Register it in ``TEMPLATE_LOADERS`` when a project wants the ``template`` attribute to participate in the loader chain rather than being consulted directly.
+Register it in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` when a project wants the ``template`` attribute to participate in the loader chain rather than being consulted directly.
 
 Template Files
 --------------
@@ -161,7 +163,7 @@ A ``@context`` decorator publishes one or more values into the template scope.
 The framework calls the function at request time.
 The return value lands in the template under the configured key.
 
-The decorator has three shapes.
+The decorator has two shapes.
 
 Keyed single value.
    ``@context("name")`` registers the return value under that name.
@@ -171,8 +173,9 @@ Unkeyed dict.
    ``@context`` on a function that returns a dict merges the dict into the template scope.
    Useful when several values share a dependency you only want to resolve once.
 
-Inherited context.
-   ``@context("name", inherit_context=True)`` makes the value visible to every descendant page, not only to the page that declares the function.
+The ``inherit_context=True`` flag on a keyed function publishes the value to
+every descendant page rather than to the declaring page alone.
+See :doc:`context` for that flag and the other ways to vary the decorator.
 
 .. code-block:: python
    :caption: unkeyed dict
@@ -230,13 +233,13 @@ Register additional loaders in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to support
        ],
    }
 
-User-provided ``TEMPLATE_LOADERS`` replaces the default list entirely.
+A user-provided ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` replaces the default list entirely.
 Include ``DjxTemplateLoader`` explicitly when you still want sibling ``template.djx`` files to load.
 
 Loader Contract
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
-A loader sets one class attribute and implements three methods.
+A loader sets one class attribute, implements two required methods, and may override one optional method.
 
 ``source_name``.
    Class attribute string used by the system check to name the loader in conflict warnings.
@@ -249,8 +252,10 @@ A loader sets one class attribute and implements three methods.
    The framework treats ``None`` as "did not match" and tries the next loader.
 
 ``source_path(file_path)``.
+   Optional.
    Returns the backing file path for the cache invalidation hook.
    Edits to that file invalidate the composed template on the next request.
+   The default returns ``None`` for non-file-based loaders.
 
 Priority Resolution
 -------------------
@@ -289,7 +294,7 @@ A page that always redirects elsewhere uses a ``render`` function that returns `
 
    from django.http import HttpResponseRedirect
 
-   from next.urls.reverse import page_reverse
+   from next.urls import page_reverse
 
 
    def render(request) -> HttpResponseRedirect:
@@ -312,8 +317,7 @@ Return ``JsonResponse`` from ``render`` for a JSON endpoint that still benefits 
 Streaming Response
 ~~~~~~~~~~~~~~~~~~
 
-Return ``StreamingHttpResponse`` from ``render`` for Server Sent Events or any long lived stream.
-The response is returned verbatim, so the layout chain and the static collector are skipped.
+Reach for ``StreamingHttpResponse`` when the body is produced incrementally, such as Server Sent Events or a large export.
 
 .. code-block:: python
    :caption: notes/routes/notes/[id]/stream/page.py
@@ -338,9 +342,9 @@ See ``examples/live-polls`` for a worked SSE broker.
 Markdown Blog Post
 ~~~~~~~~~~~~~~~~~~
 
-Use a custom loader that reads ``template.md`` and converts it to HTML on demand.
-The page body is whatever the loader returns and goes through the standard layout chain.
-See ``examples/markdown-blog`` for a working setup.
+.. seealso::
+
+   The *Custom Template Loaders* section above for the ``template.md`` loader, and ``examples/markdown-blog`` for a working setup.
 
 System Checks
 -------------
@@ -349,7 +353,7 @@ The pages subsystem contributes Django system checks. The ``check_page_functions
 
 - ``next.E012`` — the page module has no ``render`` function, no ``template`` attribute, and no ``template.djx`` file.
 - ``next.E013`` — the page module defines a ``render`` attribute that is not callable.
-- ``next.W002`` — the page directory has no body source and no ancestor ``layout.djx``, so the page renders nothing.
+- ``next.W002`` — the page directory has no body source and no ``layout.djx`` in the same directory, so the page renders nothing.
 - ``next.W043`` — more than one body source is declared in the same directory. The highest priority one wins and the others are dropped.
 
 Run them through ``uv run python manage.py check``.

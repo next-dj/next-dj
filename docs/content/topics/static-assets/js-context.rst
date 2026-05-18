@@ -20,7 +20,8 @@ Opting In
 ---------
 
 Pass ``serialize=True`` on ``@context`` in ``page.py`` or on ``@component.context`` in ``component.py``.
-The value appears under ``window.Next.context.<key>``. Keys without the flag stay server-side only.
+The value appears under ``window.Next.context.<key>``.
+Keys without the flag stay server-side only.
 Decorator shapes and inheritance rules live in :doc:`../context`.
 
 Serializers
@@ -135,6 +136,33 @@ Configure the policy through the first static backend ``OPTIONS``.
            }
        ]
    }
+
+Writing a Policy
+----------------
+
+A custom policy implements the ``JsContextPolicy`` protocol from ``next.static.collector``.
+The protocol has one method, ``merge(existing, key, value)``, which returns the updated context dict.
+
+.. code-block:: python
+   :caption: notes/policies.py
+
+   from typing import Any
+
+
+   class NamespacePolicy:
+       """Group conflicting keys under a per-key list."""
+
+       def merge(self, existing: dict[str, Any], key: str, value: Any) -> dict[str, Any]:
+           current = existing.get(key)
+           if current is None:
+               existing[key] = value
+           elif isinstance(current, list):
+               current.append(value)
+           else:
+               existing[key] = [current, value]
+           return existing
+
+Point ``JS_CONTEXT_POLICY`` in the first static backend ``OPTIONS`` at the dotted path of the class.
 
 Reading on the Client
 ---------------------

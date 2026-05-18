@@ -80,7 +80,7 @@ The ``assert_has_class`` and ``find_anchor`` helpers from ``next.testing`` keep 
            at="notes/pages/template.djx",
            context={"title": "Quick start"},
        )
-       assert_has_class(html, "article", "info-card")
+       assert_has_class(html, "info-card")
 
 Pass a Request When the Component Needs One
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -1,7 +1,10 @@
 .. _howto-build-a-custom-asset-backend:
 
-Build a Custom Asset Backend
-============================
+Resolve Asset URLs Through a Custom Backend
+===========================================
+
+Pick this page when the asset URL must come from an external source such as a Vite manifest.
+To change only the tag markup or attributes, see :doc:`/content/howto/write-a-static-backend`.
 
 Problem
 -------
@@ -145,9 +148,10 @@ Register the ``page`` stem too so discovery picks up ``page.jsx`` alongside ``pa
            )
            default_stems.register("template", "page")
 
-The four arguments are the kind identifier, the file extension, the placeholder slot, and the backend method name.
+See :doc:`/content/topics/static-assets/asset-kinds` for the ``register`` signature.
 The ``scripts`` slot means ``{% collect_scripts %}`` in the layout emits the tag.
-The manager looks the renderer up on the active backend with ``getattr`` per asset, so a subclass that needs a tag shape the bundled methods do not produce can also add its own renderer method and name it here.
+The manager looks the renderer up on the active backend with ``getattr`` per asset.
+A subclass that needs a tag shape the bundled methods do not produce can add its own renderer method and name it here.
 
 Register the Backend
 ~~~~~~~~~~~~~~~~~~~~

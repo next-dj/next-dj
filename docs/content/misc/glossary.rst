@@ -26,7 +26,6 @@ Terms used throughout the next.dj documentation.
    collector slot
       A named collection inside the static collector.
       ``{% collect_styles %}`` emits the ``styles`` slot, ``{% collect_scripts %}`` emits the ``scripts`` slot.
-      The internal collector code names this structure ``_buckets``, but the documentation uses "slot" throughout.
 
    collector
       The request scoped object that accumulates assets touched by the current render.

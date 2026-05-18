@@ -5,21 +5,19 @@ ModelForm Support
 
 A :doc:`ModelForm <django:topics/forms/modelforms>` adapts a Django model to a form.
 next.dj supports ModelForms anywhere a plain ``Form`` works.
-This page covers the ``next.forms.ModelForm`` mixin, the ``get_initial`` hook that pre fills create and edit pages, and the patterns for routing instance lookups through the dependency injector.
+This page covers the ``next.forms.ModelForm`` base class, the ``get_initial`` hook that pre fills create and edit pages, and the patterns for routing instance lookups through the dependency injector.
 
 .. contents::
    :local:
    :depth: 2
 
-Mixin Setup
------------
+Base Class Setup
+----------------
 
-Combine the framework mixin with Django's ``ModelForm``.
+Subclass the framework's ``ModelForm`` base class.
 
 .. code-block:: python
    :caption: notes/forms.py
-
-   from django import forms
 
    from next.forms import ModelForm
 
@@ -61,7 +59,7 @@ A ModelForm can return either a dict for fresh creation or an instance for editi
                try:
                    return Note.objects.get(pk=id)
                except Note.DoesNotExist:
-                   return {}
+                   pass
            return {}
 
 The method runs through the dependency injector.
@@ -123,12 +121,12 @@ An edit page reuses the same form class and saves the bound instance.
 
 
    @context("note")
-   def fetch_note(note_id: DUrl[int]) -> Note:
+   def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
 
    @action("update_note", form_class=NoteForm)
-   def update_note(form: NoteForm, note_id: DUrl[int]) -> HttpResponseRedirect:
+   def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
        form.instance = get_object_or_404(Note, pk=note_id)
        form.save()
        return HttpResponseRedirect(reverse("next:page_notes_id", kwargs={"id": note_id}))
@@ -145,8 +143,9 @@ A custom DI provider can centralise the instance lookup.
 .. code-block:: python
    :caption: notes/providers.py
 
-   from django.http import Http404
    from typing import get_args, get_origin
+
+   from django.http import Http404
 
    from next.deps import DDependencyBase, RegisteredParameterProvider
 

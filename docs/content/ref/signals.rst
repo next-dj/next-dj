@@ -111,7 +111,7 @@ Aggregated Signals
 Subpackage Signals
 ------------------
 
-The aggregator simply forwards from these modules.
+The aggregator forwards from these modules.
 
 Pages
 ~~~~~
@@ -166,4 +166,4 @@ See Also
 
 .. seealso::
 
-   :doc:`/content/topics/signals` for the catalog with payload tables.
+   :doc:`/content/topics/signals` for receiver patterns and testing helpers.

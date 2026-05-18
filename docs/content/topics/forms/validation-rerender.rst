@@ -11,6 +11,8 @@ This page explains every step of the validation and re-render flow, why the orig
    :local:
    :depth: 2
 
+.. _topics-forms-validation-rerender-origin:
+
 The Origin Page
 ---------------
 
@@ -113,14 +115,16 @@ The ``redirect_to_origin`` helper sends the user back to whichever page rendered
 .. code-block:: python
    :caption: notes/routes/page.py
 
+   from django.http import HttpRequest
+
    from next.forms import action, redirect_to_origin
    from next.urls import DUrl
 
 
    @action("toggle_favourite")
-   def toggle_favourite(note_id: DUrl[int], request):
+   def toggle_favourite(note_id: DUrl["id", int], request: HttpRequest):
        Note.objects.filter(pk=note_id).update(favourite=True)
-       return redirect_to_origin(request)
+       return redirect_to_origin(request, fallback="/notes/")
 
 ``redirect_to_origin(request, fallback="/")`` reads the hidden ``_next_form_origin`` field that the ``{% form %}`` tag emits with the request path of the rendering page.
 It validates the value as a same-site path. A value that does not start with a single ``/`` is rejected, which blocks open-redirect input.
@@ -181,20 +185,21 @@ Origin page renamed or deleted.
    The dispatcher returns HTTP 400 when the path no longer exists.
    Schedule a router reload after restructuring page directories to keep current renders consistent.
 
-Form class changed.
-   When a form class is renamed or replaced the dispatcher rejects the submission with HTTP 400.
-   The action UID is hashed from the action name, not the form class name.
+Form class renamed.
+   Renaming the form class has no effect on the UID.
+   The UID is hashed from the action name.
+   A submission only fails when the origin ``page.py`` path becomes invalid.
 
 Pre dispatch redirect from handler.
    A handler that returns ``HttpResponseRedirect`` skips the re-render path entirely.
    Use this on success, never on validation failure.
 
 Virtual page origin.
-   Covered in detail under :ref:`The Origin Page <topics-forms-validation-rerender>` above.
+   Covered in detail under :ref:`The Origin Page <topics-forms-validation-rerender-origin>` above.
    Routes backed only by a sibling ``template.djx`` (no ``page.py``) still resolve an origin path for re-render.
 
 CSRF token on re-render.
-   The re-render runs the ``{% form %}`` tag again, which calls :func:`~django.middleware.csrf.get_token` and emits a fresh ``csrfmiddlewaretoken`` hidden input.
+   The re-render runs the ``{% form %}`` tag again, which calls Django's ``get_token`` and emits a fresh ``csrfmiddlewaretoken`` hidden input.
    The token the browser already holds in its cookie stays valid, so the resubmission after a correction passes CSRF without a page reload.
    A re-render never reuses the token string from the failed POST. It always emits the current one.
 

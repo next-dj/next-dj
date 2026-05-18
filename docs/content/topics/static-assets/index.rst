@@ -3,7 +3,8 @@
 Static Assets
 =============
 
-The static pipeline discovers co-located CSS, JS, and module files, deduplicates them across requests, and injects them into HTML at the location of ``{% collect_styles %}`` and ``{% collect_scripts %}`` template tags.
+The static pipeline discovers co-located CSS, JS, and module files, deduplicates them across requests, and injects them into HTML.
+The injection point is the location of the ``{% collect_styles %}`` and ``{% collect_scripts %}`` template tags.
 The pipeline is fully pluggable through asset kinds, custom stems, and backends.
 
 .. rubric:: Concepts

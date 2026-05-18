@@ -12,9 +12,8 @@ This page covers how the static subsystem discovers assets, collects them per re
 Overview
 --------
 
-The static pipeline has two stages.
-Discovery runs once at startup and produces a registry of ``StaticAsset`` records.
-Collection runs once per request and produces an ordered list of assets that the layout emits.
+The static pipeline runs entirely per request.
+``AssetDiscovery`` walks the page and component trees on each render, builds ``StaticAsset`` records, and feeds them to the request ``StaticCollector``.
 
 Discovery and Injection
 -----------------------
@@ -22,11 +21,11 @@ Discovery and Injection
 .. mermaid::
 
    flowchart LR
-       Walk["Filesystem walk"] --> StemMatch["Match stem and extension"]
-       StemMatch --> Discovery["AssetDiscovery"]
-       Discovery --> Registry["Asset registry"]
-       Registry --> Request["Request"]
-       Request --> Collector["StaticCollector"]
+       subgraph Request["Request"]
+           Walk["Filesystem walk"] --> StemMatch["Match stem and extension"]
+           StemMatch --> Discovery["AssetDiscovery"]
+           Discovery --> Collector["StaticCollector"]
+       end
        Collector --> Dedup["Dedup strategy"]
        Dedup --> Backend["StaticFilesBackend"]
        Backend --> Tags["Render link or script tags"]
@@ -35,7 +34,8 @@ Discovery and Injection
 Collector Slots
 ---------------
 
-The collector keeps assets in named slots (each slot matches the **bucket** term in :doc:`/content/misc/glossary`) that map to ``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholder tokens in templates.
+The collector keeps assets in named slots that map to ``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholder tokens in templates.
+Each slot matches the ``collector slot`` term in :doc:`/content/misc/glossary`.
 
 .. mermaid::
 
@@ -49,6 +49,29 @@ The collector keeps assets in named slots (each slot matches the **bucket** term
        Finalize --> EmitScripts["collect_scripts tag"]
        EmitStyles --> Injected["html_injected"]
        EmitScripts --> Injected
+
+Runtime Script Injection
+------------------------
+
+Under the ``AUTO`` script injection policy the static manager wraps the rendered page with the ``next.min.js`` runtime.
+``NextScriptBuilder`` produces three fragments.
+A preload hint is inserted before ``</head>`` so the browser starts downloading the runtime during HTML parsing.
+A blocking ``<script>`` tag loads the compiled ``next.min.js`` runtime.
+An inline init script feeds the serialized JS context into ``Next._init``.
+
+.. mermaid::
+
+   flowchart LR
+       JsContext["JS context values"] --> Builder["NextScriptBuilder"]
+       Builder --> Preload["Preload hint before </head>"]
+       Builder --> Runtime["next.min.js script tag"]
+       Builder --> Init["Inline Next._init payload"]
+       Preload --> Wrapped["Wrapped HTML"]
+       Runtime --> Wrapped
+       Init --> Wrapped
+
+The ``DISABLED`` policy skips the wrap entirely and the ``MANUAL`` policy builds the fragments on request without injecting them.
+The policy is read from the ``NEXT_JS_OPTIONS`` setting.
 
 Modules
 -------

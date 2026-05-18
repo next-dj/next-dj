@@ -60,8 +60,8 @@ Mass assignment.
    Avoid ``Meta.exclude`` because new fields default to editable.
 
 Path traversal.
-   The file router validates page paths against ``BASE_DIR``.
-   A submission with a ``_next_form_page`` outside ``BASE_DIR`` returns HTTP 400.
+   The form dispatcher validates the posted ``_next_form_page`` path against ``BASE_DIR``.
+   A submission that points outside ``BASE_DIR`` returns HTTP 400.
 
 Open redirect.
    ``HttpResponseRedirect`` accepts any URL.
@@ -82,6 +82,7 @@ A short list of production specific settings.
 - ``CSRF_TRUSTED_ORIGINS = ["https://..."]``.
 
 Run ``uv run python manage.py check --deploy`` and resolve every warning.
+See :doc:`/content/deployment/checklist` for the full pre-deploy review.
 
 System Checks
 -------------

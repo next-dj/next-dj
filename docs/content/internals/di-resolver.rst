@@ -44,7 +44,7 @@ Modules
    Exposes ``resolve``, ``resolve_dependencies``, and ``resolve_with_template_context`` to run a callable with resolved parameters.
 
 ``next.deps.providers``.
-   The ``ParameterProvider`` protocol, the ``RegisteredParameterProvider`` base class, and the ``ProviderRegistry``.
+   The ``ParameterProvider`` protocol and the ``RegisteredParameterProvider`` base class.
 
 ``next.deps.cache``.
    ``REQUEST_DEP_CACHE_ATTR`` constant, ``DependencyCycleError`` exception, ``get_request_dep_cache`` accessor.
@@ -62,15 +62,11 @@ The resolver iterates providers in registration order.
 Each provider declares whether it can handle a parameter through ``can_handle``.
 The first provider that returns ``True`` produces the value.
 
-The built in providers are.
+The built in providers, in registration order, are ``DependsProvider``, ``ContextByDefaultProvider``,
+``ContextByNameProvider``, ``FormProvider``, ``HttpRequestProvider``, ``UrlByAnnotationProvider``,
+``UrlKwargsProvider``, and ``QueryParamProvider``.
 
-- ``HttpRequestProvider`` for ``HttpRequest`` parameters.
-- ``UrlByAnnotationProvider`` for ``DUrl`` annotated parameters.
-- ``UrlKwargsProvider`` for plain parameters that match a captured URL kwarg.
-- ``QueryParamProvider`` for ``DQuery`` annotated parameters.
-- ``ContextByDefaultProvider`` and ``ContextByNameProvider`` for ``Context`` markers and context keys.
-- ``DependsProvider`` for parameters whose default is a ``Depends`` marker.
-- ``FormProvider`` for ``DForm`` annotated parameters.
+See :doc:`/content/topics/dependency-injection` for the single source of truth on this order and what each provider matches.
 
 Custom providers register through ``RegisteredParameterProvider``.
 A subclass joins the chain when its module is imported, in subclass definition order.
@@ -81,17 +77,21 @@ Depends Forms
 ``DependsProvider`` handles a parameter whose default is a ``Depends`` marker.
 The ``dependency`` argument of ``Depends`` selects one of four forms.
 
-- ``Depends("name")`` — the argument is a string. The resolver looks up the callable registered under that name and invokes it through ``resolver._resolve_callable_dependency``.
-- ``Depends(callable)`` — the argument is a callable. The resolver resolves the callable's own parameters and calls it as a factory.
-- ``Depends(value)`` — the argument is any other object. That object is injected directly as a constant.
-- ``Depends()`` — no argument. The marker falls back to the parameter name and resolves it as the named form.
+- ``Depends("name")``. The argument is a string. The resolver looks up the callable registered under that name and invokes it through ``resolver._resolve_callable_dependency``.
+- ``Depends(callable)``. The argument is a callable. The resolver resolves the callable's own parameters and calls it as a factory.
+- ``Depends(value)``. The argument is any other object. That object is injected directly as a constant.
+- ``Depends()``. No argument. The marker falls back to the parameter name and resolves it as the named form.
 
 ResolutionContext
 -----------------
 
 Each call builds a fresh ``ResolutionContext``.
-It carries the current request, the captured URL kwargs, the query string, the template scope, and the bound form when one exists.
+It carries the current request, the captured URL kwargs, the template scope carried as ``context_data``, the bound form when one exists, the dependency cache, and the resolution stack.
+Query-string values are read off the request by the query provider.
 Providers read what they need and never mutate the context.
+
+The names in ``RESERVED_KEYS`` (``request``, ``form``, ``_cache``, ``_stack``, ``_context_data``) are stripped from name-based resolution.
+A context key called ``request`` cannot shadow the ``HttpRequest`` provider, and the other four names stay reserved for the resolver's own inputs.
 
 Cache
 -----
@@ -117,8 +117,8 @@ Shared across re-render.
 Cycle Detection
 ---------------
 
-``DependencyCycleError`` is raised when a provider calls back into the resolver and produces an infinite loop.
-The error message lists the chain of providers that triggered the cycle.
+``DependencyCycleError`` is raised when a named dependency re-enters a name already being resolved, directly or through a longer ``Depends`` chain.
+The error message lists the chain of named dependencies that closed the loop, read left to right.
 
 Signals
 -------

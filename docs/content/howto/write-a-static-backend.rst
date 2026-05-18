@@ -1,7 +1,10 @@
 .. _howto-static-backend:
 
-Write a Static Backend
-======================
+Customise Rendered Static Tags
+==============================
+
+Pick this page when the tag markup must change, for example to add ``crossorigin`` or load from a CDN host.
+To resolve asset URLs through an external manifest, see :doc:`/content/howto/build-a-custom-asset-backend`.
 
 Problem
 -------

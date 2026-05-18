@@ -88,6 +88,19 @@ A 15-second timeout on ``wait_for`` produces a comment frame so idle connections
                continue
            yield format_event(payload, event="update")
 
+``_wait_for_new_revision`` wraps ``condition.wait_for`` with the 15-second timeout and returns the current revision.
+
+.. code-block:: python
+   :caption: polls/broker.py
+
+   def _wait_for_new_revision(self, poll_id, condition, last_revision):
+       with condition:
+           condition.wait_for(
+               lambda: self._revisions[poll_id] != last_revision,
+               timeout=15,
+           )
+           return self._revisions[poll_id]
+
 The byte formatter follows the WHATWG SSE spec, so each record ends with a blank line.
 Keepalive frames begin with ``:`` so clients ignore them while proxies still see traffic.
 
@@ -111,6 +124,9 @@ Place a page module at the ``stream/`` route and return the response from ``rend
 When ``render`` returns a :class:`~django.http.HttpResponseBase` subclass such as :class:`~django.http.StreamingHttpResponse`, the framework passes it through unchanged.
 No ``layout.djx`` wrapping runs and the static collector does not rewrite the body.
 Assets referenced only inside a streaming endpoint must still be collected from a parent page.
+
+``DPoll`` is a project-defined DI marker the example declares in ``polls/providers.py``.
+See :doc:`/content/topics/dependency-injection` for how to define custom markers.
 
 .. code-block:: python
    :caption: polls/screens/polls/[int:id]/stream/page.py

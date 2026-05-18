@@ -4,7 +4,9 @@ URL Reversing
 =============
 
 next.dj generates URL names for every file-routed page.
-This page covers the two reverse helpers in ``next.urls.reverse``, ``page_reverse`` for building a URL from a directory-shaped template and ``with_query`` for tweaking the query string of an existing URL.
+This page covers the two reverse helpers ``page_reverse`` and ``with_query`` exported from ``next.urls``.
+``page_reverse`` builds a URL from a directory-shaped template.
+``with_query`` adjusts the query string of an existing URL.
 You will use these helpers anywhere Python code needs an absolute or relative URL, including action redirects, signal payloads, and tests.
 
 .. contents::
@@ -16,9 +18,8 @@ Overview
 
 File-routed pages register Django URL names of the form ``next:page_<segments>``.
 The ``page_`` prefix is the ``URL_NAME_TEMPLATE`` setting, whose default is ``page_{name}``.
-You can pass those names to the standard ``django.urls.reverse`` function.
-``page_reverse`` does the same thing but accepts the directory template as input, which keeps callers close to the file tree they already understand.
-``page_reverse`` reads ``URL_NAME_TEMPLATE`` itself, so it keeps working when you change the prefix.
+Those names work with the standard ``django.urls.reverse`` function.
+``page_reverse`` accepts the directory template instead of the computed name, and reads ``URL_NAME_TEMPLATE`` itself so it keeps working when the prefix changes.
 
 ``with_query`` composes the query string of a URL that already exists.
 Pass keyword arguments to add or replace query parameters, pass ``None`` to remove a key, pass a list or tuple to repeat a key.
@@ -33,7 +34,7 @@ Captured values are passed as keyword arguments.
 .. code-block:: python
    :caption: examples
 
-   from next.urls.reverse import page_reverse
+   from next.urls import page_reverse
 
    # routes/page.py
    page_reverse()                              # "/"
@@ -45,10 +46,10 @@ Captured values are passed as keyword arguments.
    page_reverse("posts/[slug]", slug="hello")  # "/posts/hello/"
 
    # routes/posts/[int:post_id]/page.py
-   page_reverse("posts/[post_id]", post_id=7)  # "/posts/7/"
+   page_reverse("posts/[int:post_id]", post_id=7)  # "/posts/7/"
 
 The template is normalised through the same parser the router uses for URL name generation.
-You can pass either ``[slug]`` or ``[str:slug]`` in the template, the parser only looks at the parameter name.
+The template must repeat the same bracket text the directory uses, including any converter prefix, because the URL name is computed from the raw segment text.
 
 The resulting segment string is fed into ``URL_NAME_TEMPLATE`` before the lookup.
 The default ``page_{name}`` yields ``next:page_posts_slug``.
@@ -81,7 +82,7 @@ The helper takes a URL string and adds, replaces, or removes query parameters.
 .. code-block:: python
    :caption: query manipulation
 
-   from next.urls.reverse import with_query
+   from next.urls import with_query
 
    with_query("/search/", query="next.dj")
    # "/search/?query=next.dj"
@@ -118,7 +119,7 @@ Compose both helpers when the base URL needs both reversal and query parameters.
 .. code-block:: python
    :caption: filtered listing
 
-   from next.urls.reverse import page_reverse, with_query
+   from next.urls import page_reverse, with_query
 
 
    def filtered_notes_url(*, tag: str | None = None, page: int = 1) -> str:
@@ -150,7 +151,7 @@ An action handler can return an ``HttpResponseRedirect`` to a reversed page URL.
    from notes.forms import NoteForm
 
    from next.forms import action
-   from next.urls.reverse import page_reverse
+   from next.urls import page_reverse
 
 
    @action("create_note", form_class=NoteForm)
@@ -169,7 +170,7 @@ A component can compute a URL through ``@component.context``.
    from notes.models import Note
 
    from next.components import component
-   from next.urls.reverse import page_reverse
+   from next.urls import page_reverse
 
 
    @component.context("href")
@@ -184,7 +185,7 @@ Pagination
 .. code-block:: python
    :caption: pagination helper
 
-   from next.urls.reverse import with_query
+   from next.urls import with_query
 
 
    def page_link(request, page: int) -> str:
@@ -198,7 +199,7 @@ Both helpers are pure functions and are safe to call from tests without any Djan
 .. code-block:: python
    :caption: tests
 
-   from next.urls.reverse import page_reverse, with_query
+   from next.urls import page_reverse, with_query
 
 
    def test_page_reverse_empty() -> None:

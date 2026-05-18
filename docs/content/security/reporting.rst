@@ -22,7 +22,7 @@ A public report exposes users before a fix is available.
 What to Include
 ---------------
 
-A complete report contains.
+A complete report contains the following.
 
 - Dependency versions that match your environment (for example a lock file or the output of ``pip freeze``) so maintainers can reproduce the stack.
 - The affected subsystem (pages, components, forms, static, deps, server, conf).

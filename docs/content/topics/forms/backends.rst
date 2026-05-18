@@ -124,28 +124,16 @@ Override the validation pipeline itself only when subclassing ``RegistryFormActi
 Backend vs Signal
 -----------------
 
-Two channels observe a dispatch.
-
-Backend override.
-   Runs inside the dispatch call.
-   Sees the raw request and the response.
-   Can change the response or block the dispatch.
-
-Signal receiver.
-   Runs decoupled from the dispatch.
-   Receives the ``action_dispatched`` payload.
-   Cannot change the response.
-
-Use a backend override when the audit row must be transactional with the dispatch.
-Use a signal receiver when the side effect is independent and can tolerate eventual consistency.
-See ``examples/audit-forms`` for a project that uses both channels side by side.
+An override runs inside the dispatch and can change or block the response.
+A signal receiver runs decoupled and only observes.
+Use the override when the side effect must be transactional with the dispatch.
 
 System Checks
 -------------
 
 The framework validates the backend configuration at startup.
 
-- ``next.E044`` reports a malformed ``DEFAULT_FORM_ACTION_BACKENDS`` entry.
+- ``next.E044`` reports a malformed or non-importable ``DEFAULT_FORM_ACTION_BACKENDS`` entry, including a non-string ``BACKEND`` path.
 - ``next.E045`` reports a backend that does not subclass ``FormActionBackend``.
 
 Run ``uv run python manage.py check`` after editing the backend list.

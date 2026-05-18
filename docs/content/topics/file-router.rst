@@ -90,6 +90,9 @@ The bracket syntax accepts every Django path converter.
      - ``<path:name>``
      - Wildcard that matches one or more segments including slashes.
 
+The ``[[name]]`` wildcard requires at least one character.
+A request to the parent path with no trailing segment, such as ``/api/`` for an ``api/[[suffix]]/`` route, does not match, because the Django ``path`` converter never captures an empty string.
+
 Captured values reach Python through markers.
 ``DUrl[T]`` parses the captured value into the requested type and provides it to context functions and action handlers.
 
@@ -103,15 +106,19 @@ Name your directories without hyphens when you want the parameter name and the d
    from notes.models import Note
 
    from next.pages import context
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
 
    @context("note")
    def fetch_note(post_id: DUrl[int]) -> Note:
        return Note.objects.get(pk=post_id)
 
-The parameter name in the signature can be anything.
-The marker type takes priority over the parameter name during resolution.
+``DUrl[int]`` reads the captured segment whose name matches the parameter,
+so the parameter ``post_id`` resolves the ``[int:post_id]`` segment and the
+marker coerces it to ``int``.
+When the parameter name has to differ from the segment name, name the
+segment explicitly with ``DUrl["post_id", int]``.
+See :doc:`dependency-injection` for the full set of ``DUrl`` forms.
 
 Virtual Routes
 --------------
@@ -182,7 +189,6 @@ App directories.
 
 Project directories.
    The ``DIRS`` list adds absolute or project-relative paths to the scan.
-   These roots behave like ``STATICFILES_DIRS``.
    The router walks each directory in order and registers every ``page.py`` and ``template.djx`` it finds.
 
 You can use both sources at once.
@@ -337,7 +343,8 @@ The router contributes Django system checks that validate the configuration at s
 - ``check_next_pages_configuration`` validates the ``NEXT_FRAMEWORK`` structure and each backend entry.
 - ``check_pages_structure`` validates directory naming, captured parameter syntax, and the presence of ``page.py`` or ``template.djx``.
 - ``check_page_functions`` warns when a directory has neither a render function nor a template.
-- ``check_url_patterns`` reports duplicate URL names and parameter conflicts.
+- ``check_url_patterns`` reports the same Django path produced by two sources (``next.E015``).
+- ``check_duplicate_url_parameters`` fails when one route repeats a captured parameter name (``next.E028``).
 
 Run them through ``uv run python manage.py check``.
 A clean exit confirms that every page resolves and every name is unique.
@@ -358,52 +365,10 @@ Database Driven Routes
 ----------------------
 
 A hybrid backend combines file routes with routes built from database rows.
-Subclass ``FileRouterBackend`` and override ``generate_urls`` to append one named pattern per row.
-``generate_urls`` takes no arguments and returns a ``list[URLPattern | URLResolver]``.
-Call ``super().generate_urls()`` for the file routes, then build the extra patterns with Django's :func:`~django.urls.path` directly.
+Subclass ``FileRouterBackend`` and override ``generate_urls`` to call ``super().generate_urls()`` for the file routes, then append one named pattern per row.
+Register the backend in ``DEFAULT_PAGE_BACKENDS`` and call ``router_manager.reload()`` from a model signal so the row-derived patterns rebuild when the data changes.
 
-.. code-block:: python
-   :caption: notes/backends.py
-
-   from django.apps import apps as django_apps
-   from django.urls import URLPattern, path
-
-   from next.urls import FileRouterBackend
-
-
-   class HybridRouterBackend(FileRouterBackend):
-       """File router that also publishes one named URL per Article row."""
-
-       def generate_urls(self):
-           urls = list(super().generate_urls())
-           catchall = next(
-               (
-                   url
-                   for url in urls
-                   if isinstance(url, URLPattern)
-                   and url.pattern.regex.pattern.startswith("(?P<suffix>")
-               ),
-               None,
-           )
-           if catchall is None:
-               return urls
-           article = django_apps.get_model("notes", "Article")
-           urls.extend(
-               path(
-                   f"wiki/{slug}/",
-                   catchall.callback,
-                   kwargs={"suffix": slug},
-                   name=f"wiki_article_{slug}",
-               )
-               for slug in article.objects.values_list("slug", flat=True)
-           )
-           return urls
-
-The example scans the file routes for the wildcard catch-all pattern, then binds a fixed ``suffix`` kwarg on each alias.
-The catch-all page renders both the generic capture and the alias through the same dependency injection flow.
-
-Register the backend in ``DEFAULT_PAGE_BACKENDS`` and call ``router_manager.reload()`` from a model signal so the alias set rebuilds when a row changes.
-See ``examples/wiki`` for the complete pattern.
+See :doc:`/content/howto/write-a-router-backend` for the full worked recipe.
 
 See Also
 --------

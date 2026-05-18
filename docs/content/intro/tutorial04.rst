@@ -1,7 +1,7 @@
 .. _intro-tutorial04:
 
-Tutorial Part 4 Forms and Actions
-=================================
+Forms and Actions
+=================
 
 Goal
 ----
@@ -211,7 +211,7 @@ Extend the detail template.
    </article>
 
 The detail page URL captures ``id``.
-The ``{% form %}`` tag emits a hidden ``_url_param_id`` field automatically for every captured URL parameter, so the handler resolves ``DUrl[int]`` without any extra argument on the tag.
+The ``{% form %}`` tag emits a hidden ``_url_param_id`` field automatically for every captured URL parameter, so the handler resolves ``DUrl["id", int]`` without any extra argument on the tag.
 Add the handler to the detail page.
 
 .. code-block:: python
@@ -243,9 +243,9 @@ Submit the delete button on a note and the detail page redirects to the index, w
 How Re-render Works
 ~~~~~~~~~~~~~~~~~~~
 
-A failing validation does not produce an error page.
-The dispatch pipeline saves the bound form and re-renders the origin page with the same context functions, the same DI cache, and the failing form replacing the unbound version.
-The user sees their input, the errors next to each field, and a fresh CSRF token.
+A failing validation re-renders the origin page rather than producing an error page.
+The re-render keeps the request scoped DI cache and runs the same context functions, so the surrounding page content stays consistent.
+See :doc:`/content/topics/forms/validation-rerender` for the full re-render contract.
 
 You can confirm this by submitting the create form with an empty title.
 The page re-renders, the title field shows the error, the list of notes still appears, and the URL stays at ``/``.
@@ -294,6 +294,8 @@ CSRF token missing.
 Edit form does not show the existing data.
    The page must publish a bound form through ``@context("form")``.
    Without the context function the framework renders an unbound form even when the URL points at a real note.
+
+See :doc:`/content/faq/troubleshooting` for the full catalog of errors and fixes.
 
 Next Steps
 ----------

@@ -17,7 +17,7 @@ It imports each subsystem ``checks`` module so the ``@register`` side effects ta
 The imported modules are ``next.conf.checks``, ``next.pages.checks``, ``next.urls.checks``, ``next.components.checks``, ``next.forms.checks``, ``next.server.checks``, and ``next.static.checks``.
 
 Most of these modules register checks. ``next.server.checks`` is a placeholder with no registered checks yet.
-``next.deps.checks`` is not imported by ``register_all`` and the dependency injection layer contributes no Django system checks.
+The dependency injection layer contributes no Django system checks.
 
 Shared Helpers
 ~~~~~~~~~~~~~~
@@ -51,9 +51,6 @@ Components
 Forms
 ~~~~~
 
-``check_form_action_collisions`` flags two ``@action`` calls that share a name but come from different handlers, reporting ``next.E041``.
-``check_form_action_backends_configuration`` validates the ``DEFAULT_FORM_ACTION_BACKENDS`` shape and import paths, reporting ``next.E044`` for a malformed entry and ``next.E045`` for a class that does not subclass ``FormActionBackend``.
-
 .. automodule:: next.forms.checks
    :members:
 
@@ -72,11 +69,7 @@ Configuration
 Server
 ~~~~~~
 
-``next.server.checks`` is a placeholder module with no registered checks yet.
-It exists so future server-layer checks can ship alongside the autoreload wiring without reshuffling the docs layout.
-
-.. automodule:: next.server.checks
-   :members:
+``next.server.checks`` is a placeholder module with no registered checks yet, as noted under Check Registration.
 
 Dependency Injection
 ~~~~~~~~~~~~~~~~~~~~

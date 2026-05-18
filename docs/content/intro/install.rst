@@ -169,11 +169,6 @@ Run them once to confirm the configuration matches the framework expectations.
 A clean check run prints ``System check identified no issues`` and exits with status zero.
 If a check fires, the message includes both the configuration key and the recommended fix.
 
-.. note::
-
-   The first time you import ``next``, the framework records the current ``NEXT_FRAMEWORK`` snapshot.
-   Subsequent settings reloads emit a ``settings_reloaded`` signal so that long-lived processes can refresh caches.
-
 Next Steps
 ----------
 

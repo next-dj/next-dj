@@ -12,7 +12,8 @@ Solution
 --------
 
 The file router mounts as a single :func:`~django.urls.include` in the root URLconf, so it has no per-view decorator surface.
-Guard the routes with project :doc:`middleware <django:topics/http/middleware>` that checks :attr:`request.user.is_authenticated <django:django.contrib.auth.models.User.is_authenticated>` and redirects anonymous requests.
+Guard the routes with project :doc:`middleware <django:topics/http/middleware>` that checks :attr:`request.user.is_authenticated <django:django.contrib.auth.models.User.is_authenticated>`.
+It redirects anonymous requests.
 A page or component callable that needs the user reads it back through the request.
 
 Walkthrough
@@ -84,7 +85,7 @@ Past the guard every request carries an authenticated user.
 A ``@context`` callable asks for the request by annotation and reads ``request.user``.
 
 .. code-block:: python
-   :caption: notes/pages/page.py
+   :caption: notes/routes/page.py
 
    from django.http import HttpRequest
 
@@ -103,7 +104,7 @@ When only a few pages need protection, skip the middleware and raise :exc:`~djan
 Django renders the ``403`` handler for an anonymous request.
 
 .. code-block:: python
-   :caption: notes/pages/admin-notes/page.py
+   :caption: notes/routes/admin-notes/page.py
 
    from django.core.exceptions import PermissionDenied
    from django.http import HttpRequest

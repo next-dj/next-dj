@@ -156,7 +156,8 @@ Share the Snapshot Across a Layout Chain
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Register a resolved value with ``inherit_context=True`` so nested pages receive the same instance through DI.
-The ``[category]`` bracket segment becomes a URL kwarg, so the callable reads the slug with ``DUrl[str]`` and resolves it once.
+The ``[category]`` bracket segment becomes a URL kwarg.
+The callable reads it with ``DUrl[str]`` through a parameter named ``category`` to match the segment, then resolves it once.
 Child callables then ask for ``category`` by parameter name and never re-query.
 
 .. code-block:: python
@@ -170,9 +171,9 @@ Child callables then ask for ``category`` by parameter name and never re-query.
 
 
    @context("category", inherit_context=True)
-   def category(slug: DUrl[str]) -> Category:
+   def category(category: DUrl[str]) -> Category:
        try:
-           return Category.objects.get(slug=slug)
+           return Category.objects.get(slug=category)
        except Category.DoesNotExist as exc:
            raise Http404 from exc
 

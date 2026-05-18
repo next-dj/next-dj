@@ -93,7 +93,7 @@ Each project points at the shared directory through ``DIRS``.
            {
                "BACKEND": "next.components.FileComponentsBackend",
                "DIRS": [str(SHARED_DIR / "_components")],
-               "COMPONENTS_DIR": "_widgets",
+               "COMPONENTS_DIR": "_components",
            }
        ],
    }
@@ -123,8 +123,8 @@ Co-located assets from shared components participate through the components back
 Shared Components Convention
 ----------------------------
 
-Shared components live inside ``_shared/_components/`` even when the projects use a different ``COMPONENTS_DIR`` name.
-The framework reads the path from ``DIRS`` and treats it as a components root regardless of the directory name in settings.
+Shared components live inside ``_shared/_components/``.
+The framework reads the path from ``DIRS`` and treats it as a components root regardless of the ``COMPONENTS_DIR`` name in settings, so the on-disk directory name and the ``COMPONENTS_DIR`` setting are independent.
 
 The shared components folder ships UI primitives such as buttons, cards, dialogs, and form widgets.
 Each project consumes them through ``{% component "name" %}`` without redeclaring anything.
@@ -145,7 +145,7 @@ A project can ship project-specific components alongside the shared kit.
                    str(BASE_DIR / "chrome" / "_components"),
                    str(SHARED_DIR / "_components"),
                ],
-               "COMPONENTS_DIR": "_widgets",
+               "COMPONENTS_DIR": "_components",
            }
        ]
    }
@@ -156,7 +156,7 @@ Earlier entries win when the same component name appears twice, so a project ``D
 Hot Reload
 ----------
 
-Each component root contributes its own watch spec to the :doc:`autoreloader </content/internals/autoreload>`.
+Every directory listed in a component backend ``DIRS``, including the shared ``_shared/_components/`` root, contributes its own ``**/component.py`` watch spec to the :doc:`autoreloader </content/internals/autoreload>`.
 A change inside ``_shared/_components/`` fires the autoreload pipeline across every project that uses the development server.
 
 The ``components_registered`` signal includes the full set after each reload so long-lived processes can refresh their caches.

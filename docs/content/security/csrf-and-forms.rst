@@ -84,7 +84,7 @@ The simplest way to obtain the origin path is to read the hidden ``_next_form_pa
    const formElement = document.querySelector("form");
    const originPath = formElement.elements._next_form_page.value;
 
-   fetch("/_next/form/<uid>/", {
+   fetch(formElement.action, {
      method: "POST",
      headers: {"X-CSRFToken": token},
      body: new URLSearchParams({
@@ -93,7 +93,7 @@ The simplest way to obtain the origin path is to read the hidden ``_next_form_pa
      }),
    });
 
-To post without a rendered form, publish the page module path with ``@context("page_module", serialize=True)`` so it reaches ``window.Next.context``.
+To post without a rendered form, re-publish the existing ``current_page_module_path`` value with ``@context("current_page_module_path", serialize=True)`` so it reaches ``window.Next.context``.
 
 Cross Origin Requests
 ---------------------

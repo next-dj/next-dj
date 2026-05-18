@@ -13,13 +13,15 @@ API Tiers
 ---------
 
 ``next.forms`` groups its symbols into three tiers that describe the intended audience for each name.
+The lists below are representative.
+The autodoc blocks under `Public API`_ are the exhaustive surface.
 
 Stable.
-   ``@action``, ``page``, ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``DForm``, ``FormProvider``, ``FormSpec``, ``FormActionManager``, ``form_action_manager``, and the UID helpers (``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``redirect_to_origin``, ``validated_next_form_page_path``).
+   ``@action``, ``page``, ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``DForm``, ``FormProvider``, ``FormActionManager``, ``form_action_manager``, and the UID helpers (``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``redirect_to_origin``, ``validated_next_form_page_path``).
    Use these in application code.
 
 Advanced.
-   ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``, ``FieldSpec``, ``FormsetSpec``, and the frozen spec helpers (``field_spec``, ``form_spec``, ``formset_spec``).
+   ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``, ``FormActionDispatch``, ``FormActionOptions``, ``ActionMeta``, ``build_form_namespace_for_action``, the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``, ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``, ``formset_spec``), the formset helper ``cleanup_extra_initial``, and the ``signals`` and ``checks`` submodules.
    Use these when writing a custom backend or a form renderer.
 
 Internal hooks.
@@ -80,6 +82,7 @@ Treat them as the ``Internal hooks`` tier described above.
 
 .. automodule:: next.forms.dispatch
    :members:
+   :exclude-members: _bind_form_for_post, _filter_reserved_url_kwargs, _form_action_context_callable, _form_from_initial_data, _get_caller_path, _normalize_handler_response, _url_kwargs_from_post, _url_kwargs_from_resolver_or_post
 
 Manager
 ~~~~~~~

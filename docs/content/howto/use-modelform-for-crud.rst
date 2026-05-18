@@ -76,12 +76,12 @@ Update Page
 
 
    @context("form")
-   def edit_form(note_id: DUrl[int]) -> NoteForm:
+   def edit_form(note_id: DUrl["id", int]) -> NoteForm:
        return NoteForm(instance=get_object_or_404(Note, pk=note_id))
 
 
    @action("update_note", form_class=NoteForm)
-   def update_note(form: NoteForm, note_id: DUrl[int]) -> HttpResponseRedirect:
+   def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
        form.instance = get_object_or_404(Note, pk=note_id)
        form.save()
        return HttpResponseRedirect(reverse("next:page_notes_id", kwargs={"id": note_id}))
@@ -103,7 +103,7 @@ Delete Action
 
 
    @action("delete_note", form_class=DeleteNoteForm)
-   def delete_note(form: DeleteNoteForm, note_id: DUrl[int]) -> HttpResponseRedirect:
+   def delete_note(form: DeleteNoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
        Note.objects.filter(pk=note_id).delete()
        return HttpResponseRedirect(reverse("next:page_"))
 

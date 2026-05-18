@@ -189,6 +189,9 @@ The static checks validate the backend configuration at startup.
 They use the codes ``next.E036``, ``next.E037``, ``next.E038``, ``next.W030``, ``next.W031``, and ``next.W042``.
 Run ``uv run python manage.py check`` after editing the backend list.
 
+The ``next.W031`` check validates the ``css_tag`` and ``js_tag`` templates.
+The ``module_tag`` template is not checked, so verify it contains ``{url}`` yourself.
+
 Common Patterns
 ---------------
 

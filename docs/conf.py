@@ -233,4 +233,7 @@ myst_enable_extensions = [
 ]
 
 # source suffix
-source_suffix = [".rst", ".md"]
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".md": "markdown",
+}

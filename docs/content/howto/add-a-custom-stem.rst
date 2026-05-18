@@ -56,7 +56,7 @@ After registering ``vendor`` under the ``component`` role, discovery looks for `
 Verification
 ------------
 
-Restart the server so the autoreload watch specs pick up the new file globs.
+Editing ``apps.py`` restarts the dev server, so the new stem registration is live on the next boot.
 Reload a page that uses the file and confirm the asset appears in the rendered HTML.
 
 See Also

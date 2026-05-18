@@ -1,7 +1,7 @@
 .. _intro-tutorial01:
 
-Tutorial Part 1 First Page
-==========================
+Building the First Page
+=======================
 
 Goal
 ----
@@ -140,6 +140,8 @@ Inspect Through System Checks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 next.dj contributes a Django system check that confirms each page module is loadable.
+A page module that raises an import error surfaces as a framework error with a ``next.E`` code naming the ``page.py`` path.
+See :doc:`/content/ref/system-checks` for the full catalog.
 Run it and confirm no warnings remain.
 
 .. code-block:: bash

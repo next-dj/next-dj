@@ -29,7 +29,7 @@ Discovery groups stems into three roles.
    Matches files inside a component folder next to ``component.djx``.
 
 .. code-block:: text
-   :caption: layout
+   :caption: directory layout
 
    notes/_components/note_card/
      component.djx
@@ -113,8 +113,8 @@ Component assets enter in the order the components appear in the template.
 Hot Reload
 ----------
 
-The discovery scanner contributes watch specs to the autoreloader.
-Adding ``component.css`` to a component folder triggers a reload and the collector picks up the new asset on the next request.
+Co-located assets are picked up on the next page load with no process restart.
+See :doc:`overview` for how the per-request collector handles new files.
 
 Recipes
 -------

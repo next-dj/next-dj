@@ -18,7 +18,7 @@ Overview
 A formset action looks like any other action but takes the entire formset as a single ``form`` parameter.
 The ``form`` value in the handler is the bound formset, not an individual form.
 
-The ``next.forms.Form`` and ``next.forms.ModelForm`` mixins apply to each row form inside the formset.
+The ``next.forms.Form`` and ``next.forms.ModelForm`` base classes apply to each row form inside the formset.
 Use Django's standard :doc:`factory functions <django:topics/forms/formsets>` to build the formset class.
 
 Registering a Formset Action
@@ -105,8 +105,8 @@ The framework helper drops those initial values so untouched rows pass validatio
    from next.forms.formsets import cleanup_extra_initial
 
 
-   def build_formset(queryset) -> NoteFormSet:
-       formset = NoteFormSet(queryset=queryset)
+   def build_formset(initial) -> NoteFormSet:
+       formset = NoteFormSet(initial=initial)
        cleanup_extra_initial(formset)
        return formset
 
@@ -177,11 +177,12 @@ Partial Save
 
 Save only the valid rows by iterating ``form.cleaned_data`` and skipping rows with ``DELETE`` true or empty payloads.
 
-Inline Formset Through DI
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Inline Formset
+~~~~~~~~~~~~~~
 
 Use ``inlineformset_factory`` for parent and child relationships.
-The same registration pattern applies, the handler reads ``form.instance`` for the parent and iterates the formset for children.
+The handler builds the formset, assigns it to the parent form, and validates them together.
+See `Validating an Inline Formset`_ below for the worked pattern.
 
 Validation Failure
 ------------------
@@ -194,6 +195,9 @@ Validating an Inline Formset
 
 When a parent form owns an inline formset, validate the formset inside the parent form ``clean`` method.
 Raising ``ValidationError`` from ``clean`` routes the failure through the standard re-render pipeline instead of producing a bare error response.
+
+The framework does not attach the inline formset to the parent form.
+The handler builds the formset and assigns it to the form before calling ``form.is_valid()``.
 
 .. code-block:: python
    :caption: notes/forms.py
@@ -210,10 +214,38 @@ Raising ``ValidationError`` from ``clean`` routes the failure through the standa
 
        def clean(self):
            cleaned = super().clean()
-           if self.row_formset is not None and not self.row_formset.is_valid():
+           row_formset = getattr(self, "row_formset", None)
+           if row_formset is not None and not row_formset.is_valid():
                raise ValidationError("Fix the rows before saving.")
            return cleaned
 
+.. code-block:: python
+   :caption: notes/routes/notes/[id]/edit/page.py
+
+   from django.forms import inlineformset_factory
+   from django.http import HttpResponseRedirect
+   from django.shortcuts import get_object_or_404
+
+   from next.forms import action
+   from next.urls import DUrl
+
+   from notes.forms import NoteForm
+   from notes.models import Note, Row
+
+   RowFormSet = inlineformset_factory(Note, Row, fields=("label",), extra=1)
+
+
+   @action("update_note", form_class=NoteForm)
+   def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
+       note = get_object_or_404(Note, pk=note_id)
+       form.instance = note
+       form.row_formset = RowFormSet(form.data or None, instance=note)
+       if form.is_valid():
+           form.save()
+           form.row_formset.save()
+       return HttpResponseRedirect("/")
+
+Assigning ``form.row_formset`` before ``form.is_valid()`` makes the formset reachable from ``clean``.
 The parent page re-renders with both the parent form errors and the row errors in scope.
 See ``examples/admin`` for a worked inline formset.
 

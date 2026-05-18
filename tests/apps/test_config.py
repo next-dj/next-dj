@@ -1,16 +1,36 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from django.conf import settings
+from django.test import override_settings
 from django.utils import autoreload
 from django.utils.autoreload import (
     StatReloader as DjangoStatReloader,
     autoreload_started,
 )
 
-from next.apps import autoreload as next_autoreload
-from next.components import components_manager
+from next.apps import autoreload as next_autoreload, components as next_components
+from next.components import FileComponentsBackend, components_manager
 from next.pages.watch import get_pages_directories_for_watch
 from next.server import NextStatReloader
+
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+def _component_backend_config(
+    root: Path, component_name: str, marker: Path
+) -> dict[str, object]:
+    """Write a component tree whose ``component.py`` touches ``marker`` on import."""
+    comp_dir = root / "_components" / component_name
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.djx").write_text("<div/>")
+    (comp_dir / "component.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('loaded')\n"
+    )
+    return {"DIRS": [str(root / "_components")], "COMPONENTS_DIR": "_components"}
 
 
 class TestNextFrameworkConfig:
@@ -122,8 +142,45 @@ class TestTemplatesInstall:
 
 
 class TestComponentsInstall:
-    """``next.apps.components.install`` loads component backends on startup."""
+    """``next.apps.components.install`` discovers component backends on startup."""
 
     def test_components_manager_backends_loaded(self) -> None:
         """``components_manager._backends`` is populated after ``ready()``."""
         assert components_manager._backends is not None
+
+    def test_install_discovers_and_imports_component_modules(
+        self, tmp_path: Path
+    ) -> None:
+        """``install()`` populates the registry and imports each ``component.py``."""
+        marker = tmp_path / "imported.txt"
+        config = _component_backend_config(tmp_path, "widget", marker)
+        try:
+            with override_settings(
+                NEXT_FRAMEWORK={"DEFAULT_COMPONENT_BACKENDS": [config]},
+            ):
+                next_components.install()
+                backend = components_manager._backends[0]
+                assert isinstance(backend, FileComponentsBackend)
+                assert len(backend._registry) == 1
+            assert marker.read_text() == "loaded"
+        finally:
+            components_manager._reload_config()
+
+    def test_install_lazy_discovers_without_importing(self, tmp_path: Path) -> None:
+        """With ``LAZY_COMPONENT_MODULES`` ``install()`` discovers but defers imports."""
+        marker = tmp_path / "imported.txt"
+        config = _component_backend_config(tmp_path, "lazy_widget", marker)
+        try:
+            with override_settings(
+                NEXT_FRAMEWORK={
+                    "DEFAULT_COMPONENT_BACKENDS": [config],
+                    "LAZY_COMPONENT_MODULES": True,
+                },
+            ):
+                next_components.install()
+                backend = components_manager._backends[0]
+                assert isinstance(backend, FileComponentsBackend)
+                assert len(backend._registry) == 1
+                assert not marker.exists()
+        finally:
+            components_manager._reload_config()

@@ -83,19 +83,6 @@ Use a context processor to publish the nonce.
        return {"csp_nonce": nonce}
 
 Bake the nonce into the backend tag templates so every collected ``<script>`` and ``<link>`` carries it.
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
-           {
-               "BACKEND": "notes.backends.NonceBackend",
-               "OPTIONS": {},
-           }
-       ]
-   }
-
 A request aware backend reads the nonce from the request and writes it into each tag.
 
 .. code-block:: python
@@ -108,6 +95,20 @@ A request aware backend reads the nonce from the request and writes it into each
        def render_script_tag(self, url, *, request=None) -> str:
            nonce = getattr(request, "_csp_nonce", "")
            return f'<script src="{url}" nonce="{nonce}"></script>'
+
+Register the backend by its dotted path.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_STATIC_BACKENDS": [
+           {
+               "BACKEND": "notes.backends.NonceBackend",
+               "OPTIONS": {},
+           }
+       ]
+   }
 
 Send the matching ``Content-Security-Policy`` header from middleware.
 

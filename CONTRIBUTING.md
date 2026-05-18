@@ -247,7 +247,7 @@ Build locally using `make docs`. CI enables Sphinx warnings as errors.
 - [ ] TS changes: `next.min.js` rebuilt (`make build-js`) and vitest tests updated
 - [ ] Example + tests when adding public API or behavior users copy from `examples/`
 - [ ] Docs updated when behavior or usage changes
-- [ ] `make bench` checked locally when touching a hot path (see [Benchmarks](#benchmarks)); confirm the PR bench comment before requesting review
+- [ ] `make bench` checked locally when touching a hot path (see [Benchmarks](#benchmarks)). Confirm the PR bench comment before requesting review
 - [ ] Link issues with `Fixes #123` / `Closes #123` when applicable
 
 ### Branches

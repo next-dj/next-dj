@@ -75,6 +75,9 @@ def eager_load_components() -> None:
         ensure = getattr(backend, "_ensure_loaded", None)
         if callable(ensure):
             ensure()
+        import_all = getattr(backend, "import_all_component_modules", None)
+        if callable(import_all):
+            import_all()
 
 
 __all__ = ["clear_loaded_dirs", "eager_load_components", "eager_load_pages"]

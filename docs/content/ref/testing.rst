@@ -14,11 +14,15 @@ Public API
 Client
 ~~~~~~
 
+``NextClient`` extends Django's test client with form-action shortcuts for end to end HTTP tests.
+
 .. automodule:: next.testing.client
    :members:
 
 Signals
 ~~~~~~~
+
+``SignalRecorder`` and the ``capture_signals`` wrappers capture framework signal payloads inside a context manager.
 
 .. automodule:: next.testing.signals
    :members:
@@ -26,11 +30,15 @@ Signals
 Isolation
 ~~~~~~~~~
 
+``reset_registries`` and its narrower variants clear the framework registries between tests.
+
 .. automodule:: next.testing.isolation
    :members:
 
 Actions
 ~~~~~~~
+
+``resolve_action_url`` and ``build_form_for`` exercise a registered action without crafting POST bodies.
 
 .. automodule:: next.testing.actions
    :members:
@@ -38,11 +46,15 @@ Actions
 Rendering
 ~~~~~~~~~
 
+``render_page`` and ``render_component_by_name`` render a single page or component without an HTTP round trip.
+
 .. automodule:: next.testing.rendering
    :members:
 
 Loaders
 ~~~~~~~
+
+``eager_load_components`` and ``eager_load_pages`` force-import ``page.py`` and ``component.py`` modules in tests.
 
 .. automodule:: next.testing.loaders
    :members:
@@ -50,17 +62,23 @@ Loaders
 HTML Utilities
 ~~~~~~~~~~~~~~
 
+``find_anchor``, ``assert_has_class``, and ``assert_missing_class`` inspect rendered HTML fragments.
+
 .. automodule:: next.testing.html
    :members:
 
 Patching
 ~~~~~~~~
 
+The ``override_*`` context managers and ``patch_static_collector`` swap framework wiring for the duration of a block.
+
 .. automodule:: next.testing.patching
    :members:
 
 Dependencies
 ~~~~~~~~~~~~
+
+``make_resolution_context`` and ``resolve_call`` build dependency-injection test doubles for provider unit tests.
 
 .. automodule:: next.testing.deps
    :members:

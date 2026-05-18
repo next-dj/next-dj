@@ -78,6 +78,15 @@ URL_BY_ANNOTATION_RESOLVE_CASES: tuple[UrlByAnnotationResolveCase, ...] = (
         "str_slug", "slug", DUrl[str], {"slug": "hello"}, "hello"
     ),
     UrlByAnnotationResolveCase("missing_key", "missing", DUrl[str], {}, None),
+    UrlByAnnotationResolveCase(
+        "two_arg_coerce_int", "note_id", DUrl["id", int], {"id": "42"}, 42
+    ),
+    UrlByAnnotationResolveCase(
+        "key_only_no_coercion", "note_id", DUrl["id"], {"id": "7"}, "7"
+    ),
+    UrlByAnnotationResolveCase(
+        "two_arg_reads_named_key", "note_id", DUrl["id", int], {"note_id": "9"}, None
+    ),
 )
 
 
