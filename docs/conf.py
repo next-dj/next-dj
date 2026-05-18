@@ -48,6 +48,7 @@ extensions = [
     "sphinx.ext.autosummary",
     "sphinx.ext.doctest",
     "sphinx.ext.intersphinx",
+    "sphinx.ext.extlinks",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.githubpages",
@@ -80,6 +81,11 @@ napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = False
 napoleon_include_private_with_doc = False
 napoleon_include_special_with_doc = True
+
+# shared shortcut for repository links so the URL is defined in one place
+extlinks = {
+    "repo": ("https://github.com/next-dj/next-dj/%s", "%s"),
+}
 
 # intersphinx mapping for external references
 intersphinx_mapping = {

@@ -175,25 +175,28 @@ See :doc:`/content/topics/testing` for the full testing surface.
 Common Patterns
 ---------------
 
-Audit Trail
-~~~~~~~~~~~
+A receiver covers most extension needs by subscribing to one or two signals.
+See :doc:`/content/howto/observe-framework-signals` for production-sized receiver code.
 
-Subscribe to ``action_dispatched`` and ``form_validation_failed`` to record every dispatched action and every rejection.
+.. list-table::
+   :header-rows: 1
+   :widths: 25 30 45
 
-Cache Invalidation
-~~~~~~~~~~~~~~~~~~
-
-Subscribe to ``action_dispatched`` and invalidate downstream caches keyed on the affected model.
-
-Hot Reload
-~~~~~~~~~~
-
-Subscribe to ``router_reloaded`` to refresh long-lived caches of URL references after a route change.
-
-Observability
-~~~~~~~~~~~~~
-
-Subscribe to ``page_rendered`` and ``collector_finalized`` to emit per-request metrics for tracing and capacity planning.
+   * - Pattern
+     - Signals
+     - Purpose
+   * - Audit trail
+     - ``action_dispatched``, ``form_validation_failed``
+     - Record every dispatched action and every rejection.
+   * - Cache invalidation
+     - ``action_dispatched``
+     - Invalidate downstream caches keyed on the affected model.
+   * - Hot reload
+     - ``router_reloaded``
+     - Refresh long-lived caches of URL references after a route change.
+   * - Observability
+     - ``page_rendered``, ``collector_finalized``
+     - Emit per-request metrics for tracing and capacity planning.
 
 See Also
 --------

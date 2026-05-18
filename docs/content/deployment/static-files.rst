@@ -17,7 +17,10 @@ next.dj contributes ``NextStaticFilesFinder`` (dotted path ``next.static.NextSta
 ``NextFrameworkConfig.ready`` appends it to ``STATICFILES_FINDERS`` automatically, so no manual configuration is required.
 Production deployments use :doc:`collectstatic <django:ref/contrib/staticfiles>` exactly as they would for any other Django project.
 
-To confirm the finder is active, run::
+To confirm the finder is active, run the command below.
+
+.. code-block:: bash
+   :caption: shell
 
    uv run python manage.py findstatic next/some-component/component.css
 

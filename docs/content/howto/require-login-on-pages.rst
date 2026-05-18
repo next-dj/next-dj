@@ -83,7 +83,7 @@ Past the guard every request carries an authenticated user.
 A ``@context`` callable asks for the request by annotation and reads ``request.user``.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from django.http import HttpRequest
    from next.pages import context
@@ -100,7 +100,7 @@ When only a few pages need protection, skip the middleware and raise :exc:`~djan
 Django renders the ``403`` handler for an anonymous request.
 
 .. code-block:: python
-   :caption: notes/routes/admin-notes/page.py
+   :caption: notes/pages/admin-notes/page.py
 
    from django.core.exceptions import PermissionDenied
    from django.http import HttpRequest

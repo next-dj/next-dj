@@ -43,8 +43,9 @@ For the Notes application the most common layout sits next to the page tree at `
      </body>
    </html>
 
-The ``{% block template %}`` placeholder is mandatory.
+Writing the ``{% block template %}`` placeholder explicitly is the recommended practice because it controls where the page body lands.
 The framework substitutes the body of each page into that block.
+When a layout omits the block, the framework still wraps the page body in a ``{% block template %}`` block so an ancestor layout's placeholder stays valid.
 
 Reverse names such as ``next:page_`` come from the file router.
 See :doc:`/content/topics/file-router` for how directories become URLs and :doc:`/content/topics/url-reversing` for helpers such as ``page_reverse``.
@@ -84,7 +85,8 @@ Add a ``page.py`` next to ``layout.djx`` to publish those values with ``inherit_
    def tagline() -> str:
        return "A small tutorial application."
 
-``inherit_context=True`` makes both values visible to every descendant page, not only to the layout itself.
+``inherit_context`` defaults to ``False``, so a layout context value is visible only to the page that declares it.
+Passing ``inherit_context=True`` publishes the value to every descendant page as well.
 Without that flag the layout would still render but pages further down the tree would not see them.
 
 Add the Detail Page
@@ -92,6 +94,8 @@ Add the Detail Page
 
 Create a new directory ``notes/pages/notes/[id]/``.
 The bracketed segment is a URL parameter that the file router captures as ``id``.
+The untyped ``[id]`` segment matches any string, and ``DUrl["id", int]`` in the page module coerces it to an integer.
+The alternative ``[int:id]`` directory rejects non-numeric URLs at routing time before any page code runs.
 
 .. code-block:: python
    :caption: notes/pages/notes/[id]/page.py
@@ -105,9 +109,14 @@ The bracketed segment is a URL parameter that the file router captures as ``id``
    def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
-The ``DUrl["id", int]`` marker tells the :doc:`dependency injector </content/topics/dependency-injection>` to read the ``id`` segment captured by the ``[id]`` directory and coerce it to ``int``.
+The ``DUrl["id", int]`` annotation is a marker, an annotation in the type position that tells the framework where a value comes from.
+Dependency injection means the framework fills a function's parameters from their names and type annotations rather than from an explicit call.
+See :doc:`/content/topics/dependency-injection` for the full model.
+Here the ``DUrl["id", int]`` marker tells the dependency injector to read the ``id`` segment captured by the ``[id]`` directory and coerce it to ``int``.
 The segment name is given explicitly because the parameter ``note_id`` differs from the captured segment.
 The :func:`~django.shortcuts.get_object_or_404` shortcut is the standard Django way to fetch a row or return a 404 response.
+An ``id`` that matches no note returns Django's standard 404 response.
+See :doc:`/content/howto/customize-error-pages` for customising what the visitor sees.
 
 Add the matching template.
 
@@ -194,11 +203,11 @@ Common Pitfalls
 ---------------
 
 Layout shows but page body does not.
-   The layout must contain ``{% block template %}{% endblock template %}``.
-   Without the placeholder the framework still renders the layout but cannot inject the page body.
+   Add ``{% block template %}{% endblock template %}`` where the page body should land.
+   When the layout omits the block the framework still renders the layout, but the body has no explicit slot.
 
 ``DUrl`` resolves to ``None`` when the captured segment is missing.
-   ``DUrl[T]`` reads the segment whose name matches the parameter and coerces to ``T`` for ``int``, ``bool``, ``float``, and ``str`` as described in :doc:`/content/topics/dependency-injection`.
+   ``DUrl[T]`` reads the segment whose name matches the parameter and coerces to ``T`` for ``int``, ``bool``, and ``float`` as described in :doc:`/content/topics/dependency-injection`.
    ``DUrl["name"]`` returns the raw string for that segment.
    When the Python parameter name differs from the segment, use ``DUrl["id", int]`` for an ``[id]`` directory.
 

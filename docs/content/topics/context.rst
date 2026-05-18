@@ -44,7 +44,7 @@ The most common shape.
 The decorator takes a single key and the function returns the value.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from notes.models import Note
    from next.pages import context
@@ -81,7 +81,7 @@ The inherit_context Flag
 ``inherit_context=True`` makes a keyed value visible to every descendant route, not only to the page that declares it.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from next.pages import context
 
@@ -129,7 +129,7 @@ The ``Context(callable)`` form is useful when a parameter needs a value computed
 The factory takes its own dependency-injected arguments, so it can ask for the request, captured URL parameters, or any registered provider.
 
 .. code-block:: python
-   :caption: notes/routes/notes/[int:note_id]/page.py
+   :caption: notes/pages/notes/[int:note_id]/page.py
 
    from notes.models import Note
    from next.pages import Context, context
@@ -196,8 +196,8 @@ Inheritance Rules
 Inherited context follows the filesystem route tree.
 The framework walks up from the current ``page.py`` directory and runs every ``@context`` callable marked ``inherit_context=True`` that it finds in ancestor ``page.py`` files.
 
-- A ``page.py`` at ``notes/routes/`` publishes inherited values for every page under that root.
-- A ``page.py`` at ``notes/routes/admin/`` publishes inherited values only for pages under ``/admin/``.
+- A ``page.py`` at ``notes/pages/`` publishes inherited values for every page under that root.
+- A ``page.py`` at ``notes/pages/admin/`` publishes inherited values only for pages under ``/admin/``.
 - A page at ``/admin/links/`` sees both layers because it sits below both directories.
 
 The current page can shadow an inherited value by declaring a context function with the same key.
@@ -211,7 +211,7 @@ On the first run it holds the raw URL string. On a descendant re-run it holds th
 Leave the parameter untyped and return early if it is already an instance of the model.
 
 .. code-block:: python
-   :caption: notes/routes/notes/[category]/page.py
+   :caption: notes/pages/notes/[category]/page.py
 
    from notes.models import Category
    from next.pages import context
@@ -269,7 +269,7 @@ Per Page Title
 Publish the page title from each page.
 
 .. code-block:: python
-   :caption: notes/routes/notes/[id]/page.py
+   :caption: notes/pages/notes/[id]/page.py
 
    from notes.models import Note
    from next.pages import context
@@ -298,7 +298,7 @@ Filter Values From Query String
 Combine a context function with the ``DQuery[T]`` marker to read filters from the URL.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from next.pages import context
    from next.urls import DQuery

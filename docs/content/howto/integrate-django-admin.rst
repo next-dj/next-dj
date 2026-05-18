@@ -76,7 +76,7 @@ Link to Admin From the Site
 Use ``reverse`` from inside the file router.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from django.urls import reverse
    from next.pages import context

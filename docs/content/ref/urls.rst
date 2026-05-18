@@ -6,7 +6,7 @@ URLs Reference
 Module Summary
 --------------
 
-``next.urls`` exposes the file router backend, the dispatcher, URL reverse helpers, and dependency markers ``DUrl`` (captured path segments) and ``DQuery`` (query string parameters).
+``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``, the ``RouterFactory`` and ``RouterManager`` that build and own them, the ``URLPatternParser`` for bracket-segment parsing, the ``page_reverse`` and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, the Django integration name ``app_name``, the parameter providers, and the dependency markers ``DUrl`` (captured path segments) and ``DQuery`` (query string parameters).
 
 Public API
 ----------

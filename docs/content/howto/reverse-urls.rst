@@ -21,7 +21,7 @@ Reverse a Static Page
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from next.urls import page_reverse
 
@@ -64,7 +64,7 @@ Use Inside an Action Handler
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from django.http import HttpResponseRedirect
    from next.forms import action

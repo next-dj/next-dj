@@ -3,7 +3,8 @@
 Contributing
 ============
 
-This section covers documentation contributions: how to write and structure new pages.
+This section covers documentation contributions.
+It explains how to write and structure new pages.
 
 Code contributions cover setup, testing, benchmarks, and the pull request process.
 Read `CONTRIBUTING.md <https://github.com/next-dj/next-dj/blob/main/CONTRIBUTING.md>`_ in the repository root for that workflow.

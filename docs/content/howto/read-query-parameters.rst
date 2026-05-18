@@ -46,12 +46,16 @@ The default is used when the key is absent from the query string.
 
 A request to ``/?show=8`` injects ``show=8`` as an ``int``.
 A request to ``/`` injects the default ``3``.
-Clamp the value yourself, since the marker only coerces the type.
 
 Type Coercion
 ~~~~~~~~~~~~~
 
 The annotation drives coercion of the raw query string.
+
+.. note::
+
+   The marker only coerces the type.
+   Clamp or otherwise bound the value yourself, as the ``featured`` example does with ``max`` and ``min``.
 
 ``DQuery[int]``.
    Parsed with ``int()``. A value that does not parse, such as ``?show=abc``, falls back to the raw string rather than raising.

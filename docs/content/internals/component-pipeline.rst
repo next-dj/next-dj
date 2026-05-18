@@ -22,8 +22,10 @@ Pipeline
 
    flowchart LR
        Scanner[Scanner] --> Registry[Registry]
-       Registry --> Manager[ComponentsManager]
-       Manager --> Resolve[Resolve name]
+       Registry --> Backend[FileComponentsBackend]
+       Backend --> Manager[ComponentsManager]
+       Manager --> Visibility[ComponentVisibilityResolver]
+       Visibility --> Resolve[Resolve name]
        Resolve --> Loading[Load module]
        Loading --> ContextReg[Component context]
        Resolve --> Renderer[Renderer]
@@ -78,7 +80,10 @@ A component reference resolves through the visibility resolver.
    Each backend entry under ``DEFAULT_COMPONENT_BACKENDS`` reads its extra roots from the ``DIRS`` key.
    Within every root the scanner matches folders whose name equals the backend's ``COMPONENTS_DIR`` value.
 3. A component visible in the template's own page tree wins over a same-named component contributed through ``DIRS``.
-   When no local match exists, backend-entry order breaks remaining ties among the ``DIRS`` roots.
+
+The visibility resolver scores candidates by scope specificity, and within one backend a registration-order tie-break decides between two candidates that score equally.
+Across backends, the order of entries in ``DEFAULT_COMPONENT_BACKENDS`` decides which backend is consulted first.
+The two levels are distinct: registration order operates inside a single ``FileComponentsBackend``, while entry order operates across separate backend instances.
 
 Two components in the same scope with the same name are reported by ``next.E020``.
 ``next.E034`` reports one component name used at the root route scope of more than one page tree.
@@ -96,7 +101,8 @@ Component Context Resolution
 ----------------------------
 
 Each ``@component.context("key")`` function runs once per component render.
-The resolver shares its cache with the page render so values produced by page level context are reused inside the component.
+On the template render path the resolver reuses the page render cache, so values produced by page level context are visible inside the component.
+A component whose ``component.py`` defines a ``render`` function runs against a fresh ``DependencyCache`` instead, so its parameters resolve independently of the page render.
 
 Signals
 -------

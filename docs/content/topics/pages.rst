@@ -4,8 +4,7 @@ Pages
 =====
 
 A page is a directory under a configured page root that produces a body when its URL is requested.
-This page covers the three ways a page can produce that body and the priority rules between them.
-It also covers the contract for ``render`` functions and how custom template loaders extend discovery beyond ``template.djx``.
+This page covers the three ways a page produces that body, the priority rules between them, the ``render`` function contract, and how custom template loaders extend discovery beyond ``template.djx``.
 
 .. contents::
    :local:
@@ -81,7 +80,7 @@ The ``render`` function takes any DI-resolved parameters the resolver can fill.
 The most common shape is ``request`` plus captured URL parameters and marker-driven values.
 
 .. code-block:: python
-   :caption: notes/routes/reports/[int:report_id]/page.py
+   :caption: notes/pages/reports/[int:report_id]/page.py
 
    from notes.models import Report
    from next.urls import DUrl
@@ -111,7 +110,7 @@ The template Attribute
 Assign a string to the module-level ``template`` attribute when the body is small enough to live next to the Python code.
 
 .. code-block:: python
-   :caption: notes/routes/health/page.py
+   :caption: notes/pages/health/page.py
 
    template = "<p>ok</p>"
 
@@ -120,7 +119,8 @@ When no ``render`` function exists the ``template`` attribute is consulted befor
 Use it for trivial pages where a separate template file would be noise.
 
 The ``template`` attribute also has a matching loader, ``PythonTemplateLoader`` in ``next.pages.loaders``, whose ``source_name`` is ``"template"``.
-Register it in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` when a project wants the ``template`` attribute to participate in the loader chain rather than being consulted directly.
+The manager always reads ``module.template`` directly, so registering this loader in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` changes nothing at render time.
+It only makes the ``next.W043`` conflict check name the ``template`` attribute as a loader source.
 
 Template Files
 --------------
@@ -129,7 +129,7 @@ A ``template.djx`` sibling is the default source.
 The file contains the body without any HTML envelope.
 
 .. code-block:: jinja
-   :caption: notes/routes/template.djx
+   :caption: notes/pages/template.djx
 
    <ul>
      {% for note in notes %}
@@ -280,7 +280,7 @@ Pure Redirect Page
 A page that always redirects elsewhere uses a ``render`` function that returns ``HttpResponseRedirect``.
 
 .. code-block:: python
-   :caption: notes/routes/login/page.py
+   :caption: notes/pages/login/page.py
 
    from django.http import HttpResponseRedirect
    from next.urls import page_reverse
@@ -294,7 +294,7 @@ JSON Endpoint
 Return ``JsonResponse`` from ``render`` for a JSON endpoint that still benefits from URL naming.
 
 .. code-block:: python
-   :caption: notes/routes/api/health/page.py
+   :caption: notes/pages/api/health/page.py
 
    from django.http import JsonResponse
 
@@ -307,7 +307,7 @@ Streaming Response
 Reach for ``StreamingHttpResponse`` when the body is produced incrementally, such as Server Sent Events or a large export.
 
 .. code-block:: python
-   :caption: notes/routes/notes/[id]/stream/page.py
+   :caption: notes/pages/notes/[id]/stream/page.py
 
    from django.http import StreamingHttpResponse
    from notes.models import Note

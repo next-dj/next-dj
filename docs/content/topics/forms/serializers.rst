@@ -6,7 +6,8 @@ Frozen Form Specs
 The forms subsystem ships frozen dataclass descriptors that describe a form, a formset, or a single field as plain Python data.
 This module (``next.forms.serializers``) is unrelated to JSON serializers for :doc:`the browser context object </content/topics/static-assets/js-context>`. Those live under ``next.static``.
 
-Each descriptor is a frozen dataclass, so it is immutable and supports value equality, safe to cache or compare across renders.
+Each descriptor is a frozen dataclass, so it is immutable and supports value equality.
+This makes a descriptor safe to cache or compare across renders.
 
 .. contents::
    :local:
@@ -65,8 +66,9 @@ Each ``options`` mapping carries a ``fields`` list and an optional ``description
 Each helper returns a frozen instance ready to pass into a template.
 
 ``field_spec`` accepts an ``is_extra`` keyword argument that defaults to ``False``.
-It sets the ``is_extra`` field on the resulting ``FieldSpec``, which flags a field that belongs to a blank extra formset row.
-``formset_spec`` computes ``is_extra`` per row and propagates it to every ``FieldSpec`` and ``FormsetRowSpec`` it builds, so a template can tell a blank trailing row apart from a populated one and style or hide it accordingly.
+It sets the ``is_extra`` field on the resulting ``FieldSpec``, a structural flag that marks a field as belonging to an extra formset row rather than an instance-backed row.
+The flag describes the row's origin, not whether the user filled it in.
+``formset_spec`` computes ``is_extra`` per row and propagates it to every ``FieldSpec`` and ``FormsetRowSpec`` it builds, so a template can tell an extra row apart from an instance-backed one and style or hide it accordingly.
 A standalone ``field_spec`` call leaves ``is_extra`` at ``False`` unless the caller passes the argument.
 
 Using a Spec in Templates

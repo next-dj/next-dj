@@ -36,7 +36,7 @@ Define the row form and the formset.
 Register the action.
 
 .. code-block:: python
-   :caption: notes/routes/notes/bulk/page.py
+   :caption: notes/pages/notes/bulk/page.py
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
@@ -47,13 +47,13 @@ Register the action.
    def bulk_create(form: NoteFormSet) -> HttpResponseRedirect:
        for row in form:
            if row.cleaned_data and not row.cleaned_data.get("DELETE"):
-               row.instance.save()
+               row.save()
        return HttpResponseRedirect(reverse("next:page_"))
 
 Render the formset.
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/bulk/template.djx
+   :caption: notes/pages/notes/bulk/template.djx
 
    {% form @action="bulk_create" %}
      {{ form.management_form }}

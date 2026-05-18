@@ -115,33 +115,12 @@ The recommended placement is the outermost layout.
 Customising the Tag Output
 --------------------------
 
-The ``collect`` tags do not accept HTML attributes.
-The rendered ``<link>``, ``<script>``, and ``<script type="module">`` markup comes from the active backend.
-Customise it through the backend ``OPTIONS`` keys ``css_tag``, ``js_tag``, and ``module_tag``.
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
-           {
-               "BACKEND": "next.static.StaticFilesBackend",
-               "OPTIONS": {
-                   "css_tag": '<link rel="stylesheet" href="{url}" media="screen">',
-                   "js_tag": '<script src="{url}" defer></script>',
-                   "module_tag": '<script type="module" src="{url}"></script>',
-               },
-           }
-       ]
-   }
-
-The format string must contain the ``{url}`` placeholder.
-See :doc:`backends` for the full backend surface.
+The ``collect`` tags accept no HTML attributes, and the rendered ``<link>``, ``<script>``, and ``<script type="module">`` markup comes from the active backend, see :doc:`backends` for the ``css_tag``, ``js_tag``, and ``module_tag`` ``OPTIONS`` keys.
 
 Tag Loading
 -----------
 
-The framework loads the static template tags as Django builtins through ``next.apps.templates``.
+The framework loads the static template tags as Django builtins through ``next.apps.templates.install``.
 Templates do not need a ``{% load %}`` statement.
 The same applies to ``{% form %}`` and ``{% component %}``.
 
@@ -159,7 +138,7 @@ Critical Inline CSS
 
 Use the inline block form of ``{% #use_style %}`` for a small critical stylesheet that should ship in the document.
 
-Per Page Script
+Per-Page Script
 ~~~~~~~~~~~~~~~
 
 Use the inline block form of ``{% #use_script %}`` for a one off script that interpolates page context.

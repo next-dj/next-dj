@@ -136,12 +136,8 @@ Autoreload Watch Specs
 
 The development reloader watches the page and component trees by default.
 Call ``register_autoreload_watch_spec`` from ``next.server`` to add a directory of your own.
-
-.. function:: register_autoreload_watch_spec(path: Path, glob: str) -> None
-   :noindex:
-
-``path`` is the filesystem root to watch.
-``glob`` is a pattern relative to that root that selects the files whose changes trigger a reload.
+It takes a ``path``, the filesystem root to watch, and a ``glob``, a pattern relative to that root that selects the files whose changes trigger a reload.
+See :doc:`/content/ref/server` for the full signature.
 Register the spec from ``AppConfig.ready`` so it is in place before the watcher starts.
 
 .. code-block:: python

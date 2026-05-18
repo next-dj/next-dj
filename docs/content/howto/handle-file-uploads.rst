@@ -44,7 +44,7 @@ Define the form.
 Register the action.
 
 .. code-block:: python
-   :caption: notes/routes/attachments/page.py
+   :caption: notes/pages/attachments/page.py
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
@@ -59,7 +59,7 @@ Register the action.
 Render the form with the right encoding type.
 
 .. code-block:: jinja
-   :caption: notes/routes/attachments/template.djx
+   :caption: notes/pages/attachments/template.djx
 
    {% form @action="upload_attachment" enctype="multipart/form-data" %}
      {{ form.title }}

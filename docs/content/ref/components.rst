@@ -21,6 +21,9 @@ These are the names project code uses day-to-day.
 
 .. autodata:: next.components.component
 
+   The component decorator namespace.
+   Inside a ``component.py`` use ``@component.context("key")`` to publish a value for the component template.
+
 .. autodata:: next.components.context
 
    The ``@component.context`` decorator, bound from ``ComponentContextManager.context``. Registers a context function inside a ``component.py``.
@@ -83,6 +86,9 @@ Renderers
 .. autoclass:: next.components.ComponentTemplateLoader
    :members:
 
+``ComponentsManager`` wires a single ``ComponentTemplateLoader`` into its render pipeline.
+The loader is fixed and not pluggable, so a custom backend reads component template bodies through this class rather than substituting its own.
+
 Internal Infrastructure
 -----------------------
 
@@ -133,6 +139,12 @@ Signals
 -------
 
 See :doc:`signals` and :doc:`/content/topics/signals` for the components signals (``component_registered``, ``components_registered``, ``component_backend_loaded``, ``component_rendered``).
+
+.. automodule:: next.components.signals
+   :members:
+   :no-index:
+
+The package ``__init__`` re-exports ``next_framework_settings`` from :doc:`/content/ref/conf` as a convenience for backend code that reads ``LAZY_COMPONENT_MODULES``.
 
 See Also
 --------

@@ -44,9 +44,7 @@ See :doc:`/content/intro/tutorial04`.
 How do I customise the static output
 ------------------------------------
 
-Subclass ``StaticFilesBackend`` to keep Django staticfiles URL resolution and only change the rendered tags.
-Subclass the abstract ``StaticBackend`` when the asset URLs come from a non-staticfiles source such as a CDN API.
-Register the dotted path in ``DEFAULT_STATIC_BACKENDS``.
+Subclass a static backend, register its dotted path in ``DEFAULT_STATIC_BACKENDS``, and override how tags or asset URLs are produced.
 See :doc:`/content/howto/write-a-static-backend`.
 
 How do I test a page
@@ -64,8 +62,7 @@ The autoreloader picks up new and changed page directories without a restart.
 How do I deploy in production
 -----------------------------
 
-Serve the project through a WSGI or ASGI server and collect static files the
-same way as any Django project.
+Serve the project through a WSGI or ASGI server and collect static files the same way as any Django project.
 See :doc:`/content/deployment/index` for the framework-specific checklist.
 
 How do I integrate Django admin

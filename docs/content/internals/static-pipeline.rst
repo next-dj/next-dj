@@ -49,11 +49,7 @@ Each slot matches the ``collector slot`` term in :doc:`/content/misc/glossary`.
 Runtime Script Injection
 ------------------------
 
-Under the ``AUTO`` script injection policy the static manager wraps the rendered page with the ``next.min.js`` runtime.
-``NextScriptBuilder`` produces three fragments.
-A preload hint is inserted before ``</head>`` so the browser starts downloading the runtime during HTML parsing.
-A blocking ``<script>`` tag loads the compiled ``next.min.js`` runtime.
-An inline init script feeds the serialized JS context into ``Next._init``.
+Under the ``AUTO`` script injection policy the static manager wraps the rendered page with the ``next.min.js`` runtime through ``NextScriptBuilder``.
 
 .. mermaid::
 
@@ -66,8 +62,7 @@ An inline init script feeds the serialized JS context into ``Next._init``.
        Runtime --> Wrapped
        Init --> Wrapped
 
-The ``DISABLED`` policy skips the wrap entirely and the ``MANUAL`` policy builds the fragments on request without injecting them.
-The policy is read from the ``NEXT_JS_OPTIONS`` key of ``NEXT_FRAMEWORK``.
+See :doc:`/content/topics/static-assets/js-context` for the ``ScriptInjectionPolicy`` values, the three injected fragments, and the ``NEXT_JS_OPTIONS`` keys.
 
 Modules
 -------

@@ -36,6 +36,7 @@ The only abstract method is ``register_file``.
 
 Discovery catches ``OSError`` and ``ValueError`` from ``register_file`` and logs a warning, dropping that one asset.
 Any other exception, including ``RuntimeError``, propagates and aborts the render.
+The bundled ``StaticFilesBackend`` raises ``RuntimeError`` when an asset is missing from the Django staticfiles manifest, so a stale manifest aborts the render rather than dropping the asset.
 A custom backend that wants a soft fail for an unresolvable asset should raise ``ValueError``.
 
 Renderer methods are not abstract.
@@ -213,7 +214,7 @@ Subresource Integrity
 
 Subclass ``StaticFilesBackend`` and override ``render_link_tag`` and ``render_script_tag`` to add an ``integrity`` attribute.
 
-Per Tenant CDN
+Per-Tenant CDN
 ~~~~~~~~~~~~~~
 
 Use a request aware backend that reads the tenant from the request and chooses a CDN host.

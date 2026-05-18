@@ -150,6 +150,8 @@ The action binds ``NoteForm`` to the existing note through a ``form_class`` fact
 
 The factory passed to ``form_class`` is dependency-resolved at dispatch time, so it receives the captured URL ``id`` and returns the form class paired with the ``instance`` to bind.
 The dispatcher builds and validates that bound form before it calls ``update_note``, so the handler only saves it.
+An ``id`` that matches no note makes ``get_object_or_404`` return Django's standard 404 response.
+See :doc:`/content/howto/customize-error-pages` for customising what the visitor sees.
 
 .. code-block:: jinja
    :caption: notes/pages/notes/[id]/edit/template.djx
@@ -201,10 +203,10 @@ Extend the detail template.
      </p>
    </article>
 
-The detail page URL captures ``id``.
-The ``{% form %}`` tag emits a hidden ``_url_param_id`` field automatically for every captured URL parameter, so the handler resolves ``DUrl["id", int]`` without any extra argument on the tag.
-The ``confirm`` input is different.
-It is a real field on ``DeleteNoteForm``, so the markup posts it explicitly, while the tag adds ``_url_param_id`` for you because it is a captured URL parameter.
+The two hidden inputs in this form come from different places.
+``confirm`` is a real field on ``DeleteNoteForm``, so the template posts it explicitly.
+``_url_param_id`` carries the captured URL ``id``, and the ``{% form %}`` tag emits it automatically for every captured URL parameter.
+That hidden field lets the handler resolve ``DUrl["id", int]`` without any extra argument on the tag.
 Add the handler to the detail page.
 
 .. code-block:: python

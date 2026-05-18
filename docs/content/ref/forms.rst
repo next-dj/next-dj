@@ -17,12 +17,13 @@ The lists below are representative.
 The autodoc blocks under `Public API`_ are the exhaustive surface.
 
 Stable.
-   ``@action``, ``page``, ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``DForm``, ``FormProvider``, ``FormActionManager``, ``form_action_manager``, and the UID helpers (``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``redirect_to_origin``, ``validated_next_form_page_path``).
+   ``@action``, ``page``, ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``DForm``, ``FormActionManager``, ``form_action_manager``, and the UID helpers (``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``redirect_to_origin``, ``validated_next_form_page_path``).
    Use these in application code.
 
 Advanced.
-   ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``, ``FormActionDispatch``, ``FormActionOptions``, ``ActionMeta``, ``build_form_namespace_for_action``, the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``, ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``, ``formset_spec``), the formset helper ``cleanup_extra_initial``, and the ``signals`` and ``checks`` submodules.
+   ``FormProvider``, ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``, ``FormActionDispatch``, ``FormActionOptions``, ``ActionMeta``, ``build_form_namespace_for_action``, the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``, ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``, ``formset_spec``), the formset helper ``cleanup_extra_initial``, and the ``signals`` and ``checks`` submodules.
    Use these when writing a custom backend or a form renderer.
+   ``FormProvider`` is the DI provider the framework auto-registers to resolve the bound ``form`` parameter, so application code never instantiates it.
 
 Internal hooks.
    Symbols with a leading underscore are implementation details re-exported for testing and advanced backend authoring.

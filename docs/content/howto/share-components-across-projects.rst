@@ -74,7 +74,7 @@ Use the Components
 
    {% component "button" text="Save" variant="primary" %}
 
-The framework resolves the component by name through the discovery order defined in ``DIRS``.
+The framework resolves the component by name through the component visibility resolver.
 
 Per Project Overrides
 ~~~~~~~~~~~~~~~~~~~~~
@@ -86,7 +86,8 @@ A project can override a shared component by placing a component with the same n
 
    projects/admin/admin_app/_components/button/component.djx
 
-The project local version wins because the application directory is walked before the shared ``DIRS`` entries.
+The project local version wins because the visibility resolver scores it by scope specificity.
+A component inside the project's own page tree is more specific than a global ``DIRS`` root, so it shadows the shared component of the same name.
 
 Static Files
 ~~~~~~~~~~~~

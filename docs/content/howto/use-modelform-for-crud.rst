@@ -38,7 +38,7 @@ Create Page
 ~~~~~~~~~~~
 
 .. code-block:: python
-   :caption: notes/routes/notes/new/page.py
+   :caption: notes/pages/notes/new/page.py
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
@@ -57,7 +57,7 @@ Update Page
 ~~~~~~~~~~~
 
 .. code-block:: python
-   :caption: notes/routes/notes/[id]/edit/page.py
+   :caption: notes/pages/notes/[id]/edit/page.py
 
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
@@ -82,7 +82,7 @@ Delete Action
 ~~~~~~~~~~~~~
 
 .. code-block:: python
-   :caption: notes/routes/notes/[id]/page.py
+   :caption: notes/pages/notes/[id]/page.py
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
@@ -100,7 +100,7 @@ Templates
 ~~~~~~~~~
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/new/template.djx
+   :caption: notes/pages/notes/new/template.djx
 
    {% form @action="create_note" %}
      {{ form.title }}
@@ -109,7 +109,7 @@ Templates
    {% endform %}
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/[id]/edit/template.djx
+   :caption: notes/pages/notes/[id]/edit/template.djx
 
    {% form @action="update_note" %}
      {{ form.title }}
@@ -118,7 +118,7 @@ Templates
    {% endform %}
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/[id]/template.djx
+   :caption: notes/pages/notes/[id]/template.djx
 
    {% form @action="delete_note" %}
      <input type="hidden" name="confirm" value="on">

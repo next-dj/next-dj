@@ -14,8 +14,8 @@ This page covers the two component shapes, the rules for props and slots, how co
 Overview
 --------
 
-The default ``FileComponentsBackend`` registers page-tree component folders through the URL router walk and walks the ``DIRS`` roots itself, treating every directory named ``COMPONENTS_DIR`` as a component namespace.
-Individual folders inside that directory register components. See ``next.components.scanner`` in :doc:`/content/internals/component-pipeline` if you need the exact walk order.
+The default ``FileComponentsBackend`` registers components from page trees and from configured ``DIRS`` roots.
+The :ref:`components-folder-discovery` section below covers the discovery mechanism in full.
 
 Components compose freely.
 A page template can call a component, a component template can call another component, and a layout can call any component that is in scope.
@@ -53,6 +53,8 @@ See :ref:`ref-template-tags` under *Multiline tag bodies* for the global parsing
        component.css
        component.js
      button.djx
+
+.. _components-folder-discovery:
 
 Component Folder Discovery
 --------------------------
@@ -109,8 +111,7 @@ Global scope.
    Components in directories listed under ``DIRS`` are visible from every template, regardless of tree.
 
 Two components with the same name in different scopes are valid only when one is local to a tree and the other is in another tree.
-Two components with the same name in the same scope are reported by the ``next.E020`` system check.
-``next.E034`` reports one component name used at the root route scope of more than one page tree.
+The same-scope name clash is reported by a system check, covered in the `System Checks`_ section below.
 
 Calling a Component
 -------------------
@@ -257,11 +258,9 @@ Callers fill the slot with ``{% #slot %}`` inside the block form of ``{% compone
 A caller-supplied ``{% #slot %}`` wins over the component's fallback body.
 When the caller omits the slot the component renders its own ``{% #set_slot %}`` default instead.
 
-The void ``{% slot "name" %}`` form fills a slot whose content carries no children, mirroring the void and block split shown for ``{% component %}``.
-Use it when the slot value is supplied through a prop or left empty.
-Caller slot content reaches the component scope under the ``slot_<name>`` key.
-``{% set_slot "content" %}`` renders that injected content, or its own fallback body when no caller content was supplied.
-It is the supported way to place a slot because it also carries the fallback.
+Both the void ``{% slot "name" %}`` and the block ``{% #slot %}`` forms are supported on the caller side, mirroring the void and block split shown for ``{% component %}``.
+The void form suits a slot whose value comes from a prop or is left empty.
+Caller slot content reaches the component scope under the ``slot_<name>`` key, and ``{% set_slot %}`` renders it or the component's fallback body.
 
 Component Context
 -----------------
@@ -335,7 +334,9 @@ See :doc:`/content/topics/forms/actions` for the action decorator.
 A ``component.py`` inside a ``_components`` folder beside page files is not part of this bulk import.
 The URL router imports those modules as it walks the page trees and generates URL patterns.
 
-Set ``LAZY_COMPONENT_MODULES`` to skip the bulk import for modules under configured component roots, leaving them to import on first resolve.
+Set ``LAZY_COMPONENT_MODULES`` to skip the bulk import of ``component.py`` modules under the configured ``DIRS`` roots, leaving them to import on first resolve.
+The flag gates only that bulk import.
+Page-tree ``component.py`` modules are unaffected because the URL router imports them as it walks the page trees.
 See :ref:`ref-settings` for the exact behaviour.
 
 .. code-block:: python
@@ -349,8 +350,8 @@ Hot Reload
 ----------
 
 The development server picks up new and changed component folders without a restart.
-Each component root contributes its own watch spec.
-A change inside the folder fires the autoreload pipeline and the runserver reloads with the updated component set.
+The reloader watches both kinds of component source: the ``DIRS`` roots configured on a backend and the page-tree component folders the URL router walks.
+A change inside any watched folder fires the autoreload pipeline and the runserver reloads with the updated component set.
 
 Lifecycle Signals
 -----------------
@@ -406,6 +407,8 @@ Return an empty string to render nothing, which turns the component into a serve
 A ``render`` function takes over completely.
 The component template and ``@component.context`` callables do not run for that component.
 The function may return a string or an :class:`~django.http.HttpResponse`.
+When it returns an :class:`~django.http.HttpResponse`, only the decoded body is spliced into the page.
+The response status code and headers are not propagated.
 
 When ``component.py`` defines no ``render`` function, the component renders its template and runs every ``@component.context`` callable as usual.
 

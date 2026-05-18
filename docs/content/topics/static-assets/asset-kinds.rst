@@ -46,7 +46,7 @@ The kind registry is ``next.static.default_kinds``, an instance of ``KindRegistr
 A kind registration is keyed by the ``kind`` identifier and carries three pieces of metadata.
 
 ``kind``.
-   The registry key, a non empty Python identifier such as ``css`` or ``jsx``.
+   The registry key, a non-empty Python identifier such as ``css`` or ``jsx``.
 
 ``extension``.
    The file suffix, starting with a dot, such as ``.jsx``.
@@ -126,6 +126,14 @@ A slot is the location where the static manager injects rendered tags.
 The slot registry is ``next.static.default_placeholders``.
 The framework registers two slots, ``styles`` and ``scripts``, each with an HTML comment token.
 
+The Placeholder Registry
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+``default_placeholders`` is an instance of ``PlaceholderRegistry``, exported from ``next.static`` alongside the ``PlaceholderSlot`` record.
+A ``PlaceholderSlot`` binds a slot ``name`` to the HTML comment ``token`` that the matching ``{% collect_* %}`` tag emits.
+The ``register`` method has the signature ``register(name, *, token)``.
+A repeated call with the same token is idempotent, and a repeated call with a different token raises ``ValueError``.
+
 Register a new slot when a kind should inject somewhere other than the standard two slots.
 
 .. code-block:: python
@@ -158,7 +166,8 @@ System Checks
 
 The static system checks validate the backend configuration only.
 They do not validate kind registration.
-A bad call to ``default_kinds.register`` raises ``ValueError`` at startup, before any check runs.
+A bad call to ``default_kinds.register`` raises ``ValueError`` while the app registry populates.
+Because ``manage.py check`` populates the registry itself, the ``ValueError`` aborts the ``check`` command before any individual check reports.
 
 Common Patterns
 ---------------

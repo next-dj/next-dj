@@ -3,7 +3,8 @@
 Contributor Notes
 =================
 
-This page collects the conventions that the framework code itself follows: module layout, naming rules, and the invariants each subsystem must preserve.
+This page collects the conventions that the framework code itself follows.
+It covers module layout, naming rules, and the invariants each subsystem must preserve.
 Read it before sending a patch that touches the core packages.
 
 .. note::

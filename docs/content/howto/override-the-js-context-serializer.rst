@@ -32,7 +32,7 @@ Point the setting at it.
 Context functions can now return Pydantic models directly.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from pydantic import BaseModel
    from next.pages import context

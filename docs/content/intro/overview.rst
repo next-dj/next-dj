@@ -27,7 +27,7 @@ Layouts and context.
 
 Components.
    A folder under the configured components root becomes a reusable template fragment.
-   Components carry their own Python file, template, and co-located CSS and JS.
+   Components carry their own Python file, template, and co-located CSS and JS, meaning those assets live in the same folder as the component.
    The framework discovers them by name and renders them through the ``{% component %}`` tag.
 
 Form actions.
@@ -71,48 +71,9 @@ For design rationale, see :doc:`/content/misc/design-philosophy`.
 A Minimal Project
 -----------------
 
-Once installed, the smallest next.dj project is the three files below plus a one-line edit to ``config/urls.py``.
-
-.. code-block:: python
-   :caption: notes/pages/page.py
-
-   from next.pages import context
-
-   @context("title")
-   def page_title() -> str:
-       return "Notes"
-
-.. code-block:: jinja
-   :caption: notes/pages/template.djx
-
-   <h1>{{ title }}</h1>
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
-           {
-               "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [],
-               "APP_DIRS": True,
-               "PAGES_DIR": "pages",
-               "OPTIONS": {"context_processors": []},
-           }
-       ],
-   }
-
-.. code-block:: python
-   :caption: config/urls.py
-
-   from django.urls import include, path
-
-   urlpatterns = [
-       path("", include("next.urls")),
-   ]
-
-The URL ``/`` then renders ``<h1>Notes</h1>``.
-Every new directory under ``pages/`` adds another page without touching the URL configuration.
+Once installed, the smallest next.dj project is a ``page.py`` plus a ``template.djx`` under an app's ``pages/`` directory such as ``notes/pages/``, the ``NEXT_FRAMEWORK`` block in ``config/settings.py``, and a one-line ``include("next.urls")`` in ``config/urls.py``.
+:doc:`install` shows the full three-file shape with each block spelled out.
+Every new directory under ``pages/`` then adds another page without touching the URL configuration.
 
 When to Read the Tutorial
 -------------------------

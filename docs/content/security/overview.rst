@@ -50,6 +50,7 @@ CSRF.
 XSS.
    Django template auto escaping prevents most cases.
    Context functions that return ``mark_safe`` strings or HTML strings bypass escaping.
+   Apply ``mark_safe`` only to values you fully control, and never to untrusted input as covered in :doc:`di-and-untrusted-input`.
 
 SQL injection.
    The :doc:`Django ORM <django:topics/db/queries>` uses parameterised queries.

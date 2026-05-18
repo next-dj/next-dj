@@ -89,8 +89,7 @@ The owner determines when the collector adds the asset.
 Hot Reload
 ----------
 
-Register stems during ``AppConfig.ready`` so the kind and stem registries are complete before the first request.
-A new co-located file under a registered stem is picked up on the next page load, see :doc:`overview`.
+See :doc:`overview` for how a new co-located file under a registered stem is picked up without a process restart.
 
 Common Patterns
 ---------------

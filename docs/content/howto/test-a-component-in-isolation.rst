@@ -51,7 +51,7 @@ The ``context`` mapping fills the values the component template reads.
    def test_info_card_renders_title() -> None:
        html = render_component_by_name(
            "info_card",
-           at="notes/routes/template.djx",
+           at="notes/pages/template.djx",
            context={"title": "Quick start", "subtitle": "Read this first"},
        )
        assert "Quick start" in html
@@ -73,7 +73,7 @@ The ``assert_has_class`` and ``find_anchor`` helpers from ``next.testing`` keep 
    def test_info_card_marks_the_root() -> None:
        html = render_component_by_name(
            "info_card",
-           at="notes/routes/template.djx",
+           at="notes/pages/template.djx",
            context={"title": "Quick start"},
        )
        assert_has_class(html, "info-card")
@@ -95,7 +95,7 @@ When a component callable reads the request, build one with :class:`~django.test
        request.user = user
        html = render_component_by_name(
            "user_badge",
-           at="notes/routes/template.djx",
+           at="notes/pages/template.djx",
            request=request,
        )
        assert "ada" in html

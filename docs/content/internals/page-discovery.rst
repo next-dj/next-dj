@@ -104,12 +104,9 @@ Context Resolution
    b. Page-level context.
       The ``@context`` callables declared in the current ``page.py``, evaluated after inherited values are in place so the page can shadow any inherited key.
 
-3. Context processors merge ``OPTIONS.context_processors`` from each page backend entry with ``context_processors`` from the **first** ``TEMPLATES`` entry.
-   The merge concatenates the page backend paths ahead of the Django paths and then deduplicates by dotted path.
-   Distinct paths stay in that order and run once each.
-   When the same dotted path appears in both sources only its first occurrence survives, so the page backend entry takes precedence over the Django entry.
-   Each surviving processor returns a dict that updates the merged scope, so a processor running later overrides an earlier key on a value collision.
-   Only the first ``TEMPLATES`` backend participates when several are configured.
+3. Context processors merge ``OPTIONS.context_processors`` from each page backend entry with ``context_processors`` from the **first** ``TEMPLATES`` entry, with the page backend paths concatenated ahead of the Django paths.
+   Deduplication by dotted path keeps the first occurrence, so a path shared by both sources runs once with the page backend taking precedence.
+   Each surviving processor returns a dict that updates the merged scope, so a later processor overrides an earlier key on a collision.
 4. Component-level context functions run on demand as each ``{% component %}`` tag is evaluated during rendering.
 
 The dependency resolver shares a per-request cache across all four steps so a value resolved once (for example, the current user from ``Depends``) is not recomputed.

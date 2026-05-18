@@ -75,7 +75,7 @@ DJX and Django templates use ``jinja`` as the language for syntax highlighting.
 Example.
 
 .. code-block:: jinja
-   :caption: notes/routes/template.djx
+   :caption: notes/pages/template.djx
 
    <h1>{{ title }}</h1>
 

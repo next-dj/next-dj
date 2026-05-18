@@ -84,7 +84,7 @@ Smoke Tests
 Hit at least three URLs after the deploy.
 
 - The site index ``/``.
-- One captured URL such as ``/notes/1/``.
+- One captured URL such as ``/notes/<existing-id>/``.
 - One action endpoint through a simulated POST.
 
 The smoke tests confirm that the file router is mounted, the database is reachable, and the dispatcher resolves URLs.

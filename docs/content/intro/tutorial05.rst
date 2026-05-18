@@ -43,6 +43,7 @@ Add the pytest configuration.
 
 Add a ``conftest.py`` at the project root.
 The conftest imports every ``page.py`` so actions register before the tests run.
+The ``PAGES_DIR`` path must match the actual app and page-root names, so a project that did not name its app ``notes`` adjusts the path accordingly.
 
 .. code-block:: python
    :caption: conftest.py

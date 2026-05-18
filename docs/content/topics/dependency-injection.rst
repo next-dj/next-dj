@@ -53,7 +53,7 @@ DUrl
 The URL path provider coerces the captured segment to the requested type.
 
 .. code-block:: python
-   :caption: notes/routes/notes/[int:note_id]/page.py
+   :caption: notes/pages/notes/[int:note_id]/page.py
 
    from notes.models import Note
    from next.pages import context
@@ -102,7 +102,7 @@ DQuery
 The query provider reads from ``request.GET``.
 
 .. code-block:: python
-   :caption: notes/routes/search/page.py
+   :caption: notes/pages/search/page.py
 
    from next.pages import context
    from next.urls import DQuery
@@ -272,7 +272,7 @@ See ``examples/kanban`` for a marker that serves both call sites.
 Use the new marker.
 
 .. code-block:: python
-   :caption: notes/routes/notes/[id]/page.py
+   :caption: notes/pages/notes/[id]/page.py
 
    from notes.models import Note
    from notes.providers import DNote
@@ -338,30 +338,9 @@ Resolver Lifecycle
 
 The resolver builds its provider registry on first use and reuses it, so register custom providers from ``AppConfig.ready`` and see :doc:`/content/internals/di-resolver` for the full lifecycle.
 
-Common Patterns
----------------
-
-Shared Context Value
-~~~~~~~~~~~~~~~~~~~~
-
-A custom provider can publish a value once and let several context functions ask for it without duplicating queries.
-
-.. code-block:: python
-   :caption: custom provider
-
-   from notes.providers import DNote
-   from next.pages import context
-
-   @context("breadcrumbs")
-   def breadcrumbs(note: DNote[Note]) -> list:
-       return [{"label": "Home", "href": "/"}, {"label": note.title}]
-
-   @context("note_count")
-   def note_count(note: DNote[Note]) -> int:
-       return note.comments.count()
-
-The provider is called once thanks to the request cache.
-Each context function reads the same instance.
+A custom provider can publish a value once and let several context functions ask for it.
+The request cache calls the provider a single time, so every context function reads the same instance without duplicating queries.
+See :doc:`/content/howto/share-context-across-pages` for a worked example.
 
 See Also
 --------

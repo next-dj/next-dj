@@ -125,7 +125,9 @@ Shared Components Convention
 ----------------------------
 
 Shared components live inside ``_shared/_components/``.
-The framework reads the path from ``DIRS`` and treats it as a components root regardless of the ``COMPONENTS_DIR`` name in settings, so the on-disk directory name and the ``COMPONENTS_DIR`` setting are independent.
+Each path in ``DIRS`` is scanned directly as a components root, so its on-disk name is free to be anything.
+``COMPONENTS_DIR`` only names the folder the URL router treats as a component namespace inside a page tree.
+The framework does not consult ``COMPONENTS_DIR`` when it scans the ``DIRS`` roots.
 
 The shared components folder ships UI primitives such as buttons, cards, dialogs, and form widgets.
 Each project consumes them through ``{% component "name" %}`` without redeclaring anything.
@@ -151,8 +153,10 @@ A project can ship project-specific components alongside the shared kit.
        ]
    }
 
-The list order matters.
-Earlier entries win when the same component name appears twice, so a project ``DIRS`` entry placed before the shared entry silently shadows the shared component of the same name.
+When the same component name appears in two roots, the visibility resolver scores each candidate by scope specificity rather than by ``DIRS`` order.
+A page-tree component visible from the template wins over a same-named component contributed through ``DIRS``.
+For two ``DIRS`` roots scored equally, the resolved winner is not a guaranteed contract, so avoid relying on a fixed ``DIRS`` position to shadow a shared component.
+Give project-specific components distinct names instead.
 
 Hot Reload
 ----------

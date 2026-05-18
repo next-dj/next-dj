@@ -44,6 +44,7 @@ Keep the fields minimal so the tutorial stays focused on the framework.
            return self.title
 
 Apply the :doc:`migration <django:topics/migrations>` and seed two rows so the index page has something to render.
+The ``startproject`` scaffold uses SQLite by default, so ``migrate`` creates the ``db.sqlite3`` file in the project root.
 
 .. code-block:: bash
    :caption: shell
@@ -65,6 +66,7 @@ The directory that contains a ``page.py`` becomes a URL.
 The router scans every application listed in ``INSTALLED_APPS`` for a ``pages/`` directory.
 
 Create the page module.
+A captioned code block holds the complete content of the named file unless the prose explicitly says to append to it.
 
 .. code-block:: python
    :caption: notes/pages/page.py
@@ -111,6 +113,7 @@ Start the development server.
    uv run python manage.py runserver
 
 Visit ``http://127.0.0.1:8000/`` and you should see the two seeded notes.
+The development server restarts itself on every Python edit, so reloading the browser page shows the change without a manual restart.
 
 Trace the URL Name
 ~~~~~~~~~~~~~~~~~~

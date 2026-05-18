@@ -28,6 +28,12 @@ Without the placeholder the framework drops the body at render time without an e
 
 Confirm that ``layout.djx`` sits in an ancestor directory.
 
+next.W002 warning
+~~~~~~~~~~~~~~~~~
+
+A ``page.py`` declares no body source, so the page renders nothing.
+Add a ``render`` function, a ``template`` module attribute, a sibling ``template.djx``, or a ``layout.djx`` in an ancestor directory.
+
 next.W043 warning
 ~~~~~~~~~~~~~~~~~
 
@@ -149,7 +155,7 @@ To inspect what the resolver would actually inject, use ``resolve_call`` from ``
 
    from next.testing import resolve_call, make_resolution_context
    from notes.providers import DTenant
-   from notes.routes.notes.page import notes
+   from notes.pages.notes.page import notes
 
    resolved = resolve_call(notes, url_kwargs={"tenant_slug": "acme"})
    print(resolved)
@@ -188,7 +194,8 @@ URL Resolution
 Virtual routes and bracket directories
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A plain directory that contains only a ``template.djx`` and no ``page.py`` is a virtual route: the router still maps it to a URL.
+A plain directory that contains only a ``template.djx`` and no ``page.py`` is a virtual route.
+The router still maps it to a URL.
 
 Captured-parameter directories (names in brackets) must contain ``page.py``, ``layout.djx``, ``template.djx``, or a child directory whose subtree includes ``page.py``.
 Otherwise ``manage.py check`` reports ``next.E010``.
@@ -257,9 +264,8 @@ This hides some startup errors but surfaces them when the failing component or r
 System Checks
 -------------
 
-``uv run python manage.py check`` runs every framework check and prints each
-one that fired with its code and a hint. The check codes referenced above are
-defined in full in :doc:`/content/ref/system-checks`.
+``uv run python manage.py check`` runs every framework check and prints each one that fired with its code and a hint.
+The check codes referenced above are defined in full in :doc:`/content/ref/system-checks`.
 
 See Also
 --------

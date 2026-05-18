@@ -17,7 +17,7 @@ The Decorator
 ``next.forms.action`` registers a callable as a form handler.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from django.http import HttpResponseRedirect
    from next.forms import action
@@ -127,7 +127,7 @@ Object with a ``url`` attribute.
    Coerced into an ``HttpResponseRedirect`` to that URL.
 
 None.
-   For an action registered with a ``form_class`` the dispatcher returns the re-rendered origin page.
+   For an action registered with a ``form_class`` the dispatcher returns the re-rendered origin page with HTTP 200.
    For a handler-only action it returns an empty HTTP 204 response.
    Return a redirect or a string explicitly when a handler-only action needs a visible result.
 
@@ -195,7 +195,7 @@ A ``(FormClass, init_kwargs)`` tuple.
 The factory is dependency-resolved, so it can declare ``request: HttpRequest``, a ``DUrl[...]`` parameter, or any ``Depends`` provider in its signature.
 
 .. code-block:: python
-   :caption: notes/routes/login/page.py
+   :caption: notes/pages/login/page.py
 
    from typing import Any
    from django.contrib.auth import login as auth_login
@@ -250,7 +250,7 @@ A page module can register several actions.
 Each lives at its own URL so the dispatcher can tell them apart.
 
 .. code-block:: python
-   :caption: notes/routes/notes/[id]/page.py
+   :caption: notes/pages/notes/[id]/page.py
 
    from next.forms import action
 
@@ -268,7 +268,7 @@ Each lives at its own URL so the dispatcher can tell them apart.
 Templates reference both names.
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/[id]/template.djx
+   :caption: notes/pages/notes/[id]/template.djx
 
    {% form @action="update_note" %}
      {{ form.title }}
@@ -281,7 +281,7 @@ Templates reference both names.
    {% endform %}
 
 Both forms render on a page whose URL captures ``id``.
-The ``{% form %}`` tag emits a hidden ``_url_param_id`` field for every captured kwarg, skipping the dispatch ``uid`` and any name reserved by the dependency resolver, so each handler resolves ``DUrl["id", int]`` without any extra tag argument.
+Each handler resolves ``DUrl["id", int]`` without any extra tag argument because the ``{% form %}`` tag forwards every captured kwarg automatically, as covered under Captured URL Parameters in :doc:`templates`.
 
 Component Actions
 -----------------
@@ -292,12 +292,15 @@ The action stays valid wherever the component renders.
 .. code-block:: python
    :caption: _components/comment_box/component.py
 
-   from next.forms import action
+   from django.http import HttpRequest, HttpResponseRedirect
+   from next.forms import action, redirect_to_origin
 
    @action("post_comment", form_class=CommentForm, namespace="comments")
-   def post_comment(form: CommentForm) -> HttpResponseRedirect:
+   def post_comment(form: CommentForm, request: HttpRequest) -> HttpResponseRedirect:
        form.save()
-       return HttpResponseRedirect(form.cleaned_data["origin"])
+       return redirect_to_origin(request, fallback="/")
+
+``redirect_to_origin(request, fallback="/")`` reads the hidden ``_next_form_origin`` field so the user lands back on whichever page rendered the component.
 
 Components register their actions when the components backend imports each ``component.py``.
 
@@ -310,7 +313,10 @@ The forms subsystem contributes Django system checks.
 - ``next.E044`` reports a malformed or non-importable ``DEFAULT_FORM_ACTION_BACKENDS`` entry, including a non-string ``BACKEND`` path.
 - ``next.E045`` reports a backend that does not subclass ``FormActionBackend``.
 
-Run them through ``uv run python manage.py check``.
+A UID hash collision is not a system check.
+Two distinct action names that hash to the same 16 character UID raise ``ImproperlyConfigured`` at import time, before any check runs.
+
+Run the checks through ``uv run python manage.py check``.
 
 See Also
 --------

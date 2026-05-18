@@ -42,6 +42,18 @@ Fires when the static manager begins injection, after template rendering has com
 The sender is the collector.
 The payload carries ``page_path``, which is ``None`` for partial renders, and ``request``, which is the active ``HttpRequest`` or ``None`` for renders outside a request lifecycle.
 
+.. code-block:: python
+   :caption: inspect collected slots per request
+
+   from django.dispatch import receiver
+   from next.static.signals import collector_finalized
+
+   @receiver(collector_finalized)
+   def count_assets(sender, **kwargs) -> None:
+       styles = sender.assets_in_slot("styles")
+       scripts = sender.assets_in_slot("scripts")
+       print(f"{len(styles)} styles, {len(scripts)} scripts")
+
 html_injected
 ~~~~~~~~~~~~~
 
@@ -56,18 +68,6 @@ backend_loaded
 Fires after the static factory instantiates a backend.
 The sender is the backend class.
 The payload carries ``config`` and ``instance``.
-
-.. code-block:: python
-   :caption: inspect collected slots per request
-
-   from django.dispatch import receiver
-   from next.static.signals import collector_finalized
-
-   @receiver(collector_finalized)
-   def count_assets(sender, **kwargs) -> None:
-       styles = sender.assets_in_slot("styles")
-       scripts = sender.assets_in_slot("scripts")
-       print(f"{len(styles)} styles, {len(scripts)} scripts")
 
 Register imports from ``AppConfig.ready`` so receivers exist before the first request.
 

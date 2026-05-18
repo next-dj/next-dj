@@ -9,7 +9,7 @@ Terms used throughout the next.dj documentation.
 
    action
       A Python callable registered with ``@action("name")``.
-      Receives a stable URL and dispatches form submissions.
+      The handler receives the validated form plus any DI-resolved parameters, and the framework derives a stable dispatch URL from the action name.
 
    asset
       A file registered with the static pipeline.

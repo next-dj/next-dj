@@ -97,7 +97,7 @@ Captured values reach Python through markers.
 ``DUrl[T]`` parses the captured value into the requested type and provides it to context functions and action handlers.
 
 Hyphens in directory names are normalised to underscores in the generated URL parameter and URL name.
-``[my-id]`` becomes the Django parameter ``<str:my_id>`` and the resolver provides it as ``my_id``.
+A ``routes/[my-id]/page.py`` route becomes the Django parameter ``<str:my_id>``, the resolver provides it as ``my_id``, and the URL name registers as ``next:page_my_id``.
 Name your directories without hyphens when you want the parameter name and the directory name to match exactly.
 
 .. code-block:: python
@@ -140,7 +140,7 @@ A virtual route can still receive layout wrapping from any ancestor ``layout.djx
 URL Names
 ---------
 
-Every page receives an URL name in the ``next`` namespace.
+Every page receives a URL name in the ``next`` namespace.
 The name is computed from the URL path with the leading slash removed and each segment separated by an underscore.
 Captured segments contribute their parameter name without the brackets.
 
@@ -156,8 +156,13 @@ Captured segments contribute their parameter name without the brackets.
      - ``next:page_blog``
    * - ``routes/posts/[slug]/page.py``
      - ``next:page_posts_slug``
+   * - ``routes/posts/[int:post_id]/page.py``
+     - ``next:page_posts_int_post_id``
    * - ``routes/api/[[suffix]]/page.py``
      - ``next:page_api_suffix``
+
+A typed captured segment keeps its converter label in the URL name.
+``[int:post_id]`` becomes ``posts_int_post_id``, not ``posts_post_id``, because the name is computed from the raw segment text.
 
 The ``page_`` prefix comes from the ``URL_NAME_TEMPLATE`` setting.
 Its default is ``page_{name}``, where ``{name}`` is the underscore-joined path computed above.
@@ -183,7 +188,7 @@ The router resolves routes from two sources, in the same way ``staticfiles`` res
 
 App directories.
    When ``APP_DIRS`` is ``True`` the router scans each installed application for a directory named ``PAGES_DIR``.
-   In the tutorial this is ``notes/routes/`` because ``PAGES_DIR`` is ``routes``.
+   In the tutorial this is ``notes/pages/`` because ``PAGES_DIR`` defaults to ``pages``.
 
 Project directories.
    The ``DIRS`` list adds absolute or project-relative paths to the scan.

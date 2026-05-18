@@ -7,7 +7,7 @@ next.dj generates URL names for every file-routed page.
 This page covers the two reverse helpers ``page_reverse`` and ``with_query`` exported from ``next.urls``.
 ``page_reverse`` builds a URL from a directory-shaped template.
 ``with_query`` adjusts the query string of an existing URL.
-You will use these helpers anywhere Python code needs an absolute or relative URL, including action redirects, signal payloads, and tests.
+You will use these helpers anywhere Python code needs a URL path, including action redirects, signal payloads, and tests.
 
 .. contents::
    :local:
@@ -60,12 +60,28 @@ Namespace Override
 ~~~~~~~~~~~~~~~~~~
 
 The default namespace is ``next``, configured through ``next.urls.manager.app_name``.
-Pass ``namespace=`` to point at a different installation when several routers are mounted under different namespaces.
+``page_reverse`` forwards ``namespace=`` straight to ``django.urls.reverse``, so the value must name a Django URL namespace that already exists.
+The ``next`` namespace exists because ``next.urls`` sets ``app_name = "next"``.
+A second namespace exists only when ``next.urls`` is mounted again under an explicit ``namespace`` argument.
+
+.. code-block:: python
+   :caption: config/urls.py
+
+   from django.urls import include, path
+
+   urlpatterns = [
+       path("", include("next.urls")),
+       path("admin/", include("next.urls", namespace="admin")),
+   ]
+
+With that second mount in place, ``page_reverse`` can target it.
 
 .. code-block:: python
    :caption: secondary namespace
 
    page_reverse("dashboard", namespace="admin")  # "/admin/dashboard/"
+
+Passing a ``namespace`` that no Django mount registers raises ``NoReverseMatch``.
 
 When to Use page_reverse Instead of reverse
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -145,7 +161,7 @@ Redirect After Action
 An action handler can return an ``HttpResponseRedirect`` to a reversed page URL.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from django.http import HttpResponseRedirect
    from notes.forms import NoteForm

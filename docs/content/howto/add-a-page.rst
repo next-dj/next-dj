@@ -19,12 +19,12 @@ Walkthrough
 
 Pick the URL.
    Decide the URL path.
-   For ``/about/`` the page lives at ``notes/routes/about/``.
+   For ``/about/`` the page lives at ``notes/pages/about/``.
 
 Create the page module.
 
 .. code-block:: python
-   :caption: notes/routes/about/page.py
+   :caption: notes/pages/about/page.py
 
    from next.pages import context
 
@@ -35,7 +35,7 @@ Create the page module.
 Create the template.
 
 .. code-block:: jinja
-   :caption: notes/routes/about/template.djx
+   :caption: notes/pages/about/template.djx
 
    <article>
      <h2>About</h2>

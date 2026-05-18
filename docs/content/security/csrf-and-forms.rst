@@ -77,10 +77,10 @@ The simplest way to obtain the origin path is to read the hidden ``_next_form_pa
 .. code-block:: javascript
    :caption: fetch wrapper
 
-   const token = document.cookie
+   const cookie = document.cookie
      .split("; ")
-     .find((row) => row.startsWith("csrftoken="))
-     .split("=")[1];
+     .find((row) => row.startsWith("csrftoken="));
+   const token = cookie ? cookie.split("=")[1] : "";
 
    const formElement = document.querySelector("form");
    const originPath = formElement.elements._next_form_page.value;

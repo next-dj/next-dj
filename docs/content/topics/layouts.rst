@@ -33,7 +33,7 @@ The collected layouts are composed in order, with the closest layout wrapping th
 .. code-block:: text
    :caption: layout discovery
 
-   notes/routes/
+   notes/pages/
      layout.djx                outer wrapper for every page
      notes/
        layout.djx              inner wrapper for /notes/* pages
@@ -55,7 +55,7 @@ The closing tag can be written either way.
 ``{% block template %}{% endblock template %}`` and ``{% block template %}{% endblock %}`` are both recognised.
 
 .. code-block:: jinja
-   :caption: notes/routes/layout.djx
+   :caption: notes/pages/layout.djx
 
    <!doctype html>
    <html>
@@ -86,7 +86,7 @@ A segment directory that contains a ``layout.djx`` can also have a sibling ``pag
 Use it to publish values that the layout markup needs and, with ``inherit_context=True``, to make those values available to every descendant page.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from notes.models import Note
    from next.pages import context
@@ -99,8 +99,7 @@ Use it to publish values that the layout markup needs and, with ``inherit_contex
    def note_count() -> int:
        return Note.objects.count()
 
-The ``inherit_context=True`` flag publishes the value to every descendant page.
-Without the flag the value is available only when ``notes/routes/page.py`` itself handles the request. Descendant pages cannot read it.
+The ``inherit_context=True`` flag publishes the value to every descendant page, whereas without the flag the value is available only when ``notes/pages/page.py`` itself handles the request.
 
 Context functions in a segment ``page.py`` take dependencies the same way any page does.
 The resolver shares its cache across the entire layout chain and the leaf page, so a value resolved at an ancestor segment is not recomputed further down.
@@ -114,7 +113,7 @@ Section Layout
 Add a layout inside a section to share a sub navigation across every page under that section.
 
 .. code-block:: jinja
-   :caption: notes/routes/admin/layout.djx
+   :caption: notes/pages/admin/layout.djx
 
    <section class="admin">
      <nav class="admin-nav">
@@ -131,7 +130,7 @@ Sometimes a directory needs a visual-only layout boundary for context but no ext
 Use an empty layout that contains only the placeholder.
 
 .. code-block:: jinja
-   :caption: notes/routes/api/layout.djx
+   :caption: notes/pages/api/layout.djx
 
    {% block template %}{% endblock template %}
 
@@ -171,7 +170,7 @@ Two backends can have entirely different root layouts even when both scan the sa
        ]
    }
 
-The first backend reads ``notes/routes/`` and uses ``notes/routes/layout.djx`` as its root.
+The first backend reads ``notes/pages/`` and uses ``notes/pages/layout.djx`` as its root.
 The second backend reads ``notes/admin_routes/`` and uses ``notes/admin_routes/layout.djx`` as its root.
 The two trees do not share layouts.
 

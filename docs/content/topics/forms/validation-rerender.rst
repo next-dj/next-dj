@@ -5,7 +5,7 @@ Validation and Re-render
 
 A failing POST does not produce an error page.
 The dispatcher re-renders the origin page with the bound form, the cached dependencies, and a fresh CSRF token.
-This page explains every step of the validation and re-render flow, why the origin page must be discoverable, and how to influence the re-render output from a context function.
+This page explains the validation and re-render flow end to end.
 
 .. contents::
    :local:
@@ -56,10 +56,8 @@ Dependency cache.
 
 .. tip::
 
-   Shared dependencies between the action handler and page context functions are resolved only once per request.
-   If your handler and a ``@context`` function both declare ``Depends("current_user")``, the provider runs on the first resolution and the cached value is returned on every subsequent call within the same request.
-   This means that a failed form validation does not re-query the database for values that were already produced during initial dispatch.
-   Register expensive lookups (tenant queries, permission checks) as named dependencies to get this caching for free.
+   A dependency shared between the action handler and a page context function resolves only once per request, so a failed validation never re-queries it.
+   Register expensive lookups such as tenant queries and permission checks as named dependencies to get this caching for free.
 
 The frozen ``FormSpec`` descriptors in :doc:`serializers` are a separate user-facing tool.
 The dispatcher does not attach a ``FormSpec`` to the request on its own.
@@ -86,8 +84,8 @@ The Bound Form Variable
 On the re-rendered page the variable ``form`` is the bound form with errors.
 The template can render error messages inline with each field.
 
-A page may publish its own ``form`` through ``@context("form")``.
-On re-render the dispatcher replaces that value with the bound failing form so the user sees the input that triggered the failure.
+On re-render the dispatcher always supplies the bound failing form under the action-named context key so the user sees the input that triggered the failure.
+Override ``get_initial`` on the form class to control the initial render instead.
 
 Multiple Forms On The Same Page
 -------------------------------
@@ -101,11 +99,11 @@ The dispatcher does not rerun the validation of any other form.
 Influencing the Re-render
 -------------------------
 
-One hook lets a page customise the re-render output.
+One hook lets a page customise the form before it reaches the template.
 
-Custom ``form`` context.
-   Override ``@context("form")`` to construct the form in a particular way on the initial render.
-   The dispatcher reuses the same key when populating the bound failing form on re-render.
+The ``get_initial`` hook.
+   Override ``get_initial`` on the form class to shape the initial data or the bound model instance on the initial render.
+   The dispatcher always supplies the bound failing form on re-render, so ``get_initial`` runs only on the initial GET.
 
 Redirecting Back to the Origin
 ------------------------------
@@ -115,7 +113,7 @@ When the action can be submitted from more than one page, hardcoding that target
 The ``redirect_to_origin`` helper sends the user back to whichever page rendered the form.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from django.http import HttpRequest
    from next.forms import action, redirect_to_origin

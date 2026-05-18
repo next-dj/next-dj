@@ -69,7 +69,7 @@ Create Page
 A create page renders the unbound form and saves it on submission.
 
 .. code-block:: python
-   :caption: notes/routes/notes/new/page.py
+   :caption: notes/pages/notes/new/page.py
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
@@ -82,7 +82,7 @@ A create page renders the unbound form and saves it on submission.
        return HttpResponseRedirect(reverse("next:page_"))
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/new/template.djx
+   :caption: notes/pages/notes/new/template.djx
 
    {% form @action="create_note" %}
      {{ form.title }}
@@ -98,7 +98,7 @@ Edit Page
 An edit page reuses the same form class and saves the bound instance.
 
 .. code-block:: python
-   :caption: notes/routes/notes/[id]/edit/page.py
+   :caption: notes/pages/notes/[id]/edit/page.py
 
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
@@ -153,7 +153,7 @@ A custom DI provider can centralise the instance lookup.
 The handler can now take the instance directly.
 
 .. code-block:: python
-   :caption: notes/routes/notes/[id]/edit/page.py
+   :caption: notes/pages/notes/[id]/edit/page.py
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
@@ -182,29 +182,29 @@ For a ModelForm this means the user sees the values they typed plus any field er
 The framework does not call ``save()`` when validation fails.
 The handler runs only when ``form.is_valid()`` returns ``True``.
 
-ModelForm With Custom Save
---------------------------
+Setting an Audit Field
+----------------------
 
-Override ``save`` on the ModelForm when you need extra side effects.
-The handler still calls ``form.save()`` and the override runs.
+A ModelForm carries no request-derived attributes.
+The dispatcher resolves ``request`` into the handler signature, so set audit fields in the handler with ``form.save(commit=False)`` before the final save.
 
 .. code-block:: python
-   :caption: form with audit trail
+   :caption: notes/pages/notes/new/page.py
 
-   class NoteForm(ModelForm):
-       class Meta:
-           model = Note
-           fields = ("title", "body")
+   from django.http import HttpRequest, HttpResponseRedirect
+   from django.urls import reverse
+   from next.forms import action
+   from notes.forms import NoteForm
 
-       def save(self, commit: bool = True) -> Note:
-           instance = super().save(commit=False)
-           instance.modified_by = self.request_user
-           if commit:
-               instance.save()
-           return instance
+   @action("create_note", form_class=NoteForm)
+   def create_note(form: NoteForm, request: HttpRequest) -> HttpResponseRedirect:
+       note = form.save(commit=False)
+       note.modified_by = request.user
+       note.save()
+       return HttpResponseRedirect(reverse("next:page_"))
 
-The framework does not inject ``request_user`` into the form by itself.
-Add a ``@context("form")`` that constructs the form with the user attached, or pass the user in the handler before calling ``save``.
+``form.save(commit=False)`` returns the unsaved instance so the handler can attach the user before writing the row.
+Call ``form.save_m2m()`` after ``note.save()`` when the model has many-to-many fields.
 
 System Checks
 -------------

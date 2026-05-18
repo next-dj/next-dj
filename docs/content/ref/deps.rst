@@ -69,7 +69,6 @@ See :doc:`signals` for the ``provider_registered`` signal.
 Checks
 ------
 
-``next.deps.checks`` is the home for dependency injection system checks.
 The dependency injection layer registers no Django system checks.
 
 See Also

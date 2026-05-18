@@ -19,7 +19,7 @@ Walkthrough
 Add the context function to the segment's ``page.py``.
 
 .. code-block:: python
-   :caption: notes/routes/page.py
+   :caption: notes/pages/page.py
 
    from notes.models import Note
    from next.pages import context
@@ -31,7 +31,7 @@ Add the context function to the segment's ``page.py``.
 Use the value from the layout and from any descendant page.
 
 .. code-block:: jinja
-   :caption: notes/routes/layout.djx
+   :caption: notes/pages/layout.djx
 
    <header>
      There are {{ note_count }} notes.
@@ -41,7 +41,7 @@ Use the value from the layout and from any descendant page.
 The value is injected into the shared context dict for that request, so both the layout wrappers and every descendant page template can read it.
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/[id]/template.djx
+   :caption: notes/pages/notes/[id]/template.djx
 
    <p>{{ note_count }} notes in total.</p>
 
@@ -51,7 +51,7 @@ Limit Inheritance to a Subtree
 Drop the flag for values that should stay local to the current page only.
 
 .. code-block:: python
-   :caption: notes/routes/page.py (local only)
+   :caption: notes/pages/page.py (local only)
 
    from next.pages import context
 
@@ -59,7 +59,7 @@ Drop the flag for values that should stay local to the current page only.
    def nav_links() -> list:
        return [{"label": "Home", "href": "/"}]
 
-Without ``inherit_context=True`` the value is available only when ``notes/routes/page.py`` handles the request directly.
+Without ``inherit_context=True`` the value is available only when ``notes/pages/page.py`` handles the request directly.
 Descendant routes do not receive it.
 
 A descendant page that declares the same key with its own ``@context`` overrides the inherited value for that request.

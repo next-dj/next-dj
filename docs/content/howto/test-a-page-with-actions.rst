@@ -84,7 +84,7 @@ For tests that focus on template output, render the page directly.
    from next.testing.rendering import render_page
 
    def test_template_renders_form() -> None:
-       html = render_page("notes/routes/page.py")
+       html = render_page("notes/pages/page.py")
        assert "Create" in html
 
 Verification

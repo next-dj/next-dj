@@ -37,6 +37,17 @@ The payload carries ``action_name``, ``uid``, ``form_class``, ``namespace``, and
 
 Use this to build an inventory of every action in the project, for example a debug page that lists registered handlers.
 
+Read ``namespace`` from the payload to group actions by the app that declared them.
+It is ``None`` for an action declared without a namespace, so guard the lookup with a default.
+
+.. code-block:: python
+   :caption: reading the namespace
+
+   @receiver(action_registered)
+   def group_by_namespace(sender, *, action_name, namespace, **kwargs) -> None:
+       bucket = namespace or "global"
+       logger.info("action %s belongs to %s", action_name, bucket)
+
 action_dispatched
 -----------------
 

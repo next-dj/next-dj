@@ -43,6 +43,8 @@ Create the folder ``notes/_components/info_card/`` with three files.
    def subtitle(subtitle: str = "") -> str:
        return subtitle.strip()
 
+The ``subtitle`` function reads its own ``subtitle`` prop through dependency injection and republishes the cleaned value under the same key, so the template sees the trimmed string.
+
 .. code-block:: css
    :caption: notes/_components/info_card/component.css
 
@@ -59,7 +61,7 @@ Use the Component
 Call the component in block form and fill the slot.
 
 .. code-block:: jinja
-   :caption: notes/routes/template.djx
+   :caption: notes/pages/template.djx
 
    {% #component "info_card" title="Quick start" subtitle="Read this first" %}
      {% #slot "content" %}

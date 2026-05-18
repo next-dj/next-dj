@@ -23,7 +23,8 @@ Collector.
    ``StaticCollector`` accumulates and deduplicates the assets touched by the current render.
 
 Backend.
-   A ``StaticBackend`` resolves on disk paths into URLs and renders the tags, ``StaticFilesBackend`` is the bundled one.
+   A ``StaticBackend`` resolves on-disk paths into URLs and renders the tags.
+   ``StaticFilesBackend`` is the bundled one.
 
 Placeholder slots and template tags.
    ``{% collect_styles %}`` and ``{% collect_scripts %}`` mark the slots the static manager fills after the page renders.
@@ -46,7 +47,7 @@ StaticAsset
    The path of the co-located file on disk, or ``None`` for inline and external assets.
 
 ``inline``.
-   The pre rendered inline body, or ``None`` for URL assets.
+   The pre-rendered inline body, or ``None`` for URL assets.
 
 Asset Kinds
 -----------
@@ -86,6 +87,7 @@ A file named ``component.css`` next to ``component.djx`` reaches the browser in 
 Discovery records it as a ``css`` ``StaticAsset`` because ``component`` is a registered stem and ``.css`` is the ``css`` kind extension.
 A render that uses the component adds the asset to the collector, which deduplicates it.
 After the page renders, the static manager replaces the ``styles`` slot token emitted by ``{% collect_styles %}`` with the link tags produced by ``render_link_tag`` on the active backend.
+``render_link_tag`` resolves the on-disk path to a public URL through Django staticfiles, so manifest hashing and CDN settings apply to the emitted tag.
 
 The same flow applies to ``component.js`` (kind ``js``) and ``component.mjs`` (kind ``module``), which land in the ``scripts`` slot emitted by ``{% collect_scripts %}``.
 :doc:`/content/internals/static-pipeline` traces the pipeline step by step.
@@ -123,18 +125,17 @@ Where Assets Live
 .. code-block:: text
    :caption: typical layout
 
-   notes/
-     _components/
-       note_card/
-         component.djx
-         component.css
-         component.js
-     routes/
-       layout.djx
-       layout.css
-       page.py
-       template.djx
-       template.css
+   notes/_components/note_card/
+     component.djx
+     component.css
+     component.js
+   notes/pages/
+     layout.djx
+     layout.css
+     page.py
+     template.djx
+     template.css
+     template.js
 
 Hot Reload
 ----------

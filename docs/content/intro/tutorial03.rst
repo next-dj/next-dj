@@ -26,7 +26,7 @@ The :doc:`component </content/topics/components>` backend looks for component fo
 :doc:`install` set ``COMPONENTS_DIR`` to ``_components``, so a component named ``note_card`` lives at ``notes/_components/note_card/``.
 The framework treats the folder name as the component name.
 
-Create the directory and an empty template.
+Create the directory and a starter template.
 
 .. code-block:: jinja
    :caption: notes/_components/note_card/component.djx
@@ -92,9 +92,10 @@ Place a CSS file next to ``component.djx`` and the :doc:`static pipeline </conte
      background: #f5f5f5;
    }
 
-The framework finds ``component.css`` by stem.
+The framework finds ``component.css`` by stem, the filename without its extension.
 When a page renders a component that has co-located styles, the static collector adds the file to the current request slot.
-Asset discovery runs for composite components such as ``note_card``, the kind this tutorial builds, while a simple ``.djx`` component carries no co-located assets.
+Asset discovery picks up files co-located with the component folder.
+See :doc:`/content/topics/components` for the full component model.
 
 Wire the Collector Into the Layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -153,9 +154,10 @@ Add a small enhancement that toggles a class when the note title is clicked.
 
 The collector emits one ``<script>`` tag for the file at the location of ``{% collect_scripts %}``.
 
-Module Components With Component Context
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Composite Components With Component Context
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+A component that pairs a template with a ``component.py`` is a composite component.
 Some components need Python logic.
 The note card formats a short preview from the body when one is present.
 Add a ``component.py`` next to the template.

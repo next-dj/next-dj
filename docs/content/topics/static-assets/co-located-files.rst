@@ -26,7 +26,7 @@ Discovery groups stems into three roles.
 
 ``component`` role.
    Default stem ``component``.
-   Matches files inside a component folder next to ``component.djx``.
+   Matches files alongside the component's ``component.djx`` or ``component.py``.
 
 .. code-block:: text
    :caption: directory layout
@@ -35,7 +35,7 @@ Discovery groups stems into three roles.
      component.djx
      component.css
      component.js
-   notes/routes/
+   notes/pages/
      layout.djx
      layout.css
      page.py
@@ -113,19 +113,18 @@ Component assets enter in the order the components appear in the template.
 Hot Reload
 ----------
 
-Co-located assets are picked up on the next page load with no process restart.
-See :doc:`overview` for how the per-request collector handles new files.
+See :doc:`overview` for how the per-request collector picks up new co-located files without a process restart.
 
 Recipes
 -------
 
-Site Wide Reset
+Site-Wide Reset
 ~~~~~~~~~~~~~~~
 
 Place ``layout.css`` next to the root ``layout.djx``.
 Every page below the layout inherits the reset because layout assets enter the collector first.
 
-Per Section Styles
+Per-Section Styles
 ~~~~~~~~~~~~~~~~~~
 
 Add a ``layout.css`` next to an inner layout.

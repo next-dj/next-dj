@@ -3,7 +3,7 @@
 General Questions
 =================
 
-This page answers high level questions about the project, its scope, and its lifecycle.
+This page answers high-level questions about the project, its scope, and its lifecycle.
 
 .. contents::
    :local:
@@ -50,7 +50,8 @@ Django's ``manage.py`` plus the framework system checks cover the operational su
 Which symbols are safe to depend on
 ------------------------------------
 
-Anything exported from a top-level ``next.*`` package is safe to import, while symbols whose names start with a single underscore are internal and may change without notice.
+Anything exported from a top-level ``next.*`` package is safe to import.
+Symbols whose names start with a single underscore are internal and may change without notice.
 See :doc:`/content/ref/forms` for a concrete example of how the API tiers apply to ``next.forms``.
 
 See Also

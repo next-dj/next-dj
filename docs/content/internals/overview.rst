@@ -3,7 +3,7 @@
 Internals Overview
 ==================
 
-next.dj is built from ten subsystems that share one settings layer, one dependency resolver, and one signal bus.
+next.dj is built from the ten subsystems mapped below, which share one settings layer, one dependency resolver, and one signal bus.
 This page maps them and shows how signals flow between them.
 
 .. note::
@@ -106,6 +106,11 @@ The diagram below shows which subsystem emits each signal and the typical receiv
        Server -- "watch_specs_ready" --> Watch
        Conf -- "settings_reloaded" --> Watch
        Conf -- "settings_reloaded" --> Cache
+
+.. note::
+
+   The diagram is a coordination sketch.
+   :doc:`/content/topics/signals` is the canonical catalog of signal names, senders, and payloads.
 
 Subsystem Dependencies
 ----------------------

@@ -37,7 +37,7 @@ The second argument is the new stem.
 Ship a file with the new stem.
 
 .. code-block:: text
-   :caption: notes/routes/
+   :caption: notes/pages/
 
    page.py
    template.djx

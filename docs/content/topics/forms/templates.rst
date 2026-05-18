@@ -17,7 +17,7 @@ The form Tag
 The block form is the standard shape.
 
 .. code-block:: jinja
-   :caption: notes/routes/template.djx
+   :caption: notes/pages/template.djx
 
    {% form @action="create_note" %}
      {{ form.title }}
@@ -90,7 +90,7 @@ The tag does not need any argument to forward captured URL parameters.
 When the page URL captures a parameter the tag emits a hidden ``_url_param_<name>`` field for every captured kwarg in ``request.resolver_match.kwargs``, skipping the dispatch ``uid`` and any name reserved by the dependency resolver.
 
 .. code-block:: jinja
-   :caption: notes/routes/notes/[id]/template.djx
+   :caption: notes/pages/notes/[id]/template.djx
 
    {% form @action="update_note" %}
      {{ form.title }}
@@ -114,20 +114,29 @@ Re-rendered page after a failing POST.
    The variable is the bound form with errors.
    The template renders the user input plus any field errors.
 
-A page can override the default by publishing its own ``form`` context.
+The tag does not read a ``form`` context key.
+On the initial render it reads a context key named after the action that holds a ``SimpleNamespace`` with a ``form`` attribute, and falls back to building that namespace itself when the key is absent.
+Customise the initial form by overriding ``get_initial`` on the form class rather than publishing a ``form`` context.
 
 .. code-block:: python
-   :caption: pre filled form
+   :caption: notes/forms.py
 
-   from notes.forms import NoteForm
+   from django.http import HttpRequest
+   from next.forms import ModelForm
    from notes.models import Note
-   from next.pages import context
 
-   @context("form")
-   def edit_form(note: Note) -> NoteForm:
-       return NoteForm(instance=note)
+   class NoteForm(ModelForm):
+       class Meta:
+           model = Note
+           fields = ("title", "body")
 
-The dispatcher reuses the same ``form`` key for the re-rendered failure case.
+       @classmethod
+       def get_initial(cls, request: HttpRequest, id: int | None = None) -> Note | dict:
+           if id is None:
+               return {}
+           return Note.objects.get(pk=id)
+
+On a re-rendered failure the dispatcher always supplies the bound failing form under the action-named key.
 The template therefore does not need to branch on bound vs unbound.
 
 Multiple Forms on One Page

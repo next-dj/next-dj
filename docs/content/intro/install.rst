@@ -62,6 +62,10 @@ Open ``config/settings.py`` and register both ``next`` and your application in :
        "notes",
    ]
 
+This list replaces the one ``django-admin startproject`` generates.
+It intentionally drops ``django.contrib.admin`` because next.dj does not require the admin site.
+Add ``django.contrib.admin`` back if the project needs it.
+
 The ``next`` app registers system checks, template tags, autoreload hooks, and signal connections at startup.
 
 Configure NEXT_FRAMEWORK
@@ -107,7 +111,8 @@ Mount the Router
    Without this ``include("next.urls")`` edit Django never reaches the file router.
    Every page returns a 404 until the line is in place.
 
-Forward all unmatched URLs to next.dj by adding one line to ``config/urls.py``.
+Forward all unmatched URLs to next.dj by replacing ``config/urls.py`` with the file below.
+This replacement also removes the ``admin`` import that ``startproject`` generated, which pairs with dropping ``django.contrib.admin`` from ``INSTALLED_APPS`` above.
 
 .. code-block:: python
    :caption: config/urls.py
@@ -152,6 +157,7 @@ Run the Server
 --------------
 
 Apply Django migrations and start the development server.
+A fresh ``startproject`` configures SQLite by default, so ``migrate`` creates the ``db.sqlite3`` file in the project root.
 
 .. code-block:: bash
    :caption: shell

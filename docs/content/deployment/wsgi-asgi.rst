@@ -95,7 +95,7 @@ Add a health check page that returns ``200`` quickly.
 A pure ``render`` function avoids the layout chain and the static collector.
 
 .. code-block:: python
-   :caption: notes/routes/healthz/page.py
+   :caption: notes/pages/healthz/page.py
 
    from django.http import HttpRequest, JsonResponse
 

@@ -25,7 +25,7 @@ The framework ships three strategies.
    Keys inline assets by their body and kind.
 
 ``HashContentDedup``.
-   Keys URL assets by the SHA hash of the file at ``source_path``.
+   Keys URL assets by the SHA-256 hash of the file at ``source_path``.
    Two files with identical content deduplicate even at different paths.
    Falls back to URL keying when ``source_path`` is absent.
 
@@ -73,6 +73,8 @@ The protocol has one method, ``key``, which returns a hashable value.
 .. code-block:: python
    :caption: notes/dedup.py
 
+   from collections.abc import Hashable
+
    from next.static import StaticAsset
    from next.static.collector import UrlDedup
 
@@ -82,7 +84,7 @@ The protocol has one method, ``key``, which returns a hashable value.
        def __init__(self) -> None:
            self._fallback = UrlDedup()
 
-       def key(self, asset: StaticAsset) -> object:
+       def key(self, asset: StaticAsset) -> Hashable:
            if asset.source_path is not None:
                return ("path", str(asset.source_path), asset.kind)
            return self._fallback.key(asset)

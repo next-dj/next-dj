@@ -27,11 +27,14 @@ Pipeline
        Template -- "non-POST" --> NotAllowed["HTTP 405"]
        Endpoint --> Lookup["Resolve action by UID"]
        Lookup -- unknown UID --> NotFound["HTTP 404"]
-       Lookup -- found --> Build["Build form"]
+       Lookup -- "found, no form_class" --> HandlerOnly["Run handler only"]
+       Lookup -- "found, form_class" --> Build["Build form"]
+       HandlerOnly --> HandlerOnlyResponse["Handler response or HTTP 204"]
+       HandlerOnly --> ActionDispatched["action_dispatched signal"]
        Build --> Validate{"Form valid"}
        Validate -- yes --> Handler["Run handler"]
        Handler --> Response["Handler response"]
-       Handler --> ActionDispatched["action_dispatched signal"]
+       Handler --> ActionDispatched
        Validate -- no --> Origin{"Origin page valid"}
        Origin -- no --> BadRequest["HTTP 400"]
        Origin -- yes --> ShareCache["Reuse dep cache on request"]

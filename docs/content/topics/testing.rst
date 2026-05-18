@@ -173,7 +173,7 @@ Posting to Actions
        assert response.status_code == 302
 
 ``NextClient.get_action_url`` returns the dispatch URL without posting, for tests that need the URL itself.
-Both methods resolve the name through ``next.testing.resolve_action_url``.
+Both methods resolve the name through ``resolve_action_url`` from ``next.testing.actions``.
 
 Render a Page
 -------------
@@ -186,7 +186,7 @@ Use ``next.testing.rendering`` to render a page without an HTTP round trip.
    from next.testing.rendering import render_page
 
    def test_index_body() -> None:
-       html = render_page("notes/routes/page.py")
+       html = render_page("notes/pages/page.py")
        assert "Notes" in html
 
 The helper invokes context functions and the template loader in the same order as a real request.
@@ -294,7 +294,7 @@ HTML Utilities
    def test_card_class() -> None:
        html = render_component_by_name(
            "note_card",
-           at="notes/routes/page.py",
+           at="notes/pages/page.py",
            context={"note": {"title": "First"}},
        )
        assert_has_class(html, "note-card")

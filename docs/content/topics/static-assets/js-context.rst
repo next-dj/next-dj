@@ -22,7 +22,7 @@ Opting In
 Pass ``serialize=True`` on ``@context`` in ``page.py`` or on ``@component.context`` in ``component.py``.
 The value appears under ``window.Next.context.<key>``.
 Keys without the flag stay server-side only.
-Decorator shapes and inheritance rules live in :doc:`../context`.
+Decorator shapes and inheritance rules live in :doc:`/content/topics/context`.
 
 A value the active serializer cannot encode raises ``TypeError`` at the point the context function registers it.
 The error names the offending key.
@@ -45,7 +45,7 @@ The framework ships two implementations.
    Requires the ``pydantic`` package.
    The class raises ``ImportError`` at construction when ``pydantic`` is not installed.
 
-Project Wide Serializer
+Project-Wide Serializer
 -----------------------
 
 Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to the dotted path of a serializer class.
@@ -60,7 +60,7 @@ Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to the dotted path of a serializ
 ``resolve_serializer`` reads the setting on every call.
 When the key is absent the framework uses ``JsonJsContextSerializer``.
 
-Per Key Serializer
+Per-Key Serializer
 ------------------
 
 Pass ``serializer=`` on a single ``@context`` decorator to route one key through a custom serializer.
@@ -188,6 +188,7 @@ Runtime Script Options
 
 The setting ``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]`` is a dict that configures the runtime script builder.
 The builder controls how and where the ``Next`` script is injected through a ``ScriptInjectionPolicy``.
+An absent or empty ``NEXT_JS_OPTIONS`` uses the ``AUTO`` policy and the default tag templates.
 
 .. list-table::
    :header-rows: 1

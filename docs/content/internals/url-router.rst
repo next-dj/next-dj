@@ -59,7 +59,7 @@ URL Name Computation
 
 Names follow ``next:page_<segments>`` where the segments come from the directory path.
 
-- Static segments contribute their lowercase name.
+- Static segments contribute their directory name unchanged.
 - Captured segments contribute their parameter name without the type prefix.
 - Wildcard segments contribute the parameter name without brackets.
 
