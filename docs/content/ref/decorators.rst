@@ -35,6 +35,7 @@ Registers a component context function inside ``component.py``.
 The first positional argument is ``func_or_key``.
 Called bare as ``@component.context`` it merges the function's returned dict into the component template scope.
 Called as ``@component.context("greeting")`` it binds the function's return value to that key.
+Pass ``serialize=True`` to include the return value in ``window.Next.context``, and ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 
 @action
 ~~~~~~~
@@ -54,7 +55,8 @@ Depends
 .. autoclass:: next.deps.Depends
    :no-index:
 
-Default argument that injects a named dependency registered through ``resolver.dependency``.
+Default argument that injects a named, callable, or constant dependency.
+See :doc:`/content/topics/dependency-injection` for all resolution modes and the registration API.
 
 Context
 ~~~~~~~
@@ -62,7 +64,8 @@ Context
 .. autoclass:: next.pages.Context
    :no-index:
 
-Default argument that injects a context value by key.
+Default argument that reads a value from the current page context data by key.
+See :doc:`/content/topics/context` for all source forms and the resolution order.
 
 DUrl
 ~~~~

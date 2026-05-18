@@ -172,6 +172,27 @@ The framework computes the template scope in this order.
 4. Context processors come from ``OPTIONS.context_processors`` on each page backend entry plus the ``context_processors`` list of the first ``TEMPLATES`` entry in Django settings.
    The two lists merge in that order with duplicate dotted paths dropped, so a processor listed twice runs once.
    Each processor return dict is applied with ``update`` after every ``@context`` callable, so a processor key overwrites a page or inherited value.
+
+   .. code-block:: python
+      :caption: config/settings.py
+
+      NEXT_FRAMEWORK = {
+          "DEFAULT_PAGE_BACKENDS": [
+              {
+                  "BACKEND": "next.urls.FileRouterBackend",
+                  "DIRS": [],
+                  "APP_DIRS": True,
+                  "PAGES_DIR": "routes",
+                  "OPTIONS": {
+                      "context_processors": [
+                          "django.template.context_processors.request",
+                          "django.contrib.auth.context_processors.auth",
+                      ],
+                  },
+              }
+          ],
+      }
+
 5. Component context functions when a ``{% component %}`` tag is encountered during render.
 
 A later step that uses the same key overrides earlier values.
@@ -196,7 +217,7 @@ Inherited Function That Names a URL Parameter
 
 When an inherited context function is keyed under the same name as a captured URL segment, the parameter it asks for changes type across runs.
 On the first run it holds the raw URL string. On a descendant re-run it holds the resolved object the function already produced.
-Leave the parameter untyped and short circuit on the resolved type.
+Leave the parameter untyped and return early if it is already an instance of the model.
 
 .. code-block:: python
    :caption: notes/routes/notes/[category]/page.py
@@ -268,8 +289,8 @@ Publish the page title from each page.
 
 
    @context("page_title")
-   def page_title(note: Note) -> str:
-       return note.title
+   def page_title(note_id: DUrl[int]) -> str:
+       return Note.objects.get(pk=note_id).title
 
 Render it in the layout.
 

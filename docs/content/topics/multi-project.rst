@@ -84,9 +84,10 @@ Each project points at the shared directory through ``DIRS``.
        "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "APP_DIRS": True,
                "DIRS": [str(BASE_DIR / "chrome")],
+               "APP_DIRS": True,
                "PAGES_DIR": "routes",
+               "OPTIONS": {"context_processors": []},
            }
        ],
        "DEFAULT_COMPONENT_BACKENDS": [

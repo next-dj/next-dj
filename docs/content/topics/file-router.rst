@@ -242,9 +242,10 @@ Segment entry.
        "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
+               "DIRS": ["_drafts"],
                "APP_DIRS": True,
                "PAGES_DIR": "routes",
-               "DIRS": ["_drafts"],
+               "OPTIONS": {"context_processors": []},
            }
        ]
    }
@@ -273,13 +274,17 @@ Each backend can read from a different directory, register a different ``PAGES_D
        "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
+               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "routes",
+               "OPTIONS": {"context_processors": []},
            },
            {
                "BACKEND": "next.urls.FileRouterBackend",
+               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "admin_routes",
+               "OPTIONS": {"context_processors": []},
            }
        ]
    }

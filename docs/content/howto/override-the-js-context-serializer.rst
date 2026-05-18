@@ -64,7 +64,7 @@ Verification
 ------------
 
 Reload a page and inspect ``window.Next.context`` in the browser console.
-The previously failing values now appear as proper JSON.
+The values that could not serialise before now appear as proper JSON.
 
 See Also
 --------

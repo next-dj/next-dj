@@ -99,6 +99,52 @@ A renderer can read the request to vary its output per visitor.
 
 The static manager passes the current request to every renderer call.
 
+Tenant URL Prefix
+~~~~~~~~~~~~~~~~~
+
+A common multi-tenant pattern is to prefix every collected URL with a tenant slug so static files are scoped per tenant.
+Override all three renderer methods and delegate to the parent after rewriting the URL.
+Leave absolute URLs untouched.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   from next.static import StaticFilesBackend
+   from notes.access import get_active_tenant
+
+
+   PREFIX_FORMAT = "/_t/{slug}"
+
+
+   class TenantPrefixStaticBackend(StaticFilesBackend):
+       def render_link_tag(self, url, *, request=None) -> str:
+           return super().render_link_tag(_prefixed(url, request))
+
+       def render_script_tag(self, url, *, request=None) -> str:
+           return super().render_script_tag(_prefixed(url, request))
+
+       def render_module_tag(self, url, *, request=None) -> str:
+           return super().render_module_tag(_prefixed(url, request))
+
+
+   def _prefixed(url, request):
+       tenant = get_active_tenant(request) if request is not None else None
+       if tenant is None or not url.startswith("/"):
+           return url
+       return PREFIX_FORMAT.format(slug=tenant.slug) + url
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_STATIC_BACKENDS": [
+           {"BACKEND": "notes.backends.TenantPrefixStaticBackend"},
+       ],
+   }
+
+``get_active_tenant`` is a project-level helper that reads ``request.tenant`` set by middleware.
+See :doc:`/content/howto/scope-requests-per-tenant` for the full middleware and provider setup.
+
 Verification
 ------------
 

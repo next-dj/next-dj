@@ -80,7 +80,9 @@ Clean Up Empty Rows
 -------------------
 
 A formset with ``extra=3`` ships three blank rows.
-Use ``cleanup_extra_initial`` to strip default values from untouched rows so the user does not face spurious errors.
+When ``initial`` data is provided alongside those extra rows, Django pre-populates the blank rows with the initial values.
+A user who leaves those rows untouched submits data that appears empty but carries hidden values, triggering validation errors.
+Use ``cleanup_extra_initial`` to clear initial values from blank extra rows before the formset is rendered.
 
 .. code-block:: python
    :caption: notes/forms.py

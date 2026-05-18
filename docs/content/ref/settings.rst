@@ -75,6 +75,9 @@ Default value.
        }
    ]
 
+The ``OPTIONS`` dict accepts ``JS_CONTEXT_POLICY``, a dotted path to a conflict-resolution class that decides what happens when two context functions publish the same key for serialisation.
+See :doc:`/content/topics/static-assets/js-context` under *Key Conflict Policy* for the available policies and an example.
+
 DEFAULT_FORM_ACTION_BACKENDS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -141,7 +144,7 @@ The class is instantiated with no arguments and its ``dumps`` method encodes eve
 
 Default value ``None``, which selects the built-in ``JsonJsContextSerializer``.
 
-The resolver reads this key on every call, so ``override_settings`` takes effect without a restart.
+``resolve_serializer`` reads this setting on every call, so ``override_settings`` takes effect without a restart.
 A value that does not resolve to a usable serializer triggers the ``next.W042`` warning during ``manage.py check`` and the framework falls back to ``JsonJsContextSerializer``.
 
 See :doc:`static` under *JS Context Serializer* for the protocol and the bundled serializers.

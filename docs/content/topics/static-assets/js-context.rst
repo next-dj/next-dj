@@ -74,6 +74,9 @@ The override applies only to that key.
 
 The collector routes the ``featured`` key through the supplied serializer and every other key through the project default.
 
+The ``serializer=`` parameter takes an already-instantiated object.
+``JS_CONTEXT_SERIALIZER`` in settings takes a dotted import path instead.
+
 Writing a Serializer
 --------------------
 

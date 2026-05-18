@@ -57,6 +57,9 @@ Create Page
        form.save()
        return HttpResponseRedirect(reverse("next:page_"))
 
+URL names follow the ``page_{path}`` convention where path segments are joined with underscores and captured-parameter brackets are dropped.
+See :doc:`/content/topics/file-router` for the full naming rules.
+
 Update Page
 ~~~~~~~~~~~
 

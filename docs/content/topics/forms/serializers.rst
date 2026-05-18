@@ -27,7 +27,7 @@ FormsetRowSpec.
 
 FormsetSpec.
    Template-friendly view of a Django formset.
-   Includes the management form, every row, the non form errors, and a ``can_delete`` flag.
+   Includes the prefix, the model verbose name plural, the management form, every row, the non form errors, and a ``can_delete`` flag.
 
 FormSectionSpec.
    One labelled section in a ``FormSpec``, matching a Django admin fieldset.
@@ -156,7 +156,7 @@ Render a Form in a Different Engine
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Use the spec to ship form structure to a Jinja2 macro or a JSON consumer.
-The dataclass form is friendly to ``dataclasses.asdict`` for one direction conversions.
+The dataclass form works well with ``dataclasses.asdict`` for converting to a plain dict before serialisation.
 
 Snapshot Diffing
 ~~~~~~~~~~~~~~~~

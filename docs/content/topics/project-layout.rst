@@ -82,8 +82,10 @@ Three settings keys point at the directories above.
        "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
+               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "routes",
+               "OPTIONS": {"context_processors": []},
            }
        ],
        "DEFAULT_COMPONENT_BACKENDS": [
@@ -135,9 +137,10 @@ A project that hosts a global layout or a project-wide page tree adds an entry t
        "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "APP_DIRS": True,
                "DIRS": [str(BASE_DIR / "chrome")],
+               "APP_DIRS": True,
                "PAGES_DIR": "routes",
+               "OPTIONS": {"context_processors": []},
            }
        ]
    }

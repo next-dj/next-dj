@@ -23,7 +23,7 @@ Set up pytest plus pytest-django and an isolation fixture (see :doc:`/content/to
 
    import pytest
 
-   from next.testing.isolation import reset_registries
+   from next.testing import reset_registries
 
 
    @pytest.fixture(autouse=True)

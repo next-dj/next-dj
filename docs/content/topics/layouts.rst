@@ -159,13 +159,17 @@ Two backends can have entirely different root layouts even when both scan the sa
        "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
+               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "routes",
+               "OPTIONS": {"context_processors": []},
            },
            {
                "BACKEND": "next.urls.FileRouterBackend",
+               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "admin_routes",
+               "OPTIONS": {"context_processors": []},
            }
        ]
    }
@@ -196,9 +200,10 @@ Place a root layout outside of any application by adding a project directory to 
        "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
-               "APP_DIRS": True,
                "DIRS": [str(BASE_DIR / "chrome")],
+               "APP_DIRS": True,
                "PAGES_DIR": "routes",
+               "OPTIONS": {"context_processors": []},
            }
        ]
    }

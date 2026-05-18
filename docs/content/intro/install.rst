@@ -79,6 +79,7 @@ The values below treat each Django application as a self-contained unit.
        "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
+               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "routes",
                "OPTIONS": {"context_processors": []},

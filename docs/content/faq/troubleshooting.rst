@@ -143,11 +143,47 @@ Common causes:
 - The callable asks for data that is not in the request-scoped cache yet (for example the wrong phase of a form re-render).
   Compare your scenario with the lifecycle discussion in :doc:`/content/topics/dependency-injection`.
 
+To inspect what the resolver would actually inject, use ``resolve_call`` from ``next.testing`` in a shell or test.
+
+.. code-block:: python
+
+   from next.testing import resolve_call, make_resolution_context
+
+   from notes.providers import DTenant
+   from notes.routes.notes.page import notes
+
+
+   resolved = resolve_call(notes, url_kwargs={"tenant_slug": "acme"})
+   print(resolved)
+
+``resolve_call`` returns the kwargs dict the resolver would pass to the callable.
+Use ``make_resolution_context`` when you need finer control over the request, form, URL kwargs, or context data supplied to the resolver.
+
 Custom marker not handled
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Confirm that the provider class is imported during ``AppConfig.ready``.
 ``RegisteredParameterProvider`` registers at class creation, so the import must happen before the resolver caches the provider list.
+
+Testing with custom providers
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``reset_registries()`` clears the provider list as well as the dependency registry.
+A custom provider registered in ``AppConfig.ready`` disappears after a ``reset_registries()`` call, which isolation tests often run in ``setUp`` or a fixture.
+Re-register the provider inside the test or in a ``setUp`` method that runs after ``reset_registries()``.
+
+.. code-block:: python
+
+   from next.testing import reset_registries
+   from myapp.providers import TenantProvider
+
+
+   class TenantProviderTests(TestCase):
+       def setUp(self):
+           reset_registries()
+           TenantProvider()  # re-registers at class creation
+
+See :doc:`/content/howto/test-a-component-in-isolation` for the full isolation-test setup.
 
 URL Resolution
 --------------
@@ -164,7 +200,7 @@ URL name not found
 ~~~~~~~~~~~~~~~~~~
 
 Run ``uv run python manage.py shell`` and print ``reverse("next:page_<name>")``.
-Confirm that the file router walked the relevant directory.
+If it raises ``NoReverseMatch``, verify that the directory contains at least one of ``page.py``, ``template.djx``, or a child page, and that it sits under an active ``PAGES_DIR`` root configured in ``DEFAULT_PAGE_BACKENDS``.
 
 Captured parameter name differs from directory name
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

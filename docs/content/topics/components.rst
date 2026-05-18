@@ -290,6 +290,10 @@ Use ``@component.context("key")`` to publish a value under that key for the temp
 Component context functions take :doc:`DI parameters <dependency-injection>` the same way page context does.
 The framework resolves parameters from the surrounding template scope, from URL kwargs, from the request, or from any registered provider.
 
+Pass ``serialize=True`` and optionally ``serializer=`` to include the return value in ``window.Next.context``.
+The behaviour is identical to ``@context`` on a page module.
+See :doc:`static-assets/js-context` for the serialization options.
+
 Co-located Static Assets
 ------------------------
 
@@ -330,8 +334,8 @@ Those modules run on first resolve instead.
    }
 
 Discovery still runs during ``AppConfig.ready`` so the visibility scope tree is built before any component resolves.
-Python modules under configured roots alone defer until first resolve.
-Components under ``_components`` next to page files still load during the router filesystem walk when URL patterns are generated.
+Modules discovered from ``DIRS`` entries defer their import until the component first resolves.
+Modules discovered from ``_components`` folders next to page files still load during the router filesystem walk when URL patterns are generated.
 See :ref:`ref-settings` for the exact split between the two paths.
 
 Hot Reload

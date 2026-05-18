@@ -69,8 +69,14 @@ The annotation drives coercion of the raw query string.
 ``DQuery[str]``.
    The raw value, unchanged.
 
+``DQuery[list[T]]``.
+   The value is split across three wire formats in priority order.
+   The plain repeated form ``?brand=Acme&brand=Globex`` wins first.
+   The bracket-suffix form ``?brand[]=Acme&brand[]=Globex`` (emitted by axios and similar clients) is the second fallback.
+   The comma-delimited form ``?brand=Acme,Globex`` is the third fallback.
+   Each element is then coerced using the same rules as the scalar form for ``T``.
+
 A parameter that is absent from the query string receives the declared default, or ``None`` when no default is given.
-The same coercion table applies to each element of a ``DQuery[list[T]]``.
 
 Read Several Typed Parameters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -94,10 +100,7 @@ Each annotation drives its own coercion.
    ) -> dict:
        ...
 
-``DQuery[list[str]]`` accepts three wire formats.
-The plain repeated form ``?brand=Acme&brand=Globex`` emitted by ``<form method="get">`` wins first.
-The bracket suffix ``?brand[]=Acme&brand[]=Globex`` emitted by axios is the second fallback.
-The comma-delimited form ``?brand=Acme,Globex`` is the third fallback.
+List elements follow the same three wire formats described above under *Type Coercion*.
 
 Build a Typed Snapshot With a Provider
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

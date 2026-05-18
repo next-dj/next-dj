@@ -105,7 +105,9 @@ class TestEagerLoadComponents:
         eager_load_components()
         assert called == ["ensure", "b1", "b2"]
 
-    def test_imports_component_py_when_lazy_modules_enabled(self, tmp_path: Path) -> None:
+    def test_imports_component_py_when_lazy_modules_enabled(
+        self, tmp_path: Path
+    ) -> None:
         """``eager_load_components`` loads every ``component.py`` even under lazy startup."""
         marker = tmp_path / "imported.txt"
         config = _component_backend_config(tmp_path, "eager_widget", marker)

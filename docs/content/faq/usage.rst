@@ -88,6 +88,60 @@ How do I share components across projects
 Place the shared components in one folder and reference it through ``DEFAULT_COMPONENT_BACKENDS["DIRS"]``.
 See :doc:`/content/howto/share-components-across-projects`.
 
+How do I add context processors to pages
+-----------------------------------------
+
+Add a ``context_processors`` list to the ``OPTIONS`` dict of the relevant page backend entry.
+The list merges with the processors from the first ``TEMPLATES`` entry in Django settings. Duplicates are dropped.
+See :doc:`/content/topics/context` for the merge order and a full settings example.
+
+How do I keep query parameters after a form action redirect
+------------------------------------------------------------
+
+Build the redirect URL from the form's ``cleaned_data`` inside the action handler.
+The ``{% form %}`` tag posts to the framework's action endpoint, so ``request.GET`` is empty on the POST side.
+Reconstruct the query string from the validated fields instead.
+
+.. code-block:: python
+
+   from django.http import HttpResponseRedirect
+   from django.urls import reverse
+
+   from next.forms import action
+
+   from notes.forms import SearchForm
+
+
+   @action("search", form_class=SearchForm)
+   def search(form: SearchForm) -> HttpResponseRedirect:
+       q = form.cleaned_data.get("q", "")
+       base = reverse("next:page_notes")
+       return HttpResponseRedirect(f"{base}?q={q}" if q else base)
+
+For filter forms with no side effects, use ``<form method="get">`` directly and skip ``@action`` altogether.
+The ``DQuery`` marker then reads every filter from the query string on the GET request without a round-trip through the action endpoint.
+
+Can a form action return a custom HTTP status code
+--------------------------------------------------
+
+Return any ``HttpResponseBase`` subclass.
+
+.. code-block:: python
+
+   from django.http import HttpResponse
+
+   from next.forms import action
+
+   from notes.forms import NoteForm
+
+
+   @action("create_note", form_class=NoteForm)
+   def create_note(form: NoteForm) -> HttpResponse:
+       form.save()
+       return HttpResponse(status=204)
+
+Common choices are ``HttpResponse(status=204)`` for no-content responses, ``HttpResponse(status=201)`` for created resources, and ``HttpResponseRedirect(url, status=303)`` for POST-redirect-GET flows.
+
 How do I translate URLs or templates
 -------------------------------------
 

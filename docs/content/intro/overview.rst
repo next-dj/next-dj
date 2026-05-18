@@ -98,6 +98,7 @@ Once installed, the smallest next.dj project is the three files below plus a one
        "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
+               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "routes",
                "OPTIONS": {"context_processors": []},
@@ -105,7 +106,8 @@ Once installed, the smallest next.dj project is the three files below plus a one
        ],
    }
 
-Add ``include("next.urls")`` to ``config/urls.py`` and the URL ``/`` renders ``<h1>Notes</h1>``.
+Add ``include("next.urls")`` to ``config/urls.py``.
+The URL ``/`` then renders ``<h1>Notes</h1>``.
 Every new directory under ``routes/`` adds another page without touching the URL configuration.
 
 When to Read the Tutorial

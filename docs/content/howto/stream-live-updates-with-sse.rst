@@ -29,11 +29,15 @@ The broker keeps one :class:`threading.Condition` and one monotonic revision cou
 ``publish`` stores the snapshot in the cache, bumps the revision, and wakes every subscriber.
 ``subscribe`` is a generator that yields Server-Sent Events bytes.
 
+``Snapshot``, ``store_snapshot``, and ``read_snapshot`` are project-level helpers defined in the full example at ``examples/live-polls/polls/broker.py``.
+They wrap a plain cache key so the broker stays decoupled from the cache backend.
+
 .. code-block:: python
    :caption: polls/broker.py
 
    import threading
    from collections import defaultdict
+   from collections.abc import Iterator
 
    from django.core.cache import cache
 

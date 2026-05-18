@@ -190,6 +190,7 @@ List it in the page backend ``OPTIONS`` so the file router runs it.
        "DEFAULT_PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
+               "DIRS": [],
                "APP_DIRS": True,
                "PAGES_DIR": "workspaces",
                "OPTIONS": {
@@ -205,41 +206,11 @@ List it in the page backend ``OPTIONS`` so the file router runs it.
 Prefix Asset URLs Per Tenant
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A static backend subclass reads the tenant from the ``request`` keyword that the static manager threads into every renderer.
-It prepends ``/_t/<slug>`` to each collected URL and leaves absolute URLs untouched.
+Scope the static backend the same way: subclass ``StaticFilesBackend`` and override the renderer methods.
+Read the tenant from the ``request`` keyword argument that the static manager passes to every renderer, then prepend the tenant slug to each collected URL.
+Register the subclass in ``DEFAULT_STATIC_BACKENDS``.
 
-.. code-block:: python
-   :caption: notes/backends.py
-
-   from next.static import StaticFilesBackend
-   from notes.access import get_active_tenant
-
-
-   PREFIX_FORMAT = "/_t/{slug}"
-
-
-   class TenantPrefixStaticBackend(StaticFilesBackend):
-       def render_link_tag(self, url, *, request=None):
-           return super().render_link_tag(_prefixed(url, request))
-
-       def render_script_tag(self, url, *, request=None):
-           return super().render_script_tag(_prefixed(url, request))
-
-
-   def _prefixed(url, request):
-       tenant = get_active_tenant(request) if request is not None else None
-       if tenant is None or not url.startswith("/"):
-           return url
-       return PREFIX_FORMAT.format(slug=tenant.slug) + url
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
-           {"BACKEND": "notes.backends.TenantPrefixStaticBackend"},
-       ],
-   }
+See :doc:`write-a-static-backend` under *Tenant URL Prefix* for the full implementation.
 
 Verification
 ------------
@@ -252,8 +223,8 @@ Send the same path with two different headers and confirm the responses diverge.
    curl -H 'X-Tenant: acme' http://127.0.0.1:8000/notes/
    curl -H 'X-Tenant: globex' http://127.0.0.1:8000/notes/
 
-The Acme response lists only Acme notes and carries ``/_t/acme/static/`` URLs.
-The Globex response lists only Globex notes and carries ``/_t/globex/static/`` URLs.
+The Acme response lists only Acme notes.
+The Globex response lists only Globex notes.
 A request with no header returns ``400``.
 
 See Also

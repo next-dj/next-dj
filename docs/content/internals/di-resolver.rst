@@ -77,7 +77,7 @@ Depends Forms
 ``DependsProvider`` handles a parameter whose default is a ``Depends`` marker.
 The ``dependency`` argument of ``Depends`` selects one of four forms.
 
-- ``Depends("name")``. The argument is a string. The resolver looks up the callable registered under that name and invokes it through ``resolver._resolve_callable_dependency``.
+- ``Depends("name")``. The argument is a string. The resolver looks up the callable registered under that name and invokes it with its own parameters resolved.
 - ``Depends(callable)``. The argument is a callable. The resolver resolves the callable's own parameters and calls it as a factory.
 - ``Depends(value)``. The argument is any other object. That object is injected directly as a constant.
 - ``Depends()``. No argument. The marker falls back to the parameter name and resolves it as the named form.
