@@ -6,20 +6,20 @@ Share Context Across Pages
 Problem
 -------
 
-You want to publish a value once and read it from every page below a particular layout.
+You want to publish a value once and read it from every page below a particular directory in the route tree.
 
 Solution
 --------
 
-Declare the value in the ``layout.py`` that sits at the root of the subtree and pass ``inherit_context=True`` to the decorator.
+Declare the value in a ``page.py`` that sits at the root of the subtree and pass ``inherit_context=True`` to the decorator.
 
 Walkthrough
 -----------
 
-Create the layout module.
+Add the context function to the segment's ``page.py``.
 
 .. code-block:: python
-   :caption: notes/routes/layout.py
+   :caption: notes/routes/page.py
 
    from notes.models import Note
 
@@ -30,7 +30,7 @@ Create the layout module.
    def note_count() -> int:
        return Note.objects.count()
 
-Use the value from any page below the layout.
+Use the value from the layout and from any descendant page.
 
 .. code-block:: jinja
    :caption: notes/routes/layout.djx
@@ -40,7 +40,7 @@ Use the value from any page below the layout.
    </header>
    {% block template %}{% endblock template %}
 
-The value is also available in any descendant page, not only in the layout.
+The value is injected into the shared context dict for that request, so both the layout wrappers and every descendant page template can read it.
 
 .. code-block:: jinja
    :caption: notes/routes/notes/[id]/template.djx
@@ -50,10 +50,10 @@ The value is also available in any descendant page, not only in the layout.
 Limit Inheritance to a Subtree
 ------------------------------
 
-Drop the flag for values that should remain local to the layout.
+Drop the flag for values that should stay local to the current page only.
 
 .. code-block:: python
-   :caption: per layout only
+   :caption: notes/routes/page.py (local only)
 
    from next.pages import context
 
@@ -62,33 +62,17 @@ Drop the flag for values that should remain local to the layout.
    def nav_links() -> list:
        return [...]
 
-Without ``inherit_context=True`` the value reaches only the layout template, not the descendant pages.
+Without ``inherit_context=True`` the value is available only when ``notes/routes/page.py`` handles the request directly.
+Descendant routes do not receive it.
 
-Override From a Page
---------------------
-
-A descendant page that declares the same key overrides the inherited value for itself.
-
-.. code-block:: python
-   :caption: notes/routes/notes/[id]/page.py
-
-   from next.pages import context
-
-   from notes.models import Note
-
-
-   @context("note_count")
-   def specific_count() -> int:
-       return Note.objects.filter(featured=True).count()
-
-The override only applies to the page that declares it.
-The layout still sees the original value when it renders.
+A descendant page that declares the same key with its own ``@context`` overrides the inherited value for that request.
+The page's own function runs after the inherited ones, so its value wins across the whole render, layout chain included.
 
 Verification
 ------------
 
-Visit two pages under the layout and confirm the value renders on both.
-Visit a page outside the layout and confirm the value is undefined.
+Visit two pages under the directory that hosts the ``page.py`` and confirm the value renders on both.
+Visit a page outside that directory and confirm the value is undefined.
 
 See Also
 --------

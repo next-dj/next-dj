@@ -6,6 +6,12 @@ Getting Started
 This section gets you from zero to a running next.dj project.
 Read the overview to learn the mental model, install the package, then walk through the five tutorial parts that build a small Notes application.
 
+.. rubric:: After the tutorial
+
+Read :doc:`whatsnext` for topic and recipe hubs, then move through :doc:`/content/topics/index`, :doc:`/content/howto/index`, and :doc:`/content/ref/index` as your questions get more specific.
+
+:doc:`/content/topics/multi-project` and :doc:`/content/misc/examples` cover shared page roots and the runnable ``examples/`` projects once you leave the single-app Notes path.
+
 .. rubric:: Read first
 
 :doc:`overview`

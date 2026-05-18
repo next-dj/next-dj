@@ -91,7 +91,7 @@ Append One Pattern Per Row
 
 Read the slugs from the model and build a :func:`django.urls.path` for each.
 Every alias points at the shared callback and binds a fixed ``slug`` keyword, so the catchall view receives the right URL parameter.
-Catch :exc:`~django.db.utils.DatabaseError` because the backend can run before migrations have created the table.
+Catch ``django.db.utils.DatabaseError`` because the backend can run before migrations have created the table.
 
 .. code-block:: python
    :caption: wiki/backends.py

@@ -51,6 +51,27 @@ A request to ``/?show=8`` injects ``show=8`` as an ``int``.
 A request to ``/`` injects the default ``3``.
 Clamp the value yourself, since the marker only coerces the type.
 
+Type Coercion
+~~~~~~~~~~~~~
+
+The annotation drives coercion of the raw query string.
+
+``DQuery[int]``.
+   Parsed with ``int()``. A value that does not parse, such as ``?show=abc``, falls back to the raw string rather than raising.
+   Validate when a bad value must be rejected.
+
+``DQuery[float]``.
+   Parsed with ``float()``, with the same string fallback on a parse failure.
+
+``DQuery[bool]``.
+   ``True`` when the value is ``1``, ``true``, or ``yes``, case-insensitive. Every other value, including ``0`` and ``false``, is ``False``.
+
+``DQuery[str]``.
+   The raw value, unchanged.
+
+A parameter that is absent from the query string receives the declared default, or ``None`` when no default is given.
+The same coercion table applies to each element of a ``DQuery[list[T]]``.
+
 Read Several Typed Parameters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -135,7 +156,8 @@ Share the Snapshot Across a Layout Chain
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Register a resolved value with ``inherit_context=True`` so nested pages receive the same instance through DI.
-Child callables ask for it by parameter name and never re-read the query string or re-query.
+The ``[category]`` bracket segment becomes a URL kwarg, so the callable reads the slug with ``DUrl[str]`` and resolves it once.
+Child callables then ask for ``category`` by parameter name and never re-query.
 
 .. code-block:: python
    :caption: storefront/catalog/[category]/page.py
@@ -144,16 +166,29 @@ Child callables ask for it by parameter name and never re-read the query string 
    from django.http import Http404
 
    from next.pages import context
+   from next.urls import DUrl
 
 
    @context("category", inherit_context=True)
-   def category(category: object) -> Category:
-       if isinstance(category, Category):
-           return category
+   def category(slug: DUrl[str]) -> Category:
        try:
-           return Category.objects.get(slug=category)
+           return Category.objects.get(slug=slug)
        except Category.DoesNotExist as exc:
            raise Http404 from exc
+
+A descendant page reads the resolved instance back through its parameter name.
+
+.. code-block:: python
+   :caption: storefront/catalog/[category]/products/page.py
+
+   from catalog.models import Category, Product
+
+   from next.pages import context
+
+
+   @context("products")
+   def products(category: Category) -> list[Product]:
+       return list(Product.objects.filter(category=category))
 
 Verification
 ------------
@@ -175,3 +210,5 @@ See Also
 
    :doc:`/content/topics/dependency-injection` for the built-in providers.
    :doc:`/content/howto/reverse-urls` for building query strings from code.
+   :doc:`/content/topics/url-reversing` for ``DUrl`` on the path versus ``DQuery`` in the query string.
+   :doc:`/content/topics/file-router` for bracket segments that become URL kwargs.

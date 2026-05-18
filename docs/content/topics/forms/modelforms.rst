@@ -116,7 +116,7 @@ An edit page reuses the same form class and saves the bound instance.
 
    from next.forms import action
    from next.pages import context
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
    from notes.forms import NoteForm
    from notes.models import Note

@@ -69,7 +69,7 @@ Update Page
 
    from next.forms import action
    from next.pages import context
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
    from notes.forms import NoteForm
    from notes.models import Note
@@ -96,7 +96,7 @@ Delete Action
    from django.urls import reverse
 
    from next.forms import action
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
    from notes.forms import DeleteNoteForm
    from notes.models import Note

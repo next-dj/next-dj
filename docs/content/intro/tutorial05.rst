@@ -14,9 +14,13 @@ Prerequisites
 
 You have finished :doc:`tutorial04`.
 The application creates, edits, and deletes notes through registered actions.
+The patterns below mirror :doc:`/content/topics/testing`. Keep that page open if you want the full helper catalog.
+
+Walkthrough
+-----------
 
 Install Test Dependencies
--------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The framework ships its own ``next.testing`` module, which depends on pytest and pytest-django.
 
@@ -56,7 +60,7 @@ The conftest isolates the next.dj registries between test modules.
 Database access uses the standard ``db`` fixture from pytest-django, no extra fixture is needed.
 
 Write the First End-to-End Test
--------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Create ``tests/test_notes_e2e.py``.
 
@@ -87,8 +91,10 @@ Create ``tests/test_notes_e2e.py``.
        assert response.status_code == 200
        assert "Second" in response.content.decode()
 
-``NextClient`` extends the standard Django test client.
-It boots the file router, registers actions, and resolves URL names exactly the way the running server does.
+``NextClient`` extends Django's test client with two shortcuts for form actions.
+``post_action`` resolves an action name to its URL and POSTs in one call.
+``get_action_url`` returns that URL without dispatching.
+The router itself is built lazily through Django's URL resolver, the same as in production.
 Use the same ``client.get`` and ``client.post`` calls you already know.
 
 Run the tests.
@@ -99,7 +105,7 @@ Run the tests.
    uv run pytest
 
 Test the Create Action
-----------------------
+~~~~~~~~~~~~~~~~~~~~~~
 
 The framework gives each action a stable URL.
 ``NextClient.post_action`` resolves an action name to its URL and posts in one call.
@@ -124,7 +130,7 @@ The framework gives each action a stable URL.
 The redirect target matches ``next:page_`` because the handler returns ``HttpResponseRedirect(reverse("next:page_"))``.
 
 Capture Action Signals
-----------------------
+~~~~~~~~~~~~~~~~~~~~~~
 
 Every dispatch fires the ``action_dispatched`` signal.
 ``SignalRecorder`` collects events so the test can assert what happened.
@@ -132,7 +138,7 @@ Every dispatch fires the ``action_dispatched`` signal.
 .. code-block:: python
    :caption: tests/test_notes_signals.py
 
-   from next.forms.signals import action_dispatched
+   from next.signals import action_dispatched
    from next.testing.client import NextClient
    from next.testing.signals import SignalRecorder
 
@@ -146,11 +152,13 @@ Every dispatch fires the ``action_dispatched`` signal.
        assert event.kwargs["action_name"] == "create_note"
        assert event.kwargs["form"].cleaned_data["title"] == "Signal"
 
+``next.signals`` re-exports every framework signal under one import path.
+The owning submodule path ``next.forms.signals`` also works if you prefer it.
 ``SignalRecorder`` is a context manager that subscribes to the signal on entry and unsubscribes on exit.
 Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwargs`` attributes.
 
 Test Validation Failure
------------------------
+~~~~~~~~~~~~~~~~~~~~~~~
 
 A failed validation does not produce a redirect.
 The pipeline re-renders the origin page with the bound form and a non-zero error count.
@@ -164,10 +172,11 @@ The pipeline re-renders the origin page with the bound form and a non-zero error
        assert response.status_code == 200
        assert b"This field is required" in response.content
 
-The response status is ``200`` because the index page rendered, this time with the failing form replacing the unbound one in the template context.
+The response status is ``200`` because the index page rendered.
+This time the failing form replaces the unbound one in the template context.
 
 Use the Autoreloader
---------------------
+~~~~~~~~~~~~~~~~~~~~
 
 The development server already reloads on Python file changes.
 The file router has its own reloader for new pages and components.

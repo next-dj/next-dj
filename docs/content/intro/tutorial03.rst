@@ -14,6 +14,7 @@ Prerequisites
 You have finished :doc:`tutorial02`.
 The root layout publishes ``site_name``, ``tagline``, and ``note_count``.
 The detail page at ``/notes/<id>/`` renders one note from the URL.
+:doc:`tutorial04` adds form actions on top of this component-driven UI.
 
 Walkthrough
 -----------
@@ -186,13 +187,7 @@ Reload ``/`` and confirm that each note shows a short preview, capped at twelve 
 Inspect the Collected Output
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Open the page source in the browser and find the ``<link>`` and ``<script>`` tags emitted by the collector.
-The hash in the URL changes when the file content changes, which makes long cache lifetimes safe in production.
-
-.. note::
-
-   The collector runs once per request.
-   Two pages that use the same component receive the same hashed URL, and a CDN serves each asset from a single cached location.
+View the page source in the browser to see the ``<link>`` and ``<script>`` tags the collector injected.
 
 Checkpoint
 ----------
@@ -213,7 +208,6 @@ Your project tree now looks like this.
          component.js
      routes/
        layout.djx
-       layout.py
        page.py
        template.djx
        notes/

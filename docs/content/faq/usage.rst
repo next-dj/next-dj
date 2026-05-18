@@ -25,7 +25,7 @@ See :doc:`/content/topics/context`.
 How do I share data across pages
 --------------------------------
 
-Declare the context in ``layout.py`` and pass ``inherit_context=True`` to the decorator.
+Declare the context in a ``page.py`` that sits in a directory above the consuming page, and pass ``inherit_context=True`` to the decorator.
 See :doc:`/content/howto/share-context-across-pages`.
 
 How do I capture URL parameters
@@ -44,7 +44,8 @@ See :doc:`/content/intro/tutorial04`.
 How do I customise the static output
 ------------------------------------
 
-Subclass ``StaticBackend`` and register the dotted path in ``DEFAULT_STATIC_BACKENDS``.
+Subclass ``StaticFilesBackend`` to adjust URLs or tag attributes and register the dotted path in ``DEFAULT_STATIC_BACKENDS``.
+Subclass the abstract ``StaticBackend`` only for fully custom URL resolution.
 See :doc:`/content/howto/write-a-static-backend`.
 
 How do I test a page
@@ -83,6 +84,15 @@ How do I share components across projects
 
 Place the shared components in one folder and reference it through ``DEFAULT_COMPONENT_BACKENDS["DIRS"]``.
 See :doc:`/content/howto/share-components-across-projects`.
+
+How do I translate URLs or templates
+-------------------------------------
+
+Internationalisation stays on Django's stack.
+Configure ``LocaleMiddleware``, translation files, and ``i18n_patterns`` (or your preferred URL prefix strategy) the same way as in a stock Django project.
+File routes resolve under whatever locale-aware prefix Django exposes. next.dj does not ship a separate translation mechanism for ``page.py`` files beyond ordinary Django template translation tags.
+
+See Django's :doc:`translation overview <django:topics/i18n/index>`.
 
 See Also
 --------

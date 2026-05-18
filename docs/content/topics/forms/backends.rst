@@ -59,6 +59,10 @@ It keeps an in memory registry, builds dispatch URLs of the form ``/_next/form/<
 
 Subclass it to keep all of that behaviour and add your own step.
 
+The public method ``clear_registry()`` drops every registered action and resets the UID index.
+It exists for test isolation, so a test session that registers overlapping action names can start from an empty registry.
+Production code never calls it.
+
 Writing a Custom Backend
 ------------------------
 
@@ -78,19 +82,19 @@ The most common customisation overrides ``dispatch`` to wrap the standard dispat
        """Registry backend that writes an audit row per dispatch."""
 
        def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
-           action_name = self._uid_to_name.get(uid)
-           if action_name is None:
-               return super().dispatch(request, uid)
            response = super().dispatch(request, uid)
            AuditEntry.objects.create(
-               action_name=action_name,
+               action_uid=uid,
                response_status=response.status_code,
            )
            return response
 
-The override calls ``super().dispatch`` to run the standard pipeline.
-The ``self._uid_to_name`` mapping resolves a UID to an action name.
-An unknown UID returns 404 from the parent dispatch, so the override skips it.
+The override calls ``super().dispatch`` to run the standard pipeline and
+records the dispatch UID against the response status.
+The ``uid`` argument is the public dispatch key, so the override never
+touches a private attribute of the registry.
+An unknown UID returns 404 from the parent dispatch, and the audit row
+still records that outcome.
 
 Registering a Custom Backend
 ----------------------------

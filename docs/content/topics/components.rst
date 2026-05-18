@@ -14,9 +14,8 @@ This page covers the two component shapes, the rules for props and slots, how co
 Overview
 --------
 
-The components backend scans every page tree for folders that match the configured components directory.
-Each component lives in its own folder and has a name that comes from the folder.
-A template references a component by name through the ``{% component "name" %}`` tag.
+The default ``FileComponentsBackend`` walks each active page tree (the same roots the URL router uses) and treats every directory named ``COMPONENTS_DIR`` as a component namespace.
+Individual folders inside that directory register components. See ``next.components.scanner`` in :doc:`/content/internals/component-pipeline` if you need the exact walk order.
 
 Components compose freely.
 A page template can call a component, a component template can call another component, and a layout can call any component that is in scope.
@@ -39,6 +38,9 @@ Composite component.
 The two shapes share the same template syntax and the same call form.
 Composite components add Python logic when the template needs computed values that go beyond the surrounding template context.
 
+Multiline ``{% #component %}``, ``{% #slot %}``, and related tags are allowed: the framework enables ``re.DOTALL`` for Django’s tag lexer so tag bodies can wrap across lines.
+See :ref:`ref-template-tags` under *Multiline tag bodies* for the global parsing caveat.
+
 .. code-block:: text
    :caption: component folder layouts
 
@@ -55,9 +57,10 @@ Composite components add Python logic when the template needs computed values th
 Component Folder Discovery
 --------------------------
 
-The components backend reads ``COMPONENTS_DIR`` from the first entry of ``DEFAULT_COMPONENT_BACKENDS``.
-The default value is ``_components``.
-The router also reads that name to skip those directories during URL scanning.
+Each entry in ``DEFAULT_COMPONENT_BACKENDS`` carries its own ``COMPONENTS_DIR`` name, defaulting to ``_components``.
+The components backend treats every directory with that name as a component namespace.
+
+When the URL router walks the page trees it skips directories that match a configured ``COMPONENTS_DIR``, so component folders never become URL segments.
 
 The backend recognises three sources for components.
 
@@ -148,21 +151,63 @@ Pair it with the matching close tag.
 
 The block form lets the component template substitute child content through slots.
 
+Multiline Tags
+~~~~~~~~~~~~~~
+
+Both the void form and the block form accept line breaks inside the tag body.
+This is useful when a component takes many props.
+
+.. code-block:: jinja
+   :caption: multiline void tag
+
+   {% component "card"
+      title="Welcome"
+      variant="featured"
+      pinned=True %}
+
+.. code-block:: jinja
+   :caption: multiline block tag
+
+   {% #component "card"
+      title="News"
+      variant="featured" %}
+     {% #slot "content" %}
+       <p>Latest update.</p>
+     {% /slot %}
+   {% /component %}
+
+The line break support is applied globally by the template engine at startup so it works in every template type, not only in component tags.
+
 Props
 -----
 
-Props are literal strings or numbers.
-The framework never evaluates ``some_var`` as a Python expression.
-A prop value of ``some_var`` becomes the literal string ``"some_var"``, not the value of a template variable.
+Each ``key=value`` prop is compiled as a Django template expression and resolved against the current template context at render time.
+A prop value may be one of the following.
+
+Quoted string literal.
+   ``title="Hello"`` passes the string ``Hello``.
+   Double or single quotes both work.
+
+Number literal.
+   ``count=3`` and ``rating=4.5`` pass the integer and float.
+
+Boolean literal.
+   ``pinned=True`` and ``pinned=False`` pass the boolean.
+
+Template expression.
+   An unquoted token is resolved against the surrounding context, exactly like ``{{ ... }}``.
+   ``title=note.title`` performs the attribute lookup, ``count=notes|length`` applies a filter.
+   When the lookup fails the prop resolves to the empty string.
 
 .. code-block:: jinja
-   :caption: literal vs variable
+   :caption: literal vs context lookup
 
-   {% component "card" title="Hello" %}             {# title = "Hello" #}
-   {% component "card" title=note.title %}          {# title resolves from context #}
+   {% component "card" title="Hello" %}        {# title = the string "Hello" #}
+   {% component "card" title=note.title %}      {# title = note.title from context #}
+   {% component "card" pinned=True %}           {# pinned = the boolean True #}
 
-The ``key=expression`` form does resolve against the template scope.
-Use it when the value must come from a loop variable, the URL kwargs, or another context entry.
+A bare string literal that Django would mark safe is demoted to a plain string so ``{{ prop }}`` autoescapes it inside the component.
+Pass ``prop=value|safe`` or a variable already holding safe content when the component should receive raw HTML.
 
 Variable Forwarding
 ~~~~~~~~~~~~~~~~~~~
@@ -216,7 +261,7 @@ Component Context
 -----------------
 
 A ``component.py`` next to ``component.djx`` runs Python code for the component.
-Use ``@component.context("name")`` to publish named values that the template can render.
+Use ``@component.context("key")`` to publish a value under that key for the template to render.
 
 .. code-block:: python
    :caption: _components/note_card/component.py
@@ -238,19 +283,6 @@ Use ``@component.context("name")`` to publish named values that the template can
 
 Component context functions take :doc:`DI parameters <dependency-injection>` the same way page context does.
 The framework resolves parameters from the surrounding template scope, from URL kwargs, from the request, or from any registered provider.
-
-Inherited Component Context
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Component context is local to the component by default.
-Pass ``inherit_context=True`` to make the value available from nested component calls and from slot content.
-
-.. code-block:: python
-   :caption: shared component context
-
-   @component.context("brand", inherit_context=True)
-   def brand() -> str:
-       return "Notes"
 
 Co-located Static Assets
 ------------------------
@@ -278,12 +310,13 @@ See :doc:`static-assets/deduplication` for the dedup rules.
 Module Loading
 --------------
 
-The components backend imports every discovered ``component.py`` on startup so the side effects of ``@component.context`` and ``@action`` are visible from the first request.
+By default the components backend imports every discovered ``component.py`` when it initialises, so the side effects of ``@component.context`` and ``@action`` are visible from the first request.
+When ``NEXT_FRAMEWORK["LAZY_COMPONENT_MODULES"]`` is ``True``, Python execution of each module is deferred to the first render of that component instead.
 
 Lazy Loading
 ~~~~~~~~~~~~
 
-For very large projects defer Python module loading until the first call to a component.
+To defer module imports to the first render of each component, set ``LAZY_COMPONENT_MODULES``.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -292,8 +325,8 @@ For very large projects defer Python module loading until the first call to a co
        "LAZY_COMPONENT_MODULES": True,
    }
 
-The filesystem scan still happens at startup so the scope tree is ready.
-Python execution moves to the first component render.
+The filesystem scan still happens at startup so the visibility scope tree is ready.
+Only Python execution is deferred.
 
 Hot Reload
 ----------
@@ -337,7 +370,7 @@ Shared UI Kit
 
 Ship a folder of reusable components under a project directory listed in ``DIRS``.
 Every application sees the same set, which keeps the design system consistent.
-See :doc:`multi-project` for the multi project version of this pattern.
+See :doc:`multi-project` for several trees sharing one kit, and :doc:`/content/misc/examples` for repository samples that wire ``DIRS``.
 
 Conditional Rendering
 ~~~~~~~~~~~~~~~~~~~~~

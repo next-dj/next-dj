@@ -9,24 +9,27 @@ By the end you have a project that renders a single page from the filesystem and
 Requirements
 ------------
 
-next.dj depends on Python 3.12 or newer and Django 4.2 or newer.
+- Python 3.12 or newer (3.12, 3.13, 3.14 tested).
+- Django 4.2 or newer (4.2, 5.0, 5.1, 5.2, 6.0 supported).
+- An ASGI or WSGI server compatible with the Django version in use.
 
-- Python 3.12, 3.13, or 3.14.
-- Django 4.2, 5.0, 5.1, 5.2, or 6.0.
-- An ASGI or WSGI server compatible with your chosen Django version.
+next.dj extends Django. It does not replace the ORM, migrations, admin, or auth (:ref:`intro-overview-django-unchanged`).
 
 Install the Package
 -------------------
 
-next.dj is published on PyPI under the distribution name ``next-dj``.
-Inside a project virtualenv, install it through your usual package manager.
+Install the project package from PyPI.
+The published name matches ``name`` in the package metadata (``next.dj`` in ``pyproject.toml``).
 
 .. code-block:: bash
    :caption: shell
 
    uv add next.dj
    # or
-   pip install next-dj
+   pip install next.dj
+
+Some installers normalise dots to hyphens in wheel and cache paths.
+The import path is always ``next``.
 
 Create a Django Project
 -----------------------
@@ -78,6 +81,7 @@ The values below treat each Django application as a self-contained unit.
                "BACKEND": "next.urls.FileRouterBackend",
                "APP_DIRS": True,
                "PAGES_DIR": "routes",
+               "OPTIONS": {"context_processors": []},
            }
        ],
        "DEFAULT_COMPONENT_BACKENDS": [
@@ -87,6 +91,11 @@ The values below treat each Django application as a self-contained unit.
            }
        ],
    }
+
+The built-in default for ``PAGES_DIR`` is ``pages``.
+This guide sets it to ``routes`` as a naming convention, so the tutorial uses ``routes/`` throughout.
+A ``FileRouterBackend`` entry must carry an ``OPTIONS`` key.
+Omitting it makes ``manage.py check`` report ``next.E026``.
 
 Mount the Router
 ----------------

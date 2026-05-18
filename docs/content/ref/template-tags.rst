@@ -12,15 +12,16 @@ Templates therefore use them without an explicit ``{% load %}`` statement.
 Forms
 -----
 
-.. describe:: {% form @action="<name>" method="post" %}...{% endform %}
+.. describe:: {% form @action="<name>" %}...{% endform %}
 
    Renders a form bound to a registered action.
    Injects the CSRF token and the hidden ``_next_form_page`` origin field.
    The block body has access to the bound or unbound form through ``{{ form }}``.
 
+   The HTTP method is always ``post``. It cannot be passed as an argument.
+
    Accepts every HTML attribute as a keyword.
-   Accepts captured URL parameters as ``kwargs`` (for example ``id=note.id``).
-   Accepts ``form_var="other"`` to publish the form under a custom variable name.
+   Captured URL parameters from ``request.resolver_match.kwargs`` are emitted automatically as ``_url_param_<name>`` hidden inputs. They are not passed as tag arguments.
 
 Components
 ----------
@@ -55,6 +56,17 @@ Components
    Block form.
    Marks a slot location inside a component template, with a fallback body used when the caller omits the slot.
 
+Multiline tag bodies
+~~~~~~~~~~~~~~~~~~~~
+
+The framework reinstalls Django’s template tag pattern with the ``re.DOTALL`` flag so a single ``{% ... %}`` token may span several lines.
+That allows readable block components and slots when the inner markup is long.
+
+.. caution::
+
+   This changes template parsing for **every** template the process loads, not only DJX files.
+   If you rely on Django’s stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
+
 Static Pipeline
 ---------------
 
@@ -87,6 +99,18 @@ Static Pipeline
 
    Inline JS block.
    The body is rendered with the template context and deduplicated by content.
+
+Layouts
+-------
+
+.. describe:: {% block template %}{% endblock %}
+
+   Marks the slot inside a ``layout.djx`` where the page template is composed.
+   The layout loader replaces the empty block with the wrapped page body when it builds the final template string.
+   Both ``{% endblock %}`` and ``{% endblock template %}`` are accepted as the closing tag.
+
+   A ``layout.djx`` without this block raises ``next.W001`` during ``manage.py check``, since the page body would have nowhere to render.
+   Nested layouts each carry their own ``{% block template %}`` and compose from innermost to outermost.
 
 Tag Loading
 -----------

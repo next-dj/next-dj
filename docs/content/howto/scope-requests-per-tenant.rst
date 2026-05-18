@@ -13,6 +13,8 @@ Solution
 
 Resolve the tenant once in :doc:`middleware <django:topics/http/middleware>`, stash it on the request, and let a dependency provider, a :doc:`context processor <django:ref/templates/api>`, and a custom static backend each read it back from there.
 
+The ``examples/multi-tenant/`` project in the repository applies the same pattern end to end. See :doc:`/content/misc/examples`.
+
 Walkthrough
 -----------
 
@@ -24,6 +26,8 @@ A missing header is a ``400`` and an unknown slug is a ``404``.
 
 .. code-block:: python
    :caption: notes/middleware.py
+
+   from django.http import HttpResponse, HttpResponseBadRequest
 
    from notes.models import Tenant
 

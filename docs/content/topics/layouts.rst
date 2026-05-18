@@ -50,7 +50,9 @@ The outermost layout wraps the result again.
 Layout Template Contract
 ------------------------
 
-Every layout must contain a ``{% block template %}{% endblock template %}`` placeholder where the body of the wrapped content is substituted.
+Every layout must contain a ``{% block template %}`` placeholder where the body of the wrapped content is substituted.
+The closing tag can be written either way.
+``{% block template %}{% endblock template %}`` and ``{% block template %}{% endblock %}`` are both recognised.
 
 .. code-block:: jinja
    :caption: notes/routes/layout.djx
@@ -71,19 +73,20 @@ Every layout must contain a ``{% block template %}{% endblock template %}`` plac
    </html>
 
 Without the placeholder the layout still renders, but the page body is dropped silently.
+The ``check_layout_templates`` system check emits ``next.W001`` for any ``layout.djx`` that lacks a ``{% block template %}`` block.
 Run ``uv run python manage.py check`` to catch layouts that miss the placeholder.
 
 Layouts can declare layout-level CSS and JS through the static collector tags shown above.
 The tags also live in inner layouts when you want a section-scoped style sheet.
 
-Publishing Context From a Layout
---------------------------------
+Publishing Context From a Layout Segment
+-----------------------------------------
 
-A layout can have its own ``layout.py`` next to ``layout.djx``.
-Use it to publish values for the layout markup and, when needed, for every descendant page.
+A segment directory that contains a ``layout.djx`` can also have a sibling ``page.py``.
+Use it to publish values that the layout markup needs and, with ``inherit_context=True``, to make those values available to every descendant page.
 
 .. code-block:: python
-   :caption: notes/routes/layout.py
+   :caption: notes/routes/page.py
 
    from notes.models import Note
 
@@ -100,10 +103,10 @@ Use it to publish values for the layout markup and, when needed, for every desce
        return Note.objects.count()
 
 The ``inherit_context=True`` flag publishes the value to every descendant page.
-Without the flag the value is only visible to the layout markup itself, not to the pages below.
+Without the flag the value is available only when ``notes/routes/page.py`` itself handles the request. Descendant pages cannot read it.
 
-Layout context functions can take dependencies the same way pages do.
-The resolver shares its cache across the layout chain and the page so a value resolved in a layout is not recomputed in the page.
+Context functions in a segment ``page.py`` take dependencies the same way any page does.
+The resolver shares its cache across the entire layout chain and the leaf page, so a value resolved at an ancestor segment is not recomputed further down.
 
 Nested Layout Patterns
 ----------------------
@@ -127,7 +130,7 @@ Add a layout inside a section to share a sub navigation across every page under 
 Empty Pass Through
 ~~~~~~~~~~~~~~~~~~
 
-Sometimes a directory needs a Python-level layout for context but no extra HTML.
+Sometimes a directory needs a visual-only layout boundary for context but no extra HTML.
 Use an empty layout that contains only the placeholder.
 
 .. code-block:: jinja
@@ -135,7 +138,7 @@ Use an empty layout that contains only the placeholder.
 
    {% block template %}{% endblock template %}
 
-The accompanying ``layout.py`` can still publish context for every page under ``/api/`` without injecting any markup.
+A sibling ``page.py`` in the same directory can publish inherited context for every page under ``/api/`` without that layout injecting any visible markup.
 
 Section Specific Static Assets
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -210,8 +213,12 @@ Cross Cutting Behaviour
 Context Processors
 ~~~~~~~~~~~~~~~~~~
 
-Context processors configured on a backend run before the layout chain renders.
-They contribute variables that every layout and every page can use.
+Context processors are applied after every ``@context`` callable finishes but before any template (including the layout chain) renders.
+They contribute variables that every layout and every page template can use.
+Because they run last, a processor that returns the same key as a ``@context`` function overwrites that value.
+Processor-to-processor duplicates are resolved by dotted path, keeping the first occurrence.
+See :doc:`context` under *Resolution Order* for the full merge order and the **first** ``TEMPLATES`` entry rule.
+Processor failures are swallowed during development unless ``STRICT_CONTEXT`` is enabled. Semantics live in :ref:`ref-settings`.
 
 Static Collector
 ~~~~~~~~~~~~~~~~
@@ -230,12 +237,12 @@ Common Pitfalls
 ---------------
 
 Layout renders but page body is missing.
-   The ``{% block template %}{% endblock template %}`` placeholder is required.
+   A ``{% block template %}`` placeholder is required, closed with either ``{% endblock %}`` or ``{% endblock template %}``.
    Without it the framework still renders the layout but the page content is dropped.
 
-Inherited context not visible to a sub layout.
-   Layouts share the same context flow as pages.
-   The ``inherit_context=True`` flag is required when a layout consumes a value declared in an ancestor layout.
+Inherited context not visible to a sub-page.
+   The ``inherit_context=True`` flag is required on the ancestor ``page.py`` that declares the value.
+   Without it the value is not injected into descendant routes.
 
 Two roots produce one composed page.
    Each backend has its own layout tree.

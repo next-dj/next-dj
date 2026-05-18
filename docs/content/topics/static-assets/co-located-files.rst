@@ -70,15 +70,12 @@ A file named ``component.mjs`` is therefore picked up as a ``module`` asset.
 Custom kinds extend the set through :doc:`asset-kinds`.
 Custom stems extend the recognised filenames through :doc:`custom-stems`.
 
-How Discovery Works
--------------------
+How Discovery Pairs a File
+--------------------------
 
-Discovery happens at startup and after each filesystem reload.
-
-1. ``AssetDiscovery`` walks every page and component root.
-2. For each owner directory, the scanner combines every registered stem of the appropriate role with every registered kind extension.
-3. Each match becomes a ``StaticAsset`` record.
-4. The records feed the per request collector.
+The full disk-to-HTML trace lives in :doc:`overview`.
+For co-located files the pairing rule is the part that matters.
+A file is recognised only when its stem matches a registered stem for the owner's role and its extension matches a registered kind.
 
 A file that does not match a registered stem and kind pair is ignored.
 Discovery does not warn on unknown files because the folder may hold documentation or fixtures.

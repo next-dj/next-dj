@@ -167,23 +167,8 @@ The static checks use the codes ``next.E036``, ``next.E037``, ``next.E038``, ``n
 Common Patterns
 ---------------
 
-JSX Through a Module Script
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Register a ``jsx`` kind that points at ``render_module_tag`` when the JSX is pre compiled into modules.
-See ``examples/kanban``.
-
-JSX Through Babel
-~~~~~~~~~~~~~~~~~
-
-Register a ``jsx`` kind with a custom backend renderer method that emits a Babel script tag.
-See ``examples/observability``.
-
-Vue Single File Components
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Register a ``vue`` kind paired with a custom stem.
-See ``examples/live-polls``.
+Custom asset kinds drive several worked projects, including JSX through a module script, JSX through a Babel renderer, and Vue single file components paired with a custom stem.
+See :doc:`/content/misc/examples` for the runnable projects and their walkthroughs.
 
 See Also
 --------

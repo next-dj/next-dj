@@ -4,8 +4,8 @@ Register handlers with `@action`. Each action gets a stable UID
 endpoint. Valid submissions run the handler. Invalid forms re-render
 with errors. CSRF is applied for posted forms.
 
-Internal classes are reachable with deep imports of the form
-`from next.forms.dispatch import FormActionDispatch`.
+Advanced integrations can import dispatch helpers from ``next.forms.dispatch`` when a
+submodule import clarifies intent.
 """
 
 from __future__ import annotations

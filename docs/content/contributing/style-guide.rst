@@ -93,12 +93,15 @@ Every topic page declares an anchor at the top in the form ``.. _topics-<area>:`
 Admonitions
 -----------
 
+Do not use ``.. versionadded::`` or ``.. versionchanged::`` in user-facing documentation.
+Release history belongs in the project changelog, not in the manual.
+This matches the version policy in :doc:`writing-documentation`.
+
 Allowed types.
 
 - ``.. note::`` for nonessential context.
 - ``.. warning::`` for foot guns.
 - ``.. seealso::`` for sibling links.
-- ``.. versionadded::`` and ``.. versionchanged::`` for release aware notes.
 
 Each admonition holds one paragraph.
 
@@ -127,8 +130,18 @@ A documentation pull request lands when.
 - ``uv run --group docs sphinx-build -nW --keep-going docs docs/_build`` is green.
 - ``uv run doc8 docs/content`` is green.
 - Every new section follows its template.
-- Every internal page has a mermaid diagram.
+- Every page under ``content/internals/`` includes a ``.. mermaid::`` diagram.
 - Cross references resolve.
+- Runnable excerpts follow the Notes tutorial paths or name another reference project. Blurbs for ``examples/`` stay aligned with ``examples/README.md``.
+
+Repository Markdown
+-------------------
+
+``README.md`` and ``CONTRIBUTING.md`` follow a relaxed subset of these rules.
+Em dashes are allowed inside list items and table cells as separators between a term and its description.
+Running prose paragraphs avoid em dashes and semicolons, the same as RST prose.
+Semicolons do not join independent clauses in any context.
+Each independent clause begins a new sentence.
 
 See Also
 --------

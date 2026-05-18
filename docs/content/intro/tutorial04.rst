@@ -15,6 +15,9 @@ Prerequisites
 You have finished :doc:`tutorial03`.
 The ``note_card`` component renders each note and the static collector emits its CSS and JS.
 
+Handlers receive ``request``, forms, and URL segments through the same dependency resolver as pages.
+When this part introduces ``DUrl`` and other markers, read :doc:`/content/topics/dependency-injection` alongside if you want the full rules before continuing.
+
 Walkthrough
 -----------
 
@@ -138,11 +141,11 @@ The page renders the same ``NoteForm`` pre-filled with the existing note.
 
    from next.forms import action
    from next.pages import context
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
 
    @context("note")
-   def fetch_note(note_id: DUrl[int]) -> Note:
+   def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
 
@@ -152,7 +155,7 @@ The page renders the same ``NoteForm`` pre-filled with the existing note.
 
 
    @action("update_note", form_class=NoteForm)
-   def update_note(note_id: DUrl[int], form: NoteForm) -> HttpResponseRedirect:
+   def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
        form.instance = get_object_or_404(Note, pk=note_id)
        form.save()
        return HttpResponseRedirect(reverse("next:page_notes_id", kwargs={"id": note_id}))
@@ -222,16 +225,16 @@ Add the handler to the detail page.
 
    from next.forms import action
    from next.pages import context
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
 
    @context("note")
-   def fetch_note(note_id: DUrl[int]) -> Note:
+   def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
 
    @action("delete_note", form_class=DeleteNoteForm)
-   def delete_note(note_id: DUrl[int], form: DeleteNoteForm) -> HttpResponseRedirect:
+   def delete_note(note_id: DUrl["id", int], form: DeleteNoteForm) -> HttpResponseRedirect:
        get_object_or_404(Note, pk=note_id).delete()
        return HttpResponseRedirect(reverse("next:page_"))
 
@@ -263,7 +266,6 @@ The Notes application is functionally complete.
        note_card/
      routes/
        layout.djx
-       layout.py
        page.py
        template.djx
        notes/

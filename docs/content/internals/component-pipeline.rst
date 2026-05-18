@@ -74,7 +74,9 @@ Resolution Order
 A component reference resolves through the visibility resolver.
 
 1. Look for a component folder under the page's own scope.
-2. Look for a component folder in any ``DIRS`` listed under ``DEFAULT_COMPONENT_BACKENDS``.
+2. Look for a component folder inside any extra root directory.
+   Each backend entry under ``DEFAULT_COMPONENT_BACKENDS`` reads its extra roots from the ``DIRS`` key.
+   Within every root the scanner matches folders whose name equals the backend's ``COMPONENTS_DIR`` value.
 3. Pick the first match in registration order, which matches the order of backend entries.
 
 Two components in the same scope with the same name are reported by ``next.E020`` and ``next.E034``.
@@ -93,8 +95,6 @@ Component Context Resolution
 
 Each ``@component.context("key")`` function runs once per component render.
 The resolver shares its cache with the page render so values produced by page level context are reused inside the component.
-
-``inherit_context=True`` makes a value reachable from nested ``{% component %}`` calls and from slot content.
 
 Signals
 -------

@@ -20,6 +20,12 @@ The dispatcher reads that field to know which page rendered the form.
 The dispatcher rejects submissions when the field is missing, when the path does not exist on disk, or when the path is outside ``BASE_DIR``.
 Each rejection returns HTTP 400 with a structured error so it is easy to spot in logs.
 
+Virtual routes are fully supported as origin pages.
+A directory that has only a ``template.djx`` and no ``page.py`` is a virtual route (see :doc:`/content/topics/file-router` for the routing rules).
+The ``{% form %}`` tag on such a page emits ``_next_form_page`` pointing at a non-existent ``page.py`` path.
+The dispatcher accepts this: if ``page.py`` does not exist but a sibling ``template.djx`` does, the path is considered valid.
+On validation failure the re-render composes the body from the template loader exactly as the initial render did, with no page module involved.
+
 The Render Pipeline
 -------------------
 
@@ -43,6 +49,13 @@ Dependency cache.
    Every value produced by the resolver during dispatch is stored on the request under ``REQUEST_DEP_CACHE_ATTR``.
    The re-render reuses each cached value without rerunning the provider.
    A custom DI provider must therefore be idempotent across a render cycle.
+
+.. tip::
+
+   Shared dependencies between the action handler and page context functions are resolved only once per request.
+   If your handler and a ``@context`` function both declare ``Depends("current_user")``, the provider runs on the first resolution and the cached value is returned on every subsequent call within the same request.
+   This means that a failed form validation does not re-query the database for values that were already produced during initial dispatch.
+   Register expensive lookups (tenant queries, permission checks) as named dependencies to get this caching for free.
 
 The frozen ``FormSpec`` descriptors in :doc:`serializers` are a separate user-facing tool.
 The dispatcher does not attach a ``FormSpec`` to the request on its own.
@@ -90,6 +103,46 @@ Custom ``form`` context.
    Override ``@context("form")`` to construct the form in a particular way on the initial render.
    The dispatcher reuses the same key when populating the bound failing form on re-render.
 
+Redirecting Back to the Origin
+------------------------------
+
+A handler that succeeds usually returns an ``HttpResponseRedirect``.
+When the action can be submitted from more than one page, hardcoding that target sends every caller to the same place.
+The ``redirect_to_origin`` helper sends the user back to whichever page rendered the form.
+
+.. code-block:: python
+   :caption: notes/routes/page.py
+
+   from next.forms import action, redirect_to_origin
+   from next.urls import DUrl
+
+
+   @action("toggle_favourite")
+   def toggle_favourite(note_id: DUrl[int], request):
+       Note.objects.filter(pk=note_id).update(favourite=True)
+       return redirect_to_origin(request)
+
+``redirect_to_origin(request, fallback="/")`` reads the hidden ``_next_form_origin`` field that the ``{% form %}`` tag emits with the request path of the rendering page.
+It validates the value as a same-site path. A value that does not start with a single ``/`` is rejected, which blocks open-redirect input.
+When the field is absent or fails validation the helper redirects to ``fallback`` instead.
+
+Origin Versus Page Fields
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two hidden fields travel with every submission and serve different roles.
+
+``_next_form_page``.
+   The absolute filesystem path to the ``page.py`` that rendered the form.
+   The dispatcher uses it to locate the origin module for the re-render.
+   It is a disk path, never a URL.
+
+``_next_form_origin``.
+   The request path the form was rendered under, such as ``/notes/42/``.
+   It is consumed only by ``redirect_to_origin`` on the success path.
+
+The re-render path uses ``_next_form_page``. The success-redirect path uses ``_next_form_origin``.
+A failing form ignores ``_next_form_origin`` because the re-render stays on the same URL without a redirect.
+
 Server Side Effects Before Validation
 -------------------------------------
 
@@ -97,13 +150,10 @@ Side effects belong inside the handler, after ``form.is_valid()`` returns true.
 The dispatcher does not call any side effect when validation fails.
 This guarantee makes it safe to put database writes and external calls inside the handler.
 
-A page level context function that has external side effects runs on every render including re-render.
-Move side effects into the handler or into a custom provider whose result is cached on the request.
+.. warning::
 
-.. note::
-
-   A context function that writes to the database or calls an external service runs a second time on every validation failure.
-   Keep context functions read only and put writes inside the action handler where they run once on success.
+   A page level context function runs again on every re-render, so any write or external call it makes happens a second time on every validation failure.
+   Keep context functions read only. Put writes inside the action handler where they run once on success, or in a custom provider whose result is cached on the request.
 
 Signals
 -------
@@ -140,8 +190,31 @@ Pre dispatch redirect from handler.
    Use this on success, never on validation failure.
 
 Virtual page origin.
-   A directory with a ``template.djx`` and no ``page.py`` is a virtual route.
-   It re-renders correctly on validation failure because the dispatcher composes the body from the template loader, not from a page module.
+   Covered in detail under :ref:`The Origin Page <topics-forms-validation-rerender>` above.
+   Routes backed only by a sibling ``template.djx`` (no ``page.py``) still resolve an origin path for re-render.
+
+CSRF token on re-render.
+   The re-render runs the ``{% form %}`` tag again, which calls :func:`~django.middleware.csrf.get_token` and emits a fresh ``csrfmiddlewaretoken`` hidden input.
+   The token the browser already holds in its cookie stays valid, so the resubmission after a correction passes CSRF without a page reload.
+   A re-render never reuses the token string from the failed POST. It always emits the current one.
+
+File uploads.
+   An invalid submission does not preserve uploaded files.
+   The HTTP spec does not let a server re-populate an ``<input type="file">``, so the bound form on the re-render has no file data and the user must pick the file again.
+   The bound form still reports a missing-file error on the field when the upload was required.
+   Always set ``enctype="multipart/form-data"`` on the ``{% form %}`` tag so the dispatcher receives ``request.FILES`` in the first place.
+
+Partial form state.
+   Every text, select, checkbox, and textarea value survives the re-render because the dispatcher binds the failing form to ``request.POST`` and the template renders the bound widgets.
+   ``cleaned_data`` holds only the fields that passed validation. Fields that failed keep their raw submitted value on the widget so the user can correct them in place.
+   Password inputs are the exception. Django widgets clear them on render unless ``render_value=True`` is set on the widget.
+
+Wrong-origin re-render.
+   When a re-render shows the wrong page, the cause is almost always a stale or hand-built ``_next_form_page`` field.
+   The dispatcher trusts that field for the origin, so a form copied between pages or a hand-crafted ``<form>`` with a hardcoded path re-renders against the wrong module.
+   Let the ``{% form %}`` tag emit the field. It writes the path of the page that actually rendered the form.
+   A hand-built form must set ``_next_form_page`` to ``{{ current_page_module_path }}``, which the framework publishes on every rendered page.
+   When the field points outside ``BASE_DIR`` or at a path that no longer exists, the dispatcher returns HTTP 400 rather than rendering the wrong page.
 
 Common Patterns
 ---------------

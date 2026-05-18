@@ -18,18 +18,25 @@ A bound page renders ``<input type="hidden" name="csrfmiddlewaretoken" value="..
 Django's :doc:`CsrfViewMiddleware <django:ref/csrf>` validates the token on every POST to ``/_next/form/<uid>/``.
 A missing or stale token returns HTTP 403.
 
+The tag also depends on ``request`` existing in the template context so Django can render the CSRF field.
+If ``manage.py check`` reports ``next.E019``, add ``django.template.context_processors.request`` to your template ``OPTIONS`` (or an equivalent processor) so layouts receive ``request``.
+
 Origin Validation
 -----------------
 
 The framework adds a second hidden field named ``_next_form_page`` with the absolute path to the rendering page.
 The dispatcher validates the path before invoking the handler.
 
-Two checks apply.
+Several checks apply.
 
-The path must point at an existing file under ``BASE_DIR``.
-The path must end in ``page.py``.
+The posted path must resolve under ``settings.BASE_DIR``.
+It must name ``page.py`` (the framework stores the absolute path to that module).
+Either the file must exist, or the directory must contain a sibling ``template.djx`` so virtual routes can re-render after validation failures.
 
-A submission that fails either check returns HTTP 400 and the handler does not run.
+The optional hidden field ``_next_form_origin`` carries a same-site path (starts with ``/``, not ``//``).
+Handlers can call ``redirect_to_origin`` from ``next.forms`` to redirect back to the page that rendered the form.
+
+A submission that fails these checks returns HTTP 400 and the handler does not run.
 
 Manual Forms
 ------------

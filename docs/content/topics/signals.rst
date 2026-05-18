@@ -47,7 +47,7 @@ Pages
    * - ``context_registered``
      - ``sender`` is ``PageContextRegistry``. ``file_path`` is the page module path. ``key`` is the context name.
    * - ``page_rendered``
-     - ``sender`` is ``Page``. ``file_path`` is the page module path. ``duration_ms`` is the render time. ``styles_count`` and ``scripts_count`` are the collected asset counts. ``context_keys`` is a tuple of every context key.
+     - ``sender`` is ``Page``. ``file_path`` is the page module path. ``duration_ms`` is the render time. ``styles_count`` and ``scripts_count`` are the collected asset counts. ``context_keys`` is a tuple of every key in the rendered context. It contains framework-internal keys such as ``request``, ``current_template_path``, ``_next_js_context``, and ``_static_collector`` alongside the user-declared context keys.
 
 Components
 ~~~~~~~~~~
@@ -121,9 +121,9 @@ Static Pipeline
    * - ``asset_registered``
      - ``sender`` is the ``StaticAsset`` instance. ``collector`` is the collector. ``backend`` is the active static backend.
    * - ``collector_finalized``
-     - ``sender`` is the collector. ``page_path`` is the page module path. ``request`` is the HTTP request.
+     - ``sender`` is the collector. ``page_path`` is the page module path when the render comes from a page, or ``None`` for partial renders. ``request`` is the active ``HttpRequest`` or ``None`` outside a normal request cycle.
    * - ``html_injected``
-     - ``sender`` is the static manager. ``html_before`` and ``html_after`` are the HTML around injection. ``collector`` is the collector. ``placeholders_replaced`` is a tuple of slot names. ``injected_bytes`` is the size delta. ``request`` is the HTTP request.
+     - ``sender`` is the static manager. ``html_before`` and ``html_after`` are the HTML around injection. ``collector`` is the collector. ``placeholders_replaced`` is a tuple of slot names. ``injected_bytes`` is the size delta. ``request`` is the active ``HttpRequest`` or ``None``.
    * - ``backend_loaded``
      - ``sender`` is the backend class. ``config`` is the config dict. ``instance`` is the backend instance.
 
@@ -205,7 +205,7 @@ Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwar
        assert len(recorder.events) == 1
        assert recorder.events[0].kwargs["action_name"] == "create_note"
 
-See :doc:`testing` for the full testing surface.
+See :doc:`/content/topics/testing` for the full testing surface.
 
 Common Patterns
 ---------------
@@ -238,4 +238,5 @@ See Also
    :doc:`/content/topics/forms/signals` for the forms-specific signals.
    :doc:`/content/topics/static-assets/signals` for the static-specific signals.
    :doc:`/content/topics/testing` for ``SignalRecorder`` and other helpers.
+   :doc:`/content/howto/observe-framework-signals` for production sized receivers.
    :doc:`/content/ref/signals` for the public API.

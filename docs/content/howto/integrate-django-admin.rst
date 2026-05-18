@@ -92,7 +92,7 @@ Use Frozen Form Specs Inside Admin
 ----------------------------------
 
 When the admin renders a custom form, ``next.forms.serializers.form_spec`` produces a frozen descriptor that admin templates can render without touching the standard Django widgets.
-See ``examples/admin`` in the repository for the full walkthrough.
+The repository ships a full admin integration. See the ``admin`` row in :doc:`/content/misc/examples`.
 
 Verification
 ------------
@@ -114,4 +114,4 @@ See Also
 .. seealso::
 
    :doc:`/content/topics/forms/serializers` for frozen form specs.
-   ``examples/admin`` for the worked integration.
+   :doc:`/content/misc/examples` for the ``admin`` sample project.

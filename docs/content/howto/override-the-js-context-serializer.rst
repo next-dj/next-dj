@@ -52,53 +52,13 @@ Write a Custom Serializer
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A serializer is any class with a ``dumps`` method that returns a JSON string.
-
-.. code-block:: python
-   :caption: notes/serializers.py
-
-   import json
-
-   from django.core.serializers.json import DjangoJSONEncoder
-
-
-   class SortedSerializer:
-       """Serialise context values with sorted keys for stable output."""
-
-       def dumps(self, value: object) -> str:
-           return json.dumps(
-               value,
-               cls=DjangoJSONEncoder,
-               separators=(",", ":"),
-               sort_keys=True,
-           )
-
-Point the setting at the class.
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK = {
-       "JS_CONTEXT_SERIALIZER": "notes.serializers.SortedSerializer",
-   }
+See :doc:`/content/topics/static-assets/js-context` for the protocol and a minimal ``CompactSerializer`` example, then point ``JS_CONTEXT_SERIALIZER`` at your dotted path.
 
 Per Key Override
 ~~~~~~~~~~~~~~~~
 
-Pass ``serializer=`` on a single ``@context`` to route one key through a custom serializer.
-
-.. code-block:: python
-   :caption: per key
-
-   from next.pages import context
-   from next.static import PydanticJsContextSerializer
-
-
-   @context("note", serialize=True, serializer=PydanticJsContextSerializer())
-   def note() -> object:
-       return load_note()
-
-The override applies only to the ``note`` key.
-Every other key uses the project serializer.
+Pass ``serializer=`` on a single ``@context`` so only that key uses a different encoder. Everything else keeps the project default.
+See the **Per Key Serializer** section in :doc:`/content/topics/static-assets/js-context` for a concrete snippet.
 
 Verification
 ------------

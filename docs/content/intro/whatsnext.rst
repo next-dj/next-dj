@@ -4,66 +4,59 @@ What to Read Next
 =================
 
 The tutorial covers the core flow.
-This page points to where each subsystem is documented in depth.
+After :doc:`tutorial05`, follow **topics → how-to guides → reference → internals** when you need depth beyond the Notes walkthrough.
 
-By Subsystem
-------------
+The hubs below replace long subsystem-by-subsystem lists.
 
-Routing.
-   :doc:`/content/topics/file-router` covers static segments, captured parameters, wildcard segments, and per-project page roots.
-   :doc:`/content/topics/url-reversing` covers ``page_reverse`` and ``with_query`` for building URLs in Python.
+- :doc:`/content/topics/index` explains each subsystem.
+- :doc:`/content/howto/index` answers task-shaped questions.
+- :doc:`/content/ref/index` lists modules, decorators, settings, and checks.
+- :doc:`/content/internals/index` traces pipelines under the hood.
+- :doc:`/content/deployment/index` and :doc:`/content/security/index` cover operations.
+- :doc:`/content/misc/examples` catalogues the repository ``examples/`` projects with links and doc cross-references.
 
-Pages and layouts.
-   :doc:`/content/topics/pages` covers page resolution and template loading.
-   :doc:`/content/topics/layouts` covers nested layouts and ordering.
-
-Components.
-   :doc:`/content/topics/components` covers simple, composite, and slot-based components.
-   :doc:`/content/howto/build-a-composite-component` is a recipe for the most common shape.
-
-Context and dependency injection.
-   :doc:`/content/topics/context` covers ``@context`` patterns and serialization.
-   :doc:`/content/topics/dependency-injection` covers markers, providers, and the resolver.
-
-Forms and actions.
-   :doc:`/content/topics/forms/index` is the entry point for the entire forms surface.
-   :doc:`/content/topics/forms/validation-rerender` explains how a failed validation re-renders the origin page.
-   :doc:`/content/topics/forms/formsets` covers Django formset support.
-
-Static assets.
-   :doc:`/content/topics/static-assets/index` opens the static pipeline guide.
-   :doc:`/content/topics/static-assets/asset-kinds` covers built-in kinds and how to add new ones.
-
-Signals.
-   :doc:`/content/topics/signals` covers every signal emitted by the framework with payload tables.
-
-Testing.
-   :doc:`/content/topics/testing` covers ``NextClient``, ``SignalRecorder``, registry isolation, and helpers.
-
-Extending.
-   :doc:`/content/topics/extending` covers the five extension mechanisms used across the framework.
-
-By Task
--------
-
-The :doc:`/content/howto/index` section answers task-shaped questions.
-Look there when you have a concrete goal in mind.
-
-For Background
+Learning Paths
 --------------
 
-Internals.
-   :doc:`/content/internals/index` walks through how each subsystem works under the hood, with mermaid diagrams.
-   Start with :doc:`/content/internals/overview`.
+First Full-Stack App
+~~~~~~~~~~~~~~~~~~~~
 
-Reference.
-   :doc:`/content/ref/index` lists every public module, decorator, signal, and template tag.
+1. :doc:`install`
+2. :doc:`tutorial01` through :doc:`tutorial05`
+3. :doc:`/content/topics/file-router` — route shapes and captured segments.
+4. :doc:`/content/topics/context` and :doc:`/content/topics/dependency-injection` — shared scope and markers such as ``DUrl``.
+5. :doc:`/content/topics/forms/index`
+6. :doc:`/content/topics/static-assets/index`
+7. :doc:`/content/deployment/checklist`
 
-Deployment.
-   :doc:`/content/deployment/index` covers production settings, ``collectstatic``, and WSGI or ASGI hosting.
+Customize the Pipeline
+~~~~~~~~~~~~~~~~~~~~~~
 
-Security.
-   :doc:`/content/security/index` covers CSRF, XSS, and DI hygiene in the context of next.dj.
+1. :doc:`/content/topics/extending`
+2. :doc:`/content/topics/static-assets/backends`
+3. :doc:`/content/topics/forms/backends`
+4. :doc:`/content/topics/signals`
+5. :doc:`/content/internals/overview`
+6. :doc:`/content/internals/action-dispatch` and :doc:`/content/internals/component-pipeline`
+7. :doc:`/content/howto/add-a-custom-template-loader`
+8. :doc:`/content/howto/observe-framework-signals`
+
+Multi-Tenant or Multi-Project Setup
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. :doc:`/content/topics/multi-project`
+2. :doc:`/content/howto/share-components-across-projects`
+3. :doc:`/content/howto/scope-requests-per-tenant`
+4. :doc:`/content/topics/dependency-injection`
+5. :doc:`/content/deployment/settings`
+
+Examples
+--------
+
+The ``examples/`` directory contains several self-contained Django projects plus ``_shared`` UI kit assets and a ``_template`` scaffold.
+Run any example from its folder with ``migrate`` then ``runserver``.
+Conventions, commands, and a per-folder **Focus** summary are in the repository `examples README <https://github.com/next-dj/next-dj/blob/main/examples/README.md>`_.
+The documentation catalog with GitHub links and primary doc pointers lives in :doc:`/content/misc/examples`.
 
 Community
 ---------

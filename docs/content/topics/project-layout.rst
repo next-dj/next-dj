@@ -45,7 +45,6 @@ The Notes project from the tutorial demonstrates the full layout.
            component.js
        routes/
          layout.djx
-         layout.py
          layout.css
          page.py
          template.djx
@@ -97,7 +96,8 @@ Three settings keys point at the directories above.
 
 ``PAGES_DIR`` names the page root inside each application.
 ``COMPONENTS_DIR`` names the component root inside each application.
-The names are convention, you can choose anything that fits your domain.
+The names are convention.
+You can choose anything that fits your domain.
 
 Settings Helpers
 ----------------
@@ -150,7 +150,7 @@ Tests
 -----
 
 Place tests under ``tests/`` at the project root.
-Add a project ``conftest.py`` that activates registry isolation through ``reset_registries`` (see :doc:`testing`).
+Add a project ``conftest.py`` that activates registry isolation through ``reset_registries`` (see :doc:`/content/topics/testing`).
 
 A per application ``tests/`` directory works for projects with several applications.
 See :doc:`multi-project` for the layered layout.

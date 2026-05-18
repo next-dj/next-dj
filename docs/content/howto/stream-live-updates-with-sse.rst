@@ -8,6 +8,10 @@ Problem
 
 A poll page shows a vote chart and you want every open tab to update the moment someone votes, without polling and without a WebSocket stack.
 
+next.dj adds no dedicated SSE module.
+The pieces you use are the usual page module, form actions, and signals such as ``action_dispatched`` for fan-out after dispatch.
+A full implementation lives under ``examples/live-polls/``. See :doc:`/content/misc/examples`.
+
 Solution
 --------
 
@@ -53,7 +57,7 @@ The broker keeps one :class:`threading.Condition` and one monotonic revision cou
 
 Each subscriber captures its own ``last_revision`` before yielding the initial snapshot.
 A publish that lands while the consumer still holds that frame wakes the subscriber on the next ``next()`` instead of being lost.
-A :class:`threading.Event` with ``clear()`` would drop events under fan-out because the first subscriber to clear the flag hides the wake from the others.
+A :class:`threading.Event` with ``clear()`` would drop events under fan-out because the first subscriber clears the event before the other threads observe it.
 
 Yield SSE frames
 ~~~~~~~~~~~~~~~~
@@ -84,8 +88,7 @@ A 15-second timeout on ``wait_for`` produces a comment frame so idle connections
                continue
            yield format_event(payload, event="update")
 
-The byte formatter follows the WHATWG SSE spec.
-Each record ends with a blank line.
+The byte formatter follows the WHATWG SSE spec, so each record ends with a blank line.
 Keepalive frames begin with ``:`` so clients ignore them while proxies still see traffic.
 
 .. code-block:: python
@@ -105,7 +108,9 @@ Stream from a page module
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Place a page module at the ``stream/`` route and return the response from ``render``.
-The framework escape hatch returns any :class:`~django.http.HttpResponseBase` subclass verbatim, so the layout chain and the static collector are bypassed.
+When ``render`` returns a :class:`~django.http.HttpResponseBase` subclass such as :class:`~django.http.StreamingHttpResponse`, the framework passes it through unchanged.
+No ``layout.djx`` wrapping runs and the static collector does not rewrite the body.
+Assets referenced only inside a streaming endpoint must still be collected from a parent page.
 
 .. code-block:: python
    :caption: polls/screens/polls/[int:id]/stream/page.py
@@ -126,7 +131,7 @@ The framework escape hatch returns any :class:`~django.http.HttpResponseBase` su
            },
        )
 
-The endpoint stays sync because the broker waits on :class:`threading.Condition` and the example targets ``runserver`` and ``pytest``.
+The endpoint stays sync because the broker waits on :class:`threading.Condition`.
 An ASGI deployment swaps the wake primitive for an :class:`asyncio.Condition` and yields from an async generator without touching the page or the signal layer.
 
 Fan out from the vote signal
@@ -134,7 +139,7 @@ Fan out from the vote signal
 
 The vote handler runs the atomic ``UPDATE`` and returns the redirect.
 A receiver on ``action_dispatched`` is the single publish point for the broker.
-The signal carries the bound form after validation, so the receiver knows which poll changed without reissuing the query.
+The signal carries the bound form after validation, so the receiver knows which poll changed.
 
 .. code-block:: python
    :caption: polls/signals.py
@@ -163,7 +168,7 @@ The signal carries the bound form after validation, so the receiver knows which 
        snapshot = build_snapshot(poll)
        broker.publish(snapshot)
 
-Concentrating the publish in the receiver keeps the write path observable through one signal hook and avoids the double cache write a handler-side publish would cause.
+Concentrating the publish in the receiver keeps the write path observable through one signal hook.
 
 Subscribe from the browser
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

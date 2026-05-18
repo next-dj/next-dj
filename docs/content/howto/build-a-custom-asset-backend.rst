@@ -73,7 +73,7 @@ A custom backend can intercept one kind and resolve it elsewhere, then delegate 
            return super().register_file(source_path, logical_name, kind)
 
 The constructor reads its own keys from the ``OPTIONS`` mapping.
-``register_file`` receives the absolute ``source_path``, the extension free ``logical_name``, and the registered ``kind``.
+``register_file`` receives the absolute ``source_path``, the extension-free ``logical_name``, and the registered ``kind``.
 Every kind except ``jsx`` falls straight through to ``super().register_file``.
 
 Read the Vite manifest

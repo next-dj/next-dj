@@ -15,8 +15,10 @@ Overview
 --------
 
 File-routed pages register Django URL names of the form ``next:page_<segments>``.
+The ``page_`` prefix is the ``URL_NAME_TEMPLATE`` setting, whose default is ``page_{name}``.
 You can pass those names to the standard ``django.urls.reverse`` function.
 ``page_reverse`` does the same thing but accepts the directory template as input, which keeps callers close to the file tree they already understand.
+``page_reverse`` reads ``URL_NAME_TEMPLATE`` itself, so it keeps working when you change the prefix.
 
 ``with_query`` composes the query string of a URL that already exists.
 Pass keyword arguments to add or replace query parameters, pass ``None`` to remove a key, pass a list or tuple to repeat a key.
@@ -47,6 +49,11 @@ Captured values are passed as keyword arguments.
 
 The template is normalised through the same parser the router uses for URL name generation.
 You can pass either ``[slug]`` or ``[str:slug]`` in the template, the parser only looks at the parameter name.
+
+The resulting segment string is fed into ``URL_NAME_TEMPLATE`` before the lookup.
+The default ``page_{name}`` yields ``next:page_posts_slug``.
+Changing ``URL_NAME_TEMPLATE`` changes the name ``page_reverse`` resolves against without any call-site edits.
+See :doc:`file-router` for the setting and the segment-naming rules.
 
 Namespace Override
 ~~~~~~~~~~~~~~~~~~
@@ -200,6 +207,24 @@ Both helpers are pure functions and are safe to call from tests without any Djan
 
    def test_with_query_drops_none() -> None:
        assert with_query("/?a=1", a=None) == "/"
+
+Reading the Query String Back
+-----------------------------
+
+The helpers on this page write query strings.
+To read them in a page or component, annotate a parameter with the ``DQuery[T]`` marker.
+``with_query`` and ``DQuery`` are two ends of the same wire.
+
+``DQuery[list[T]]`` accepts three wire formats for a repeated parameter.
+
+- Repeated keys, ``?tag=a&tag=b``.
+- Bracket suffix, ``?tag[]=a&tag[]=b``.
+- Comma-delimited, ``?tag=a,b``.
+
+``with_query`` emits the repeated-key form when you pass a list.
+Captured **path** segments are separate. They flow through ``DUrl`` or plain URL kwargs as described in :doc:`dependency-injection`.
+
+See :doc:`/content/howto/read-query-parameters` for the full typed-query walkthrough.
 
 See Also
 --------

@@ -14,7 +14,8 @@ Overview
 --------
 
 The smallest page is a folder that contains a ``page.py`` and a sibling ``template.djx``.
-The framework calls every ``@context`` function declared in ``page.py``, then renders ``template.djx`` with the resulting variables, then wraps the result in the closest ancestor ``layout.djx``.
+The framework resolves the page body, then calls every ``@context`` function declared in ``page.py`` to build the template variables, then wraps the rendered body in the closest ancestor ``layout.djx``.
+See *Render Order* below for the exact sequence.
 
 Pages share four pluggable parts.
 
@@ -33,44 +34,64 @@ Layout chain.
 Body Sources
 ------------
 
-A page module can supply its body through three mechanisms.
+A page module can supply its body through these sources.
 
 ``render`` function on the page module.
    Highest priority.
-   Receives :doc:`DI-resolved <dependency-injection>` arguments and returns either a string body or any ``HttpResponse`` subclass.
+   Receives :doc:`DI-resolved <dependency-injection>` arguments and returns either a string body or any :class:`~django.http.HttpResponseBase` subclass (including :class:`~django.http.StreamingHttpResponse` and :class:`~django.http.FileResponse`).
 
 ``template`` module attribute.
    A plain string assigned at module level.
-   Used as the page body when no ``render`` function exists.
+   Used as the page body when no ``render`` function exists, and checked before any template loader.
 
 Sibling ``template.djx`` file.
    The default source for most pages.
    Loaded through the ``DjxTemplateLoader`` and composed with the layout chain.
 
-The framework runs context processors, the :doc:`static collector <static-assets/index>`, and the ``page_rendered`` signal once per request regardless of which source produced the body.
+Custom template loaders.
+   Any loader registered in ``TEMPLATE_LOADERS`` other than ``DjxTemplateLoader``.
+   Loaders run in declared order and the first one that matches supplies the body.
+
+When the body source produces a string, the framework runs context processors, the :doc:`static collector <static-assets/index>`, and the ``page_rendered`` signal once per request.
+When a ``render`` function returns an :class:`~django.http.HttpResponseBase` the pipeline short-circuits and those steps are skipped. See *Render Order* below.
+Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
 When two sources are declared at the same level the lower priority one is silently dropped and ``uv run python manage.py check`` emits a warning.
+
+Render Order
+------------
+
+The body source runs before the template context is built.
+This is the authoritative ordering for the page render path.
+
+1. The body source produces the body markup.
+   A ``render`` function is called first with its :doc:`DI-resolved <dependency-injection>` arguments.
+   When ``render`` returns an :class:`~django.http.HttpResponseBase` the response is sent verbatim and the remaining steps are skipped, so layouts and the static pipeline do not run.
+   A ``template`` attribute or a template file supplies the body string directly.
+2. The ``@context`` callables are collected and run to build the template variable namespace.
+3. The body is composed through the ancestor layouts and rendered with that namespace.
+
+A ``render`` function therefore cannot read a value that a ``@context`` callable would publish, because the callables have not run yet.
+``render`` receives its inputs straight from the dependency injector. A context callable can read another context value because step 2 runs them as one batch.
 
 The render Function
 -------------------
 
 The ``render`` function takes any DI-resolved parameters the resolver can fill.
-The most common shape is ``request`` plus zero or more values from context functions.
+The most common shape is ``request`` plus captured URL parameters and marker-driven values.
+Because ``render`` runs before the ``@context`` callables, it cannot receive a value those callables publish.
+Pull the data ``render`` needs through the dependency injector directly.
 
 .. code-block:: python
-   :caption: notes/routes/reports/page.py
+   :caption: notes/routes/reports/[int:report_id]/page.py
 
-   from django.http import HttpResponse, HttpResponseRedirect
+   from notes.models import Report
 
-   from next.pages import context
-
-
-   @context("today")
-   def today() -> str:
-       return "2026-05-15"
+   from next.urls.markers import DUrl
 
 
-   def render(request, today: str) -> str:
-       return f"<section>Report for {today}</section>"
+   def render(request, report_id: DUrl[int]) -> str:
+       report = Report.objects.get(pk=report_id)
+       return f"<section>Report {report.title}</section>"
 
 The return value follows a strict contract.
 
@@ -78,9 +99,9 @@ String body.
    The framework composes the string through the ancestor layouts.
    Context processors, the static collector, and the ``page_rendered`` signal run exactly as for a ``template.djx`` page.
 
-Any ``HttpResponse`` subclass.
+:class:`~django.http.HttpResponseBase` subclass.
    Returned verbatim to the client.
-   Layouts and the static pipeline are skipped, which makes this the right shape for redirects, JSON APIs, streaming responses, and downloads.
+   Layout composition and static placeholder injection are skipped, which makes this the right shape for redirects, JSON APIs, streaming responses, and downloads.
 
 Anything else.
    The framework raises ``TypeError`` naming the page module so the mistake surfaces during development.
@@ -97,8 +118,12 @@ Assign a string to the module-level ``template`` attribute when the body is smal
 
    template = "<p>ok</p>"
 
-This source has the lowest priority of the three.
+A ``render`` function outranks this attribute.
+When no ``render`` function exists the ``template`` attribute is consulted before any registered template loader, so a module-level ``template`` string wins over a sibling ``template.djx``.
 Use it for trivial pages where a separate template file would be noise.
+
+The ``template`` attribute also has a matching loader, ``PythonTemplateLoader`` in ``next.pages.loaders``, whose ``source_name`` is ``"template"``.
+Register it in ``TEMPLATE_LOADERS`` when a project wants the ``template`` attribute to participate in the loader chain rather than being consulted directly.
 
 Template Files
 --------------
@@ -234,25 +259,21 @@ When more than one body source applies the framework picks the highest priority 
 
 .. list-table::
    :header-rows: 1
-   :widths: 15 35 50
+   :widths: 30 70
 
-   * - Priority
-     - Source
-     - Used when
-   * - 1
-     - ``render`` function
-     - The page module defines ``def render(...)``.
-   * - 2
-     - ``template`` attribute
-     - The page module sets ``template = "..."``.
-   * - 3
-     - Sibling ``template.djx``
-     - The directory contains a file named ``template.djx``.
-   * - 4
-     - Custom loader
-     - A loader in ``TEMPLATE_LOADERS`` matches the directory.
+   * - Source
+     - Resolution
+   * - ``render`` function
+     - Wins outright when the page module defines ``def render(...)``.
+   * - ``template`` attribute
+     - Used when no ``render`` function exists and the page module sets ``template = "..."``. Consulted before any template loader.
+   * - Template loaders
+     - Consulted only when neither of the above applies. Loaders run in ``TEMPLATE_LOADERS`` order and the first one whose ``can_load`` returns ``True`` supplies the body.
 
-Two sources at the same priority level are also flagged.
+The template loaders have no fixed numbering between them.
+``DjxTemplateLoader`` matches the sibling ``template.djx``, but a custom loader placed before it in ``TEMPLATE_LOADERS`` is consulted first and wins when both could load the same directory.
+
+Two sources at the same level are also flagged.
 The check ``next.W043`` points at the file when this happens.
 
 Common Patterns
@@ -324,10 +345,12 @@ See ``examples/markdown-blog`` for a working setup.
 System Checks
 -------------
 
-The pages subsystem contributes Django system checks.
+The pages subsystem contributes Django system checks. The ``check_page_functions`` check inspects every ``page.py`` and reports the following.
 
-- ``check_page_functions`` warns when a page directory has neither a body source nor a render function.
-- ``next.W043`` warns when more than one body source exists in the same directory.
+- ``next.E012`` — the page module has no ``render`` function, no ``template`` attribute, and no ``template.djx`` file.
+- ``next.E013`` — the page module defines a ``render`` attribute that is not callable.
+- ``next.W002`` — the page directory has no body source and no ancestor ``layout.djx``, so the page renders nothing.
+- ``next.W043`` — more than one body source is declared in the same directory. The highest priority one wins and the others are dropped.
 
 Run them through ``uv run python manage.py check``.
 

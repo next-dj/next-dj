@@ -45,8 +45,9 @@ namespace (optional, keyword only).
    Prefix prepended to the name as ``"<namespace>:<name>"``.
    Useful when several apps share short names such as ``"save"``.
 
-The decorated function joins the form action registry on import.
-Application startup imports every ``page.py``, ``component.py``, ``layout.py``, and ``actions.py`` so registration happens before the first request.
+The decorated function joins the form action registry when the module that contains it is imported.
+The framework imports ``page.py`` files when resolving URL patterns and imports ``component.py`` files when the components backend initialises, so actions declared in either file are registered before the first request.
+Actions in other modules (such as a shared ``actions.py``) register when those modules are first imported. Import them from ``AppConfig.ready`` to guarantee early registration.
 
 Action Names and Namespaces
 ---------------------------
@@ -83,7 +84,7 @@ The handler can take any parameters the dependency injector knows how to resolve
 
    from next.forms import action
    from next.pages import Context
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
 
    @action("simple", form_class=NoteForm)
@@ -180,7 +181,7 @@ Pass a ``ModelForm`` to handle create and edit flows in one decorator.
    from django.shortcuts import get_object_or_404
 
    from next.forms import action
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
    from notes.forms import NoteForm
    from notes.models import Note
@@ -194,11 +195,22 @@ Pass a ``ModelForm`` to handle create and edit flows in one decorator.
 
 See :doc:`modelforms` for ``get_initial`` patterns that preload the instance from the request.
 
-Dynamic Form Class
-------------------
+Form Factory Callable
+---------------------
 
-The ``form_class`` argument also accepts a factory callable.
-The framework resolves the factory through the dependency injector and the factory returns a tuple of the form class and the initial keyword arguments.
+The ``form_class`` argument accepts a factory callable in place of a concrete ``Form`` subclass.
+The framework resolves the factory through the dependency injector once per request, before binding the POST body.
+The factory may return either of two shapes.
+
+A ``Form`` subclass.
+   The dispatcher binds POST data and ``get_initial`` exactly as it does for a static ``form_class``.
+   Use this when only the choice of class is dynamic.
+
+A ``(FormClass, init_kwargs)`` tuple.
+   The dispatcher passes ``**init_kwargs`` straight to the form constructor and skips ``get_initial`` entirely.
+   Use this when the form needs constructor arguments that only exist at request time.
+
+The factory is dependency-resolved, so it can declare ``request: HttpRequest``, a ``DUrl[...]`` parameter, or any ``Depends`` provider in its signature.
 
 .. code-block:: python
    :caption: notes/routes/login/page.py
@@ -211,7 +223,9 @@ The framework resolves the factory through the dependency injector and the facto
    from next.forms import action
 
 
-   def login_form_factory(request: HttpRequest) -> tuple[type[AuthenticationForm], dict[str, Any]]:
+   def login_form_factory(
+       request: HttpRequest,
+   ) -> tuple[type[AuthenticationForm], dict[str, Any]]:
        return AuthenticationForm, {"request": request}
 
 
@@ -219,8 +233,35 @@ The framework resolves the factory through the dependency injector and the facto
    def login(request: HttpRequest, form: AuthenticationForm) -> HttpResponse:
        ...
 
-Use a factory when the form needs constructor arguments that only exist at request time, such as the request itself or the current tenant.
-The template can also reference the action through a variable, ``{% form @action=action_name %}``, when the name is computed in context.
+``AuthenticationForm`` requires ``request`` as its first constructor argument and has no ``get_initial`` method.
+The tuple shape supplies that argument and bypasses ``get_initial``, so the form binds cleanly.
+
+When the factory returns a bare class instead of a tuple, the dispatcher takes the regular path.
+Use that shape to pick a form per request without changing the constructor call.
+
+.. code-block:: python
+   :caption: choosing a class per request
+
+   from next.forms import action
+   from next.urls import DUrl
+
+
+   def report_form_factory(kind: DUrl[str]) -> type:
+       return WeeklyReportForm if kind == "weekly" else DailyReportForm
+
+
+   @action("submit_report", form_class=report_form_factory)
+   def submit_report(form) -> HttpResponse:
+       form.save()
+       return HttpResponseRedirect("/reports/")
+
+A factory that returns anything other than a class or a ``(class, dict)`` tuple raises ``TypeError`` at dispatch time.
+The template can reference the action through a variable when the name is computed in context.
+
+.. code-block:: jinja
+   :caption: action name from context
+
+   {% form @action=action_name %}
 
 Multiple Actions on One Page
 ----------------------------
@@ -235,7 +276,7 @@ Each lives at its own URL so the dispatcher can tell them apart.
 
 
    @action("update_note", form_class=NoteForm)
-   def update_note(form, note_id: DUrl[int]) -> HttpResponseRedirect:
+   def update_note(form: NoteForm, note_id: DUrl[int]) -> HttpResponseRedirect:
        form.instance = Note.objects.get(pk=note_id)
        form.save()
        return HttpResponseRedirect("/")
@@ -281,7 +322,7 @@ The action stays valid wherever the component renders.
        form.save()
        return HttpResponseRedirect(form.cleaned_data["origin"])
 
-Components register their actions during the same startup pass as pages.
+Components register their actions when the components backend imports each ``component.py``.
 
 System Checks
 -------------

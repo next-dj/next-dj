@@ -27,9 +27,12 @@ Pipeline
        Resolver -- form dispatch path --> FormDispatch["Form dispatcher"]
        Resolver -- file routed path --> PageView["Page view"]
        PageView --> Loader["Page loader"]
-       Loader --> ContextCtx["Run context functions"]
-       ContextCtx --> RenderBody["Render body source"]
-       RenderBody --> LayoutChain["Compose layout chain"]
+       Loader --> BodySource{"Body source"}
+       BodySource -- "render() function" --> RenderFn["Call render(), resolve its arguments"]
+       BodySource -- "template / template.djx" --> StaticBody["Read static body string"]
+       RenderFn --> ContextCtx["Run context functions"]
+       StaticBody --> ContextCtx
+       ContextCtx --> LayoutChain["Compose layout chain"]
        LayoutChain --> CollectAssets["Static collector"]
        CollectAssets --> InjectTags["Emit collected tags"]
        InjectTags --> Response(["HTTP response"])
@@ -58,8 +61,11 @@ A match on ``/_next/form/<uid>/`` dispatches to the form dispatcher instead.
 Page View
 ~~~~~~~~~
 
-The page view loads the page module, prepares the dependency cache, and runs every ``@context`` function in order.
-The view then calls the body source (``render``, ``template`` attribute, or ``template.djx``) and stores the result.
+The page view loads the page module and resolves the body source first.
+When the module exposes a ``render`` function the view calls it before context runs, resolving its arguments through the dependency resolver.
+``render`` may return a string body or an ``HttpResponseBase`` that short-circuits the layout and static pipelines.
+When the body comes from the ``template`` attribute or a ``template.djx`` file the view reads that source as a plain string.
+After the body is in hand the view builds the render context and runs every ``@context`` function in order.
 
 Layout Chain
 ~~~~~~~~~~~~
@@ -73,12 +79,12 @@ Static Collector
 
 The collector accumulates assets touched during the render.
 Components contribute when they render through ``{% component %}``.
-The collector finalises before the template tags emit their bucket.
+The collector finalises before the template tags emit their slot.
 
 Tag Injection
 ~~~~~~~~~~~~~
 
-``{% collect_styles %}`` and ``{% collect_scripts %}`` ask the collector for the appropriate bucket and emit the HTML.
+``{% collect_styles %}`` and ``{% collect_scripts %}`` ask the collector for the appropriate slot and emit the HTML.
 The framework injects the ``Next`` JS context script before any other script in the page.
 
 Form Submission Path

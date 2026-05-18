@@ -8,6 +8,12 @@ Problem
 
 Several Django projects in the same repository should reuse a single UI kit instead of duplicating component code.
 
+Scope
+-----
+
+:doc:`/content/topics/multi-project` is the full guide: page ``DIRS``, shared static, autoreload, and naming conventions.
+This page is the shortest path: point ``DEFAULT_COMPONENT_BACKENDS`` at one shared folder.
+
 Solution
 --------
 
@@ -107,5 +113,5 @@ See Also
 
 .. seealso::
 
-   :doc:`/content/topics/multi-project` for the directory shape.
+   :doc:`/content/topics/multi-project` for the full multi-project layout and hot reload.
    :doc:`/content/topics/components` for the component lifecycle.

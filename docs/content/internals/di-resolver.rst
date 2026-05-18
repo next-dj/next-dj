@@ -75,6 +75,17 @@ The built in providers are.
 Custom providers register through ``RegisteredParameterProvider``.
 A subclass joins the chain when its module is imported, in subclass definition order.
 
+Depends Forms
+-------------
+
+``DependsProvider`` handles a parameter whose default is a ``Depends`` marker.
+The ``dependency`` argument of ``Depends`` selects one of four forms.
+
+- ``Depends("name")`` — the argument is a string. The resolver looks up the callable registered under that name and invokes it through ``resolver._resolve_callable_dependency``.
+- ``Depends(callable)`` — the argument is a callable. The resolver resolves the callable's own parameters and calls it as a factory.
+- ``Depends(value)`` — the argument is any other object. That object is injected directly as a constant.
+- ``Depends()`` — no argument. The marker falls back to the parameter name and resolves it as the named form.
+
 ResolutionContext
 -----------------
 
@@ -85,8 +96,14 @@ Providers read what they need and never mutate the context.
 Cache
 -----
 
-The resolver caches every produced value on the request through an attribute named ``REQUEST_DEP_CACHE_ATTR``.
-The cache key combines the parameter type and the parameter name.
+Each resolution pass owns a ``DependencyCache``.
+It lives on the ``ResolutionContext`` for that pass and holds named dependency values.
+The cache key is the dependency name string alone, with no type component.
+
+Form validation failures re-render the origin page.
+``FormActionDispatch.dispatch`` attaches the dispatch cache dict to the request under the attribute named ``REQUEST_DEP_CACHE_ATTR``.
+The page context and component context renderers read it back through ``get_request_dep_cache`` and rejoin the same cache.
+That attribute carries the cache only for the form-failure re-render path, not for an ordinary page request.
 
 Two consequences flow from the cache.
 

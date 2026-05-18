@@ -4,8 +4,9 @@ Overview
 ========
 
 next.dj is a Django library that turns the filesystem into your URL router, your layout tree, and your component registry.
-You stay inside Django for models, admin, ORM, auth, and migrations.
-You leave Django when laying out URLs, sharing context, composing components, and dispatching forms.
+It layers on top of Django, it does not replace it.
+next.dj takes over URL layout, context sharing, component composition, and form dispatch.
+Django keeps handling models, admin, ORM, auth, and migrations exactly as before.
 
 This page describes the mental model.
 Read it once before the tutorial, then refer back when the layout of a real project surprises you.
@@ -23,7 +24,8 @@ File router.
 Layouts and context.
    A ``layout.djx`` wraps every page under its directory.
    Layouts nest down the tree.
-   A ``@context`` decorator publishes named values into the template scope and can opt into ``inherit_context=True`` to share values across descendants.
+   A ``@context`` decorator publishes named values into the template scope.
+   A context value can also be inherited, so every page below the directory that declares it can read it.
 
 Components.
    A folder under the configured components root becomes a reusable template fragment.
@@ -31,45 +33,29 @@ Components.
    The framework discovers them by name and renders them through the ``{% component %}`` tag.
 
 Form actions.
-   A ``@action`` decorator on a callable registers it as a form handler.
-   The ``{% form %}`` template tag points at that handler by name.
+   A ``@action`` decorator registers a callable as a form handler under a required action name, for example ``@action("create_note", form_class=NoteForm)``.
+   The ``{% form %}`` template tag points at that handler by the same name.
    The framework injects only the parameters that the handler signature asks for.
+
+.. _intro-overview-django-unchanged:
 
 What next.dj Does Not Replace
 -----------------------------
 
-next.dj does not replace Django, it depends on it.
+The ORM, migrations, admin, auth, and middleware stay the same as in a stock Django project.
+next.dj adds the ``NEXT_FRAMEWORK`` dict, includes ``next.urls`` for the file router, and resolves ``.djx`` through ``DjxTemplateLoader``. Standard ``.html`` templates in other apps are unchanged.
 
-- Django models, migrations, and the ORM stay the same.
-- Django admin, auth, and middleware stack work without changes.
-- Django settings still live in ``settings.py``, and next.dj reads its own knobs from a single ``NEXT_FRAMEWORK`` dict.
-- Django templates and template tags continue to work, and the framework registers a few new tags as Django builtins at startup.
+For the design principles behind that split, read :doc:`/content/misc/design-philosophy`.
 
-Glossary at a Glance
---------------------
+Key Terms
+---------
 
-Page.
-   A directory with a ``page.py`` becomes a URL.
-   Its sibling ``template.djx`` is the body that renders inside the layout chain.
+You will see these nouns on every page.
 
-Layout.
-   A ``layout.djx`` in any ancestor directory wraps every descendant page.
-   Layouts nest, with the closest layout being the innermost wrapper.
+**Page**, **layout**, **component**, **action**, **context function**, **DI marker**.
 
-Component.
-   A directory under the components root.
-   Holds ``component.djx`` (template), optional ``component.py`` (context), and optional co-located ``component.css`` and ``component.js``.
-
-Action.
-   A Python callable decorated with ``@action("name")``.
-   The framework gives it a stable URL and dispatches form submissions to it.
-
-Context function.
-   A callable decorated with ``@context("key")`` inside a ``page.py`` or ``layout.py``.
-   Its return value lands in the template under the key.
-
-DI marker.
-   A type annotation such as ``DUrl[str]``, ``DQuery[int]``, or ``Depends(...)`` that asks the resolver for a specific source of data.
+Expand definitions, spelling rules for route names, and the full term list in :doc:`/content/misc/glossary`.
+For design rationale, see :doc:`/content/misc/design-philosophy`.
 
 A Single-File Tour
 ------------------
@@ -116,5 +102,6 @@ The five tutorial parts build a small Notes application that exercises every cor
 .. seealso::
 
    :doc:`install` for environment setup.
+   :doc:`whatsnext` for topic hubs after the tutorial.
    :doc:`/content/topics/index` for in-depth topic guides.
    :doc:`/content/ref/index` for the API reference.

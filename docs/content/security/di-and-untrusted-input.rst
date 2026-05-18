@@ -44,7 +44,7 @@ Always validate the string before passing it into ORM lookups or external servic
    from notes.models import Note
 
    from next.pages import context
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
 
    @context("note")
@@ -66,7 +66,7 @@ Validate the resulting values against business rules.
    :caption: pagination guard
 
    from next.pages import context
-   from next.urls.markers import DQuery
+   from next.urls import DQuery
 
 
    @context("page")
@@ -156,7 +156,7 @@ Validate destination URLs before passing them to ``HttpResponseRedirect``.
    from django.urls import resolve, Resolver404
 
    from next.forms import action
-   from next.urls.markers import DQuery
+   from next.urls import DQuery
 
 
    @action("login", form_class=LoginForm)

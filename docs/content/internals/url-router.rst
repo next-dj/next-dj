@@ -46,7 +46,7 @@ Modules
    ``RouterManager`` builds the active pattern list, exposes ``reload``, and emits the ``router_reloaded`` signal.
 
 ``next.urls.dispatcher``.
-   Loads the page module, prepares the dependency cache, runs the page through the resolver, and produces an HTTP response.
+   ``FilesystemTreeDispatcher`` walks the pages directory tree and yields ``(url_path, page_file)`` pairs that the router turns into URL patterns.
 
 ``next.urls.markers``.
    ``DUrl`` and ``DQuery`` markers used in annotations.

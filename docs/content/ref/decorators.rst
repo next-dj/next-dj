@@ -18,7 +18,10 @@ Decorators
 .. autofunction:: next.pages.context
    :no-index:
 
-Registers a context function on a page module or layout module.
+Registers a context function on a page module (``page.py``).
+The first positional argument is ``func_or_key``.
+Called bare as ``@context`` it receives the decorated function and merges its returned dict into the template context.
+Called as ``@context("greeting")`` it receives a key string and binds the function's return value to that key.
 Pass ``inherit_context=True`` to publish the value to every descendant page.
 Pass ``serialize=True`` to expose the return value to the browser under ``window.Next.context``, and ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 
@@ -29,7 +32,9 @@ Pass ``serialize=True`` to expose the return value to the browser under ``window
    :no-index:
 
 Registers a component context function inside ``component.py``.
-The decorator publishes a named value into the component template scope.
+The first positional argument is ``func_or_key``.
+Called bare as ``@component.context`` it merges the function's returned dict into the component template scope.
+Called as ``@component.context("greeting")`` it binds the function's return value to that key.
 
 @action
 ~~~~~~~

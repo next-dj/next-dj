@@ -35,7 +35,7 @@ Discovery and Injection
 Collector Slots
 ---------------
 
-The collector keeps assets in named slots that map to template tags.
+The collector keeps assets in named slots (each slot matches the **bucket** term in :doc:`/content/misc/glossary`) that map to ``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholder tokens in templates.
 
 .. mermaid::
 

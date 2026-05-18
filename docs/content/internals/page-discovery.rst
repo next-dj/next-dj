@@ -22,14 +22,15 @@ Pipeline
 
    flowchart LR
        Walk[Filesystem walk] --> Loaders[Template loaders]
-       Loaders --> Manager[PageManager]
+       Loaders --> Manager[Page]
        Manager --> Registry[Page registry]
        Manager --> ContextReg[Context registry]
-       Manager --> Processors[Context processors]
        Registry --> Render[Render request]
        ContextReg --> Render
-       Processors --> Render
-       Render --> LayoutCompose[Layout composition]
+       Render --> InheritedCtx[Inherited page.py context]
+       InheritedCtx --> PageCtx[Page @context functions]
+       PageCtx --> Processors[Context processors]
+       Processors --> LayoutCompose[Layout composition]
        LayoutCompose --> Output[Final HTML body]
 
 Modules
@@ -50,8 +51,8 @@ Modules
    Implements the ``@context`` decorator and the ``Context`` marker.
 
 ``next.pages.processors``.
-   Runs Django context processors plus framework processors before page level context functions.
-   Merge precedence is global processors, layout context, page context, in that order.
+   Discovers and imports the context processor callables listed in each page backend's ``OPTIONS.context_processors`` and in the first Django ``TEMPLATES`` entry.
+   Processors are applied after all ``@context`` functions finish, so a processor that returns the same key as a context function overrides it.
 
 ``next.pages.watch``.
    Returns the watch specs that the autoreloader uses to track page directories.
@@ -59,22 +60,21 @@ Modules
 Render Path
 -----------
 
-1. The view loads the page module.
-2. The dependency resolver invokes every registered ``@context`` function for the page.
-3. The body source produces the page body.
-4. The framework walks the ancestor layout chain bottom up.
-5. Each layout substitutes the wrapped content into ``{% block template %}``.
-6. The framework runs ``{% collect_styles %}`` and ``{% collect_scripts %}`` against the request scoped collector.
+1. The view loads the page module from disk (or the module cache).
+2. ``Page.build_render_context`` assembles the template scope — see `Context Resolution`_ below.
+3. The body source produces the page body string.
+4. The framework walks the ancestor layout chain inward (outermost layout first, innermost last).
+5. Each layout substitutes the wrapped content into ``{% block template %}{% endblock template %}``.
+6. ``StaticManager.inject`` replaces ``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholder tokens with the rendered tags accumulated by the request-scoped ``StaticCollector``.
 
 Layout Composition
 ------------------
 
-Layouts compose by string substitution, not Django template inheritance.
-The framework reads each ``layout.djx`` from disk and replaces the ``{% block template %}{% endblock template %}`` region with the wrapped content.
-The closest layout wraps the page body.
-The farthest layout wraps everything.
+The framework reads each ancestor ``layout.djx`` from disk and replaces its ``{% block template %}{% endblock template %}`` region with the wrapped content.
+The innermost layout wraps the page body, the outermost layout wraps everything.
+Composition is string substitution, not Django template inheritance, so no page needs an explicit ``{% extends %}``.
 
-This avoids the need for ``{% extends %}`` per page and keeps the chain explicit.
+The user-facing rules for layout discovery, the placeholder contract, and layout-level context live in :doc:`/content/topics/layouts`.
 
 Body Source Priority
 --------------------
@@ -91,14 +91,26 @@ A page with more than one source is flagged by ``next.W043``.
 Context Resolution
 ------------------
 
-Context resolution happens in this order.
+``Page.build_render_context`` assembles the template scope in this order.
 
-1. Context processors configured on the page backend.
-2. Inherited context functions from every ancestor layout, evaluated from the page root downward.
-3. Page level context functions declared in ``page.py``.
-4. Component level context functions when ``{% component %}`` evaluates.
+1. URL kwargs from the matched route are seeded into the context dict.
+2. ``PageContextRegistry.collect_context`` runs in two sub-steps.
 
-The dependency resolver shares its cache across the chain so a value asked for twice is computed once.
+   a. Inherited context — every ``@context(..., inherit_context=True)`` callable registered in ancestor ``page.py`` files, walked from the root inward toward the current page.
+   b. Page-level context — ``@context`` callables declared in the current ``page.py``, evaluated after inherited values are in place so the page can shadow any inherited key.
+
+3. Context processors merge ``OPTIONS.context_processors`` from each page backend entry with ``context_processors`` from the **first** ``TEMPLATES`` entry.
+   The merge concatenates the page backend paths ahead of the Django paths and then deduplicates by dotted path.
+   Distinct paths stay in that order and run once each.
+   When the same dotted path appears in both sources only its first occurrence survives, so the page backend entry takes precedence over the Django entry.
+   Each surviving processor returns a dict that updates the merged scope, so a processor running later overrides an earlier key on a value collision.
+   Only the first ``TEMPLATES`` backend participates when several are configured.
+4. Component-level context functions run on demand as each ``{% component %}`` tag is evaluated during rendering.
+
+The dependency resolver shares a per-request cache across all four steps so a value resolved once (for example, the current user from ``Depends``) is not recomputed.
+
+The canonical description is in :doc:`/content/topics/context`.
+This page focuses on which module performs each step.
 
 Extension Points
 ----------------

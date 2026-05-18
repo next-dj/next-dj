@@ -30,12 +30,8 @@ Resolve every warning before deploying.
 next.dj Settings
 ----------------
 
-- ``NEXT_FRAMEWORK["LAZY_COMPONENT_MODULES"]`` is ``False`` so every component module imports at startup.
-- ``NEXT_FRAMEWORK["STRICT_CONTEXT"]`` is ``True`` to fail fast on undefined context keys.
-- ``NEXT_FRAMEWORK["DEFAULT_STATIC_BACKENDS"]`` points at a CDN aware backend when serving from a CDN.
-- ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` is set when context values include types beyond standard JSON.
-
-See :doc:`settings` for the full list with examples.
+Tune ``NEXT_FRAMEWORK`` using :doc:`settings` (production-oriented commentary and patterns).
+Canonical semantics for each key live in :doc:`/content/ref/settings`.
 
 Static Files
 ------------
@@ -52,7 +48,7 @@ Database
 
 - Apply every migration before starting the new process.
 - Run ``uv run python manage.py migrate --plan`` to confirm the migration set.
-- Take a snapshot before applying breaking schema changes.
+- Take a snapshot before applying destructive or high-risk schema changes.
 
 Server
 ------

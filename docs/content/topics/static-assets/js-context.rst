@@ -19,20 +19,9 @@ Context values opted into serialisation land under ``window.Next.context``.
 Opting In
 ---------
 
-Pass ``serialize=True`` on the ``@context`` decorator.
-
-.. code-block:: python
-   :caption: notes/routes/page.py
-
-   from next.pages import context
-
-
-   @context("note_count", serialize=True)
-   def note_count() -> int:
-       return 5
-
-The value lands at ``window.Next.context.note_count`` in the browser.
-A context function without ``serialize=True`` stays server side only.
+Pass ``serialize=True`` on ``@context`` in ``page.py`` or on ``@component.context`` in ``component.py``.
+The value appears under ``window.Next.context.<key>``. Keys without the flag stay server-side only.
+Decorator shapes and inheritance rules live in :doc:`../context`.
 
 Serializers
 -----------
@@ -167,21 +156,59 @@ Runtime Script Options
 
 The setting ``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]`` is a dict that configures the runtime script builder.
 The builder controls how and where the ``Next`` script is injected through a ``ScriptInjectionPolicy``.
-The default policy is ``AUTO``, which injects the runtime script before the collected scripts.
 
-Common Patterns
----------------
+.. list-table::
+   :header-rows: 1
+   :widths: 15 50 35
 
-Hydrate a Component
-~~~~~~~~~~~~~~~~~~~
+   * - Policy
+     - Effect
+     - When to use
+   * - ``AUTO`` (default)
+     - Injects the preload hint, the ``<script>`` tag, and the ``Next._init`` call into every rendered page.
+     - Pages that read ``window.Next.context`` or use co-located JS.
+   * - ``DISABLED``
+     - Skips injection entirely. ``window.Next`` is not defined.
+     - Pages that serve raw data or HTML fragments and have no client-side JS that reads ``window.Next``.
+   * - ``MANUAL``
+     - Skips automatic injection but builds the tag strings on request via ``NextScriptBuilder`` methods.
+     - Pages where you control placement of the script tags in a layout template.
 
-Mark the data a client component needs with ``serialize=True``.
-The component reads ``window.Next.context`` without a second request.
+Set the policy through the ``NEXT_JS_OPTIONS`` dict.
 
-Pydantic Models to the Browser
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. code-block:: python
+   :caption: config/settings.py
 
-Set ``JS_CONTEXT_SERIALIZER`` to ``PydanticJsContextSerializer`` so context functions can return Pydantic models directly.
+   NEXT_FRAMEWORK = {
+       "NEXT_JS_OPTIONS": {"policy": "disabled"},
+   }
+
+Accepted string values for ``policy`` are ``"auto"``, ``"disabled"``, and ``"manual"``.
+
+.. warning::
+
+   When ``policy`` is ``"disabled"``, ``window.Next`` is not defined.
+   Any co-located JavaScript or inline script that reads ``window.Next.context`` will fail at runtime.
+   Review every ``component.js`` and inline script before switching away from ``AUTO``.
+
+Template Tag Customisation
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``NEXT_JS_OPTIONS`` dict also accepts ``preload_template``, ``script_tag_template``, and ``init_template`` keys.
+Each is an HTML string with a single placeholder.
+Use them to add attributes such as ``nonce``, ``async``, or ``crossorigin`` without writing a custom backend.
+
+.. code-block:: python
+   :caption: config/settings.py — adding a crossorigin attribute
+
+   NEXT_FRAMEWORK = {
+       "NEXT_JS_OPTIONS": {
+           "script_tag_template": '<script src="{url}" crossorigin="anonymous"></script>',
+       }
+   }
+
+The ``{url}`` placeholder is the only supported substitution. The template is formatted with Python ``str.format``, not Django templates.
+For per-request values such as CSP nonces, use a custom static backend instead.
 
 See Also
 --------

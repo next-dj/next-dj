@@ -12,10 +12,17 @@ Run them through ``uv run python manage.py check`` and the framework reports con
 Check Registration
 ------------------
 
-``next.checks.register_all`` registers every subsystem check during ``AppConfig.ready``.
+``next.checks.register_all`` runs during ``AppConfig.ready``.
+It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
+The imported modules are ``next.conf.checks``, ``next.pages.checks``, ``next.urls.checks``, ``next.components.checks``, ``next.forms.checks``, ``next.server.checks``, and ``next.static.checks``.
+
+Most of these modules register checks. ``next.server.checks`` is a placeholder with no registered checks yet.
+``next.deps.checks`` is not imported by ``register_all`` and the dependency injection layer contributes no Django system checks.
 
 Shared Helpers
 ~~~~~~~~~~~~~~
+
+``next.checks.common`` holds helpers reused across subsystem check modules. It is imported indirectly by those modules rather than by ``register_all``.
 
 .. automodule:: next.checks.common
    :members:
@@ -44,6 +51,9 @@ Components
 Forms
 ~~~~~
 
+``check_form_action_collisions`` flags two ``@action`` calls that share a name but come from different handlers, reporting ``next.E041``.
+``check_form_action_backends_configuration`` validates the ``DEFAULT_FORM_ACTION_BACKENDS`` shape and import paths, reporting ``next.E044`` for a malformed entry and ``next.E045`` for a class that does not subclass ``FormActionBackend``.
+
 .. automodule:: next.forms.checks
    :members:
 
@@ -62,8 +72,22 @@ Configuration
 Server
 ~~~~~~
 
+``next.server.checks`` is a placeholder module with no registered checks yet.
+It exists so future server-layer checks can ship alongside the autoreload wiring without reshuffling the docs layout.
+
 .. automodule:: next.server.checks
    :members:
+
+Dependency Injection
+~~~~~~~~~~~~~~~~~~~~
+
+The dependency injection layer does not contribute Django system checks.
+There is no ``next.ENNN`` code for a missing provider or a bad marker graph.
+
+.. note::
+
+   Expect misconfiguration at **runtime**: unresolved parameters become ``None``, and cycles raise ``DependencyCycleError``.
+   Troubleshooting lives in :doc:`/content/topics/dependency-injection` and :doc:`/content/faq/troubleshooting`.
 
 Check Code Reference
 --------------------
@@ -247,3 +271,4 @@ See Also
 .. seealso::
 
    :doc:`/content/intro/install` for the first ``manage.py check`` run.
+   :doc:`/content/faq/troubleshooting` for symptoms that map to individual ``next.*`` codes.

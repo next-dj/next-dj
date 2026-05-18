@@ -9,35 +9,23 @@ This page answers high level questions about the project, its scope, and its lif
    :local:
    :depth: 2
 
-What is next.dj
----------------
+What is next.dj and is it a Django replacement
+-----------------------------------------------
 
-next.dj is a Django library that turns the filesystem into your URL router, your layout tree, and your component registry.
-It depends on Django and works inside any Django project.
-See :doc:`/content/intro/overview` for the mental model.
+next.dj is a Django library, not a replacement.
+It adds file-based routing, a layout system, reusable components, and form dispatch on top of a regular Django project.
+See :doc:`/content/intro/overview`, especially :ref:`intro-overview-django-unchanged`, for what stays stock Django versus what the framework adds.
 
-Is next.dj a Django replacement
--------------------------------
+Which Django and Python versions are supported
+----------------------------------------------
 
-No.
-next.dj depends on Django for models, the ORM, admin, auth, and migrations.
-It replaces only the URL configuration boilerplate, the view per URL pattern, and the verbose template inheritance.
-
-Which Django versions are supported
------------------------------------
-
-The 0.5 line supports Django 4.2, 5.0, 5.1, 5.2, and 6.0.
-
-Which Python versions are supported
------------------------------------
-
-The 0.5 line supports Python 3.12, 3.13, and 3.14.
+The :doc:`/content/intro/install` *Requirements* list names the tested Python and Django combinations.
 
 Is next.dj production ready
 ---------------------------
 
-The 0.5 line is the current active series.
-The project is still pre 1.0 so breaking changes can happen between minor versions.
+next.dj is used in production.
+See `Which symbols are safe to depend on`_ below for guidance on the public API surface.
 
 Where does the name come from
 -----------------------------
@@ -48,7 +36,7 @@ How do I follow the project
 ---------------------------
 
 Watch the repository on GitHub.
-Releases ship through PyPI under ``next-dj``.
+Releases ship through PyPI under the project name ``next.dj``.
 Discussions and feature requests live on GitHub Discussions.
 
 What about plugins
@@ -63,6 +51,28 @@ What about a CLI
 
 The framework does not add a new CLI.
 Django's ``manage.py`` plus the framework system checks cover the operational surface.
+
+Which symbols are safe to depend on
+------------------------------------
+
+Three tiers describe the public API.
+
+Stable.
+   Decorators, form base classes, template tags, marker types, and the documented settings keys.
+   Import these from the top-level ``next.*`` packages.
+
+Advanced.
+   Backend base classes, factory helpers, and frozen spec types.
+   Their signatures are intentionally stable.
+   Use them when writing a custom backend or a custom renderer.
+
+Internal hooks.
+   Symbols whose names start with a single underscore, plus private submodule internals.
+   Some packages re-export these names for testing and backend authoring convenience, but that does not make them part of the public API.
+   Avoid them in application code.
+   Use them only when extending the dispatch or discovery pipelines.
+
+See :doc:`/content/ref/forms` for a concrete example of how the tier model applies to ``next.forms``.
 
 See Also
 --------

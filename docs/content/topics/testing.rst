@@ -16,7 +16,7 @@ Overview
 The module provides nine submodules.
 
 ``next.testing.client``.
-   ``NextClient`` extends Django's test client and boots the file router.
+   ``NextClient`` is a thin subclass of Django's test client that adds form-action shortcuts.
 
 ``next.testing.isolation``.
    ``reset_registries`` reloads the form-action and component backends between tests.
@@ -31,7 +31,9 @@ The module provides nine submodules.
    Helpers to render a single page or component in isolation.
 
 ``next.testing.loaders``.
-   Utilities to eager load pages and components before a test.
+   ``eager_load_components()`` imports every ``component.py`` through the backend chain.
+   ``eager_load_pages(base_dir)`` imports every ``page.py`` under a given directory.
+   ``clear_loaded_dirs()`` drops the loader memoisation cache between self-test runs.
 
 ``next.testing.html``.
    HTML inspection helpers.
@@ -41,6 +43,59 @@ The module provides nine submodules.
 
 ``next.testing.deps``.
    Builders for ``ResolutionContext`` test doubles.
+
+Choose the Right Helper
+-----------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 35 30
+
+   * - Goal
+     - Use
+     - Import
+   * - HTTP request to a page or action
+     - ``NextClient``
+     - ``next.testing`` or ``next.testing.client``
+   * - POST to a registered action by name
+     - ``NextClient.post_action``
+     - ``next.testing`` or ``next.testing.client``
+   * - Render a page body without HTTP
+     - ``render_page``
+     - ``next.testing`` or ``next.testing.rendering``
+   * - Render a component in isolation
+     - ``render_component_by_name``
+     - ``next.testing`` or ``next.testing.rendering``
+   * - Assert on rendered HTML structure
+     - ``find_anchor``, ``assert_has_class``, ``assert_missing_class``
+     - ``next.testing`` or ``next.testing.html``
+   * - Capture one or more signals explicitly
+     - ``SignalRecorder`` or ``capture_signals``
+     - ``next.testing`` or ``next.testing.signals``
+   * - Capture every framework signal at once
+     - ``capture_framework_signals``
+     - ``next.testing`` or ``next.testing.signals``
+   * - Validate a form without HTTP
+     - ``build_form_for``, ``resolve_action_url``
+     - ``next.testing`` or ``next.testing.actions``
+   * - Temporarily override ``NEXT_FRAMEWORK`` or framework wiring
+     - ``override_next_settings``, ``override_dependency``, ``override_provider``, ``override_form_action``, ``override_component_backends``, ``patch_static_collector``
+     - ``next.testing`` or ``next.testing.patching``
+   * - Wrap the static collector for assertions
+     - ``StaticCollectorProxy``
+     - ``next.testing`` or ``next.testing.patching``
+   * - Unit-test a custom provider or resolver path
+     - ``resolve_call``, ``make_resolution_context``
+     - ``next.testing`` or ``next.testing.deps``
+   * - Force-import pages or components in tests
+     - ``eager_load_components``, ``eager_load_pages``, ``clear_loaded_dirs``
+     - ``next.testing`` or ``next.testing.loaders``
+   * - Clear registries between tests
+     - ``reset_registries`` (autouse fixture), or narrower ``reset_components`` / ``reset_form_actions`` / ``reset_page_cache``
+     - ``next.testing`` or ``next.testing.isolation``
+
+You can import everything above from the ``next.testing`` package. Submodule imports stay valid when you prefer explicit paths.
+See :doc:`/content/ref/testing` for generated signatures.
 
 Boot the Suite
 --------------
@@ -80,12 +135,46 @@ Add an ``autouse`` fixture in ``conftest.py`` to clear every registry between te
        reset_registries()
 
 The helper reloads the form-action and component backends from the current settings.
-``reset_page_cache`` is a separate helper that drops the page template cache when a test rewrites template files on disk.
+Three narrower helpers are also available when only one registry needs resetting:
+
+- ``reset_components()`` — reloads only the component backends.
+- ``reset_form_actions()`` — reloads only the form-action backends.
+- ``reset_page_cache()`` — drops the page template cache. It is useful when a test rewrites template files on disk.
+
+.. note::
+
+   When ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK``, ``component.py`` modules are not imported at startup.
+   After ``reset_registries()``, component registrations are absent until the first render triggers the import.
+   To make registrations visible before any HTTP request, call ``eager_load_components()`` from ``next.testing.loaders`` after ``reset_registries()``.
+
+   .. code-block:: python
+      :caption: conftest.py — eager loading with lazy modules
+
+      import pytest
+
+      from next.testing.isolation import reset_registries
+      from next.testing.loaders import eager_load_components
+
+
+      @pytest.fixture(autouse=True)
+      def _next_isolation():
+          reset_registries()
+          eager_load_components()
+          yield
+          reset_registries()
+
+   With the default ``LAZY_COMPONENT_MODULES = False``, all registrations are in place after ``AppConfig.ready``, so the extra call is unnecessary.
+
+   ``eager_load_pages(base_dir)`` is a separate helper that imports every ``page.py`` under a given directory.
+   Use it when a test suite does not go through the full request cycle and must trigger ``@context`` and ``@action`` side-effects manually.
+   See :ref:`ref-settings` for the full description of ``LAZY_COMPONENT_MODULES``.
 
 NextClient
 ----------
 
-``NextClient`` boots the file router and registers actions on creation.
+``NextClient`` is a thin subclass of Django's ``Client`` that adds ``post_action`` and ``get_action_url``, both of which resolve an action name through ``resolve_action_url``.
+It does nothing special on creation.
+The file router builds lazily through Django's URL resolver on the first request.
 Use it for end to end HTTP tests.
 
 .. code-block:: python
@@ -141,7 +230,7 @@ Use it for snapshot tests and template assertion tests that do not need URL rout
 Capture Signals
 ---------------
 
-``SignalRecorder`` subscribes to a signal on enter and unsubscribes on exit.
+``SignalRecorder`` subscribes to a single signal on enter and unsubscribes on exit.
 
 .. code-block:: python
    :caption: test with recorder
@@ -159,6 +248,48 @@ Capture Signals
        assert event.kwargs["action_name"] == "create_note"
 
 The recorder holds a list of ``SignalEvent`` instances with ``signal``, ``sender``, and ``kwargs`` attributes.
+``SignalRecorder`` accepts one or more signals and exposes these public methods.
+
+``start()``.
+   Connects receivers for every tracked signal and returns the recorder. Called automatically on context entry.
+
+``stop()``.
+   Disconnects receivers for every tracked signal. Called automatically on context exit.
+
+``events_for(signal)``.
+   Returns the list of captured events emitted by that signal.
+
+``first_for(signal)``.
+   Returns the first captured event for that signal, or raises ``LookupError`` when none was captured.
+
+``last_for(signal)``.
+   Returns the last captured event for that signal, or raises ``LookupError`` when none was captured.
+
+``clear()``.
+   Drops every captured event without disconnecting.
+
+The recorder is also iterable and supports ``len()`` over the captured events.
+
+Two convenience wrappers cover the common multi-signal cases.
+
+``capture_signals(*signals)`` returns a started ``SignalRecorder`` and reads well in ``with`` statements.
+
+.. code-block:: python
+   :caption: test with capture_signals
+
+   from next.signals import action_dispatched, page_rendered
+   from next.testing.client import NextClient
+   from next.testing.signals import capture_signals
+
+
+   def test_dispatch_and_render(db) -> None:
+       with capture_signals(action_dispatched, page_rendered) as recorder:
+           NextClient().post_action("create_note", {"title": "hi"})
+       assert len(recorder.events_for(action_dispatched)) == 1
+       dispatch = recorder.first_for(action_dispatched)
+       assert dispatch.kwargs["action_name"] == "create_note"
+
+``capture_framework_signals()`` attaches to every name in ``next.signals.__all__``, which helps integration tests assert ordering without listing signals by hand.
 
 Action Helpers
 --------------
@@ -186,6 +317,7 @@ HTML Utilities
 .. code-block:: python
    :caption: html assertions
 
+   from next.testing.client import NextClient
    from next.testing.html import assert_has_class, find_anchor
    from next.testing.rendering import render_component_by_name
 
@@ -229,7 +361,9 @@ Patching
    * - ``override_component_backends``
      - Temporarily swap the component backend configs.
    * - ``patch_static_collector``
-     - Temporarily swap the static collector.
+     - Temporarily swap the static collector implementation.
+   * - ``StaticCollectorProxy``
+     - Thin proxy around a collector for introspection in tests.
 
 .. code-block:: python
    :caption: temporary settings

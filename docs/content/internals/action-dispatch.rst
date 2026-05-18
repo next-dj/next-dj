@@ -30,8 +30,7 @@ Pipeline
        Build --> Validate{"Form valid"}
        Validate -- yes --> Handler["Run handler"]
        Handler --> Response["Handler response"]
-       Validate -- no --> FrozenSpec["Save frozen FormSpec"]
-       FrozenSpec --> ShareCache["Reuse dep cache"]
+       Validate -- no --> ShareCache["Attach dep cache to request"]
        ShareCache --> RenderOrigin["Render origin page"]
        RenderOrigin --> RerenderHTML["HTTP 200 with bound form"]
        Handler --> ActionDispatched["action_dispatched signal"]
@@ -60,7 +59,7 @@ Modules
    ``DForm`` annotation and ``FormProvider`` class.
 
 ``next.forms.serializers``.
-   ``FormSpec``, ``FormsetSpec``, ``FormSectionSpec``, ``FieldSpec`` plus the builders ``form_spec``, ``formset_spec``, ``field_spec``.
+   ``FormSpec``, ``FormsetSpec``, ``FormsetRowSpec``, ``FormSectionSpec``, ``FieldSpec`` plus the builders ``form_spec``, ``formset_spec``, ``field_spec``.
 
 ``next.forms.formsets``.
    ``cleanup_extra_initial`` helper for blank extra rows.
@@ -84,12 +83,6 @@ Its ``dispatch`` method resolves the UID, validates the origin page, builds the 
 
 A project customises dispatch by subclassing ``RegistryFormActionBackend`` and overriding ``dispatch``.
 The override calls ``super().dispatch`` to keep the standard pipeline.
-
-Frozen Form Spec
-----------------
-
-Before re-rendering on failure the dispatcher builds a ``FormSpec`` describing the bound failing form.
-The spec lives on the request and is available to context functions that want to introspect the form layout.
 
 Shared Dependency Cache
 -----------------------

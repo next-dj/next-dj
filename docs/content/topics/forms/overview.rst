@@ -76,14 +76,14 @@ The :doc:`dependency resolver </content/topics/dependency-injection>` fills each
    from django.http import HttpRequest, HttpResponseRedirect
 
    from next.forms import action
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
 
    @action("update_note", form_class=NoteForm)
    def update_note(
-       request: HttpRequest,
-       note_id: DUrl[int],
        form: NoteForm,
+       note_id: DUrl[int],
+       request: HttpRequest,
    ) -> HttpResponseRedirect:
        form.save()
        return HttpResponseRedirect("/")
@@ -110,58 +110,23 @@ Bad request.
 Where to Declare Actions
 ------------------------
 
-The framework imports action modules during application startup.
-Place the ``@action`` decorator in any of these files and the registration runs without manual imports.
+An ``@action`` decorator registers the handler at the time its module is imported.
+The framework automatically imports ``page.py`` files (when building URL patterns) and ``component.py`` files (when the components backend initialises), so actions in either location register without any extra wiring.
 
 - ``page.py`` next to the page that uses the action.
 - ``component.py`` next to a component that wraps a form.
-- A dedicated ``actions.py`` in your application package.
+- Any other module imported from ``AppConfig.ready``. A dedicated ``actions.py`` per-app is a common convention.
 
 A single Python module can register many actions.
 Each action stays addressable by name from any template in the project.
 
-Quick Start
------------
+Putting It Together
+-------------------
 
-The smallest end-to-end form has three parts.
+A form is the form class, the ``@action`` handler, and the ``{% form %}`` tag working together.
+The template tag wires the form to the action, the handler receives the validated form, and a failed validation re-renders the page with the bound form in place.
 
-.. code-block:: python
-   :caption: notes/forms.py
-
-   from django import forms
-
-   from next.forms import Form
-
-
-   class ContactForm(Form):
-       email = forms.EmailField()
-       message = forms.CharField(widget=forms.Textarea)
-
-.. code-block:: python
-   :caption: notes/routes/page.py
-
-   from django.http import HttpResponseRedirect
-
-   from next.forms import action
-
-
-   @action("contact", form_class=ContactForm)
-   def contact(form: ContactForm) -> HttpResponseRedirect:
-       send_email(form.cleaned_data["email"], form.cleaned_data["message"])
-       return HttpResponseRedirect("/")
-
-.. code-block:: jinja
-   :caption: notes/routes/template.djx
-
-   {% form @action="contact" %}
-     {{ form.email }}
-     {{ form.message }}
-     <button type="submit">Send</button>
-   {% endform %}
-
-The template tag wires the form to the action.
-The handler receives the validated form.
-A failed validation re-renders the page with the bound form in place.
+See :doc:`templates` for a worked end-to-end example and the full ``{% form %}`` tag reference.
 
 See Also
 --------

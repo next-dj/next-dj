@@ -15,6 +15,9 @@ next.dj emits :doc:`Django signals <django:topics/signals>` from every subsystem
 Connect plain receivers from ``AppConfig.ready`` and forward each payload to your metrics store or tracer.
 This is the production counterpart of ``SignalRecorder``, which captures the same signals inside tests.
 
+This page stays task focused.
+Use :doc:`/content/topics/signals` when you need the full catalog with payload tables, import paths, and testing notes.
+
 Walkthrough
 -----------
 

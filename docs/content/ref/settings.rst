@@ -9,6 +9,8 @@ Module Summary
 This page lists every key inside ``NEXT_FRAMEWORK`` with its framework default and a short description.
 Set ``NEXT_FRAMEWORK`` in ``settings.py`` to override any of these values.
 
+For production-specific recommendations (which values to change and why), see :doc:`/content/deployment/settings`.
+
 Backends
 --------
 
@@ -33,7 +35,12 @@ Default value.
 
 Each entry is passed to the backend constructor.
 Keys are ``BACKEND``, ``DIRS``, ``APP_DIRS``, ``PAGES_DIR``, and ``OPTIONS``.
-See :doc:`/content/topics/file-router` for the semantics.
+
+``DIRS`` accepts two kinds of entry.
+An absolute or project-relative path that resolves to an existing directory is added as an extra page root.
+A plain string that does not resolve to a directory is treated as a skip name: the router will not enter any directory with that name during the file walk.
+
+See :doc:`/content/topics/file-router` for the full semantics including examples.
 
 DEFAULT_COMPONENT_BACKENDS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -118,16 +125,26 @@ JavaScript Context
 NEXT_JS_OPTIONS
 ~~~~~~~~~~~~~~~
 
-Dict of options that the JS context shell renders into the page.
+Dict passed to ``NextScriptBuilder.from_options`` for the bundled ``next.min.js`` runtime: injection ``policy`` (``auto``, ``disabled``, or ``manual``), and optional string templates ``preload_template``, ``script_tag_template``, and ``init_template``.
 
-Default value ``{}``.
+Default value ``{}`` (automatic injection with default templates).
+
+Serialisation of ``window.Next.context`` is controlled by ``JS_CONTEXT_SERIALIZER`` and by ``@context(..., serialize=True)``, not by this dict.
+
+See :doc:`/content/topics/static-assets/js-context` under *Runtime script options* for the full table and examples.
 
 JS_CONTEXT_SERIALIZER
 ~~~~~~~~~~~~~~~~~~~~~
 
-Dotted path to a callable or class that converts the context map before JSON encoding.
+Dotted path to a class that implements the ``JsContextSerializer`` protocol.
+The class is instantiated with no arguments and its ``dumps`` method encodes every value bound for ``window.Next.context``.
 
-Default value ``None`` (use the built in JSON serializer).
+Default value ``None``, which selects the built-in ``JsonJsContextSerializer``.
+
+The resolver reads this key on every call, so ``override_settings`` takes effect without a restart.
+A value that does not resolve to a usable serializer raises ``next.W042`` during ``manage.py check``.
+
+See :doc:`static` under *JS Context Serializer* for the protocol and the bundled serializers.
 
 Strictness
 ----------
@@ -135,16 +152,28 @@ Strictness
 STRICT_CONTEXT
 ~~~~~~~~~~~~~~
 
-When ``True`` the framework raises on undefined context keys.
+When ``True``, any exception raised by a Django context processor (``TypeError``, ``ValueError``, ``AttributeError``, or ``KeyError``) is re-raised immediately instead of being logged as a warning and swallowed.
+The check applies only to processors listed under a page backend ``OPTIONS["context_processors"]``.
+Context callables registered with ``@context`` always propagate their exceptions regardless of this setting.
+When ``False``, the default, a failing processor is skipped so local development keeps rendering.
 
 Default value ``False``.
+:doc:`/content/deployment/settings` explains when to turn this on in production.
 
 LAZY_COMPONENT_MODULES
 ~~~~~~~~~~~~~~~~~~~~~~
 
-When ``True`` ``component.py`` modules are imported on first render rather than at startup.
+When ``False``, the default, every ``component.py`` module is imported eagerly during ``AppConfig.ready`` so the ``@component.context`` and ``@action`` decorators run before the first request.
+When ``True``, that eager preload is skipped.
+A ``component.py`` module is then imported lazily the first time its component is rendered.
 
-Default value ``False``.
+Set it to ``True`` for projects with very large component trees where the eager import pass slows startup noticeably.
+The trade-off is that an import error in a component module surfaces late, at the first render that needs the component, rather than at boot time.
+
+Default value ``False`` (eager import at startup).
+
+See :doc:`/content/deployment/settings` for production defaults.
+For tests, ``next.testing`` helpers such as ``eager_load_components`` matter when lazy loading is enabled. See :doc:`/content/topics/testing`.
 
 Patching Defaults
 -----------------
@@ -175,3 +204,4 @@ See Also
 
    :doc:`/content/topics/extending` for the broader picture.
    :doc:`/content/deployment/settings` for production tuned values.
+   :doc:`/content/topics/static-assets/js-context` for ``NEXT_JS_OPTIONS`` and ``ScriptInjectionPolicy``.

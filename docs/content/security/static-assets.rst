@@ -43,6 +43,11 @@ A custom backend overrides the renderer methods to add the ``integrity`` and ``c
 .. code-block:: python
    :caption: notes/backends.py
 
+   import base64
+   import hashlib
+
+   from django.contrib.staticfiles.storage import staticfiles_storage
+
    from next.static import StaticFilesBackend
 
 
@@ -52,7 +57,10 @@ A custom backend overrides the renderer methods to add the ``integrity`` and ``c
            return f'<link rel="stylesheet" href="{url}" integrity="{integrity}" crossorigin>'
 
        def _integrity_for(self, url: str) -> str:
-           ...
+           relative_path = url.removeprefix(staticfiles_storage.base_url)
+           with staticfiles_storage.open(relative_path) as asset:
+               digest = hashlib.sha384(asset.read()).digest()
+           return "sha384-" + base64.b64encode(digest).decode("ascii")
 
 Apply the same pattern to ``render_script_tag`` and ``render_module_tag``.
 
@@ -139,3 +147,4 @@ See Also
 
    :doc:`/content/topics/static-assets/backends` for backend customisation.
    :doc:`/content/deployment/static-files` for the production pipeline.
+   :doc:`/content/topics/static-assets/js-context` for ``NEXT_JS_OPTIONS``, ``ScriptInjectionPolicy``, and CSP-related templates.

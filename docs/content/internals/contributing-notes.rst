@@ -3,8 +3,14 @@
 Contributor Notes
 =================
 
-This page collects the conventions that the framework code itself follows.
+This page collects the conventions that the framework code itself follows: module layout, naming rules, and the invariants each subsystem must preserve.
 Read it before sending a patch that touches the core packages.
+
+.. note::
+
+   This page targets **framework contributors** editing ``next/``.
+   Documentation authoring rules live under :doc:`/content/contributing/index`.
+   Contribution workflow (tooling, CI, benchmarks, PR checklist) lives in `CONTRIBUTING.md <https://github.com/next-dj/next-dj/blob/main/CONTRIBUTING.md>`_.
 
 .. contents::
    :local:
@@ -23,13 +29,13 @@ Annotations
 ~~~~~~~~~~~
 
 Modules that participate in dependency resolution never use ``from __future__ import annotations``.
-This applies to ``page.py``, ``layout.py``, ``component.py``, and to ``providers.py``.
+This applies to ``page.py``, ``component.py``, and to ``providers.py``.
 The DI resolver inspects real annotations, not strings, and ``typing.get_origin`` returns ``None`` on stringified generics.
 
 Public Callables
 ~~~~~~~~~~~~~~~~
 
-Names exposed through ``@page.context``, ``@component.context``, ``@action``, ``get_initial``, and through provider classes never start with an underscore.
+Names exposed through ``@page.context``, ``@component.context``, ``@action``, and through provider classes never start with an underscore.
 Names prefixed with ``_`` stay module internal.
 
 System Checks
@@ -83,5 +89,5 @@ See Also
 
 .. seealso::
 
-   :doc:`/content/contributing/index` for the broader contribution workflow.
+   `CONTRIBUTING.md <https://github.com/next-dj/next-dj/blob/main/CONTRIBUTING.md>`_ for the full contribution workflow (setup, testing, benchmarks, PRs).
    :doc:`/content/contributing/writing-documentation` for the documentation rules.

@@ -61,7 +61,8 @@ Inline Assets
 
 Inline ``{% #use_style %}`` and ``{% #use_script %}`` blocks participate in deduplication.
 The strategy keys them by the rendered body, so two identical inline blocks collapse to one.
-Inline blocks always append, they never prepend.
+Inline blocks always append.
+They never prepend.
 
 Writing a Custom Strategy
 -------------------------

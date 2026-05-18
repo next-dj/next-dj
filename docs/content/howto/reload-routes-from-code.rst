@@ -49,8 +49,8 @@ Connect the receiver from ``AppConfig.ready`` so it runs at startup.
        def ready(self) -> None:
            from notes import receivers  # noqa: F401
 
-The reload is idempotent.
-Calling it twice in a single transaction emits the signal once.
+Each call rebuilds the backend list from the current ``NEXT_FRAMEWORK`` configuration, clears Django's URL caches, and emits ``router_reloaded``.
+Receivers should tolerate being invoked more than once when several writes batch into one task.
 
 Observe the Reload
 ------------------

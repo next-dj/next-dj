@@ -4,8 +4,9 @@ Frozen Form Specs
 =================
 
 The forms subsystem ships frozen dataclass descriptors that describe a form, a formset, or a single field as plain Python data.
+This module (``next.forms.serializers``) is unrelated to JSON serializers for :doc:`the browser context object </content/topics/static-assets/js-context>`. Those live under ``next.static``.
+
 Each descriptor is a frozen dataclass, so it is hashable and safe to cache or compare across renders.
-Use them when you need to inspect a form structure from Python or to render forms in a custom template engine.
 
 .. contents::
    :local:
@@ -14,28 +15,32 @@ Use them when you need to inspect a form structure from Python or to render form
 Overview
 --------
 
-The module ``next.forms.serializers`` exposes four dataclasses.
+The module ``next.forms.serializers`` exposes five dataclasses.
 
 FieldSpec.
    Render-time descriptor for one ``BoundField``.
-   Includes the field kind, the input type, the current value, and the selected values for choice fields.
+   Includes the field kind, the input type, the current value, the selected values for choice fields, and an ``is_extra`` flag.
 
 FormsetRowSpec.
    One row inside a formset spec.
-   Includes the row fields, the hidden HTML, the delete field, the row errors, and a flag for extra rows.
+   Includes the row fields, the hidden HTML, the delete field, the row errors, and an ``is_extra`` flag.
 
 FormsetSpec.
    Template-friendly view of a Django formset.
    Includes the management form, every row, the non form errors, and a ``can_delete`` flag.
 
+FormSectionSpec.
+   One labelled section in a ``FormSpec``, matching a Django admin fieldset.
+   Includes the section label, an optional description, and the tuple of ``FieldSpec`` it groups.
+
 FormSpec.
    Top-level descriptor for rendering a form with optional sections.
    Includes a tuple of ``FormSectionSpec`` plus non field errors.
 
-Every spec is a frozen ``@dataclass`` so it is hashable and safe to share across threads.
+Use these specs when you need to inspect a form structure from Python or to render in a custom template engine.
 
 Building a Spec
----------------
+----------------
 
 The module provides three constructor helpers.
 
@@ -58,6 +63,11 @@ The module provides three constructor helpers.
 The second argument of ``form_spec`` is a Django admin style ``fieldsets`` sequence of ``(label, options)`` pairs.
 Each ``options`` mapping carries a ``fields`` list and an optional ``description``.
 Each helper returns a frozen instance ready to pass into a template.
+
+``field_spec`` accepts an ``is_extra`` keyword argument that defaults to ``False``.
+It sets the ``is_extra`` field on the resulting ``FieldSpec``, which flags a field that belongs to a blank extra formset row.
+``formset_spec`` sets this flag on every ``FieldSpec`` and ``FormsetRowSpec`` it builds, so a template can tell a blank trailing row apart from a populated one and style or hide it accordingly.
+A standalone ``field_spec`` call leaves ``is_extra`` at ``False`` unless the caller passes the argument.
 
 Using a Spec in Templates
 -------------------------

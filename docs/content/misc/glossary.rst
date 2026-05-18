@@ -23,9 +23,10 @@ Terms used throughout the next.dj documentation.
       A subsystem implementation registered through ``NEXT_FRAMEWORK``.
       Used for the router, the components backend, the static backend chain, and the form action chain.
 
-   bucket
-      A named collection slot inside the static collector.
-      ``{% collect_styles %}`` emits the ``styles`` bucket, ``{% collect_scripts %}`` emits the ``scripts`` bucket.
+   collector slot
+      A named collection inside the static collector.
+      ``{% collect_styles %}`` emits the ``styles`` slot, ``{% collect_scripts %}`` emits the ``scripts`` slot.
+      The internal collector code names this structure ``_buckets``, but the documentation uses "slot" throughout.
 
    collector
       The request scoped object that accumulates assets touched by the current render.
@@ -38,8 +39,9 @@ Terms used throughout the next.dj documentation.
       A Python callable decorated with ``@context("key")`` that publishes a value to the template scope.
 
    DI marker
-      A type annotation or default argument that asks the resolver for a specific source of data.
-      Includes ``DUrl``, ``DQuery``, ``DForm``, ``Depends``, and ``Context``.
+      A signal that asks the resolver for a specific source of data.
+      An annotation marker is written in the type position, for example ``param: DUrl[int]``, and covers ``DUrl``, ``DQuery``, and ``DForm``.
+      A default-value marker is written as the parameter default, for example ``param: str = Context()``, and covers ``Context`` and ``Depends``.
 
    discovery
       The filesystem walk that builds the asset registry, the components registry, and the page registry at startup.
@@ -52,11 +54,22 @@ Terms used throughout the next.dj documentation.
       Used to render forms in custom templates.
 
    inherit context
-      The flag on ``@context`` that publishes a value to descendant pages, not only to the layout that declares it.
+      The ``inherit_context=True`` flag on ``@context`` in ``page.py``.
+      Publishes the context value to every descendant page under that directory, not only to the page that declares it.
 
    layout
       A ``layout.djx`` file in an ancestor directory.
       Wraps every descendant page.
+
+   JS context policy
+      Algorithm class such as ``FirstWinsPolicy`` or ``DeepMergePolicy`` that resolves duplicate serialised keys for ``window.Next.context``.
+      Selected through ``JS_CONTEXT_POLICY`` inside static backend ``OPTIONS``. See :doc:`/content/topics/static-assets/js-context`.
+
+   NextScriptBuilder
+      Constructs the ``next.min.js`` tag, preload link, and ``Next._init`` shell. Controlled through ``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]``.
+
+   ScriptInjectionPolicy
+      Controls whether the framework injects the runtime bundle automatically (``AUTO``), skips injection (``DISABLED``), or leaves placement to your templates (``MANUAL``).
 
    manager
       The singleton orchestrator for one subsystem.
@@ -73,6 +86,10 @@ Terms used throughout the next.dj documentation.
       A directory that the router walks for page discovery.
       Comes from ``APP_DIRS`` and ``DIRS`` in ``DEFAULT_PAGE_BACKENDS``.
 
+   multi-project layout
+      Multiple Django applications or explicit ``DIRS`` entries each contributing page trees while optionally sharing component directories through ``DEFAULT_COMPONENT_BACKENDS``.
+      See :doc:`/content/topics/multi-project`.
+
    provider
       A class that produces a value for a parameter.
       Implements ``can_handle`` and ``resolve``.
@@ -87,19 +104,29 @@ Terms used throughout the next.dj documentation.
       The singleton ``DependencyResolver`` that fills parameters from providers.
 
    route name
-      The URL name in the ``next`` namespace, computed from the directory path.
-      Default format ``next:page_<segments>``.
+      The Django URL name string inside the ``next`` namespace (``app_name`` on ``next.urls``).
+      Values come from ``NEXT_FRAMEWORK["URL_NAME_TEMPLATE"]``, default ``"page_{name}"``, where ``{name}`` is derived from the normalized filesystem path.
+      Reverse from templates as ``{% url 'next:page_notes_id' id=note.id %}`` or from Python through :doc:`/content/topics/url-reversing`.
 
    signal
       A Django signal emitted by one subsystem.
       Subscribers react without subclassing.
+
+   JS context serializer
+      Implementations of ``next.static.JsContextSerializer`` that encode values for ``window.Next.context``.
+      Distinct from frozen form specs in ``next.forms.serializers``.
 
    slot
       A named area inside a component template filled with caller content through the block form of ``{% component %}``.
 
    stem
       The filename without the extension.
-      Recognised stems for components are ``component``, for layouts ``layout``, for pages ``template``.
+      The recognised stem is ``component`` for a component file, ``layout`` for a layout file, and ``template`` for a page template file.
+      There is no ``page`` stem.
+
+   template loader
+      A ``TemplateLoader`` subclass registered through ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` that supplies template text for a ``page.py`` path.
+      See :doc:`/content/howto/add-a-custom-template-loader`.
 
    strategy
       A swappable algorithm such as ``DedupStrategy`` for static deduplication.
@@ -109,7 +136,7 @@ Terms used throughout the next.dj documentation.
 
    virtual route
       A directory with only ``template.djx`` and no ``page.py``.
-      Renders directly without invoking Python.
+      No Python module is invoked for the route itself, but ancestor ``layout.djx`` files still wrap it and co-located static assets are still collected.
 
 See Also
 --------

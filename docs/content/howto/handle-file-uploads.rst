@@ -76,6 +76,37 @@ Render the form with the right encoding type.
 The ``enctype`` attribute is required.
 Without it the browser submits only text values and ``form.file`` is empty.
 
+Configure media storage.
+
+A ``FileField`` writes to ``MEDIA_ROOT`` under the ``upload_to`` subdirectory, and the saved URL is built from ``MEDIA_URL``.
+Both settings must be present before any upload is saved.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   MEDIA_ROOT = BASE_DIR / "media"
+   MEDIA_URL = "/media/"
+
+Serve uploaded files in development.
+
+The file router include lives in the root URLconf alongside Django's :func:`~django.conf.urls.static.static` helper, which exposes ``MEDIA_ROOT`` while ``DEBUG`` is on.
+A production deployment serves the same files through the web server instead.
+
+.. code-block:: python
+   :caption: config/urls.py
+
+   from django.conf import settings
+   from django.conf.urls.static import static
+   from django.urls import include, path
+
+
+   urlpatterns = [
+       path("", include("next.urls")),
+   ]
+
+   if settings.DEBUG:
+       urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
 Verification
 ------------
 

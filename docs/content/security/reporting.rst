@@ -24,7 +24,7 @@ What to Include
 
 A complete report contains.
 
-- The next.dj version and the Django version.
+- Dependency versions that match your environment (for example a lock file or the output of ``pip freeze``) so maintainers can reproduce the stack.
 - The affected subsystem (pages, components, forms, static, deps, server, conf).
 - A reproducible test case or at minimum a step by step description.
 - The observed impact, including any account or data exposure.
@@ -36,13 +36,13 @@ What Happens Next
 -----------------
 
 The maintainers respond within five business days with an acknowledgement and an initial assessment.
-A fix lands in the next patch release.
-A coordinated public disclosure happens after the release is available.
+A fix is prepared and released once the assessment confirms the issue.
+A coordinated public disclosure happens after the fix is available.
 
 Reporter Credit
 ---------------
 
-The release notes credit the reporter unless the reporter prefers to remain anonymous.
+The fix announcement credits the reporter unless the reporter prefers to remain anonymous.
 
 Out of Scope
 ------------

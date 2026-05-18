@@ -44,7 +44,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`signals`
    Every signal emitted by the framework, with payload tables.
 
-:doc:`testing`
+:doc:`/content/topics/testing`
    ``NextClient``, ``SignalRecorder``, registry isolation.
 
 :doc:`extending`

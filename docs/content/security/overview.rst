@@ -72,7 +72,7 @@ Production Hardening
 
 A short list of production specific settings.
 
-- ``SECURE_BROWSER_XSS_FILTER = True``.
+- ``SECURE_SSL_REDIRECT = True``.
 - ``SECURE_CONTENT_TYPE_NOSNIFF = True``.
 - ``SECURE_HSTS_SECONDS = 31536000``.
 - ``SECURE_HSTS_INCLUDE_SUBDOMAINS = True``.
@@ -102,4 +102,5 @@ See Also
    :doc:`csrf-and-forms` for the form pipeline.
    :doc:`static-assets` for the static pipeline.
    :doc:`di-and-untrusted-input` for the dependency surface.
+   :doc:`/content/topics/static-assets/js-context` for runtime script options that interact with CSP.
    :doc:`reporting` for vulnerability disclosure.

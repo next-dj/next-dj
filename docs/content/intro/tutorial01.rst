@@ -14,6 +14,7 @@ Prerequisites
 
 You have followed :doc:`install` and you can serve a placeholder page at ``http://127.0.0.1:8000/``.
 You have a Django application named ``notes`` registered in ``INSTALLED_APPS``.
+Directory layout maps to URLs through the file router. See :doc:`/content/topics/file-router` and :doc:`/content/topics/pages` when you need the rules behind ``routes/``.
 
 Walkthrough
 -----------
@@ -99,12 +100,11 @@ Create the template.
 The framework composes the body of ``template.djx`` with any ancestor ``layout.djx``.
 You do not have a layout yet, so the page renders standalone.
 
-Wire the Static App
-~~~~~~~~~~~~~~~~~~~
+Confirming App Discovery
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The router needs to know that ``notes`` ships pages.
-The ``APP_DIRS`` flag from :doc:`install` already does the discovery, so no extra change to ``settings.py`` is required.
-The router will scan every application listed in ``INSTALLED_APPS`` for a ``routes/`` directory.
+The ``APP_DIRS`` flag from :doc:`install` already handles discovery, so no extra change to ``settings.py`` is required.
+The router scans every application listed in ``INSTALLED_APPS`` for a ``routes/`` directory.
 
 Run the Server
 ~~~~~~~~~~~~~~

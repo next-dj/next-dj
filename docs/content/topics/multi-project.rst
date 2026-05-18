@@ -17,6 +17,8 @@ When to Use Multi Project Layout
 Use this layout when more than one project needs to share components, layouts, and static assets without duplicating code.
 The examples repository uses this shape so that every example project pulls components from ``examples/_shared/``.
 
+For recipes focused on components only, see :doc:`/content/howto/share-components-across-projects`.
+
 Reach for the single project layout in :doc:`project-layout` when only one Django project lives in the repository.
 
 Directory Shape
@@ -149,12 +151,7 @@ A project can ship project-specific components alongside the shared kit.
    }
 
 The list order matters.
-Earlier entries win when the same component name appears twice.
-
-.. note::
-
-   A project-specific component that shares a name with a shared component shadows the shared one without any warning.
-   Place the project ``DIRS`` entry before the shared entry only when the override is intentional.
+Earlier entries win when the same component name appears twice, so a project ``DIRS`` entry placed before the shared entry silently shadows the shared component of the same name.
 
 Hot Reload
 ----------

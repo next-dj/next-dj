@@ -13,8 +13,15 @@ It covers the build step, the staticfiles finder integration, content hashing, a
 Overview
 --------
 
-next.dj contributes a staticfiles finder that exposes every co-located asset to Django's :doc:`standard staticfiles pipeline <django:howto/static-files/index>`.
-Production deployments therefore use :doc:`collectstatic <django:ref/contrib/staticfiles>` exactly as they would for any other Django project.
+next.dj contributes ``NextStaticFilesFinder`` (dotted path ``next.static.NextStaticFilesFinder``) that exposes every co-located asset to Django's :doc:`standard staticfiles pipeline <django:howto/static-files/index>`.
+``NextFrameworkConfig.ready`` appends it to ``STATICFILES_FINDERS`` automatically, so no manual configuration is required.
+Production deployments use :doc:`collectstatic <django:ref/contrib/staticfiles>` exactly as they would for any other Django project.
+
+To confirm the finder is active, run::
+
+   uv run python manage.py findstatic next/some-component/component.css
+
+If the file is not found, check that ``next`` is in ``INSTALLED_APPS``.
 
 Build Step
 ----------
@@ -26,7 +33,7 @@ Run ``collectstatic`` during the deployment build.
 
    uv run python manage.py collectstatic --noinput
 
-Django copies every co-located ``component.css``, ``component.js``, ``component.mjs``, ``layout.css``, ``template.css``, and any custom stem file into ``STATIC_ROOT``.
+Django copies every co-located ``component.css``, ``component.js``, ``component.mjs``, ``layout.css``, ``layout.js``, ``layout.mjs``, ``template.css``, ``template.js``, ``template.mjs``, and any custom stem file into ``STATIC_ROOT``.
 Project ``static/`` directories and any directory listed in ``STATICFILES_DIRS`` are copied as well.
 
 Hashed URLs

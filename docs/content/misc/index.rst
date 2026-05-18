@@ -11,9 +11,13 @@ This section collects material that supports the rest of the documentation witho
 :doc:`glossary`
    Definitions for every term the documentation uses with a specific meaning.
 
+:doc:`examples`
+   Catalog of the ``examples/`` projects in the repository, with links and doc cross-references.
+
 .. toctree::
    :hidden:
    :maxdepth: 1
 
    design-philosophy
    glossary
+   examples

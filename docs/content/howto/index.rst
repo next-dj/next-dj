@@ -24,6 +24,18 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`read-query-parameters`
    Read query-string values with the ``DQuery`` marker.
 
+:doc:`add-a-custom-template-loader`
+   Plug an extra ``TemplateLoader`` into ``TEMPLATE_LOADERS``.
+
+:doc:`require-login-on-pages`
+   Gate routed pages behind authentication.
+
+:doc:`internationalize-routes`
+   Serve the page tree under per-language URL prefixes.
+
+:doc:`customize-error-pages`
+   Replace the default 404 and 500 pages.
+
 .. rubric:: Context and components
 
 :doc:`share-context-across-pages`
@@ -77,6 +89,12 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`test-a-page-with-actions`
    Test a page that posts to a registered action.
 
+:doc:`test-a-component-in-isolation`
+   Render and assert on one component without a page.
+
+:doc:`split-settings-per-environment`
+   Split settings into base, dev, and prod modules.
+
 :doc:`integrate-django-admin`
    Run Django admin alongside next.dj pages.
 
@@ -98,6 +116,10 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    reload-routes-from-code
    write-a-router-backend
    read-query-parameters
+   add-a-custom-template-loader
+   require-login-on-pages
+   internationalize-routes
+   customize-error-pages
    share-context-across-pages
    build-a-composite-component
    share-components-across-projects
@@ -113,6 +135,8 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    write-a-form-action-backend
    extend-a-default-backend
    test-a-page-with-actions
+   test-a-component-in-isolation
+   split-settings-per-environment
    integrate-django-admin
    observe-framework-signals
    scope-requests-per-tenant

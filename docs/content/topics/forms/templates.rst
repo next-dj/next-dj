@@ -52,6 +52,7 @@ Class and Extra Attributes
 --------------------------
 
 Every ``key=value`` pair on the opening tag other than ``@action`` and ``method`` becomes a literal attribute on the ``<form>`` element.
+The tag does not interpret extra pairs as URL parameters.
 
 .. code-block:: jinja
    :caption: tag attributes
@@ -80,9 +81,6 @@ When the page URL captures a parameter the tag emits a hidden ``_url_param_<name
 
 A page whose URL captures ``id`` therefore posts a hidden ``_url_param_id`` field automatically.
 The handler receives the same value through ``DUrl[int]`` or any other URL marker.
-
-Any ``key=value`` pair on the opening tag other than ``@action`` and ``method`` is rendered as a literal attribute on the ``<form>`` element.
-The tag does not interpret extra pairs as URL parameters.
 
 The form Variable
 -----------------
@@ -134,9 +132,6 @@ The dispatcher routes submissions through the URL alone, so different forms do n
      {{ form.body }}
      <button type="submit">Create</button>
    {% endform %}
-
-Every ``{% form %}`` tag renders a ``<form method="post">`` element.
-The dispatcher only processes POST submissions, so the tag always emits ``method="post"`` regardless of any ``method`` argument.
 
 A page can also publish multiple bound forms by registering several ``@context("...")`` functions with distinct keys.
 The block always publishes the bound form under the name ``form``, so each ``{% form %}`` block sees its own form even when two blocks render on the same page.

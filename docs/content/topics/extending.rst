@@ -64,7 +64,7 @@ Subclass an abstract base class and register the dotted path in ``NEXT_FRAMEWORK
      - ``next.static.backends.StaticBackend``
    * - JS context serializer
      - ``JS_CONTEXT_SERIALIZER``
-     - ``next.static.serializers.JsContextSerializer``
+     - ``next.static.JsContextSerializer`` protocol, defined in ``next.static.serializers``
 
 A backend always implements the full contract.
 A custom backend usually subclasses the default so it inherits every default behaviour.
@@ -105,19 +105,79 @@ Register entries in ``AppConfig.ready`` or through a settings key.
    * - Target
      - How to register
    * - Asset kinds
-     - ``next.static.default_kinds.register`` in ``AppConfig.ready``.
+     - ``default_kinds.register(...)`` in ``AppConfig.ready``. Import ``default_kinds`` from ``next.static``.
    * - Asset stems
-     - ``next.static.discovery.default_stems.register`` in ``AppConfig.ready``.
+     - ``default_stems.register(...)`` in ``AppConfig.ready``. Import ``default_stems`` from ``next.static.discovery`` (deep import).
    * - Placeholder slots
-     - ``next.static.default_placeholders.register`` in ``AppConfig.ready``.
+     - ``default_placeholders.register(...)`` in ``AppConfig.ready``. Import ``default_placeholders`` from ``next.static``.
    * - Dependency providers
      - Subclass ``RegisteredParameterProvider``, imported in ``AppConfig.ready``.
    * - Named dependencies
-     - ``next.deps.resolver.dependency`` decorator.
+     - ``@resolver.dependency("name")`` decorator. Import ``resolver`` from ``next.deps``.
    * - Template loaders
      - The ``TEMPLATE_LOADERS`` settings key.
 
 The registry pattern is the right choice when the framework already knows how to consume the values and just needs to learn about a new entry.
+
+The asset-stem registry is the extension point for teaching the static discovery scanner about a new filename inside a component.
+``default_stems`` is not re-exported from the ``next.static`` package, so the registration requires the deep import ``from next.static.discovery import default_stems``.
+Call ``default_stems.register(...)`` from ``AppConfig.ready`` so the new stem is known before the first component scan.
+
+.. code-block:: python
+   :caption: notes/apps.py
+
+   from django.apps import AppConfig
+
+   from next.static.discovery import default_stems
+
+
+   class NotesConfig(AppConfig):
+       name = "notes"
+
+       def ready(self) -> None:
+           default_stems.register("styles", "theme")
+
+Autoreload Watch Specs
+~~~~~~~~~~~~~~~~~~~~~~
+
+The development reloader watches the page and component trees by default.
+Call ``register_autoreload_watch_spec`` from ``next.server`` to add a directory of your own.
+
+.. code-block:: python
+
+   register_autoreload_watch_spec(path: Path, glob: str) -> None
+
+``path`` is the filesystem root to watch.
+``glob`` is a pattern relative to that root that selects the files whose changes trigger a reload.
+Register the spec from ``AppConfig.ready`` so it is in place before the watcher starts.
+
+.. code-block:: python
+   :caption: notes/apps.py
+
+   from pathlib import Path
+
+   from django.apps import AppConfig
+
+   from next.server import register_autoreload_watch_spec
+
+
+   class NotesConfig(AppConfig):
+       name = "notes"
+
+       def ready(self) -> None:
+           register_autoreload_watch_spec(
+               Path(__file__).resolve().parent / "rules",
+               "**/*.yaml",
+           )
+
+Edits to any ``*.yaml`` file under ``notes/rules`` now restart the development server.
+Duplicate ``(path, glob)`` pairs are dropped, so registering the same spec twice is safe.
+
+A subsystem that produces watch specs of its own implements the ``FilesystemWatchContributor`` Protocol from ``next.server.watcher``.
+The Protocol declares a single ``iter_watch_specs()`` method that yields ``(root, glob)`` pairs for the file watcher.
+When the watcher collects the final spec list it sends the ``watch_specs_ready`` signal with ``sender`` set to the ``iter_all_autoreload_watch_specs`` function itself.
+Subscribe to that signal to observe or audit the resolved spec set.
+See :doc:`/content/internals/autoreload` for the full watcher pipeline.
 
 Protocols
 ---------
@@ -180,43 +240,23 @@ Choosing Between Mechanisms
 ---------------------------
 
 Picking the right mechanism saves work.
-The decision tree below covers the common cases.
+Use the entries below as a quick map.
 
-I need to add a new URL pattern source.
-   Use a backend that subclasses ``RouterBackend``.
-
-I need to recognise a new asset extension.
-   Use the kind registry.
-
-I need to recognise a new filename inside a component.
-   Use the stem setting.
-
-I need to validate every dispatch.
-   Use a form action backend.
-
-I need to log every dispatch.
-   Use the ``action_dispatched`` signal.
-
-I need to change how URLs land in HTML.
-   Use a static backend.
-
-I need to vary URLs by request.
-   Use a request-aware static backend.
-
-I need to inspect every rendered page.
-   Use the ``page_rendered`` signal.
+- **Add a new URL pattern source.** Subclass ``RouterBackend`` and register it under ``DEFAULT_PAGE_BACKENDS``.
+- **Recognise a new asset extension.** Register through the kind registry (``default_kinds``).
+- **Recognise a new filename inside a component.** Register a custom stem (``default_stems``).
+- **Validate every dispatch.** Implement a form action backend.
+- **Log every dispatch.** Subscribe to the ``action_dispatched`` signal.
+- **Change how URLs land in HTML.** Customise a static backend.
+- **Vary URLs by request.** Use a request-aware static backend.
+- **Inspect every rendered page.** Subscribe to the ``page_rendered`` signal.
+- **Watch extra directories during development.** Call ``register_autoreload_watch_spec``. See *Autoreload Watch Specs* above.
 
 Worked Examples
 ---------------
 
-See ``examples/`` in the repository for one project per mechanism.
-
-- ``examples/audit-forms`` shows a custom form action backend.
-- ``examples/kanban`` shows a custom static backend and a custom asset kind.
-- ``examples/live-polls`` shows a custom stem and a custom asset kind for Vue SFCs.
-- ``examples/wiki`` shows a hybrid router backend that reads from the database.
-- ``examples/feature-flags`` shows signal driven cache invalidation.
-- ``examples/observability`` covers every signal of the framework.
+The repository ``examples/`` tree ships complete projects for every major extension mechanism.
+:doc:`/content/misc/examples` lists each folder, a one-line focus, links to GitHub, and the sections of this manual that explain the same techniques.
 
 See Also
 --------

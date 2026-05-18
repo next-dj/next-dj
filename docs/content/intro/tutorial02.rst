@@ -14,6 +14,7 @@ Prerequisites
 
 You have finished :doc:`tutorial01`.
 The index page at ``/`` lists two seeded notes from the database.
+The same layout flow supports :doc:`tutorial03`, which factors UI into components, and :doc:`tutorial04`, which adds form actions on these routes.
 
 Walkthrough
 -----------
@@ -46,6 +47,9 @@ For the Notes application the most common layout sits next to the page tree at `
 The ``{% block template %}`` placeholder is mandatory.
 The framework substitutes the body of each page into that block.
 
+Reverse names such as ``next:page_`` come from the file router.
+See :doc:`/content/topics/file-router` for how directories become URLs and :doc:`/content/topics/url-reversing` for helpers such as ``page_reverse``.
+
 Remove the now redundant HTML envelope from ``notes/routes/template.djx`` and keep only the page body.
 
 .. code-block:: jinja
@@ -66,10 +70,10 @@ Share Site Context
 ~~~~~~~~~~~~~~~~~~
 
 The layout references ``site_name`` and ``tagline``, but no page produces them yet.
-Add a ``layout.py`` next to ``layout.djx`` to publish those values.
+Add a ``page.py`` next to ``layout.djx`` to publish those values with ``inherit_context=True`` so every descendant page can read them.
 
 .. code-block:: python
-   :caption: notes/routes/layout.py
+   :caption: notes/routes/page.py
 
    from next.pages import context
 
@@ -99,16 +103,19 @@ The bracketed segment is a URL parameter that the file router captures as ``id``
    from notes.models import Note
 
    from next.pages import context
-   from next.urls.markers import DUrl
+   from next.urls import DUrl
 
 
    @context("note")
-   def fetch_note(note_id: DUrl[int]) -> Note:
+   def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
-The ``DUrl[int]`` marker tells the :doc:`dependency injector </content/topics/dependency-injection>` to pull the captured ``id`` value from the URL, coerce it to an integer, and pass it to the function.
+The ``DUrl["id", int]`` marker tells the :doc:`dependency injector </content/topics/dependency-injection>` to pull a captured URL value, coerce it, and pass it to the function.
+The first argument is the captured segment name, here ``id`` from the ``[id]`` directory.
+The second argument is the coercion type, here ``int``.
+The parameter name in the signature is free, ``note_id`` reads better than ``id`` which shadows the Python builtin.
+Because the parameter name differs from the captured segment, the segment name must be given explicitly as the first argument.
 The :func:`~django.shortcuts.get_object_or_404` shortcut is the standard Django way to fetch a row or return a 404 response.
-The parameter name in the signature can be anything, here ``note_id`` reads better than ``id`` which shadows the Python builtin.
 
 Add the matching template.
 
@@ -144,20 +151,13 @@ Drop a second layout inside ``notes/routes/notes/`` to wrap only the detail page
 Reload ``/notes/1/`` and you should see both layouts at once.
 The root layout wraps the inner layout which wraps the detail template.
 
-How Context Reaches the Template
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Context functions resolve once per request.
-A ``@context("note")`` declared in ``notes/routes/notes/[id]/page.py`` runs only when a request hits that page.
-A ``@context("site_name", inherit_context=True)`` declared in a layout runs for every descendant page, but only one time per request even if a sub-layout also references it.
-
 Use Counts Across Pages
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Add a small bit of inherited context that demonstrates DI between context functions.
 
 .. code-block:: python
-   :caption: notes/routes/layout.py
+   :caption: notes/routes/page.py
 
    from notes.models import Note
 
@@ -200,7 +200,6 @@ Your project tree looks like this.
 
    routes/
      layout.djx
-     layout.py
      page.py
      template.djx
      notes/
@@ -211,7 +210,7 @@ Your project tree looks like this.
 
 The index links to each note.
 The detail page renders a single note pulled from the URL.
-Inherited context flows from the root layout down to every page.
+Inherited context flows from the root ``page.py`` down to every page.
 
 Common Pitfalls
 ---------------
@@ -221,11 +220,14 @@ Layout shows but page body does not.
    Without the placeholder the framework still renders the layout but cannot inject the page body.
 
 DUrl returns a string instead of an int.
-   Annotate the parameter as ``DUrl[int]``, not ``DUrl[str]``.
-   The marker takes the conversion type from the generic argument and falls back to ``str`` when omitted.
+   Pass the coercion type as the last argument, for example ``DUrl["id", int]``.
+
+DUrl parameter resolves to ``None``.
+   A ``DUrl`` parameter is matched against the captured segment by name.
+   When the parameter name does not match the segment, pass the segment name explicitly as the first argument, for example ``DUrl["id", int]`` for an ``[id]`` directory.
 
 Inherited context not available in a descendant.
-   Make sure the layout that publishes the context sits above the page that consumes it, and the context function declares ``inherit_context=True``.
+   Make sure the ``page.py`` that publishes the context sits in a directory above the page that consumes it, and the context function declares ``inherit_context=True``.
 
 Next Steps
 ----------

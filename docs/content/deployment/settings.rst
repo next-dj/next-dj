@@ -3,12 +3,9 @@
 Production Settings
 ===================
 
-This page lists recommended values for ``NEXT_FRAMEWORK`` in production.
-The values differ from the development defaults to prefer correctness, predictability, and observability over development speed.
-
-.. contents::
-   :local:
-   :depth: 2
+This page lists recommended ``NEXT_FRAMEWORK`` values for production.
+Each entry explains *why* the production value differs from the development default.
+For the full list of available keys, their defaults, and their semantics, see :doc:`/content/ref/settings`.
 
 Strict Context
 --------------
@@ -20,8 +17,8 @@ Strict Context
        "STRICT_CONTEXT": True,
    }
 
-Production renders fail fast on undefined context keys.
-A typo or a missing context function surfaces immediately instead of silently rendering an empty string.
+Use ``STRICT_CONTEXT: True`` in production so a misconfigured context processor fails loudly.
+Reference for behaviour and exception types: :ref:`ref-settings`.
 
 Eager Component Loading
 -----------------------
@@ -33,8 +30,8 @@ Eager Component Loading
        "LAZY_COMPONENT_MODULES": False,
    }
 
-Every ``component.py`` imports at startup.
-Action registrations, context registrations, and component context functions are visible from the first request.
+Keep ``LAZY_COMPONENT_MODULES: False`` (the default) in production so every ``component.py`` is imported at startup and registrations exist from the first request.
+Reference for lazy behaviour and testing helpers: :ref:`ref-settings` and :doc:`/content/topics/testing`.
 
 Static Backend
 --------------
@@ -63,6 +60,12 @@ JS Context Serializer
 
 Set the serializer when context values include types beyond the standard JSON set.
 ``PydanticJsContextSerializer`` handles Pydantic models and falls back to the Django JSON encoder for plain values.
+
+.. note::
+
+   ``PydanticJsContextSerializer`` requires the ``pydantic`` package, which is not a dependency of next.dj.
+   Install it separately (``pip install pydantic``) before enabling this serializer.
+   If ``pydantic`` is not installed, importing the serializer raises ``ImportError`` at startup.
 
 Page Backends With Context Processors
 -------------------------------------
@@ -100,61 +103,17 @@ Form Action Backend
 Register a custom backend that subclasses ``RegistryFormActionBackend`` and rate limits dispatch for endpoints exposed to anonymous users.
 See :doc:`/content/howto/write-a-form-action-backend`.
 
-Template Loaders
-----------------
+Combining Keys
+--------------
 
-.. code-block:: python
-   :caption: config/settings.py
+Use the snippets above as isolated overrides.
+When several apply at once, merge them into a single ``NEXT_FRAMEWORK`` dict without duplicating the full default structures documented on :doc:`/content/ref/settings`.
 
-   NEXT_FRAMEWORK = {
-       "TEMPLATE_LOADERS": [
-           "next.pages.loaders.DjxTemplateLoader",
-       ]
-   }
+Runtime script overrides
+------------------------
 
-Keep the loader list short.
-Each loader runs in order for every page resolution, and a long list adds startup cost.
-
-Full Example
-------------
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   from pathlib import Path
-
-
-   BASE_DIR = Path(__file__).resolve().parent.parent
-
-
-   NEXT_FRAMEWORK = {
-       "STRICT_CONTEXT": True,
-       "LAZY_COMPONENT_MODULES": False,
-       "DEFAULT_PAGE_BACKENDS": [
-           {
-               "BACKEND": "next.urls.FileRouterBackend",
-               "APP_DIRS": True,
-               "DIRS": [str(BASE_DIR / "chrome")],
-               "PAGES_DIR": "routes",
-               "OPTIONS": {"context_processors": [
-                   "notes.context_processors.tenant",
-               ]},
-           }
-       ],
-       "DEFAULT_COMPONENT_BACKENDS": [
-           {
-               "BACKEND": "next.components.FileComponentsBackend",
-               "COMPONENTS_DIR": "_components",
-           }
-       ],
-       "DEFAULT_STATIC_BACKENDS": [
-           {"BACKEND": "notes.backends.CdnBackend", "OPTIONS": {}},
-       ],
-       "DEFAULT_FORM_ACTION_BACKENDS": [
-           {"BACKEND": "notes.backends.RateLimitedFormActionBackend"},
-       ],
-       "JS_CONTEXT_SERIALIZER": "next.static.PydanticJsContextSerializer",
-   }
+Strict content security policies sometimes need nonces or manual ordering for the bundled ``next.min.js`` shell.
+``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]`` accepts template overrides and ``ScriptInjectionPolicy`` values described on :ref:`ref-settings` and in :doc:`/content/topics/static-assets/js-context`.
 
 See Also
 --------

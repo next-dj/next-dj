@@ -23,7 +23,7 @@ Run ``uv run python manage.py check`` and resolve every warning. The command run
 Page renders without layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A layout must contain ``{% block template %}{% endblock template %}``.
+A layout must contain the placeholder block ``{% block template %}{% endblock template %}`` or its short form ``{% block template %}{% endblock %}``.
 Without the placeholder the framework drops the body silently.
 
 Confirm that ``layout.djx`` sits in an ancestor directory.
@@ -34,6 +34,13 @@ next.W043 warning
 A page module declares more than one body source.
 Pick one of ``render``, ``template`` attribute, or sibling ``template.djx``.
 Remove the others.
+
+``render`` raised ``TypeError``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``render`` must return ``str`` or a Django :class:`~django.http.HttpResponseBase` subclass.
+Other values raise ``TypeError`` naming the ``page.py`` path.
+See :doc:`/content/topics/pages`.
 
 Forms
 -----
@@ -94,14 +101,47 @@ Hashed URL does not change
 Restart the development server.
 The watcher picks up file content changes but a hash computed at startup can stale during long sessions.
 
+next.W030 empty static backends
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``manage.py check`` warns when ``DEFAULT_STATIC_BACKENDS`` is empty.
+The framework falls back to the bundled ``StaticFilesBackend``, but you should either restore an explicit backend entry or accept that no custom chain is configured.
+
+next.E038 duplicate BACKEND entries
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two identical ``BACKEND`` dotted paths appear in ``DEFAULT_STATIC_BACKENDS``.
+Remove or rename one entry so each backend class appears once.
+
+next.W042 unusable JS_CONTEXT_SERIALIZER
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``JS_CONTEXT_SERIALIZER`` is set but does not resolve to an object that implements the ``JsContextSerializer`` protocol (a ``dumps`` method).
+Fix the dotted path or install optional dependencies such as ``pydantic`` when using ``PydanticJsContextSerializer``.
+
 Dependency Injection
 --------------------
+
+DependencyCycleError
+~~~~~~~~~~~~~~~~~~~~~~
+
+The resolver raises ``DependencyCycleError`` when two providers depend on each other.
+Read the chain printed on the exception, remove one ``Depends`` edge, or merge providers.
+See :doc:`/content/topics/dependency-injection` for request-cache interactions during form re-renders.
 
 DI parameter resolves to None
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The annotation might be a string (under ``from __future__ import annotations``).
-Remove the future import in page modules, layout modules, component modules, and provider modules.
+Common causes:
+
+- The parameter annotation is a forward-reference string (often from ``from __future__ import annotations`` in modules where the resolver cannot evaluate it).
+  Drop that import in ``page.py``, ``layout.djx``-adjacent Python hooks, ``component.py``, and provider modules if markers stop resolving.
+
+- No registered provider covers the marker type.
+  The resolver leaves the parameter unset. Depending on the callable signature this surfaces as ``None`` or a normal Python ``TypeError``.
+
+- The callable asks for data that is not in the request-scoped cache yet (for example the wrong phase of a form re-render).
+  Compare your scenario with the lifecycle discussion in :doc:`/content/topics/dependency-injection`.
 
 Custom marker not handled
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -112,17 +152,72 @@ Confirm that the provider class is imported during ``AppConfig.ready``.
 URL Resolution
 --------------
 
+Virtual routes and bracket directories
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A plain directory that contains only a ``template.djx`` and no ``page.py`` is a virtual route: the router still maps it to a URL.
+
+Captured-parameter directories (names in brackets) must contain ``page.py``, ``layout.djx``, ``template.djx``, or a child directory whose subtree includes ``page.py``.
+Otherwise ``manage.py check`` reports ``next.E010``.
+
 URL name not found
 ~~~~~~~~~~~~~~~~~~
 
 Run ``uv run python manage.py shell`` and print ``reverse("next:page_<name>")``.
 Confirm that the file router walked the relevant directory.
 
+Captured parameter name differs from directory name
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The router normalises hyphens in directory names to underscores.
+A directory named ``[my-id]`` produces the parameter ``my_id``, not ``my-id``.
+Access it as ``DUrl[str]`` annotated ``my_id`` in your context function.
+Rename the directory to ``[my_id]`` to avoid confusion.
+
+Two pages collide under the same URL pattern
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The system check ``next.E015`` reports when the same Django URL pattern is produced from multiple sources.
+This happens when two backends each walk a directory that maps to the same logical path.
+Verify that ``DIRS`` and ``APP_DIRS`` in your page backends do not overlap.
+
 Routes do not refresh
 ~~~~~~~~~~~~~~~~~~~~~
 
 For a custom router backend that reads from the database call ``router_manager.reload()`` after data changes.
 See :doc:`/content/howto/reload-routes-from-code`.
+
+Template tags look undefined
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The framework registers ``{% form %}``, ``{% component %}``, ``{% collect_styles %}``, and related tags as Django builtins during ``AppConfig.ready``.
+You normally **do not** ``{% load %}`` the ``next.templatetags.*`` libraries.
+If the template engine reports ``Invalid block tag`` on one of these names, confirm ``next.apps.NextFrameworkConfig`` is listed in ``INSTALLED_APPS`` and run ``manage.py check`` before chasing import paths.
+
+``template.djx`` edits and hot reload
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The dev watcher restarts the process when Python entrypoints such as ``page.py`` change.
+Editing only ``template.djx`` or other DJX files refreshes rendered output without a full restart, but long sessions occasionally benefit from a manual server bounce if templates look stale.
+
+Settings Behaviour
+------------------
+
+STRICT_CONTEXT causes unexpected exceptions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When ``STRICT_CONTEXT = True`` in ``NEXT_FRAMEWORK``, any context processor that raises ``TypeError``, ``ValueError``, ``AttributeError``, or ``KeyError`` re-raises the exception instead of logging a warning and continuing.
+This is recommended in production to surface misconfigured processors immediately, but can expose exceptions in processors you did not write.
+To debug, disable ``STRICT_CONTEXT`` temporarily and read the logged warning to identify the offending processor.
+See :ref:`ref-settings` for the full description of this key.
+
+Components are not available at startup
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default ``LAZY_COMPONENT_MODULES = False``, which means ``component.py`` modules are imported during ``AppConfig.ready``.
+If a module raises an import error at startup, the server does not start.
+Set ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK`` to defer imports to the first render.
+This hides startup errors but allows the server to boot and show the error on the page that uses the component instead.
 
 System Checks
 -------------

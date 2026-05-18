@@ -85,26 +85,13 @@ See :doc:`asset-kinds` for the registration recipe.
 A Single Asset From Disk to HTML
 --------------------------------
 
-Trace a file named ``component.css`` inside a component folder.
+A file named ``component.css`` next to ``component.djx`` reaches the browser in one pass.
+Discovery records it as a ``css`` ``StaticAsset`` because ``component`` is a registered stem and ``.css`` is the ``css`` kind extension.
+A render that uses the component adds the asset to the collector, which deduplicates it.
+After the page renders, the static manager replaces the ``styles`` slot token emitted by ``{% collect_styles %}`` with the link tags produced by ``render_link_tag`` on the active backend.
 
-1. Discovery walks the component roots.
-   It finds ``component.css`` next to ``component.djx`` because ``component`` is a registered stem and ``.css`` is the extension of the ``css`` kind.
-
-2. Discovery records a ``StaticAsset`` with kind ``css`` and the resolved ``source_path``.
-
-3. A page that uses the component triggers the collector to add the asset.
-   The collector deduplicates the entry through its dedup strategy.
-
-4. The layout contains ``{% collect_styles %}``.
-   The tag emits a placeholder token for the ``styles`` slot.
-
-5. After the page renders, the static manager replaces the ``styles`` token with the rendered link tags.
-   It calls ``render_link_tag`` on the active backend for each ``css`` asset.
-
-6. The browser receives the final HTML with the link tags in place of the placeholder token.
-
-The same flow applies to ``component.js`` (kind ``js``) and ``component.mjs`` (kind ``module``).
-Both land in the ``scripts`` slot emitted by ``{% collect_scripts %}``.
+The same flow applies to ``component.js`` (kind ``js``) and ``component.mjs`` (kind ``module``), which land in the ``scripts`` slot emitted by ``{% collect_scripts %}``.
+:doc:`/content/internals/static-pipeline` traces the pipeline step by step.
 
 Stems and Owners
 ----------------

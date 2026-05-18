@@ -3,8 +3,8 @@
 Design Philosophy
 =================
 
-This page captures the design principles behind next.dj.
-Read it to understand why the framework picks one path over another.
+Read this page when a framework decision surprises you and you want to understand the reasoning behind it.
+For a practical description of what next.dj adds to Django, see :doc:`/content/intro/overview`.
 
 .. contents::
    :local:
@@ -13,9 +13,8 @@ Read it to understand why the framework picks one path over another.
 Stay Inside Django
 ------------------
 
-next.dj is a library on top of Django, not a replacement.
-Models, the ORM, admin, auth, migrations, and the staticfiles pipeline remain unchanged.
-A Django developer can adopt next.dj for the routing and template layers without throwing away years of accumulated knowledge.
+Ordinary Django concerns stay in place. See :ref:`intro-overview-django-unchanged` in :doc:`/content/intro/overview` for the split.
+This page explains *why* routing, layouts, components, assets, and form dispatch sit on that base and what trade-offs follow.
 
 Filesystem as a Single Source of Truth
 --------------------------------------
@@ -55,8 +54,8 @@ Small Public Surfaces
 ---------------------
 
 Each subsystem exposes a narrow public API through its ``__init__.py``.
-Deep imports work but are not part of the stability promise.
-Project code that sticks to the public API survives upgrades unchanged.
+Importing deeper modules may work at runtime, yet anything not listed in :doc:`/content/ref/index` or :doc:`/content/faq/general` as stable is not part of the documented contract for application code.
+Keep application imports to the documented top-level ``next.*`` symbols.
 
 Signals for Side Channels
 -------------------------
@@ -75,8 +74,6 @@ Removing the dependency leaves the project intact.
 
 Trade Offs
 ----------
-
-The framework explicitly accepts a few trade offs.
 
 Filesystem walks at startup.
    Discovery costs time during boot.
