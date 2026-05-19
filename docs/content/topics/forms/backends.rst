@@ -86,15 +86,9 @@ The most common customisation overrides ``dispatch`` to wrap the standard dispat
            )
            return response
 
-The override calls ``super().dispatch`` to run the standard pipeline and
-records the dispatch UID against the response status.
-The ``uid`` argument is the public dispatch key, so this override stays
-on the public surface.
-An override that needs the action name instead can read the private
-``_uid_to_name`` index, the supported way to recover the name inside a
-``dispatch`` override.
-An unknown UID returns 404 from the parent dispatch, and the audit row
-still records that outcome.
+The override calls ``super().dispatch`` to run the standard pipeline and records the dispatch UID against the response status.
+An unknown UID returns 404 from the parent dispatch, and the audit row still records that outcome.
+See :doc:`/content/howto/write-a-form-action-backend` for the guarded pattern that recovers the action name from the UID index.
 
 Registering a Custom Backend
 ----------------------------
@@ -156,6 +150,7 @@ Custom Error Fragment
 ~~~~~~~~~~~~~~~~~~~~~
 
 Override ``render_form_fragment`` to return custom HTML for the validation error path.
+The override signature is ``render_form_fragment(request, action_name, form, template_fragment=None, *, page_file_path=None)``.
 
 See Also
 --------

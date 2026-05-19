@@ -25,13 +25,14 @@ Is next.dj production ready
 ---------------------------
 
 next.dj is used in production.
+Run ``manage.py check`` to confirm a deployment matches framework expectations, and pin a supported Python and Django release (see :doc:`/content/intro/install`).
 See `Which symbols are safe to depend on`_ below for guidance on the public API surface.
 
 How do I follow the project
 ---------------------------
 
 Watch the repository on GitHub.
-Releases ship through PyPI under the project name ``next.dj``.
+Releases ship through PyPI under the distribution name ``next.dj``, imported as ``next`` (see :doc:`/content/intro/install`).
 Discussions and feature requests live on GitHub Discussions.
 
 What about plugins

@@ -224,8 +224,8 @@ Accepted string values for ``policy`` are ``"auto"``, ``"disabled"``, and ``"man
    Any co-located JavaScript or inline script that reads ``window.Next.context`` will fail at runtime.
    Review every ``component.js`` and inline script before switching away from ``AUTO``.
 
-Template Tag Customisation
---------------------------
+Runtime Script Templates
+------------------------
 
 The ``NEXT_JS_OPTIONS`` dict also accepts ``preload_template``, ``script_tag_template``, and ``init_template`` keys.
 Each is an HTML string with a single placeholder.

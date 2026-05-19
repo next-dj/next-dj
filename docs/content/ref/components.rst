@@ -59,6 +59,8 @@ Backends
 
 .. autofunction:: next.components.register_components_folder_from_router_walk
 
+The URL router calls this during the page-tree walk and application code does not invoke it directly.
+
 Context Pipeline
 ~~~~~~~~~~~~~~~~
 
@@ -98,6 +100,8 @@ Prefer the Application Imports tier unless you are building framework tooling.
 
 .. autoclass:: next.components.ComponentInfo
    :members:
+
+``scope_key`` is the stable grouping tuple the duplicate-name check uses to detect same-scope collisions.
 
 .. autoclass:: next.components.ContextFunction
    :members:

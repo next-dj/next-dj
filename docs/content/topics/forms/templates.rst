@@ -3,9 +3,7 @@
 Form Templates
 ==============
 
-The ``{% form %}`` template tag renders a form bound to a registered action.
-It produces the HTML form element, injects the CSRF token, emits the hidden ``_next_form_page`` origin field, and exposes the bound form to its block body.
-This page covers every shape of the tag, the variables it publishes, and the rendering patterns for single and multi form pages.
+The ``{% form %}`` template tag renders a form bound to a registered action, and this page covers every shape of the tag, the variables it publishes, and the rendering patterns for single and multi form pages.
 
 .. contents::
    :local:
@@ -121,6 +119,8 @@ Customise the initial form by overriding ``get_initial`` on the form class rathe
 .. code-block:: python
    :caption: notes/forms.py
 
+   from typing import Any
+
    from django.http import HttpRequest
    from next.forms import ModelForm
    from notes.models import Note
@@ -131,7 +131,7 @@ Customise the initial form by overriding ``get_initial`` on the form class rathe
            fields = ("title", "body")
 
        @classmethod
-       def get_initial(cls, request: HttpRequest, id: int | None = None) -> Note | dict:
+       def get_initial(cls, request: HttpRequest, id: int | None = None) -> Note | dict[str, Any]:
            if id is None:
                return {}
            return Note.objects.get(pk=id)

@@ -100,6 +100,7 @@ The ``{% form %}`` tag posts to the framework's action endpoint, so ``request.GE
 Reconstruct the query string from the validated fields instead.
 
 .. code-block:: python
+   :caption: notes/pages/search/page.py
 
    from django.http import HttpResponseRedirect
    from django.urls import reverse
@@ -121,6 +122,7 @@ Can a form action return a custom HTTP status code
 Return any ``HttpResponseBase`` subclass.
 
 .. code-block:: python
+   :caption: notes/pages/page.py
 
    from django.http import HttpResponse
    from next.forms import action
@@ -138,7 +140,8 @@ How do I translate URLs or templates
 
 Internationalisation stays on Django's stack.
 Configure ``LocaleMiddleware``, translation files, and ``i18n_patterns`` (or your preferred URL prefix strategy) the same way as in a stock Django project.
-File routes resolve under whatever locale-aware prefix Django exposes. next.dj does not ship a separate translation mechanism for ``page.py`` files beyond ordinary Django template translation tags.
+File routes resolve under whatever locale-aware prefix Django exposes.
+next.dj does not ship a separate translation mechanism for ``page.py`` files beyond ordinary Django template translation tags.
 
 See Django's :doc:`translation overview <django:topics/i18n/index>`.
 

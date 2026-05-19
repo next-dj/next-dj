@@ -59,6 +59,8 @@ Update Page
 .. code-block:: python
    :caption: notes/pages/notes/[id]/edit/page.py
 
+   from types import SimpleNamespace
+
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
    from django.urls import reverse
@@ -68,9 +70,10 @@ Update Page
    from notes.forms import NoteForm
    from notes.models import Note
 
-   @context("form")
-   def edit_form(note_id: DUrl["id", int]) -> NoteForm:
-       return NoteForm(instance=get_object_or_404(Note, pk=note_id))
+   @context("update_note")
+   def edit_form(note_id: DUrl["id", int]) -> SimpleNamespace:
+       note = get_object_or_404(Note, pk=note_id)
+       return SimpleNamespace(form=NoteForm(instance=note))
 
    @action("update_note", form_class=NoteForm)
    def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:

@@ -37,7 +37,7 @@ The default is used when the key is absent from the query string.
 
    @context("featured")
    def featured(show: DQuery[int] = DEFAULT_FEATURED) -> list[Product]:
-       count = max(1, min(MAX_FEATURED, show))
+       count = max(1, min(MAX_FEATURED, show if isinstance(show, int) else DEFAULT_FEATURED))
        return list(
            Product.objects.filter(in_stock=True)
            .select_related("category")
@@ -126,7 +126,7 @@ When several callables need the same filter set, parse it once into a frozen dat
        return Filters(
            q=g.get("q", "").strip(),
            brands=tuple(get_multi_values(request, "brand")),
-           in_stock=g.get("in_stock") in {"1", "true", "yes"},
+           in_stock=g.get("in_stock", "").lower() in {"1", "true", "yes"},
            sort=g.get("sort") or "newest",
        )
 

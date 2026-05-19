@@ -29,6 +29,8 @@ Staticfiles Integration
 .. automodule:: next.apps.staticfiles
    :members:
 
+``staticfiles.install()`` calls ``next.static.register_defaults`` to register the built-in ``css``, ``js``, and ``module`` kinds and the ``styles`` and ``scripts`` slots.
+
 Autoreload Installer
 ~~~~~~~~~~~~~~~~~~~~
 

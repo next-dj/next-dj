@@ -39,6 +39,8 @@ A ModelForm can return either a dict for fresh creation or an instance for editi
 .. code-block:: python
    :caption: notes/forms.py
 
+   from typing import Any
+
    from django.http import Http404, HttpRequest
    from next.forms import ModelForm
    from notes.models import Note
@@ -49,7 +51,7 @@ A ModelForm can return either a dict for fresh creation or an instance for editi
            fields = ("title", "body")
 
        @classmethod
-       def get_initial(cls, request: HttpRequest, id: int | None = None) -> Note | dict:
+       def get_initial(cls, request: HttpRequest, id: int | None = None) -> Note | dict[str, Any]:
            if id is None:
                return {}
            try:

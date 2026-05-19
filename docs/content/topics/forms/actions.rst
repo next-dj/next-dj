@@ -216,7 +216,6 @@ The factory is dependency-resolved, so it can declare ``request: HttpRequest``, 
 ``AuthenticationForm`` requires ``request`` as its first constructor argument and has no ``get_initial`` method, so the tuple shape fits.
 
 A factory that returns a bare class picks the form per request without changing the constructor call.
-``WeeklyReportForm`` and ``DailyReportForm`` are two ``next.forms.Form`` subclasses defined in the project that share the dispatch URL of a single action.
 
 .. code-block:: python
    :caption: choosing a class per request
@@ -234,7 +233,7 @@ A factory that returns a bare class picks the form per request without changing 
        form.save()
        return HttpResponseRedirect("/reports/")
 
-A factory that returns anything other than a class or a ``(class, dict)`` tuple raises ``TypeError`` at dispatch time.
+A factory that returns anything other than a class or a ``(class, dict)`` tuple raises ``TypeError`` when the dispatcher resolves the factory.
 
 When the action name itself is computed at render time, the ``{% form %}`` tag accepts it through a context variable.
 
@@ -312,9 +311,6 @@ The forms subsystem contributes Django system checks.
 - ``next.E041`` reports two ``@action`` registrations that share a name but come from different handlers.
 - ``next.E044`` reports a malformed or non-importable ``DEFAULT_FORM_ACTION_BACKENDS`` entry, including a non-string ``BACKEND`` path.
 - ``next.E045`` reports a backend that does not subclass ``FormActionBackend``.
-
-A UID hash collision is not a system check.
-Two distinct action names that hash to the same 16 character UID raise ``ImproperlyConfigured`` at import time, before any check runs.
 
 Run the checks through ``uv run python manage.py check``.
 

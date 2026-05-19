@@ -6,7 +6,8 @@ Utils Reference
 Module Summary
 --------------
 
-``next.utils`` exposes three helpers that project code can import: ``resolve_base_dir``, ``classify_dirs_entries``, and ``caller_source_path``.
+``next.utils`` exposes two helpers that project code can import: ``resolve_base_dir`` and ``classify_dirs_entries``.
+``caller_source_path`` is a registration-internal frame helper the framework uses to attribute a decorated callable to its defining file, documented here for contributors rather than for project use.
 
 Public API
 ----------

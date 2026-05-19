@@ -32,7 +32,7 @@ Read :doc:`overview` first, then jump to the page that matches the part you are 
    What happens between a failing POST and the re-rendered origin page.
 
 :doc:`serializers`
-   The frozen field, formset, and form specs that survive across re-render.
+   The frozen field, formset, and form specs for rendering a form in a custom template engine.
 
 .. rubric:: Extending
 

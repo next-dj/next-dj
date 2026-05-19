@@ -21,7 +21,6 @@ Define the row form and the formset.
 .. code-block:: python
    :caption: notes/forms.py
 
-   from django import forms
    from django.forms import formset_factory
    from next.forms import ModelForm
    from notes.models import Note
@@ -49,6 +48,8 @@ Register the action.
            if row.cleaned_data and not row.cleaned_data.get("DELETE"):
                row.save()
        return HttpResponseRedirect(reverse("next:page_"))
+
+The ``page_{path}`` URL name follows the file-router naming convention, see :doc:`/content/topics/file-router`.
 
 Render the formset.
 

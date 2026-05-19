@@ -94,6 +94,8 @@ The simplest way to obtain the origin path is to read the hidden ``_next_form_pa
      }),
    });
 
+This works because every ``{% form %}`` block emits the ``_next_form_page`` hidden field.
+
 To post without a rendered form, re-publish the existing ``current_page_module_path`` value with ``@context("current_page_module_path", serialize=True)`` so it reaches ``window.Next.context``.
 
 Cross Origin Requests

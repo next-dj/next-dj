@@ -48,30 +48,14 @@ For the design principles behind that split, read :doc:`/content/misc/design-phi
 Key Terms
 ---------
 
-You will see these nouns on every page.
-
-Page
-   A directory with a ``page.py`` module that the file router maps to a URL.
-
-Layout
-   A ``layout.djx`` template that wraps every page below it in the tree.
-
-Component
-   A reusable template fragment with its own context and co-located assets.
-
-Action
-   A handler registered with ``@action`` that receives a form submission.
-
-Context function
-   A callable decorated with ``@context`` that publishes a value into the template scope.
-
-Expand these definitions, spelling rules for route names, and the full term list in :doc:`/content/misc/glossary`.
-For design rationale, see :doc:`/content/misc/design-philosophy`.
+You will see the nouns *page*, *layout*, *component*, *action*, and *context function* on every page.
+:doc:`/content/misc/glossary` defines each one.
 
 A Minimal Project
 -----------------
 
-Once installed, the smallest next.dj project is a ``page.py`` plus a ``template.djx`` under an app's ``pages/`` directory such as ``notes/pages/``, the ``NEXT_FRAMEWORK`` block in ``config/settings.py``, and a one-line ``include("next.urls")`` in ``config/urls.py``.
+Once installed, the smallest next.dj project is a ``page.py`` plus a ``template.djx`` under an app's ``pages/`` directory such as ``notes/pages/``.
+It also needs the ``NEXT_FRAMEWORK`` block in ``config/settings.py`` and a one-line ``include("next.urls")`` in ``config/urls.py``.
 :doc:`install` shows the full three-file shape with each block spelled out.
 Every new directory under ``pages/`` then adds another page without touching the URL configuration.
 

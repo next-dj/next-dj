@@ -58,6 +58,8 @@ Write the test.
 
        assert Note.objects.filter(title="First").exists()
 
+``NextClient`` does not enforce CSRF by default, matching Django's test client, so the POST needs no token.
+
 Test the Failure Path
 ~~~~~~~~~~~~~~~~~~~~~
 

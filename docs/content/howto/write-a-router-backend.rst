@@ -79,6 +79,7 @@ Locate that catchall :doc:`URLPattern <django:ref/urls>` by its reverse name and
 
 The reverse name follows ``URL_NAME_TEMPLATE``, which defaults to ``page_{name}``.
 A dynamic segment named ``[slug]`` yields the route name ``wiki_slug``.
+A typed segment such as ``[int:slug]`` would instead yield ``wiki_int_slug`` because the converter token survives into the name.
 
 Append One Pattern Per Row
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -145,7 +146,6 @@ Connect a receiver to ``post_save`` and ``post_delete`` and call ``router_manage
 .. code-block:: python
    :caption: wiki/receivers.py
 
-   from __future__ import annotations
    from django.db.models.signals import post_delete, post_save
    from django.dispatch import receiver
    from next.urls import router_manager

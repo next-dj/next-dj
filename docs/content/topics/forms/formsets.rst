@@ -55,6 +55,8 @@ Pass the formset class as ``form_class``.
                row.save()
        return HttpResponseRedirect(reverse("next:page_"))
 
+The ``page_{path}`` URL name follows the file-router naming convention, see :doc:`/content/topics/file-router`.
+
 Rendering the Formset
 ---------------------
 
@@ -158,27 +160,6 @@ Use ``modelformset_factory`` for editing several existing instances.
 The ``@context("edit_all_notes")`` callable publishes a bound formset under the action-named key the ``{% form %}`` tag reads.
 The handler receives the same formset for save.
 
-Common Patterns
----------------
-
-Add Form Button
-~~~~~~~~~~~~~~~
-
-Pair the formset with client side JS that clones the empty extra row.
-The framework processes whatever the management form reports.
-
-Partial Save
-~~~~~~~~~~~~
-
-Save only the valid rows by iterating ``form.cleaned_data`` and skipping rows with ``DELETE`` true or empty payloads.
-
-Inline Formset
-~~~~~~~~~~~~~~
-
-Use ``inlineformset_factory`` for parent and child relationships.
-The handler builds the formset, assigns it to the parent form, and validates them together.
-See `Validating an Inline Formset`_ below for the worked pattern.
-
 Validation Failure
 ------------------
 
@@ -238,6 +219,27 @@ The handler builds the formset and assigns it to the form before calling ``form.
 Assigning ``form.row_formset`` before ``form.is_valid()`` makes the formset reachable from ``clean``.
 The parent page re-renders with both the parent form errors and the row errors in scope.
 See ``examples/admin`` for a worked inline formset.
+
+Common Patterns
+---------------
+
+Add Form Button
+~~~~~~~~~~~~~~~
+
+Pair the formset with client side JS that clones the empty extra row.
+The framework processes whatever the management form reports.
+
+Partial Save
+~~~~~~~~~~~~
+
+Save only the valid rows by iterating ``form.cleaned_data`` and skipping rows with ``DELETE`` true or empty payloads.
+
+Inline Formset
+~~~~~~~~~~~~~~
+
+Use ``inlineformset_factory`` for parent and child relationships.
+The handler builds the formset, assigns it to the parent form, and validates them together.
+See `Validating an Inline Formset`_ above for the worked pattern.
 
 See Also
 --------

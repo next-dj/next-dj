@@ -78,6 +78,9 @@ Default value.
 The first static backend's ``OPTIONS`` dict accepts ``JS_CONTEXT_POLICY``, a dotted path to a conflict-resolution class the static manager applies when two context functions publish the same key for serialisation.
 See :doc:`/content/topics/static-assets/js-context` under *Key Conflict Policy* for the available policies and an example.
 
+The same ``OPTIONS`` dict accepts ``DEDUP_STRATEGY``, a dotted path to a dedup strategy class the collector instantiates once per request to drop assets several components register more than once.
+See :doc:`/content/topics/static-assets/deduplication` for the bundled strategies and the custom-strategy protocol.
+
 DEFAULT_FORM_ACTION_BACKENDS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

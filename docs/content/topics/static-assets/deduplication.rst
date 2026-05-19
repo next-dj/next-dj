@@ -53,7 +53,8 @@ The static manager builds the collector per request and reads the strategy dotte
        ]
    }
 
-The ``DEDUP_STRATEGY`` value is a dotted path to a callable that returns a strategy instance.
+The ``DEDUP_STRATEGY`` value is the dotted path to a dedup strategy class.
+The collector instantiates it once per request.
 When the key is absent the collector uses ``UrlDedup``.
 
 Inline Assets

@@ -6,7 +6,9 @@ URLs Reference
 Module Summary
 --------------
 
-``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``, the ``RouterFactory`` and ``RouterManager`` that build and own them, the ``URLPatternParser`` for bracket-segment parsing, the ``page_reverse`` and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, the Django integration name ``app_name``, the parameter providers, and the dependency markers ``DUrl`` (captured path segments) and ``DQuery`` (query string parameters).
+``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``, the ``RouterFactory`` and ``RouterManager`` that build and own them, and the ``URLPatternParser`` for bracket-segment parsing.
+It also exposes the ``page_reverse`` and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, and the Django integration name ``app_name``.
+The parameter providers and the dependency markers ``DUrl`` (captured path segments) and ``DQuery`` (query string parameters) round out the public surface.
 
 Public API
 ----------
@@ -73,8 +75,6 @@ They are exported from ``next.urls`` for introspection and for authors writing c
    * - ``QueryParamProvider``
      - Supplies ``request.GET`` values for parameters annotated with ``DQuery[...]``.
 
-Use ``get_multi_values(request, name)`` to read a multi-value query string parameter directly without going through the resolver.
-
 See :doc:`/content/internals/di-resolver` for the full provider registration sequence and the resolution order.
 
 Signals
@@ -83,7 +83,7 @@ Signals
 The URL subsystem fires two signals.
 
 ``route_registered``.
-   Sent by ``FileRouterBackend`` once per registered route, with the ``url_path`` and ``file_path`` keyword arguments.
+   Sent by ``FileRouterBackend`` once per registered route, including virtual ``template.djx`` routes, with the ``url_path`` and ``file_path`` keyword arguments.
 
 ``router_reloaded``.
    Sent by the router manager class after the router rebuilds, with no keyword arguments.

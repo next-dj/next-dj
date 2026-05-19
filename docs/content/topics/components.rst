@@ -38,8 +38,11 @@ Composite component.
 The two shapes share the same template syntax and the same call form.
 Composite components add Python logic when the template needs computed values that go beyond the surrounding template context.
 
-Multiline ``{% #component %}``, ``{% #slot %}``, and related tags are allowed. The framework enables ``re.DOTALL`` for Django's tag lexer so tag bodies can wrap across lines.
-See :ref:`ref-template-tags` under *Multiline tag bodies* for the global parsing caveat.
+.. note::
+
+   A composite component may supply its template body from Python instead of a ``component.djx`` file.
+   When ``component.py`` exposes a module-level string named ``component`` and no ``component.djx`` file exists, the framework uses that string as the template body.
+   ``ComponentScanner`` registers the component and ``ComponentTemplateLoader.load`` reads the string.
 
 .. code-block:: text
    :caption: component folder layouts
@@ -153,11 +156,16 @@ Pair it with the matching close tag.
 
 The block form lets the component template substitute child content through slots.
 
+.. _components-multiline-tags:
+
 Multiline Tags
 ~~~~~~~~~~~~~~
 
 Both the void form and the block form accept line breaks inside the tag body.
 This is useful when a component takes many props.
+The framework enables ``re.DOTALL`` for Django's tag lexer, so tag bodies wrap across lines.
+The line break support is applied globally by the template engine at startup, so it works in every template type, not only in component tags.
+See :ref:`ref-template-tags` under *Multiline tag bodies* for the global parsing caveat.
 
 .. code-block:: jinja
    :caption: multiline void tag
@@ -177,8 +185,6 @@ This is useful when a component takes many props.
        <p>Latest update.</p>
      {% /slot %}
    {% /component %}
-
-The line break support is applied globally by the template engine at startup so it works in every template type, not only in component tags.
 
 Props
 -----
@@ -255,12 +261,12 @@ Callers fill the slot with ``{% #slot %}`` inside the block form of ``{% compone
      {% /slot %}
    {% /component %}
 
-A caller-supplied ``{% #slot %}`` wins over the component's fallback body.
-When the caller omits the slot the component renders its own ``{% #set_slot %}`` default instead.
+A caller-supplied slot replaces the component's ``{% #set_slot %}`` fallback body.
+When the caller omits the slot the fallback renders.
 
 Both the void ``{% slot "name" %}`` and the block ``{% #slot %}`` forms are supported on the caller side, mirroring the void and block split shown for ``{% component %}``.
 The void form suits a slot whose value comes from a prop or is left empty.
-Caller slot content reaches the component scope under the ``slot_<name>`` key, and ``{% set_slot %}`` renders it or the component's fallback body.
+Caller slot content reaches the component scope under the ``slot_<name>`` key.
 
 Component Context
 -----------------
@@ -282,6 +288,14 @@ Use ``@component.context("key")`` to publish a value under that key for the temp
    @component.context("href")
    def href(note: Note) -> str:
        return f"/notes/{note.id}/"
+
+The matching template renders the published keys.
+
+.. code-block:: jinja
+   :caption: _components/note_card/component.djx
+
+   <a href="{{ href }}">{{ note.title }}</a>
+   <p>{{ preview }}</p>
 
 Component context functions take :doc:`DI parameters <dependency-injection>` the same way page context does.
 The framework resolves parameters from the surrounding template scope, from URL kwargs, from the request, or from any registered provider.
@@ -325,18 +339,15 @@ See :doc:`static-assets/deduplication` for the dedup rules.
 Module Loading
 --------------
 
-A configured component root is a ``DIRS`` entry of a ``DEFAULT_COMPONENT_BACKENDS`` backend.
-By default the framework imports every ``component.py`` found under those roots during ``AppConfig.ready``.
+By default the framework imports every registered ``component.py`` during component backend setup.
+``import_all_component_modules`` walks the whole registry, not only the ``DIRS`` roots.
 The bulk import runs the side effects of ``@component.context`` so they are visible from the first request.
 A ``component.py`` may also register a form action with ``@action``, which the same import makes visible.
 See :doc:`/content/topics/forms/actions` for the action decorator.
 
-A ``component.py`` inside a ``_components`` folder beside page files is not part of this bulk import.
-The URL router imports those modules as it walks the page trees and generates URL patterns.
-
-Set ``LAZY_COMPONENT_MODULES`` to skip the bulk import of ``component.py`` modules under the configured ``DIRS`` roots, leaving them to import on first resolve.
-The flag gates only that bulk import.
-Page-tree ``component.py`` modules are unaffected because the URL router imports them as it walks the page trees.
+The ``LAZY_COMPONENT_MODULES`` flag gates this eager bulk import.
+When the flag is set the framework skips it and imports a ``component.py`` on first resolve instead.
+Page-tree ``component.py`` modules are imported by the URL router as it walks the page trees, so they are available regardless of the flag.
 See :ref:`ref-settings` for the exact behaviour.
 
 .. code-block:: python
@@ -371,7 +382,9 @@ System Checks
 The components subsystem contributes Django system checks.
 
 - ``next.E020`` reports two components with the same name in the same scope.
+  Rename one of the colliding components or move it to a different scope root.
 - ``next.E034`` reports one component name used at the root route scope of more than one page tree.
+  Rename one of the colliding components or move it to a different scope root.
 
 Run them with ``uv run python manage.py check``.
 
@@ -415,8 +428,6 @@ When ``component.py`` defines no ``render`` function, the component renders its 
 .. code-block:: python
    :caption: _components/feature_guard/component.py
 
-   from next.components import component
-
    def render(flag_enabled: bool = False) -> str:
        if not flag_enabled:
            return ""
@@ -430,6 +441,7 @@ See Also
 .. seealso::
 
    :doc:`context` for the difference between page and component context.
+   :doc:`file-router` for the URL router walk that registers app page-tree component folders.
    :doc:`static-assets/index` for the static collector that emits component CSS and JS.
    :doc:`/content/howto/build-a-composite-component` for a recipe.
    :doc:`/content/internals/component-pipeline` for the discovery and render pipeline.

@@ -5,7 +5,7 @@ Repository Examples
 
 The ``examples/`` tree in the next.dj repository holds self-contained Django projects.
 Each runs on SQLite and in-process ``LocMemCache``.
-No Docker, Node, or external services are required beyond what the `examples README <https://github.com/next-dj/next-dj/blob/main/examples/README.md>`_ lists for a given folder.
+No Docker, Node, or external services are required beyond what the :repo:`examples README <blob/main/examples/README.md>` lists for a given folder.
 
 Catalog
 -------

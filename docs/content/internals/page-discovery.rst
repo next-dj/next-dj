@@ -82,14 +82,7 @@ The user-facing rules for layout discovery, the placeholder contract, and layout
 Body Source Priority
 --------------------
 
-The framework picks the highest priority body source.
-
-1. ``render`` function on the page module.
-2. ``template`` attribute on the page module.
-3. Sibling ``template.djx`` file.
-4. Custom template loader match.
-
-A page with more than one source is flagged by ``next.W043``.
+``Page._resolve_page_body`` and ``_load_static_body`` in ``next.pages.manager`` pick the highest priority body source, see :doc:`/content/topics/pages` for the full priority order and the ``next.W043`` conflict warning.
 
 Context Resolution
 ------------------
@@ -100,9 +93,12 @@ Context Resolution
 2. ``PageContextRegistry.collect_context`` runs in two sub-steps.
 
    a. Inherited context.
-      Every ``@context(..., inherit_context=True)`` callable registered in ancestor ``page.py`` files, walked from the root inward toward the current page.
+      Every ``@context(..., inherit_context=True)`` callable registered in ancestor ``page.py`` files, walked from the current page upward toward the page root.
    b. Page-level context.
       The ``@context`` callables declared in the current ``page.py``, evaluated after inherited values are in place so the page can shadow any inherited key.
+
+   Page-level context still shadows every inherited key.
+   Ancestor-collision order therefore only matters between two inherited keys.
 
 3. Context processors merge ``OPTIONS.context_processors`` from each page backend entry with ``context_processors`` from the **first** ``TEMPLATES`` entry, with the page backend paths concatenated ahead of the Django paths.
    Deduplication by dotted path keeps the first occurrence, so a path shared by both sources runs once with the page backend taking precedence.

@@ -50,6 +50,8 @@ Modules
 
 ``next.urls.markers``.
    ``DUrl`` and ``DQuery`` markers used in annotations.
+   The four parameter providers ``HttpRequestProvider``, ``UrlByAnnotationProvider``, ``UrlKwargsProvider``, and ``QueryParamProvider`` that register with the resolver.
+   The ``get_multi_values`` helper that reads a multi-value query parameter outside the resolver.
 
 ``next.urls.reverse``.
    ``page_reverse`` and ``with_query`` helpers.
@@ -85,7 +87,7 @@ The settings list accepts more than one backend.
 Each backend reports its own list of patterns.
 The dispatcher checks them in order and the first match wins.
 
-Two backends with the same URL pattern fire the ``next.E015`` system check at startup.
+If two routes resolve to the same Django path the ``next.E015`` system check reports the conflict at startup, whether they come from one tree or several.
 
 Extension Points
 ----------------

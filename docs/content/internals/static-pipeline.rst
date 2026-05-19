@@ -96,25 +96,15 @@ Asset Kinds
 -----------
 
 Each kind maps an extension to a placeholder slot and a backend renderer method.
-``register_defaults`` registers three kinds through ``default_kinds``.
-
-- ``css`` with extension ``.css``, slot ``styles``, renderer ``render_link_tag``.
-- ``js`` with extension ``.js``, slot ``scripts``, renderer ``render_script_tag``.
-- ``module`` with extension ``.mjs``, slot ``scripts``, renderer ``render_module_tag``.
-
-The renderer name is a method on the active static backend.
-The manager looks the method up with ``getattr`` per asset.
-``StaticFilesBackend`` ships all three methods.
+The renderer name is a plain string the manager looks up with ``getattr`` on the active static backend per asset, so a backend supplies a renderer simply by exposing a method of that name.
+:doc:`/content/topics/static-assets/asset-kinds` lists the bundled kinds and their renderer methods.
 
 Dedup
 -----
 
-The collector holds a dedup strategy.
-The default is ``UrlDedup``, which keys by URL and kind.
-``HashContentDedup`` keys by content hash.
-``IdentityDedup`` disables deduplication.
-
-The strategy is selected through the ``DEDUP_STRATEGY`` key in the first static backend ``OPTIONS``.
+The collector holds one dedup strategy for the request.
+The strategy is selected by the dotted path under the ``DEDUP_STRATEGY`` key of the first static backend ``OPTIONS``, instantiated once per request, defaulting to ``UrlDedup`` when the key is absent.
+:doc:`/content/topics/static-assets/deduplication` covers the bundled strategies and the custom-strategy protocol.
 
 Signals
 -------

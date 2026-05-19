@@ -125,6 +125,19 @@ Use ``SimpleUploadedFile`` to feed a fake file into ``NextClient``.
        )
        assert response.status_code == 302
 
+A submission without the ``file`` key re-renders the origin page with the missing-file error.
+
+.. code-block:: python
+   :caption: tests/test_upload.py
+
+   def test_upload_without_file_rerenders(db) -> None:
+       response = NextClient().post_action(
+           "upload_attachment",
+           {"title": "First"},
+       )
+       assert response.status_code == 200
+       assert b"This field is required" in response.content
+
 See Also
 --------
 

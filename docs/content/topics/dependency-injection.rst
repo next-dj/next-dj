@@ -16,7 +16,6 @@ Overview
 
 The resolver runs at four call sites: page context functions, the page render function, component context functions, and ``@action`` form handlers.
 Every call site shares one provider list and one set of markers.
-For each parameter the resolver picks the first provider whose ``can_handle`` returns ``True``, falling back to the declared default when none claims it.
 Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
 
 Built In Providers

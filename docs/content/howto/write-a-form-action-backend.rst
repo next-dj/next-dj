@@ -98,4 +98,4 @@ See Also
 .. seealso::
 
    :doc:`/content/topics/forms/backends` for the topic guide.
-   ``examples/audit-forms`` for a worked dual channel audit.
+   ``examples/audit-forms`` for a worked audit backend.

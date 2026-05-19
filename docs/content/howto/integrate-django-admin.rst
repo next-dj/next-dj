@@ -13,7 +13,8 @@ Solution
 --------
 
 Mount the admin under a path prefix above the file router in ``config/urls.py``.
-The Django URL resolver tries the admin patterns first, anything that does not match falls through to next.dj.
+The Django URL resolver tries the admin patterns first.
+Anything that does not match falls through to next.dj.
 
 Walkthrough
 -----------

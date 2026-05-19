@@ -90,6 +90,9 @@ The bracket syntax accepts every Django path converter.
      - ``<path:name>``
      - Wildcard that matches one or more segments including slashes.
 
+The parser handles three bracket forms.
+The typed captured segment is the captured form with a converter prefix, as covered in :doc:`/content/internals/url-router`.
+
 The ``[[name]]`` wildcard requires at least one character.
 A request to the parent path with no trailing segment, such as ``/api/`` for an ``api/[[suffix]]/`` route, does not match, because the Django ``path`` converter never captures an empty string.
 
@@ -196,7 +199,7 @@ Project directories.
 
 You can use both sources at once.
 URL patterns are built in this order, first from application directories then from each entry in ``DIRS``.
-If the same URL appears in two sources the system check ``next.E015`` reports the conflict.
+If two routes resolve to the same Django path the system check ``next.E015`` reports the conflict, whether they come from one tree or several.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -322,24 +325,9 @@ Hot Reload
 ----------
 
 A backend that reads from a database or other dynamic source needs to rebuild its pattern list when the data changes.
-``router_manager.reload()`` clears the resolver cache and rebuilds every backend.
-
-.. code-block:: python
-   :caption: notes/receivers.py
-
-   from django.db.models.signals import post_delete, post_save
-   from django.dispatch import receiver
-   from notes.models import Note
-   from next.urls import router_manager
-
-   @receiver(post_save, sender=Note)
-   @receiver(post_delete, sender=Note)
-   def reload_router_on_note_change(**_kwargs) -> None:
-       router_manager.reload()
-
-The call is idempotent.
-Each invocation walks every configured backend and emits a ``router_reloaded`` signal with the manager class as sender.
-Long lived processes can listen for that signal to refresh cached URL references.
+``router_manager.reload()`` clears the resolver cache and rebuilds every backend, and the call is idempotent.
+Each invocation emits a ``router_reloaded`` signal with the manager class as sender, so long lived processes can listen for it to refresh cached URL references.
+See :doc:`/content/howto/reload-routes-from-code` for the model-signal receiver that triggers the reload.
 
 System Checks
 -------------
@@ -349,7 +337,8 @@ The router contributes Django system checks that validate the configuration at s
 - ``check_next_pages_configuration`` validates the ``NEXT_FRAMEWORK`` structure and each backend entry.
 - ``check_pages_structure`` validates directory naming, captured parameter syntax, and the presence of ``page.py`` or ``template.djx``.
 - ``check_page_functions`` warns when a directory has neither a render function nor a template.
-- ``check_url_patterns`` reports the same Django path produced by two sources (``next.E015``).
+- ``check_pages_structure`` and ``check_page_functions`` come from ``next.pages`` and appear here because they validate the same page tree the router scans.
+- ``check_url_patterns`` reports two routes that resolve to the same Django path, whether they come from one tree or several (``next.E015``).
 - ``check_duplicate_url_parameters`` fails when one route repeats a captured parameter name (``next.E028``).
 
 Run them through ``uv run python manage.py check``.

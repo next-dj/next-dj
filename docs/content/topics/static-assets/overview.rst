@@ -115,27 +115,14 @@ A stem is the filename without the extension.
      - ``component``
      - ``component.css``, ``component.js`` inside a component folder
 
-The stem registry is ``next.static.discovery.default_stems``.
+The stem registry is ``default_stems``, which lives at ``next.static.discovery`` rather than the package root.
 Projects register extra stems through ``default_stems.register``.
 See :doc:`custom-stems`.
 
 Where Assets Live
 -----------------
 
-.. code-block:: text
-   :caption: typical layout
-
-   notes/_components/note_card/
-     component.djx
-     component.css
-     component.js
-   notes/pages/
-     layout.djx
-     layout.css
-     page.py
-     template.djx
-     template.css
-     template.js
+:doc:`co-located-files` shows the directory layout where co-located assets sit next to pages, layouts, and components.
 
 Hot Reload
 ----------
@@ -155,28 +142,7 @@ See :doc:`/content/deployment/static-files` for production guidance.
 Public API Touchpoints
 ----------------------
 
-The pipeline exposes several public names.
-The full set is in :doc:`/content/ref/static`.
-
-``next.static.StaticCollector``.
-   The request scoped collector.
-
-``next.static.StaticBackend`` and ``next.static.StaticFilesBackend``.
-   The abstract backend contract and the bundled implementation.
-
-``next.static.StaticAsset``.
-   The frozen asset record.
-
-``next.static.AssetDiscovery``.
-   The filesystem scanner.
-
-``next.static.default_kinds``.
-   The kind registry, exported from the package root.
-
-``next.static.discovery.default_stems``.
-   The stem registry, which lives at ``next.static.discovery`` rather than the package root.
-
-See :doc:`/content/ref/static` for the full reference.
+:doc:`/content/ref/static` is the full reference for the pipeline's public names.
 
 See Also
 --------

@@ -18,13 +18,14 @@ next.dj contributes ``NextStaticFilesFinder`` (dotted path ``next.static.NextSta
 Production deployments use :doc:`collectstatic <django:ref/contrib/staticfiles>` exactly as they would for any other Django project.
 
 To confirm the finder is active, run the command below.
+The path must match a component the project actually ships.
 
 .. code-block:: bash
    :caption: shell
 
-   uv run python manage.py findstatic next/some-component/component.css
+   uv run python manage.py findstatic next/components/note_card/component.css
 
-If the file is not found, check that ``next`` is in ``INSTALLED_APPS``.
+If the file is not found, check that ``next`` is in ``INSTALLED_APPS`` and that the component named in the path exists.
 
 Build Step
 ----------

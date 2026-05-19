@@ -70,7 +70,7 @@ The :doc:`dependency resolver </content/topics/dependency-injection>` fills each
 Validation Outcomes
 ~~~~~~~~~~~~~~~~~~~
 
-A submission has three outcomes.
+A submission has four outcomes.
 
 Valid form.
    The dispatcher calls the handler with the bound form and its return value travels back to the client.
@@ -78,23 +78,19 @@ Valid form.
 Invalid form.
    The dispatcher re-renders the origin page with the bound form in scope and an HTTP 200 status, with no handler called.
 
+Handler-only result.
+   A handler-only action that returns ``None`` produces an empty HTTP 204 response.
+   See :doc:`actions` for the return type contract.
+
 Bad request.
    A submission missing the ``_next_form_page`` field or pointing at an invalid origin page returns HTTP 400.
 
 Where to Declare Actions
 ------------------------
 
-An ``@action`` decorator registers the handler at the time its module is imported.
-The framework automatically imports ``page.py`` files (when building URL patterns) and ``component.py`` files (when the components backend initialises), so actions in either location register without any extra wiring.
-
-- ``page.py`` next to the page that uses the action.
-- ``component.py`` next to a component that wraps a form.
-- Any other module imported from ``AppConfig.ready``. A dedicated ``actions.py`` per-app is a common convention.
-
-A single Python module can register many actions.
-Each action stays addressable by name from any template in the project.
-
-See :doc:`templates` for a worked end-to-end example and the full ``{% form %}`` tag reference.
+An ``@action`` decorator registers the handler when its module is imported, so ``page.py`` and ``component.py`` files register without extra wiring.
+A single module can register many actions and each stays addressable by name from any template in the project.
+See :doc:`actions` for the full placement rules and :doc:`templates` for a worked end-to-end example.
 
 See Also
 --------

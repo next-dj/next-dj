@@ -23,17 +23,17 @@ Registry.
 
 Protocol.
    Implement a runtime contract.
-   Used for template loaders, dedup strategies, and JS context serializers.
+   Used for template loaders and JS context serializers.
 
 Strategy.
    Swap an internal algorithm.
    Used for static deduplication and the JS context conflict policy.
+   A strategy is selected by dotted path and implements a small protocol.
 
 Signal.
    Observe a lifecycle event without changing it.
    Used for audit, observability, cache invalidation, and cross-app coordination.
 
-Use the first mechanism that fits.
 A signal that can replace a backend keeps the framework defaults intact and the project surface small.
 
 Backends

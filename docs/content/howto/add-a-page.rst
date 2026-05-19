@@ -71,7 +71,8 @@ Run system checks.
 
    uv run python manage.py check
 
-The output reports no warnings.
+The output reports no errors.
+Adding a second body source to the same directory would raise the informational ``next.W043``.
 
 See Also
 --------

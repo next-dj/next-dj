@@ -17,9 +17,9 @@ Overview
 --------
 
 File-routed pages register Django URL names of the form ``next:page_<segments>``.
-The ``page_`` prefix is the ``URL_NAME_TEMPLATE`` setting, whose default is ``page_{name}``.
 Those names work with the standard ``django.urls.reverse`` function.
 ``page_reverse`` accepts the directory template instead of the computed name, and reads ``URL_NAME_TEMPLATE`` itself so it keeps working when the prefix changes.
+See :doc:`file-router` for the segment-naming rules and the ``URL_NAME_TEMPLATE`` setting.
 
 ``with_query`` composes the query string of a URL that already exists.
 Pass keyword arguments to add or replace query parameters, pass ``None`` to remove a key, pass a list or tuple to repeat a key.
@@ -86,7 +86,6 @@ Passing a ``namespace`` that no Django mount registers raises ``NoReverseMatch``
 When to Use page_reverse Instead of reverse
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Both helpers produce the same URL.
 ``django.urls.reverse("next:page_posts_slug", kwargs={"slug": "hello"})`` and ``page_reverse("posts/[slug]", slug="hello")`` are equivalent.
 Use ``page_reverse`` when the call site references the directory tree, ``reverse`` when the call site already has the URL name in a variable.
 

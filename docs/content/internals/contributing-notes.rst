@@ -30,7 +30,7 @@ Annotations
 ~~~~~~~~~~~
 
 Modules that participate in dependency resolution never use ``from __future__ import annotations``.
-This applies to ``page.py``, ``component.py``, and to ``providers.py``.
+This applies to ``page.py``, ``component.py``, ``providers.py``, every action handler, and every ``get_initial`` callable.
 The DI resolver inspects real annotations, not strings, and ``typing.get_origin`` returns ``None`` on stringified generics.
 
 Public Callables

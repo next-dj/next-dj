@@ -130,6 +130,8 @@ Visiting ``/en/`` renders the English text and ``/de/`` renders the German text.
 A request to the prefix-free URL redirects to the language picked from the request.
 
 Once the router include is wrapped in ``i18n_patterns``, ``page_reverse`` returns a URL carrying the active language prefix.
+URL names are unchanged.
+``page_reverse`` reverses the same ``next:page_<segments>`` name, and ``i18n_patterns`` applies the active prefix at resolve time.
 
 See Also
 --------

@@ -74,16 +74,15 @@ Resolution Order
 ----------------
 
 A component reference resolves through the visibility resolver.
+The resolver collects every component visible from the template path, then scores each by scope specificity.
+The highest score wins.
+A component in the template's own page tree outscores a same-named component contributed through ``DIRS``.
+Equal scores fall back first to component name, then to registration order.
 
-1. Look for a component folder under the page's own scope.
-2. Look for a component folder inside any extra root directory.
-   Each backend entry under ``DEFAULT_COMPONENT_BACKENDS`` reads its extra roots from the ``DIRS`` key.
-   Within every root the scanner matches folders whose name equals the backend's ``COMPONENTS_DIR`` value.
-3. A component visible in the template's own page tree wins over a same-named component contributed through ``DIRS``.
-
-The visibility resolver scores candidates by scope specificity, and within one backend a registration-order tie-break decides between two candidates that score equally.
+The full sort key is ``(-score, component.name, registration_position)``.
+Equal scores break first by component name, then by registration order, so the component discovered first shadows a later same-named one.
+Registration order operates inside a single ``FileComponentsBackend``.
 Across backends, the order of entries in ``DEFAULT_COMPONENT_BACKENDS`` decides which backend is consulted first.
-The two levels are distinct: registration order operates inside a single ``FileComponentsBackend``, while entry order operates across separate backend instances.
 
 Two components in the same scope with the same name are reported by ``next.E020``.
 ``next.E034`` reports one component name used at the root route scope of more than one page tree.
@@ -101,8 +100,8 @@ Component Context Resolution
 ----------------------------
 
 Each ``@component.context("key")`` function runs once per component render.
-On the template render path the resolver reuses the page render cache, so values produced by page level context are visible inside the component.
-A component whose ``component.py`` defines a ``render`` function runs against a fresh ``DependencyCache`` instead, so its parameters resolve independently of the page render.
+On the template render path the resolver shares the request-scoped dependency cache through ``get_request_dep_cache``, so values produced by page level context are visible inside the component.
+A component whose ``component.py`` defines a ``render`` function resolves against a fresh ``DependencyCache`` instead, so its parameters resolve independently of the page render.
 
 Signals
 -------

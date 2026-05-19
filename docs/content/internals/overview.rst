@@ -3,7 +3,7 @@
 Internals Overview
 ==================
 
-next.dj is built from the ten subsystems mapped below, which share one settings layer, one dependency resolver, and one signal bus.
+next.dj is built from the subsystems mapped below, which share one settings layer, one dependency resolver, and one signal bus.
 This page maps them and shows how signals flow between them.
 
 .. note::
@@ -70,7 +70,8 @@ How They Compose
 ----------------
 
 A request enters through the Django URL resolver and is routed to the file router under ``next.urls``.
-The router resolves the matching page through ``next.pages``, the page invokes context functions through ``next.deps``, the rendered body collects assets through ``next.static`` and components through ``next.components``, and the final HTML returns to the client.
+The router resolves the matching page through ``next.pages``, and the page invokes its ``@context`` functions through ``next.deps``.
+The render then collects assets through ``next.static`` and components through ``next.components`` before the final HTML returns to the client.
 
 Form submissions follow a parallel path through ``/_next/form/<uid>/`` into ``next.forms``, which validates and dispatches to a registered handler.
 On validation failure the dispatcher reuses the page render pipeline above to produce the same page with the bound form in scope.
@@ -122,7 +123,7 @@ The dependency graph between subsystems is shallow.
 - ``next.pages``, ``next.components``, ``next.urls``, ``next.static`` depend on ``next.conf`` and ``next.deps``.
 - ``next.forms`` depends on ``next.pages``, ``next.deps``, and ``next.urls``.
 - ``next.server`` depends on every subsystem that contributes a watch spec.
-- ``next.testing`` depends on every subsystem to enable isolation.
+- ``next.testing`` depends on the page, component, form, dependency, and static subsystems to drive isolation and rendering helpers.
 - ``next.apps`` depends on every subsystem.
   It is the Django-facing entry point that calls each subsystem's startup hook.
 
@@ -157,6 +158,10 @@ Each subsystem keeps a flat module layout.
      - ``client``, ``signals``, ``isolation``, ``actions``, ``rendering``, ``loaders``, ``html``, ``patching``, ``deps``.
    * - ``next.apps``
      - ``config``, ``autoreload``, ``templates``, ``staticfiles``, ``components``.
+   * - ``next.checks``
+     - ``common``. Aggregates system-check registration.
+   * - ``next.templatetags``
+     - ``components``, ``forms``, ``next_static``.
 
 See Also
 --------

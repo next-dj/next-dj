@@ -84,9 +84,10 @@ Use Inside a Component
 
    from next.components import component
    from next.urls import page_reverse
+   from notes.models import Note
 
    @component.context("href")
-   def href(note) -> str:
+   def href(note: Note) -> str:
        return page_reverse("notes/[id]", id=note.id)
 
 Verification

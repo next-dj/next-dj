@@ -36,10 +36,6 @@ The five tutorial parts build a small Notes application from there.
 :doc:`whatsnext`
    Where to go for deeper topics, recipes, and reference material.
 
-.. rubric:: After the tutorial
-
-Read :doc:`whatsnext` for topic and recipe hubs, then move through :doc:`/content/topics/index`, :doc:`/content/howto/index`, and :doc:`/content/ref/index` as your questions get more specific.
-
 .. toctree::
    :hidden:
    :maxdepth: 1

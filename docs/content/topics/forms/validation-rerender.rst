@@ -36,7 +36,7 @@ The Render Pipeline
 A request to ``/_next/form/<uid>/`` follows a fixed pipeline.
 
 1. The dispatcher resolves the action UID to its handler and form class.
-2. The form is constructed with POST data and the captured URL kwargs.
+2. The form is constructed with POST data, uploaded files, and the initial data that ``get_initial`` returns.
 3. ``form.is_valid()`` runs.
 4. On valid form, the handler is called with the dependency-resolved parameters and its return value goes to the client.
 5. On invalid form, the dispatcher loads the origin page, reattaches the cached dependencies, and re-renders the template with ``form`` set to the bound failing form.
@@ -182,7 +182,7 @@ Missing ``_next_form_page`` field.
 
 Origin page renamed or deleted.
    The dispatcher returns HTTP 400 when the path no longer exists.
-   Schedule a router reload after restructuring page directories to keep current renders consistent.
+   In development the autoreloader picks up the restructured directories, in production a redeploy rebuilds the URL patterns.
 
 Form class renamed.
    Renaming the form class has no effect on the UID.

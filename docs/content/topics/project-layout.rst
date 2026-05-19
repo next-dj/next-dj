@@ -153,7 +153,7 @@ Tests
 -----
 
 Place tests under ``tests/`` at the project root.
-Add a project ``conftest.py`` that activates registry isolation through ``reset_registries`` (see :doc:`/content/topics/testing`).
+The root ``conftest.py`` holds pytest collection settings, while ``tests/conftest.py`` activates registry isolation through ``reset_registries`` (see :doc:`/content/topics/testing`).
 
 A per application ``tests/`` directory works for projects with several applications.
 See :doc:`multi-project` for the layered layout.

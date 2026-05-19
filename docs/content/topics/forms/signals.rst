@@ -11,6 +11,23 @@ Register receiver imports from ``AppConfig.ready`` so receivers exist before the
    :local:
    :depth: 2
 
+Connecting Receivers
+--------------------
+
+Receivers live in a module that Django does not import on its own.
+Import that module from ``AppConfig.ready`` so every receiver is connected before the first request.
+
+.. code-block:: python
+   :caption: notes/apps.py
+
+   from django.apps import AppConfig
+
+   class NotesConfig(AppConfig):
+       name = "notes"
+
+       def ready(self) -> None:
+           from notes import receivers  # noqa: F401
+
 action_registered
 -----------------
 

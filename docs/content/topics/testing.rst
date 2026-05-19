@@ -44,6 +44,9 @@ The table below maps each testing goal to the helper and its import path.
    * - Capture every framework signal at once
      - ``capture_framework_signals``
      - ``next.testing`` or ``next.testing.signals``
+   * - Inspect a captured signal payload
+     - ``SignalEvent``
+     - ``next.testing`` or ``next.testing.signals``
    * - Validate a form without HTTP
      - ``build_form_for``, ``resolve_action_url``
      - ``next.testing`` or ``next.testing.actions``
@@ -189,7 +192,9 @@ Use ``next.testing.rendering`` to render a page without an HTTP round trip.
        html = render_page("notes/pages/page.py")
        assert "Notes" in html
 
-The helper invokes context functions and the template loader in the same order as a real request.
+``render_page`` reads the static body source, the ``template`` attribute or a ``template.djx`` file, then runs context functions and the static collector.
+It does not invoke a ``render()`` function declared in ``page.py``.
+Use ``NextClient`` for pages whose body is built by ``render()``.
 Use it for snapshot tests and template assertion tests that do not need URL routing.
 
 Capture Signals
@@ -302,7 +307,7 @@ HTML Utilities
 ``find_anchor`` returns the matching anchor tag.
 It accepts an ``href`` keyword that matches the anchor ``href`` exactly and a ``text`` keyword that matches a substring against the anchor's stripped inner text.
 It raises ``LookupError`` when no anchor matches the filters.
-``assert_has_class`` and ``assert_missing_class`` check the class list of the first tag in a fragment.
+``assert_has_class`` and ``assert_missing_class`` check the class list of the first start tag in the fragment.
 
 Patching
 --------
@@ -367,21 +372,9 @@ Use these helpers for testing custom providers without booting the router.
 Common Patterns
 ---------------
 
-Full End to End Flow
-~~~~~~~~~~~~~~~~~~~~
+.. seealso::
 
-Use ``NextClient`` to walk through a real flow.
-Create an instance through ``post_action``, fetch the redirect target, assert that the new row appears on the listing.
-
-Form Validation Failure
-~~~~~~~~~~~~~~~~~~~~~~~
-
-POST to an action URL with invalid data, assert that the response status is ``200`` and that the rendered body contains the expected error.
-
-Signal Emission
-~~~~~~~~~~~~~~~
-
-Wrap an action invocation with ``SignalRecorder(action_dispatched)`` and assert that the call list has one entry with the expected payload.
+   :doc:`/content/howto/test-a-page-with-actions` walks a full end to end flow, a form validation failure, and a signal emission assertion with working code.
 
 System Checks
 ~~~~~~~~~~~~~

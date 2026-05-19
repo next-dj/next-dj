@@ -14,7 +14,6 @@ Overview
 --------
 
 The smallest page is a folder that contains a ``page.py`` and a sibling ``template.djx``.
-See *Render Order* below for the exact sequence the framework runs to produce the body.
 
 Pages share four pluggable parts.
 
@@ -54,8 +53,7 @@ Custom template loaders.
 
 See *Render Order* below for the per-request sequence and the ``render`` short-circuit.
 Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
-When a page directory declares more than one body source, ``next.W043`` reports it.
-The highest-priority source is used and the others are never consulted.
+Multiple body sources trigger ``next.W043``, see *Priority Resolution*.
 
 Render Order
 ------------
@@ -183,9 +181,6 @@ See :doc:`context` for that flag and the other ways to vary the decorator.
            "comments": post.comment_set.all(),
        }
 
-The dict form runs the dependency once.
-Two ``@context("post")`` and ``@context("comments")`` would each invoke the resolver and possibly hit the database twice.
-
 Custom Template Loaders
 -----------------------
 
@@ -218,8 +213,8 @@ Register additional loaders in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to support
 
    NEXT_FRAMEWORK = {
        "TEMPLATE_LOADERS": [
-           "notes.loaders.MarkdownTemplateLoader",
            "next.pages.loaders.DjxTemplateLoader",
+           "notes.loaders.MarkdownTemplateLoader",
        ],
    }
 
@@ -327,6 +322,10 @@ See ``examples/live-polls`` for a worked SSE broker.
 Markdown Blog Post
 ~~~~~~~~~~~~~~~~~~
 
+Register a ``MarkdownTemplateLoader`` in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` and drop a ``template.md`` next to ``page.py`` instead of a ``template.djx``.
+The loader renders the Markdown to a body string, and that body flows through the ancestor layout chain like any other source.
+The page module still supplies context functions and action handlers as usual.
+
 .. seealso::
 
    The *Custom Template Loaders* section above for the ``template.md`` loader, and ``examples/markdown-blog`` for a working setup.
@@ -346,8 +345,7 @@ The pages subsystem contributes Django system checks. The ``check_page_functions
    The page directory has no body source and no ``layout.djx`` in the same directory, so the page renders nothing.
 
 ``next.W043``.
-   More than one body source is declared in the same directory.
-   The highest priority one is used and the others are never consulted.
+   More than one body source is declared in the same directory, see *Priority Resolution*.
 
 Run them through ``uv run python manage.py check``.
 

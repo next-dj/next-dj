@@ -110,6 +110,27 @@ A ``handler500`` view receives only the request.
        """Render the branded 500 page."""
        return render(request, "500.html", status=500)
 
+Raise Http404 From a Page
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A ``render`` function or a ``@context`` callable can raise :exc:`~django.http.Http404` when a record is missing.
+The exception propagates out of the page to Django's URL resolver, which then invokes ``handler404`` and renders the branded page.
+
+.. code-block:: python
+   :caption: notes/pages/notes/[int:note_id]/page.py
+
+   from django.http import Http404
+   from notes.models import Note
+   from next.pages import context
+   from next.urls import DUrl
+
+   @context("note")
+   def note(note_id: DUrl[int]) -> Note:
+       try:
+           return Note.objects.get(pk=note_id)
+       except Note.DoesNotExist:
+           raise Http404("No note with that id")
+
 Verification
 ------------
 

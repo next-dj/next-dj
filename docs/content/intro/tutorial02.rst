@@ -95,7 +95,7 @@ Add the Detail Page
 Create a new directory ``notes/pages/notes/[id]/``.
 The bracketed segment is a URL parameter that the file router captures as ``id``.
 The untyped ``[id]`` segment matches any string, and ``DUrl["id", int]`` in the page module coerces it to an integer.
-The alternative ``[int:id]`` directory rejects non-numeric URLs at routing time before any page code runs.
+The typed ``[int:id]`` directory form rejects non-numeric URLs at routing time before any page code runs, see :doc:`/content/topics/file-router`.
 
 .. code-block:: python
    :caption: notes/pages/notes/[id]/page.py
@@ -109,7 +109,7 @@ The alternative ``[int:id]`` directory rejects non-numeric URLs at routing time 
    def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
-The ``DUrl["id", int]`` annotation is a marker, an annotation in the type position that tells the framework where a value comes from.
+The ``DUrl["id", int]`` annotation is a DI marker (:term:`DI marker`), an annotation in the type position that tells the framework where a value comes from.
 Dependency injection means the framework fills a function's parameters from their names and type annotations rather than from an explicit call.
 See :doc:`/content/topics/dependency-injection` for the full model.
 Here the ``DUrl["id", int]`` marker tells the dependency injector to read the ``id`` segment captured by the ``[id]`` directory and coerce it to ``int``.

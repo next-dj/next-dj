@@ -98,6 +98,7 @@ Guard One Page Without Middleware
 
 When only a few pages need protection, skip the middleware and raise :exc:`~django.core.exceptions.PermissionDenied` from the page itself.
 Django renders the ``403`` handler for an anonymous request.
+A branded 403 page needs a ``403.html`` template or a ``handler403`` in the root URLconf, see :doc:`/content/howto/customize-error-pages`.
 
 .. code-block:: python
    :caption: notes/pages/admin-notes/page.py

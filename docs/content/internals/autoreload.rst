@@ -53,7 +53,7 @@ Modules
    ``install()`` swaps ``StatReloader`` and connects the watch signal.
    ``uninstall()`` restores the previous reloader. Test suites that call ``AppConfig.ready`` multiple times use it to avoid double-patching.
 
-``next.server.autoreload``.
+``next.server.autoreload`` (distinct from ``next.apps.autoreload``, the installer above).
    ``NextStatReloader`` extends the Django stat reloader and also restarts the process when the discovered route set changes.
 
 ``next.server.watcher``.

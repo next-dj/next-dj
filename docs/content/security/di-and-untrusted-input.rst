@@ -38,7 +38,7 @@ Use a directory named with the typed segment form such as ``[int:id]`` to reject
 Always validate the string before passing it into ORM lookups or external services.
 
 .. code-block:: python
-   :caption: defensive lookup
+   :caption: notes/pages/notes/[slug]/page.py
 
    from django.shortcuts import get_object_or_404
    from notes.models import Note
@@ -61,7 +61,7 @@ Query Strings
 Validate the resulting values against business rules.
 
 .. code-block:: python
-   :caption: pagination guard
+   :caption: notes/pages/page.py
 
    from next.pages import context
    from next.urls import DQuery
@@ -131,7 +131,7 @@ The ``url_kwargs`` dict and ``request.GET`` are both untrusted.
            try:
                return Link.objects.get(slug=slug)
            except Link.DoesNotExist:
-               raise Http404
+               raise Http404 from None
 
 The explicit ``isalnum`` and length check make the validation visible to readers and to security audits.
 
@@ -141,7 +141,7 @@ Redirects
 Validate destination URLs before passing them to ``HttpResponseRedirect``.
 
 .. code-block:: python
-   :caption: validated redirect
+   :caption: notes/actions.py
 
    from django.http import HttpResponseRedirect
    from django.urls import resolve, Resolver404

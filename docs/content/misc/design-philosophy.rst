@@ -67,11 +67,8 @@ A change in the route set, in the registered components, in the form actions, or
 No Lock In
 ----------
 
-A project can drop next.dj at any time.
-Page modules are plain Python.
-Templates are plain Django templates.
-The data lives in Django models.
-Removing the dependency leaves the project intact.
+The data lives in Django models and standard Django templates keep working.
+Page modules, layout composition, and framework template tags depend on next.dj, so removing it means rewriting the routed UI layer, not the data layer.
 
 Trade Offs
 ----------

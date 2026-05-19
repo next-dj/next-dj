@@ -9,6 +9,7 @@ For the full list of available keys, their defaults, and their semantics, see :d
 
 Each snippet below sets one key on an existing ``NEXT_FRAMEWORK`` dict.
 Declare ``NEXT_FRAMEWORK = {}`` once before the first override, or merge the keys into a single literal as shown under :ref:`combining-keys`.
+Keys left unset keep their framework default because the framework merges :doc:`/content/ref/settings` defaults under the user dict.
 
 Strict Context
 --------------

@@ -98,7 +98,7 @@ With ``APP_DIRS`` set to ``True`` and ``DIRS`` left empty, each installed app ca
 
 ``PAGES_DIR`` is set to ``pages``, the built-in default, so next.dj scans a ``pages/`` directory inside each app.
 ``_components`` is the per-application folder the component backend scans, covered in :doc:`tutorial03`.
-A ``FileRouterBackend`` entry must carry an ``OPTIONS`` key.
+A ``FileRouterBackend`` entry must carry an ``OPTIONS`` key, and ``manage.py check`` reports ``next.E026`` if it is missing.
 
 Keep ``django.template.context_processors.request`` in the ``OPTIONS`` of your ``TEMPLATES`` setting.
 A fresh ``django-admin startproject`` already includes it, and ``manage.py check`` reports ``next.E019`` if it is missing.

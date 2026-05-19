@@ -138,7 +138,7 @@ See :doc:`/content/topics/dependency-injection` for request-cache interactions d
 DI parameter resolves to None
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Common causes:
+Three common causes explain this.
 
 - The parameter annotation is a forward-reference string (often from ``from __future__ import annotations`` in modules where the resolver cannot evaluate it).
   Drop that import in ``page.py``, ``layout.djx``-adjacent Python hooks, ``component.py``, and provider modules if markers stop resolving.

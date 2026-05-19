@@ -163,28 +163,9 @@ The framework computes the template scope in this order.
 4. Context processors come from ``OPTIONS.context_processors`` on each page backend entry plus the ``context_processors`` list of the first ``TEMPLATES`` entry in Django settings.
    The two lists merge in that order with duplicate dotted paths dropped, so a processor listed twice runs once.
    Each processor return dict is applied with ``update`` after every ``@context`` callable, so a processor key overwrites a page or inherited value.
-
-   .. code-block:: python
-      :caption: config/settings.py
-
-      NEXT_FRAMEWORK = {
-          "DEFAULT_PAGE_BACKENDS": [
-              {
-                  "BACKEND": "next.urls.FileRouterBackend",
-                  "DIRS": [],
-                  "APP_DIRS": True,
-                  "PAGES_DIR": "routes",
-                  "OPTIONS": {
-                      "context_processors": [
-                          "django.template.context_processors.request",
-                          "django.contrib.auth.context_processors.auth",
-                      ],
-                  },
-              }
-          ],
-      }
-
 5. Component context functions when a ``{% component %}`` tag is encountered during render.
+
+Page backend processors are declared under ``OPTIONS.context_processors`` inside ``DEFAULT_PAGE_BACKENDS``, see :ref:`ref-settings` and :doc:`project-layout` for the backend layout.
 
 A later step that uses the same key overrides earlier values.
 The full merged dict is shared across the entire ``layout.djx`` chain for that request, so all layout wrappers see the same final scope.
