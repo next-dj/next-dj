@@ -13,6 +13,8 @@ Solution
 
 Use ``next.conf.extend_default_backend``.
 The helper returns a deep copy of the default backend list with one entry patched by your overrides.
+It raises ``ImproperlyConfigured`` for an unknown setting name and ``IndexError`` for an out of range ``index``.
+Both failures surface at Django startup, not at request time.
 
 Walkthrough
 -----------
@@ -114,8 +116,6 @@ Print the resolved setting from a Django shell.
    "
 
 The list shows the default entry with your overrides applied.
-
-The helper raises ``ImproperlyConfigured`` for an unknown setting name and ``IndexError`` for an out of range ``index``.
 
 See Also
 --------

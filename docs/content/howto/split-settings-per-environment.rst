@@ -145,6 +145,12 @@ Default it to ``config.settings.dev`` so local commands need no extra flag.
 
 A production process exports ``DJANGO_SETTINGS_MODULE=config.settings.prod`` before starting the server.
 
+.. note::
+
+   ``config/wsgi.py`` and ``config/asgi.py`` carry the same ``os.environ.setdefault(..., "config.settings.dev")`` line.
+   A server started without the variable also defaults to development.
+   See :doc:`/content/deployment/wsgi-asgi`.
+
 Verification
 ------------
 

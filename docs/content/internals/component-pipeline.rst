@@ -27,10 +27,10 @@ Pipeline
        Manager --> Visibility[ComponentVisibilityResolver]
        Visibility --> Resolve[Resolve name]
        Resolve --> Loading[Load module]
-       Loading --> ContextReg[Component context]
+       Loading --> ContextReg["Run @component.context"]
        Resolve --> Renderer[Renderer]
        ContextReg --> Renderer
-       Renderer --> FilterExpr[FilterExpression props]
+       Renderer --> FilterExpr["Props, slots, children"]
        FilterExpr --> Template[Template engine]
        Template --> Output[HTML fragment]
 
@@ -100,6 +100,7 @@ Component Context Resolution
 ----------------------------
 
 Each ``@component.context("key")`` function runs once per component render.
+When a component's ``component.py`` fails to import, the renderer falls back to plain template rendering and the ``@component.context`` callables in that module do not run.
 On the template render path the resolver shares the request-scoped dependency cache through ``get_request_dep_cache``, so values produced by page level context are visible inside the component.
 A component whose ``component.py`` defines a ``render`` function resolves against a fresh ``DependencyCache`` instead, so its parameters resolve independently of the page render.
 

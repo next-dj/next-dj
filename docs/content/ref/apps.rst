@@ -50,9 +50,9 @@ Components Installer
 .. automodule:: next.apps.components
    :members:
 
-``install()`` calls ``_ensure_backends()`` and then iterates the backends, running ``_ensure_loaded()`` on each one that exposes it.
-Every backend's ``_ensure_loaded()`` populates its registry.
-Unless ``NEXT_FRAMEWORK["LAZY_COMPONENT_MODULES"]`` is true, it also imports every ``component.py`` under the configured component roots so decorators run before the first request.
+``install()`` loads the component backends and populates their registries.
+Unless ``LAZY_COMPONENT_MODULES`` is true it also imports every discovered ``component.py``.
+See :doc:`/content/internals/component-pipeline` for the discovery and load sequence.
 
 See Also
 --------

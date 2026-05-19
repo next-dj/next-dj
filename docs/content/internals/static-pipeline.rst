@@ -96,7 +96,7 @@ Asset Kinds
 -----------
 
 Each kind maps an extension to a placeholder slot and a backend renderer method.
-The renderer name is a plain string the manager looks up with ``getattr`` on the active static backend per asset, so a backend supplies a renderer simply by exposing a method of that name.
+The renderer name is a plain string the manager looks up with ``getattr`` on the active static backend per asset, so a backend supplies a renderer by exposing a method of that name.
 :doc:`/content/topics/static-assets/asset-kinds` lists the bundled kinds and their renderer methods.
 
 Dedup

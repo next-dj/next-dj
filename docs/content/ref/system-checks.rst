@@ -96,7 +96,7 @@ Errors
 
    * - Code
      - Condition
-     - Source
+     - Emitted by
    * - ``next.E001``
      - ``NEXT_FRAMEWORK`` is not a dict, or ``DEFAULT_PAGE_BACKENDS`` is not a list.
      - ``next.urls.checks``
@@ -224,6 +224,8 @@ Errors
      - A form action backend class does not subclass ``FormActionBackend``.
      - ``next.forms.checks``
 
+A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
+
 Warnings
 ~~~~~~~~
 
@@ -233,7 +235,7 @@ Warnings
 
    * - Code
      - Condition
-     - Source
+     - Emitted by
    * - ``next.W001``
      - A ``layout.djx`` is missing the required ``{% block template %}``.
      - ``next.pages.checks``

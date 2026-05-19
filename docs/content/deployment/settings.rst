@@ -17,6 +17,7 @@ Strict Context
 .. code-block:: python
    :caption: config/settings.py
 
+   NEXT_FRAMEWORK = {}
    NEXT_FRAMEWORK["STRICT_CONTEXT"] = True
 
 Use ``STRICT_CONTEXT: True`` in production so a misconfigured context processor fails loudly.
@@ -30,9 +31,9 @@ Eager Component Loading
 
    NEXT_FRAMEWORK["LAZY_COMPONENT_MODULES"] = False
 
-Keep ``LAZY_COMPONENT_MODULES: False`` (the default) in production so every ``component.py`` under configured component roots runs during startup and registrations exist before traffic.
-When ``True``, imports from those roots defer until first resolve.
-``_components`` folders beside routes still load their ``component.py`` files while URL patterns are built on first resolver access.
+Keep ``LAZY_COMPONENT_MODULES: False`` (the default) in production so every ``component.py`` is imported during startup and registrations exist before traffic.
+When ``True``, each ``component.py`` is imported on the first render that resolves the component rather than during startup.
+Component discovery and registration still happen eagerly in both modes.
 Reference for lazy behaviour and testing helpers: :ref:`ref-settings` and :doc:`/content/topics/testing`.
 
 Static Backend
@@ -63,7 +64,7 @@ Set the serializer when context values include types beyond the standard JSON se
 
    ``PydanticJsContextSerializer`` requires the ``pydantic`` package, which is not a dependency of next.dj.
    Install it separately (``pip install pydantic``) before enabling this serializer.
-   If ``pydantic`` is not installed, importing the serializer raises ``ImportError`` at startup.
+   If ``pydantic`` is not installed, the first render that serializes context raises ``ImportError``.
 
 Page Backends With Context Processors
 -------------------------------------

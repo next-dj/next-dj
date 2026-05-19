@@ -62,6 +62,18 @@ Update ``notes/pages/page.py``.
    from next.forms import action
    from next.pages import context
 
+   @context("site_name", inherit_context=True)
+   def site_name() -> str:
+       return "Notes"
+
+   @context("tagline", inherit_context=True)
+   def tagline() -> str:
+       return "A small tutorial application."
+
+   @context("note_count", inherit_context=True)
+   def note_count() -> int:
+       return Note.objects.count()
+
    @context("notes")
    def recent_notes() -> list[Note]:
        return list(Note.objects.all())

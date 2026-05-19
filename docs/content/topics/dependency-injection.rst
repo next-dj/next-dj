@@ -88,12 +88,32 @@ The marker has three forms.
 
 .. note::
 
-   ``[slug:name]`` and ``[uuid:name]`` in directory names are Django URL *converter* labels that control routing and validation (see :doc:`file-router`).
-   They are not Python type annotations.
-   The captured value for a slug segment is a ``str``. Annotate as ``DUrl[str]``.
-   The captured value for a UUID segment is a ``uuid.UUID`` object already converted by Django.
-   Name the parameter to match the segment (e.g. ``my_id``) and let the URL kwargs provider supply it directly.
-   Annotate ``DUrl[str]`` if you only need the string form.
+   A ``DUrl[T]`` annotation is not the same thing as a Django URL converter label.
+   See :ref:`Converter Segments <topics-di-converter-segments>` below.
+
+.. _topics-di-converter-segments:
+
+Converter Segments
+^^^^^^^^^^^^^^^^^^
+
+``[slug:name]`` and ``[uuid:name]`` in directory names are Django URL converter labels that control routing and validation.
+See :doc:`file-router` for the routing detail.
+They are not Python type annotations.
+Django converts the captured value before the URL kwargs provider sees it.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 35 40
+
+   * - Segment type
+     - Captured Python type
+     - Recommended annotation
+   * - ``[slug:name]``
+     - ``str``
+     - ``DUrl[str]``
+   * - ``[uuid:name]``
+     - ``uuid.UUID``
+     - Plain ``uuid.UUID`` parameter, or ``DUrl[str]`` for the string form
 
 DQuery
 ~~~~~~
@@ -150,7 +170,7 @@ Two markers reach into the request-scoped context.
    See :doc:`context` for the full set of ``Context`` shapes and how it relates to plain name matching.
 
 ``Depends("name")``.
-   Returns the result of a callable registered through ``next.deps.resolver.dependency``.
+   Returns the result of a callable registered through the ``resolver.dependency`` decorator.
    ``Depends`` also accepts a callable factory, a constant value, and a bare ``Depends()`` that falls back to the parameter name.
    See :doc:`/content/internals/di-resolver` for the four forms.
 

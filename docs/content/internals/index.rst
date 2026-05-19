@@ -35,7 +35,7 @@ The pages read top to bottom, from a whole-framework map down to each subsystem 
    Watchers, route reload, signals.
 
 :doc:`contributing-notes`
-   Internal guidelines for the framework itself.
+   Conventions the framework code follows.
 
 .. toctree::
    :hidden:

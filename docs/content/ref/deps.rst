@@ -36,8 +36,8 @@ Subclasses join the resolver's registry through ``__init_subclass__``, so the re
 
 .. note::
 
-   ``ProviderRegistry`` is an internal list-style helper, not part of the public surface.
-   It is absent from ``next.deps.__all__`` and exists for tests and framework code only.
+   ``ProviderRegistry`` is an internal list-style helper kept for test scaffolding and possible external consumers.
+   It is absent from ``next.deps.__all__``, and the framework itself does not use it.
 
 Markers
 ~~~~~~~

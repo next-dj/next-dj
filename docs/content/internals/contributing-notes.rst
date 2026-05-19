@@ -17,6 +17,16 @@ Read it before sending a patch that touches the core packages.
    :local:
    :depth: 2
 
+A patch passes through a fixed set of gates before it merges.
+
+.. mermaid::
+
+   flowchart LR
+       lint[Lint] --> types[Types]
+       types --> tests[Tests]
+       tests --> checks[System checks]
+       checks --> pr[Pull request]
+
 Conventions
 -----------
 

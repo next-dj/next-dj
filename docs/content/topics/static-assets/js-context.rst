@@ -19,10 +19,10 @@ Context values opted into serialisation land under ``window.Next.context``.
 Opting In
 ---------
 
-Pass ``serialize=True`` on ``@context`` in ``page.py`` or on ``@component.context`` in ``component.py``.
+Pass ``serialize=True`` on the ``@context`` decorator, or on ``@component.context`` in a component.
+See :doc:`/content/topics/context` for both decorators.
 The value appears under ``window.Next.context.<key>``.
 Keys without the flag stay server-side only.
-Decorator shapes and inheritance rules live in :doc:`/content/topics/context`.
 
 A value the active serializer cannot encode raises ``TypeError`` at the point the context function registers it.
 The error names the offending key.
@@ -182,6 +182,7 @@ Co-located JS and inline scripts read ``window.Next.context``.
    });
 
 The runtime script defines ``window.Next`` before the collected scripts run.
+The runtime script is always the first tag in the ``scripts`` slot, ahead of every co-located, module-list, and ``{% use_script %}`` asset, so any of those may safely read ``window.Next``.
 
 Runtime Script Options
 ----------------------

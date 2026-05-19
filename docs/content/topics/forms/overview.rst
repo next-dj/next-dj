@@ -23,7 +23,7 @@ Action.
    A Python callable decorated with ``@action("name", form_class=...)``.
 
 Template tag.
-   ``{% form @action="name" %}`` resolves the action UID, posts to its dispatch URL, and injects a CSRF token.
+   ``{% form @action="name" %}`` opens a block, closed by ``{% endform %}``, that resolves the action UID, posts to its dispatch URL, and injects a CSRF token.
 
 Dispatch endpoint.
    One URL per action that binds POST data and calls the handler when valid.
@@ -70,20 +70,8 @@ The :doc:`dependency resolver </content/topics/dependency-injection>` fills each
 Validation Outcomes
 ~~~~~~~~~~~~~~~~~~~
 
-A submission has four outcomes.
-
-Valid form.
-   The dispatcher calls the handler with the bound form and its return value travels back to the client.
-
-Invalid form.
-   The dispatcher re-renders the origin page with the bound form in scope and an HTTP 200 status, with no handler called.
-
-Handler-only result.
-   A handler-only action that returns ``None`` produces an empty HTTP 204 response.
-   See :doc:`actions` for the return type contract.
-
-Bad request.
-   A submission missing the ``_next_form_page`` field or pointing at an invalid origin page returns HTTP 400.
+A submission is valid, invalid, handler-only, or malformed.
+See :doc:`validation-rerender` for each outcome and its status code.
 
 Where to Declare Actions
 ------------------------

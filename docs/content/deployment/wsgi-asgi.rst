@@ -39,6 +39,9 @@ A standard ``config/wsgi.py`` works without modification. See Django's :doc:`WSG
    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
    application = get_wsgi_application()
 
+A project that split its settings into a package defaults this to ``config.settings.prod`` for the deployed process.
+See :doc:`/content/howto/split-settings-per-environment`.
+
 Run with a production WSGI server such as ``gunicorn`` or ``uwsgi``.
 
 .. code-block:: bash
@@ -63,6 +66,9 @@ A standard ``config/asgi.py`` works without modification. See Django's :doc:`ASG
 
    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
    application = get_asgi_application()
+
+A project that split its settings into a package defaults this to ``config.settings.prod`` for the deployed process.
+See :doc:`/content/howto/split-settings-per-environment`.
 
 Run with an ASGI server such as ``daphne`` or ``uvicorn``.
 

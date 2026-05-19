@@ -180,7 +180,7 @@ Use the Autoreloader
 ~~~~~~~~~~~~~~~~~~~~
 
 The development server already reloads on Python file changes.
-The file router has its own reloader for new pages and components.
+The file router has its own reloader for new pages.
 Run the server and create a new page in a separate terminal.
 
 .. code-block:: bash

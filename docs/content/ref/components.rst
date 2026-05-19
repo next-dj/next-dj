@@ -20,11 +20,13 @@ Application Imports
 These are the names project code uses day-to-day.
 
 .. autodata:: next.components.component
+   :no-value:
 
    The component decorator namespace.
    Inside a ``component.py`` use ``@component.context("key")`` to publish a value for the component template.
 
 .. autodata:: next.components.context
+   :no-value:
 
    The ``@component.context`` decorator, bound from ``ComponentContextManager.context``. Registers a context function inside a ``component.py``.
 
@@ -134,7 +136,13 @@ They are **not** intended for production use.
 ``DummyBackend`` accepts a config dict, stores it on ``self``, and resolves no components.
 Use it to test factory wiring.
 
+.. autoclass:: next.components.DummyBackend
+   :members:
+
 ``BoomBackend`` raises ``RuntimeError`` from ``__init__`` so you can assert that ``ComponentsManager`` catches and logs a failed backend instantiation.
+
+.. autoclass:: next.components.BoomBackend
+   :members:
 
 The underscore-prefixed render helpers exported from this module (``_inject_component_context``, ``_merge_csrf_context``, ``_render_template_string``) are internal hooks.
 Do not use them in application code.

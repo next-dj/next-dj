@@ -43,7 +43,8 @@ Modules
 ``next.deps.resolver``.
    ``DependencyResolver`` plus the singleton ``resolver`` instance.
    Exposes ``resolve``, ``resolve_dependencies``, and ``resolve_with_template_context`` to run a callable with resolved parameters.
-   ``resolve_with_template_context`` is the component entry point: it strips the ``EXPLICIT_RESOLVE_KEYS`` from the template context before name-based resolution, so a context key cannot shadow a dedicated provider such as ``request`` or ``form``.
+   ``resolve_with_template_context`` is the component entry point.
+   Like ``resolve_dependencies``, it strips ``EXPLICIT_RESOLVE_KEYS`` from the injectable context so a context key cannot shadow a dedicated provider such as ``request`` or ``form``.
 
 ``next.deps.providers``.
    The ``ParameterProvider`` protocol and the ``RegisteredParameterProvider`` base class.

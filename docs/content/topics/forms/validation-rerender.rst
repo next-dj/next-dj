@@ -22,7 +22,7 @@ The dispatcher reads that field to know which page rendered the form.
 The dispatcher rejects a submission when the field is missing or blank, when its basename is not ``page.py``, or when resolving the path raises ``OSError``.
 It also rejects the submission when ``BASE_DIR`` is unset or when the resolved path falls outside ``BASE_DIR``.
 A path whose ``page.py`` does not exist is rejected too, unless a sibling ``template.djx`` stands in for it.
-Each rejection returns HTTP 400 with a structured error so it is easy to spot in logs.
+Each rejection returns HTTP 400 with a short diagnostic message so it is easy to spot in logs.
 
 Virtual routes are fully supported as origin pages.
 A directory that has only a ``template.djx`` and no ``page.py`` is a virtual route (see :doc:`/content/topics/file-router` for the routing rules).
@@ -51,6 +51,7 @@ One important thing carries over from the initial render.
 
 Dependency cache.
    Every value produced by the resolver during dispatch is stored on the request under ``REQUEST_DEP_CACHE_ATTR``.
+   Read it through ``next.deps.get_request_dep_cache(request)`` rather than the raw attribute.
    The re-render reuses each cached value without rerunning the provider.
    A custom DI provider must therefore be idempotent across a render cycle.
 

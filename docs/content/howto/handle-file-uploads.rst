@@ -67,8 +67,8 @@ Render the form with the right encoding type.
      <button type="submit">Upload</button>
    {% endform %}
 
-The ``enctype`` attribute is required.
-Without it the browser submits only text values and ``form.file`` is empty.
+Set ``enctype="multipart/form-data"`` on the form.
+Without it the browser submits only text values and ``form.file`` arrives empty.
 
 Configure media storage.
 

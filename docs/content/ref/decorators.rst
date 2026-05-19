@@ -15,7 +15,7 @@ Decorators
 @context
 ~~~~~~~~
 
-.. autodata:: next.pages.context
+.. autofunction:: next.pages.context
    :no-index:
 
 Registers a context function on a page module (``page.py``).
@@ -28,7 +28,7 @@ Pass ``serialize=True`` to expose the return value to the browser under ``window
 @component.context
 ~~~~~~~~~~~~~~~~~~
 
-.. autodata:: next.components.context
+.. autofunction:: next.components.context
    :no-index:
 
 Registers a component context function inside ``component.py``.

@@ -55,6 +55,9 @@ See *Render Order* below for the per-request sequence and the ``render`` short-c
 Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
 Multiple body sources trigger ``next.W043``, see *Priority Resolution*.
 
+When no source supplies a body the page renders an empty string, so an ancestor ``layout.djx`` can still wrap an empty slot.
+A page file with neither a body source nor a reachable ``layout.djx`` reports ``next.W002``.
+
 Render Order
 ------------
 
@@ -69,7 +72,6 @@ This is the authoritative ordering for the page render path.
 3. The body is composed through the ancestor layouts and rendered with that namespace.
 
 A ``render`` function therefore cannot read a value that a ``@context`` callable would publish, because the callables have not run yet.
-``render`` receives its inputs straight from the dependency injector. A context callable can read another context value because step 2 runs them as one batch.
 
 The render Function
 -------------------
@@ -116,9 +118,7 @@ A ``render`` function outranks this attribute.
 When no ``render`` function exists the ``template`` attribute is consulted before any registered template loader, so a module-level ``template`` string wins over a sibling ``template.djx``.
 Use it for trivial pages where a separate template file would be noise.
 
-The ``template`` attribute also has a matching loader, ``PythonTemplateLoader`` in ``next.pages.loaders``, whose ``source_name`` is ``"template"``.
-The manager always reads ``module.template`` directly, so registering this loader in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` changes nothing at render time.
-It only makes the ``next.W043`` conflict check name the ``template`` attribute as a loader source.
+The ``template`` attribute has a matching ``PythonTemplateLoader``, documented in :doc:`/content/ref/pages`.
 
 Template Files
 --------------
@@ -164,6 +164,7 @@ Keyed single value.
 Unkeyed dict.
    ``@context`` on a function that returns a dict merges the dict into the template scope.
    Useful when several values share a dependency you only want to resolve once.
+   The unkeyed form must return a mapping, and a non-dict return annotation reports the ``next.E029`` system check.
 
 The ``inherit_context=True`` flag on a keyed function publishes the value to
 every descendant page rather than to the declaring page alone.
@@ -191,7 +192,9 @@ Register additional loaders in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to support
    :caption: notes/loaders.py
 
    from pathlib import Path
+
    import markdown
+
    from next.pages.loaders import TemplateLoader
 
    class MarkdownTemplateLoader(TemplateLoader):
@@ -346,6 +349,11 @@ The pages subsystem contributes Django system checks. The ``check_page_functions
 
 ``next.W043``.
    More than one body source is declared in the same directory, see *Priority Resolution*.
+
+The ``check_context_functions`` check inspects every ``page.py`` for keyless ``@context`` callables.
+
+``next.E029``.
+   A keyless ``@context`` callable is annotated with a non-dict return type.
 
 Run them through ``uv run python manage.py check``.
 

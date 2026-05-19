@@ -6,7 +6,8 @@ Server Reference
 Module Summary
 --------------
 
-``next.server`` exposes the autoreload watcher and the development server hooks that the framework registers with Django.
+``next.server`` exposes the autoreload watcher, the watch-spec helpers, and the filesystem roots used by the development server.
+The Django wiring that activates them lives in ``next.apps`` (see :doc:`apps`).
 
 Public API
 ----------

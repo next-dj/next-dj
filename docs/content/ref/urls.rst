@@ -6,7 +6,9 @@ URLs Reference
 Module Summary
 --------------
 
-``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``, the ``RouterFactory`` and ``RouterManager`` that build and own them, and the ``URLPatternParser`` for bracket-segment parsing.
+``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``.
+It also exposes the ``RouterFactory`` and ``RouterManager`` that build and own them.
+The ``URLPatternParser`` for bracket-segment parsing is part of the public surface.
 It also exposes the ``page_reverse`` and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, and the Django integration name ``app_name``.
 The parameter providers and the dependency markers ``DUrl`` (captured path segments) and ``DQuery`` (query string parameters) round out the public surface.
 
@@ -87,6 +89,7 @@ The URL subsystem fires two signals.
 
 ``router_reloaded``.
    Sent by the router manager class after the router rebuilds, with no keyword arguments.
+   The sender is the ``RouterManager`` class.
 
 See :doc:`signals` and :doc:`/content/topics/signals` for the wider signal catalog.
 

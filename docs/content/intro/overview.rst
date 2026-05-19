@@ -41,7 +41,8 @@ What next.dj Does Not Replace
 -----------------------------
 
 The ORM, migrations, admin, auth, and middleware stay the same as in a stock Django project.
-next.dj adds the ``NEXT_FRAMEWORK`` dict, includes ``next.urls`` for the file router, and resolves ``.djx`` through ``DjxTemplateLoader``. Standard ``.html`` templates in other apps are unchanged.
+next.dj adds the ``NEXT_FRAMEWORK`` dict, includes ``next.urls`` for the file router, and resolves ``.djx`` through ``DjxTemplateLoader``.
+Standard ``.html`` templates in other apps are unchanged.
 
 For the design principles behind that split, read :doc:`/content/misc/design-philosophy`.
 

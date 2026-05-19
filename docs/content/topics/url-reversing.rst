@@ -81,6 +81,9 @@ With that second mount in place, ``page_reverse`` can target it.
 
    page_reverse("dashboard", namespace="admin")  # "/admin/dashboard/"
 
+The ``/admin/`` prefix comes from the ``path("admin/", ...)`` mount, not from the ``namespace`` argument.
+``page_reverse`` only selects which namespace ``reverse`` resolves against.
+
 Passing a ``namespace`` that no Django mount registers raises ``NoReverseMatch``.
 
 When to Use page_reverse Instead of reverse
@@ -224,13 +227,7 @@ The helpers on this page write query strings.
 To read them in a page or component, annotate a parameter with the ``DQuery[T]`` marker.
 ``with_query`` and ``DQuery`` are two ends of the same wire.
 
-``DQuery[list[T]]`` accepts three wire formats for a repeated parameter.
-
-- Repeated keys, ``?tag=a&tag=b``.
-- Bracket suffix, ``?tag[]=a&tag[]=b``.
-- Comma-delimited, ``?tag=a,b``.
-
-``with_query`` emits the repeated-key form when you pass a list.
+``DQuery[list[T]]`` accepts several wire formats for a repeated parameter, and ``with_query`` emits the repeated-key form when you pass a list.
 To read a repeated parameter outside the resolver, call ``get_multi_values(request, name)`` from ``next.urls``, which returns every value for that key as a list.
 Captured **path** segments are separate. They flow through ``DUrl`` or plain URL kwargs as described in :doc:`dependency-injection`.
 

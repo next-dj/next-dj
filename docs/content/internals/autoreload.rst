@@ -70,7 +70,7 @@ Watch Specs
 -----------
 
 A watch spec is a tuple of a root path and one glob pattern.
-``iter_default_autoreload_watch_specs`` is an internal helper of ``next.server.watcher`` that builds the built-in set.
+``_iter_default_autoreload_watch_specs`` is an internal helper of ``next.server.watcher`` that builds the built-in set.
 User code calls ``iter_all_autoreload_watch_specs`` instead, which wraps the built-in set with the registered extra specs.
 
 - Each page root contributes a ``**/page.py`` spec.

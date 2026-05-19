@@ -33,7 +33,7 @@ Component context.
 The Decorator
 -------------
 
-The ``next.pages.context`` decorator has two shapes.
+The page-side ``@context`` decorator has two shapes.
 One is a keyed single value, the other is an unkeyed dict.
 The ``inherit_context`` flag and direct registration, covered after the two shapes, vary how a function is registered.
 
@@ -126,7 +126,7 @@ Plain parameter name.
    Use ``Context`` when the source differs from the parameter name, when you need a default, or when you want the source visible at the call site.
 
 The ``Context(callable)`` form is useful when a parameter needs a value computed from a factory rather than a context key.
-The factory takes its own dependency-injected arguments, so it can ask for the request, captured URL parameters, or any registered provider.
+The factory takes its own dependency-injected arguments, so it can ask for the request, captured URL parameters, any registered provider, and the active form when one is bound.
 
 .. code-block:: python
    :caption: notes/pages/notes/[int:note_id]/page.py
@@ -149,9 +149,6 @@ The framework resolves ``load_note`` with its own ``note_id`` argument from the 
    Use it for values produced by shared dependency callables.
    See :doc:`dependency-injection`.
 
-``Context("user_name")`` and a plain parameter named ``user_name`` resolve to the same value.
-``Context`` is the explicit form, the plain name is the implicit one. ``Depends`` reaches a different registry.
-
 Resolution Order
 ----------------
 
@@ -160,12 +157,11 @@ The framework computes the template scope in this order.
 1. URL kwargs from the matched route are seeded into the context dict.
 2. Inherited context functions from every ancestor ``page.py``, walked from the route root inward.
 3. Page level context functions declared in the current ``page.py``.
-4. Context processors come from ``OPTIONS.context_processors`` on each page backend entry plus the ``context_processors`` list of the first ``TEMPLATES`` entry in Django settings.
+4. Context processors come from ``OPTIONS.context_processors`` on each page backend entry inside ``DEFAULT_PAGE_BACKENDS`` plus the ``context_processors`` list of the first ``TEMPLATES`` entry in Django settings.
+   See :ref:`ref-settings` and :doc:`project-layout` for the backend layout.
    The two lists merge in that order with duplicate dotted paths dropped, so a processor listed twice runs once.
    Each processor return dict is applied with ``update`` after every ``@context`` callable, so a processor key overwrites a page or inherited value.
 5. Component context functions when a ``{% component %}`` tag is encountered during render.
-
-Page backend processors are declared under ``OPTIONS.context_processors`` inside ``DEFAULT_PAGE_BACKENDS``, see :ref:`ref-settings` and :doc:`project-layout` for the backend layout.
 
 A later step that uses the same key overrides earlier values.
 The full merged dict is shared across the entire ``layout.djx`` chain for that request, so all layout wrappers see the same final scope.
@@ -239,7 +235,8 @@ The framework fires ``context_registered`` after a ``@context`` callable in a ``
 Subscribe to it when an external system needs to track page context functions across reloads.
 
 ``@component.context`` does not emit its own signal.
-A component folder fires ``component_registered`` when the folder is discovered and added to the component registry, with a ``ComponentInfo`` payload that describes the whole component.
+Folder discovery registers components through ``register_many``, which fires ``components_registered`` once per discovery batch with an ``infos`` tuple of ``ComponentInfo``.
+The singular ``component_registered`` fires only on a one-at-a-time ``register`` call.
 
 Common Patterns
 ---------------
@@ -297,9 +294,9 @@ System Checks
 -------------
 
 The framework validates context functions through ``check_context_functions``.
-Functions decorated with bare ``@context`` must return a dict.
+A keyless ``@context`` callable with a non-dict return annotation reports ``next.E029`` during ``uv run python manage.py check``.
+A keyless callable with no return annotation is accepted by the check and raises ``TypeError`` at render time if the value is not a mapping.
 Functions decorated with a key may return any value.
-A wrong return shape surfaces during ``uv run python manage.py check``.
 
 See Also
 --------

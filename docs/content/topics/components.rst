@@ -5,7 +5,7 @@ Components
 
 A component is a reusable template fragment with optional Python context.
 Components live in folders under a configured components root and the framework discovers them by name.
-This page covers the two component shapes, the rules for props and slots, how component context is resolved, how to ship co-located CSS and JS, and how to compose several components into larger UI.
+This page covers the two component shapes, the rules for props and slots, how component context is resolved, how to ship co-located CSS and JS, and how to compose several components into a larger interface.
 
 .. contents::
    :local:
@@ -43,6 +43,7 @@ Composite components add Python logic when the template needs computed values th
    A composite component may supply its template body from Python instead of a ``component.djx`` file.
    When ``component.py`` exposes a module-level string named ``component`` and no ``component.djx`` file exists, the framework uses that string as the template body.
    ``ComponentScanner`` registers the component and ``ComponentTemplateLoader.load`` reads the string.
+   A ``component.py`` with neither a ``render`` function nor a ``component`` string and no ``component.djx`` alongside it produces a component that renders nothing.
 
 .. code-block:: text
    :caption: component folder layouts
@@ -72,6 +73,7 @@ The backend recognises three sources for components.
 App page trees.
    As the URL router walks each page tree it calls ``register_components_folder_from_router_walk``, which pushes every ``COMPONENTS_DIR`` folder it finds into the ``FileComponentsBackend``.
    A folder named ``COMPONENTS_DIR`` under that tree is a components root for the application.
+   When several ``FileComponentsBackend`` entries are configured, ``register_components_folder_from_router_walk`` registers app page-tree folders into the first one only.
 
 Project directories.
    The ``DIRS`` list adds absolute or project-relative roots that contribute global components.
@@ -156,15 +158,28 @@ Pair it with the matching close tag.
 
 The block form lets the component template substitute child content through slots.
 
+Free Children
+~~~~~~~~~~~~~
+
+Child markup placed inside a ``{% #component %}`` block without a wrapping ``{% #slot %}`` reaches the component template under the ``children`` context variable.
+The component template renders ``{{ children }}`` to splice the content in.
+
+.. code-block:: jinja
+   :caption: free children
+
+   {% #component "card" %}
+     <p>Free markup with no slot wrapper.</p>
+   {% /component %}
+
+The ``card`` template renders this content wherever it places ``{{ children }}``.
+
 .. _components-multiline-tags:
 
 Multiline Tags
 ~~~~~~~~~~~~~~
 
-Both the void form and the block form accept line breaks inside the tag body.
-This is useful when a component takes many props.
-The framework enables ``re.DOTALL`` for Django's tag lexer, so tag bodies wrap across lines.
-The line break support is applied globally by the template engine at startup, so it works in every template type, not only in component tags.
+Both the void form and the block form accept line breaks inside the tag body, which is useful when a component takes many props.
+The framework enables ``re.DOTALL`` for Django's tag lexer at startup, so tag bodies wrap across lines in every template type, not only in component tags.
 See :ref:`ref-template-tags` under *Multiline tag bodies* for the global parsing caveat.
 
 .. code-block:: jinja
@@ -214,7 +229,7 @@ Template expression.
    {% component "card" title=note.title %}      {# title = note.title from context #}
    {% component "card" pinned=True %}           {# pinned = the boolean True #}
 
-A bare string literal that Django would mark safe is demoted to a plain string so ``{{ prop }}`` autoescapes it inside the component.
+A bare string literal with no filter applied that Django would mark safe is demoted to a plain string so ``{{ prop }}`` autoescapes it inside the component.
 Pass ``prop=value|safe`` or a variable already holding safe content when the component should receive raw HTML.
 
 Variable Forwarding
@@ -302,9 +317,9 @@ The framework resolves parameters from the surrounding template scope, from URL 
 
 .. note::
 
-   Registration raises ``ValueError`` in two cases.
-   The first is a key reserved for dependency injection, such as ``request``.
-   The second is a duplicate registration, where the same key, or an unkeyed callable, is registered twice in one ``component.py`` with a different function.
+   Registration raises ``ValueError`` for a key reserved for dependency injection, such as ``request``.
+   It also raises ``ValueError`` for a duplicate registration of two different functions under the same key, or of two different unkeyed callables, in one ``component.py``.
+   Re-registering the identical function is a no-op.
 
 Pass ``serialize=True`` and optionally ``serializer=`` to include the return value in ``window.Next.context``.
 The behaviour is identical to ``@context`` on a page module.
@@ -360,9 +375,9 @@ See :ref:`ref-settings` for the exact behaviour.
 Hot Reload
 ----------
 
-The development server picks up new and changed component folders without a restart.
-The reloader watches both kinds of component source: the ``DIRS`` roots configured on a backend and the page-tree component folders the URL router walks.
-A change inside any watched folder fires the autoreload pipeline and the runserver reloads with the updated component set.
+The development server reloads when a ``component.py`` changes inside a watched component folder.
+The watched folders are the ``DIRS`` roots configured on a backend and the page-tree component folders the URL router walks.
+Template-only edits to ``.djx`` files are reflected on the next request without a process restart.
 
 Lifecycle Signals
 -----------------
@@ -391,30 +406,19 @@ Run them with ``uv run python manage.py check``.
 Common Patterns
 ---------------
 
-Wrapper Component
-~~~~~~~~~~~~~~~~~
+Three patterns build on the sections above.
 
-Use a block component with a single ``content`` slot to wrap arbitrary child markup.
-Common shapes are cards, alerts, and dialogs.
-
-Composite Component With Context
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Add a ``component.py`` when the template needs values computed from the surrounding context.
-The Python module keeps the template free of business logic.
-
-Shared UI Kit
-~~~~~~~~~~~~~
-
-Ship a folder of reusable components under a project directory listed in ``DIRS``.
-Every application sees the same set, which keeps the design system consistent.
-See :doc:`multi-project` for several trees sharing one kit, and :doc:`/content/misc/examples` for repository samples that wire ``DIRS``.
+- Wrap arbitrary child markup with a block component that has a single ``content`` slot, as in cards, alerts, and dialogs.
+- Add a ``component.py`` when the template needs values computed from the surrounding context, see :doc:`/content/howto/build-a-composite-component`.
+- Ship a folder of reusable components under a ``DIRS`` root for a shared UI kit, see :doc:`multi-project` and :doc:`/content/misc/examples`.
 
 Conditional Rendering
 ~~~~~~~~~~~~~~~~~~~~~
 
 A composite component can define a ``render`` function in ``component.py``.
 The function receives DI-resolved parameters and returns the component body as a string.
+A ``render`` function receives only DI-resolved parameters.
+The lazy ``csrf_token`` and the surrounding template context that template-rendered components get are not added on this path.
 Return an empty string to render nothing, which turns the component into a server side gate.
 
 A ``render`` function takes over completely.

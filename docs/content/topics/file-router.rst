@@ -90,6 +90,7 @@ The bracket syntax accepts every Django path converter.
      - ``<path:name>``
      - Wildcard that matches one or more segments including slashes.
 
+A bracket label is passed to Django verbatim, so any converter registered with :func:`django.urls.register_converter` works in ``[label:name]``.
 The parser handles three bracket forms.
 The typed captured segment is the captured form with a converter prefix, as covered in :doc:`/content/internals/url-router`.
 
@@ -336,7 +337,7 @@ The router contributes Django system checks that validate the configuration at s
 
 - ``check_next_pages_configuration`` validates the ``NEXT_FRAMEWORK`` structure and each backend entry.
 - ``check_pages_structure`` validates directory naming, captured parameter syntax, and the presence of ``page.py`` or ``template.djx``.
-- ``check_page_functions`` warns when a directory has neither a render function nor a template.
+- ``check_page_functions`` reports ``next.E012`` when a directory has neither a render function nor a template, and warns with ``next.W002`` when a page can produce no content.
 - ``check_pages_structure`` and ``check_page_functions`` come from ``next.pages`` and appear here because they validate the same page tree the router scans.
 - ``check_url_patterns`` reports two routes that resolve to the same Django path, whether they come from one tree or several (``next.E015``).
 - ``check_duplicate_url_parameters`` fails when one route repeats a captured parameter name (``next.E028``).

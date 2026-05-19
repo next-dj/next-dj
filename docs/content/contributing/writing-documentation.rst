@@ -110,7 +110,8 @@ Do not mention the framework's current version number in user-facing pages.
 Do not include backward-compatibility notes, migration guidance, or phrases like "as of version X" or "this was changed in Y".
 The documentation describes how the framework works now.
 Historical context belongs in the changelog, not in the docs.
-Do not use Sphinx ``.. versionadded::`` or ``.. versionchanged::`` directives in user-facing pages. They duplicate the same problem under a different syntax.
+Do not use Sphinx ``.. versionadded::`` or ``.. versionchanged::`` directives in user-facing pages.
+They duplicate the same problem under a different syntax.
 
 Runtime matrices
 ~~~~~~~~~~~~~~~~

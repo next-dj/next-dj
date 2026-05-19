@@ -3,7 +3,7 @@
 URL Router
 ==========
 
-This page covers how the file router scans the filesystem, builds URL patterns, dispatches requests, and reloads at runtime.
+This page covers how the file router scans the filesystem, builds URL patterns, and reloads at runtime.
 
 .. contents::
    :local:
@@ -12,7 +12,7 @@ This page covers how the file router scans the filesystem, builds URL patterns, 
 Overview
 --------
 
-The URL subsystem owns the file router, the dispatcher that runs page modules, and the reverse helpers.
+The URL subsystem owns the file router, the filesystem walker that discovers page modules, and the reverse helpers.
 It listens on the Django URL resolver through ``include("next.urls")`` and produces patterns from the filesystem layout.
 
 Pipeline
@@ -25,8 +25,7 @@ Pipeline
        Parser --> Patterns[URL patterns]
        Patterns --> Manager[RouterManager]
        Manager --> Resolver[Django URL resolver]
-       Resolver --> Dispatcher[Dispatcher]
-       Dispatcher --> PageView[Page view]
+       Resolver --> PageView[Page view]
        Manager -- reload --> Reload[Rebuild patterns]
        Reload --> Patterns
 
@@ -50,6 +49,7 @@ Modules
 
 ``next.urls.markers``.
    ``DUrl`` and ``DQuery`` markers used in annotations.
+   ``DUrl.__class_getitem__`` builds the marker for the bare-type, named-key, and named-key-with-type forms, wrapping string and tuple arguments in a ``GenericAlias`` the providers introspect.
    The four parameter providers ``HttpRequestProvider``, ``UrlByAnnotationProvider``, ``UrlKwargsProvider``, and ``QueryParamProvider`` that register with the resolver.
    The ``get_multi_values`` helper that reads a multi-value query parameter outside the resolver.
 
@@ -85,7 +85,7 @@ Multiple Backends
 
 The settings list accepts more than one backend.
 Each backend reports its own list of patterns.
-The dispatcher checks them in order and the first match wins.
+The Django URL resolver checks them in order and the first match wins.
 
 If two routes resolve to the same Django path the ``next.E015`` system check reports the conflict at startup, whether they come from one tree or several.
 

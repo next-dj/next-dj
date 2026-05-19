@@ -25,7 +25,7 @@ The default value registers one backend.
 
    NEXT_FRAMEWORK = {
        "DEFAULT_FORM_ACTION_BACKENDS": [
-           {"BACKEND": "next.forms.RegistryFormActionBackend"},
+           {"BACKEND": "next.forms.RegistryFormActionBackend", "OPTIONS": {}},
        ]
    }
 

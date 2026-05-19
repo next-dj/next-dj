@@ -42,12 +42,19 @@ Register the action.
    from next.forms import action
    from notes.forms import NoteFormSet
 
-   @action("bulk_create", form_class=NoteFormSet)
+   def build_bulk_formset() -> tuple[type[NoteFormSet], dict]:
+       return NoteFormSet, {}
+
+   @action("bulk_create", form_class=build_bulk_formset)
    def bulk_create(form: NoteFormSet) -> HttpResponseRedirect:
        for row in form:
            if row.cleaned_data and not row.cleaned_data.get("DELETE"):
                row.save()
        return HttpResponseRedirect(reverse("next:page_"))
+
+A formset class has no ``get_initial`` method, so passing it to ``form_class`` directly fails on the first POST.
+Register a factory callable that returns a ``(FormSetClass, init_kwargs)`` tuple instead.
+The ``init_kwargs`` reach the formset constructor and the dispatcher skips the ``get_initial`` step.
 
 The ``page_{path}`` URL name follows the file-router naming convention, see :doc:`/content/topics/file-router`.
 
@@ -79,14 +86,24 @@ A user who leaves those rows untouched submits data that appears empty but carri
 Use ``cleanup_extra_initial`` to clear initial values from blank extra rows before the formset is rendered.
 
 .. code-block:: python
-   :caption: notes/forms.py
+   :caption: notes/pages/notes/bulk/page.py
 
-   from next.forms.formsets import cleanup_extra_initial
+   from types import SimpleNamespace
+
+   from next.forms import cleanup_extra_initial
+   from next.pages import context
+   from notes.forms import NoteFormSet
 
    def build_formset(initial: list[dict]) -> NoteFormSet:
        formset = NoteFormSet(initial=initial)
        cleanup_extra_initial(formset)
        return formset
+
+   @context("bulk_create")
+   def bulk_create_form() -> SimpleNamespace:
+       return SimpleNamespace(form=build_formset([{"title": "Draft"}]))
+
+The ``@context`` callable named after the action publishes the formset under the key the ``{% form %}`` tag reads on the initial render.
 
 Verification
 ------------

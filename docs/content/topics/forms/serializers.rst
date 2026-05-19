@@ -3,7 +3,7 @@
 Frozen Form Specs
 =================
 
-The forms subsystem ships frozen dataclass descriptors that describe a form, a formset, or a single field as plain Python data.
+The forms subsystem ships frozen dataclass descriptors that describe a form, a formset, or a single field as immutable, comparable descriptors.
 This module (``next.forms.serializers``) is unrelated to JSON serializers for :doc:`the browser context object </content/topics/static-assets/js-context>`. Those live under ``next.static``.
 
 Each descriptor is a frozen dataclass, so it is immutable and supports value equality.
@@ -48,11 +48,7 @@ The module provides three constructor helpers.
 .. code-block:: python
    :caption: building specs
 
-   from next.forms.serializers import (
-       field_spec,
-       formset_spec,
-       form_spec,
-   )
+   from next.forms import field_spec, formset_spec, form_spec
 
    spec_one_field = field_spec(form["title"])
    spec_one_formset = formset_spec(my_formset)
@@ -74,7 +70,8 @@ A standalone ``field_spec`` call leaves ``is_extra`` at ``False`` unless the cal
 Using a Spec in Templates
 -------------------------
 
-Specs are designed to render in any template engine because they expose plain Python attributes.
+Specs are designed to render in any template engine because they expose stable, immutable attributes.
+Some members are still Django bound objects, such as ``FieldSpec.bound`` and ``FormsetSpec.management_form``.
 Use them when the standard ``{% form %}`` tag does not match the layout you want.
 
 .. code-block:: jinja

@@ -79,10 +79,10 @@ Register kinds in ``AppConfig.ready`` so the kind exists before the first reques
                "jsx",
                extension=".jsx",
                slot="scripts",
-               renderer="render_script_tag",
+               renderer="render_module_tag",
            )
 
-The ``jsx`` kind now lands in the ``scripts`` slot and renders through ``render_script_tag``.
+The ``jsx`` kind now lands in the ``scripts`` slot and renders through ``render_module_tag``.
 A repeated call with identical parameters is idempotent.
 A repeated call with different parameters raises ``ValueError``.
 
@@ -166,8 +166,7 @@ System Checks
 
 The static system checks validate the backend configuration only.
 They do not validate kind registration.
-A bad call to ``default_kinds.register`` raises ``ValueError`` while the app registry populates.
-Because ``manage.py check`` populates the registry itself, the ``ValueError`` aborts the ``check`` command before any individual check reports.
+A bad call to ``default_kinds.register`` raises ``ValueError`` during ``AppConfig.ready``, which aborts ``manage.py check`` before any check runs.
 
 Common Patterns
 ---------------

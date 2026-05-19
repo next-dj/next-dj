@@ -84,6 +84,7 @@ The payload carries ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, 
 
 ``dep_cache``.
    A snapshot of the dispatch dependency cache. Receivers can read named ``Depends("name")`` values resolved during the dispatch without re-running their providers.
+   The dict is a shallow copy taken when the signal fires, so mutating it does not change the live dispatch cache.
 
 The signal does not pass ``request``. Read what you need from ``dep_cache`` or have the handler attach audit data.
 
@@ -124,7 +125,8 @@ Fires when the bound form fails validation during dispatch.
 The sender is ``FormActionDispatch``.
 
 The payload carries ``action_name``, ``error_count``, and ``field_names``.
-``error_count`` is the total number of error messages across all fields. ``field_names`` is a tuple of the field names that failed.
+``error_count`` is the total number of error messages, including non-field errors raised from ``clean``.
+``field_names`` is a tuple of the keys that failed, with non-field errors appearing under ``__all__``.
 
 The dispatcher only builds the payload and sends the signal when at least one receiver is connected, so an unused signal costs nothing.
 

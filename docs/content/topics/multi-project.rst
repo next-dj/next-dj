@@ -164,7 +164,7 @@ Hot Reload
 ----------
 
 Every directory listed in a component backend ``DIRS``, including the shared ``_shared/_components/`` root, contributes its own ``**/component.py`` watch spec to the :doc:`autoreloader </content/internals/autoreload>`.
-A change inside ``_shared/_components/`` fires the autoreload pipeline across every project that uses the development server.
+A change to a ``component.py`` inside ``_shared/_components/`` restarts the development server for every project that watches that root.
 
 The ``components_registered`` signal includes the full set after each reload so long-lived processes can refresh their caches.
 
@@ -174,7 +174,7 @@ Common Variations
 Repository Wide Layout
 ~~~~~~~~~~~~~~~~~~~~~~
 
-Put a single layout in ``_shared/chrome/`` and add the path to every project's ``DIRS``.
+Put a single layout in ``_shared/chrome/`` and add the path to the ``DEFAULT_PAGE_BACKENDS`` ``DIRS`` of every project.
 Every project then renders inside the same shell.
 
 Per Tenant Project

@@ -97,6 +97,7 @@ When the page URL captures a parameter the tag emits a hidden ``_url_param_<name
 
 A page whose URL captures ``id`` therefore posts a hidden ``_url_param_id`` field automatically.
 The handler receives the same value through ``DUrl["id", int]`` or any other URL marker.
+On the POST the dispatcher reads these hidden ``_url_param_*`` fields back into the handler's URL kwargs, since the dispatch URL itself captures only the action UID.
 
 The form Variable
 -----------------

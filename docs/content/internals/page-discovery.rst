@@ -66,7 +66,7 @@ Render Path
 3. ``Page.build_render_context`` assembles the template scope, see `Context Resolution`_ below.
 4. The framework composes the ancestor layout chain, the innermost layout wrapping the page body first and each outer layout wrapping the result.
 5. Each layout substitutes the wrapped content into ``{% block template %}{% endblock template %}``.
-6. ``StaticManager.inject`` replaces ``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholder tokens with the rendered tags accumulated by the request-scoped ``StaticCollector``.
+6. The static manager replaces the ``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholder tokens with the rendered tags accumulated by the request-scoped ``StaticCollector``.
 
 When the body source is a ``render`` function that returns an ``HttpResponseBase``, the response is returned verbatim and steps 3 through 6 do not run.
 
@@ -82,7 +82,8 @@ The user-facing rules for layout discovery, the placeholder contract, and layout
 Body Source Priority
 --------------------
 
-``Page._resolve_page_body`` and ``_load_static_body`` in ``next.pages.manager`` pick the highest priority body source, see :doc:`/content/topics/pages` for the full priority order and the ``next.W043`` conflict warning.
+``Page._resolve_page_body`` and ``_load_static_body`` in ``next.pages.manager`` pick the highest priority body source.
+See :doc:`/content/topics/pages` for the full priority order and the ``next.W043`` conflict warning.
 
 Context Resolution
 ------------------
@@ -97,10 +98,8 @@ Context Resolution
    b. Page-level context.
       The ``@context`` callables declared in the current ``page.py``, evaluated after inherited values are in place so the page can shadow any inherited key.
 
-   Page-level context still shadows every inherited key.
-   Ancestor-collision order therefore only matters between two inherited keys.
-
-3. Context processors merge ``OPTIONS.context_processors`` from each page backend entry with ``context_processors`` from the **first** ``TEMPLATES`` entry, with the page backend paths concatenated ahead of the Django paths.
+3. Context processors merge ``OPTIONS.context_processors`` from each page backend entry with ``context_processors`` from the **first** ``TEMPLATES`` entry.
+   The page backend paths are concatenated ahead of the Django paths.
    Deduplication by dotted path keeps the first occurrence, so a path shared by both sources runs once with the page backend taking precedence.
    Each surviving processor returns a dict that updates the merged scope, so a later processor overrides an earlier key on a collision.
 4. Component-level context functions run on demand as each ``{% component %}`` tag is evaluated during rendering.

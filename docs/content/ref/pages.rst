@@ -82,7 +82,15 @@ System Checks
 ``next.pages.checks`` registers the Django system checks for the pages subsystem.
 They run through ``uv run python manage.py check``.
 
-The module exports seven check callables: ``check_request_in_context``, ``check_layout_templates``, ``check_template_loaders``, ``check_pages_structure``, ``check_page_functions``, ``check_context_functions``, and ``check_context_processor_signature``.
+The module exports seven check callables.
+
+- ``check_context_functions``.
+- ``check_context_processor_signature``.
+- ``check_layout_templates``.
+- ``check_page_functions``.
+- ``check_pages_structure``.
+- ``check_request_in_context``.
+- ``check_template_loaders``.
 
 See :doc:`system-checks` for each check identifier, its condition, and the full autodoc of ``next.pages.checks``.
 

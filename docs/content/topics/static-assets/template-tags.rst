@@ -3,7 +3,7 @@
 Static Template Tags
 ====================
 
-The static pipeline exposes four template tags.
+The static pipeline exposes four template tags, two of which also have a block form.
 ``{% collect_styles %}`` and ``{% collect_scripts %}`` mark placeholder slots in the layout.
 ``{% use_style %}`` and ``{% use_script %}`` register external or inline assets from a template.
 

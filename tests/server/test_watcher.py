@@ -13,8 +13,8 @@ from next.server import (
 )
 from next.server.watcher import (
     _dedupe_watch_specs,
+    _iter_default_autoreload_watch_specs,
     _registered_extra_watch_specs,
-    iter_default_autoreload_watch_specs,
 )
 
 
@@ -28,7 +28,7 @@ class TestServerAutoreloadWatchApi:
             register_autoreload_watch_spec(root, "**/plugin.py")
             register_autoreload_watch_spec(root, "**/plugin.py")
             with patch(
-                "next.server.watcher.iter_default_autoreload_watch_specs",
+                "next.server.watcher._iter_default_autoreload_watch_specs",
                 return_value=[],
             ):
                 specs = iter_all_autoreload_watch_specs()
@@ -68,7 +68,7 @@ class TestServerAutoreloadWatchApi:
             },
         ):
             next_framework_settings.reload()
-            specs = iter_default_autoreload_watch_specs()
+            specs = _iter_default_autoreload_watch_specs()
         next_framework_settings.reload()
         assert all(".djx" not in g for _, g in specs)
         assert any(g == "**/component.py" and p == comp_root for p, g in specs)
@@ -105,7 +105,7 @@ class TestServerAutoreloadWatchApi:
             },
         ):
             next_framework_settings.reload()
-            specs = iter_default_autoreload_watch_specs()
+            specs = _iter_default_autoreload_watch_specs()
         next_framework_settings.reload()
         expected_glob = "**/_/**/component.py"
         for root in (custom.resolve(), pages_tree.resolve()):

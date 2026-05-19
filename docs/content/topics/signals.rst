@@ -112,6 +112,9 @@ Receiver Patterns
 
 Connect once at startup.
 
+The import sits inside ``ready`` on purpose.
+Module-level imports of app code run before the app registry is ready.
+
 .. code-block:: python
    :caption: notes/apps.py
 

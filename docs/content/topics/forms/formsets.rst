@@ -48,12 +48,19 @@ Pass the formset class as ``form_class``.
    from next.forms import action
    from notes.forms import NoteFormSet
 
-   @action("bulk_create_notes", form_class=NoteFormSet)
+   def build_bulk_formset() -> tuple[type[NoteFormSet], dict]:
+       return NoteFormSet, {"initial": [{"title": "Draft"}]}
+
+   @action("bulk_create_notes", form_class=build_bulk_formset)
    def bulk_create_notes(form: NoteFormSet) -> HttpResponseRedirect:
        for row in form:
            if row.cleaned_data and not row.cleaned_data.get("DELETE"):
                row.save()
        return HttpResponseRedirect(reverse("next:page_"))
+
+A formset class has no ``get_initial`` method, so it cannot be passed to ``form_class`` directly.
+Register a factory callable that returns a ``(FormSetClass, init_kwargs)`` tuple instead.
+The ``init_kwargs`` reach the formset constructor and the dispatcher skips the ``get_initial`` step.
 
 The ``page_{path}`` URL name follows the file-router naming convention, see :doc:`/content/topics/file-router`.
 
@@ -91,7 +98,7 @@ Without it Django cannot reconstruct the formset on POST.
 cleanup_extra_initial
 ---------------------
 
-A formset that allows extra rows often comes with ``empty_permitted=True`` rows that have no instance.
+A formset that allows extra rows often comes with ``empty_permitted=True`` rows that have no saved instance behind them.
 The framework helper drops those initial values so untouched rows pass validation without producing spurious errors.
 
 Build the formset inside a ``@context`` callable named after the action and return a ``SimpleNamespace`` with a ``form`` attribute, the shape the ``{% form %}`` tag reads on the initial render.
@@ -100,7 +107,7 @@ Build the formset inside a ``@context`` callable named after the action and retu
    :caption: notes/pages/notes/bulk/page.py
 
    from types import SimpleNamespace
-   from next.forms.formsets import cleanup_extra_initial
+   from next.forms import cleanup_extra_initial
    from next.pages import context
    from notes.forms import NoteFormSet
 
@@ -152,7 +159,10 @@ Use ``modelformset_factory`` for editing several existing instances.
        formset = NoteEditFormSet(queryset=Note.objects.all())
        return SimpleNamespace(form=formset)
 
-   @action("edit_all_notes", form_class=NoteEditFormSet)
+   def build_edit_formset() -> tuple[type[NoteEditFormSet], dict]:
+       return NoteEditFormSet, {"queryset": Note.objects.all()}
+
+   @action("edit_all_notes", form_class=build_edit_formset)
    def edit_all_notes(form: NoteEditFormSet) -> HttpResponseRedirect:
        form.save()
        return HttpResponseRedirect(reverse("next:page_"))
@@ -232,7 +242,7 @@ The framework processes whatever the management form reports.
 Partial Save
 ~~~~~~~~~~~~
 
-Save only the valid rows by iterating ``form.cleaned_data`` and skipping rows with ``DELETE`` true or empty payloads.
+Save only the valid rows by iterating the formset and skipping rows whose ``cleaned_data`` is empty or carries a truthy ``DELETE``.
 
 Inline Formset
 ~~~~~~~~~~~~~~

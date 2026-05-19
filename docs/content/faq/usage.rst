@@ -89,7 +89,8 @@ How do I add context processors to pages
 -----------------------------------------
 
 Add a ``context_processors`` list to the ``OPTIONS`` dict of the relevant page backend entry.
-The list merges with the processors from the first ``TEMPLATES`` entry in Django settings. Duplicates are dropped.
+The list merges with the processors from the first ``TEMPLATES`` entry in Django settings.
+Duplicates are dropped.
 See :doc:`/content/topics/context` for the merge order and a full settings example.
 
 How do I keep query parameters after a form action redirect

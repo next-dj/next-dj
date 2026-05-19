@@ -54,7 +54,7 @@ Rendering
 Loaders
 ~~~~~~~
 
-``eager_load_components`` and ``eager_load_pages`` force-import ``page.py`` and ``component.py`` modules in tests.
+``eager_load_components``, ``eager_load_pages``, and ``clear_loaded_dirs`` force-import or reset the per-directory memoisation of ``page.py`` and ``component.py`` modules in tests.
 
 .. automodule:: next.testing.loaders
    :members:

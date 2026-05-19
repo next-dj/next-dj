@@ -34,7 +34,7 @@ name (required).
    String identifier used in templates and inside the registry.
    Must be unique across the project unless a namespace prefix differentiates duplicates.
 
-form_class (optional).
+form_class (optional, keyword only).
    Form class to bind and validate the POST body against.
    Omit it for non form POST actions, see the section below.
 
@@ -311,6 +311,9 @@ The forms subsystem contributes Django system checks.
 - ``next.E041`` reports two ``@action`` registrations that share a name but come from different handlers.
 - ``next.E044`` reports a malformed or non-importable ``DEFAULT_FORM_ACTION_BACKENDS`` entry, including a non-string ``BACKEND`` path.
 - ``next.E045`` reports a backend that does not subclass ``FormActionBackend``.
+
+A UID hash collision between two distinct action names is not a check.
+It raises ``ImproperlyConfigured`` at import time, as described under Action Names and Namespaces above.
 
 Run the checks through ``uv run python manage.py check``.
 

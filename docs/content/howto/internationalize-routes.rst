@@ -80,6 +80,7 @@ Translate In-Page Text
 
 Mark template strings with the standard Django i18n tags.
 Load the ``i18n`` tag library at the top of the template.
+The examples below use a separate ``shop`` project rather than the Notes project shown elsewhere in the documentation.
 
 .. code-block:: jinja
    :caption: shop/routes/template.djx

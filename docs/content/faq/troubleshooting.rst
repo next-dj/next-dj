@@ -144,12 +144,14 @@ Three common causes explain this.
   Drop that import in ``page.py``, ``layout.djx``-adjacent Python hooks, ``component.py``, and provider modules if markers stop resolving.
 
 - No registered provider covers the marker type.
-  The resolver leaves the parameter unset. Depending on the callable signature this surfaces as ``None`` or a normal Python ``TypeError``.
+  The resolver leaves the parameter unset.
+  Depending on the callable signature this surfaces as ``None`` or a normal Python ``TypeError``.
 
 - The callable asks for data that is not in the request-scoped cache yet (for example the wrong phase of a form re-render).
   Compare your scenario with the lifecycle discussion in :doc:`/content/topics/dependency-injection`.
 
 To inspect what the resolver would actually inject, use ``resolve_call`` from ``next.testing`` in a shell or test.
+The snippet below assumes a non-bracketed ``notes/pages/notes/`` page module and a custom ``DTenant`` provider declared in the project.
 
 .. code-block:: python
 

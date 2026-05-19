@@ -47,6 +47,8 @@ Modules
 
 ``next.forms.decorators``.
    ``@action`` decorator implementation.
+   An ``@action`` may also live in a ``component.py``, which the components backend imports during component discovery, so the action registry is populated before the first request regardless of where the decorator runs.
+   See :doc:`/content/internals/component-pipeline` for the discovery walk.
 
 ``next.forms.manager``.
    ``FormActionManager`` aggregates the configured backends and yields their URL patterns.
@@ -87,7 +89,7 @@ Each backend is a full implementation of the ``FormActionBackend`` contract, not
 A backend owns the registry, the URL generation, and the dispatch for every action it registers.
 
 The default value registers ``RegistryFormActionBackend``.
-Its ``dispatch`` method resolves the UID, validates the origin page, builds the form, and runs the pipeline through ``FormActionDispatch``.
+Its ``dispatch`` method resolves the UID to an action and forwards the request to ``FormActionDispatch``, which builds the form, runs the validation chain, and validates the origin page when re-rendering.
 
 A project customises dispatch by subclassing ``RegistryFormActionBackend`` and overriding ``dispatch``.
 The override calls ``super().dispatch`` to keep the standard pipeline.
@@ -102,6 +104,7 @@ Two consequences flow from this.
 - Re-render is cheap because layouts and context functions reuse cached values.
 
 The cache hangs on ``request`` under the attribute named ``REQUEST_DEP_CACHE_ATTR``.
+Read it through ``next.deps.get_request_dep_cache(request)`` rather than the raw attribute.
 
 Signals
 -------

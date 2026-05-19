@@ -29,8 +29,6 @@ Backend.
 Placeholder slots and template tags.
    ``{% collect_styles %}`` and ``{% collect_scripts %}`` mark the slots the static manager fills after the page renders.
 
-"A Single Asset From Disk to HTML" below traces these four parts on a concrete file.
-
 StaticAsset
 -----------
 
@@ -130,6 +128,7 @@ Hot Reload
 Co-located assets are not watched by the autoreloader.
 The collector re-runs discovery on every request, so a saved or added asset is picked up on the next page load without a process restart.
 A change to ``page.py`` or ``component.py`` does restart the process through the normal Python reloader.
+A ``.djx`` template change is likewise picked up on the next request without a restart.
 
 Production Build
 ----------------

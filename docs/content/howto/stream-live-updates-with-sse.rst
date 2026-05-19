@@ -8,12 +8,12 @@ Problem
 
 A poll page shows a vote chart and you want every open tab to update the moment someone votes, without polling and without a WebSocket stack.
 
+Solution
+--------
+
 next.dj adds no dedicated SSE module.
 The pieces you use are the usual page module, form actions, and signals such as ``action_dispatched`` for fan-out after dispatch.
 A full implementation lives under ``examples/live-polls/``. See :doc:`/content/misc/examples`.
-
-Solution
---------
 
 Return a :class:`~django.http.StreamingHttpResponse` with the ``text/event-stream`` content type from a page module.
 Back the stream with an in-process broker built on :class:`threading.Condition` and a per-poll revision counter.
@@ -22,7 +22,7 @@ Publish a fresh snapshot from an ``action_dispatched`` receiver so the vote hand
 Walkthrough
 -----------
 
-Build the broker
+Build the Broker
 ~~~~~~~~~~~~~~~~
 
 The broker keeps one :class:`threading.Condition` and one monotonic revision counter per poll.
@@ -60,7 +60,7 @@ Each subscriber captures its own ``last_revision`` before yielding the initial s
 A publish that lands while the consumer still holds that frame wakes the subscriber on the next ``next()`` instead of being lost.
 A :class:`threading.Event` with ``clear()`` would drop events under fan-out because the first subscriber clears the event before the other threads observe it.
 
-Yield SSE frames
+Yield SSE Frames
 ~~~~~~~~~~~~~~~~
 
 The first frame is always the cached snapshot under the ``snapshot`` event so a fresh tab catches up immediately.
@@ -94,10 +94,15 @@ A 15-second timeout on ``wait_for`` produces a comment frame so idle connections
 .. code-block:: python
    :caption: polls/broker.py
 
-   def _wait_for_new_revision(self, poll_id, condition, last_revision):
+   def _wait_for_new_revision(
+       self,
+       poll_id: int,
+       condition: threading.Condition,
+       baseline: int,
+   ) -> int:
        with condition:
            condition.wait_for(
-               lambda: self._revisions[poll_id] != last_revision,
+               lambda: self._revisions[poll_id] != baseline,
                timeout=15,
            )
            return self._revisions[poll_id]
@@ -117,7 +122,7 @@ Keepalive frames begin with ``:`` so clients ignore them while proxies still see
    def format_keepalive() -> bytes:
        return b": keepalive\n\n"
 
-Stream from a page module
+Stream From a Page Module
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Place a page module at the ``stream/`` route and return the response from ``render``.
@@ -149,7 +154,7 @@ See :doc:`/content/topics/dependency-injection` for how to define custom markers
 The endpoint stays sync because the broker waits on :class:`threading.Condition`.
 An ASGI deployment swaps the wake primitive for an :class:`asyncio.Condition` and yields from an async generator without touching the page or the signal layer.
 
-Fan out from the vote signal
+Fan Out From the Vote Signal
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The vote handler runs the atomic ``UPDATE`` and returns the redirect.
@@ -182,7 +187,7 @@ The signal carries the bound form after validation, so the receiver knows which 
 
 Concentrating the publish in the receiver keeps the write path observable through one signal hook.
 
-Subscribe from the browser
+Subscribe From the Browser
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The detail component exposes the stream URL through ``@component.context`` with ``serialize=True``, which injects the dict into ``window.Next.context.results``.
@@ -210,6 +215,7 @@ A raw ``.vue`` file is not browser-loadable, so the ``vue`` kind needs a custom 
    :caption: polls/apps.py
 
    from next.static import default_kinds
+   from next.static.discovery import default_stems
 
    class PollsConfig(AppConfig):
        name = "polls"
@@ -221,6 +227,9 @@ A raw ``.vue`` file is not browser-loadable, so the ``vue`` kind needs a custom 
                slot="scripts",
                renderer="render_module_tag",
            )
+           default_stems.register("template", "page")
+
+The example uses ``.vue`` page bodies, so ``default_stems.register("template", "page")`` lets discovery recognise ``page`` as a template stem alongside the default ``template`` stem.
 
 Verification
 ------------

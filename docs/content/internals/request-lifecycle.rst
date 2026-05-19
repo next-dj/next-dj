@@ -56,7 +56,7 @@ URL Resolver
 The framework registers its URL patterns through ``include("next.urls")`` in ``config/urls.py``.
 The Django URL resolver matches the request path against those patterns.
 A file routed match dispatches to the page view.
-A match on ``/_next/form/<uid>/`` dispatches to the form dispatcher instead.
+A match on ``/_next/form/<str:uid>/`` dispatches to the form dispatcher instead.
 
 Page View
 ~~~~~~~~~
@@ -66,6 +66,7 @@ When the module exposes a ``render`` function the view calls it before context r
 ``render`` may return a string body or an ``HttpResponseBase`` that short-circuits the layout and static pipelines.
 When the body comes from the ``template`` attribute or a ``template.djx`` file the view reads that source as a plain string.
 After the body is in hand the view builds the render context and runs every ``@context`` function in order.
+Captured URL kwargs from the matched route are seeded into the context dict before any ``@context`` function runs.
 
 Layout Chain
 ~~~~~~~~~~~~
@@ -90,7 +91,7 @@ The framework injects the ``Next`` JS context script before any other script in 
 Form Submission Path
 --------------------
 
-A form submission enters at ``/_next/form/<uid>/``.
+A form submission enters at ``/_next/form/<str:uid>/``.
 The dispatcher resolves the UID to the registered handler and form class.
 On valid form the handler runs and returns a response that goes back to the browser.
 On invalid form the dispatcher loads the origin page and re-renders it through the same pipeline used for a fresh page request, with the bound form in the template scope.

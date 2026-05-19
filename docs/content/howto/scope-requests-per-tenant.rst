@@ -106,6 +106,8 @@ The provider matches the bare ``DTenant`` annotation when a request carries a te
        def resolve(self, _param, context):
            return get_active_tenant(context.request)
 
+Unlike ``DFlag[Flag]``, ``DTenant`` is matched by class identity rather than ``get_origin``, so it carries no type parameter and the provider compares ``param.annotation`` to the class directly.
+
 Import the module from ``AppConfig.ready`` so the auto-registry wires the provider at startup.
 
 .. code-block:: python

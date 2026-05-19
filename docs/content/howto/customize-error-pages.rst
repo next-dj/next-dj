@@ -128,8 +128,8 @@ The exception propagates out of the page to Django's URL resolver, which then in
    def note(note_id: DUrl[int]) -> Note:
        try:
            return Note.objects.get(pk=note_id)
-       except Note.DoesNotExist:
-           raise Http404("No note with that id")
+       except Note.DoesNotExist as exc:
+           raise Http404("No note with that id") from exc
 
 Verification
 ------------

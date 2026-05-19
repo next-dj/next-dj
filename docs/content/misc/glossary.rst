@@ -47,12 +47,13 @@ Terms used throughout the next.dj documentation.
 
    dispatch
       The pipeline that turns a form submission into a handler invocation.
+      A failed validation skips the handler and re-renders the origin page instead.
 
    FormSpec
       A frozen dataclass that describes a form layout.
       Used to render forms in custom templates.
 
-   inherit context
+   inherit_context
       The ``inherit_context=True`` flag on ``@context`` in ``page.py``.
       Publishes the context value to every descendant page under that directory, not only to the page that declares it.
 
@@ -66,7 +67,8 @@ Terms used throughout the next.dj documentation.
       Selected through ``JS_CONTEXT_POLICY`` inside static backend ``OPTIONS``. See :doc:`/content/topics/static-assets/js-context`.
 
    NextScriptBuilder
-      Constructs the ``next.min.js`` tag, preload link, and ``Next._init`` shell. Controlled through ``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]``.
+      Constructs the ``next.min.js`` tag, preload link, and ``Next._init`` shell.
+      Controlled through ``NEXT_FRAMEWORK["NEXT_JS_OPTIONS"]``.
 
    ScriptInjectionPolicy
       Controls whether the framework injects the runtime bundle automatically (``AUTO``), skips injection (``DISABLED``), or leaves placement to your templates (``MANUAL``).

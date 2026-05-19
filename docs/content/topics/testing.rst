@@ -89,6 +89,10 @@ Configure ``DJANGO_SETTINGS_MODULE`` so the framework can load.
 
 Run the suite with ``uv run pytest``.
 
+The helpers assume Django is configured and the app registry is populated.
+``pytest-django`` does this from ``DJANGO_SETTINGS_MODULE``.
+A stdlib ``unittest`` suite calls ``django.setup()`` once before importing any ``next.testing`` helper.
+
 Isolate Registries
 ------------------
 
@@ -107,11 +111,13 @@ Add an ``autouse`` fixture in ``conftest.py`` to clear every registry between te
        reset_registries()
 
 The helper reloads the form-action and component backends from the current settings.
-Three narrower helpers are also available when only one registry needs resetting:
+Two narrower helpers reset a single registry.
 
 - ``reset_components()`` reloads only the component backends.
 - ``reset_form_actions()`` reloads only the form-action backends.
-- ``reset_page_cache()`` drops the page template cache. It is useful when a test rewrites template files on disk.
+
+A third helper, ``reset_page_cache()``, resets no registry.
+It drops the page template cache and is useful when a test rewrites template files on disk.
 
 .. note::
 

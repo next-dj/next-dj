@@ -169,26 +169,15 @@ Default value ``False``.
 LAZY_COMPONENT_MODULES
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-When ``False``, the default, ``next.apps.components.install`` runs discovery on configured component roots then imports every ``component.py`` found there so ``@component.context`` and ``@action`` decorators run before the first HTTP request.
+When ``False``, the default, ``next.apps.components.install`` imports every ``component.py`` found in configured component roots so ``@component.context`` and ``@action`` decorators run before the first HTTP request.
 
-When ``True``, that bulk import pass for configured roots alone is skipped.
-Each ``component.py`` discovered only through those roots is imported later the first time ``get_component`` resolves that component for rendering.
+When ``True``, that bulk import is skipped.
+Each ``component.py`` discovered through a configured root is imported the first time ``get_component`` resolves that component.
 
-Two paths interact:
+Components discovered through ``_components`` directories beside page files are unaffected.
+The file router imports those modules as it walks the page tree, regardless of this flag.
 
-Configured component roots from ``DEFAULT_COMPONENT_BACKENDS``.
-   Lazy mode defers executing Python modules discovered solely through this scan until first resolve.
-
-``_components`` directories beside page files.
-   While the file router walks the page tree to emit URL patterns it registers those folders and imports each ``component.py`` it finds there.
-   That happens when Django first drives ``urlpatterns`` far enough to reach the folder.
-   ``LAZY_COMPONENT_MODULES`` does not defer this path.
-
-Set ``True`` when configured roots hold a very large tree and eager import slows ``AppConfig.ready``.
-Expect import errors from lazily loaded root modules when the component first resolves, and from router-discovered modules when URL generation reaches their folder.
-
-Default value ``False`` (eager import at startup for configured roots).
-
+Default value ``False``.
 See :doc:`/content/deployment/settings` for production defaults.
 For tests, ``eager_load_components`` imports every registered ``component.py`` even when this flag is ``True``. See :doc:`/content/topics/testing`.
 

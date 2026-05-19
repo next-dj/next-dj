@@ -36,7 +36,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`static-assets/index`
    Co-located files, deduplication, asset kinds, backends, JS context.
 
-.. rubric:: Cross Cutting
+.. rubric:: Cross-Cutting Concerns
 
 :doc:`dependency-injection`
    Markers, providers, the resolver, request scoped cache.
@@ -44,7 +44,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`signals`
    Every signal emitted by the framework, with payload tables.
 
-:doc:`/content/topics/testing`
+:doc:`testing`
    ``NextClient``, ``SignalRecorder``, registry isolation.
 
 :doc:`extending`

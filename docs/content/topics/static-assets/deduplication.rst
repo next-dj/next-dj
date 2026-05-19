@@ -28,6 +28,7 @@ The framework ships three strategies.
    Keys URL assets by the SHA-256 hash of the file at ``source_path``.
    Two files with identical content deduplicate even at different paths.
    Falls back to URL keying when ``source_path`` is absent.
+   Inline assets are keyed by their rendered body, identical to ``UrlDedup``.
 
 ``IdentityDedup``.
    Disables deduplication.

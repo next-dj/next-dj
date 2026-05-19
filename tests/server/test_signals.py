@@ -32,7 +32,7 @@ class TestWatchSpecsReadySignal:
     ) -> None:
         """Calling ``iter_all_autoreload_watch_specs()`` emits ``watch_specs_ready``."""
         with patch(
-            "next.server.watcher.iter_default_autoreload_watch_specs",
+            "next.server.watcher._iter_default_autoreload_watch_specs",
             return_value=[],
         ):
             iter_all_autoreload_watch_specs()
@@ -43,7 +43,7 @@ class TestWatchSpecsReadySignal:
     ) -> None:
         """Sender is the ``iter_all_autoreload_watch_specs`` function."""
         with patch(
-            "next.server.watcher.iter_default_autoreload_watch_specs",
+            "next.server.watcher._iter_default_autoreload_watch_specs",
             return_value=[],
         ):
             iter_all_autoreload_watch_specs()
@@ -54,7 +54,7 @@ class TestWatchSpecsReadySignal:
     ) -> None:
         """``specs`` kwarg is the final deduplicated list."""
         with patch(
-            "next.server.watcher.iter_default_autoreload_watch_specs",
+            "next.server.watcher._iter_default_autoreload_watch_specs",
             return_value=[],
         ):
             result = iter_all_autoreload_watch_specs()

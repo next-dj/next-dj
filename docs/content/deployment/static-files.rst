@@ -17,13 +17,15 @@ next.dj contributes ``NextStaticFilesFinder`` (dotted path ``next.static.NextSta
 ``NextFrameworkConfig.ready`` appends it to ``STATICFILES_FINDERS`` automatically, so no manual configuration is required.
 Production deployments use :doc:`collectstatic <django:ref/contrib/staticfiles>` exactly as they would for any other Django project.
 
-To confirm the finder is active, run the command below.
-The path must match a component the project actually ships.
+Verify the Finder
+~~~~~~~~~~~~~~~~~
+
+To confirm the finder is active, run the command below with a path that matches a component the project actually ships.
 
 .. code-block:: bash
    :caption: shell
 
-   uv run python manage.py findstatic next/components/note_card/component.css
+   uv run python manage.py findstatic next/components/note_card.css
 
 If the file is not found, check that ``next`` is in ``INSTALLED_APPS`` and that the component named in the path exists.
 
@@ -49,7 +51,7 @@ Pair it with Django's :doc:`ManifestStaticFilesStorage <django:ref/contrib/stati
 .. code-block:: text
    :caption: rendered output example
 
-   <link rel="stylesheet" href="/static/next/components/note_card/component.a1b2c3d4.css">
+   <link rel="stylesheet" href="/static/next/components/note_card.a1b2c3d4.css">
 
 Configure the web server or the CDN to honour long ``Cache-Control`` headers on the static origin.
 

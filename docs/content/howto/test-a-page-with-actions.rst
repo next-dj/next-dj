@@ -52,7 +52,7 @@ Write the test.
        assert response.status_code == 302
        assert response["Location"] == "/"
 
-       event = recorder.events[-1]
+       event = recorder.last_for(action_dispatched)
        assert event.kwargs["action_name"] == "create_note"
        assert event.kwargs["form"].cleaned_data["title"] == "First"
 
@@ -83,10 +83,13 @@ For tests that focus on template output, render the page directly.
 .. code-block:: python
    :caption: tests/test_template.py
 
+   from pathlib import Path
+
    from next.testing.rendering import render_page
 
    def test_template_renders_form() -> None:
-       html = render_page("notes/pages/page.py")
+       page = Path(__file__).parent.parent / "notes" / "pages" / "page.py"
+       html = render_page(page)
        assert "Create" in html
 
 Verification

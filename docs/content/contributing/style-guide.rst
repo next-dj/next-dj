@@ -132,7 +132,8 @@ A documentation pull request lands when.
 - Every new section follows its template.
 - Every page under ``content/internals/`` includes a ``.. mermaid::`` diagram.
 - Cross references resolve.
-- Runnable excerpts follow the Notes tutorial paths or name another reference project. Blurbs for ``examples/`` stay aligned with ``examples/README.md``.
+- Runnable excerpts follow the Notes tutorial paths or name another reference project.
+- Blurbs for ``examples/`` stay aligned with ``examples/README.md``.
 
 Repository Markdown
 -------------------

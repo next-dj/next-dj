@@ -19,7 +19,7 @@ Django's :doc:`CsrfViewMiddleware <django:ref/csrf>` validates the token on ever
 A missing or stale token returns HTTP 403.
 
 The tag also depends on ``request`` existing in the template context so Django can render the CSRF field.
-If ``manage.py check`` reports ``next.E019``, add ``django.template.context_processors.request`` to the ``OPTIONS.context_processors`` list of your Django ``TEMPLATES`` entry.
+If ``manage.py check`` reports a missing ``request`` context processor, add ``django.template.context_processors.request`` to the ``OPTIONS.context_processors`` list of your Django ``TEMPLATES`` entry.
 An equivalent processor that supplies ``request`` works as well, so layouts receive ``request``.
 
 Origin Validation
@@ -34,7 +34,8 @@ The posted path must resolve under ``settings.BASE_DIR``.
 It must name ``page.py`` (the framework stores the absolute path to that module).
 Either the file must exist, or the directory must contain a sibling ``template.djx`` so virtual routes can re-render after validation failures.
 
-The optional hidden field ``_next_form_origin`` carries a same-site path (starts with ``/``, not ``//``).
+The hidden field ``_next_form_origin`` carries a same-site path that starts with ``/`` and not with ``//``.
+The ``{% form %}`` tag emits it on every render, and ``redirect_to_origin`` falls back to ``/`` when it is missing.
 Handlers can call ``redirect_to_origin`` from ``next.forms`` to redirect back to the page that rendered the form.
 
 A submission that fails these checks returns HTTP 400 and the handler does not run.
@@ -69,7 +70,7 @@ Use ``DQuery[str]`` in the page context to read the value.
 AJAX Submissions
 ----------------
 
-JavaScript code that posts to the dispatch URL must include both fields in the request body.
+JavaScript that posts to the dispatch URL must supply the CSRF token, in the ``X-CSRFToken`` header or the ``csrfmiddlewaretoken`` body field, and the ``_next_form_page`` value in the request body.
 The standard Django approach reads the token from the cookie or from a meta tag.
 
 The simplest way to obtain the origin path is to read the hidden ``_next_form_page`` field that the rendered ``{% form %}`` tag already emits.
