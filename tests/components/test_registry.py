@@ -295,9 +295,7 @@ class TestComponentVisibilityResolver:
         resolved = ComponentVisibilityResolver(reg).resolve_visible(tmpl)
         return resolved["button"]
 
-    def test_equal_score_tie_breaks_on_registration_order(
-        self, tmp_path: Path
-    ) -> None:
+    def test_equal_score_tie_breaks_on_registration_order(self, tmp_path: Path) -> None:
         """Two equal-score global roots resolve to the one registered first."""
         winner = self._resolve_same_name_from_two_roots(
             tmp_path / "case1", "z_root", "a_root"

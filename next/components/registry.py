@@ -116,8 +116,7 @@ class ComponentVisibilityResolver:
         self._result_cache: OrderedDict[Path, Mapping[str, ComponentInfo]] = (
             OrderedDict()
         )
-        self._scope_index: dict[Path, list[ComponentInfo]] = {}
-        self._registration_index: dict[ComponentInfo, int] = {}
+        self._scope_index: dict[Path, list[tuple[int, ComponentInfo]]] = {}
         self._scope_index_registry_version = -1
         self._cached_registry_version = -1
         self._resolved_path_cache: dict[Path, Path] = {}
@@ -126,16 +125,18 @@ class ComponentVisibilityResolver:
         if self._scope_index_registry_version == self._registry.version:
             return
         self._scope_index = {}
-        self._registration_index = {}
         for position, ci in enumerate(self._registry.get_all()):
-            self._scope_index.setdefault(ci.resolved_scope_root, []).append(ci)
-            self._registration_index[ci] = position
+            self._scope_index.setdefault(ci.resolved_scope_root, []).append(
+                (position, ci)
+            )
         self._scope_index_registry_version = self._registry.version
 
-    def _candidate_components(self, template_path: Path) -> list[ComponentInfo]:
+    def _candidate_components(
+        self, template_path: Path
+    ) -> list[tuple[int, ComponentInfo]]:
         self._ensure_scope_index()
         tmpl_dir = template_path.parent
-        out: list[ComponentInfo] = []
+        out: list[tuple[int, ComponentInfo]] = []
         for scope_root, infos in self._scope_index.items():
             if self._registry.is_root(scope_root):
                 out.extend(infos)
@@ -169,10 +170,9 @@ class ComponentVisibilityResolver:
             return self._result_cache[template_path]
 
         candidates: list[tuple[int, str, int, ComponentInfo]] = []
-        for component in self._candidate_components(template_path):
+        for position, component in self._candidate_components(template_path):
             score = self._calculate_visibility_score(component, template_path)
             if score is not None:
-                position = self._registration_index[component]
                 candidates.append((score, component.name, position, component))
 
         # Higher score wins. Equal score and name fall back to registration
