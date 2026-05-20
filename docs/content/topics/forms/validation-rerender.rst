@@ -249,5 +249,5 @@ See Also
 
    :doc:`actions` for handler patterns.
    :doc:`templates` for the ``{% form %}`` tag and ``_next_form_page``.
-   :doc:`backends` for swapping the validation backend.
+   :doc:`backends` for swapping the dispatch backend.
    :doc:`/content/internals/action-dispatch` for the full pipeline.

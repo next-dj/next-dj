@@ -73,6 +73,7 @@ Configure NEXT_FRAMEWORK
 
 Tell next.dj where to look for pages and components.
 With ``APP_DIRS`` set to ``True`` and ``DIRS`` left empty, each installed app carries its own ``pages/`` and ``_components/`` directories.
+The file router walk registers each ``_components/`` folder it encounters during page discovery, so the component backend needs no separate ``APP_DIRS`` flag.
 
 .. code-block:: python
    :caption: config/settings.py

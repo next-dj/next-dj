@@ -111,6 +111,24 @@ Omitted parameters are not resolved and not passed to the handler.
 Action dispatch resolves ``request``, bound ``form``, captured URL parameters, and ``Depends`` providers.
 It does not resolve page context values, so a handler reads request state or settings directly instead of a ``Context`` marker.
 
+Injecting by Type Annotation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``DForm[MyForm]`` is a type-annotation marker that tells the dispatcher to inject the bound form regardless of the parameter name.
+
+.. code-block:: python
+   :caption: using DForm
+
+   from next.forms import action, DForm
+   from notes.forms import NoteForm
+
+   @action("save_note", form_class=NoteForm)
+   def save_note(submitted: DForm[NoteForm]) -> None:
+       submitted.save()
+
+Use ``DForm[MyForm]`` when the parameter name carries domain meaning that conflicts with the ``form`` convention, or when a type checker benefits from the explicit annotation.
+A plain ``form: MyForm`` annotation resolves by name match and is sufficient in most cases.
+
 Return Types
 ------------
 

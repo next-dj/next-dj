@@ -141,7 +141,7 @@ Import the receivers module from ``AppConfig.ready`` so the ``@receiver`` decora
        name = "obs"
 
        def ready(self) -> None:
-           from obs import receivers  # noqa: F401
+           from obs import receivers  # noqa: F401, PLC0415
 
 Verification
 ------------

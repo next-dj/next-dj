@@ -69,6 +69,11 @@ The ``register`` method takes the role and the new stem.
 The role is created when it does not exist.
 A repeated registration of the same stem is a no op.
 
+.. warning::
+
+   Only the three built-in roles — ``template``, ``layout``, and ``component`` — are probed by discovery.
+   Registering a stem under a new role name has no effect on asset collection.
+
 Stem and Kind Interaction
 -------------------------
 

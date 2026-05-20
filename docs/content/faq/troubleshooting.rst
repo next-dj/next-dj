@@ -15,7 +15,7 @@ Pages
 Page does not appear at the expected URL
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Confirm that the directory contains a ``page.py`` plus a ``template.djx`` (or any other body source).
+Confirm that the directory contains a ``page.py`` plus at least one body source: a ``render`` function, a ``template`` attribute, a ``template.djx``, or a sibling ``layout.djx``.
 Confirm that the application is listed in ``INSTALLED_APPS`` and ``APP_DIRS=True`` in the page backend.
 
 Run ``uv run python manage.py check`` and resolve every warning. The command runs Django's :doc:`system check framework <django:ref/checks>` together with the next.dj checks.
@@ -24,15 +24,9 @@ Page renders without layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A layout must contain the placeholder block ``{% block template %}{% endblock template %}`` or its short form ``{% block template %}{% endblock %}``.
-Without the placeholder the framework drops the body at render time without an error, and ``manage.py check`` reports ``next.W001``.
+Without the placeholder the framework drops the body at render time without an error, and ``manage.py check`` reports :ref:`next.W001 <ref-system-checks>`.
 
-Confirm that ``layout.djx`` sits in an ancestor directory.
-
-next.W002 warning
-~~~~~~~~~~~~~~~~~
-
-A ``page.py`` declares no body source, so the page renders nothing.
-Add a ``render`` function, a ``template`` module attribute, a sibling ``template.djx``, or a ``layout.djx`` in an ancestor directory.
+Confirm that ``layout.djx`` sits in the same directory as ``page.py`` or in an ancestor directory.
 
 next.W043 warning
 ~~~~~~~~~~~~~~~~~
@@ -141,7 +135,7 @@ DI parameter resolves to None
 Three common causes explain this.
 
 - The parameter annotation is a forward-reference string (often from ``from __future__ import annotations`` in modules where the resolver cannot evaluate it).
-  Drop that import in ``page.py``, ``layout.djx``-adjacent Python hooks, ``component.py``, and provider modules if markers stop resolving.
+  Drop that import in ``page.py``, the ``page.py`` modules that declare inherited context, ``component.py``, and provider modules if markers stop resolving.
 
 - No registered provider covers the marker type.
   The resolver leaves the parameter unset.
@@ -200,7 +194,7 @@ A plain directory that contains only a ``template.djx`` and no ``page.py`` is a 
 The router still maps it to a URL.
 
 Captured-parameter directories (names in brackets) must contain ``page.py``, ``layout.djx``, ``template.djx``, or a child directory whose subtree includes ``page.py``.
-Otherwise ``manage.py check`` reports ``next.E010``.
+Otherwise ``manage.py check`` reports :ref:`next.E010 <ref-system-checks>`.
 
 URL name not found
 ~~~~~~~~~~~~~~~~~~
@@ -219,7 +213,7 @@ Rename the directory to ``[my_id]`` to avoid confusion.
 Two pages collide under the same URL pattern
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The system check ``next.E015`` reports when the same Django URL pattern is produced from multiple sources.
+The system check :ref:`next.E015 <ref-system-checks>` reports when the same Django URL pattern is produced from multiple sources.
 This happens when two backends each walk a directory that maps to the same logical path.
 Verify that ``DIRS`` and ``APP_DIRS`` in your page backends do not overlap.
 

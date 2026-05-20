@@ -22,6 +22,11 @@ Public API
 
 .. autofunction:: next.pages.context
 
+.. note::
+
+   The ``serialize`` and ``serializer`` keyword arguments opt a value into the JS context.
+   See the topic guide for details.
+
 .. autodata:: next.pages.page
 
 Manager

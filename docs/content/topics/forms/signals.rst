@@ -28,6 +28,8 @@ Import that module from ``AppConfig.ready`` so every receiver is connected befor
        def ready(self) -> None:
            from notes import receivers  # noqa: F401
 
+.. _topics-forms-signals-action-registered:
+
 action_registered
 -----------------
 
@@ -64,6 +66,8 @@ It is ``None`` for an action declared without a namespace, so guard the lookup w
    def group_by_namespace(sender, *, action_name, namespace, **kwargs) -> None:
        bucket = namespace or "global"
        logger.info("action %s belongs to %s", action_name, bucket)
+
+.. _topics-forms-signals-action-dispatched:
 
 action_dispatched
 -----------------
@@ -117,6 +121,8 @@ Reading a named dependency from ``dep_cache`` lets a receiver reuse a value the 
            )
 
 Filter on ``action_name`` when a receiver should observe only one action.
+
+.. _topics-forms-signals-form-validation-failed:
 
 form_validation_failed
 ----------------------

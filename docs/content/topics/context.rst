@@ -116,7 +116,7 @@ Three forms pull a value out of the surrounding context, and they differ only in
 Plain parameter name.
    Declare a parameter whose name matches a context key and the value is injected with no marker.
    ``def greeting(user_name): ...`` receives the ``user_name`` context value.
-   This is the terse form. The source is implied by the name.
+   This terse form implies the source from the parameter name.
 
 ``Context(...)`` default.
    ``Context()`` reads the parameter name from the context, exactly like the plain form.
@@ -184,7 +184,8 @@ Inherited Function That Names a URL Parameter
 ---------------------------------------------
 
 When an inherited context function is keyed under the same name as a captured URL segment, the parameter it asks for changes type across runs.
-On the first run it holds the raw URL string. On a descendant re-run it holds the resolved object the function already produced.
+On the first run it holds the raw URL string.
+On a descendant re-run it holds the resolved object the function already produced.
 Leave the parameter untyped and return early if it is already an instance of the model.
 
 .. code-block:: python
@@ -223,7 +224,8 @@ Page context.
 Component context.
    Resolves once per component render.
    The framework forwards the surrounding template scope into the component automatically.
-   The ``@component.context`` decorator accepts only ``serialize`` and ``serializer``. There is no ``inherit_context`` flag, and component context never flows beyond the component that declares it.
+   The ``@component.context`` decorator accepts only ``serialize`` and ``serializer``.
+   There is no ``inherit_context`` flag, and component context never flows beyond the component that declares it.
 
 A component context function can ask for any value that the template forwards, plus any value that the dependency injector knows how to produce.
 This includes the request, captured URL parameters, query strings, and custom providers.

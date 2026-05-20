@@ -51,12 +51,14 @@ Custom template loaders.
    Any loader registered in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` other than ``DjxTemplateLoader``.
    Loaders run in declared order and the first one that matches supplies the body.
 
+Sibling ``layout.djx``.
+   A ``layout.djx`` file in the same directory as ``page.py`` wraps the body of the current page and is itself wrapped by ancestor layouts.
+   When no other body source exists the body slot is empty, so the page renders the layout shell alone.
+   :ref:`next.E012 <ref-system-checks>` does not fire for a page that has a sibling ``layout.djx``.
+
 See *Render Order* below for the per-request sequence and the ``render`` short-circuit.
 Processor ordering and ``STRICT_CONTEXT`` behaviour are documented in :doc:`context` and :ref:`ref-settings`.
-Multiple body sources trigger ``next.W043``, see *Priority Resolution*.
-
-When no source supplies a body the page renders an empty string, so an ancestor ``layout.djx`` can still wrap an empty slot.
-A page file with neither a body source nor a reachable ``layout.djx`` reports ``next.W002``.
+Multiple body sources trigger :ref:`next.W043 <ref-system-checks>`, see *Priority Resolution*.
 
 Render Order
 ------------
@@ -164,11 +166,28 @@ Keyed single value.
 Unkeyed dict.
    ``@context`` on a function that returns a dict merges the dict into the template scope.
    Useful when several values share a dependency you only want to resolve once.
-   The unkeyed form must return a mapping, and a non-dict return annotation reports the ``next.E029`` system check.
+   The unkeyed form must return a mapping, and a return annotation that is not a mapping type reports :ref:`next.E029 <ref-system-checks>`.
 
 The ``inherit_context=True`` flag on a keyed function publishes the value to
 every descendant page rather than to the declaring page alone.
 See :doc:`context` for that flag and the other ways to vary the decorator.
+
+.. _topics-pages-js-context:
+
+Including Values in the JS Context
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Pass ``serialize=True`` to include the return value in ``window.Next.context`` on the client side.
+Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key serializer for that value instead of the global ``JS_CONTEXT_SERIALIZER`` setting.
+
+.. code-block:: python
+   :caption: page.py
+
+   from next.pages import context
+
+   @context("featured", serialize=True)
+   def featured() -> dict:
+       return {"id": 1, "title": "Hello"}
 
 .. code-block:: python
    :caption: unkeyed dict
@@ -266,7 +285,7 @@ When more than one body source applies the framework picks the highest priority 
 The template loaders have no fixed numbering between them.
 ``DjxTemplateLoader`` matches the sibling ``template.djx``, but a custom loader placed before it in ``TEMPLATE_LOADERS`` is consulted first and wins when both could load the same directory.
 
-When a page directory declares more than one body source, ``next.W043`` reports it.
+When a page directory declares more than one body source, :ref:`next.W043 <ref-system-checks>` reports it.
 The highest-priority source is used and the others are never consulted.
 
 Common Patterns
@@ -339,13 +358,10 @@ System Checks
 The pages subsystem contributes Django system checks. The ``check_page_functions`` check inspects every ``page.py`` and reports the following.
 
 ``next.E012``.
-   The page module has no ``render`` function, no ``template`` attribute, and no ``template.djx`` file.
+   The page module has no body source: no ``render`` function, no ``template`` attribute, no registered template loader match, and no sibling ``layout.djx``.
 
 ``next.E013``.
    The page module defines a ``render`` attribute that is not callable.
-
-``next.W002``.
-   The page directory has no body source and no ``layout.djx`` in the same directory, so the page renders nothing.
 
 ``next.W043``.
    More than one body source is declared in the same directory, see *Priority Resolution*.
@@ -353,7 +369,7 @@ The pages subsystem contributes Django system checks. The ``check_page_functions
 The ``check_context_functions`` check inspects every ``page.py`` for keyless ``@context`` callables.
 
 ``next.E029``.
-   A keyless ``@context`` callable is annotated with a non-dict return type.
+   A keyless ``@context`` callable has a return annotation that is not a mapping type.
 
 Run them through ``uv run python manage.py check``.
 

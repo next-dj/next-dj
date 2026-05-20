@@ -90,6 +90,9 @@ The override calls ``super().dispatch`` to run the standard pipeline and records
 An unknown UID returns 404 from the parent dispatch, and the audit row still records that outcome.
 See :doc:`/content/howto/write-a-form-action-backend` for the guarded pattern that recovers the action name from the UID index.
 
+The ``validated_next_form_page_path(request)`` helper validates the hidden ``_next_form_page`` POST field and returns a trusted ``Path | None``.
+Call it inside a ``dispatch`` override when the custom backend needs to know which page initiated the form submission — for example, to build a custom redirect target.
+
 Registering a Custom Backend
 ----------------------------
 
@@ -151,6 +154,8 @@ Custom Error Fragment
 
 Override ``render_form_fragment`` to return custom HTML for the validation error path.
 The override signature is ``render_form_fragment(request, action_name, form, template_fragment=None, *, page_file_path=None)``.
+When no action meta or template body is found, the default implementation falls back to ``form.as_p()``.
+Override ``render_form_fragment`` to replace this fallback entirely.
 
 See Also
 --------

@@ -52,7 +52,7 @@ Register the action.
                row.save()
        return HttpResponseRedirect(reverse("next:page_"))
 
-A formset class has no ``get_initial`` method, so passing it to ``form_class`` directly fails on the first POST.
+Passing a formset class directly to ``form_class`` raises ``TypeError`` at dispatch time because the dispatcher expects a ``get_initial`` method on the form class.
 Register a factory callable that returns a ``(FormSetClass, init_kwargs)`` tuple instead.
 The ``init_kwargs`` reach the formset constructor and the dispatcher skips the ``get_initial`` step.
 

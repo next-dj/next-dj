@@ -43,7 +43,7 @@ The Notes project from the tutorial demonstrates the full layout.
            component.py
            component.css
            component.js
-       routes/
+       pages/
          layout.djx
          layout.css
          page.py
@@ -66,7 +66,7 @@ The Notes project from the tutorial demonstrates the full layout.
 
 Three things are special about this tree.
 
-- ``routes/`` is the page root. Every directory below it becomes a URL.
+- ``pages/`` is the page root. Every directory below it becomes a URL.
 - ``_components/`` lives at the application root. Every directory below it becomes a reusable component.
 - ``static/`` keeps project-wide assets that are not co-located with a page or a component.
 
@@ -84,7 +84,7 @@ Three settings keys point at the directories above.
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
                "APP_DIRS": True,
-               "PAGES_DIR": "routes",
+               "PAGES_DIR": "pages",
                "OPTIONS": {"context_processors": []},
            }
        ],
@@ -139,7 +139,7 @@ A project that hosts a global layout or a project-wide page tree adds an entry t
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [str(BASE_DIR / "chrome")],
                "APP_DIRS": True,
-               "PAGES_DIR": "routes",
+               "PAGES_DIR": "pages",
                "OPTIONS": {"context_processors": []},
            }
        ]

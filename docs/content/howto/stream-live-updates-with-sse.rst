@@ -113,6 +113,8 @@ Keepalive frames begin with ``:`` so clients ignore them while proxies still see
 .. code-block:: python
    :caption: polls/broker.py
 
+   import json
+
    def format_event(payload: dict[str, object], *, event: str) -> bytes:
        body = json.dumps(payload, separators=(",", ":"))
        lines = [f"event: {event}"]

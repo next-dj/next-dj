@@ -32,7 +32,7 @@ FormsetSpec.
 
 FormSectionSpec.
    One labelled section in a ``FormSpec``, matching a Django admin fieldset.
-   Includes the section label, an optional description, and the tuple of ``FieldSpec`` it groups.
+   Includes the section label, a description string (empty when none was supplied), and the tuple of ``FieldSpec`` it groups.
 
 FormSpec.
    Top-level descriptor for rendering a form with optional sections.

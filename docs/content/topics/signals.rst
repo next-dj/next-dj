@@ -112,8 +112,7 @@ Receiver Patterns
 
 Connect once at startup.
 
-The import sits inside ``ready`` on purpose.
-Module-level imports of app code run before the app registry is ready.
+The import sits inside ``ready`` because Django's app registry is not fully initialised at module import time, making this the one approved exception to the module-level import rule.
 
 .. code-block:: python
    :caption: notes/apps.py
@@ -171,7 +170,9 @@ Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwar
            NextClient().post_action("create_note", {"title": "Hello"})
 
        assert len(recorder.events) == 1
-       assert recorder.events[0].kwargs["action_name"] == "create_note"
+       assert recorder.first_for(action_dispatched).kwargs["action_name"] == "create_note"
+
+``SignalRecorder`` also provides ``events_for(signal)``, ``first_for(signal)``, and ``last_for(signal)`` for targeted access.
 
 See :doc:`/content/topics/testing` for the full testing surface.
 

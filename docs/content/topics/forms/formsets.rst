@@ -58,7 +58,7 @@ Pass the formset class as ``form_class``.
                row.save()
        return HttpResponseRedirect(reverse("next:page_"))
 
-A formset class has no ``get_initial`` method, so it cannot be passed to ``form_class`` directly.
+Passing a formset class directly to ``form_class`` raises ``TypeError`` at dispatch time because the dispatcher expects a ``get_initial`` method on the form class.
 Register a factory callable that returns a ``(FormSetClass, init_kwargs)`` tuple instead.
 The ``init_kwargs`` reach the formset constructor and the dispatcher skips the ``get_initial`` step.
 
@@ -203,6 +203,11 @@ The handler builds the formset and assigns it to the form before calling ``form.
                raise ValidationError("Fix the rows before saving.")
            return cleaned
 
+Use a factory callable as ``form_class`` to attach the inline formset before the dispatcher calls ``form.is_valid()``.
+The factory is dependency-resolved, so it fetches the parent instance and constructs the formset at request time.
+It returns ``(FormClass, init_kwargs)`` and the dispatcher creates the form with those kwargs, so ``row_formset`` is already attached when ``is_valid()`` runs.
+The handler receives the already-validated form and calls ``save()`` directly.
+
 .. code-block:: python
    :caption: notes/pages/notes/[id]/edit/page.py
 
@@ -216,17 +221,36 @@ The handler builds the formset and assigns it to the form before calling ``form.
 
    RowFormSet = inlineformset_factory(Note, Row, fields=("label",), extra=1)
 
-   @action("update_note", form_class=NoteForm)
-   def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
+   def note_form_factory(note_id: DUrl["id", int]) -> tuple:
        note = get_object_or_404(Note, pk=note_id)
-       form.instance = note
-       form.row_formset = RowFormSet(form.data or None, instance=note)
-       if form.is_valid():
-           form.save()
-           form.row_formset.save()
+       row_formset = RowFormSet(prefix="rows")
+       return NoteForm, {"instance": note, "row_formset": row_formset}
+
+   @action("update_note", form_class=note_form_factory)
+   def update_note(form: NoteForm) -> HttpResponseRedirect:
+       form.save()
+       form.row_formset.save()
        return HttpResponseRedirect("/")
 
-Assigning ``form.row_formset`` before ``form.is_valid()`` makes the formset reachable from ``clean``.
+``NoteForm`` must accept ``row_formset`` in its constructor so ``clean`` can see it.
+
+.. code-block:: python
+   :caption: notes/forms.py (NoteForm additions)
+
+   class NoteForm(ModelForm):
+       def __init__(self, *args, row_formset=None, **kwargs):
+           super().__init__(*args, **kwargs)
+           self.row_formset = row_formset
+
+       def clean(self):
+           row_formset = getattr(self, "row_formset", None)
+           if row_formset is not None and not row_formset.is_valid():
+               raise ValidationError("Row formset has errors.")
+
+       class Meta:
+           model = Note
+           fields = ["title", "body"]
+
 The parent page re-renders with both the parent form errors and the row errors in scope.
 See ``examples/admin`` for a worked inline formset.
 

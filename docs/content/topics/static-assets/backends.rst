@@ -48,6 +48,11 @@ The Default Backend
 ``StaticFilesBackend`` resolves assets through Django staticfiles.
 Assets live in the ``next/`` staticfiles namespace, so manifest storage, S3 storage, and CDN settings apply automatically.
 
+.. note::
+
+   ``StaticFilesBackend`` caches resolved URLs per ``(logical_name, suffix)`` pair for the lifetime of the backend instance.
+   Tests that use ``override_settings`` to swap storage backends should be aware that the cache is reset when the framework rebuilds the backend.
+
 The backend ships three renderer methods.
 
 - ``render_link_tag`` for the ``css`` kind.
@@ -96,6 +101,11 @@ Dedup and JS Context Options
 
 The first backend ``OPTIONS`` also carries two pipeline level keys.
 
+.. note::
+
+   Tag format keys (``css_tag``, ``js_tag``, ``module_tag``) are lowercase.
+   Pipeline strategy keys (``DEDUP_STRATEGY``, ``JS_CONTEXT_POLICY``) are uppercase.
+
 ``DEDUP_STRATEGY``.
    Dotted path to a dedup strategy, see :doc:`deduplication`.
 
@@ -141,6 +151,9 @@ Subclass ``StaticFilesBackend`` to keep the staticfiles resolution and change on
            return f'<script type="module" src="{url}" crossorigin></script>'
 
 Override ``render_module_tag`` as well, otherwise ``.mjs`` assets miss the attribute the override adds.
+
+This example adds ``crossorigin`` only.
+For a complete Subresource Integrity implementation that also computes the ``integrity`` hash, see :doc:`/content/security/static-assets`.
 
 Subclass the abstract ``StaticBackend`` directly only when the project resolves assets from a source other than Django staticfiles, such as a build manifest.
 

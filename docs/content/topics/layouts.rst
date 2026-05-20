@@ -219,7 +219,7 @@ They contribute variables that every layout and every page template can use.
 Because they run last, a processor that returns the same key as a ``@context`` function overwrites that value.
 Processor-to-processor duplicates are resolved by dotted path, keeping the first occurrence.
 See :doc:`context` under *Resolution Order* for the full merge order and the **first** ``TEMPLATES`` entry rule.
-Processor failures are swallowed during development unless ``STRICT_CONTEXT`` is enabled. Semantics live in :ref:`ref-settings`.
+Processor failures are logged and swallowed by default unless ``STRICT_CONTEXT`` is enabled. Semantics live in :ref:`ref-settings`.
 
 Static Collector
 ~~~~~~~~~~~~~~~~

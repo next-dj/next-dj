@@ -102,7 +102,9 @@ Component Context Resolution
 Each ``@component.context("key")`` function runs once per component render.
 When a component's ``component.py`` fails to import, the renderer falls back to plain template rendering and the ``@component.context`` callables in that module do not run.
 On the template render path the resolver shares the request-scoped dependency cache through ``get_request_dep_cache``, so values produced by page level context are visible inside the component.
-A component whose ``component.py`` defines a ``render`` function resolves against a fresh ``DependencyCache`` instead, so its parameters resolve independently of the page render.
+A component whose ``component.py`` defines a ``render`` function uses a fresh ``DependencyCache`` for that call instead of the shared request cache.
+The surrounding template scope (props and page context variables) is still forwarded to the resolver as DI parameters.
+The lazy ``csrf_token`` and any ``@component.context`` callables are not run on this path.
 
 Signals
 -------

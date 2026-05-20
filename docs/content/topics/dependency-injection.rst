@@ -163,7 +163,9 @@ The provider returns the parameter default when the key is absent.
 Context Markers
 ---------------
 
-Two markers reach into the request-scoped context.
+Two markers fill parameters from distinct data sources.
+``Context`` reads from the per-render context dictionary.
+``Depends`` invokes a callable registered in the resolver's process-wide dependency map.
 
 ``Context("key")``.
    Returns the value of the named context key produced by an ancestor layout or by a context function earlier in the chain.
@@ -232,6 +234,7 @@ Re-entering a name that is already on the stack raises ``DependencyCycleError``.
    next.deps.cache.DependencyCycleError: Circular dependency: profile -> settings -> profile
 
 The chain in the message is the resolution path that closed the loop, read left to right.
+Catch it with ``from next.deps import DependencyCycleError``. The path ``next.deps.cache`` is an implementation detail.
 Break the cycle by removing one ``Depends`` edge.
 Here ``settings`` does not need ``profile`` at all, so the fix is to drop that parameter.
 
@@ -311,10 +314,12 @@ Import before resolution.
    Register the provider before the resolver caches its provider list.
    The natural place is ``AppConfig.ready`` of the application that owns the provider.
 
-Request Scoped Cache
---------------------
+Resolution Cache
+----------------
 
-The resolver caches every named dependency for the duration of one resolution pass.
+The resolver creates a fresh ``DependencyCache`` for each resolution pass.
+During form-dispatch re-renders, the dispatcher attaches the cache to the request so the page and component context functions reuse the same memoised values.
+
 A second context function in the same page render that asks for the same dependency receives the cached value, not a fresh call.
 
 The cache is also shared between the initial render of a form page and the re-render on validation failure.

@@ -74,14 +74,14 @@ Production Hardening
 
 A short list of production specific settings.
 
-- ``SECURE_SSL_REDIRECT = True``.
-- ``SECURE_CONTENT_TYPE_NOSNIFF = True``.
-- ``SECURE_HSTS_SECONDS = 31536000``.
-- ``SECURE_HSTS_INCLUDE_SUBDOMAINS = True``.
-- ``SECURE_HSTS_PRELOAD = True``.
-- ``SESSION_COOKIE_SECURE = True``.
-- ``CSRF_COOKIE_SECURE = True``.
-- ``CSRF_TRUSTED_ORIGINS = ["https://..."]``.
+- Set ``SECURE_SSL_REDIRECT = True`` to redirect every HTTP request to HTTPS.
+- Set ``SECURE_CONTENT_TYPE_NOSNIFF = True`` to block MIME-type sniffing.
+- Set ``SECURE_HSTS_SECONDS = 31536000`` to send a one-year HSTS header.
+- Set ``SECURE_HSTS_INCLUDE_SUBDOMAINS = True`` to extend HSTS to all subdomains.
+- Set ``SECURE_HSTS_PRELOAD = True`` to allow submission to the HSTS preload list.
+- Set ``SESSION_COOKIE_SECURE = True`` to send the session cookie only over HTTPS.
+- Set ``CSRF_COOKIE_SECURE = True`` to send the CSRF cookie only over HTTPS.
+- Set ``CSRF_TRUSTED_ORIGINS = ["https://..."]`` to restrict cross-origin form submissions to listed origins.
 
 Run ``uv run python manage.py check --deploy`` and resolve every warning.
 See :doc:`/content/deployment/checklist` for the full pre-deploy review.

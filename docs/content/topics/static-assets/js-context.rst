@@ -24,7 +24,7 @@ See :doc:`/content/topics/context` for both decorators.
 The value appears under ``window.Next.context.<key>``.
 Keys without the flag stay server-side only.
 
-A value the active serializer cannot encode raises ``TypeError`` at the point the context function registers it.
+A value the active serializer cannot encode raises ``TypeError`` during rendering, when the collector registers it.
 The error names the offending key.
 
 Serializers
@@ -81,6 +81,12 @@ The collector routes the ``featured`` key through the supplied serializer and ev
 The ``serializer=`` parameter takes an already-instantiated object.
 ``JS_CONTEXT_SERIALIZER`` in settings takes a dotted import path instead.
 
+.. note::
+
+   ``PydanticJsContextSerializer()`` imports pydantic at instantiation time.
+   Creating an instance at module level raises ``ImportError`` on startup when pydantic is not installed.
+   Use the ``JS_CONTEXT_SERIALIZER`` setting for a process-wide override that keeps the import lazy.
+
 Writing a Serializer
 --------------------
 
@@ -124,7 +130,8 @@ The framework ships four policies in ``next.static.collector``.
    Raises on a duplicate key.
 
 ``DeepMergePolicy``.
-   Merges nested dicts when both values are dicts.
+   Recursively merges nested dicts when both values are dicts.
+   Overwrites the existing scalar with the latest value when either side is not a dict.
 
 Configure the policy through the first static backend ``OPTIONS``.
 
@@ -207,6 +214,11 @@ An absent or empty ``NEXT_JS_OPTIONS`` uses the ``AUTO`` policy and the default 
    * - ``MANUAL``
      - Skips automatic injection but builds the tag strings on request via ``NextScriptBuilder`` methods.
      - Pages where you control placement of the script tags in a layout template.
+
+.. note::
+
+   Under ``MANUAL``, the framework builds the ``NextScriptBuilder`` but skips injection.
+   Retrieve it via ``next.static.default_manager._next_script_builder()`` to emit the ``<script>`` tag yourself, for example in a custom template tag or middleware.
 
 Set the policy through the ``NEXT_JS_OPTIONS`` dict.
 

@@ -7,7 +7,7 @@ next.dj generates URL names for every file-routed page.
 This page covers the two reverse helpers ``page_reverse`` and ``with_query`` exported from ``next.urls``.
 ``page_reverse`` builds a URL from a directory-shaped template.
 ``with_query`` adjusts the query string of an existing URL.
-You will use these helpers anywhere Python code needs a URL path, including action redirects, signal payloads, and tests.
+These helpers cover every location where Python code needs a URL path, including action redirects, signal payloads, and tests.
 
 .. contents::
    :local:

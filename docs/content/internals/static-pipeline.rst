@@ -76,6 +76,7 @@ Modules
 
 ``next.static.collector``.
    ``StaticCollector`` plus the dedup strategies ``UrlDedup``, ``HashContentDedup``, ``IdentityDedup`` and the JS context policies.
+   Also holds ``PlaceholderSlot``, ``PlaceholderRegistry``, and the ``default_placeholders`` instance.
 
 ``next.static.backends``.
    ``StaticBackend`` abstract base class plus the bundled ``StaticFilesBackend`` and the ``StaticsFactory``.

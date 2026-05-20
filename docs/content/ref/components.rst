@@ -42,6 +42,8 @@ Manager
 .. autoclass:: next.components.ComponentsManager
    :members:
 
+.. autodata:: next.components.components_manager
+
 Framework Extension
 -------------------
 

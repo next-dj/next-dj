@@ -208,6 +208,32 @@ class TestFileComponentsBackend:
         assert "card" in visible
         assert visible["card"].name == "card"
 
+    def test_import_all_does_not_double_exec_module(
+        self, tmp_path: Path, min_component_config: dict
+    ) -> None:
+        """``import_all_component_modules`` does not exec ``component.py`` twice."""
+        comp_dir = tmp_path / "card"
+        comp_dir.mkdir()
+        component_py = comp_dir / "component.py"
+        component_py.write_text("component = 'card'\n")
+
+        disk_reads: list[Path] = []
+        original_load_from_disk = ModuleLoader._load_from_disk
+
+        def tracking_load_from_disk(self, path):
+            disk_reads.append(path)
+            return original_load_from_disk(self, path)
+
+        with patch.object(ModuleLoader, "_load_from_disk", tracking_load_from_disk):
+            backend = FileComponentsBackend(
+                {**min_component_config, "DIRS": [str(tmp_path)]},
+            )
+            backend._ensure_loaded()
+            backend.import_all_component_modules()
+
+        reads_for_comp = [p for p in disk_reads if p == component_py]
+        assert len(reads_for_comp) == 1
+
 
 class TestComponentsFactory:
     """Tests for ComponentsFactory."""

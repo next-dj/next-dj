@@ -57,14 +57,14 @@ The ``PAGES_DIR`` path must match the actual app and page-root names, so a proje
 
    @pytest.fixture(autouse=True)
    def _next_dj_isolation():
-       eager_load_pages(PAGES_DIR)
        reset_registries()
+       eager_load_pages(PAGES_DIR)
        yield
        reset_registries()
 
-``eager_load_pages`` walks ``notes/pages`` and imports every ``page.py``, which runs the ``@action`` and ``@context`` registrations that the file router would otherwise defer to the first request.
-``reset_registries()`` reloads the form-action and component backends from the current settings, so a test that swaps ``NEXT_FRAMEWORK`` does not bleed into the next one.
-It does not touch page routing or the page cache.
+``reset_registries()`` runs first to create fresh form-action and component backends, so every ``@action`` and ``@component.context`` registration that follows lands on a clean slate.
+``eager_load_pages`` then walks ``notes/pages`` and imports every ``page.py``, which runs the decorators and registers them on those fresh backends.
+The teardown ``reset_registries()`` clears all state before the next test runs.
 Database access uses the standard ``db`` fixture from pytest-django, no extra fixture is needed.
 
 Write the First End-to-End Test

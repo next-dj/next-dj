@@ -120,7 +120,7 @@ Import the module from ``AppConfig.ready`` so the auto-registry wires the provid
        name = "notes"
 
        def ready(self):
-           from notes import providers  # noqa: F401
+           from notes import providers  # noqa: F401, PLC0415
 
 A page context function now requests the tenant by name and type, and the resolver hands back the model instance.
 Keep real annotations in these modules, because the resolver compares parameter annotations by identity.

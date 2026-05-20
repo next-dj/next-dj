@@ -165,6 +165,9 @@ Captured segments contribute their parameter name without the brackets.
    * - ``routes/api/[[suffix]]/page.py``
      - ``next:page_api_suffix``
 
+The trailing underscore on the root page name is intentional.
+``reverse('next:page_')`` resolves the root page.
+
 A typed captured segment keeps its converter label in the URL name.
 ``[int:post_id]`` becomes ``posts_int_post_id``, not ``posts_post_id``, because the name is computed from the raw segment text.
 
@@ -337,10 +340,10 @@ The router contributes Django system checks that validate the configuration at s
 
 - ``check_next_pages_configuration`` validates the ``NEXT_FRAMEWORK`` structure and each backend entry.
 - ``check_pages_structure`` validates directory naming, captured parameter syntax, and the presence of ``page.py`` or ``template.djx``.
-- ``check_page_functions`` reports ``next.E012`` when a directory has neither a render function nor a template, and warns with ``next.W002`` when a page can produce no content.
+- ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a directory has neither a render function nor a template.
 - ``check_pages_structure`` and ``check_page_functions`` come from ``next.pages`` and appear here because they validate the same page tree the router scans.
-- ``check_url_patterns`` reports two routes that resolve to the same Django path, whether they come from one tree or several (``next.E015``).
-- ``check_duplicate_url_parameters`` fails when one route repeats a captured parameter name (``next.E028``).
+- ``check_url_patterns`` reports two routes that resolve to the same Django path, whether they come from one tree or several (:ref:`next.E015 <ref-system-checks>`).
+- ``check_duplicate_url_parameters`` fails when one route repeats a captured parameter name (:ref:`next.E028 <ref-system-checks>`).
 
 Run them through ``uv run python manage.py check``.
 A clean exit confirms that every page resolves and every name is unique.

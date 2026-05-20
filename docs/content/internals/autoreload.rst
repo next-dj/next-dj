@@ -36,9 +36,9 @@ Startup Integration
 The pipeline is wired by ``next.apps.autoreload.install()``, which ``NextFrameworkConfig.ready`` calls at application startup.
 ``install`` performs two actions:
 
-1. Replaces ``django.utils.autoreload.StatReloader`` with ``NextStatReloader``.
+#. Replaces ``django.utils.autoreload.StatReloader`` with ``NextStatReloader``.
    The swap is idempotent: subsequent calls are no-ops if ``StatReloader`` is already a ``NextStatReloader`` subclass.
-2. Connects ``_watch_next_filesystem`` to Django's ``autoreload_started`` signal so the watch specs are registered the moment the dev server starts.
+#. Connects ``_watch_next_filesystem`` to Django's ``autoreload_started`` signal so the watch specs are registered the moment the dev server starts.
 
 .. note::
 

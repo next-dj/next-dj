@@ -225,12 +225,12 @@ Template expression.
 .. code-block:: jinja
    :caption: literal vs context lookup
 
-   {% component "card" title="Hello" %}        {# title = the string "Hello" #}
-   {% component "card" title=note.title %}      {# title = note.title from context #}
-   {% component "card" pinned=True %}           {# pinned = the boolean True #}
+   {% component "card" title="Hello" %}
+   {% component "card" title=note.title %}
+   {% component "card" pinned=True %}
 
-A bare string literal with no filter applied that Django would mark safe is demoted to a plain string so ``{{ prop }}`` autoescapes it inside the component.
-Pass ``prop=value|safe`` or a variable already holding safe content when the component should receive raw HTML.
+A quoted string prop is always passed as an unescaped plain string.
+The component template autoescapes it through ``{{ prop }}``, so pass ``prop=value|safe`` or an already-safe variable when the component must receive raw HTML.
 
 Variable Forwarding
 ~~~~~~~~~~~~~~~~~~~
@@ -417,8 +417,8 @@ Conditional Rendering
 
 A composite component can define a ``render`` function in ``component.py``.
 The function receives DI-resolved parameters and returns the component body as a string.
-A ``render`` function receives only DI-resolved parameters.
-The lazy ``csrf_token`` and the surrounding template context that template-rendered components get are not added on this path.
+A ``render`` function is resolved with the surrounding template scope (props and page context variables) available as DI parameters.
+The lazy ``csrf_token`` and any ``@component.context`` callables are not run on this path.
 Return an empty string to render nothing, which turns the component into a server side gate.
 
 A ``render`` function takes over completely.

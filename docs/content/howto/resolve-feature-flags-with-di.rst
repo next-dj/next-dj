@@ -61,7 +61,8 @@ The provider claims any parameter whose annotation origin is ``DFlag`` and reads
 ``resolve`` checks two sources.
 A page captures the name in the URL through ``context.url_kwargs``.
 A component receives it as a template prop through ``context.context_data``.
-When the flag does not exist the provider returns a disabled placeholder instead of ``None``, so guard code checks ``flag.enabled`` without a three-way branch.
+When the flag does not exist the provider returns a disabled placeholder instead of ``None``.
+Guard code then checks ``flag.enabled`` without a three-way branch.
 
 Back the lookup with a cache
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -144,7 +145,7 @@ The receivers connect to the model signals.
 
        def ready(self) -> None:
            """Import provider and receiver modules so DI and signals wire up."""
-           from flags import providers, receivers  # noqa: F401
+           from flags import providers, receivers  # noqa: F401, PLC0415
 
 The imports run at ready time, not at module top level.
 Importing ``receivers`` earlier would reach ``@receiver(post_save, sender=Flag)`` before the app registry knows ``Flag``.

@@ -72,25 +72,9 @@ See :doc:`/content/ref/testing` for generated signatures.
 Boot the Suite
 --------------
 
-Add pytest and pytest-django to the project's development dependencies.
-
-.. code-block:: bash
-   :caption: shell
-
-   uv add --dev pytest pytest-django
-
-Configure ``DJANGO_SETTINGS_MODULE`` so the framework can load.
-
-.. code-block:: ini
-   :caption: pytest.ini
-
-   [pytest]
-   DJANGO_SETTINGS_MODULE = config.settings
-
+Set ``DJANGO_SETTINGS_MODULE`` in ``pytest.ini`` so pytest-django can configure Django before collecting tests.
 Run the suite with ``uv run pytest``.
-
-The helpers assume Django is configured and the app registry is populated.
-``pytest-django`` does this from ``DJANGO_SETTINGS_MODULE``.
+The ``next.testing`` helpers assume the app registry is populated; ``pytest-django`` does this automatically.
 A stdlib ``unittest`` suite calls ``django.setup()`` once before importing any ``next.testing`` helper.
 
 Isolate Registries
@@ -118,6 +102,21 @@ Two narrower helpers reset a single registry.
 
 A third helper, ``reset_page_cache()``, resets no registry.
 It drops the page template cache and is useful when a test rewrites template files on disk.
+
+Tests that write ``template.djx`` or ``page.py`` files to ``tmp_path`` need both helpers:
+
+.. code-block:: python
+   :caption: conftest.py
+
+   import pytest
+   from next.testing.isolation import reset_page_cache, reset_registries
+
+   @pytest.fixture(autouse=True)
+   def _isolation():
+       reset_registries()
+       yield
+       reset_registries()
+       reset_page_cache()
 
 .. note::
 
@@ -343,6 +342,20 @@ Patching
 
 A ``StaticCollectorProxy`` is yielded by ``patch_static_collector(capture=True)``.
 Its ``.collector`` attribute holds the collector built inside the block, so a test can assert on the emitted styles and scripts without parsing HTML.
+
+Use ``patch_static_collector(capture=True)`` to inspect which assets a page emits:
+
+.. code-block:: python
+
+   from next.testing.patching import patch_static_collector
+   from next.testing.client import NextClient
+
+   def test_collects_styles() -> None:
+       with patch_static_collector(capture=True) as proxy:
+           NextClient().get("/")
+       assert proxy.collector is not None
+       styles = proxy.collector.assets_in_slot("styles")
+       assert len(styles) > 0
 
 .. code-block:: python
    :caption: temporary settings

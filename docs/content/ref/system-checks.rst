@@ -131,7 +131,7 @@ Errors
      - An error was raised while checking page functions.
      - ``next.pages.checks``
    * - ``next.E012``
-     - A ``page.py`` has no ``render`` function, ``template`` attribute, or ``template.djx``.
+     - A ``page.py`` has no body source: no ``render`` function, no ``template`` attribute, no loader match, and no sibling ``layout.djx``.
      - ``next.pages.checks``
    * - ``next.E013``
      - A page ``render`` attribute is not callable.
@@ -238,9 +238,6 @@ Warnings
      - Emitted by
    * - ``next.W001``
      - A ``layout.djx`` is missing the required ``{% block template %}``.
-     - ``next.pages.checks``
-   * - ``next.W002``
-     - A ``page.py`` has no body source and will render nothing.
      - ``next.pages.checks``
    * - ``next.W030``
      - ``DEFAULT_STATIC_BACKENDS`` is empty, so the framework falls back to ``StaticFilesBackend``.
