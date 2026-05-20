@@ -32,12 +32,28 @@ _T = TypeVar("_T")
 
 
 class DUrl(DDependencyBase[_T]):
-    """Annotation for a path or query parameter with optional type coercion.
+    """Annotation for a captured URL path parameter with optional type coercion.
 
-    Use `DUrl["param"]` or `DUrl[SomeType]`.
+    Use `DUrl[SomeType]` to read the captured segment that matches the
+    parameter name and coerce it. Use `DUrl["param"]` to read a named
+    segment without coercion. Use `DUrl["param", SomeType]` to read a
+    named segment and coerce it, which is the form to reach for when the
+    parameter name differs from the captured segment name.
     """
 
     __slots__ = ()
+
+    def __class_getitem__(cls, item: object) -> object:
+        """Build the marker for the type, named-key, and named-key-with-type forms.
+
+        A plain type follows the standard generic path. A string, or a
+        `(string, type)` tuple, is wrapped so the provider can read the
+        captured segment by an explicit name rather than the parameter name.
+        """
+        if isinstance(item, (str, tuple)):
+            args = item if isinstance(item, tuple) else (item,)
+            return types.GenericAlias(cls, args)
+        return super().__class_getitem__(item)  # type: ignore[misc]
 
 
 class DQuery(DDependencyBase[_T]):
@@ -81,6 +97,8 @@ class HttpRequestProvider(RegisteredParameterProvider):
     without giving up dependency injection.
     """
 
+    priority = 50
+
     def can_handle(self, param: inspect.Parameter, context: object) -> bool:
         """Return True when the parameter expects `HttpRequest` and a request exists."""
         if getattr(context, "request", None) is None:
@@ -110,26 +128,41 @@ class HttpRequestProvider(RegisteredParameterProvider):
 class UrlByAnnotationProvider(RegisteredParameterProvider):
     """Fill `DUrl[...]` parameters from `url_kwargs`."""
 
+    priority = 60
+
     def can_handle(self, param: inspect.Parameter, _context: object) -> bool:
         """Return True when the parameter uses a `DUrl` annotation."""
         return get_origin(param.annotation) is DUrl
 
     def resolve(self, param: inspect.Parameter, context: object) -> object:
-        """URL value for the parameter, coerced when the annotation is a type."""
+        """URL value for the parameter, coerced when the annotation names a type."""
         args = get_args(param.annotation)
         key = args[0] if args and isinstance(args[0], str) else param.name
         url_kwargs = getattr(context, "url_kwargs", {}) or {}
-        raw = (
-            url_kwargs.get(key) if isinstance(key, str) else url_kwargs.get(param.name)
-        )
+        raw = url_kwargs.get(key)
         if raw is None:
             return None
-        hint = args[0] if args and isinstance(args[0], type) else str
-        return _coerce_url_value(str(raw), hint)
+        return _coerce_url_value(str(raw), _url_type_hint(args))
+
+
+def _url_type_hint(args: tuple[object, ...]) -> type:
+    """Return the coercion type carried by a `DUrl` annotation, or `str`.
+
+    `DUrl[SomeType]` carries the type at position 0. `DUrl["param", SomeType]`
+    carries the key at position 0 and the type at position 1. Every other
+    shape, including the bare `DUrl["param"]`, coerces to `str`.
+    """
+    if args and isinstance(args[0], type):
+        return args[0]
+    if len(args) > 1 and isinstance(args[1], type):
+        return args[1]
+    return str
 
 
 class UrlKwargsProvider(RegisteredParameterProvider):
     """Fill parameters by name from `url_kwargs`."""
+
+    priority = 70
 
     def can_handle(self, param: inspect.Parameter, context: object) -> bool:
         """Return True when `url_kwargs` contains this parameter name."""
@@ -151,6 +184,8 @@ class UrlKwargsProvider(RegisteredParameterProvider):
 
 class QueryParamProvider(RegisteredParameterProvider):
     """Resolve `DQuery[...]` parameters from `request.GET`."""
+
+    priority = 80
 
     def can_handle(
         self,

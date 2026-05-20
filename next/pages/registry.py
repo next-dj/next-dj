@@ -121,8 +121,10 @@ class PageContextRegistry:
         *args: object,
         **kwargs: object,
     ) -> ContextResult:
-        """Merge inherited layout context with this file's context callables.
+        """Merge inherited ancestor page.py context with this file's context callables.
 
+        Inherited context comes from ``@context(..., inherit_context=True)``
+        callables in ancestor ``page.py`` files, not from layout files.
         The returned `ContextResult` separates the full template context
         from the JavaScript-serializable subset. The js_context uses
         first-registration semantics so that page-level values always

@@ -24,6 +24,7 @@ media
 
 # generated files
 .claude
+.mcp.json
 .idea/**/contentModel.xml
 
 # sensitive or high-churn files

@@ -360,7 +360,7 @@ def _check_page_functions_in_directory(
     pages_path: Path,
     context: str,
 ) -> tuple[list[CheckMessage], list[CheckMessage]]:
-    """Check `page.py` files for render/template rules and warn when empty."""
+    """Check `page.py` files for render/template rules."""
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
@@ -376,8 +376,8 @@ def _check_page_functions_in_directory(
             errors.append(
                 Error(
                     f"{context} pages: {page_file.relative_to(pages_path)} "
-                    "is missing a valid render function, template attribute, "
-                    "or template.djx file.",
+                    "has no body source. Add a render function, a template "
+                    "attribute, a sibling template.djx, or a sibling layout.djx.",
                     obj=settings,
                     id="next.E012",
                 ),
@@ -398,16 +398,6 @@ def _check_page_functions_in_directory(
             shadow_warning = _check_body_source_conflicts(page_file)
             if shadow_warning is not None:
                 warnings.append(shadow_warning)
-            if not _has_page_content(page_file):
-                warnings.append(
-                    DjangoWarning(
-                        f"Page file {page_file} has no content: no template "
-                        "variable, no render function, no template.djx, and "
-                        "no layout.djx found. This page will not render anything.",
-                        obj=str(page_file),
-                        id="next.W002",
-                    ),
-                )
 
     return errors, warnings
 
@@ -469,7 +459,10 @@ def _load_render_function(file_path: Path) -> object:
 
 
 def _has_template_or_djx(file_path: Path) -> bool:
-    """Return True when a static body source (attribute or loader) backs `file_path`."""
+    """Return True when the page has a body source or a sibling ``layout.djx``."""
+    if (file_path.parent / "layout.djx").exists():
+        return True
+
     try:
         if (
             spec := importlib.util.spec_from_file_location("page_module", file_path)
@@ -486,26 +479,6 @@ def _has_template_or_djx(file_path: Path) -> bool:
 
     except (ImportError, AttributeError, OSError, SyntaxError):
         return False
-
-
-def _has_page_content(page_path: Path) -> bool:
-    """Return True when `page.py` has any body source or an ancestor layout."""
-    module = _load_python_module(page_path)
-    has_template = False
-    has_render = False
-
-    if module:
-        has_template = hasattr(module, "template")
-        has_render = hasattr(module, "render") and callable(module.render)
-
-    has_loader_match = any(
-        loader.can_load(page_path) for loader in build_registered_loaders()
-    )
-
-    layout_djx = page_path.parent / "layout.djx"
-    has_layout_djx = layout_djx.exists()
-
-    return any([has_template, has_render, has_loader_match, has_layout_djx])
 
 
 def _check_layout_file(layout_file: Path) -> CheckMessage | None:

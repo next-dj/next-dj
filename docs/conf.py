@@ -37,13 +37,10 @@ if not settings.configured:
     django.setup()
 
 
-from next import __version__ as current_version
-
 # project information
 project = "next.dj"
 copyright = "2025-2026, paqstd-dev"
 author = "paqstd-dev"
-release = current_version
 
 # general configuration
 extensions = [
@@ -51,13 +48,20 @@ extensions = [
     "sphinx.ext.autosummary",
     "sphinx.ext.doctest",
     "sphinx.ext.intersphinx",
+    "sphinx.ext.extlinks",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.githubpages",
     "myst_parser",
     "sphinx_design",
     "sphinx_copybutton",
+    "sphinxcontrib.mermaid",
+    "sphinx_reredirects",
 ]
+
+# mermaid configuration
+mermaid_output_format = "raw"
+mermaid_init_js = "mermaid.initialize({startOnLoad:true, theme:'default'});"
 
 # autodoc configuration
 autodoc_default_options = {
@@ -78,30 +82,79 @@ napoleon_include_init_with_doc = False
 napoleon_include_private_with_doc = False
 napoleon_include_special_with_doc = True
 
+# shared shortcut for repository links so the URL is defined in one place
+extlinks = {
+    "repo": ("https://github.com/next-dj/next-dj/%s", "%s"),
+}
+
 # intersphinx mapping for external references
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3/", None),
     "django": ("https://docs.djangoproject.com/en/stable/", "https://docs.djangoproject.com/en/stable/_objects/"),
 }
 
+# intersphinx validates Django and Python targets on every build, so linkcheck
+# skips those hosts to avoid redundant requests and HTTP 429 rate limiting.
+linkcheck_ignore = [
+    r"https://docs\.djangoproject\.com/.*",
+    r"https://docs\.python\.org/.*",
+]
+
 # templates path
 templates_path = ["_templates"]
 
 # list of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+]
 
-# 404 and content/guide/index are intentionally not in toctree (no nav entry)
+# the 404 page is intentionally kept out of every toctree
 suppress_warnings = ["toc.not_included"]
 
-# the name of the Pygments (syntax highlighting) style to use
-pygments_style = "sphinx"
+# URL redirects for moved pages (sphinx-reredirects)
+redirects = {
+    "content/guide/getting-started": "../intro/install.html",
+    "content/guide/file-router": "../topics/file-router.html",
+    "content/guide/pages-and-templates": "../topics/pages.html",
+    "content/guide/components": "../topics/components.html",
+    "content/guide/context": "../topics/context.html",
+    "content/guide/forms": "../topics/forms/index.html",
+    "content/guide/dependency-injection": "../topics/dependency-injection.html",
+    "content/guide/static-assets": "../topics/static-assets/index.html",
+    "content/guide/autoreload": "../internals/autoreload.html",
+    "content/guide/testing": "../topics/testing.html",
+    "content/guide/project-layout": "../topics/project-layout.html",
+    "content/guide/extending": "../topics/extending.html",
+    "content/api/reference": "../ref/index.html",
+    "content/api/pages": "../ref/pages.html",
+    "content/api/components": "../ref/components.html",
+    "content/api/urls": "../ref/urls.html",
+    "content/api/forms": "../ref/forms.html",
+    "content/api/static": "../ref/static.html",
+    "content/api/deps": "../ref/deps.html",
+    "content/api/server": "../ref/server.html",
+    "content/api/testing": "../ref/testing.html",
+    "content/api/signals": "../ref/signals.html",
+    "content/api/conf": "../ref/conf.html",
+    "content/api/apps": "../ref/apps.html",
+    "content/reference/system-checks": "../ref/system-checks.html",
+    "content/contributing/documentation-guide": "writing-documentation.html",
+}
+
+pygments_style = "github-light-default"
 
 # html theme (Shibuya)
 html_theme = "shibuya"
 html_theme_options = {
-    "accent_color": "violet",
+    "accent_color": "indigo",
+    "color_mode": "auto",
+    "dark_code": False,
     "page_layout": "default",
+    "light_logo": "_static/img/logos/next-dj-wordmark-light.svg",
+    "dark_logo": "_static/img/logos/next-dj-wordmark-dark.svg",
     "github_url": "https://github.com/next-dj/next-dj",
     "globaltoc_expand_depth": 2,
     "toctree_collapse": False,
@@ -113,7 +166,9 @@ html_theme_options = {
 
 # html static files
 html_static_path = ["_static"]
-html_css_files = ["custom.css"]
+html_css_files = ["css/tokens.css", "css/theme.css", "css/landing.css"]
+html_js_files = ["js/landing.js"]
+html_favicon = "_static/img/favicon.svg"
 
 # ensure _static and _static/images exist
 import os
@@ -187,4 +242,7 @@ myst_enable_extensions = [
 ]
 
 # source suffix
-source_suffix = [".rst", ".md"]
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".md": "markdown",
+}

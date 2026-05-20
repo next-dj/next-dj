@@ -64,6 +64,8 @@ docs = [
     "myst-parser==5.0.0",
     "sphinx-autodoc-typehints==3.10.2",
     "sphinxcontrib-apidoc==0.6.0",
+    "sphinxcontrib-mermaid==1.0.0",
+    "sphinx-reredirects==1.1.0",
 ]
 
 [tool.hatch.version]
@@ -264,7 +266,7 @@ docstring-code-format = true
 docstring-code-line-length = "dynamic"
 
 [tool.doc8]
-max-line-length = 200
+ignore = ["D001"]
 ignore-path = [
     "docs/_build",
     "docs/_static",

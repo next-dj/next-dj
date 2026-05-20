@@ -1,0 +1,315 @@
+/* next.dj docs — doc-page restyle
+   Layered over Shibuya. Tokens (tokens.css) already retarget colour and
+   typography, so this file only refines surfaces, spacing, and components. */
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv05", "cv11", "ss03";
+}
+
+.yue {
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.yue h1,
+.yue h2,
+.yue h3,
+.yue h4 {
+  letter-spacing: -0.018em;
+}
+
+.yue h1 {
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+/* Vite-style hairline separator above section headings */
+.yue h2 {
+  margin-top: 2.6em;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--sy-c-divider);
+}
+
+.yue h2:first-of-type {
+  margin-top: 1.6em;
+}
+
+/* anchor offset so headings clear the sticky header */
+.yue :is(h1, h2, h3, h4, h5, h6):target,
+.yue section[id] {
+  scroll-margin-top: calc(var(--sy-s-navbar-height) + 1.5rem);
+}
+
+.sy-head {
+  border-bottom: 1px solid transparent;
+}
+
+.sy-head-blur {
+  border-bottom: 1px solid var(--ndj-border);
+  background-color: color-mix(in srgb, var(--sy-c-background) 82%, transparent);
+}
+
+/* the wordmark logo already carries the brand name — drop the text fallback */
+.sy-head-brand strong,
+.sy-head-brand b {
+  display: none;
+}
+
+.sy-head-brand img {
+  height: 16px;
+  width: auto;
+}
+
+.globaltoc a,
+.sy-rside a {
+  border-radius: var(--ndj-radius-sm);
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+
+/* full-width rows so the active state reads as a clean pill,
+   not a tight blob hugging the text */
+.globaltoc > ul a {
+  display: block;
+  padding: 0.32rem 0.6rem;
+}
+
+.globaltoc li {
+  margin: 0.12rem 0;
+}
+
+.globaltoc > ul a:hover {
+  background-color: var(--ndj-surface-2);
+  color: var(--accent-11);
+}
+
+/* ancestor of the open page — coloured label only, no fill */
+.globaltoc .current > a {
+  color: var(--accent-11);
+  font-weight: 600;
+}
+
+/* the page currently open — soft accent pill */
+.globaltoc > ul a.current {
+  background-color: var(--accent-a3);
+  color: var(--accent-11);
+  font-weight: 600;
+}
+
+.sy-rside a:hover {
+  color: var(--accent-11);
+}
+
+.sy-rside a.active {
+  color: var(--accent-11);
+  font-weight: 600;
+}
+
+.yue a {
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+/* Every code block is one bordered, rounded terminal card. A captioned block
+   wraps in .literal-block-wrapper. A bare block is just the highlight- div.
+   The card chrome (border + radius + clip) lives on whichever is outermost,
+   and the inner elements carry no chrome of their own. */
+
+/* outermost card */
+.literal-block-wrapper,
+div[class*="highlight-"] {
+  border: 1px solid var(--ndj-code-border);
+  border-radius: var(--ndj-radius);
+  overflow: hidden;
+}
+
+/* inside a captioned wrapper the body div is no longer the card */
+.literal-block-wrapper div[class*="highlight-"] {
+  border: 0;
+  border-radius: 0;
+}
+
+/* the highlight + pre never draw their own border or radius */
+.highlight,
+.highlight pre,
+pre.literal-block {
+  border: 0;
+}
+
+.highlight pre,
+pre.literal-block {
+  border-radius: 0;
+  padding: 1rem 1.15rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+/* code body — one surface for the whole card in either theme */
+.highlight,
+.highlight pre {
+  background-color: var(--ndj-code-bg);
+}
+
+/* caption — a terminal title bar with traffic-light dots */
+.code-block-caption {
+  align-items: center;
+  font-family: var(--sy-f-mono);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  padding: 0.62rem 1.1rem;
+  color: var(--ndj-code-caption-text);
+  background-color: var(--ndj-code-bg);
+  border-bottom: 1px solid var(--ndj-code-border);
+}
+
+.code-block-caption::before {
+  content: "";
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background-color: var(--ndj-term-dot-red);
+  box-shadow: 18px 0 0 var(--ndj-term-dot-amber), 36px 0 0 var(--ndj-term-dot-green);
+  margin-right: 3rem;
+}
+
+/* inline code */
+.yue :not(pre) > code {
+  border-radius: 6px;
+  font-size: 0.875em;
+  padding: 0.12em 0.38em;
+}
+
+/* copy button — tucked into the top-right corner */
+.highlight .copybtn,
+div[class*="highlight-"] .copybtn {
+  top: 0.5rem;
+  right: 0.5rem;
+  opacity: 0;
+  border-radius: 6px;
+  transition: opacity 0.15s ease;
+}
+
+.highlight:hover .copybtn,
+div[class*="highlight-"]:hover .copybtn {
+  opacity: 0.85;
+}
+
+.admonition {
+  border-radius: var(--ndj-radius);
+  border-left-width: 3px;
+  box-shadow: var(--ndj-shadow-sm);
+}
+
+/* the title bar bleeds to the card edges via negative margins, so its
+   top corners must round to match the card or they poke past it */
+.admonition > p.admonition-title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  border-top-left-radius: var(--ndj-radius);
+  border-top-right-radius: var(--ndj-radius);
+}
+
+.sd-card {
+  border-radius: var(--ndj-radius-lg) !important;
+  border: 1px solid var(--ndj-border) !important;
+  background-color: var(--ndj-surface-1) !important;
+  box-shadow: var(--ndj-shadow-sm);
+  /* clip headers, footers, and images to the rounded corners */
+  overflow: hidden;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.sd-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--accent-7) !important;
+  box-shadow: var(--ndj-shadow);
+}
+
+.sd-card .sd-card-title .sd-octicon,
+.sd-card .sd-card-title svg {
+  color: var(--accent-9);
+}
+
+.yue table {
+  border-radius: var(--ndj-radius);
+  overflow: hidden;
+  border: 1px solid var(--ndj-border);
+}
+
+.yue table thead th {
+  background-color: var(--ndj-surface-2);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--sy-c-light);
+}
+
+.sy-searchbox input,
+.sy-searchbox button {
+  border-radius: var(--ndj-radius-sm);
+}
+
+.sy-foot {
+  background-color: var(--ndj-surface-2);
+}
+
+.yue p.lead,
+.rst-class-lead {
+  font-size: 1.2rem;
+  color: var(--sy-c-light);
+  line-height: 1.6;
+}
+
+.body.sy-container main.sy-content {
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
+/* the .. contents:: directive, rendered as a bordered surface card so it
+   reads like the landing's blocks rather than a loose bullet list */
+.yue nav.contents,
+.yue div.contents.topic {
+  background-color: var(--ndj-surface-2);
+  border: 1px solid var(--ndj-border);
+  border-radius: var(--ndj-radius);
+  padding: 1.1rem 1.35rem;
+}
+
+.yue nav.contents > .topic-title,
+.yue div.contents.topic > .topic-title {
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--sy-c-light);
+  margin: 0 0 0.55rem;
+}
+
+.yue nav.contents ul,
+.yue div.contents.topic ul {
+  margin: 0;
+}
+
+/* the .. rubric:: directive used on section index pages */
+.yue p.rubric {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent-11);
+  border-bottom: 1px solid var(--sy-c-divider);
+  padding-bottom: 0.4rem;
+  margin-top: 2.4rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sd-card,
+  .sd-card:hover {
+    transition: none;
+    transform: none;
+  }
+}

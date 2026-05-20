@@ -1,0 +1,194 @@
+{%- macro check() -%}
+<svg class="ndj-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>
+{%- endmacro -%}
+{%- macro mockbar(title) -%}
+<div class="ndj-mock-bar">
+  <span class="ndj-mock-dot"></span>
+  <span class="ndj-mock-dot"></span>
+  <span class="ndj-mock-dot"></span>
+  <span class="ndj-mock-title">{{ title }}</span>
+</div>
+{%- endmacro -%}
+<section class="ndj-features">
+  <div class="ndj-wrap">
+    <div class="ndj-section-head">
+      <h2 class="ndj-section-title">Core building blocks</h2>
+      <p class="ndj-section-sub">
+        The patterns next.dj adds, each shown in real project source.
+      </p>
+    </div>
+
+    <div class="ndj-feature-list">
+
+      <article class="ndj-feature">
+        <div class="ndj-feature-text">
+          <span class="ndj-feature-kicker">File router</span>
+          <h3 class="ndj-feature-title">Pages are files</h3>
+          <p>
+            Add a directory with a <code>page.py</code> under <code>routes/</code>
+            and it answers a URL. Bracketed segments capture typed parameters.
+          </p>
+          <ul class="ndj-feature-bullets">
+            <li>{{ check() }} Directories become URL segments, no <code>urls.py</code></li>
+            <li>{{ check() }} <code>[int:post_id]</code> captures a typed path parameter</li>
+            <li>{{ check() }} <code>DUrl[int]</code> coerces and injects it by type</li>
+          </ul>
+        </div>
+        <div class="ndj-mock">
+          {{ mockbar("routes/posts/[int:post_id]/page.py") }}
+          <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> notes.models <span class="c-kw">import</span> Note
+<span class="c-kw">from</span> next.pages <span class="c-kw">import</span> context
+<span class="c-kw">from</span> next.urls <span class="c-kw">import</span> DUrl
+
+<span class="c-deco">@context</span>(<span class="c-str">"note"</span>)
+<span class="c-kw">def</span> <span class="c-fn">note</span>(post_id: DUrl[<span class="c-kw">int</span>]) -> Note:
+    <span class="c-kw">return</span> Note.objects.<span class="c-fn">get</span>(pk=post_id)</pre>
+        </div>
+      </article>
+
+      <article class="ndj-feature">
+        <div class="ndj-feature-text">
+          <span class="ndj-feature-kicker">Components</span>
+          <h3 class="ndj-feature-title">Composable components</h3>
+          <p>
+            Call components by name, pass props, and fill named slots with
+            child markup.
+          </p>
+          <ul class="ndj-feature-bullets">
+            <li>{{ check() }} One tag, <code>{% raw %}{% component %}{% endraw %}</code>, for every component</li>
+            <li>{{ check() }} Props are explicit, slots fill block content</li>
+            <li>{{ check() }} Co-locate CSS and JS in the component folder</li>
+          </ul>
+        </div>
+        <div class="ndj-mock">
+          {{ mockbar("routes/template.djx") }}
+          <pre class="ndj-mock-body ndj-code"><span class="c-tag">{% raw %}{% #component{% endraw %}</span> <span class="c-str">"card"</span> title=<span class="c-str">"Welcome"</span> <span class="c-tag">%}</span>
+  <span class="c-tag">{% raw %}{% #slot{% endraw %}</span> <span class="c-str">"content"</span> <span class="c-tag">%}</span>
+    &lt;p&gt;Latest update.&lt;/p&gt;
+  <span class="c-tag">{% raw %}{% /slot %}{% endraw %}</span>
+<span class="c-tag">{% raw %}{% /component %}{% endraw %}</span></pre>
+        </div>
+      </article>
+
+      <article class="ndj-feature">
+        <div class="ndj-feature-text">
+          <span class="ndj-feature-kicker">Forms</span>
+          <h3 class="ndj-feature-title">Forms wired to handlers</h3>
+          <p>
+            Register a handler with <code>@action</code> and bind a form class.
+            CSRF and re-render are handled for you.
+          </p>
+          <ul class="ndj-feature-bullets">
+            <li>{{ check() }} <code>@action</code> registers a POST endpoint by name</li>
+            <li>{{ check() }} <code>form_class</code> binds and validates the body</li>
+            <li>{{ check() }} Invalid submissions re-render with errors</li>
+          </ul>
+        </div>
+        <div class="ndj-mock">
+          {{ mockbar("routes/page.py") }}
+          <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> django.http <span class="c-kw">import</span> HttpResponseRedirect
+<span class="c-kw">from</span> next.forms <span class="c-kw">import</span> action
+<span class="c-kw">from</span> notes.forms <span class="c-kw">import</span> NoteForm
+
+<span class="c-deco">@action</span>(<span class="c-str">"create_note"</span>, form_class=NoteForm)
+<span class="c-kw">def</span> <span class="c-fn">create_note</span>(form: NoteForm) -> HttpResponseRedirect:
+    form.<span class="c-fn">save</span>()
+    <span class="c-kw">return</span> <span class="c-fn">HttpResponseRedirect</span>(<span class="c-str">"/"</span>)</pre>
+        </div>
+      </article>
+
+      <article class="ndj-feature">
+        <div class="ndj-feature-text">
+          <span class="ndj-feature-kicker">Static assets</span>
+          <h3 class="ndj-feature-title">Assets next to pages</h3>
+          <p>
+            Drop a <code>template.css</code> or <code>component.js</code> beside
+            the file that uses it. The pipeline collects each asset and injects
+            it where the page renders.
+          </p>
+          <ul class="ndj-feature-bullets">
+            <li>{{ check() }} Asset files pair with a page or component by filename</li>
+            <li>{{ check() }} Component assets ship only when the component renders</li>
+            <li>{{ check() }} <code>{% raw %}{% collect_styles %}{% endraw %}</code> emits the deduplicated output</li>
+          </ul>
+        </div>
+        <div class="ndj-mock">
+          {{ mockbar("notes/") }}
+          <pre class="ndj-mock-body ndj-code"><span class="c-fn">routes/</span>
+  page.py
+  template.djx
+  template.css        <span class="c-com"># collected with the page</span>
+  template.js
+<span class="c-fn">_components/note_card/</span>
+  component.djx
+  component.css       <span class="c-com"># collected with the component</span>
+  component.js</pre>
+        </div>
+      </article>
+
+      <article class="ndj-feature">
+        <div class="ndj-feature-text">
+          <span class="ndj-feature-kicker">Dependency injection</span>
+          <h3 class="ndj-feature-title">Inject by signature</h3>
+          <p>
+            Declare what a page or action needs as typed parameters. The
+            resolver matches each one to a provider and supplies it.
+          </p>
+          <ul class="ndj-feature-bullets">
+            <li>{{ check() }} Parameters resolve by name, type, and marker</li>
+            <li>{{ check() }} <code>@resolver.dependency</code> publishes a named value</li>
+            <li>{{ check() }} <code>Depends("name")</code> pulls it into any signature</li>
+          </ul>
+        </div>
+        <div class="ndj-mock">
+          {{ mockbar("routes/notes/[int:note_id]/page.py") }}
+          <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> django.http <span class="c-kw">import</span> HttpRequest
+<span class="c-kw">from</span> next.deps <span class="c-kw">import</span> Depends
+<span class="c-kw">from</span> next.pages <span class="c-kw">import</span> context
+<span class="c-kw">from</span> next.urls <span class="c-kw">import</span> DUrl
+
+<span class="c-deco">@context</span>(<span class="c-str">"note"</span>)
+<span class="c-kw">def</span> <span class="c-fn">note</span>(
+    request: HttpRequest,
+    note_id: DUrl[<span class="c-kw">int</span>],
+    repo: NoteRepo = <span class="c-fn">Depends</span>(<span class="c-str">"note_repo"</span>),
+) -> Note:
+    <span class="c-kw">return</span> repo.<span class="c-fn">for_user</span>(request.user).<span class="c-fn">get</span>(pk=note_id)</pre>
+        </div>
+      </article>
+
+      <article class="ndj-feature">
+        <div class="ndj-feature-text">
+          <span class="ndj-feature-kicker">Testing</span>
+          <h3 class="ndj-feature-title">Tests that know the router</h3>
+          <p>
+            <code>NextClient</code> boots the file router and registers actions,
+            so a test posts to an action by name.
+          </p>
+          <ul class="ndj-feature-bullets">
+            <li>{{ check() }} <code>NextClient</code> extends Django's test client</li>
+            <li>{{ check() }} <code>post_action</code> resolves an action to its URL</li>
+            <li>{{ check() }} <code>render_page</code> covers template-only assertions</li>
+          </ul>
+        </div>
+        <div class="ndj-mock">
+          {{ mockbar("notes/tests/test_actions.py") }}
+          <pre class="ndj-mock-body ndj-code"><span class="c-kw">from</span> next.testing.client <span class="c-kw">import</span> NextClient
+
+<span class="c-kw">def</span> <span class="c-fn">test_create_note</span>():
+    response = <span class="c-fn">NextClient</span>().<span class="c-fn">post_action</span>(
+        <span class="c-str">"create_note"</span>, {<span class="c-str">"title"</span>: <span class="c-str">"Test"</span>, <span class="c-str">"body"</span>: <span class="c-str">""</span>},
+    )
+    <span class="c-kw">assert</span> response.status_code == <span class="c-num">302</span></pre>
+        </div>
+      </article>
+
+    </div>
+
+    <p class="ndj-feature-more">
+      These are the core blocks. next.dj ships more — layouts, signals,
+      autoreload, deployment, and the full reference live in the
+      <a href="{{ pathto('content/topics/index') }}">documentation</a>.
+    </p>
+  </div>
+</section>

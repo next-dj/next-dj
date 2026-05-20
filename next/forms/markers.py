@@ -20,6 +20,8 @@ class DForm[FormT](DDependencyBase[FormT]):
 class FormProvider(RegisteredParameterProvider):
     """Inject a `form` instance matching the annotation or the parameter name `form`."""
 
+    priority = 40
+
     def can_handle(self, param: inspect.Parameter, context: object) -> bool:
         """Return True when context carries a form compatible with `param`."""
         form = getattr(context, "form", None)

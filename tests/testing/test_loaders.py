@@ -1,8 +1,11 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from django.test import override_settings
 
+from next.components import components_manager
 from next.testing import (
     clear_loaded_dirs,
     eager_load_components,
@@ -19,6 +22,19 @@ def _reset_loader_memo() -> None:
 def _write_page(path: Path, body: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body)
+
+
+def _component_backend_config(
+    root: Path, component_name: str, marker: Path
+) -> dict[str, object]:
+    """Write a component tree whose ``component.py`` touches ``marker`` on import."""
+    comp_dir = root / "_components" / component_name
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.djx").write_text("<div/>")
+    (comp_dir / "component.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('loaded')\n"
+    )
+    return {"DIRS": [str(root / "_components")], "COMPONENTS_DIR": "_components"}
 
 
 class TestEagerLoadPages:
@@ -79,10 +95,8 @@ class TestEagerLoadComponents:
     def test_invokes_ensure_loaded_on_every_backend(self, monkeypatch) -> None:
         called: list[str] = []
 
-        b1 = MagicMock()
-        b1._ensure_loaded = lambda: called.append("b1")
-        b2 = MagicMock()
-        b2._ensure_loaded = lambda: called.append("b2")
+        b1 = SimpleNamespace(_ensure_loaded=lambda: called.append("b1"))
+        b2 = SimpleNamespace(_ensure_loaded=lambda: called.append("b2"))
         manager = MagicMock()
         manager._backends = [b1, b2]
         manager._ensure_backends = lambda: called.append("ensure")
@@ -90,6 +104,26 @@ class TestEagerLoadComponents:
         monkeypatch.setattr(loaders, "components_manager", manager)
         eager_load_components()
         assert called == ["ensure", "b1", "b2"]
+
+    def test_imports_component_py_when_lazy_modules_enabled(
+        self, tmp_path: Path
+    ) -> None:
+        """``eager_load_components`` loads every ``component.py`` even under lazy startup."""
+        marker = tmp_path / "imported.txt"
+        config = _component_backend_config(tmp_path, "eager_widget", marker)
+        try:
+            with override_settings(
+                NEXT_FRAMEWORK={
+                    "DEFAULT_COMPONENT_BACKENDS": [config],
+                    "LAZY_COMPONENT_MODULES": True,
+                },
+            ):
+                components_manager._reload_config()
+                assert not marker.exists()
+                eager_load_components()
+                assert marker.read_text() == "loaded"
+        finally:
+            components_manager._reload_config()
 
     def test_backend_without_ensure_loaded_is_skipped(self, monkeypatch) -> None:
         bare = object()

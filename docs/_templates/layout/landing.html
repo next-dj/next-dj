@@ -1,0 +1,22 @@
+{# next.dj override of Shibuya's landing layout.
+   Overrides `document` to render a full-bleed marketing page while keeping
+   the real banner, site header, and site footer. The index.rst body (only
+   hidden toctrees) is intentionally dropped. #}
+{%- extends "layout.html" -%}
+
+{%- block extrahead -%}
+  {% include "components/meta-opengraph.html" %}
+{%- endblock -%}
+
+{%- block document -%}
+  {%- include "partials/banner.html" -%}
+  {%- block header -%}
+    {% include "partials/site-head.html" with context %}
+  {%- endblock -%}
+
+  <main class="ndj-landing" role="main">
+    {% include "landing/hero.html" %}
+    {% include "landing/features.html" %}
+    {% include "landing/cta.html" %}
+  </main>
+{%- endblock -%}

@@ -1,0 +1,178 @@
+/* next.dj docs — design tokens
+   Self-hosted fonts, an indigo accent ramp that retargets Shibuya's Radix
+   scale, and a private --ndj-* namespace for surfaces, radii, and shadows. */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/inter-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/inter-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/inter-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../fonts/inter-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/jetbrains-mono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/jetbrains-mono-500.woff2") format("woff2");
+}
+
+:root {
+  --sy-f-text: "Inter", var(--sy-f-sys), var(--sy-f-cjk), sans-serif;
+  --sy-f-heading: "Inter", var(--sy-f-sys), var(--sy-f-cjk), sans-serif;
+  --sy-f-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Shibuya binds --accent-* to --indigo-* when accent_color is "indigo",
+   so redefining the indigo scale recolors every accented surface. */
+
+:root {
+  --indigo-1: #fbfbfd;
+  --indigo-2: #f4f4f9;
+  --indigo-3: #e9e8f3;
+  --indigo-4: #dad7ec;
+  --indigo-5: #c8c2e0;
+  --indigo-6: #b2acd5;
+  --indigo-7: #9990c5;
+  --indigo-8: #7d72b8;
+  --indigo-9: #5d51b8;
+  --indigo-10: #514aa6;
+  --indigo-11: #564f9e;
+  --indigo-12: #232040;
+  --indigo-contrast: #ffffff;
+  --indigo-surface: #f8f8fb;
+
+  --indigo-a1: rgba(93, 81, 184, 0.02);
+  --indigo-a2: rgba(93, 81, 184, 0.05);
+  --indigo-a3: rgba(93, 81, 184, 0.10);
+  --indigo-a4: rgba(93, 81, 184, 0.15);
+  --indigo-a5: rgba(93, 81, 184, 0.21);
+  --indigo-a6: rgba(93, 81, 184, 0.28);
+  --indigo-a7: rgba(93, 81, 184, 0.38);
+  --indigo-a8: rgba(93, 81, 184, 0.53);
+  --indigo-a9: rgba(93, 81, 184, 0.81);
+  --indigo-a10: rgba(81, 74, 166, 0.86);
+  --indigo-a11: rgba(86, 79, 158, 0.92);
+  --indigo-a12: rgba(35, 32, 64, 0.95);
+}
+
+html.dark {
+  --indigo-1: #121217;
+  --indigo-2: #181820;
+  --indigo-3: #232238;
+  --indigo-4: #2c2b48;
+  --indigo-5: #343356;
+  --indigo-6: #3d3c63;
+  --indigo-7: #494875;
+  --indigo-8: #595897;
+  --indigo-9: #8086c8;
+  --indigo-10: #9094d2;
+  --indigo-11: #b3b6e0;
+  --indigo-12: #e6e6f0;
+  --indigo-contrast: #0e0c1a;
+  --indigo-surface: #1f1f30;
+
+  --indigo-a1: rgba(128, 134, 200, 0.03);
+  --indigo-a2: rgba(128, 134, 200, 0.07);
+  --indigo-a3: rgba(128, 134, 200, 0.14);
+  --indigo-a4: rgba(128, 134, 200, 0.20);
+  --indigo-a5: rgba(128, 134, 200, 0.27);
+  --indigo-a6: rgba(128, 134, 200, 0.35);
+  --indigo-a7: rgba(128, 134, 200, 0.46);
+  --indigo-a8: rgba(128, 134, 200, 0.62);
+  --indigo-a9: rgba(128, 134, 200, 0.92);
+  --indigo-a10: rgba(144, 148, 210, 0.95);
+  --indigo-a11: rgba(179, 182, 224, 0.97);
+  --indigo-a12: rgba(230, 230, 240, 0.98);
+}
+
+:root {
+  --ndj-radius-sm: 8px;
+  --ndj-radius: 12px;
+  --ndj-radius-lg: 18px;
+  --ndj-maxw: 90rem;
+
+  --ndj-surface-1: #ffffff;
+  --ndj-surface-2: #f6f6fb;
+  --ndj-surface-3: #eeeef5;
+  --ndj-border: #e6e6f0;
+  --ndj-border-strong: #d6d6e4;
+
+  --ndj-shadow-sm: 0 1px 2px rgba(20, 18, 40, 0.05);
+  --ndj-shadow: 0 1px 2px rgba(20, 18, 40, 0.04), 0 10px 28px rgba(20, 18, 40, 0.07);
+
+  /* landing code mockup chrome — follows the active theme */
+  --ndj-term-bg: #ffffff;
+  --ndj-term-border: var(--ndj-border-strong);
+  --ndj-term-text: #1f2328;
+  --ndj-term-muted: #6e7781;
+  --ndj-term-dot-red: #ef6b6b;
+  --ndj-term-dot-amber: #f0b449;
+  --ndj-term-dot-green: #4fc77f;
+
+  /* doc code-block chrome — follows the active theme */
+  --ndj-code-bg: var(--ndj-surface-2);
+  --ndj-code-border: var(--ndj-border-strong);
+  --ndj-code-caption-text: #6b6880;
+
+  /* landing mockup hand-tokenised syntax palette — follows the active theme */
+  --ndj-syntax-keyword: #cf222e;
+  --ndj-syntax-name: #6639ba;
+  --ndj-syntax-string: #0a3069;
+  --ndj-syntax-number: #0550ae;
+  --ndj-syntax-decorator: #953800;
+}
+
+html.dark {
+  --ndj-surface-1: #0e0c1a;
+  --ndj-surface-2: #16142a;
+  --ndj-surface-3: #1e1b38;
+  --ndj-border: #262442;
+  --ndj-border-strong: #322f54;
+
+  --ndj-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --ndj-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.5);
+
+  --ndj-term-bg: #0b0a14;
+  --ndj-term-border: #262442;
+  --ndj-term-text: #e6e4f2;
+  --ndj-term-muted: #8a86a8;
+
+  --ndj-code-bg: #0b0a14;
+  --ndj-code-border: #262442;
+  --ndj-code-caption-text: #8a86a8;
+
+  --ndj-syntax-keyword: #c79bff;
+  --ndj-syntax-name: #8fa6ff;
+  --ndj-syntax-string: #7fd6a0;
+  --ndj-syntax-number: #f5b860;
+  --ndj-syntax-decorator: #f0b449;
+}

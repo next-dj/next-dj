@@ -67,7 +67,7 @@ def _dedupe_watch_specs(
     return out
 
 
-def iter_default_autoreload_watch_specs() -> list[tuple[Path, str]]:
+def _iter_default_autoreload_watch_specs() -> list[tuple[Path, str]]:
     """Return the default watch specs for pages and filesystem components.
 
     `.djx` is intentionally omitted. Template edits do not restart the
@@ -96,7 +96,7 @@ def iter_default_autoreload_watch_specs() -> list[tuple[Path, str]]:
 def iter_all_autoreload_watch_specs() -> list[tuple[Path, str]]:
     """Return default watch specs plus registered extras, deduplicated."""
     specs = _dedupe_watch_specs(
-        (*iter_default_autoreload_watch_specs(), *_registered_extra_watch_specs)
+        (*_iter_default_autoreload_watch_specs(), *_registered_extra_watch_specs)
     )
     watch_specs_ready.send(sender=iter_all_autoreload_watch_specs, specs=specs)
     return specs

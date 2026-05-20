@@ -1,122 +1,49 @@
 :layout: landing
-:description: next.dj — A full-stack Django framework with file-based routing, DJX templates, and modern web development patterns.
-:content_max_width: 100%
+:description: next.dj. A full-stack Django framework with file-based routing, DJX templates, and modern web development patterns.
 
-Full-stack Django framework
-==============================
+next.dj
+=======
 
-.. rst-class:: lead
-
-next.dj brings **file-based routing** and **modern frontend patterns** to Django.
-You get a Next.js-like structure—pages, layouts, and forms from the filesystem—while keeping Django's backend, ORM, and ecosystem.
-Less boilerplate, clear conventions, one stack.
-
-.. container:: buttons
-
-   :doc:`Getting started <content/guide/getting-started>`
-   `Source code <https://github.com/next-dj/next-dj>`_
-
-Features
---------
-
-.. grid:: 1 1 2 3
-   :gutter: 2
-   :padding: 0
-   :class-row: surface
-
-   .. grid-item-card:: :octicon:`file-directory` File-based routing
-      :link: content/guide/file-router
-      :link-type: doc
-
-      Stop editing ``urls.py`` for every new page. Add a file, get a route—ship faster and forget routing boilerplate.
-
-   .. grid-item-card:: :octicon:`browser` Pages and templates
-      :link: content/guide/pages-and-templates
-      :link-type: doc
-
-      One layout, many pages. Reuse structure instead of copy-pasting—less repetition and fewer bugs as you scale.
-
-   .. grid-item-card:: :octicon:`package` Components
-      :link: content/guide/components
-      :link-type: doc
-
-      Reusable template fragments with props and slots. Simple and composite components, scoped by page branch and root directories.
-
-   .. grid-item-card:: :octicon:`database` Context and data
-      :link: content/guide/context
-      :link-type: doc
-
-      No more passing the same data in every view. Define once, use everywhere—views stay clean and easy to change.
-
-   .. grid-item-card:: :octicon:`pencil` Forms and actions
-      :link: content/guide/forms
-      :link-type: doc
-
-      Forms that render and validate with less code. Handlers get request, form, and params automatically—no manual wiring.
-
-   .. grid-item-card:: :octicon:`plug` Dependency injection
-      :link: content/guide/dependency-injection
-      :link-type: doc
-
-      Get request and params where you need them, without threading through functions. Less glue code, faster iteration.
-
-   .. grid-item-card:: :octicon:`paintbrush` Static assets
-      :link: content/guide/static-assets
-      :link-type: doc
-
-      Drop CSS and JS next to pages and components. The framework discovers, deduplicates, and injects them in deterministic order — no manual ``<link>`` plumbing.
-
-   .. grid-item-card:: :octicon:`sync` Development server
-      :link: content/guide/autoreload
-      :link-type: doc
-
-      Edit and see. No restart, no manual refresh—focus on building instead of waiting for the server.
-
-Open source
------------
-
-.. admonition:: Open source
-   :class: note
-
-   next.dj is **open source**. Contributions—bug fixes, docs, and ideas—are welcome. See :doc:`content/contributing/contributing` to get started.
-
-Sponsors
---------
-
-.. image:: _images/sponsored/evrone_sponsored.svg
-   :width: 130px
-   :alt: Evrone
+.. The landing page is rendered by docs/_templates/layout/landing.html.
+   This source only carries the :layout: landing metadata and the navigation
+   toctrees below. Its body is intentionally not displayed.
 
 .. toctree::
-   :caption: Guide
+   :caption: Getting Started
    :hidden:
    :maxdepth: 1
 
-   content/guide/getting-started
-   content/guide/file-router
-   content/guide/pages-and-templates
-   content/guide/components
-   content/guide/context
-   content/guide/forms
-   content/guide/dependency-injection
-   content/guide/static-assets
-   content/guide/autoreload
-   content/guide/testing
-   content/guide/project-layout
-   content/guide/extending
+   content/intro/index
 
 .. toctree::
-   :caption: API Reference
+   :caption: Guides
    :hidden:
    :maxdepth: 1
 
-   content/api/reference
-   content/reference/system-checks
+   content/topics/index
+   content/howto/index
 
 .. toctree::
-   :caption: Contributing
+   :caption: Reference
    :hidden:
    :maxdepth: 1
 
-   content/contributing/contributing
-   content/contributing/documentation-guide
+   content/ref/index
+
+.. toctree::
+   :caption: Going Further
+   :hidden:
+   :maxdepth: 1
+
+   content/internals/index
+   content/deployment/index
+   content/security/index
+
+.. toctree::
+   :caption: Help and Project
+   :hidden:
+   :maxdepth: 1
+
+   content/faq/index
+   content/contributing/index
+   content/misc/index

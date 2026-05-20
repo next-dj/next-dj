@@ -1,0 +1,109 @@
+.. _security-overview:
+
+Security Overview
+=================
+
+next.dj relies on Django's middleware stack and template engine for the bulk of its security guarantees.
+This page lists the Django mechanisms that apply unchanged and the framework specific surfaces that need extra attention.
+
+.. contents::
+   :local:
+   :depth: 2
+
+Django Guarantees Used Unchanged
+--------------------------------
+
+The framework does not bypass any standard :doc:`Django middleware <django:topics/http/middleware>`.
+
+- CSRF tokens flow through the standard :doc:`CsrfViewMiddleware <django:ref/csrf>`.
+- Session management uses the standard :doc:`SessionMiddleware <django:topics/http/sessions>`.
+- Authentication uses ``AuthenticationMiddleware`` and the standard :doc:`auth backends <django:topics/auth/index>`.
+- Permissions checking, password hashing, and signed cookies remain unchanged.
+- Django template engine :doc:`auto escaping <django:ref/templates/language>` is active for every page and component template.
+
+A standard ``MIDDLEWARE`` block in ``settings.py`` is therefore enough to inherit the full Django security baseline.
+
+Framework Specific Surfaces
+---------------------------
+
+The framework adds three surfaces that warrant attention.
+
+File router input.
+   Captured URL parameters and query values reach Python through the dependency resolver.
+   Treat them as untrusted, see :doc:`di-and-untrusted-input`.
+
+Form dispatch path.
+   ``/_next/form/<uid>/`` is the dispatch endpoint for every action.
+   See :doc:`csrf-and-forms` for the CSRF flow.
+
+Co-located assets.
+   Component and page level CSS and JS ship through the static collector.
+   See :doc:`static-assets` for origins, hashes, and integrity.
+
+Common Threats
+--------------
+
+CSRF.
+   Django middleware plus the framework ``{% form %}`` tag covers the standard form path.
+   Manual ``<form>`` elements need explicit ``{% csrf_token %}``.
+
+XSS.
+   Django template auto escaping prevents most cases.
+   Context functions that return ``mark_safe`` strings or HTML strings bypass escaping.
+   Apply ``mark_safe`` only to values you fully control, and never to untrusted input as covered in :doc:`di-and-untrusted-input`.
+
+SQL injection.
+   The :doc:`Django ORM <django:topics/db/queries>` uses parameterised queries.
+   Raw SQL inside a custom provider must use ``params``.
+   See :doc:`di-and-untrusted-input` for the custom-provider validation pattern.
+
+Mass assignment.
+   Use ``ModelForm.Meta.fields`` to whitelist editable fields.
+   Avoid ``Meta.exclude`` because new fields default to editable.
+
+Path traversal.
+   The form dispatcher validates the posted ``_next_form_page`` path against ``BASE_DIR``.
+   A submission that points outside ``BASE_DIR`` returns HTTP 400.
+
+Open redirect.
+   ``HttpResponseRedirect`` accepts any URL.
+   Validate destinations before passing user input into a redirect target.
+
+Production Hardening
+--------------------
+
+A short list of production specific settings.
+
+- Set ``SECURE_SSL_REDIRECT = True`` to redirect every HTTP request to HTTPS.
+- Set ``SECURE_CONTENT_TYPE_NOSNIFF = True`` to block MIME-type sniffing.
+- Set ``SECURE_HSTS_SECONDS = 31536000`` to send a one-year HSTS header.
+- Set ``SECURE_HSTS_INCLUDE_SUBDOMAINS = True`` to extend HSTS to all subdomains.
+- Set ``SECURE_HSTS_PRELOAD = True`` to allow submission to the HSTS preload list.
+- Set ``SESSION_COOKIE_SECURE = True`` to send the session cookie only over HTTPS.
+- Set ``CSRF_COOKIE_SECURE = True`` to send the CSRF cookie only over HTTPS.
+- Set ``CSRF_TRUSTED_ORIGINS = ["https://..."]`` to restrict cross-origin form submissions to listed origins.
+
+Run ``uv run python manage.py check --deploy`` and resolve every warning.
+See :doc:`/content/deployment/checklist` for the full pre-deploy review.
+
+System Checks
+-------------
+
+The framework system checks cover configuration mistakes that affect security.
+
+- ``next.E041`` reports two actions registered under the same name from different handlers.
+- ``next.E045`` reports a form action backend that does not subclass ``FormActionBackend``.
+- ``next.E020`` reports a component name collision that could mask a third party component.
+
+Run them with ``uv run python manage.py check``.
+
+See Also
+--------
+
+.. seealso::
+
+   :doc:`csrf-and-forms` for the form pipeline.
+   :doc:`static-assets` for the static pipeline.
+   :doc:`di-and-untrusted-input` for the dependency surface.
+   :doc:`/content/topics/static-assets/js-context` for runtime script options that interact with CSP.
+   :doc:`reporting` for vulnerability disclosure.

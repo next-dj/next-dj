@@ -5,14 +5,19 @@
 [![PyPI Supported Django Versions](https://img.shields.io/pypi/djversions/next.dj.svg)](https://pypi.python.org/pypi/next.dj/)
 [![codecov](https://codecov.io/gh/next-dj/next-dj/graph/badge.svg?token=6RY9344W4E)](https://codecov.io/gh/next-dj/next-dj)
 
-A next-gen framework based on Django for cool engineers who love to do complex things!
+A next-gen framework based on Django without the tears.
 
 > [!WARNING]
-> This project is currently under active development. The code may be unstable and breaking changes may occur between versions. Many features are still in progress. Please use with caution in production environments.
+> This project is under active development. Treat releases as evolving until you validate behaviour for your workload.
 
 ## What is `next.dj`?
 
-`next.dj` is a modern framework based on Django that provides a unique opportunity - you can build full-stack applications on Django! Now you don't need frontend developers on React or other frameworks. It simplifies Django development by providing intuitive APIs and automatic code generation, offering a file-based routing system similar to Next.js, but built on top of Django's robust ecosystem.
+`next.dj` adds file-based routing, nested `layout.djx` wrappers, reusable components with co-located assets, dependency-injected context and actions, and form dispatch via `{% form %}`. Directories map to URLs. A `page.py` file turns a segment into a page. Configuration lives in the `NEXT_FRAMEWORK` mapping alongside standard Django settings.
+
+Read the **Overview** and **Installation** guides on Read the Docs for the mental model and a minimal working `INSTALLED_APPS` / `NEXT_FRAMEWORK` setup:
+
+- [Overview](https://next-dj.readthedocs.io/en/latest/content/intro/overview.html)
+- [Installation](https://next-dj.readthedocs.io/en/latest/content/intro/install.html)
 
 ## Documentation
 

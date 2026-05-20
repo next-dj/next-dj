@@ -3,9 +3,10 @@
 `TemplateLoader` is the abstract contract. The page manager consults
 `module.template` directly and then iterates the loader chain built
 from `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`. The default chain contains
-only `DjxTemplateLoader`. `PythonTemplateLoader` is kept for projects
-that register it explicitly or rely on the legacy capability-detection
-code path. The manager does not call it by default.
+only `DjxTemplateLoader`. `PythonTemplateLoader` is available for
+projects that register it explicitly. Registering it changes nothing
+at render time and only affects how the `next.W043` conflict check
+reports the body source. The manager does not call it by default.
 
 `DjxTemplateLoader` reads a sibling `template.djx`.
 `LayoutTemplateLoader` composes outer `layout.djx` wrappers up the

@@ -1,0 +1,202 @@
+.. _topics-multi-project:
+
+Multi-Project Setup
+===================
+
+A multi project setup hosts several Django projects from one repository.
+A shared UI kit lives in one place, each project pulls components from it, and each project keeps its own page tree.
+This page covers the directory shape, the ``DIRS`` configuration, the shared components convention, and the autoreload watchers that keep development fast.
+
+.. contents::
+   :local:
+   :depth: 2
+
+When to Use Multi Project Layout
+--------------------------------
+
+Use this layout when more than one project needs to share components, layouts, and static assets without duplicating code.
+The examples repository uses this shape so that every example project pulls components from ``examples/_shared/``.
+
+For recipes focused on components only, see :doc:`/content/howto/share-components-across-projects`.
+
+Reach for the single project layout in :doc:`project-layout` when only one Django project lives in the repository.
+
+Directory Shape
+---------------
+
+A typical multi project repository looks like this.
+
+.. code-block:: text
+   :caption: multi project tree
+
+   repo/
+     _shared/
+       _components/
+         button/
+           component.djx
+           component.py
+         card/
+           component.djx
+         alert/
+           component.djx
+       static/
+         vendor.css
+     projects/
+       admin/
+         config/
+           settings.py
+         chrome/
+           layout.djx
+         admin_app/
+           routes/
+             page.py
+             template.djx
+       site/
+         config/
+           settings.py
+         chrome/
+           layout.djx
+         site_app/
+           routes/
+             page.py
+             template.djx
+
+Two pieces stand out.
+
+- ``_shared/`` holds components and static files that are common to every project.
+- Each project under ``projects/`` has its own ``config/`` and its own ``chrome/`` directory.
+
+DIRS Configuration
+------------------
+
+Each project points at the shared directory through ``DIRS``.
+
+.. code-block:: python
+   :caption: projects/admin/config/settings.py
+
+   from pathlib import Path
+
+   BASE_DIR = Path(__file__).resolve().parent.parent
+   REPO_DIR = BASE_DIR.parent.parent
+   SHARED_DIR = REPO_DIR / "_shared"
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_PAGE_BACKENDS": [
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "DIRS": [str(BASE_DIR / "chrome")],
+               "APP_DIRS": True,
+               "PAGES_DIR": "routes",
+               "OPTIONS": {"context_processors": []},
+           }
+       ],
+       "DEFAULT_COMPONENT_BACKENDS": [
+           {
+               "BACKEND": "next.components.FileComponentsBackend",
+               "DIRS": [str(SHARED_DIR / "_components")],
+               "COMPONENTS_DIR": "_components",
+           }
+       ],
+   }
+
+The page backend reads ``chrome/layout.djx`` from inside the project, plus every application directory.
+The component backend reads from the shared components folder.
+
+Each project picks its own ``COMPONENTS_DIR`` and its own ``PAGES_DIR``.
+Different projects can use different names without affecting one another.
+
+Static Files
+------------
+
+The shared directory ships static files alongside components.
+
+.. code-block:: python
+   :caption: projects/admin/config/settings.py
+
+   STATICFILES_DIRS = [
+       BASE_DIR / "static",
+       SHARED_DIR / "static",
+   ]
+
+The Django static files finder picks up files from both directories.
+Co-located CSS and JS from shared components are emitted by the static collector.
+
+Shared Components Convention
+----------------------------
+
+Shared components live inside ``_shared/_components/``.
+Each path in ``DIRS`` is scanned directly as a components root, so its on-disk name is free to be anything.
+``COMPONENTS_DIR`` only names the folder the URL router treats as a component namespace inside a page tree.
+The framework does not consult ``COMPONENTS_DIR`` when it scans the ``DIRS`` roots.
+
+The shared components folder ships UI primitives such as buttons, cards, dialogs, and form widgets.
+Each project consumes them through ``{% component "name" %}`` without redeclaring anything.
+
+Per Project Components
+----------------------
+
+A project can ship project-specific components alongside the shared kit.
+
+.. code-block:: python
+   :caption: projects/admin/config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_COMPONENT_BACKENDS": [
+           {
+               "BACKEND": "next.components.FileComponentsBackend",
+               "DIRS": [
+                   str(BASE_DIR / "chrome" / "_components"),
+                   str(SHARED_DIR / "_components"),
+               ],
+               "COMPONENTS_DIR": "_components",
+           }
+       ]
+   }
+
+When the same component name appears in two roots, the visibility resolver scores each candidate by scope specificity.
+A page-tree component visible from the template wins over a same-named component contributed through ``DIRS``.
+The full sort key is ``(-score, component.name, registration_position)``.
+When two ``DIRS`` roots score equally the resolver breaks the tie first by component name, then by registration order.
+Roots are scanned in ``DIRS`` order, so an entry placed earlier in the list shadows a same-named component from a later entry.
+Prefer distinct names for project-specific components over relying on this ordering.
+
+Hot Reload
+----------
+
+Every directory listed in a component backend ``DIRS``, including the shared ``_shared/_components/`` root, contributes its own ``**/component.py`` watch spec to the :doc:`autoreloader </content/internals/autoreload>`.
+A change to a ``component.py`` inside ``_shared/_components/`` restarts the development server for every project that watches that root.
+
+The ``components_registered`` signal includes the full set after each reload so long-lived processes can refresh their caches.
+
+Common Variations
+-----------------
+
+Repository Wide Layout
+~~~~~~~~~~~~~~~~~~~~~~
+
+Put a single layout in ``_shared/chrome/`` and add the path to the ``DEFAULT_PAGE_BACKENDS`` ``DIRS`` of every project.
+Every project then renders inside the same shell.
+
+Per Tenant Project
+~~~~~~~~~~~~~~~~~~
+
+Run one project per tenant from the same repository.
+Each project ships its own settings, chrome, and applications.
+The shared components folder keeps the design consistent across tenants.
+
+Domain Specific Components
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Add a ``_internal/`` shared folder for components that should only be visible to a subset of projects.
+Reference it from the appropriate projects through ``DIRS``.
+
+See Also
+--------
+
+.. seealso::
+
+   :doc:`project-layout` for the single project layout.
+   :doc:`file-router` for the URL routing rules across roots.
+   :doc:`components` for the components subsystem.
+   :doc:`/content/howto/share-components-across-projects` for a recipe.
+   :doc:`/content/internals/autoreload` for the watch spec pipeline.

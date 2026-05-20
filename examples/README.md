@@ -1,6 +1,6 @@
 # next-dj examples
 
-Each folder below is a self-contained Django project that runs on SQLite and Django's in-process `LocMemCache`. No Docker, no Node, no external services. Every example overrides `PAGES_DIR` and `COMPONENTS_DIR` in `NEXT_FRAMEWORK` to demonstrate that the naming is user-controlled, and lists a project-level page root through `DEFAULT_PAGE_BACKENDS["DIRS"]` (named differently in each project — `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, `root_pages/`) that owns the shared HTML envelope sitting outside the per-app page tree.
+Each folder below is a self-contained Django project that runs on SQLite and Django's in-process `LocMemCache`. No Docker, no Node, and no external services are required. Every example overrides `PAGES_DIR` and `COMPONENTS_DIR` in `NEXT_FRAMEWORK` to demonstrate that the naming is user-controlled. Each example also registers a project-level page root through `DEFAULT_PAGE_BACKENDS["DIRS"]`: `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/`. This root owns the shared HTML envelope that sits outside the per-app page tree.
 
 ## Shared UI kit
 
@@ -42,7 +42,7 @@ Tailwind is loaded via the Play CDN (`https://cdn.tailwindcss.com`) from the roo
 ## Conventions every example follows
 
 * One custom `PAGES_DIR` (`routes`, `screens`, `panels`, …) and one custom components directory (`_widgets`, `_parts`, `_chunks`, …).
-* One project-level page root listed in `DEFAULT_PAGE_BACKENDS["DIRS"]` (e.g. `host/`, `frame/`, `shell/`, `studio/`). The file router walks it alongside the per-app `PAGES_DIR`, and its `layout.djx` becomes the outermost wrapper around every page. The [`multi-tenant`](multi-tenant/) example goes one step further and also drops project-shared components inside this root (`root_blocks/header`, `root_blocks/footer`); [`markdown-blog`](markdown-blog/) shows the same trick with a `site/_parts/site_footer` registered through `DEFAULT_COMPONENT_BACKENDS["DIRS"]`.
+* One project-level page root listed in `DEFAULT_PAGE_BACKENDS["DIRS"]` (e.g. `host/`, `frame/`, `shell/`, `studio/`). The file router walks it alongside the per-app `PAGES_DIR`, and its `layout.djx` becomes the outermost wrapper around every page. The [`multi-tenant`](multi-tenant/) example goes one step further and also drops project-shared components inside this root (`root_blocks/header`, `root_blocks/footer`). The [`markdown-blog`](markdown-blog/) example shows the same trick with a `site/_parts/site_footer` registered through `DEFAULT_COMPONENT_BACKENDS["DIRS"]`.
 * Co-located CSS/JS next to the `page.py`, `component.py`, or `layout.djx` they belong to. The `{% collect_styles %}` / `{% collect_scripts %}` tags place them in the rendered HTML, with deduplication.
 * E2E tests driven by `next.testing`: `eager_load_pages`, `reset_registries`, `NextClient`.
 * Forms return `HttpResponseRedirect` on success.

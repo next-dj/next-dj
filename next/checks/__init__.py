@@ -30,6 +30,7 @@ if TYPE_CHECKING:
         check_page_functions,
         check_pages_structure,
         check_request_in_context,
+        check_template_loaders,
     )
     from next.pages.loaders import _load_python_module
     from next.static.checks import check_js_context_serializer

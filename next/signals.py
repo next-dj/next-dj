@@ -1,8 +1,8 @@
 """Aggregate re-export of every signal emitted by the framework.
 
-Importing the sub-package signal module directly is still supported.
-This module provides a single import path for code that wants to wire
-multiple signals without remembering which subsystem owns each one.
+Signals also live on their owning subpackage (for example ``next.forms.signals``).
+Import from here when one module subscribes to several subsystems and prefers one
+import path.
 """
 
 from __future__ import annotations

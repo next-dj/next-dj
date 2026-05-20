@@ -11,7 +11,7 @@ _FINDER_PATH = "next.static.NextStaticFilesFinder"
 
 
 def install() -> None:
-    """Wire the staticfiles finder and register the built-in `css` and `js` kinds.
+    """Wire the staticfiles finder and register the framework's built-in asset kinds.
 
     Adds `NextStaticFilesFinder` to `STATICFILES_FINDERS` once and
     populates the public `KindRegistry` and `PlaceholderRegistry` with

@@ -110,7 +110,7 @@ class TestLayoutChecks:
 
 
 class TestMissingPageContentChecks:
-    """Merged page checks: ``check_page_functions`` covers template/render and W002."""
+    """``check_page_functions`` raises E012 and E013 for invalid page modules."""
 
     @pytest.mark.parametrize(
         (
@@ -161,7 +161,7 @@ class TestMissingPageContentChecks:
                 None,
                 True,
                 "<html>{% block template %}{% endblock template %}</html>",
-                1,
+                0,
                 0,
             ),
             (
@@ -195,7 +195,7 @@ class TestMissingPageContentChecks:
         expected_errors,
         expected_warnings,
     ) -> None:
-        """Exercise ``check_page_functions`` for template/render rules and empty pages."""
+        """``check_page_functions`` fires the expected error and warning counts."""
         page_file = tmp_path / "page.py"
         page_file.write_text(page_content)
 
@@ -223,8 +223,6 @@ class TestMissingPageContentChecks:
             warnings = [m for m in messages if m.id.startswith("next.W")]
             assert len(errors) == expected_errors
             assert len(warnings) == expected_warnings
-            if expected_warnings > 0:
-                assert "has no content" in warnings[0].msg
 
 
 class TestCheckTemplateLoaders:

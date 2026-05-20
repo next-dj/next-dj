@@ -277,3 +277,32 @@ class TestComponentVisibilityResolver:
         assert paths[0].resolve() not in res._result_cache
         assert (paths[0].resolve(), scope_root) not in res._path_cache
         assert paths[-1].resolve() in res._result_cache
+
+    def _resolve_same_name_from_two_roots(
+        self, base: Path, first: str, second: str
+    ) -> ComponentInfo:
+        """Register a same-named component from two global roots in given order."""
+        reg = ComponentRegistry()
+        for name in (first, second):
+            root = (base / name).resolve()
+            root.mkdir(parents=True)
+            info = ComponentInfo("button", root, "", root / "button.djx", None, True)
+            reg.register(info)
+            reg.mark_as_root(root)
+        tmpl = base / "page" / "home.djx"
+        tmpl.parent.mkdir(parents=True)
+        tmpl.write_text("x")
+        resolved = ComponentVisibilityResolver(reg).resolve_visible(tmpl)
+        return resolved["button"]
+
+    def test_equal_score_tie_breaks_on_registration_order(self, tmp_path: Path) -> None:
+        """Two equal-score global roots resolve to the one registered first."""
+        winner = self._resolve_same_name_from_two_roots(
+            tmp_path / "case1", "z_root", "a_root"
+        )
+        assert winner.scope_root == (tmp_path / "case1" / "z_root").resolve()
+
+        other = self._resolve_same_name_from_two_roots(
+            tmp_path / "case2", "a_root", "z_root"
+        )
+        assert other.scope_root == (tmp_path / "case2" / "a_root").resolve()
