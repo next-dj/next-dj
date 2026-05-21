@@ -7,7 +7,7 @@ Goal
 ----
 
 This part wires create, edit, and delete flows for notes through the form and action subsystem.
-By the end the index has a create form, each detail page has edit and delete buttons, and every submission lands in a typed handler that the framework dispatches automatically.
+By the end the index has a create form, each detail page has edit and delete buttons, and every submission lands in a typed action handler that the framework dispatches automatically.
 
 Prerequisites
 -------------
@@ -43,12 +43,13 @@ Create ``notes/forms.py``.
 ``next.forms.ModelForm`` and ``next.forms.Form`` are the framework form base classes.
 They participate in :doc:`form dispatch </content/topics/forms/index>`.
 A plain Django ``Form`` or ``ModelForm`` cannot be passed to ``@action`` because the dispatch pipeline expects the framework base class.
-``next.forms`` also re-exports every Django form field and widget, so ``BooleanField`` and the rest are importable from one place.
+``next.forms`` re-exports the common Django form fields and widgets used in this tutorial, so ``BooleanField`` and the rest are importable from one place.
+Import other fields directly from :mod:`django.forms` when you need them.
 
 Register the Create Action
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-An ``@action`` handler registers when its module is imported.
+An ``@action`` action handler registers when its module is imported.
 Placing it in the page's ``page.py`` means the file router imports it on the first request, so the natural home is next to the page that exposes the form.
 Update ``notes/pages/page.py``.
 
@@ -215,11 +216,12 @@ Extend the detail template.
      </p>
    </article>
 
-The two hidden inputs in this form come from different places.
+The rendered form carries several hidden inputs from different sources.
 ``confirm`` is a real field on ``DeleteNoteForm``, so the template posts it explicitly.
-``_url_param_id`` carries the captured URL ``id``, and the ``{% form %}`` tag emits it automatically for every captured URL parameter.
-That hidden field lets the handler resolve ``DUrl["id", int]`` without any extra argument on the tag.
-Add the handler to the detail page.
+The ``{% form %}`` tag emits four framework fields automatically.
+``csrfmiddlewaretoken`` carries the CSRF token, ``_next_form_page`` identifies the origin page, ``_next_form_origin`` records the request path, and ``_url_param_id`` echoes the captured URL ``id``.
+The ``_url_param_id`` field lets the action handler resolve ``DUrl["id", int]`` without any extra argument on the tag.
+Add the action handler to the detail page.
 
 .. code-block:: python
    :caption: notes/pages/notes/[id]/page.py
@@ -248,7 +250,8 @@ How Re-render Works
 ~~~~~~~~~~~~~~~~~~~
 
 A failing validation re-renders the origin page rather than producing an error page.
-The re-render keeps the request scoped DI cache, so it reuses the values the page already computed for this request.
+The framework keeps a per-request cache that memoises ``Depends("name")`` callables across the initial render and any subsequent re-render in the same request, and the re-render reads from it instead of recomputing.
+See :doc:`/content/topics/dependency-injection` for the full cache model.
 It runs the same context functions, so the surrounding page content stays consistent.
 See :doc:`/content/topics/forms/validation-rerender` for the full re-render contract.
 
@@ -287,7 +290,7 @@ The Notes application is functionally complete.
              template.djx
 
 Users can create, view, edit, and delete notes.
-Every action goes through a typed handler that receives the validated form and any DI markers it asks for.
+Every action goes through a typed action handler that receives the validated form and any DI markers it asks for.
 
 Common Pitfalls
 ---------------

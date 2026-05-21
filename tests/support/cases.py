@@ -2,17 +2,24 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from uuid import UUID
 
 from next.urls import DUrl
 
 
+_UUID_TEXT = "12345678-1234-5678-1234-567812345678"
+_UUID_VALUE = UUID(_UUID_TEXT)
+
+
 @dataclass(frozen=True, slots=True)
 class CoerceUrlValueCase:
-    """One row for ``TestCoerceUrlValue`` (raw string, type hint, expected value)."""
+    """One row for ``TestCoerceUrlValue`` (raw value, type hint, expected value)."""
 
     id: str
-    raw: str
-    hint: type
+    raw: object
+    hint: object
     expected: object
 
 
@@ -27,6 +34,24 @@ COERCE_URL_VALUE_CASES: tuple[CoerceUrlValueCase, ...] = (
     CoerceUrlValueCase("float_ok", "3.14", float, 3.14),
     CoerceUrlValueCase("float_bad", "x", float, "x"),
     CoerceUrlValueCase("str_pass", "hello", str, "hello"),
+    CoerceUrlValueCase("uuid_ok", _UUID_TEXT, UUID, _UUID_VALUE),
+    CoerceUrlValueCase("uuid_bad", "not-a-uuid", UUID, "not-a-uuid"),
+    CoerceUrlValueCase("decimal_ok", "3.14", Decimal, Decimal("3.14")),
+    CoerceUrlValueCase("decimal_bad", "x", Decimal, "x"),
+    CoerceUrlValueCase("date_ok", "2026-01-15", date, date(2026, 1, 15)),
+    CoerceUrlValueCase("date_bad", "x", date, "x"),
+    CoerceUrlValueCase(
+        "datetime_ok",
+        "2026-01-15T10:30:00+00:00",
+        datetime,
+        datetime(2026, 1, 15, 10, 30, tzinfo=UTC),
+    ),
+    CoerceUrlValueCase("datetime_bad", "x", datetime, "x"),
+    CoerceUrlValueCase("isinstance_uuid", _UUID_VALUE, UUID, _UUID_VALUE),
+    CoerceUrlValueCase("isinstance_int", 42, int, 42),
+    CoerceUrlValueCase("non_type_hint", "anything", "not-a-type", "anything"),
+    CoerceUrlValueCase("str_from_int", 42, str, "42"),
+    CoerceUrlValueCase("unsupported_type", "hello", bytes, "hello"),
 )
 
 
@@ -58,6 +83,10 @@ URL_KWARGS_RESOLVE_CASES: tuple[UrlKwargsResolveCase, ...] = (
         "str_annot", "slug", str, {"slug": "hello-world"}, "hello-world"
     ),
     UrlKwargsResolveCase("missing_key", "missing", str, {"other": "value"}, None),
+    UrlKwargsResolveCase(
+        "uuid_preserved", "id", UUID, {"id": _UUID_VALUE}, _UUID_VALUE
+    ),
+    UrlKwargsResolveCase("uuid_from_text", "id", UUID, {"id": _UUID_TEXT}, _UUID_VALUE),
 )
 
 
@@ -86,6 +115,20 @@ URL_BY_ANNOTATION_RESOLVE_CASES: tuple[UrlByAnnotationResolveCase, ...] = (
     ),
     UrlByAnnotationResolveCase(
         "two_arg_reads_named_key", "note_id", DUrl["id", int], {"note_id": "9"}, None
+    ),
+    UrlByAnnotationResolveCase(
+        "coerce_uuid_preserved",
+        "pk",
+        DUrl[UUID],
+        {"pk": _UUID_VALUE},
+        _UUID_VALUE,
+    ),
+    UrlByAnnotationResolveCase(
+        "coerce_uuid_from_text",
+        "pk",
+        DUrl[UUID],
+        {"pk": _UUID_TEXT},
+        _UUID_VALUE,
     ),
 )
 

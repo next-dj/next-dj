@@ -82,6 +82,8 @@ The handler can take any parameters the dependency injector knows how to resolve
    from django.http import HttpRequest, HttpResponseRedirect
    from next.forms import action
    from next.urls import DUrl
+   from notes.forms import NoteForm
+   from notes.models import Note
 
    @action("simple", form_class=NoteForm)
    def simple(form: NoteForm) -> HttpResponseRedirect:
@@ -210,6 +212,9 @@ A ``(FormClass, init_kwargs)`` tuple.
    The dispatcher passes ``**init_kwargs`` straight to the form constructor and skips ``get_initial`` entirely.
    Use this when the form needs constructor arguments that only exist at request time.
 
+Do not include ``data`` or ``files`` in ``init_kwargs``.
+The dispatcher passes both keyword arguments itself, populated from ``request.POST`` and ``request.FILES``, so a kwarg with either name would conflict at construction time.
+
 The factory is dependency-resolved, so it can declare ``request: HttpRequest``, a ``DUrl[...]`` parameter, or any ``Depends`` provider in its signature.
 
 .. code-block:: python
@@ -269,7 +274,11 @@ Each lives at its own URL so the dispatcher can tell them apart.
 .. code-block:: python
    :caption: notes/pages/notes/[id]/page.py
 
+   from django.http import HttpResponseRedirect
    from next.forms import action
+   from next.urls import DUrl
+   from notes.forms import NoteForm
+   from notes.models import Note
 
    @action("update_note", form_class=NoteForm)
    def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:

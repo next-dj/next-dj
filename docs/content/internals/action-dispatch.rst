@@ -13,7 +13,7 @@ It traces a submission from the template ``{% form %}`` tag through the validati
 Overview
 --------
 
-The dispatcher runs at ``/_next/form/<uid>/`` where the UID is a 16 character hash of the action name.
+The dispatcher runs at ``/_next/form/<uid>/`` where the UID is the first 16 hex characters of the SHA-256 digest of the action name.
 The dispatcher loads the action handler, builds the form, runs the validation chain, and either calls the handler or re-renders the origin page.
 Any non-POST method short-circuits before that work and returns HTTP 405.
 
@@ -23,9 +23,9 @@ Pipeline
 .. mermaid::
 
    flowchart TB
-       Template["form tag in template"] -- POST --> Endpoint["form dispatch endpoint"]
-       Template -- "non-POST" --> NotAllowed["HTTP 405"]
-       Endpoint --> Lookup["Resolve action by UID"]
+       Template["form tag in template"] --> Endpoint["form dispatch endpoint"]
+       Endpoint -- "non-POST" --> NotAllowed["HTTP 405"]
+       Endpoint -- POST --> Lookup["Resolve action by UID"]
        Lookup -- unknown UID --> NotFound["HTTP 404"]
        Lookup -- "found, no form_class" --> HandlerOnly["Run handler only"]
        Lookup -- "found, form_class" --> Build["Build form"]
@@ -97,11 +97,12 @@ The override calls ``super().dispatch`` to keep the standard pipeline.
 Shared Dependency Cache
 -----------------------
 
-The dispatcher reuses the dependency cache from the initial render path on the re-render path.
+The dispatcher creates a fresh dependency cache on every POST and shares it across each stage of the dispatch.
+``get_initial``, the factory resolution, the handler call, and any re-render after validation failure all read and write the same cache.
 Two consequences flow from this.
 
-- Custom providers are idempotent across initial render and re-render.
-- Re-render is cheap because layouts and context functions reuse cached values.
+- Custom providers are idempotent across the dispatch stages.
+- Re-render after a validation failure is cheap because layouts and context functions reuse the values cached during the initial bind.
 
 The cache hangs on ``request`` under the attribute named ``REQUEST_DEP_CACHE_ATTR``.
 Read it through ``next.deps.get_request_dep_cache(request)`` rather than the raw attribute.

@@ -76,6 +76,7 @@ Terms used throughout the next.dj documentation.
    manager
       The singleton orchestrator for one subsystem.
       Examples include ``page``, ``components_manager``, ``router_manager``, ``form_action_manager``.
+      ``page`` is the outlier without a ``_manager`` suffix because the rendering manager is exposed as a decorator-style facade rather than a named singleton.
 
    origin page
       The page that rendered a form.

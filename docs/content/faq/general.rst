@@ -51,8 +51,10 @@ Django's ``manage.py`` plus the framework system checks cover the operational su
 Which symbols are safe to depend on
 ------------------------------------
 
-Anything exported from a top-level ``next.*`` package is safe to import.
-Symbols whose names start with a single underscore are internal and may change without notice.
+Two rules define the public surface.
+First, anything exported from a top-level ``next.*`` package is safe to import.
+Second, symbols whose names start with a single underscore are internal and may change without notice, even when they appear in a module ``__all__``.
+The underscore rule is binding and overrides any incidental re-export.
 See :doc:`/content/ref/forms` for a concrete example of how the API tiers apply to ``next.forms``.
 
 See Also

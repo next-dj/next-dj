@@ -49,11 +49,17 @@ The pipeline is wired by ``next.apps.autoreload.install()``, which ``NextFramewo
 Modules
 -------
 
+Installer
+~~~~~~~~~
+
 ``next.apps.autoreload``.
    ``install()`` swaps ``StatReloader`` and connects the watch signal.
    ``uninstall()`` restores the previous reloader. Test suites that call ``AppConfig.ready`` multiple times use it to avoid double-patching.
 
-``next.server.autoreload`` (distinct from ``next.apps.autoreload``, the installer above).
+Runtime
+~~~~~~~
+
+``next.server.autoreload``.
    ``NextStatReloader`` extends the Django stat reloader and also restarts the process when the discovered route set changes.
 
 ``next.server.watcher``.

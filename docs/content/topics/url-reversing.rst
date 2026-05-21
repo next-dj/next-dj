@@ -114,7 +114,9 @@ The helper takes a URL string and adds, replaces, or removes query parameters.
    with_query("/filter/", tag=["python", "django"])
    # "/filter/?tag=python&tag=django"
 
-An existing parameter with an empty value, such as ``?flag=``, is kept unless you pass that key explicitly.
+   # An empty-valued parameter is preserved unless you pass that key.
+   with_query("/search/?flag=", query="next.dj")
+   # "/search/?flag=&query=next.dj"
 
 Multi Value Keys
 ~~~~~~~~~~~~~~~~

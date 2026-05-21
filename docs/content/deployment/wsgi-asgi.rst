@@ -50,7 +50,8 @@ Run with a production WSGI server such as ``gunicorn`` or ``uwsgi``.
    uv run gunicorn config.wsgi:application --workers 4 --bind 0.0.0.0:8000
 
 The example uses four workers.
-Gunicorn's own default ``--workers`` count is the number of CPU cores plus one.
+Gunicorn's own default ``--workers`` is ``1``.
+A common starting point is ``(2 * num_cores) + 1``.
 Tune based on the expected concurrency and the average request duration.
 
 ASGI Configuration

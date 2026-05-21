@@ -30,9 +30,9 @@ Never interpolate into queries.
 URL Parameters
 --------------
 
-``DUrl[int]`` coerces the captured value to ``int``.
-A value that fails coercion falls through as the raw string, so the page module still runs.
-Use a directory named with the typed segment form such as ``[int:id]`` to reject a non integer capture with ``404`` before the page module runs.
+``DUrl[T]`` coerces the captured value to ``T`` for ``int``, ``float``, ``bool``, ``UUID``, ``Decimal``, ``date``, and ``datetime``.
+A value that fails to parse falls through as the raw string, so the page module still runs.
+Use a directory named with the typed segment form such as ``[int:id]`` or ``[uuid:id]`` to reject a malformed capture with ``404`` before the page module runs.
 
 ``DUrl[str]`` accepts any non slash value.
 Always validate the string before passing it into ORM lookups or external services.
@@ -54,7 +54,8 @@ The ``is_public`` filter prevents an attacker from reading a private note by gue
 Query Strings
 -------------
 
-``DQuery[int]`` coerces or rejects.
+``DQuery[T]`` coerces the value to ``T`` for the same scalar set as ``DUrl``.
+A value that fails to parse falls back to the raw query string rather than raising, so a crafted input cannot crash the page module.
 ``DQuery[str]`` returns the raw string.
 ``DQuery[list[T]]`` returns a list of coerced values.
 

@@ -193,7 +193,7 @@ A custom backend can vary its output per request, for example to pick a CDN host
            return f'<link rel="stylesheet" href="{prefix}{url}">'
 
 The manager passes the current request to every renderer call.
-See ``examples/multi-tenant`` for a worked tenant prefix backend.
+See the `multi-tenant example <https://github.com/next-dj/next-dj/tree/main/examples/multi-tenant>`__ for a worked tenant prefix backend.
 
 Signals
 -------

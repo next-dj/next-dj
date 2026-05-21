@@ -177,36 +177,8 @@ The two trees do not share layouts.
 Project Level Root Layout
 -------------------------
 
-Place a root layout outside of any application by adding a project directory to ``DIRS``.
-
-.. code-block:: text
-   :caption: project layout
-
-   chrome/
-     layout.djx
-   notes/
-     routes/
-       page.py
-       template.djx
-
-.. code-block:: python
-   :caption: config/settings.py
-
-   NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
-           {
-               "BACKEND": "next.urls.FileRouterBackend",
-               "DIRS": [str(BASE_DIR / "chrome")],
-               "APP_DIRS": True,
-               "PAGES_DIR": "routes",
-               "OPTIONS": {"context_processors": []},
-           }
-       ]
-   }
-
-The router walks application directories first then continues into ``chrome``.
-The ``chrome/layout.djx`` wraps every page found in every application.
-See :doc:`multi-project` for the full pattern.
+Place a root layout outside of any application by adding a project directory to ``DIRS`` so a single ``layout.djx`` wraps every page across every installed app.
+See :doc:`multi-project` for the full settings example and the layered-projects pattern.
 
 Cross Cutting Behaviour
 -----------------------

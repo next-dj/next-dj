@@ -108,19 +108,22 @@ The provider matches the bare ``DTenant`` annotation when a request carries a te
 
 Unlike ``DFlag[Flag]``, ``DTenant`` is matched by class identity rather than ``get_origin``, so it carries no type parameter and the provider compares ``param.annotation`` to the class directly.
 
-Import the module from ``AppConfig.ready`` so the auto-registry wires the provider at startup.
+Import the module at the top of ``apps.py`` so the auto-registry wires the provider at startup.
+The ``ready`` hook does not need to re-run anything because ``RegisteredParameterProvider`` registers the provider as a side effect of class definition.
 
 .. code-block:: python
    :caption: notes/apps.py
 
    from django.apps import AppConfig
+   from notes import providers
+
+   _ = providers
 
    class NotesConfig(AppConfig):
        default_auto_field = "django.db.models.BigAutoField"
        name = "notes"
 
-       def ready(self):
-           from notes import providers  # noqa: F401, PLC0415
+The ``_ = providers`` line documents the intentional side-effect import so a linter does not flag it as unused.
 
 A page context function now requests the tenant by name and type, and the resolver hands back the model instance.
 Keep real annotations in these modules, because the resolver compares parameter annotations by identity.

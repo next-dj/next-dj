@@ -21,13 +21,14 @@ Pipeline
 .. mermaid::
 
    flowchart LR
-       Walk[Filesystem walk] --> Loaders[Template loaders]
-       Loaders --> Manager[Page]
-       Manager --> TemplateCache[Template cache]
+       Walk[Filesystem walk] --> Dispatcher[FilesystemTreeDispatcher]
+       Dispatcher --> Pairs["(url_path, page.py) pairs"]
+       Pairs --> Manager[Page]
        Manager --> ContextReg[Context registry]
-       TemplateCache --> Render[Render request]
-       ContextReg --> Render
-       Render --> InheritedCtx[Inherited page.py context]
+       Manager --> RenderReq[Render request]
+       ContextReg --> RenderReq
+       RenderReq --> Loaders[Template loaders]
+       Loaders --> InheritedCtx[Inherited page.py context]
        InheritedCtx --> PageCtx[Page @context functions]
        PageCtx --> Processors[Context processors]
        Processors --> LayoutCompose[Layout composition]

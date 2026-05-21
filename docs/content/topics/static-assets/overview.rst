@@ -47,6 +47,10 @@ StaticAsset
 ``inline``.
    The pre-rendered inline body, or ``None`` for URL assets.
 
+``url`` and ``inline`` are mutually exclusive.
+A URL asset carries a non-empty ``url`` and a ``None`` ``inline``.
+An inline asset carries a ``None`` or empty ``url`` and a non-empty ``inline`` body.
+
 Asset Kinds
 -----------
 

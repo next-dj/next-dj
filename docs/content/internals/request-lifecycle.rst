@@ -85,7 +85,8 @@ The collector finalises before the template tags emit their slot.
 Tag Injection
 ~~~~~~~~~~~~~
 
-``{% collect_styles %}`` and ``{% collect_scripts %}`` ask the collector for the appropriate slot and emit the HTML.
+``{% collect_styles %}`` and ``{% collect_scripts %}`` emit placeholder tokens during template rendering.
+After the layout chain finishes, the static manager replaces every placeholder token with the rendered tags accumulated by the request-scoped ``StaticCollector``.
 The framework injects the ``Next`` JS context script before any other script in the page.
 
 Form Submission Path
@@ -104,7 +105,7 @@ Extension Points
 - Add an entry to ``MIDDLEWARE`` to intercept the request before next.dj sees it.
 - Subscribe to ``page_rendered`` to inspect the final HTML.
 - Subclass ``StaticBackend`` to change how the collector renders.
-- Subclass ``FileRouterBackend`` to feed the resolver from a different source.
+- Subclass ``RouterBackend`` to feed the resolver from a different source.
 
 See Also
 --------

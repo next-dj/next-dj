@@ -1,7 +1,7 @@
 .. _topics-forms-modelforms:
 
-ModelForm Support
-=================
+ModelForms
+==========
 
 A :doc:`ModelForm <django:topics/forms/modelforms>` adapts a Django model to a form.
 next.dj supports ModelForms anywhere a plain ``Form`` works.

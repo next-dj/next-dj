@@ -117,8 +117,9 @@ The dependency graph between subsystems is shallow.
 
 - ``next.conf`` has no internal dependencies and sits at the bottom.
 - ``next.deps`` depends only on ``next.conf``.
-- ``next.pages``, ``next.components``, ``next.urls``, ``next.static`` depend on ``next.conf`` and ``next.deps``.
-- ``next.forms`` depends on ``next.pages``, ``next.deps``, and ``next.urls``.
+- ``next.pages``, ``next.components``, ``next.static`` depend on ``next.conf`` and ``next.deps``.
+- ``next.forms`` depends on ``next.pages`` and ``next.deps``.
+- ``next.urls`` depends on ``next.conf``, ``next.deps``, ``next.pages``, ``next.components``, and ``next.forms``.
 - ``next.server`` depends on ``next.conf``, ``next.pages``, ``next.urls``, and ``next.components``, the subsystems whose trees it watches.
 - ``next.testing`` depends on the page, component, form, dependency, and static subsystems to drive isolation and rendering helpers.
 - ``next.apps`` depends on every subsystem.
@@ -146,7 +147,7 @@ Each subsystem keeps a flat module layout.
    * - ``next.static``
      - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``scripts``, ``serializers``, ``defaults``, ``finders``, ``checks``, ``signals``.
    * - ``next.deps``
-     - ``resolver``, ``providers``, ``cache``, ``context``, ``markers``, ``checks``, ``signals``.
+     - ``resolver``, ``providers``, ``cache``, ``context``, ``markers``, ``signals``. The ``checks`` module is a reserved stub with no checks registered yet.
    * - ``next.server``
      - ``autoreload``, ``watcher``, ``roots``, ``checks``, ``signals``.
    * - ``next.conf``
@@ -156,7 +157,7 @@ Each subsystem keeps a flat module layout.
    * - ``next.apps``
      - ``config``, ``autoreload``, ``templates``, ``staticfiles``, ``components``.
    * - ``next.checks``
-     - ``common``. Aggregates system-check registration.
+     - ``__init__`` aggregates system-check registration across every subpackage. ``common`` provides shared helpers used by individual ``checks`` modules.
    * - ``next.templatetags``
      - ``components``, ``forms``, ``next_static``.
 

@@ -12,6 +12,8 @@ class TestURLPatternParser:
             ("simple", "simple/", {}),
             ("user/[id]", "user/<str:id>/", {"id": "id"}),
             ("user/[int:user-id]", "user/<int:user_id>/", {"user_id": "user_id"}),
+            ("user/[uuid:id]", "user/<uuid:id>/", {"id": "id"}),
+            ("post/[slug:post-slug]", "post/<slug:post_slug>/", {"post_slug": "post_slug"}),
             ("profile/[[args]]", "profile/<path:args>/", {"args": "args"}),
             (
                 "user/[int:id]/posts/[[args]]",
@@ -24,6 +26,8 @@ class TestURLPatternParser:
             "simple",
             "user_id",
             "user_int_id",
+            "user_uuid_id",
+            "post_slug",
             "profile_args",
             "user_id_posts_args",
             "empty",

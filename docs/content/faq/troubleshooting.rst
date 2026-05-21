@@ -145,17 +145,19 @@ Three common causes explain this.
   Compare your scenario with the lifecycle discussion in :doc:`/content/topics/dependency-injection`.
 
 To inspect what the resolver would actually inject, use ``resolve_call`` from ``next.testing`` in a shell or test.
-The snippet below assumes a non-bracketed ``notes/pages/notes/`` page module and a custom ``DTenant`` provider declared in the project.
+The snippet below uses ``fetch_note``, the ``@context("note")`` callable from the :doc:`tutorial </content/intro/tutorial02>` detail page.
 
 .. code-block:: python
 
    from next.testing import resolve_call, make_resolution_context
-   from notes.providers import DTenant
-   from notes.pages.notes.page import notes
 
-   resolved = resolve_call(notes, url_kwargs={"tenant_slug": "acme"})
+   def fetch_note(note_id):  # the callable under test
+       ...
+
+   resolved = resolve_call(fetch_note, url_kwargs={"id": "1"})
    print(resolved)
 
+Import the real ``fetch_note`` directly when the page module sits at an importable path.
 ``resolve_call`` returns the kwargs dict the resolver would pass to the callable.
 Use ``make_resolution_context`` when you need finer control over the request, form, URL kwargs, or context data supplied to the resolver.
 
@@ -168,19 +170,21 @@ Confirm that the provider class is imported during ``AppConfig.ready``.
 Testing with custom providers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``reset_registries()`` clears the provider list as well as the dependency registry.
-A custom provider registered in ``AppConfig.ready`` disappears after a ``reset_registries()`` call, which isolation tests often run in ``setUp`` or a fixture.
-Re-register the provider inside the test or in a ``setUp`` method that runs after ``reset_registries()``.
+``reset_registries()`` resets the form-action and component backends.
+It does not touch the provider list, so a custom provider registered in ``AppConfig.ready`` survives the call.
+To swap a provider for the duration of a test, use ``override_provider`` from ``next.testing``.
+The context manager prepends the provider to the resolver list on entry and removes it on exit.
 
 .. code-block:: python
 
-   from next.testing import reset_registries
+   from next.testing import override_provider
    from myapp.providers import TenantProvider
 
    class TenantProviderTests(TestCase):
-       def setUp(self):
-           reset_registries()
-           TenantProvider()  # re-registers at class creation
+       def test_resolves_tenant(self):
+           with override_provider(TenantProvider()):
+               response = self.client.get("/dashboard/")
+           self.assertEqual(response.status_code, 200)
 
 See :doc:`/content/howto/test-a-component-in-isolation` for the full isolation-test setup.
 

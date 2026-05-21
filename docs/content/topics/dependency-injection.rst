@@ -21,7 +21,7 @@ Custom providers and tests can import ``resolver`` from ``next.deps`` and call `
 Built In Providers
 ------------------
 
-The framework registers eight providers.
+The framework registers a fixed list of providers at startup.
 Each one carries an explicit ``priority`` value, the resolver consults them from lowest to highest, and the first match wins.
 
 1. Named dependency provider.
@@ -42,8 +42,10 @@ Each one carries an explicit ``priority`` value, the resolver consults them from
    A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
 
 The order makes the marker-driven providers narrow and decisive.
-``Depends`` and ``Context`` look only at the parameter default, ``DForm``, ``DUrl``, and ``DQuery`` look only at the annotation, so they never compete with one another.
-The context-by-name and URL-kwargs providers are the broad fallbacks that match on the bare parameter name.
+``Depends`` and ``Context`` look only at the parameter default.
+``DUrl`` and ``DQuery`` look only at the annotation.
+The form provider is broader, it matches the parameter name ``form``, the marker ``DForm[FormClass]``, and any plain class annotation whose type the bound form is an instance of.
+The context-by-name and URL-kwargs providers are the fallbacks that match on the bare parameter name.
 They run after the marker providers so an explicit marker always wins over an accidental name collision.
 
 DUrl
@@ -63,10 +65,12 @@ The URL path provider coerces the captured segment to the requested type.
        return Note.objects.get(pk=note_id)
 
 In the simplest form ``DUrl[T]`` matches the captured segment whose name
-equals the parameter name, then coerces the string value to ``T``. Coercion applies when ``T``
-is ``int``, ``bool``, or ``float``. For any other type, including ``str``,
-the value is returned as-is.
+equals the parameter name, then coerces the captured value to ``T``.
+``T`` may be ``str``, ``int``, ``bool``, ``float``, ``UUID``, ``Decimal``, ``date``, or ``datetime``.
+A value that already satisfies ``T`` passes through untouched, so a Django converter that pre-coerced the segment, such as ``[uuid:id]`` producing a :class:`~uuid.UUID`, reaches the handler in that shape.
+A failed parse falls back to the raw captured value rather than raising.
 ``bool`` treats ``"1"``, ``"true"``, and ``"yes"`` as ``True`` and everything else as ``False``.
+``date`` and ``datetime`` parse the ISO 8601 forms accepted by :meth:`date.fromisoformat <datetime.date.fromisoformat>` and :meth:`datetime.fromisoformat <datetime.datetime.fromisoformat>`.
 For wildcard ``[[name]]`` segments the captured value is the matched path string. Annotate as ``DUrl[str]`` or leave it unannotated.
 
 The marker has three forms.
@@ -77,14 +81,17 @@ The marker has three forms.
    directory segment.
 
 ``DUrl["segment"]``.
-   Reads the named captured segment and returns it unchanged as a string.
+   Reads the named captured segment and returns it in string form.
    Use it when the parameter name differs from the segment name and no
-   coercion is needed.
+   type coercion is needed.
 
 ``DUrl["segment", T]``.
    Reads the named captured segment and coerces it to ``T``. Use it when
    the parameter name differs from the segment name, for example
    ``note_id: DUrl["id", int]`` for an ``[id]`` directory.
+
+The string in ``DUrl["segment"]`` and ``DUrl["segment", T]`` is the URL kwarg key the resolver looks up, not the Django converter label.
+Hyphens in directory names are normalised to underscores in the kwarg, so a ``[my-id]`` directory is read as ``DUrl["my_id"]``.
 
 .. note::
 
@@ -113,7 +120,7 @@ Django converts the captured value before the URL kwargs provider sees it.
      - ``DUrl[str]``
    * - ``[uuid:name]``
      - ``uuid.UUID``
-     - Plain ``uuid.UUID`` parameter, or ``DUrl[str]`` for the string form
+     - ``DUrl[UUID]`` for the parsed form, ``DUrl[str]`` for the canonical string
 
 DQuery
 ~~~~~~
@@ -123,12 +130,15 @@ The query provider reads from ``request.GET``.
 .. code-block:: python
    :caption: notes/pages/search/page.py
 
+   from notes.models import Note
    from next.pages import context
    from next.urls import DQuery
 
    @context("results")
-   def results(query: DQuery[str] = "") -> list:
-       return search(query) if query else []
+   def results(query: DQuery[str] = "") -> list[Note]:
+       if not query:
+           return []
+       return list(Note.objects.filter(title__icontains=query))
 
 The provider supports scalar types and lists.
 
@@ -159,6 +169,9 @@ The provider supports scalar types and lists.
      - ``?tag=a,b,c``
 
 The provider returns the parameter default when the key is absent.
+
+``DQuery`` accepts the same scalar set as ``DUrl``, namely ``str``, ``int``, ``bool``, ``float``, ``UUID``, ``Decimal``, ``date``, and ``datetime``, plus ``list[T]`` for any of those scalars.
+A value that fails to parse falls back to the raw query string rather than raising.
 
 Context Markers
 ---------------
@@ -314,22 +327,27 @@ Import before resolution.
    Register the provider before the resolver caches its provider list.
    The natural place is ``AppConfig.ready`` of the application that owns the provider.
 
+A custom provider that does not declare ``priority`` inherits the ``RegisteredParameterProvider`` default of ``100``.
+The built-in providers occupy the range ``10`` (named dependency) through ``80`` (query string), so the default keeps a custom provider after every built-in.
+Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``50`` for an annotation that should outrank ``DUrl``.
+
 Resolution Cache
 ----------------
 
 The resolver creates a fresh ``DependencyCache`` for each resolution pass.
-During form-dispatch re-renders, the dispatcher attaches the cache to the request so the page and component context functions reuse the same memoised values.
+The cache memoises ``Depends("name")`` callables only, keyed by the registered name.
+Parameter providers run once per parameter per resolution pass and their results are not stored, so a second context function that asks for the same ``DQuery`` or ``DUrl`` parameter triggers another provider call.
 
-A second context function in the same page render that asks for the same dependency receives the cached value, not a fresh call.
+A second context function in the same page render that asks for the same ``Depends("name")`` dependency receives the memoised value, not a fresh call.
 
-The cache is also shared between the initial render of a form page and the re-render on validation failure.
+The same cache is shared between the initial render of a form page and the re-render on validation failure.
 ``FormActionDispatch`` attaches its dependency cache to the request, and ``get_request_dep_cache`` reads it back.
 The function returns ``None`` outside a form dispatch, so callers handle the missing case.
 
 .. code-block:: python
    :caption: reading the cache
 
-   from next.deps.cache import get_request_dep_cache
+   from next.deps import get_request_dep_cache
 
    def render(request) -> str:
        cache = get_request_dep_cache(request)
@@ -362,8 +380,8 @@ Resolver Lifecycle
 
 The resolver builds its provider registry on first use and reuses it, so register custom providers from ``AppConfig.ready`` and see :doc:`/content/internals/di-resolver` for the full lifecycle.
 
-A custom provider can publish a value once and let several context functions ask for it.
-The request cache calls the provider a single time, so every context function reads the same instance without duplicating queries.
+A custom provider that wants to share one value across several context functions in the same render should publish it through ``Depends("name")``, because the per-resolution cache memoises named dependencies but not raw provider calls.
+Register a named callable through ``resolver.dependency("active_tenant")`` and have each ``@context`` function ask for ``Depends("active_tenant")``.
 See :doc:`/content/howto/share-context-across-pages` for a worked example.
 
 See Also

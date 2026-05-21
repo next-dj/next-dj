@@ -13,7 +13,8 @@ Requirements
 - Django 4.2 or newer (4.2, 5.0, 5.1, 5.2, 6.0 supported).
 - An ASGI or WSGI server compatible with the Django version in use.
 
-next.dj extends Django. It does not replace the ORM, migrations, admin, or auth (:ref:`intro-overview-django-unchanged`).
+next.dj extends Django.
+It does not replace the ORM, migrations, admin, or auth (:ref:`intro-overview-django-unchanged`).
 
 Install the Package
 -------------------

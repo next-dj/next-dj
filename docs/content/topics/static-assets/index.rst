@@ -15,8 +15,13 @@ The pipeline is fully pluggable through asset kinds, custom stems, and backends.
 :doc:`co-located-files`
    How asset files are paired with pages and components.
 
+.. rubric:: Authoring
+
 :doc:`template-tags`
    Template tags that emit the collected output.
+
+:doc:`js-context`
+   Exposing context to the browser through the ``Next`` object.
 
 .. rubric:: Mechanics
 
@@ -28,11 +33,6 @@ The pipeline is fully pluggable through asset kinds, custom stems, and backends.
 
 :doc:`custom-stems`
    Recognise additional filenames as component assets.
-
-.. rubric:: Browser side
-
-:doc:`js-context`
-   Exposing context to the browser through the ``Next`` object.
 
 .. rubric:: Extending
 

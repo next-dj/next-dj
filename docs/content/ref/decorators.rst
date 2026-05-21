@@ -23,7 +23,10 @@ The first positional argument is ``func_or_key``.
 Called bare as ``@context`` it receives the decorated function and merges its returned dict into the template context.
 Called as ``@context("greeting")`` it receives a key string and binds the function's return value to that key.
 Pass ``inherit_context=True`` to publish the value to every descendant page.
-Pass ``serialize=True`` to expose the return value to the browser under ``window.Next.context``, and ``serializer=`` to route that key through a custom ``JsContextSerializer``.
+Pass ``serialize=True`` to expose the return value to the browser under ``window.Next.context``.
+The value must be JSON-encodable by the active serializer.
+See :ref:`Serialization for the Browser <topics-context-serialization>` for the contract.
+Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 
 @component.context
 ~~~~~~~~~~~~~~~~~~
@@ -35,7 +38,9 @@ Registers a component context function inside ``component.py``.
 The first positional argument is ``func_or_key``.
 Called bare as ``@component.context`` it merges the function's returned dict into the component template scope.
 Called as ``@component.context("greeting")`` it binds the function's return value to that key.
-Pass ``serialize=True`` to include the return value in ``window.Next.context``, and ``serializer=`` to route that key through a custom ``JsContextSerializer``.
+Pass ``serialize=True`` to include the return value in ``window.Next.context``.
+The value must be JSON-encodable by the active serializer, the same contract documented under :ref:`Serialization for the Browser <topics-context-serialization>`.
+Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 
 @action
 ~~~~~~~
@@ -75,8 +80,9 @@ DUrl
 
 Type annotation that injects the captured URL parameter with the matching name.
 Pass a generic argument to coerce the value to a type.
-The named form ``DUrl["key"]`` targets a segment by name and applies no coercion.
+The named form ``DUrl["key"]`` targets a segment by name and delivers it in string form, without extra type coercion.
 The named-and-typed form ``DUrl["key", Type]`` targets a segment by name and coerces the value to ``Type``.
+See :doc:`/content/topics/dependency-injection` for the supported coercion types.
 
 DQuery
 ~~~~~~
@@ -85,7 +91,7 @@ DQuery
    :no-index:
 
 Type annotation that injects a query string value.
-Supports ``DQuery[str]``, ``DQuery[int]``, ``DQuery[bool]``, ``DQuery[float]``, and ``DQuery[list[T]]``.
+Supports ``DQuery[str]``, ``DQuery[int]``, ``DQuery[bool]``, ``DQuery[float]``, ``DQuery[UUID]``, ``DQuery[Decimal]``, ``DQuery[date]``, ``DQuery[datetime]``, and ``DQuery[list[T]]`` for any of those scalars.
 
 DForm
 ~~~~~

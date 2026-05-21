@@ -110,11 +110,6 @@ Layout assets enter first as the layout chain unfolds from the root.
 Page assets follow.
 Component assets enter in the order the components appear in the template.
 
-Hot Reload
-----------
-
-See :doc:`overview` for how the per-request collector picks up new co-located files without a process restart.
-
 Recipes
 -------
 

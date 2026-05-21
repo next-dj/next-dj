@@ -14,11 +14,6 @@ A next-gen framework based on Django without the tears.
 
 `next.dj` adds file-based routing, nested `layout.djx` wrappers, reusable components with co-located assets, dependency-injected context and actions, and form dispatch via `{% form %}`. Directories map to URLs. A `page.py` file turns a segment into a page. Configuration lives in the `NEXT_FRAMEWORK` mapping alongside standard Django settings.
 
-Read the **Overview** and **Installation** guides on Read the Docs for the mental model and a minimal working `INSTALLED_APPS` / `NEXT_FRAMEWORK` setup:
-
-- [Overview](https://next-dj.readthedocs.io/en/latest/content/intro/overview.html)
-- [Installation](https://next-dj.readthedocs.io/en/latest/content/intro/install.html)
-
 ## Documentation
 
 Full documentation is available at https://next-dj.readthedocs.io/.

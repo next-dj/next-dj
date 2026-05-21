@@ -8,29 +8,46 @@ a Django path pattern. Bracket syntax `[name]` maps to `<str:name>`,
 from __future__ import annotations
 
 import re
-from typing import ClassVar
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+from typing import TYPE_CHECKING, ClassVar
+from uuid import UUID
 
 
-def _coerce_url_value(value: str, hint: type) -> object:
-    """Coerce a URL string toward `int`, `bool`, `float`, or `str`.
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-    Returns the original string when conversion fails so the caller
-    can decide how to react. The helper is shared by `DUrl` and
-    `DQuery` parameter resolution.
-    """
-    if hint is int:
-        try:
-            return int(value)
-        except ValueError:
-            return value
-    if hint is bool:
-        return value.lower() in ("1", "true", "yes")
-    if hint is float:
-        try:
-            return float(value)
-        except ValueError:
-            return value
-    return value
+
+def _coerce_bool(text: str) -> bool:
+    return text.lower() in ("1", "true", "yes")
+
+
+_COERCERS: dict[type, Callable[[str], object]] = {
+    str: str,
+    int: int,
+    bool: _coerce_bool,
+    float: float,
+    UUID: UUID,
+    Decimal: Decimal,
+    datetime: datetime.fromisoformat,
+    date: date.fromisoformat,
+}
+
+
+def _coerce_url_value(value: object, hint: object) -> object:
+    """Coerce `value` to `hint`, passing it through on failure or unsupported hint."""
+    if not isinstance(hint, type):
+        return value
+    if isinstance(value, hint):
+        return value
+    coercer = _COERCERS.get(hint)
+    if coercer is None:
+        return value
+    text = value if isinstance(value, str) else str(value)
+    try:
+        return coercer(text)
+    except (ValueError, InvalidOperation):
+        return value
 
 
 class URLPatternParser:

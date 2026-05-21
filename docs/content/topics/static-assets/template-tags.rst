@@ -3,9 +3,10 @@
 Static Template Tags
 ====================
 
-The static pipeline exposes four template tags, two of which also have a block form.
+The static pipeline registers six Django template tags.
 ``{% collect_styles %}`` and ``{% collect_scripts %}`` mark placeholder slots in the layout.
-``{% use_style %}`` and ``{% use_script %}`` register external or inline assets from a template.
+``{% use_style %}`` and ``{% use_script %}`` register an external URL on the active collector.
+``{% #use_style %}`` and ``{% #use_script %}`` are block forms that capture an inline body.
 
 .. contents::
    :local:
@@ -105,8 +106,8 @@ The collector deduplicates inline entries by the rendered body, so two identical
 Placement Rules
 ---------------
 
-Place each ``{% collect_styles %}`` and ``{% collect_scripts %}`` tag once in the layout chain.
-A token that appears twice is replaced in both spots.
+Place each ``{% collect_styles %}`` and ``{% collect_scripts %}`` tag exactly once in the layout chain.
+The manager replaces every occurrence of the slot token with the same rendered output, so a tag that appears twice emits every collected asset twice in the final HTML.
 The recommended placement is the outermost layout.
 
 - ``{% collect_styles %}`` inside ``<head>``.

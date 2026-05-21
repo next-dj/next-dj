@@ -200,6 +200,24 @@ With a Vite build present, the ``src`` is the hashed file from ``dist/.vite/mani
 Delete the manifest and reload.
 The page still renders and the log carries a single fallback warning.
 
+The fallback warning reaches the console only when ``LOGGING`` routes the ``kanban.backends`` logger to a handler at ``WARNING`` or below.
+Django's default configuration sends warnings to ``stderr`` in development.
+In production, add an explicit entry.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   LOGGING = {
+       "version": 1,
+       "disable_existing_loggers": False,
+       "handlers": {
+           "console": {"class": "logging.StreamHandler"},
+       },
+       "loggers": {
+           "kanban.backends": {"handlers": ["console"], "level": "WARNING"},
+       },
+   }
+
 See Also
 --------
 

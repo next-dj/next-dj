@@ -6,7 +6,7 @@ Forms Reference
 Module Summary
 --------------
 
-``next.forms`` exposes form action registration, dispatch, formset helpers, frozen field and form specs, and a complete re-export of every Django form field and widget.
+``next.forms`` exposes form action registration, dispatch, formset helpers, frozen field and form specs, and a curated set of commonly used Django form fields and widgets.
 It also re-exports ``page`` from ``next.pages`` so that a single ``from next.forms import action, page`` covers the two most common decorators in a ``page.py``.
 
 API Tiers
@@ -23,12 +23,12 @@ Stable.
 Advanced.
    ``FormProvider``, ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``, ``FormActionDispatch``, ``FormActionOptions``, ``ActionMeta``, ``build_form_namespace_for_action``, the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``, ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``, ``formset_spec``), the formset helper ``cleanup_extra_initial``, and the ``signals`` and ``checks`` submodules.
    Use these when writing a custom backend or a form renderer.
-   ``FormProvider`` is the DI provider the framework auto-registers to resolve the bound ``form`` parameter, so application code never instantiates it.
+   ``FormProvider`` auto-registers through the ``__init_subclass__`` hook on ``RegisteredParameterProvider`` and resolves the bound ``form`` parameter, so application code never instantiates it.
 
 Internal hooks.
    Symbols with a leading underscore are implementation details re-exported for testing and advanced backend authoring.
-   The complete list lives in ``next.forms.__all__``: ``_bind_form_for_post``, ``_filter_reserved_url_kwargs``, ``_form_action_context_callable``, ``_form_from_initial_data``, ``_get_caller_path``, ``_make_uid``, ``_normalize_handler_response``, ``_url_kwargs_from_post``, and ``_url_kwargs_from_resolver_or_post``.
-   Do not import them in application code.
+   The full set lives in ``next.forms.__all__``, which is the source of truth for the internal hook surface.
+   Do not import these names in application code.
 
 .. note::
 
@@ -62,7 +62,8 @@ Form Base Classes
 Fields and Widgets
 ~~~~~~~~~~~~~~~~~~
 
-The framework re-exports the full Django field and widget catalog through ``next.forms`` so a single import covers a form definition.
+The framework re-exports a curated set of commonly used Django form fields and widgets through ``next.forms`` so a single import covers most form definitions.
+Import any other Django field or widget directly from ``django.forms``.
 
 .. automodule:: next.forms.base
    :members:

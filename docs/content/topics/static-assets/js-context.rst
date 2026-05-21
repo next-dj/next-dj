@@ -26,6 +26,7 @@ Keys without the flag stay server-side only.
 
 A value the active serializer cannot encode raises ``TypeError`` during rendering, when the collector registers it.
 The error names the offending key.
+See :ref:`Serialization for the Browser <topics-context-serialization>` for the accepted shapes and the common materialisation patterns.
 
 Serializers
 -----------
@@ -58,7 +59,14 @@ Set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` to the dotted path of a serializ
    }
 
 ``resolve_serializer`` reads the setting on every call.
-When the key is absent the framework uses ``JsonJsContextSerializer``.
+When the key is absent or set to an empty string the framework uses ``JsonJsContextSerializer``.
+
+System Check
+~~~~~~~~~~~~
+
+The ``next.W042`` system check validates ``JS_CONTEXT_SERIALIZER`` at startup.
+It warns when the value is not a string, when the dotted path cannot be imported, when the resolved attribute is not a class, when the class cannot be instantiated, or when the instance does not implement the ``JsContextSerializer`` protocol (a ``dumps(value) -> str`` method).
+The check is skipped when the key is absent or set to an empty string.
 
 Per-Key Serializer
 ------------------
@@ -149,6 +157,10 @@ Configure the policy through the first static backend ``OPTIONS``.
        ]
    }
 
+The configured policy only fires across modules, when a page and a component share a key or when two components do.
+Two ``@context`` decorators on the same page that register the same key always resolve first-wins, regardless of ``JS_CONTEXT_POLICY``.
+Pick distinct keys when both registrations live in the same module.
+
 Writing a Policy
 ----------------
 
@@ -178,7 +190,19 @@ Point ``JS_CONTEXT_POLICY`` in the first static backend ``OPTIONS`` at the dotte
 Reading on the Client
 ---------------------
 
-Co-located JS and inline scripts read ``window.Next.context``.
+Register the key server-side with ``serialize=True``.
+
+.. code-block:: python
+   :caption: notes/pages/page.py
+
+   from next.pages import context
+   from notes.models import Note
+
+   @context("note_count", serialize=True)
+   def note_count() -> int:
+       return Note.objects.count()
+
+Co-located JS and inline scripts then read the value under ``window.Next.context``.
 
 .. code-block:: javascript
    :caption: notes/_components/note_card/component.js
@@ -212,13 +236,14 @@ An absent or empty ``NEXT_JS_OPTIONS`` uses the ``AUTO`` policy and the default 
      - Skips injection entirely. ``window.Next`` is not defined.
      - Pages that serve raw data or HTML fragments and have no client-side JS that reads ``window.Next``.
    * - ``MANUAL``
-     - Skips automatic injection but builds the tag strings on request via ``NextScriptBuilder`` methods.
+     - Skips automatic injection.
+       Build the tags yourself with ``NextScriptBuilder.from_options``.
      - Pages where you control placement of the script tags in a layout template.
 
 .. note::
 
-   Under ``MANUAL``, the framework builds the ``NextScriptBuilder`` but skips injection.
-   Retrieve it via ``next.static.default_manager._next_script_builder()`` to emit the ``<script>`` tag yourself, for example in a custom template tag or middleware.
+   Under ``MANUAL`` the static manager does not emit ``window.Next`` for you.
+   Construct your own builder through ``NextScriptBuilder.from_options(next_js_url, NEXT_JS_OPTIONS)`` and emit ``preload_link()``, ``script_tag()``, and ``init_script(js_context)`` from a custom template tag or middleware.
 
 Set the policy through the ``NEXT_JS_OPTIONS`` dict.
 

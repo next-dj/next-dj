@@ -72,10 +72,14 @@ See :doc:`/content/ref/testing` for generated signatures.
 Boot the Suite
 --------------
 
-Set ``DJANGO_SETTINGS_MODULE`` in ``pytest.ini`` so pytest-django can configure Django before collecting tests.
-Run the suite with ``uv run pytest``.
-The ``next.testing`` helpers assume the app registry is populated; ``pytest-django`` does this automatically.
-A stdlib ``unittest`` suite calls ``django.setup()`` once before importing any ``next.testing`` helper.
+The ``next.testing`` helpers assume the app registry is populated before any helper is imported.
+
+Pytest.
+   Set ``DJANGO_SETTINGS_MODULE`` in ``pytest.ini`` so ``pytest-django`` can configure Django before collecting tests.
+   Run the suite with ``uv run pytest``.
+
+Stdlib ``unittest``.
+   Call ``django.setup()`` once before importing any ``next.testing`` helper, then run the suite with the standard runner.
 
 Isolate Registries
 ------------------
@@ -148,10 +152,8 @@ Tests that write ``template.djx`` or ``page.py`` files to ``tmp_path`` need both
 NextClient
 ----------
 
-``NextClient`` is a thin subclass of Django's ``Client`` that adds ``post_action`` and ``get_action_url``, both of which resolve an action name through ``resolve_action_url``.
-It does nothing special on creation.
-The file router builds lazily through Django's URL resolver on the first request.
-Use it for end to end HTTP tests.
+``NextClient`` is a thin subclass of Django's ``Client`` that adds ``post_action`` and ``get_action_url``.
+Both resolve an action name through ``resolve_action_url`` before delegating to the underlying client.
 
 .. code-block:: python
    :caption: tests/test_index.py
@@ -201,6 +203,10 @@ Use ``next.testing.rendering`` to render a page without an HTTP round trip.
 It does not invoke a ``render()`` function declared in ``page.py``.
 Use ``NextClient`` for pages whose body is built by ``render()``.
 Use it for snapshot tests and template assertion tests that do not need URL routing.
+
+Pass ``request=`` to supply a custom ``HttpRequest``.
+When omitted the helper synthesises one through ``RequestFactory().get("/")`` so context functions and the static collector see a real request object.
+Extra keyword arguments are forwarded to the underlying ``page.render`` call as URL kwargs, which feeds them into ``DUrl`` markers and other URL-scoped providers.
 
 Capture Signals
 ---------------
@@ -309,9 +315,7 @@ HTML Utilities
        )
        assert_has_class(html, "note-card")
 
-``find_anchor`` returns the matching anchor tag.
-It accepts an ``href`` keyword that matches the anchor ``href`` exactly and a ``text`` keyword that matches a substring against the anchor's stripped inner text.
-It raises ``LookupError`` when no anchor matches the filters.
+``find_anchor`` returns the matching anchor tag and raises ``LookupError`` when no anchor matches the filters, see :func:`next.testing.html.find_anchor` for the accepted keywords.
 ``assert_has_class`` and ``assert_missing_class`` check the class list of the first start tag in the fragment.
 
 Patching
@@ -342,6 +346,8 @@ Patching
 
 A ``StaticCollectorProxy`` is yielded by ``patch_static_collector(capture=True)``.
 Its ``.collector`` attribute holds the collector built inside the block, so a test can assert on the emitted styles and scripts without parsing HTML.
+Pass ``factory=`` to swap the collector implementation entirely.
+The callable runs in place of the default ``create_collector`` and returns a custom ``StaticCollector`` for the duration of the block.
 
 Use ``patch_static_collector(capture=True)`` to inspect which assets a page emits:
 

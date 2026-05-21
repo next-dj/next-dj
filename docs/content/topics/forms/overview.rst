@@ -11,27 +11,6 @@ This page covers the mental model behind that pipeline.
    :local:
    :depth: 2
 
-Overview
---------
-
-Five things make a form work.
-
-Form class.
-   A subclass of ``next.forms.Form`` or ``next.forms.ModelForm``.
-
-Action.
-   A Python callable decorated with ``@action("name", form_class=...)``.
-
-Template tag.
-   ``{% form @action="name" %}`` opens a block, closed by ``{% endform %}``, that resolves the action UID, posts to its dispatch URL, and injects a CSRF token.
-
-Dispatch endpoint.
-   One URL per action that binds POST data and calls the handler when valid.
-   A non-POST request to a dispatch URL returns HTTP 405.
-
-Re-render pipeline.
-   On validation failure the framework renders the origin page again with the bound form in scope.
-
 Concepts
 --------
 

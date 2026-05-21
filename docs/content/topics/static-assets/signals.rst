@@ -59,8 +59,26 @@ html_injected
 
 Fires after placeholder replacement completes.
 The sender is the static manager.
-The payload carries ``html_before``, ``html_after``, ``collector``, ``placeholders_replaced``, ``injected_bytes``, and ``request``.
-The ``request`` argument carries the active ``HttpRequest`` or ``None``.
+
+``html_before``
+   The raw HTML string the manager received before injection.
+
+``html_after``
+   The HTML string after every slot token was replaced.
+
+``collector``
+   The sealed ``StaticCollector`` used for this render.
+
+``placeholders_replaced``
+   A tuple of slot names whose token appeared in ``html_before``.
+   The tuple is computed lazily and is only populated when at least one receiver is connected to ``html_injected``.
+
+``injected_bytes``
+   A signed ``int`` equal to ``len(html_after) - len(html_before)``.
+   Negative when injection shortens the document, for example when a slot token is longer than the rendered tags it replaces.
+
+``request``
+   The active ``HttpRequest`` or ``None``.
 
 backend_loaded
 ~~~~~~~~~~~~~~
@@ -70,6 +88,12 @@ The sender is the backend class.
 The payload carries ``config`` and ``instance``.
 
 Register imports from ``AppConfig.ready`` so receivers exist before the first request.
+
+.. note::
+
+   ``backend_loaded`` re-fires whenever the static manager rebuilds its backend chain.
+   Tests that toggle ``DEFAULT_STATIC_BACKENDS`` through ``override_settings`` or call ``reset_default_manager`` trigger the signal again on the next access.
+   Make receivers idempotent.
 
 Pipeline placement
 ------------------

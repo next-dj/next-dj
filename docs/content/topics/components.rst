@@ -73,7 +73,11 @@ The backend recognises three sources for components.
 App page trees.
    As the URL router walks each page tree it calls ``register_components_folder_from_router_walk``, which pushes every ``COMPONENTS_DIR`` folder it finds into the ``FileComponentsBackend``.
    A folder named ``COMPONENTS_DIR`` under that tree is a components root for the application.
-   When several ``FileComponentsBackend`` entries are configured, ``register_components_folder_from_router_walk`` registers app page-tree folders into the first one only.
+
+   .. note::
+
+      When several ``FileComponentsBackend`` entries are configured, ``register_components_folder_from_router_walk`` registers app page-tree folders into the first one only.
+      Configure additional ``FileComponentsBackend`` instances through ``DIRS`` so they pick up their own roots independently.
 
 Project directories.
    The ``DIRS`` list adds absolute or project-relative roots that contribute global components.
@@ -179,8 +183,12 @@ Multiline Tags
 ~~~~~~~~~~~~~~
 
 Both the void form and the block form accept line breaks inside the tag body, which is useful when a component takes many props.
-The framework enables ``re.DOTALL`` for Django's tag lexer at startup, so tag bodies wrap across lines in every template type, not only in component tags.
-See :ref:`ref-template-tags` under *Multiline tag bodies* for the global parsing caveat.
+The framework enables ``re.DOTALL`` for Django's tag lexer at startup, so tag bodies wrap across lines in every template type.
+
+.. caution::
+
+   This changes template parsing for **every** template the process loads, not only DJX files.
+   If you rely on Django's stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
 
 .. code-block:: jinja
    :caption: multiline void tag
@@ -322,8 +330,8 @@ The framework resolves parameters from the surrounding template scope, from URL 
    Re-registering the identical function is a no-op.
 
 Pass ``serialize=True`` and optionally ``serializer=`` to include the return value in ``window.Next.context``.
-The behaviour is identical to ``@context`` on a page module.
-See :doc:`static-assets/js-context` for the serialization options.
+The behaviour is identical to ``@context`` on a page module, so the value must be JSON-encodable by the active serializer.
+See :doc:`static-assets/js-context` for the serialization options and :ref:`Serialization for the Browser <topics-context-serialization>` for the encodability contract.
 
 An unkeyed ``@component.context`` returning a dict serializes each key of that dict separately.
 A keyed ``@component.context`` serializes its return value under the given key.
@@ -372,6 +380,39 @@ See :ref:`ref-settings` for the exact behaviour.
        "LAZY_COMPONENT_MODULES": True,
    }
 
+The render Function
+-------------------
+
+A composite component can define a ``render`` function in ``component.py`` that returns the component body as a string in place of the template.
+The function receives DI-resolved parameters drawn from the surrounding template scope, including props and page context variables.
+The lazy ``csrf_token`` and any ``@component.context`` callables are not run on this path.
+Return an empty string to render nothing, which turns the component into a server side gate.
+
+A ``render`` function takes over completely.
+The component template and ``@component.context`` callables do not run for that component.
+The function may return a string or an :class:`~django.http.HttpResponse`.
+When it returns an :class:`~django.http.HttpResponse`, only the decoded body is spliced into the page.
+The response status code and headers are not propagated.
+
+When ``component.py`` defines no ``render`` function, the component renders its template and runs every ``@component.context`` callable as usual.
+
+.. code-block:: python
+   :caption: _components/feature_guard/component.py
+
+   def render(flag_enabled: bool = False) -> str:
+       if not flag_enabled:
+           return ""
+       return "<div class='feature'>New feature</div>"
+
+Invoke the guard from a page template and forward the flag from the surrounding context.
+
+.. code-block:: jinja
+   :caption: notes/pages/template.djx
+
+   {% component "feature_guard" flag_enabled=flags.new_ui %}
+
+See ``examples/feature-flags`` for a feature guard built this way.
+
 Hot Reload
 ----------
 
@@ -411,33 +452,6 @@ Three patterns build on the sections above.
 - Wrap arbitrary child markup with a block component that has a single ``content`` slot, as in cards, alerts, and dialogs.
 - Add a ``component.py`` when the template needs values computed from the surrounding context, see :doc:`/content/howto/build-a-composite-component`.
 - Ship a folder of reusable components under a ``DIRS`` root for a shared UI kit, see :doc:`multi-project` and :doc:`/content/misc/examples`.
-
-Conditional Rendering
-~~~~~~~~~~~~~~~~~~~~~
-
-A composite component can define a ``render`` function in ``component.py``.
-The function receives DI-resolved parameters and returns the component body as a string.
-A ``render`` function is resolved with the surrounding template scope (props and page context variables) available as DI parameters.
-The lazy ``csrf_token`` and any ``@component.context`` callables are not run on this path.
-Return an empty string to render nothing, which turns the component into a server side gate.
-
-A ``render`` function takes over completely.
-The component template and ``@component.context`` callables do not run for that component.
-The function may return a string or an :class:`~django.http.HttpResponse`.
-When it returns an :class:`~django.http.HttpResponse`, only the decoded body is spliced into the page.
-The response status code and headers are not propagated.
-
-When ``component.py`` defines no ``render`` function, the component renders its template and runs every ``@component.context`` callable as usual.
-
-.. code-block:: python
-   :caption: _components/feature_guard/component.py
-
-   def render(flag_enabled: bool = False) -> str:
-       if not flag_enabled:
-           return ""
-       return "<div class='feature'>New feature</div>"
-
-See ``examples/feature-flags`` for a feature guard built this way.
 
 See Also
 --------

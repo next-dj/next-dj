@@ -53,7 +53,7 @@ System Checks
 ~~~~~~~~~~~~~
 
 Every check lives next to the subsystem it validates.
-The codes follow ``next.E<NN>`` for errors and ``next.W<NN>`` for warnings.
+The codes follow ``next.E<NNN>`` for errors and ``next.W<NNN>`` for warnings.
 A new check registers through ``next.checks.register_all``.
 
 Signals
@@ -62,6 +62,37 @@ Signals
 Every signal lives in a ``signals`` submodule of its subsystem.
 The aggregator ``next.signals`` re-exports each name.
 A new signal adds an entry to the aggregator and to the topic catalog in ``docs/content/topics/signals.rst``.
+
+Module Docstrings
+~~~~~~~~~~~~~~~~~
+
+Python files start with the first ``import`` statement.
+Test modules in particular carry no module-level docstring.
+
+Imports
+~~~~~~~
+
+Every ``import`` lives at the top of the module.
+Imports inside functions or methods are not used, including inside tests.
+
+Docstrings
+~~~~~~~~~~
+
+A docstring is one summary line, or at most a short paragraph.
+Examples, enumerations, and historical notes belong in the guide documentation, not in docstrings.
+
+Prose Punctuation
+~~~~~~~~~~~~~~~~~
+
+The same punctuation rules that bind the documentation also bind every docstring, comment, and log message in ``next/``.
+No semicolon joins two clauses. No em or en dash separates one statement from the next.
+The full rule set lives in :doc:`/content/contributing/style-guide`.
+
+Decorative Separators
+~~~~~~~~~~~~~~~~~~~~~
+
+CSS, JavaScript, and Jinja files in ``docs/_static`` and ``docs/_templates`` carry no decorative ``/* ---- section ---- */`` banners.
+A comment explains a non-obvious choice and nothing else.
 
 Testing the Framework
 ---------------------

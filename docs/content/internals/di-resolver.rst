@@ -47,10 +47,10 @@ Modules
    Like ``resolve_dependencies``, it strips ``EXPLICIT_RESOLVE_KEYS`` from the injectable context so a context key cannot shadow a dedicated provider such as ``request`` or ``form``.
 
 ``next.deps.providers``.
-   The ``ParameterProvider`` protocol and the ``RegisteredParameterProvider`` base class.
+   The ``ParameterProvider`` protocol, the ``RegisteredParameterProvider`` base class, and the ``ProviderRegistry`` list-style helper.
 
 ``next.deps.cache``.
-   ``REQUEST_DEP_CACHE_ATTR`` constant, ``DependencyCycleError`` exception, ``get_request_dep_cache`` accessor.
+   ``DependencyCache`` accumulator, the ``REQUEST_DEP_CACHE_ATTR`` constant, the ``DependencyCycleError`` exception, and the ``get_request_dep_cache`` accessor.
 
 ``next.deps.context``.
    ``ResolutionContext`` value object passed to every provider, plus the ``RESERVED_KEYS`` frozenset of names excluded from name-based resolution.
@@ -74,7 +74,7 @@ See :doc:`/content/topics/dependency-injection` for the single source of truth o
 
 Custom providers register through ``RegisteredParameterProvider``.
 A subclass that does not set ``priority`` inherits the default ``100``, so it is consulted after every built-in provider.
-A subclass joins the chain when its module is imported, in subclass definition order.
+The resolver sorts the registry by ``priority`` as the primary key and by subclass definition order as the stable tie-break.
 
 Depends Forms
 -------------
@@ -105,10 +105,10 @@ Each resolution pass owns a ``DependencyCache``.
 It lives on the ``ResolutionContext`` for that pass and holds named dependency values.
 The cache key is the dependency name string alone, with no type component.
 
-Form validation failures re-render the origin page.
-``FormActionDispatch.dispatch`` attaches the dispatch cache dict to the request under the attribute named ``REQUEST_DEP_CACHE_ATTR``.
-The page context and component context renderers read it back through ``get_request_dep_cache`` and rejoin the same cache.
-That attribute carries the cache only for the form-failure re-render path, not for an ordinary page request.
+``FormActionDispatch.dispatch`` creates a fresh dispatch cache dict on every POST and attaches it to the request under the attribute named ``REQUEST_DEP_CACHE_ATTR``.
+The cache is shared across each stage of the dispatch: ``get_initial``, the factory resolution, the handler call, and any re-render after validation failure.
+On a re-render the page context and component context renderers read it back through ``get_request_dep_cache`` and rejoin the same cache.
+An ordinary page request that does not pass through the form dispatcher never sees this attribute.
 
 Two consequences flow from the cache.
 
@@ -116,8 +116,8 @@ Idempotent providers.
    Custom providers must not depend on producing a fresh value between two invocations within the same request.
    The cache holds the first result.
 
-Shared across re-render.
-   Form validation failures reuse the cache from the initial render to keep re-render cheap.
+Shared across the dispatch.
+   The dispatch cache attaches on every form-dispatch POST and is consumed on the validation-failure re-render to keep the second pass cheap.
 
 Cycle Detection
 ---------------

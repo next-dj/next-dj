@@ -17,7 +17,7 @@ The collector holds a dedup strategy.
 A strategy reduces a ``StaticAsset`` to a hashable key.
 The collector ignores any asset whose key was already recorded.
 
-The framework ships three strategies.
+The framework ships three strategies in ``next.static.collector``.
 
 ``UrlDedup``.
    The default.

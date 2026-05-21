@@ -157,10 +157,12 @@ The framework computes the template scope in this order.
 1. URL kwargs from the matched route are seeded into the context dict.
 2. Inherited context functions from every ancestor ``page.py``, walked from the route root inward.
 3. Page level context functions declared in the current ``page.py``.
-4. Context processors come from ``OPTIONS.context_processors`` on each page backend entry inside ``DEFAULT_PAGE_BACKENDS`` plus the ``context_processors`` list of the first ``TEMPLATES`` entry in Django settings.
+4. Context processors run after every ``@context`` callable.
+   The first source is ``OPTIONS.context_processors`` on each page backend entry inside ``DEFAULT_PAGE_BACKENDS``.
+   The second source is the ``context_processors`` list of the first ``TEMPLATES`` entry in Django settings.
    See :ref:`ref-settings` and :doc:`project-layout` for the backend layout.
    The two lists merge in that order with duplicate dotted paths dropped, so a processor listed twice runs once.
-   Each processor return dict is applied with ``update`` after every ``@context`` callable, so a processor key overwrites a page or inherited value.
+   Each processor return dict is applied with ``update``, so a processor key overwrites a page or inherited value.
 5. Component context functions when a ``{% component %}`` tag is encountered during render.
 
 A later step that uses the same key overrides earlier values.
@@ -202,12 +204,24 @@ Leave the parameter untyped and return early if it is already an instance of the
 
 Declaring the parameter as ``str`` would break the descendant re-run.
 
+.. _topics-context-serialization:
+
 Serialization for the Browser
 -----------------------------
 
 next.dj ships a ``window.Next`` object to the browser through the :doc:`static pipeline <static-assets/index>`.
 Pass ``serialize=True`` on ``@context`` or ``@component.context`` to publish the return value under ``window.Next.context``.
 Pass ``serializer=`` on that decorator for a per-key encoder, or set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` for a project-wide default.
+
+A value marked ``serialize=True`` must be encodable by the active serializer.
+The default ``JsonJsContextSerializer`` runs values through Django ``DjangoJSONEncoder``, which handles primitives, ``list``, ``dict``, ``datetime``, ``Decimal``, ``UUID``, and lazy translation strings.
+A ``QuerySet``, a ``Manager``, a bare model instance, a Django ``Form``, and any other unsupported type raises ``TypeError`` at render time with the offending key in the message.
+Materialise such values before returning.
+Use ``list(queryset)`` for collections and a plain ``dict`` projection for model instances.
+
+Values not marked ``serialize=True`` stay server-side only.
+Template rendering iterates a queryset or resolves a lazy string directly.
+The materialisation rule applies only to keys that travel to the client.
 
 See :doc:`static-assets/js-context` for serializers, duplicate-key policies, ``NEXT_JS_OPTIONS``, and reading values from co-located JS.
 See :doc:`/content/howto/override-the-js-context-serializer` for a guided recipe when the default JSON encoder is not enough.

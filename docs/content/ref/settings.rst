@@ -15,7 +15,7 @@ Backends
 --------
 
 DEFAULT_PAGE_BACKENDS
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 List of page backend configurations.
 

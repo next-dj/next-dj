@@ -115,12 +115,8 @@ Name your directories without hyphens when you want the parameter name and the d
    def fetch_note(post_id: DUrl[int]) -> Note:
        return Note.objects.get(pk=post_id)
 
-``DUrl[int]`` reads the captured segment whose name matches the parameter,
-so the parameter ``post_id`` resolves the ``[int:post_id]`` segment and the
-marker coerces it to ``int``.
-When the parameter name has to differ from the segment name, name the
-segment explicitly with ``DUrl["post_id", int]``.
-See :doc:`dependency-injection` for the full set of ``DUrl`` forms.
+``DUrl[int]`` reads the captured segment whose name matches the parameter, so ``post_id`` resolves the ``[int:post_id]`` segment and the marker coerces it to ``int``.
+See :doc:`dependency-injection` for the full set of ``DUrl`` forms and the coercion table.
 
 Virtual Routes
 --------------

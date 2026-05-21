@@ -77,7 +77,7 @@ Staticfiles Finder
 
 ``NextStaticFilesFinder`` is the Django staticfiles finder for co-located assets.
 It maps assets such as ``template.css``, ``layout.js``, ``component.css``, and any registered stems to their source files under the ``next/`` staticfiles namespace.
-It surfaces every such asset to ``collectstatic`` and to ``{% static "next/..." %}`` lookups during development.
+It surfaces every such asset to ``collectstatic`` for production output and to ``{% static "next/..." %}`` lookups when ``DEBUG`` is true and the staticfiles app serves files itself.
 The mapping is rebuilt on each lookup so assets added at runtime are picked up.
 
 The finder is appended to ``STATICFILES_FINDERS`` automatically by ``NextFrameworkConfig.ready`` through ``next.apps.staticfiles.install``.

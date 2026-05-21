@@ -172,12 +172,12 @@ The ``inherit_context=True`` flag on a keyed function publishes the value to
 every descendant page rather than to the declaring page alone.
 See :doc:`context` for that flag and the other ways to vary the decorator.
 
-.. _topics-pages-js-context:
-
 Including Values in the JS Context
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Pass ``serialize=True`` to include the return value in ``window.Next.context`` on the client side.
+The value must be JSON-encodable by the active serializer.
+See :ref:`Serialization for the Browser <topics-context-serialization>` for the accepted shapes and common pitfalls.
 Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key serializer for that value instead of the global ``JS_CONTEXT_SERIALIZER`` setting.
 
 .. code-block:: python
@@ -204,7 +204,7 @@ Pass ``serializer=`` with a ``JsContextSerializer`` instance to use a per-key se
 Custom Template Loaders
 -----------------------
 
-The sibling ``template.djx`` discovery is one implementation of the ``next.pages.loaders.TemplateLoader`` contract.
+The sibling ``template.djx`` loader is one implementation of the ``next.pages.loaders.TemplateLoader`` contract.
 Register additional loaders in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to support other file formats.
 
 .. code-block:: python
@@ -252,10 +252,12 @@ A loader sets one class attribute, implements two required methods, and may over
    Class attribute string used by the system check to name the loader in conflict warnings.
 
 ``can_load(file_path)``.
-   Boolean check that decides whether the loader recognises a directory.
+   Boolean check that decides whether the loader recognises this page.
+   ``file_path`` is the absolute path to the ``page.py`` file.
+   The loader inspects the sibling directory through ``file_path.parent`` to look for its source.
 
 ``load_template(file_path)``.
-   Returns the body string or ``None``.
+   Returns the body string or ``None`` for the same ``page.py`` path.
    The framework treats ``None`` as "did not match" and tries the next loader.
 
 ``source_path(file_path)``.

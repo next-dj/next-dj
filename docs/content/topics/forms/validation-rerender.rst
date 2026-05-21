@@ -50,8 +50,8 @@ What Survives Re-render
 One important thing carries over from the initial render.
 
 Dependency cache.
-   Every value produced by the resolver during dispatch is stored on the request under ``REQUEST_DEP_CACHE_ATTR``.
-   Read it through ``next.deps.get_request_dep_cache(request)`` rather than the raw attribute.
+   Read the per-request cache through ``next.deps.get_request_dep_cache(request)``.
+   The dispatcher stores it on the request under the attribute named by ``REQUEST_DEP_CACHE_ATTR`` so the helper can find it.
    The re-render reuses each cached value without rerunning the provider.
    A custom DI provider must therefore be idempotent across a render cycle.
 
@@ -125,7 +125,7 @@ The ``redirect_to_origin`` helper sends the user back to whichever page rendered
        Note.objects.filter(pk=note_id).update(favourite=True)
        return redirect_to_origin(request, fallback="/notes/")
 
-``redirect_to_origin(request, fallback="/")`` reads the hidden ``_next_form_origin`` field that the ``{% form %}`` tag emits with the request path of the rendering page.
+``redirect_to_origin(request, fallback="/")`` reads the hidden ``_next_form_origin`` field that the ``{% form %}`` tag sets to ``request.path`` verbatim at render time.
 It accepts the value only when it is a string that starts with a single ``/``.
 A protocol-relative input beginning with ``//`` is rejected, which blocks open-redirect input.
 When the field is absent or fails validation the helper redirects to ``fallback`` instead.
@@ -177,49 +177,14 @@ See :doc:`signals` for the full list and payload shapes.
 Edge Cases
 ----------
 
-Missing ``_next_form_page`` field.
-   The dispatcher returns HTTP 400.
-   Plain HTML forms must include the field explicitly.
-
-Origin page renamed or deleted.
-   The dispatcher returns HTTP 400 when the path no longer exists.
-   In development the autoreloader picks up the restructured directories, in production a redeploy rebuilds the URL patterns.
-
-Form class renamed.
-   Renaming the form class has no effect on the UID.
-   The UID is hashed from the action name.
-   A submission only fails when the origin ``page.py`` path becomes invalid.
-
-Pre dispatch redirect from handler.
-   A handler that returns ``HttpResponseRedirect`` skips the re-render path entirely.
-   Use this on success, never on validation failure.
-
-Virtual page origin.
-   Covered in detail under :ref:`The Origin Page <topics-forms-validation-rerender-origin>` above.
-   Routes backed only by a sibling ``template.djx`` (no ``page.py``) still resolve an origin path for re-render.
-
-CSRF token on re-render.
-   The re-render runs the ``{% form %}`` tag again, which calls Django's ``get_token`` and emits a fresh ``csrfmiddlewaretoken`` hidden input.
-   The token the browser already holds in its cookie stays valid, so the resubmission after a correction passes CSRF without a page reload.
-   A re-render never reuses the token string from the failed POST. It always emits the current one.
-
-File uploads.
-   An invalid submission does not preserve uploaded files.
-   The HTTP spec does not let a server re-populate an ``<input type="file">``, so the bound form on the re-render has no file data and the user must pick the file again.
-   The bound form still reports a missing-file error on the field when the upload was required.
-   Always set ``enctype="multipart/form-data"`` on the ``{% form %}`` tag so the dispatcher receives ``request.FILES`` in the first place.
-
-Partial form state.
-   Every text, select, checkbox, and textarea value survives the re-render because the dispatcher binds the failing form to ``request.POST`` and the template renders the bound widgets.
-   ``cleaned_data`` holds only the fields that passed validation. Fields that failed keep their raw submitted value on the widget so the user can correct them in place.
-   Password inputs are the exception. Django widgets clear them on render unless ``render_value=True`` is set on the widget.
-
-Wrong-origin re-render.
-   When a re-render shows the wrong page, the cause is almost always a stale or hand-built ``_next_form_page`` field.
-   The dispatcher trusts that field for the origin, so a form copied between pages or a hand-crafted ``<form>`` with a hardcoded path re-renders against the wrong module.
-   Let the ``{% form %}`` tag emit the field. It writes the path of the page that actually rendered the form.
-   A hand-built form must set ``_next_form_page`` to ``{{ current_page_module_path }}``, which the framework publishes on every rendered page.
-   When the field points outside ``BASE_DIR`` or at a path that no longer exists, the dispatcher returns HTTP 400 rather than rendering the wrong page.
+- Missing or stale ``_next_form_page`` field returns HTTP 400. Plain HTML forms must set the field to ``{{ current_page_module_path }}``.
+- Origin ``page.py`` renamed or deleted returns HTTP 400 when the path no longer exists on disk.
+- Renaming the form class has no effect on the UID, which is hashed from the action name.
+- A handler that returns ``HttpResponseRedirect`` skips the re-render path entirely. Use this on success only.
+- Virtual page origins backed by ``template.djx`` resolve through the template loader, as :ref:`topics-forms-validation-rerender-origin` explains above.
+- The re-render emits a fresh ``csrfmiddlewaretoken`` through ``get_token``, so the browser cookie stays valid and the resubmission passes CSRF without a reload.
+- File inputs reset on re-render because the HTTP spec does not let a server re-populate them. Set ``enctype="multipart/form-data"`` and re-prompt the user for the upload.
+- Text, select, checkbox, and textarea widgets keep their raw submitted values because the dispatcher binds the failing form to ``request.POST``. Password widgets clear unless ``render_value=True``.
 
 Common Patterns
 ---------------

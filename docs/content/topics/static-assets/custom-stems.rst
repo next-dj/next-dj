@@ -77,10 +77,8 @@ A repeated registration of the same stem is a no op.
 Stem and Kind Interaction
 -------------------------
 
-A new stem participates in every registered kind.
-After registering a ``vendor`` stem, discovery looks for ``vendor.css``, ``vendor.js``, and ``vendor.mjs`` inside component folders, because the three built in kinds cover those extensions.
-
-Pair a stem with a custom kind to reach a unique file convention, see :doc:`asset-kinds`.
+A new stem participates in every registered kind, so a registration combines with every kind extension automatically.
+See :doc:`/content/howto/add-a-custom-stem` for a worked example, and :doc:`asset-kinds` for pairing a stem with a custom kind.
 
 Owner Resolution
 ----------------
@@ -90,11 +88,6 @@ A ``vendor.css`` inside a component folder is still owned by the component.
 A ``page.css`` next to ``template.djx`` is still owned by the page.
 
 The owner determines when the collector adds the asset.
-
-Hot Reload
-----------
-
-See :doc:`overview` for how a new co-located file under a registered stem is picked up without a process restart.
 
 Common Patterns
 ---------------

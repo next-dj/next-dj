@@ -48,10 +48,8 @@ Modules
    ``FilesystemTreeDispatcher`` walks the pages directory tree and yields ``(url_path, page_file)`` pairs that the router turns into URL patterns.
 
 ``next.urls.markers``.
-   ``DUrl`` and ``DQuery`` markers used in annotations.
-   ``DUrl.__class_getitem__`` builds the marker for the bare-type, named-key, and named-key-with-type forms, wrapping string and tuple arguments in a ``GenericAlias`` the providers introspect.
-   The four parameter providers ``HttpRequestProvider``, ``UrlByAnnotationProvider``, ``UrlKwargsProvider``, and ``QueryParamProvider`` that register with the resolver.
-   The ``get_multi_values`` helper that reads a multi-value query parameter outside the resolver.
+   Hosts the ``DUrl`` and ``DQuery`` annotation markers, the four request/URL/query parameter providers, and the ``get_multi_values`` helper.
+   See :doc:`/content/topics/dependency-injection` for the marker semantics and the provider order.
 
 ``next.urls.reverse``.
    ``page_reverse`` and ``with_query`` helpers.
@@ -92,7 +90,7 @@ If two routes resolve to the same Django path the ``next.E015`` system check rep
 Extension Points
 ----------------
 
-- Subclass ``FileRouterBackend`` to add patterns or augment naming.
+- Subclass ``RouterBackend`` to feed the resolver from a different source, or subclass ``FileRouterBackend`` to add patterns or augment naming on the file-based backend.
 - Register a custom backend in ``RouterFactory`` and reference it through the settings dotted path.
 - Subscribe to ``route_registered`` to observe each new pattern.
   It fires once per discovered pattern with ``sender=FileRouterBackend`` and the ``url_path`` and ``file_path`` keyword arguments.

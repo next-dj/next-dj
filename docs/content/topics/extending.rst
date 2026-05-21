@@ -15,7 +15,7 @@ The Five Mechanisms
 
 Backend.
    Replace or augment a complete subsystem.
-   Used for URL routing, components, forms dispatch, the :doc:`static pipeline <static-assets/index>`, and JS context serialization.
+   Used for URL routing, components, forms dispatch, and the :doc:`static pipeline <static-assets/index>`.
 
 Registry.
    Add new entries to a global list at startup.
@@ -159,9 +159,8 @@ Register the spec from ``AppConfig.ready`` so it is in place before the watcher 
 Edits to any ``*.yaml`` file under ``notes/rules`` now restart the development server.
 Duplicate ``(path, glob)`` pairs are dropped, so registering the same spec twice is safe.
 
-A subsystem that produces watch specs of its own implements the ``FilesystemWatchContributor`` Protocol from ``next.server.watcher``.
-The Protocol declares a single ``iter_watch_specs()`` method that yields ``(root, glob)`` pairs for the file watcher.
-When the watcher collects the final spec list it sends the ``watch_specs_ready`` signal with ``sender`` set to the ``iter_all_autoreload_watch_specs`` function itself.
+``register_autoreload_watch_spec`` is the only way to add extra trees to the watcher.
+``iter_all_autoreload_watch_specs`` from ``next.server`` resolves the final spec set and sends the ``watch_specs_ready`` signal with ``sender`` set to the function itself.
 Subscribe to that signal to observe or audit the resolved spec set.
 See :doc:`/content/internals/autoreload` for the full watcher pipeline.
 
@@ -203,10 +202,10 @@ The framework calls the strategy at a well known point in the pipeline.
      - Configured through
      - Default
    * - Static dedup
-     - ``DEDUP_STRATEGY`` in static backend ``OPTIONS``
+     - ``DEDUP_STRATEGY`` in the first static backend ``OPTIONS``
      - ``UrlDedup``
    * - JS context conflict policy
-     - ``JS_CONTEXT_POLICY`` in static backend ``OPTIONS``
+     - ``JS_CONTEXT_POLICY`` in the first static backend ``OPTIONS``
      - ``FirstWinsPolicy``
 
 The JS context serializer is the ``JsContextSerializer`` protocol listed under
