@@ -53,6 +53,6 @@ Multi-Tenant or Multi-Project Setup
 Community
 ---------
 
-Source code lives in the :repo:`next.dj repository <>`.
+Source code lives in the :repo:`next.dj repository`.
 File an issue or open a discussion when something is unclear.
 Contributions to the documentation are welcome, see :doc:`/content/contributing/index`.

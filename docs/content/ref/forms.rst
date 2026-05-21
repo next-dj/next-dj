@@ -17,11 +17,11 @@ The lists below are representative.
 The autodoc blocks under `Public API`_ are the exhaustive surface.
 
 Stable.
-   ``@action``, ``page``, ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``DForm``, ``FormActionManager``, ``form_action_manager``, and the UID helpers (``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``redirect_to_origin``, ``validated_next_form_page_path``).
+   ``@action``, ``page``, ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``DForm``, ``FormActionManager``, ``form_action_manager``, and the UID helpers (``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``redirect_to_origin``).
    Use these in application code.
 
 Advanced.
-   ``FormProvider``, ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``, ``FormActionDispatch``, ``FormActionOptions``, ``ActionMeta``, ``build_form_namespace_for_action``, the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``, ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``, ``formset_spec``), the formset helper ``cleanup_extra_initial``, and the ``signals`` and ``checks`` submodules.
+   ``FormProvider``, ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``, ``FormActionDispatch``, ``FormActionOptions``, ``ActionMeta``, ``build_form_namespace_for_action``, ``validated_next_form_page_path``, the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``, ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``, ``formset_spec``), the formset helper ``cleanup_extra_initial``, and the ``signals`` and ``checks`` submodules.
    Use these when writing a custom backend or a form renderer.
    ``FormProvider`` auto-registers through the ``__init_subclass__`` hook on ``RegisteredParameterProvider`` and resolves the bound ``form`` parameter, so application code never instantiates it.
 
@@ -29,12 +29,6 @@ Internal hooks.
    Symbols with a leading underscore are implementation details re-exported for testing and advanced backend authoring.
    The full set lives in ``next.forms.__all__``, which is the source of truth for the internal hook surface.
    Do not import these names in application code.
-
-.. note::
-
-   ``next.forms.__all__`` includes the underscore-prefixed internal hooks so that test helpers and custom backends can reach them through a documented path.
-   Application code should import only from the Stable tier.
-   The same tier vocabulary is summarised for every package in :doc:`/content/faq/general`.
 
 Public API
 ----------

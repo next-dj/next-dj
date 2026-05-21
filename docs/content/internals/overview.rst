@@ -61,10 +61,8 @@ Bootstrap
 ---------
 
 Django calls ``NextFrameworkConfig.ready()`` once per process after all applications load.
-``ready()`` first registers every framework :doc:`system check </content/ref/system-checks>` through ``next.checks.register_all``.
-It then runs installers in order: ``next.apps.autoreload.install``, ``next.apps.templates.install``, ``next.apps.staticfiles.install``, and ``next.apps.components.install``.
-These hooks wire the subsystems above into the Django runtime before the first request arrives.
-See :doc:`/content/ref/apps` for the full API.
+The hook registers the framework system checks and runs four installers that wire the subsystems above into the Django runtime before the first request arrives.
+See :doc:`/content/ref/apps` for the canonical ordering and the full API.
 
 How They Compose
 ----------------

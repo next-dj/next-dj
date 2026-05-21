@@ -154,3 +154,4 @@ See Also
 
    :doc:`/content/topics/static-assets/backends` for the backend contract.
    :doc:`/content/topics/static-assets/asset-kinds` for the renderer methods.
+   :doc:`/content/howto/build-a-custom-asset-backend` for resolving URLs through an external manifest.

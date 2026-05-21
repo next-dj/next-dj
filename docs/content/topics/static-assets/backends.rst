@@ -99,7 +99,9 @@ This covers most customisation without a subclass.
 Dedup and JS Context Options
 ----------------------------
 
-The first backend ``OPTIONS`` also carries two pipeline level keys.
+The first entry of ``DEFAULT_STATIC_BACKENDS`` owns the pipeline-level options.
+``DEDUP_STRATEGY`` and ``JS_CONTEXT_POLICY`` are read from the first backend ``OPTIONS`` only.
+The same keys on a second or third backend are ignored, so place the configured values on the leading entry.
 
 .. note::
 
@@ -131,28 +133,10 @@ Writing a Custom Backend
 ------------------------
 
 Subclass ``StaticFilesBackend`` to keep the staticfiles resolution and change only the rendered markup.
+Override ``render_link_tag``, ``render_script_tag``, and ``render_module_tag`` so ``.css``, ``.js``, and ``.mjs`` assets all carry the new attribute or host.
+A renderer that is not overridden falls back to the parent output, which is why dropping ``render_module_tag`` makes ``.mjs`` assets skip the customisation.
 
-.. code-block:: python
-   :caption: notes/backends.py
-
-   import base64
-   import hashlib
-   from pathlib import Path
-   from next.static import StaticFilesBackend
-
-   class SriBackend(StaticFilesBackend):
-       def render_link_tag(self, url, *, request=None) -> str:
-           return f'<link rel="stylesheet" href="{url}" crossorigin>'
-
-       def render_script_tag(self, url, *, request=None) -> str:
-           return f'<script src="{url}" crossorigin></script>'
-
-       def render_module_tag(self, url, *, request=None) -> str:
-           return f'<script type="module" src="{url}" crossorigin></script>'
-
-Override ``render_module_tag`` as well, otherwise ``.mjs`` assets miss the attribute the override adds.
-
-This example adds ``crossorigin`` only.
+:doc:`/content/howto/write-a-static-backend` walks through the attribute and CDN recipes.
 For a complete Subresource Integrity implementation that also computes the ``integrity`` hash, see :doc:`/content/security/static-assets`.
 
 Subclass the abstract ``StaticBackend`` directly only when the project resolves assets from a source other than Django staticfiles, such as a build manifest.
@@ -205,10 +189,8 @@ System Checks
 -------------
 
 The static checks validate the backend configuration at startup.
-They use the codes ``next.E036``, ``next.E037``, ``next.E038``, ``next.W030``, and ``next.W031``.
 Run ``uv run python manage.py check`` after editing the backend list.
-
-A separate check, ``next.W042``, validates the ``JS_CONTEXT_SERIALIZER`` setting, see :doc:`js-context`.
+The full list of static check codes lives in :doc:`/content/ref/system-checks`.
 
 The ``next.W031`` check validates the ``css_tag`` and ``js_tag`` templates.
 The ``module_tag`` template is not checked, so verify it contains ``{url}`` yourself.

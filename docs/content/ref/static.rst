@@ -58,8 +58,6 @@ See :doc:`/content/topics/static-assets/js-context` for the runtime script optio
 JS Context Serializer
 ~~~~~~~~~~~~~~~~~~~~~
 
-See :doc:`/content/topics/static-assets/js-context` for how the serializer is chosen and configured.
-
 .. automodule:: next.static.serializers
    :members:
 

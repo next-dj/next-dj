@@ -59,6 +59,8 @@ Context
 
 ``RESERVED_KEYS`` lists the names (``request``, ``form``, ``_cache``, ``_stack``, ``_context_data``) stripped from name-based resolution.
 A context key cannot shadow a reserved resolver input.
+``DependencyResolver.EXPLICIT_RESOLVE_KEYS`` is the class-level alias of the same frozenset.
+Subclasses override it to broaden or narrow the stripped names, and the resolver reads ``self.EXPLICIT_RESOLVE_KEYS`` rather than the module constant during dispatch.
 See :doc:`/content/internals/di-resolver` for the resolution detail.
 
 Signals

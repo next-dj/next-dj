@@ -47,6 +47,14 @@ The innermost wraps the page body.
 The middle layout wraps the result.
 The outermost layout wraps the result again.
 
+Layout-Only Directories
+~~~~~~~~~~~~~~~~~~~~~~~
+
+A page directory that contains a sibling ``layout.djx`` but no body source still renders.
+The body slot is the empty string and the layout chain composes around it.
+Use this shape for landing routes whose whole markup belongs in the layout shell.
+:ref:`next.E012 <ref-system-checks>` does not fire in this case.
+
 Layout Template Contract
 ------------------------
 
@@ -191,7 +199,10 @@ They contribute variables that every layout and every page template can use.
 Because they run last, a processor that returns the same key as a ``@context`` function overwrites that value.
 Processor-to-processor duplicates are resolved by dotted path, keeping the first occurrence.
 See :doc:`context` under *Resolution Order* for the full merge order and the **first** ``TEMPLATES`` entry rule.
-Processor failures are logged and swallowed by default unless ``STRICT_CONTEXT`` is enabled. Semantics live in :ref:`ref-settings`.
+A processor that raises ``TypeError``, ``ValueError``, ``AttributeError``, or ``KeyError`` is logged and swallowed by default.
+Set ``STRICT_CONTEXT = True`` to re-raise those exceptions instead.
+Any other exception type propagates regardless of the setting.
+Semantics live in :ref:`ref-settings`.
 
 Static Collector
 ~~~~~~~~~~~~~~~~
@@ -204,7 +215,8 @@ Page Rendered Signal
 ~~~~~~~~~~~~~~~~~~~~
 
 The ``page_rendered`` signal fires once per request after the layout chain produces the final HTML.
-Subscribe to observe the rendered body without disturbing the rendering pipeline.
+Subscribe to observe rendering duration, the number of collected styles and scripts, and the keys present in the template scope.
+See :doc:`signals` for the full payload.
 
 Common Pitfalls
 ---------------

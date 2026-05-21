@@ -68,7 +68,7 @@ The ``assert_has_class`` and ``find_anchor`` helpers from ``next.testing`` keep 
 .. code-block:: python
    :caption: tests/test_info_card.py
 
-   from next.testing import assert_has_class, render_component_by_name
+   from next.testing import assert_has_class, find_anchor, render_component_by_name
 
    def test_info_card_marks_the_root() -> None:
        html = render_component_by_name(
@@ -77,6 +77,15 @@ The ``assert_has_class`` and ``find_anchor`` helpers from ``next.testing`` keep 
            context={"title": "Quick start"},
        )
        assert_has_class(html, "info-card")
+
+   def test_info_card_links_to_detail() -> None:
+       html = render_component_by_name(
+           "info_card",
+           at="notes/pages/template.djx",
+           context={"title": "Quick start", "href": "/notes/1/"},
+       )
+       anchor = find_anchor(html, href="/notes/1/", text="Quick start")
+       assert 'href="/notes/1/"' in anchor
 
 Pass a Request When the Component Needs One
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

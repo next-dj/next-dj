@@ -181,6 +181,9 @@ Implement the methods listed in the protocol and pass the class to the framework
    * - JS context serializer
      - ``next.static.JsContextSerializer``
 
+Select a serializer implementation with the ``JS_CONTEXT_SERIALIZER`` setting.
+The default is ``JsonJsContextSerializer``.
+
 ``next.pages.loaders.TemplateLoader`` is an abstract base class rather than a protocol.
 Subclass it explicitly and register the subclass through ``TEMPLATE_LOADERS``.
 
@@ -207,10 +210,6 @@ The framework calls the strategy at a well known point in the pipeline.
    * - JS context conflict policy
      - ``JS_CONTEXT_POLICY`` in the first static backend ``OPTIONS``
      - ``FirstWinsPolicy``
-
-The JS context serializer is the ``JsContextSerializer`` protocol listed under
-*Protocols* above. Select an implementation with the ``JS_CONTEXT_SERIALIZER``
-setting. The default is ``JsonJsContextSerializer``.
 
 Use a strategy when the customisation is a single algorithm rather than a complete subsystem.
 

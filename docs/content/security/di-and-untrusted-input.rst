@@ -113,6 +113,7 @@ The ``url_kwargs`` dict and ``request.GET`` are both untrusted.
 .. code-block:: python
    :caption: notes/providers.py
 
+   import re
    from typing import get_origin
    from django.http import Http404
    from next.deps import DDependencyBase, RegisteredParameterProvider
@@ -127,14 +128,15 @@ The ``url_kwargs`` dict and ``request.GET`` are both untrusted.
 
        def resolve(self, param, context):
            slug = str(context.url_kwargs["slug"])
-           if not slug.isalnum() or len(slug) > 50:
+           if not re.fullmatch(r"[a-zA-Z0-9-]{1,50}", slug):
                raise Http404
            try:
                return Link.objects.get(slug=slug)
            except Link.DoesNotExist:
                raise Http404 from None
 
-The explicit ``isalnum`` and length check make the validation visible to readers and to security audits.
+The explicit length and character check make the validation visible to readers and to security audits.
+The resolver does not wrap or swallow provider exceptions, so ``Http404`` raised here propagates unchanged through to Django's view layer.
 
 Redirects
 ---------

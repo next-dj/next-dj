@@ -27,11 +27,11 @@ Layouts and context.
 
 Components.
    A folder under the configured components root becomes a reusable template fragment.
-   Components carry their own Python file, template, and co-located CSS and JS, meaning those assets live in the same folder as the component.
+   Components carry a template plus optional Python, CSS, and JS files in one folder.
    The framework discovers them by name and renders them through the ``{% component %}`` tag.
 
 Form actions.
-   A ``@action`` decorator registers a callable as a form handler under a required action name, for example ``@action("create_note", form_class=NoteForm)``.
+   A ``@action`` decorator registers a callable as a form handler under the name passed to the decorator, for example ``@action("create_note", form_class=NoteForm)``.
    The ``{% form %}`` template tag points at that handler by the same name.
    The framework injects only the parameters that the handler signature asks for.
 
@@ -46,10 +46,7 @@ Standard ``.html`` templates in other apps are unchanged.
 
 For the design principles behind that split, read :doc:`/content/misc/design-philosophy`.
 
-Key Terms
----------
-
-You will see the nouns *page*, *layout*, *component*, *action*, and *context function* on every page.
+The nouns *page*, *layout*, *component*, *action*, and *context function* appear on every documentation page.
 :doc:`/content/misc/glossary` defines each one.
 
 A Minimal Project

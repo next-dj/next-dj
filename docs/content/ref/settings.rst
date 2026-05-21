@@ -38,7 +38,8 @@ Keys are ``BACKEND``, ``DIRS``, ``APP_DIRS``, ``PAGES_DIR``, and ``OPTIONS``.
 
 ``DIRS`` accepts two kinds of entry.
 An absolute or project-relative path that resolves to an existing directory is added as an extra page root.
-A plain string that does not resolve to a directory is treated as a skip name: the router will not enter any directory with that name during the file walk.
+A plain string that does not resolve to a directory is treated as a skip name.
+The router will not enter any directory with that name during the file walk.
 
 See :doc:`/content/topics/file-router` for the full semantics including examples.
 
@@ -75,7 +76,8 @@ Default value.
        }
    ]
 
-The first static backend's ``OPTIONS`` dict accepts ``JS_CONTEXT_POLICY``, a dotted path to a conflict-resolution class the static manager applies when two context functions publish the same key for serialisation.
+The first static backend's ``OPTIONS`` dict accepts ``JS_CONTEXT_POLICY``, a dotted path to a conflict-resolution class.
+The static manager applies the policy when two context functions publish the same key for serialisation.
 See :doc:`/content/topics/static-assets/js-context` under *Key Conflict Policy* for the available policies and an example.
 
 The same ``OPTIONS`` dict accepts ``DEDUP_STRATEGY``, a dotted path to a dedup strategy class the collector instantiates once per request to drop assets several components register more than once.
@@ -108,6 +110,8 @@ Template used to compute URL names from directory paths.
 Default value ``"page_{name}"``.
 
 The framework normalises the path through the parser and substitutes ``{name}`` with the result.
+Slashes, square brackets, colons, hyphens, and underscores are collapsed to a single underscore, and the leading and trailing underscores are stripped.
+The directory path ``notes/[id]`` becomes ``notes_id`` and produces the URL name ``page_notes_id``.
 
 Templates
 ---------
@@ -131,7 +135,8 @@ JavaScript Context
 NEXT_JS_OPTIONS
 ~~~~~~~~~~~~~~~~~
 
-Dict passed to ``NextScriptBuilder.from_options`` for the bundled ``next.min.js`` runtime: injection ``policy`` (``auto``, ``disabled``, or ``manual``), and optional string templates ``preload_template``, ``script_tag_template``, and ``init_template``.
+Dict passed to ``NextScriptBuilder.from_options`` for the bundled ``next.min.js`` runtime.
+Keys are the injection ``policy`` (``auto``, ``disabled``, or ``manual``) and the optional string templates ``preload_template``, ``script_tag_template``, and ``init_template``.
 
 Default value ``{}`` (automatic injection with default templates).
 
@@ -158,7 +163,8 @@ Strictness
 STRICT_CONTEXT
 ~~~~~~~~~~~~~~
 
-When ``True``, any exception raised by a Django context processor (``TypeError``, ``ValueError``, ``AttributeError``, or ``KeyError``) is re-raised immediately instead of being logged as a warning and swallowed.
+When ``True``, any ``TypeError``, ``ValueError``, ``AttributeError``, or ``KeyError`` raised by a Django context processor is re-raised immediately.
+The default behaviour is to log a warning and swallow the exception.
 The check applies only to processors listed under a page backend ``OPTIONS["context_processors"]``.
 Context callables registered with ``@context`` always propagate their exceptions regardless of this setting.
 When ``False``, the default, a failing processor is skipped so local development keeps rendering.
@@ -169,17 +175,12 @@ Default value ``False``.
 LAZY_COMPONENT_MODULES
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-When ``False``, the default, ``next.apps.components.install`` imports every ``component.py`` found in configured component roots so ``@component.context`` and ``@action`` decorators run before the first HTTP request.
-
-When ``True``, that bulk import is skipped.
-Each ``component.py`` discovered through a configured root is imported the first time ``get_component`` resolves that component.
-
-Components discovered through ``_components`` directories beside page files are unaffected.
-The file router imports those modules as it walks the page tree, regardless of this flag.
+Controls bulk import of ``component.py`` modules in configured component roots during ``next.apps.components.install``.
+When ``True``, each ``component.py`` is imported on demand the first time ``get_component`` resolves it.
+Components discovered through ``_components`` directories beside page files are imported by the file router as it walks the page tree, regardless of this flag.
 
 Default value ``False``.
-See :doc:`/content/deployment/settings` for production defaults.
-For tests, ``eager_load_components`` imports every registered ``component.py`` even when this flag is ``True``. See :doc:`/content/topics/testing`.
+See :doc:`/content/deployment/settings` for production defaults and :doc:`/content/topics/testing` for the ``eager_load_components`` helper.
 
 Patching Defaults
 -----------------
@@ -201,6 +202,9 @@ Use ``next.conf.extend_default_backend`` to patch one key of a default backend e
 The helper returns a deep copy of the default list with the entry at ``index`` (default ``0``) patched by the keyword overrides.
 Nested dicts such as ``OPTIONS`` are merged.
 
+The helper raises ``ImproperlyConfigured`` when ``key`` is not a known backend-list setting.
+It raises ``IndexError`` when ``index`` is out of range for the default list.
+
 See :doc:`conf` for the helper API and :doc:`/content/howto/extend-a-default-backend` for the recipe.
 
 See Also
@@ -210,4 +214,5 @@ See Also
 
    :doc:`/content/topics/extending` for the broader picture.
    :doc:`/content/deployment/settings` for production tuned values.
-   :doc:`/content/topics/static-assets/js-context` for ``NEXT_JS_OPTIONS`` and ``ScriptInjectionPolicy``.
+   :doc:`/content/topics/static-assets/js-context` for ``NEXT_JS_OPTIONS``.
+   :class:`next.static.scripts.ScriptInjectionPolicy` for the policy enum.

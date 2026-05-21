@@ -28,7 +28,8 @@ The difference lies in how Django dispatches the request.
 WSGI Configuration
 ------------------
 
-A standard ``config/wsgi.py`` works without modification. See Django's :doc:`WSGI deployment guide <django:howto/deployment/wsgi/index>`.
+A standard ``config/wsgi.py`` works without modification.
+See Django's :doc:`WSGI deployment guide <django:howto/deployment/wsgi/index>`.
 
 .. code-block:: python
    :caption: config/wsgi.py
@@ -49,15 +50,17 @@ Run with a production WSGI server such as ``gunicorn`` or ``uwsgi``.
 
    uv run gunicorn config.wsgi:application --workers 4 --bind 0.0.0.0:8000
 
-The example uses four workers.
-Gunicorn's own default ``--workers`` is ``1``.
-A common starting point is ``(2 * num_cores) + 1``.
+The example passes ``--workers 4``.
+Effective worker counts depend on Gunicorn CLI flags and environment variables (for example ``WEB_CONCURRENCY``).
+Verify the upstream Gunicorn docs for your installed version instead of trusting second-hand shortcuts.
+Teams often iterate from rough heuristics such as ``(2 * num_cores) + 1`` once they profile real traffic and saturation.
 Tune based on the expected concurrency and the average request duration.
 
 ASGI Configuration
 ------------------
 
-A standard ``config/asgi.py`` works without modification. See Django's :doc:`ASGI deployment guide <django:howto/deployment/asgi/index>`.
+A standard ``config/asgi.py`` works without modification.
+See Django's :doc:`ASGI deployment guide <django:howto/deployment/asgi/index>`.
 
 .. code-block:: python
    :caption: config/asgi.py

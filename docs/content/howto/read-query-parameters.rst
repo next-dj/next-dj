@@ -83,7 +83,8 @@ The annotation drives coercion of the raw query string.
    Three wire formats are accepted, but only one is consulted per request.
    ``request.GET.getlist(name)`` runs first.
    When it returns more than one value, the plain repeated form ``?brand=Acme&brand=Globex`` is used as-is.
-   When it returns one value or none, the resolver falls back to the bracket form ``?brand[]=Acme&brand[]=Globex`` only when the plain value is empty, and to the comma-delimited form ``?brand=Acme,Globex`` only when the plain value is a single non-empty string that contains a comma.
+   When the plain value is empty, the resolver falls back to the bracket form ``?brand[]=Acme&brand[]=Globex``.
+   When the plain value is a single non-empty string that contains a comma, the resolver falls back to the comma-delimited form ``?brand=Acme,Globex``.
    Each element is then coerced using the same rules as the scalar form for ``T``.
 
 A scalar parameter that is absent from the query string receives the declared default, or ``None`` when no default is given.

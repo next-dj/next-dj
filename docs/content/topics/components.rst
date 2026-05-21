@@ -14,11 +14,9 @@ This page covers the two component shapes, the rules for props and slots, how co
 Overview
 --------
 
-The default ``FileComponentsBackend`` registers components from page trees and from configured ``DIRS`` roots.
-The :ref:`components-folder-discovery` section below covers the discovery mechanism in full.
-
 Components compose freely.
 A page template can call a component, a component template can call another component, and a layout can call any component that is in scope.
+The :ref:`components-folder-discovery` section below covers how the default ``FileComponentsBackend`` finds them.
 
 Component Shapes
 ----------------
@@ -42,7 +40,7 @@ Composite components add Python logic when the template needs computed values th
 
    A composite component may supply its template body from Python instead of a ``component.djx`` file.
    When ``component.py`` exposes a module-level string named ``component`` and no ``component.djx`` file exists, the framework uses that string as the template body.
-   ``ComponentScanner`` registers the component and ``ComponentTemplateLoader.load`` reads the string.
+   ``ComponentScanner`` registers the component with ``template_path`` pointing at the ``component.py`` file itself, and ``ComponentTemplateLoader.load`` reads the ``component`` attribute from that module.
    A ``component.py`` with neither a ``render`` function nor a ``component`` string and no ``component.djx`` alongside it produces a component that renders nothing.
 
 .. code-block:: text
@@ -71,7 +69,8 @@ When the URL router walks the page trees it skips directories that match a confi
 The backend recognises three sources for components.
 
 App page trees.
-   As the URL router walks each page tree it calls ``register_components_folder_from_router_walk``, which pushes every ``COMPONENTS_DIR`` folder it finds into the ``FileComponentsBackend``.
+   As the URL router walks each page tree it calls ``register_components_folder_from_router_walk`` once per ``COMPONENTS_DIR`` folder it encounters.
+   The helper registers that folder into the first ``FileComponentsBackend`` and deduplicates by resolved path, so a folder seen twice is registered only once.
    A folder named ``COMPONENTS_DIR`` under that tree is a components root for the application.
 
    .. note::
@@ -82,6 +81,7 @@ App page trees.
 Project directories.
    The ``DIRS`` list adds absolute or project-relative roots that contribute global components.
    Components in these roots are visible from every template.
+   The scanner only inspects the immediate children of each root, so place every component folder or ``.djx`` file directly under the ``DIRS`` entry rather than in nested sub-folders.
 
 Custom backends.
    Additional entries in ``DEFAULT_COMPONENT_BACKENDS`` can serve components from any other source.
@@ -104,8 +104,8 @@ Custom backends.
        ]
    }
 
-Components Scope
-----------------
+Component Scope
+---------------
 
 Components are resolved through a scope tree.
 A template only sees components from its own branch of the tree plus any project-level roots in ``DIRS``.
@@ -138,7 +138,8 @@ Void Form
 ~~~~~~~~~
 
 The tag has no closing form when the component does not take slots.
-Single line, no children.
+The void form fits on one line and accepts no child markup.
+Use the block form covered under :ref:`components-multiline-tags` when the component renders slot content.
 
 .. code-block:: jinja
    :caption: void form
@@ -189,6 +190,7 @@ The framework enables ``re.DOTALL`` for Django's tag lexer at startup, so tag bo
 
    This changes template parsing for **every** template the process loads, not only DJX files.
    If you rely on Django's stock behaviour where a newline inside ``{% ... %}`` ends the tag, adjust those templates before adopting next.dj.
+   The patch is applied once at import time and is one-way, so the original Django pattern is not restored when the components template tag library is unloaded.
 
 .. code-block:: jinja
    :caption: multiline void tag
@@ -327,7 +329,7 @@ The framework resolves parameters from the surrounding template scope, from URL 
 
    Registration raises ``ValueError`` for a key reserved for dependency injection, such as ``request``.
    It also raises ``ValueError`` for a duplicate registration of two different functions under the same key, or of two different unkeyed callables, in one ``component.py``.
-   Re-registering the identical function is a no-op.
+   Re-registering the same function under the same key replaces the stored entry rather than raising.
 
 Pass ``serialize=True`` and optionally ``serializer=`` to include the return value in ``window.Next.context``.
 The behaviour is identical to ``@context`` on a page module, so the value must be JSON-encodable by the active serializer.
@@ -335,6 +337,7 @@ See :doc:`static-assets/js-context` for the serialization options and :ref:`Seri
 
 An unkeyed ``@component.context`` returning a dict serializes each key of that dict separately.
 A keyed ``@component.context`` serializes its return value under the given key.
+An unkeyed callable that returns anything other than a mapping is silently dropped from the template scope.
 
 Co-located Static Assets
 ------------------------
@@ -362,15 +365,18 @@ See :doc:`static-assets/deduplication` for the dedup rules.
 Module Loading
 --------------
 
-By default the framework imports every registered ``component.py`` during component backend setup.
-``import_all_component_modules`` walks the whole registry, not only the ``DIRS`` roots.
+By default the framework imports every ``component.py`` from each ``DIRS`` root during component backend setup.
+``import_all_component_modules`` walks the registry built from those roots.
 The bulk import runs the side effects of ``@component.context`` so they are visible from the first request.
 A ``component.py`` may also register a form action with ``@action``, which the same import makes visible.
 See :doc:`/content/topics/forms/actions` for the action decorator.
 
-The ``LAZY_COMPONENT_MODULES`` flag gates this eager bulk import.
-When the flag is set the framework skips it and imports a ``component.py`` on first resolve instead.
-Page-tree ``component.py`` modules are imported by the URL router as it walks the page trees, so they are available regardless of the flag.
+Page-tree ``component.py`` modules follow a different path.
+The URL router walks each page tree and ``register_components_folder_from_router_walk`` imports every ``component.py`` it registers inline.
+They are available regardless of ``LAZY_COMPONENT_MODULES``.
+
+The ``LAZY_COMPONENT_MODULES`` flag gates the ``DIRS`` bulk import only.
+When the flag is set the framework skips that step and imports a ``component.py`` on first resolve instead.
 See :ref:`ref-settings` for the exact behaviour.
 
 .. code-block:: python
@@ -380,7 +386,7 @@ See :ref:`ref-settings` for the exact behaviour.
        "LAZY_COMPONENT_MODULES": True,
    }
 
-The render Function
+The Render Function
 -------------------
 
 A composite component can define a ``render`` function in ``component.py`` that returns the component body as a string in place of the template.
@@ -391,8 +397,9 @@ Return an empty string to render nothing, which turns the component into a serve
 A ``render`` function takes over completely.
 The component template and ``@component.context`` callables do not run for that component.
 The function may return a string or an :class:`~django.http.HttpResponse`.
-When it returns an :class:`~django.http.HttpResponse`, only the decoded body is spliced into the page.
+When it returns an :class:`~django.http.HttpResponse`, the body is decoded as UTF-8 regardless of the response's ``Content-Type`` charset and spliced into the page.
 The response status code and headers are not propagated.
+Any other return value is coerced through ``str()`` before splicing.
 
 When ``component.py`` defines no ``render`` function, the component renders its template and runs every ``@component.context`` callable as usual.
 
@@ -425,10 +432,25 @@ Lifecycle Signals
 
 The framework emits four signals during the component lifecycle.
 
-- ``component_registered`` fires when an individual component enters the registry.
-- ``components_registered`` fires once after a bulk discovery, with a list of every component that registered during the cycle.
-- ``component_backend_loaded`` fires after a component backend is created from its config entry.
-- ``component_rendered`` fires after a component renders to HTML.
+.. list-table::
+   :header-rows: 1
+   :widths: 28 28 44
+
+   * - Name
+     - Sender
+     - Keyword arguments
+   * - ``component_registered``
+     - ``ComponentRegistry``
+     - ``info``
+   * - ``components_registered``
+     - ``ComponentRegistry``
+     - ``infos``
+   * - ``component_backend_loaded``
+     - ``ComponentsManager``
+     - ``backend``, ``config``
+   * - ``component_rendered``
+     - ``ComponentsManager``
+     - ``info``, ``template_path``
 
 See :doc:`/content/ref/signals` for the full signal catalog.
 

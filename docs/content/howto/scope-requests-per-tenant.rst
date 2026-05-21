@@ -200,7 +200,8 @@ List it in the page backend ``OPTIONS`` so the file router runs it.
 Prefix Asset URLs Per Tenant
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Scope the static backend the same way: subclass ``StaticFilesBackend`` and override the renderer methods.
+Scope the static backend the same way.
+Subclass ``StaticFilesBackend`` and override the renderer methods.
 Read the tenant from the ``request`` keyword argument that the static manager passes to every renderer, then prepend the tenant slug to each collected URL.
 Register the subclass in ``DEFAULT_STATIC_BACKENDS``.
 

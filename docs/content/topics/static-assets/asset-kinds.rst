@@ -164,7 +164,7 @@ Customise the rendered output through the ``module_tag`` key in the backend ``OP
 System Checks
 -------------
 
-The static system checks validate the backend configuration only.
+The static system checks validate the backend configuration and the ``JS_CONTEXT_SERIALIZER`` setting (``next.W042``).
 They do not validate kind registration.
 A bad call to ``default_kinds.register`` raises ``ValueError`` during ``AppConfig.ready``.
 Because Django runs ``ready`` for every management command and during ASGI or WSGI worker boot, the exception aborts whatever process is starting up, not only ``manage.py check``.

@@ -91,7 +91,8 @@ A render that uses the component adds the asset to the collector, which deduplic
 After the page renders, the static manager replaces the ``styles`` slot token emitted by ``{% collect_styles %}`` with the link tags produced by ``render_link_tag`` on the active backend.
 ``render_link_tag`` resolves the on-disk path to a public URL through Django staticfiles, so manifest hashing and CDN settings apply to the emitted tag.
 
-The same flow applies to ``component.js`` (kind ``js``) and ``component.mjs`` (kind ``module``), which land in the ``scripts`` slot emitted by ``{% collect_scripts %}``.
+The same flow applies to ``component.js`` (kind ``js``, classic script) and ``component.mjs`` (kind ``module``, ECMAScript module), which both land in the ``scripts`` slot emitted by ``{% collect_scripts %}``.
+The extension picks the kind, so a file named ``component.js`` never renders through ``render_module_tag``.
 :doc:`/content/internals/static-pipeline` traces the pipeline step by step.
 
 Stems and Owners

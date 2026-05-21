@@ -27,7 +27,10 @@ fire for that sender.
    * - ``action_dispatched``
      - ``FormActionDispatch``
      - ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, ``dep_cache``
-     - After an action handler runs and the response is coerced. ``form`` is the bound form, or ``None`` for handler-only actions. ``duration_ms`` times the handler call. ``dep_cache`` is a copy of the dispatch dependency-injection cache.
+     - After an action handler runs and the response is coerced.
+       ``form`` is the bound form, or ``None`` for handler-only actions.
+       ``duration_ms`` times the handler call.
+       ``dep_cache`` is a copy of the dispatch dependency-injection cache.
    * - ``action_registered``
      - Form action backend class
      - ``action_name``, ``uid``, ``form_class``, ``namespace``, ``handler``
@@ -101,17 +104,10 @@ fire for that sender.
      - ``specs``
      - After the reloader resolves the full list of watch specs.
 
-Aggregated Signals
-------------------
-
-.. automodule:: next.signals
-   :members:
-   :imported-members:
-
 Subpackage Signals
 ------------------
 
-The aggregator forwards from these modules.
+The aggregator ``next.signals`` forwards from the modules below.
 
 Pages
 ~~~~~

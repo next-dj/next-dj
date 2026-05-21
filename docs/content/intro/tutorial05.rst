@@ -214,8 +214,9 @@ Open ``http://127.0.0.1:8000/about/`` and confirm that the new page is served wi
 
 .. note::
 
-   The autoreloader emits a ``router_reloaded`` signal each time the route set changes.
-   See :doc:`/content/howto/observe-framework-signals` for how to listen for it.
+   The framework emits ``action_dispatched`` after a successful handler run, recorded above through ``SignalRecorder``.
+   The autoreloader emits a companion ``router_reloaded`` signal each time the route set changes, so a test that wants to react to filesystem-driven route changes can subscribe to it the same way.
+   See :doc:`/content/howto/observe-framework-signals` for the full subscriber pattern.
 
 Checkpoint
 ----------
@@ -260,3 +261,4 @@ The tutorial is complete.
    :doc:`whatsnext` lists where to go next, by topic.
    :doc:`/content/topics/testing` covers the full testing surface.
    :doc:`/content/internals/autoreload` explains how the reloader watches the filesystem.
+   :doc:`/content/deployment/index` covers production setup once the application is feature complete.

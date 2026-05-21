@@ -27,6 +27,7 @@ Discovery groups stems into three roles.
 ``component`` role.
    Default stem ``component``.
    Matches files alongside the component's ``component.djx`` or ``component.py``.
+   Simple components without a folder have no co-located directory, so discovery skips them.
 
 .. code-block:: text
    :caption: directory layout
@@ -110,26 +111,28 @@ Layout assets enter first as the layout chain unfolds from the root.
 Page assets follow.
 Component assets enter in the order the components appear in the template.
 
-Recipes
--------
+Common Patterns
+---------------
 
-Site-Wide Reset
-~~~~~~~~~~~~~~~
+A ``layout.css`` at the root applies to every page under that layout because layout assets enter the collector first.
+A ``layout.css`` at an inner layout scopes the styles to pages below that layout only.
+Use ``component.js`` for plain behaviour and ``component.mjs`` when the script depends on ECMAScript module imports.
 
-Place ``layout.css`` next to the root ``layout.djx``.
-Every page below the layout inherits the reset because layout assets enter the collector first.
+External URLs via Module Lists
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Per-Section Styles
-~~~~~~~~~~~~~~~~~~
+Declare ``styles`` and ``scripts`` at module level in ``page.py`` or ``component.py`` to register external URLs alongside co-located files.
 
-Add a ``layout.css`` next to an inner layout.
-The styles apply only to pages below that layout.
+.. code-block:: python
+   :caption: notes/_components/note_card/component.py
 
-Component Behaviour
-~~~~~~~~~~~~~~~~~~~
+   styles = ["https://cdn.example.com/reset.css"]
+   scripts = ["https://cdn.example.com/vendor.js", "/static/local/widget.mjs"]
 
-Use ``component.js`` for behaviour that runs on every page that includes the component.
-Use ``component.mjs`` when the script depends on ECMAScript module imports.
+Each variable is a list of strings.
+The slot is picked from the registered placeholder name, ``styles`` or ``scripts``.
+The kind is inferred from the URL extension through the kind registry.
+URLs with an unknown extension are dropped with a debug log.
 
 See Also
 --------

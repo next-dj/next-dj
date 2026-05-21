@@ -24,29 +24,29 @@ Built In Providers
 The framework registers a fixed list of providers at startup.
 Each one carries an explicit ``priority`` value, the resolver consults them from lowest to highest, and the first match wins.
 
-1. Named dependency provider.
+1. Named dependency provider (priority 10).
    A parameter with default ``Depends(...)`` receives the resolved dependency.
-2. Context by default provider.
+2. Context by default provider (priority 20).
    A parameter with a ``Context(...)`` default receives the named context value.
-3. Context by name provider.
+3. Context by name provider (priority 30).
    A parameter whose name matches a context key receives that context value.
-4. Form provider.
+4. Form provider (priority 40).
    A parameter named ``form`` or annotated ``DForm[FormClass]`` receives the bound form during action dispatch.
-5. HttpRequest provider.
+5. HttpRequest provider (priority 50).
    A parameter annotated ``HttpRequest`` or ``HttpRequest | None`` receives the current request.
-6. URL annotation provider.
+6. URL annotation provider (priority 60).
    A parameter annotated ``DUrl[T]`` reads the captured URL segment and coerces it to ``T``.
-7. URL kwargs provider.
+7. URL kwargs provider (priority 70).
    A parameter whose name matches a captured URL segment resolves to that value.
-8. Query string provider.
+8. Query string provider (priority 80).
    A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
 
-The order makes the marker-driven providers narrow and decisive.
+The order makes the default-driven and marker-driven providers decisive.
 ``Depends`` and ``Context`` look only at the parameter default.
 ``DUrl`` and ``DQuery`` look only at the annotation.
-The form provider is broader, it matches the parameter name ``form``, the marker ``DForm[FormClass]``, and any plain class annotation whose type the bound form is an instance of.
-The context-by-name and URL-kwargs providers are the fallbacks that match on the bare parameter name.
-They run after the marker providers so an explicit marker always wins over an accidental name collision.
+The context-by-name provider sits ahead of the form, URL, and query providers because a context key under the same name is considered a deliberate publication.
+The form provider matches the parameter name ``form``, the marker ``DForm[FormClass]``, and any plain class annotation whose type the bound form is an instance of.
+The URL-kwargs provider is the last fallback that matches on the bare parameter name, after every marker provider has had a chance to claim the parameter.
 
 DUrl
 ~~~~
@@ -247,7 +247,9 @@ Re-entering a name that is already on the stack raises ``DependencyCycleError``.
    next.deps.cache.DependencyCycleError: Circular dependency: profile -> settings -> profile
 
 The chain in the message is the resolution path that closed the loop, read left to right.
-Catch it with ``from next.deps import DependencyCycleError``. The path ``next.deps.cache`` is an implementation detail.
+The traceback lists the fully qualified path ``next.deps.cache.DependencyCycleError`` because that is where the exception class is defined.
+Import the exception from the public ``next.deps`` namespace with ``from next.deps import DependencyCycleError``.
+The deeper ``next.deps.cache`` path is an implementation detail and is not part of the supported import surface.
 Break the cycle by removing one ``Depends`` edge.
 Here ``settings`` does not need ``profile`` at all, so the fix is to drop that parameter.
 
@@ -314,7 +316,7 @@ Use the new marker.
    from next.pages import context
 
    @context("note")
-   def note(note: DNote[Note]) -> Note:
+   def current_note(note: DNote[Note]) -> Note:
        return note
 
 Two rules apply to the marker class.
@@ -372,8 +374,9 @@ Do not use future annotations in modules with DI parameters.
    Plain Python files that only import the framework can use future annotations freely.
 
 Keep DI types runtime importable.
-   The resolver evaluates string annotations through ``typing.get_type_hints``.
-   Types hidden behind ``if TYPE_CHECKING`` are not available at evaluation time.
+   Most providers compare annotations through ``typing.get_origin``, which returns ``None`` for string annotations and never imports the target type.
+   The ``HttpRequest`` provider does call ``typing.get_type_hints`` on the wrapped callable as a fallback, and that call evaluates string annotations.
+   Types hidden behind ``if TYPE_CHECKING`` are not visible to either path, so keep DI-touching annotations on classes that import at module top level.
 
 Resolver Lifecycle
 ------------------

@@ -79,7 +79,7 @@ The bracket syntax accepts every Django path converter.
      - Any non empty value with no slash.
    * - ``[int:name]``
      - ``<int:name>``
-     - Positive integers, including zero.
+     - Non-negative integers, including zero.
    * - ``[slug:name]``
      - ``<slug:name>``
      - URL slugs of ASCII letters, digits, hyphens, and underscores.
@@ -191,7 +191,8 @@ The router resolves routes from two sources, in the same way ``staticfiles`` res
 
 App directories.
    When ``APP_DIRS`` is ``True`` the router scans each installed application for a directory named ``PAGES_DIR``.
-   In the tutorial this is ``notes/pages/`` because ``PAGES_DIR`` defaults to ``pages``.
+   ``PAGES_DIR`` is required on every backend entry, and the ``next.E024`` system check fails when the key is missing.
+   In the tutorial it is set to ``pages``, so the router scans ``notes/pages/``.
 
 Project directories.
    The ``DIRS`` list adds absolute or project-relative paths to the scan.
@@ -296,7 +297,8 @@ Each backend can read from a different directory, register a different ``PAGES_D
    }
 
 Two backends produce two independent sets of URLs.
-The Django URL resolver checks them in order, the first match wins.
+The Django URL resolver checks them in order.
+The first match wins.
 Both backends emit the same signals and follow the same naming rules.
 
 Common Patterns
@@ -327,6 +329,8 @@ Hot Reload
 A backend that reads from a database or other dynamic source needs to rebuild its pattern list when the data changes.
 ``router_manager.reload()`` clears the resolver cache and rebuilds every backend, and the call is idempotent.
 Each invocation emits a ``router_reloaded`` signal with the manager class as sender, so long lived processes can listen for it to refresh cached URL references.
+The call walks every page tree configured in ``DEFAULT_PAGE_BACKENDS``, so a burst of model writes can dominate the request latency.
+Receivers should debounce or batch invocations when one logical change triggers many model signals at once.
 See :doc:`/content/howto/reload-routes-from-code` for the model-signal receiver that triggers the reload.
 
 System Checks

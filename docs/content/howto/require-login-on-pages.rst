@@ -45,6 +45,9 @@ The middleware lets the login page and static assets through, and redirects ever
 
 Place the middleware after :class:`~django.contrib.auth.middleware.AuthenticationMiddleware` so ``request.user`` is populated when the guard runs.
 
+Use :func:`next.urls.page_reverse` instead of a hard-coded path when redirecting to a file-routed login page.
+See :doc:`/content/topics/url-reversing` for the full reversing surface.
+
 .. code-block:: python
    :caption: config/settings.py
 

@@ -15,8 +15,7 @@ Decorators
 @context
 ~~~~~~~~
 
-.. autofunction:: next.pages.context
-   :no-index:
+.. py:decorator:: @context(func_or_key=None, *, inherit_context=False, serialize=False, serializer=None)
 
 Registers a context function on a page module (``page.py``).
 The first positional argument is ``func_or_key``.
@@ -31,8 +30,7 @@ Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 @component.context
 ~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: next.components.context
-   :no-index:
+.. py:decorator:: @component.context(func_or_key=None, *, serialize=False, serializer=None)
 
 Registers a component context function inside ``component.py``.
 The first positional argument is ``func_or_key``.
@@ -45,11 +43,12 @@ Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 @action
 ~~~~~~~
 
-.. autofunction:: next.forms.action
-   :no-index:
+.. py:decorator:: @action(name, *, form_class=None, namespace=None)
 
-Registers a form action handler.
-Pass ``form_class=`` for forms that need validation, ``namespace=`` to scope short names.
+Registers a form action handler under ``name``.
+``name`` is the first positional argument and must be unique across the project.
+Pass ``form_class=`` for forms that need validation.
+Pass ``namespace=`` to scope short names, which prefixes the stored key with ``"<namespace>:"``.
 
 Dependency Markers
 ------------------
@@ -91,7 +90,8 @@ DQuery
    :no-index:
 
 Type annotation that injects a query string value.
-Supports ``DQuery[str]``, ``DQuery[int]``, ``DQuery[bool]``, ``DQuery[float]``, ``DQuery[UUID]``, ``DQuery[Decimal]``, ``DQuery[date]``, ``DQuery[datetime]``, and ``DQuery[list[T]]`` for any of those scalars.
+Supports ``DQuery[str]``, ``DQuery[int]``, ``DQuery[bool]``, ``DQuery[float]``, ``DQuery[UUID]``, ``DQuery[Decimal]``, ``DQuery[date]``, and ``DQuery[datetime]``.
+``DQuery[list[T]]`` accepts any of those scalars as the element type.
 
 DForm
 ~~~~~

@@ -3,7 +3,7 @@
 Static Template Tags
 ====================
 
-The static pipeline registers six Django template tags.
+The static pipeline registers four Django template tags plus two inline block forms.
 ``{% collect_styles %}`` and ``{% collect_scripts %}`` mark placeholder slots in the layout.
 ``{% use_style %}`` and ``{% use_script %}`` register an external URL on the active collector.
 ``{% #use_style %}`` and ``{% #use_script %}`` are block forms that capture an inline body.
@@ -78,6 +78,8 @@ use_script
    {% use_script "https://cdn.example.com/vendor.js" %}
 
 The asset is prepended to the collector the same way as ``use_style``.
+The tag always registers the URL under kind ``js``, so it cannot publish an ECMAScript module.
+For a ``.mjs`` dependency, list the URL in the page or component ``scripts`` module-level variable instead, see :doc:`co-located-files`.
 
 Inline Blocks
 -------------

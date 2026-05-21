@@ -131,28 +131,14 @@ FormActionManager
 
 The module-level ``form_action_manager`` instance holds the active backends behind a thin facade.
 Application code reaches it through ``from next.forms import form_action_manager``.
-
-``default_backend``.
-   Property that returns the first configured backend.
-   Used internally by the template tag and the dispatcher.
-
-``get_action_url(action_name)``.
-   Returns the reverse URL of the first backend that knows ``action_name``.
-   Raises ``KeyError`` for an unknown name.
-
-``render_form_fragment(request, action_name, form, template_fragment=None, *, page_file_path=None)``.
-   Delegates the validation-failure render to ``default_backend.render_form_fragment``.
-
-``clear_registries()``.
-   Calls ``clear_registry`` on every backend that exposes it.
-   Use it for test isolation, see Testing below.
+See :doc:`/content/ref/forms` for the full member list of ``next.forms.manager``.
 
 Testing
 -------
 
 Tests that register actions through ``@action`` must drop the global registry between cases so action names from one test do not leak into the next.
 Call :func:`next.testing.reset_form_actions` from a pytest fixture or a ``setUp`` method.
-The helper clears every backend through ``form_action_manager.clear_registries`` and resets the import cache, so subsequent imports of a ``page.py`` re-register their actions.
+The helper invokes ``form_action_manager._reload_config()``, which rebuilds the backend list from the current ``NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]`` setting and discards any actions registered against the previous backend instances.
 
 See :doc:`/content/topics/testing` for the surrounding helpers and fixtures.
 

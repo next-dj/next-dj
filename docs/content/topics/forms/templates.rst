@@ -121,6 +121,7 @@ Re-rendered page after a failing POST.
 
 The tag does not read a ``form`` context key.
 On the initial render it reads a context key named after the action that holds a ``SimpleNamespace`` with a ``form`` attribute, and falls back to building that namespace itself when the key is absent.
+A namespaced action name contains ``:`` and is not addressable from the template scope, so its context lookup runs in Python only.
 Customise the initial form by overriding ``get_initial`` on the form class rather than publishing a ``form`` context.
 
 .. code-block:: python

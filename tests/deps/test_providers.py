@@ -199,13 +199,13 @@ class TestUrlKwargsProvider:
 
 
 class TestCoerceUrlValue:
-    """Tests for ``_coerce_url_value``."""
+    """Table-driven checks for ``_coerce_url_value``."""
 
     @pytest.mark.parametrize(
         "case", COERCE_URL_VALUE_CASES, ids=[c.id for c in COERCE_URL_VALUE_CASES]
     )
     def test_coerce(self, case: CoerceUrlValueCase) -> None:
-        """Coercion follows int, bool, float, and str rules."""
+        """Apply registered coercions and retain the input when conversion cannot run."""
         assert _coerce_url_value(case.raw, case.hint) == case.expected
 
 

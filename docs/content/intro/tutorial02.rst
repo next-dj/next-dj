@@ -87,7 +87,7 @@ Pass ``inherit_context=True`` so every descendant page can read the value too.
    def tagline() -> str:
        return "A small tutorial application."
 
-``inherit_context`` defaults to ``False``, so a layout context value is visible only to the page that declares it.
+``inherit_context`` defaults to ``False``, so a context value published in ``page.py`` is visible only to the page that declares it.
 Passing ``inherit_context=True`` publishes the value to every descendant page as well.
 Without that flag the layout would still render but pages further down the tree would not see them.
 
@@ -153,6 +153,7 @@ Drop a second layout inside ``notes/pages/notes/`` to wrap only the detail pages
 
 Reload ``/notes/1/`` and you should see both layouts at once.
 The root layout wraps the inner layout which wraps the detail template.
+Composition works by folding each descendant body into the parent ``{% block template %}`` placeholder, so adding ancestor layouts never requires changes to the inner templates.
 
 Use Counts Across Pages
 ~~~~~~~~~~~~~~~~~~~~~~~

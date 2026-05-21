@@ -335,7 +335,7 @@ System Checks
 
 The forms subsystem contributes Django system checks.
 
-- ``next.E041`` reports two ``@action`` registrations that share a name but come from different handlers.
+- ``next.E041`` reports two or more ``@action`` registrations that share a name but come from different handlers.
 - ``next.E044`` reports a malformed or non-importable ``DEFAULT_FORM_ACTION_BACKENDS`` entry, including a non-string ``BACKEND`` path.
 - ``next.E045`` reports a backend that does not subclass ``FormActionBackend``.
 

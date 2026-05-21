@@ -184,26 +184,51 @@ Validating an Inline Formset
 A parent form that owns an inline formset attaches the formset on construction and validates it inside ``clean``.
 Raising ``ValidationError`` from ``clean`` routes the failure through the standard re-render pipeline.
 
-Use a factory callable as ``form_class`` so the dispatcher attaches the formset to the parent form before calling ``form.is_valid()``.
+Use a factory callable as ``form_class`` so the dispatcher binds the inline formset to the parent form before calling ``form.is_valid()``.
 The factory returns ``(FormClass, init_kwargs)`` and the dispatcher passes those kwargs to the constructor.
+``NoteForm.__init__`` rebinds ``row_formset`` to ``self.data`` with ``instance=self.instance`` so the formset validates against the same POST as the parent form.
+
+.. code-block:: python
+   :caption: notes/forms.py
+
+   from django.forms import inlineformset_factory
+   from next.forms import ModelForm
+   from notes.models import Note, Row
+
+   RowFormSet = inlineformset_factory(Note, Row, fields=("label",), extra=1)
+
+   class NoteForm(ModelForm):
+       class Meta:
+           model = Note
+           fields = ("title", "body")
+
+       def __init__(self, *args, **kwargs):
+           super().__init__(*args, **kwargs)
+           self.row_formset = RowFormSet(
+               data=self.data or None,
+               instance=self.instance,
+               prefix="rows",
+           )
+
+       def clean(self):
+           cleaned = super().clean()
+           if not self.row_formset.is_valid():
+               self.add_error(None, "Fix the row errors below.")
+           return cleaned
 
 .. code-block:: python
    :caption: notes/pages/notes/[id]/edit/page.py
 
-   from django.forms import inlineformset_factory
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
    from next.forms import action
    from next.urls import DUrl
    from notes.forms import NoteForm
-   from notes.models import Note, Row
-
-   RowFormSet = inlineformset_factory(Note, Row, fields=("label",), extra=1)
+   from notes.models import Note
 
    def note_form_factory(note_id: DUrl["id", int]) -> tuple:
        note = get_object_or_404(Note, pk=note_id)
-       row_formset = RowFormSet(prefix="rows")
-       return NoteForm, {"instance": note, "row_formset": row_formset}
+       return NoteForm, {"instance": note}
 
    @action("update_note", form_class=note_form_factory)
    def update_note(form: NoteForm) -> HttpResponseRedirect:
@@ -211,9 +236,7 @@ The factory returns ``(FormClass, init_kwargs)`` and the dispatcher passes those
        form.row_formset.save()
        return HttpResponseRedirect("/")
 
-``NoteForm`` accepts ``row_formset`` in its constructor and inspects it from ``clean``.
-The parent page re-renders with both the parent and the row errors in scope.
-See ``examples/admin`` for a worked example of the same pattern.
+The parent page re-renders with both the parent and the row errors in scope on validation failure.
 
 Common Patterns
 ---------------

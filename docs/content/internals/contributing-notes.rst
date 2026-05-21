@@ -47,6 +47,7 @@ Public Callables
 ~~~~~~~~~~~~~~~~
 
 Names exposed through ``@page.context``, ``@component.context``, ``@action``, and through provider classes never start with an underscore.
+``@context`` imported from ``next.pages`` is the documented alias for ``@page.context`` used in page modules.
 Names prefixed with ``_`` stay module internal.
 
 System Checks
@@ -66,8 +67,8 @@ A new signal adds an entry to the aggregator and to the topic catalog in ``docs/
 Module Docstrings
 ~~~~~~~~~~~~~~~~~
 
-Python files start with the first ``import`` statement.
-Test modules in particular carry no module-level docstring.
+Test modules carry no module-level docstring.
+Production modules may include a one-line summary at the top.
 
 Imports
 ~~~~~~~
@@ -85,7 +86,8 @@ Prose Punctuation
 ~~~~~~~~~~~~~~~~~
 
 The same punctuation rules that bind the documentation also bind every docstring, comment, and log message in ``next/``.
-No semicolon joins two clauses. No em or en dash separates one statement from the next.
+No semicolon joins two clauses.
+No em or en dash separates one statement from the next.
 The full rule set lives in :doc:`/content/contributing/style-guide`.
 
 Decorative Separators

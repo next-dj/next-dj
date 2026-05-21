@@ -209,18 +209,27 @@ Pagination
 Testing
 -------
 
-Both helpers are pure functions and are safe to call from tests without any Django request context.
+``with_query`` is a pure stdlib helper.
+It accepts a URL string and keyword arguments and returns a string, so a unit test can call it without configuring Django.
 
 .. code-block:: python
-   :caption: tests
+   :caption: with_query test
 
-   from next.urls import page_reverse, with_query
-
-   def test_page_reverse_empty() -> None:
-       assert page_reverse() == "/"
+   from next.urls import with_query
 
    def test_with_query_drops_none() -> None:
        assert with_query("/?a=1", a=None) == "/"
+
+``page_reverse`` calls into the Django URL resolver, so the test process needs configured Django settings and a loaded URL configuration before the helper resolves anything.
+Use ``pytest-django`` or call ``django.setup()`` once, then assert against the produced path.
+
+.. code-block:: python
+   :caption: page_reverse test
+
+   from next.urls import page_reverse
+
+   def test_page_reverse_empty() -> None:
+       assert page_reverse() == "/"
 
 Reading the Query String Back
 -----------------------------
@@ -231,7 +240,8 @@ To read them in a page or component, annotate a parameter with the ``DQuery[T]``
 
 ``DQuery[list[T]]`` accepts several wire formats for a repeated parameter, and ``with_query`` emits the repeated-key form when you pass a list.
 To read a repeated parameter outside the resolver, call ``get_multi_values(request, name)`` from ``next.urls``, which returns every value for that key as a list.
-Captured **path** segments are separate. They flow through ``DUrl`` or plain URL kwargs as described in :doc:`dependency-injection`.
+Captured path segments are separate.
+They flow through ``DUrl`` or plain URL kwargs as described in :doc:`dependency-injection`.
 
 See :doc:`/content/howto/read-query-parameters` for the full typed-query walkthrough.
 

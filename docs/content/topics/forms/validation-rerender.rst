@@ -17,12 +17,15 @@ The Origin Page
 ---------------
 
 Every rendered ``{% form %}`` tag emits a hidden ``_next_form_page`` field that contains the absolute path to the current ``page.py``.
-The dispatcher reads that field to know which page rendered the form.
+The dispatcher reads that field on the re-render branch to locate the origin page.
 
-The dispatcher rejects a submission when the field is missing or blank, when its basename is not ``page.py``, or when resolving the path raises ``OSError``.
-It also rejects the submission when ``BASE_DIR`` is unset or when the resolved path falls outside ``BASE_DIR``.
-A path whose ``page.py`` does not exist is rejected too, unless a sibling ``template.djx`` stands in for it.
-Each rejection returns HTTP 400 with a short diagnostic message so it is easy to spot in logs.
+On a validation failure the dispatcher rejects the submission and returns ``HTTP 400 Missing or invalid _next_form_page`` when any of the following holds.
+
+- The field is missing or blank.
+- The basename is not ``page.py``.
+- Resolving the path raises ``OSError``.
+- ``BASE_DIR`` is unset, or the resolved path falls outside ``BASE_DIR``.
+- The ``page.py`` does not exist on disk and no sibling ``template.djx`` stands in for it.
 
 Virtual routes are fully supported as origin pages.
 A directory that has only a ``template.djx`` and no ``page.py`` is a virtual route (see :doc:`/content/topics/file-router` for the routing rules).

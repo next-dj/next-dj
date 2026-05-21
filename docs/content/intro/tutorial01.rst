@@ -16,7 +16,6 @@ You have followed :doc:`install` and you can serve a placeholder page at ``http:
 You have a Django application named ``notes`` registered in ``INSTALLED_APPS``.
 From :doc:`install` your ``config/urls.py`` already forwards URLs to next.dj through ``include("next.urls")``.
 If ``/`` does not respond, revisit :doc:`install`.
-Directory layout maps to URLs through the file router. See :doc:`/content/topics/file-router` and :doc:`/content/topics/pages` when you need the rules behind ``pages/``.
 
 Walkthrough
 -----------
@@ -44,7 +43,6 @@ Keep the fields minimal so the tutorial stays focused on the framework.
            return self.title
 
 Apply the :doc:`migration <django:topics/migrations>` and seed two rows so the index page has something to render.
-The ``startproject`` scaffold uses SQLite by default, so ``migrate`` creates the ``db.sqlite3`` file in the project root.
 
 .. code-block:: bash
    :caption: shell
@@ -189,4 +187,5 @@ The next part wraps every page in a layout and shares site-wide context.
 
    :doc:`tutorial02` adds a layout and shared context.
    :doc:`/content/topics/file-router` covers route shapes, captured parameters, and virtual routes.
+   :doc:`/content/topics/pages` documents the rules behind ``pages/``.
    :doc:`/content/ref/pages` lists every public API on ``next.pages``.

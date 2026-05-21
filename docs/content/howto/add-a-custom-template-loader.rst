@@ -45,6 +45,10 @@ That string appears in diagnostics such as the ``next.W043`` body-source warning
            candidate = file_path.parent / "template.md"
            return candidate if candidate.is_file() else None
 
+The loaded body is rendered as a Django template after composition with the layout chain.
+A ``{{ ... }}`` or ``{% ... %}`` token inside ``template.md`` is evaluated by the template engine before the user sees the page.
+Wrap untrusted Markdown in ``{% verbatim %}{% endverbatim %}`` inside ``load_template``, or escape the braces, when the source comes from an author who should not run template tags.
+
 Append the loader after the built-in DJX loader unless you intend to replace it entirely.
 
 .. code-block:: python

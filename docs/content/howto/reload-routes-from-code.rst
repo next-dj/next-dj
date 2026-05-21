@@ -17,36 +17,37 @@ The framework rebuilds every backend from the current configuration, clears the 
 Walkthrough
 -----------
 
-Wire the receiver.
-The module exposes a ``connect`` helper that ``AppConfig.ready`` calls, so the receiver wiring lives at module top level instead of inside a function body.
+Wire the receivers.
+Each receiver is decorated with ``@receiver`` at module top level, and ``AppConfig.ready`` imports the module so the decorators run once on startup.
 
 .. code-block:: python
    :caption: notes/receivers.py
 
    from django.db.models.signals import post_delete, post_save
+   from django.dispatch import receiver
    from next.urls import router_manager
    from notes.models import Note
 
-   def reload_router(**_kwargs) -> None:
+   @receiver(post_save, sender=Note)
+   def reload_router_on_save(**_kwargs) -> None:
        router_manager.reload()
 
-   def connect() -> None:
-       post_save.connect(reload_router, sender=Note)
-       post_delete.connect(reload_router, sender=Note)
+   @receiver(post_delete, sender=Note)
+   def reload_router_on_delete(**_kwargs) -> None:
+       router_manager.reload()
 
-Connect the receiver from ``AppConfig.ready`` so it runs at startup.
+Import the receivers module from ``AppConfig.ready`` so the decorators run at startup.
 
 .. code-block:: python
    :caption: notes/apps.py
 
    from django.apps import AppConfig
-   from notes import receivers
 
    class NotesConfig(AppConfig):
        name = "notes"
 
        def ready(self) -> None:
-           receivers.connect()
+           from notes import receivers  # noqa: F401, PLC0415
 
 Each call rebuilds the backend list from the current ``NEXT_FRAMEWORK`` configuration, clears Django's URL caches, and emits ``router_reloaded``.
 Receivers should tolerate being invoked more than once when several writes batch into one task.

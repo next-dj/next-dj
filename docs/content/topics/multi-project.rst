@@ -163,7 +163,8 @@ Prefer distinct names for project-specific components over relying on this order
 Hot Reload
 ----------
 
-Every directory listed in a component backend ``DIRS``, including the shared ``_shared/_components/`` root, contributes its own ``**/component.py`` watch spec to the :doc:`autoreloader </content/internals/autoreload>`.
+Every directory listed in a component backend ``DIRS`` contributes its own ``**/component.py`` watch spec to the :doc:`autoreloader </content/internals/autoreload>`.
+The shared ``_shared/_components/`` root participates the same way.
 Each project runs its own development server with its own reloader process.
 A change to a ``component.py`` inside ``_shared/_components/`` restarts only the project processes whose configuration includes that root.
 

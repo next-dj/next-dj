@@ -24,8 +24,9 @@ Backends
 Manager
 ~~~~~~~
 
-``urlpatterns`` is a ``list`` subclass that rebuilds the router and form-action patterns on each access.
-A route added after import is therefore visible without a process restart.
+``urlpatterns`` is a ``list`` subclass that recollects router and form-action patterns from the active backends on each access.
+The backends themselves are cached by ``router_manager`` and are only rebuilt when ``router_manager.reload()`` runs or when ``DEFAULT_PAGE_BACKENDS`` changes.
+A route added after import is therefore visible without a process restart, but each access still iterates the cached backend list rather than walking the page tree again.
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
 
 .. automodule:: next.urls.manager
@@ -86,7 +87,43 @@ See :doc:`/content/internals/di-resolver` for the full provider registration seq
 
 ``DUrl`` and ``DQuery`` both accept ``str``, ``int``, ``bool``, ``float``, ``UUID``, ``Decimal``, ``date``, and ``datetime``.
 ``DQuery`` additionally accepts ``list[T]`` for any of those scalars.
-See :doc:`/content/topics/dependency-injection` and :doc:`/content/topics/file-router` for the full coercion reference.
+
+The following table is the canonical coercion reference.
+A value that fails to parse falls back to the raw captured string rather than raising.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 35 40
+
+   * - Annotation type
+     - Accepted wire values
+     - Result
+   * - ``str``
+     - Any captured string.
+     - Returned unchanged.
+   * - ``int``
+     - Decimal digit string.
+     - ``int(value)``.
+   * - ``float``
+     - Decimal float string.
+     - ``float(value)``.
+   * - ``bool``
+     - ``"1"``, ``"true"``, ``"yes"`` map to ``True``, anything else to ``False``.
+     - Boolean.
+   * - ``UUID``
+     - Canonical UUID string, or an already parsed :class:`~uuid.UUID`.
+     - :class:`~uuid.UUID` instance.
+   * - ``Decimal``
+     - Numeric string parseable by :class:`~decimal.Decimal`.
+     - :class:`~decimal.Decimal` instance.
+   * - ``date``
+     - ISO 8601 date accepted by :meth:`date.fromisoformat <datetime.date.fromisoformat>`.
+     - :class:`~datetime.date` instance.
+   * - ``datetime``
+     - ISO 8601 datetime accepted by :meth:`datetime.fromisoformat <datetime.datetime.fromisoformat>`.
+     - :class:`~datetime.datetime` instance.
+
+See :doc:`/content/topics/dependency-injection` and :doc:`/content/topics/file-router` for the narrative coverage of each marker.
 
 Signals
 -------

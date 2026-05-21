@@ -152,6 +152,8 @@ A custom DI provider can centralise the instance lookup.
            except model_cls.DoesNotExist as exc:
                raise Http404 from exc
 
+Subclassing ``RegisteredParameterProvider`` auto-registers the provider with the dependency resolver at import time, so importing ``notes/providers.py`` is enough to wire it.
+
 The handler can now take the instance directly.
 
 .. code-block:: python

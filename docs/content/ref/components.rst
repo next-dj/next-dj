@@ -146,17 +146,41 @@ Use it to test factory wiring.
 .. autoclass:: next.components.BoomBackend
    :members:
 
-The underscore-prefixed render helpers exported from this module (``_inject_component_context``, ``_merge_csrf_context``, ``_render_template_string``) are internal hooks.
+The underscore-prefixed render helpers exported from this module are internal hooks.
 Do not use them in application code.
+
+.. autofunction:: next.components._inject_component_context
+
+.. autofunction:: next.components._merge_csrf_context
+
+.. autofunction:: next.components._render_template_string
 
 Signals
 -------
 
-See :doc:`signals` and :doc:`/content/topics/signals` for the components signals (``component_registered``, ``components_registered``, ``component_backend_loaded``, ``component_rendered``).
+See :doc:`signals` and :doc:`/content/topics/signals` for the components signals.
 
-.. automodule:: next.components.signals
-   :members:
-   :no-index:
+The module ``next.components.signals`` exposes four ``django.dispatch.Signal`` instances.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 25 45
+
+   * - Signal
+     - Sender
+     - Payload
+   * - ``component_registered``
+     - ``ComponentRegistry``
+     - ``info`` (``ComponentInfo``)
+   * - ``components_registered``
+     - ``ComponentRegistry``
+     - ``infos`` (tuple of ``ComponentInfo``)
+   * - ``component_backend_loaded``
+     - ``ComponentsManager``
+     - ``backend`` (``ComponentsBackend``), ``config`` (mapping)
+   * - ``component_rendered``
+     - ``ComponentsManager``
+     - ``info`` (``ComponentInfo``), ``template_path`` (``Path`` or ``None``)
 
 The package ``__init__`` re-exports ``next_framework_settings`` from :doc:`/content/ref/conf` as a convenience for backend code that reads ``LAZY_COMPONENT_MODULES``.
 

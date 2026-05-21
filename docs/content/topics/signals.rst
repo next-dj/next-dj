@@ -124,7 +124,7 @@ This is the one approved exception to the module-level import rule.
        name = "notes"
 
        def ready(self) -> None:
-           from notes import receivers  # noqa: F401
+           from notes import receivers  # noqa: F401, PLC0415
 
 Use ``django.dispatch.receiver`` to connect a callable to a signal.
 

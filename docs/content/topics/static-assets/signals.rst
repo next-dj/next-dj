@@ -71,11 +71,12 @@ The sender is the static manager.
 
 ``placeholders_replaced``
    A tuple of slot names whose token appeared in ``html_before``.
-   The tuple is computed lazily and is only populated when at least one receiver is connected to ``html_injected``.
+   The whole ``html_injected`` dispatch is skipped when no receiver is connected, so the tuple is built only on the request paths where a listener is present.
 
 ``injected_bytes``
    A signed ``int`` equal to ``len(html_after) - len(html_before)``.
    Negative when injection shortens the document, for example when a slot token is longer than the rendered tags it replaces.
+   The preload hint is added before the diff is measured, so under ``AUTO`` an empty collector can still produce a positive value because the preload link grows the document.
 
 ``request``
    The active ``HttpRequest`` or ``None``.

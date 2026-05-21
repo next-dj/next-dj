@@ -157,7 +157,7 @@ Configure the policy through the first static backend ``OPTIONS``.
        ]
    }
 
-The configured policy only fires across modules, when a page and a component share a key or when two components do.
+The configured policy fires anywhere the same key reaches the collector twice, including page-to-component, component-to-component, page-to-layout, and any contributor that calls ``StaticCollector.add_js_context`` directly.
 Two ``@context`` decorators on the same page that register the same key always resolve first-wins, regardless of ``JS_CONTEXT_POLICY``.
 Pick distinct keys when both registrations live in the same module.
 
@@ -236,14 +236,14 @@ An absent or empty ``NEXT_JS_OPTIONS`` uses the ``AUTO`` policy and the default 
      - Skips injection entirely. ``window.Next`` is not defined.
      - Pages that serve raw data or HTML fragments and have no client-side JS that reads ``window.Next``.
    * - ``MANUAL``
-     - Skips automatic injection.
-       Build the tags yourself with ``NextScriptBuilder.from_options``.
+     - Skips automatic injection in the static manager, the same as ``DISABLED``.
+       The script builder stays available for custom emission.
      - Pages where you control placement of the script tags in a layout template.
 
 .. note::
 
-   Under ``MANUAL`` the static manager does not emit ``window.Next`` for you.
-   Construct your own builder through ``NextScriptBuilder.from_options(next_js_url, NEXT_JS_OPTIONS)`` and emit ``preload_link()``, ``script_tag()``, and ``init_script(js_context)`` from a custom template tag or middleware.
+   Under ``MANUAL`` the static manager skips both the preload hint and the ``Next._init`` wrap, exactly like ``DISABLED``.
+   To inject ``window.Next`` yourself, resolve the runtime URL with ``staticfiles_storage.url(NEXT_JS_STATIC_PATH)`` from ``next.static.scripts``, then build a ``NextScriptBuilder.from_options(url, NEXT_JS_OPTIONS)`` and emit ``preload_link()``, ``script_tag()``, and ``init_script(js_context)`` from a custom template tag or middleware.
 
 Set the policy through the ``NEXT_JS_OPTIONS`` dict.
 
@@ -282,6 +282,7 @@ Use them to add attributes such as ``nonce``, ``async``, or ``crossorigin`` with
 
 A template carries only its own placeholder, ``{url}`` or ``{payload}``, and no other substitution is supported.
 The templates are formatted with Python ``str.format``, not Django templates.
+A literal ``{`` or ``}`` inside the template body collides with the formatter and must be doubled to ``{{`` or ``}}`` to survive ``str.format``.
 For per-request values such as CSP nonces, use a custom static backend instead.
 
 See Also

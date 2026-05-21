@@ -29,14 +29,11 @@ The provider claims any parameter whose annotation origin is ``DFlag`` and reads
 .. code-block:: python
    :caption: flags/providers.py
 
-   from typing import TYPE_CHECKING, get_args, get_origin
+   import inspect
+   from typing import get_args, get_origin
    from next.deps import DDependencyBase, RegisteredParameterProvider
+   from next.deps.context import ResolutionContext
    from .cache import get_cached_flag
-
-   if TYPE_CHECKING:
-       import inspect
-
-       from next.deps.context import ResolutionContext
 
    class DFlag[T](DDependencyBase[T]):
        """Annotate a parameter with `DFlag[Flag]` to inject the matching `Flag`."""

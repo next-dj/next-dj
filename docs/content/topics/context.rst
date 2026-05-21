@@ -4,10 +4,13 @@ Context
 =======
 
 Context is the data that pages and components publish into their template scope.
-This page covers the two shapes of the ``@context`` decorator and the ways to vary them, how inheritance flows down the route tree, how component context differs from page context, how to expose values to the JavaScript bundle, and how to swap out the serializer that ships values to the browser.
+This page covers the two shapes of the ``@context`` decorator and the ways to vary them.
+It also walks inheritance down the route tree, how component context differs from page context, and how to expose values to the JavaScript bundle.
+A final section covers how to swap out the serializer that ships values to the browser.
 
 This page is the concept reference for context.
-Once you understand the decorator and the ``serialize`` flag here, :doc:`/content/topics/static-assets/js-context` covers the full ``window.Next.context`` mechanics and :doc:`/content/howto/override-the-js-context-serializer` walks through replacing the serializer.
+Once you understand the decorator and the ``serialize`` flag here, :doc:`/content/topics/static-assets/js-context` covers the full ``window.Next.context`` mechanics.
+The :doc:`/content/howto/override-the-js-context-serializer` how-to walks through replacing the serializer.
 
 .. contents::
    :local:
@@ -29,6 +32,23 @@ Page context.
 Component context.
    ``@component.context("key")`` in a ``component.py``.
    Resolves once per component instance during render.
+
+Framework-Provided Keys
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Every page render starts with three keys already populated, before any user-defined ``@context`` callable runs.
+
+``request``.
+   The active :class:`~django.http.HttpRequest`, when the route was reached through the HTTP stack.
+
+``current_template_path``.
+   The absolute path of the body source on disk.
+   It points at the sibling ``template.djx`` when one exists, or at the ``page.py`` itself when the body comes from ``render`` or ``template``.
+
+``current_page_module_path``.
+   The absolute path of the ``page.py`` module being rendered.
+
+User ``@context`` callables can read these keys by parameter name, and template-side machinery such as the ``{% component %}`` and ``{% form %}`` tags relies on them.
 
 The Decorator
 -------------
@@ -214,7 +234,9 @@ Pass ``serialize=True`` on ``@context`` or ``@component.context`` to publish the
 Pass ``serializer=`` on that decorator for a per-key encoder, or set ``NEXT_FRAMEWORK["JS_CONTEXT_SERIALIZER"]`` for a project-wide default.
 
 A value marked ``serialize=True`` must be encodable by the active serializer.
-The default ``JsonJsContextSerializer`` runs values through Django ``DjangoJSONEncoder``, which handles primitives, ``list``, ``dict``, ``datetime``, ``Decimal``, ``UUID``, and lazy translation strings.
+The default ``JsonJsContextSerializer`` runs values through Django ``DjangoJSONEncoder``.
+That encoder handles primitives, ``list``, ``dict``, ``datetime``, ``date``, ``time``, ``timedelta``, ``Decimal``, ``UUID``, and Django ``Promise`` instances such as lazy translation strings.
+Switching ``JS_CONTEXT_SERIALIZER`` to ``PydanticJsContextSerializer`` also unwraps :class:`pydantic.BaseModel` subclasses via ``model_dump``.
 A ``QuerySet``, a ``Manager``, a bare model instance, a Django ``Form``, and any other unsupported type raises ``TypeError`` at render time with the offending key in the message.
 Materialise such values before returning.
 Use ``list(queryset)`` for collections and a plain ``dict`` projection for model instances.

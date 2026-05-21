@@ -52,6 +52,7 @@ Register the Create Action
 An ``@action`` action handler registers when its module is imported.
 Placing it in the page's ``page.py`` means the file router imports it on the first request, so the natural home is next to the page that exposes the form.
 Update ``notes/pages/page.py``.
+The ``inherit_context=True`` flag on the three layout-scope callables stays from :doc:`tutorial02` so each value still reaches every descendant page.
 
 .. code-block:: python
    :caption: notes/pages/page.py
@@ -218,7 +219,7 @@ Extend the detail template.
 
 The rendered form carries several hidden inputs from different sources.
 ``confirm`` is a real field on ``DeleteNoteForm``, so the template posts it explicitly.
-The ``{% form %}`` tag emits four framework fields automatically.
+The ``{% form %}`` tag emits the framework fields shown below.
 ``csrfmiddlewaretoken`` carries the CSRF token, ``_next_form_page`` identifies the origin page, ``_next_form_origin`` records the request path, and ``_url_param_id`` echoes the captured URL ``id``.
 The ``_url_param_id`` field lets the action handler resolve ``DUrl["id", int]`` without any extra argument on the tag.
 Add the action handler to the detail page.

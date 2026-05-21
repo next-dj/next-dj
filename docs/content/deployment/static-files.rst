@@ -39,7 +39,9 @@ Run ``collectstatic`` during the deployment build.
 
    uv run python manage.py collectstatic --noinput
 
-Django copies every co-located ``component.css``, ``component.js``, ``component.mjs``, ``layout.css``, ``layout.js``, ``layout.mjs``, ``template.css``, ``template.js``, ``template.mjs``, and any custom stem file into ``STATIC_ROOT``.
+Django copies every co-located file into ``STATIC_ROOT``.
+The default stems are ``component``, ``layout``, and ``template``, the default kinds are ``css``, ``js``, and ``module`` (extensions ``.css``, ``.js``, ``.mjs``).
+Files registered under custom stems and custom kinds are copied through the same finder, so an extension added through ``default_kinds.register`` ships with the rest.
 Project ``static/`` directories and any directory listed in ``STATICFILES_DIRS`` are copied as well.
 
 Hashed URLs

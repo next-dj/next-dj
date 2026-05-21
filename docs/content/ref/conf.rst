@@ -33,8 +33,13 @@ Helpers
 Import Utilities
 ~~~~~~~~~~~~~~~~
 
-.. automodule:: next.conf.imports
-   :members:
+.. autofunction:: next.conf.imports.import_class_cached
+
+.. autofunction:: next.conf.imports.perform_import
+
+.. autofunction:: next.conf.imports.clear_import_cache
+
+.. autodata:: next.conf.imports.IMPORT_STRINGS
 
 Signals
 -------

@@ -34,7 +34,7 @@ Pipeline
        Markers -- Context --> CtxByKey[Context by key]
        Markers -- DUrl --> UrlProv[URL provider]
        Markers -- DQuery --> QueryProv[Query provider]
-       Markers -- DForm --> FormProv[Form provider]
+       Markers -- form or DForm or class --> FormProv[Form provider]
        Markers -- name match --> NameProv[Context or URL kwargs by name]
 
 Modules
