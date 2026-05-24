@@ -13,7 +13,8 @@ This page covers the public surface of the module and the patterns for testing p
 Choose the Right Helper
 -----------------------
 
-``next.testing`` groups its helpers into focused submodules covering the client, isolation, signal capture, rendering, loaders, HTML assertions, patching, action helpers, and dependency context builders.
+``next.testing`` groups its helpers into focused submodules.
+The submodules cover the client, isolation, signal capture, rendering, loaders, HTML assertions, patching, action helpers, and dependency context builders.
 The table below maps each testing goal to the helper and its import path.
 
 .. list-table::
@@ -72,10 +73,21 @@ See :doc:`/content/ref/testing` for generated signatures.
 Boot the Suite
 --------------
 
-Set ``DJANGO_SETTINGS_MODULE`` in ``pytest.ini`` so pytest-django can configure Django before collecting tests.
-Run the suite with ``uv run pytest``.
-The ``next.testing`` helpers assume the app registry is populated; ``pytest-django`` does this automatically.
-A stdlib ``unittest`` suite calls ``django.setup()`` once before importing any ``next.testing`` helper.
+The ``next.testing`` helpers assume the app registry is populated before any helper is imported.
+
+Pytest.
+   Set ``DJANGO_SETTINGS_MODULE`` in ``pytest.ini`` so ``pytest-django`` can configure Django before collecting tests.
+   Run the suite with ``uv run pytest``.
+
+   .. code-block:: ini
+      :caption: pytest.ini
+
+      [pytest]
+      DJANGO_SETTINGS_MODULE = config.settings
+      python_files = test_*.py
+
+Stdlib ``unittest``.
+   Call ``django.setup()`` once before importing any ``next.testing`` helper, then run the suite with the standard runner.
 
 Isolate Registries
 ------------------
@@ -121,7 +133,8 @@ Tests that write ``template.djx`` or ``page.py`` files to ``tmp_path`` need both
 .. note::
 
    When ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK``, bulk import of ``component.py`` modules from configured component roots is skipped during ``AppConfig.ready``.
-   After ``reset_registries()``, decorator side effects from those modules are absent until resolve time unless you call ``eager_load_components()`` from ``next.testing.loaders``, which imports every registered ``component.py`` regardless of the flag.
+   After ``reset_registries()``, decorator side effects from those modules are absent until resolve time.
+   Call ``eager_load_components()`` from ``next.testing.loaders`` to import every registered ``component.py`` regardless of the flag.
 
    .. code-block:: python
       :caption: conftest.py, eager loading with lazy modules
@@ -138,20 +151,21 @@ Tests that write ``template.djx`` or ``page.py`` files to ``tmp_path`` need both
           reset_registries()
 
    With the default ``LAZY_COMPONENT_MODULES = False``, all registrations are in place after ``AppConfig.ready``, so the extra call is unnecessary.
-
-   ``eager_load_pages(base_dir)`` is a separate helper that imports every ``page.py`` under a given directory.
-   Use it when a test suite does not go through the full request cycle and must trigger ``@context`` and ``@action`` side-effects manually.
-   ``clear_loaded_dirs()`` drops the per-directory memoisation so a later ``eager_load_pages`` call re-imports.
-   It is needed only when a test rewrites ``page.py`` files on disk within a single session.
    See :ref:`ref-settings` for the full description of ``LAZY_COMPONENT_MODULES``.
+
+Eager Page Loading
+~~~~~~~~~~~~~~~~~~
+
+``eager_load_pages(base_dir)`` imports every ``page.py`` under a given directory.
+Use it when a test suite does not go through the full request cycle and must trigger ``@context`` and ``@action`` side-effects manually.
+``clear_loaded_dirs()`` drops the per-directory memoisation so a later ``eager_load_pages`` call re-imports.
+It is needed only when a test rewrites ``page.py`` files on disk within a single session.
 
 NextClient
 ----------
 
-``NextClient`` is a thin subclass of Django's ``Client`` that adds ``post_action`` and ``get_action_url``, both of which resolve an action name through ``resolve_action_url``.
-It does nothing special on creation.
-The file router builds lazily through Django's URL resolver on the first request.
-Use it for end to end HTTP tests.
+``NextClient`` is a thin subclass of Django's ``Client`` that adds ``post_action`` and ``get_action_url``.
+Both resolve an action name through ``resolve_action_url`` before delegating to the underlying client.
 
 .. code-block:: python
    :caption: tests/test_index.py
@@ -201,6 +215,21 @@ Use ``next.testing.rendering`` to render a page without an HTTP round trip.
 It does not invoke a ``render()`` function declared in ``page.py``.
 Use ``NextClient`` for pages whose body is built by ``render()``.
 Use it for snapshot tests and template assertion tests that do not need URL routing.
+
+Pass an ``HttpRequest`` as the second positional argument to supply a custom request.
+When omitted the helper synthesises one through ``RequestFactory().get("/")`` so context functions and the static collector see a real request object.
+Extra keyword arguments are forwarded to the underlying ``page.render`` call as URL kwargs, which feeds them into ``DUrl`` markers and other URL-scoped providers.
+
+.. code-block:: python
+   :caption: render with a custom request
+
+   from django.test import RequestFactory
+   from next.testing.rendering import render_page
+
+   def test_index_with_request() -> None:
+       request = RequestFactory().get("/?debug=1")
+       html = render_page("notes/pages/page.py", request)
+       assert "Notes" in html
 
 Capture Signals
 ---------------
@@ -309,9 +338,7 @@ HTML Utilities
        )
        assert_has_class(html, "note-card")
 
-``find_anchor`` returns the matching anchor tag.
-It accepts an ``href`` keyword that matches the anchor ``href`` exactly and a ``text`` keyword that matches a substring against the anchor's stripped inner text.
-It raises ``LookupError`` when no anchor matches the filters.
+``find_anchor`` returns the matching anchor tag and raises ``LookupError`` when no anchor matches the filters, see :func:`next.testing.html.find_anchor` for the accepted keywords.
 ``assert_has_class`` and ``assert_missing_class`` check the class list of the first start tag in the fragment.
 
 Patching
@@ -342,6 +369,8 @@ Patching
 
 A ``StaticCollectorProxy`` is yielded by ``patch_static_collector(capture=True)``.
 Its ``.collector`` attribute holds the collector built inside the block, so a test can assert on the emitted styles and scripts without parsing HTML.
+Pass ``factory=`` to swap the collector implementation entirely.
+The callable runs in place of the default ``create_collector`` and returns a custom ``StaticCollector`` for the duration of the block.
 
 Use ``patch_static_collector(capture=True)`` to inspect which assets a page emits:
 

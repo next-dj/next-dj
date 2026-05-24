@@ -152,6 +152,8 @@ Tests assert the same flow.
        assert not Note.objects.filter(pk=note.id).exists()
 
 The ``_url_param_id`` key in the POST data mirrors the hidden field that the ``{% form %}`` tag emits for a captured URL parameter.
+The dispatcher casts each recovered value to ``int`` when the cast succeeds and falls back to the original string when it does not, so a handler can declare ``DUrl["id", int]`` and receive the integer on both the initial render and the re-render.
+Annotate the parameter as ``DUrl["id", str]`` to opt out of the int-first coercion.
 
 See Also
 --------

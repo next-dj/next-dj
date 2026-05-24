@@ -29,14 +29,11 @@ The provider claims any parameter whose annotation origin is ``DFlag`` and reads
 .. code-block:: python
    :caption: flags/providers.py
 
-   from typing import TYPE_CHECKING, get_args, get_origin
+   import inspect
+   from typing import get_args, get_origin
    from next.deps import DDependencyBase, RegisteredParameterProvider
+   from next.deps.context import ResolutionContext
    from .cache import get_cached_flag
-
-   if TYPE_CHECKING:
-       import inspect
-
-       from next.deps.context import ResolutionContext
 
    class DFlag[T](DDependencyBase[T]):
        """Annotate a parameter with `DFlag[Flag]` to inject the matching `Flag`."""
@@ -113,42 +110,45 @@ The next ``get_cached_flag`` call refetches from the database.
    :caption: flags/receivers.py
 
    from django.db.models.signals import post_delete, post_save
-   from django.dispatch import receiver
    from .cache import invalidate_flag
    from .models import Flag
 
-   @receiver(post_save, sender=Flag)
    def _invalidate_on_save(sender: type[Flag], instance: Flag, **_: object) -> None:  # noqa: ARG001
        """Drop the cached entry so the next read reflects the updated row."""
        invalidate_flag(instance.name)
 
-   @receiver(post_delete, sender=Flag)
    def _invalidate_on_delete(sender: type[Flag], instance: Flag, **_: object) -> None:  # noqa: ARG001
        """Drop the cached entry when the flag is removed from the database."""
        invalidate_flag(instance.name)
 
+   def connect() -> None:
+       post_save.connect(_invalidate_on_save, sender=Flag)
+       post_delete.connect(_invalidate_on_delete, sender=Flag)
+
 Wire the provider and receivers at app ready
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Import the provider and receiver modules from ``AppConfig.ready``.
-The provider registers itself with the resolver on import.
-The receivers connect to the model signals.
+``flags.providers`` registers ``FlagProvider`` with the resolver as a side effect of import, so a top-level import of the module is enough.
+``flags.receivers`` exposes a ``connect`` helper that ``AppConfig.ready`` calls, which keeps the actual signal wiring out of import time.
 
 .. code-block:: python
    :caption: flags/apps.py
 
    from django.apps import AppConfig
+   from flags import providers, receivers
+
+   _ = providers
 
    class FlagsConfig(AppConfig):
        default_auto_field = "django.db.models.BigAutoField"
        name = "flags"
 
        def ready(self) -> None:
-           """Import provider and receiver modules so DI and signals wire up."""
-           from flags import providers, receivers  # noqa: F401, PLC0415
+           """Connect receivers once the app registry is populated."""
+           receivers.connect()
 
-The imports run at ready time, not at module top level.
-Importing ``receivers`` earlier would reach ``@receiver(post_save, sender=Flag)`` before the app registry knows ``Flag``.
+The ``_ = providers`` line documents the intentional side-effect import.
+``receivers.connect`` runs at ready time, so the signal connections happen after the app registry knows ``Flag``.
 
 Consume the marker in a component
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -224,8 +224,8 @@ The banner appears.
 Set ``enabled`` to ``False`` and save.
 The ``post_save`` receiver drops the cached entry, the next ``get_cached_flag`` call refetches, and the banner collapses to an empty string.
 
-A second context function that also asks for ``DFlag[Flag]`` receives the same instance.
-The request-scoped cache calls the provider once per resolution pass.
+A second context function that also asks for ``DFlag[Flag]`` triggers the provider again on the same request, but ``get_cached_flag`` shares Django's :class:`~django.core.cache.backends.locmem.LocMemCache` entry, so the lookup is served from process memory rather than the database.
+The framework's per-resolution cache only memoises ``Depends("name")`` callables, so identity across calls comes from the LocMem cache the helper builds.
 
 See Also
 --------

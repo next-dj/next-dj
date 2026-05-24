@@ -125,18 +125,8 @@ Custom renderers can branch on ``kind`` without re instantiating the widget.
 Shared Dependency Cache Across Re-render
 ----------------------------------------
 
-The dispatcher saves the dependency cache from the initial render of a form page.
-On a failed POST the cache is reattached to the re-rendered page so context functions and providers do not run twice.
-Two consequences flow from this.
-
-Idempotent providers.
-   Custom providers must not depend on a fresh evaluation between initial render and re-render.
-   The cache holds the value from the first call.
-
-Cheap re-render.
-   Form pages re-render quickly because layouts, context functions, and components reuse cached values.
-
-The framework exposes the cache through ``next.deps.get_request_dep_cache`` when an action needs to read it.
+The dispatcher reuses one dependency cache across the initial bind and the re-render, so providers run once and templates rebuild cheaply.
+See :ref:`topics-forms-validation-rerender` for the mechanics and the ``get_request_dep_cache`` access path.
 
 Spec vs Bound Form
 ------------------
@@ -158,18 +148,27 @@ Render a Form in a Different Engine
 
 Use the spec to ship form structure to a Jinja2 macro or a JSON consumer.
 Each spec is a frozen dataclass, so a custom renderer can read its fields directly or build its own plain-dict projection.
+A bare Django ``Form`` is not JSON-encodable, so a form destined for ``@context(..., serialize=True)`` must travel as a ``FormSpec`` (or a custom projection) rather than as the form instance itself.
 
 Snapshot Diffing
 ~~~~~~~~~~~~~~~~
 
-Cache a ``FormSpec`` from one render and compare against the spec of the next render to detect added or removed fields.
-The frozen dataclass implements ``__eq__`` automatically.
+The dataclass ``__eq__`` does not detect structural drift on its own because ``FieldSpec.bound`` carries a Django ``BoundField`` without value equality.
+Compare on stable attributes instead.
+
+.. code-block:: python
+   :caption: detect added or removed fields
+
+   def field_names(spec: FormSpec) -> tuple[str, ...]:
+       return tuple(field.bound.name for section in spec.sections for field in section.fields)
+
+   added = set(field_names(new_spec)) - set(field_names(old_spec))
+   removed = set(field_names(old_spec)) - set(field_names(new_spec))
 
 System Integration
 ~~~~~~~~~~~~~~~~~~
 
-The Django admin example uses ``form_spec`` to render forms inside the admin chrome while keeping all dispatch behaviour inside next.dj.
-See ``examples/admin`` for the complete walkthrough.
+Use ``form_spec`` to render a form inside another rendering layer such as the Django admin while keeping dispatch on next.dj.
 
 See Also
 --------

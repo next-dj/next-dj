@@ -142,7 +142,7 @@ class UrlByAnnotationProvider(RegisteredParameterProvider):
         raw = url_kwargs.get(key)
         if raw is None:
             return None
-        return _coerce_url_value(str(raw), _url_type_hint(args))
+        return _coerce_url_value(raw, _url_type_hint(args))
 
 
 def _url_type_hint(args: tuple[object, ...]) -> type:
@@ -177,9 +177,7 @@ class UrlKwargsProvider(RegisteredParameterProvider):
         hint = (
             param.annotation if param.annotation is not inspect.Parameter.empty else str
         )
-        if hint is str or hint is inspect.Parameter.empty:
-            return str(raw)
-        return _coerce_url_value(str(raw), hint)
+        return _coerce_url_value(raw, hint)
 
 
 class QueryParamProvider(RegisteredParameterProvider):

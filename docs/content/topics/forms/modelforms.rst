@@ -1,7 +1,7 @@
 .. _topics-forms-modelforms:
 
-ModelForm Support
-=================
+ModelForms
+==========
 
 A :doc:`ModelForm <django:topics/forms/modelforms>` adapts a Django model to a form.
 next.dj supports ModelForms anywhere a plain ``Form`` works.
@@ -151,6 +151,8 @@ A custom DI provider can centralise the instance lookup.
                return model_cls.objects.get(pk=pk)
            except model_cls.DoesNotExist as exc:
                raise Http404 from exc
+
+Subclassing ``RegisteredParameterProvider`` auto-registers the provider with the dependency resolver at import time, so importing ``notes/providers.py`` is enough to wire it.
 
 The handler can now take the instance directly.
 

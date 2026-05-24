@@ -223,6 +223,15 @@ The table below lists the public package, its primary narrative page, and its re
    * - ``next.signals``
      - :doc:`/content/topics/signals`
      - :doc:`/content/ref/signals`
+   * - ``next.utils``
+     - :doc:`/content/topics/file-router`
+     - :doc:`/content/ref/utils`
+   * - ``next.checks``
+     - :doc:`/content/faq/troubleshooting`
+     - :doc:`/content/ref/system-checks`
+   * - ``next.templatetags``
+     - :doc:`/content/topics/static-assets/template-tags`, :doc:`/content/topics/forms/templates`
+     - :doc:`/content/ref/template-tags`
 
 When you edit the signal aggregator in ``next/signals.py``, update :doc:`/content/topics/signals` and :doc:`/content/ref/signals` so every re-exported name and payload matches the module.
 

@@ -78,7 +78,8 @@ The sender is ``FormActionDispatch``.
 The payload carries ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
 
 ``form``.
-   The bound form after successful validation, or ``None`` for a handler-only action registered without a ``form_class``.
+   The bound form after the handler returns normally and the response has been coerced, or ``None`` for a handler-only action registered without a ``form_class``.
+   A handler that raises an exception aborts the dispatch and the signal does not fire.
 
 ``url_kwargs``.
    A copy of the URL kwargs the dispatcher resolved before invoking the handler.

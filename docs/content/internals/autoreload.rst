@@ -49,16 +49,22 @@ The pipeline is wired by ``next.apps.autoreload.install()``, which ``NextFramewo
 Modules
 -------
 
+Installer
+~~~~~~~~~
+
 ``next.apps.autoreload``.
    ``install()`` swaps ``StatReloader`` and connects the watch signal.
    ``uninstall()`` restores the previous reloader. Test suites that call ``AppConfig.ready`` multiple times use it to avoid double-patching.
 
-``next.server.autoreload`` (distinct from ``next.apps.autoreload``, the installer above).
+Runtime
+~~~~~~~
+
+``next.server.autoreload``.
    ``NextStatReloader`` extends the Django stat reloader and also restarts the process when the discovered route set changes.
 
 ``next.server.watcher``.
-   ``iter_all_autoreload_watch_specs`` collects watch specs from every registered subsystem.
-   ``FilesystemWatchContributor`` is the Protocol a subsystem implements to contribute ``(root, glob)`` watch specs through an ``iter_watch_specs`` method.
+   ``iter_all_autoreload_watch_specs`` returns the deduplicated list of built-in specs plus pairs registered through ``register_autoreload_watch_spec``.
+   ``FilesystemWatchContributor`` is a runtime-checkable protocol exported for type annotations only and is not iterated at runtime.
 
 ``next.server.roots``.
    ``get_framework_filesystem_roots_for_linking`` returns the canonical page and component directory roots for build tooling.
@@ -74,7 +80,7 @@ A watch spec is a tuple of a root path and one glob pattern.
 User code calls ``iter_all_autoreload_watch_specs`` instead, which wraps the built-in set with the registered extra specs.
 
 - Each page root contributes a ``**/page.py`` spec.
-- Each page root paired with its components folder name contributes a ``**/<components>/**/component.py`` spec.
+- Each page root paired with its components folder name contributes a ``**/_components/**/component.py`` spec.
 - Each extra component root from ``DEFAULT_COMPONENT_BACKENDS`` contributes a ``**/component.py`` spec.
 
 Only Python entrypoints are watched.
@@ -114,7 +120,7 @@ Custom routers subscribe to ``watch_specs_ready`` to register additional pattern
 Extension Points
 ----------------
 
-- Implement a custom backend that contributes its own watch specs through the subsystem watch module.
+- Register extra ``(path, glob)`` pairs from ``AppConfig.ready`` through ``register_autoreload_watch_spec``.
 - Subscribe to ``router_reloaded`` for in process cache refresh.
 - Subscribe to ``watch_specs_ready`` for diagnostic logging during development.
 

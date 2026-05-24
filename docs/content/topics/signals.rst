@@ -112,7 +112,8 @@ Receiver Patterns
 
 Connect once at startup.
 
-The import sits inside ``ready`` because Django's app registry is not fully initialised at module import time, making this the one approved exception to the module-level import rule.
+Django's app registry is not fully initialised at module import time, so the receiver import lives inside ``ready``.
+This is the one approved exception to the module-level import rule.
 
 .. code-block:: python
    :caption: notes/apps.py
@@ -123,7 +124,7 @@ The import sits inside ``ready`` because Django's app registry is not fully init
        name = "notes"
 
        def ready(self) -> None:
-           from notes import receivers  # noqa: F401
+           from notes import receivers  # noqa: F401, PLC0415
 
 Use ``django.dispatch.receiver`` to connect a callable to a signal.
 
@@ -149,7 +150,20 @@ They run in registration order.
 Disconnecting
 ~~~~~~~~~~~~~
 
-Call ``signal.disconnect`` when a receiver should stop firing.
+Call ``signal.disconnect(receiver)`` when a receiver should stop firing.
+The same ``dispatch_uid`` passed to ``connect`` can be supplied to ``disconnect`` so a receiver wired by string identifier can also be removed by that identifier.
+
+.. code-block:: python
+   :caption: notes/receivers.py
+
+   from next.signals import action_dispatched
+
+   def log_dispatch(sender, **kwargs) -> None:
+       ...
+
+   action_dispatched.connect(log_dispatch, dispatch_uid="notes.log_dispatch")
+   action_dispatched.disconnect(dispatch_uid="notes.log_dispatch")
+
 The ``SignalRecorder`` from ``next.testing.signals`` disconnects its receivers on context-manager exit, or when ``stop()`` is called explicitly.
 
 Test Helpers

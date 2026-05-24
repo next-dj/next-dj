@@ -24,11 +24,17 @@ They are re-read on render with mtime-based invalidation.
 Watcher
 ~~~~~~~
 
-``FilesystemWatchContributor`` is a runtime-checkable protocol for objects that yield ``(root, glob)`` pairs through ``iter_watch_specs``. Each pair is a filesystem root and a glob pattern relative to that root, both consumed by ``StatReloader.watch_dir``. The watcher collects contributor specs through ``iter_all_autoreload_watch_specs`` and feeds the deduplicated list to the reloader.
+``register_autoreload_watch_spec(path, glob)`` registers one extra directory and glob pair with the watcher.
+Call it from your own ``AppConfig.ready`` to have additional trees watched without changing the ``next`` package.
+The built-in specs for pages and filesystem components are derived from ``NEXT_FRAMEWORK`` and need no registration.
 
-``register_autoreload_watch_spec(path, glob)`` registers one extra directory and glob pair with the watcher. Call it from your own ``AppConfig.ready`` to have additional trees watched without changing the ``next`` package. The built-in specs for pages and filesystem components are derived from ``NEXT_FRAMEWORK`` and need no registration.
+``iter_all_autoreload_watch_specs`` returns the deduplicated list of built-in watch specs together with every pair registered through ``register_autoreload_watch_spec``.
+Each entry is a ``(path, glob)`` tuple consumed by ``StatReloader.watch_dir``.
+The function emits the ``watch_specs_ready`` signal on every call so subscribers can inspect the resolved set.
 
-``iter_all_autoreload_watch_specs`` resolves the complete spec set, the built-in roots plus every registered extra spec, and emits the ``watch_specs_ready`` signal so subscribers can inspect or augment the result.
+``FilesystemWatchContributor`` is a runtime-checkable protocol declaring a single ``iter_watch_specs()`` method.
+It is exported for type annotations only.
+The watcher does not iterate contributors at runtime, so registration goes through ``register_autoreload_watch_spec``.
 
 .. automodule:: next.server.watcher
    :members:

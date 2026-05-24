@@ -119,7 +119,7 @@ The shared directory ships static files alongside components.
    ]
 
 The Django static files finder picks up files from both directories.
-Co-located CSS and JS from shared components are emitted by the static collector.
+The static collector emits co-located CSS and JS sitting next to any component, page, or layout in either tree.
 
 Shared Components Convention
 ----------------------------
@@ -163,8 +163,10 @@ Prefer distinct names for project-specific components over relying on this order
 Hot Reload
 ----------
 
-Every directory listed in a component backend ``DIRS``, including the shared ``_shared/_components/`` root, contributes its own ``**/component.py`` watch spec to the :doc:`autoreloader </content/internals/autoreload>`.
-A change to a ``component.py`` inside ``_shared/_components/`` restarts the development server for every project that watches that root.
+Every directory listed in a component backend ``DIRS`` contributes its own ``**/component.py`` watch spec to the :doc:`autoreloader </content/internals/autoreload>`.
+The shared ``_shared/_components/`` root participates the same way.
+Each project runs its own development server with its own reloader process.
+A change to a ``component.py`` inside ``_shared/_components/`` restarts only the project processes whose configuration includes that root.
 
 The ``components_registered`` signal includes the full set after each reload so long-lived processes can refresh their caches.
 

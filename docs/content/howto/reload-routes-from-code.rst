@@ -17,7 +17,8 @@ The framework rebuilds every backend from the current configuration, clears the 
 Walkthrough
 -----------
 
-Wire the receiver.
+Wire the receivers.
+Each receiver is decorated with ``@receiver`` at module top level, and ``AppConfig.ready`` imports the module so the decorators run once on startup.
 
 .. code-block:: python
    :caption: notes/receivers.py
@@ -28,11 +29,14 @@ Wire the receiver.
    from notes.models import Note
 
    @receiver(post_save, sender=Note)
-   @receiver(post_delete, sender=Note)
-   def reload_router(**_kwargs) -> None:
+   def reload_router_on_save(**_kwargs) -> None:
        router_manager.reload()
 
-Connect the receiver from ``AppConfig.ready`` so it runs at startup.
+   @receiver(post_delete, sender=Note)
+   def reload_router_on_delete(**_kwargs) -> None:
+       router_manager.reload()
+
+Import the receivers module from ``AppConfig.ready`` so the decorators run at startup.
 
 .. code-block:: python
    :caption: notes/apps.py

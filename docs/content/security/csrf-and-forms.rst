@@ -28,17 +28,17 @@ Origin Validation
 The framework adds a second hidden field named ``_next_form_page`` with the absolute path to the rendering page.
 The dispatcher validates the path before invoking the handler.
 
-Several checks apply.
+Two checks apply, and they fail in different ways.
 
-The posted path must resolve under ``settings.BASE_DIR``.
+The posted ``_next_form_page`` must resolve under ``settings.BASE_DIR``.
 It must name ``page.py`` (the framework stores the absolute path to that module).
 Either the file must exist, or the directory must contain a sibling ``template.djx`` so virtual routes can re-render after validation failures.
+A submission that fails this check returns HTTP 400 and the handler does not run.
 
 The hidden field ``_next_form_origin`` carries a same-site path that starts with ``/`` and not with ``//``.
-The ``{% form %}`` tag emits it on every render, and ``redirect_to_origin`` falls back to ``/`` when it is missing.
+The ``{% form %}`` tag emits it on every render.
+A missing or off-site value never blocks dispatch, ``redirect_to_origin`` simply falls back to ``/``.
 Handlers can call ``redirect_to_origin`` from ``next.forms`` to redirect back to the page that rendered the form.
-
-A submission that fails these checks returns HTTP 400 and the handler does not run.
 
 Manual Forms
 ------------
@@ -49,7 +49,7 @@ A hand crafted ``<form>`` element bypasses these guarantees, so prefer the tag.
 
 When a hand crafted form is unavoidable, render the tag once and copy the generated markup, or keep the form inside a ``{% form %}`` block and add only the extra fields you need.
 
-The ``current_page_module_path`` variable is published by the framework on every rendered page.
+The framework publishes the ``current_page_module_path`` variable on every rendered page, so a hand crafted form can read the origin path from the template context when no ``{% form %}`` block emits the hidden field.
 
 GET Forms
 ---------
@@ -97,7 +97,8 @@ The simplest way to obtain the origin path is to read the hidden ``_next_form_pa
 
 This works because every ``{% form %}`` block emits the ``_next_form_page`` hidden field.
 
-To post without a rendered form, re-publish the existing ``current_page_module_path`` value with ``@context("current_page_module_path", serialize=True)`` so it reaches ``window.Next.context``.
+To post without a rendered form, re-publish the existing value through a callable that resolves it from the page context.
+Declare a ``page.py`` callable annotated ``path: str = Context("current_page_module_path")`` and decorate it with ``@context("current_page_module_path", serialize=True)`` so the value reaches ``window.Next.context``.
 
 Cross Origin Requests
 ---------------------

@@ -37,12 +37,13 @@ Register the action.
 .. code-block:: python
    :caption: notes/pages/notes/bulk/page.py
 
+   from django.forms.formsets import BaseFormSet
    from django.http import HttpResponseRedirect
    from django.urls import reverse
    from next.forms import action
    from notes.forms import NoteFormSet
 
-   def build_bulk_formset() -> tuple[type[NoteFormSet], dict]:
+   def build_bulk_formset() -> tuple[type[BaseFormSet], dict]:
        return NoteFormSet, {}
 
    @action("bulk_create", form_class=build_bulk_formset)

@@ -29,18 +29,12 @@ Its only contract is ``generate_urls``, which returns the patterns the backend c
 .. code-block:: python
    :caption: wiki/backends.py
 
-   from __future__ import annotations
-   from typing import TYPE_CHECKING
+   from collections.abc import Callable
    from django.apps import apps as django_apps
    from django.db.utils import DatabaseError
-   from django.urls import URLPattern, path
+   from django.urls import URLPattern, URLResolver, path
    from next.conf import next_framework_settings
    from next.urls import FileRouterBackend
-
-   if TYPE_CHECKING:
-       from collections.abc import Callable
-
-       from django.urls import URLResolver
 
    PUBLIC_PREFIX = "wiki"
 

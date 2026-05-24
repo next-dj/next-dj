@@ -57,6 +57,13 @@ Verification
 Editing ``apps.py`` restarts the dev server, so the new stem registration is live on the next boot.
 Reload a page that uses the file and confirm the asset appears in the rendered HTML.
 
+Confirm the staticfiles finder picks the new file up.
+
+.. code-block:: bash
+   :caption: shell
+
+   uv run python manage.py findstatic next/notes/pages/page.css
+
 See Also
 --------
 

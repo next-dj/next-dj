@@ -63,8 +63,7 @@ Terms used throughout the next.dj documentation.
 
    JS context policy
       Algorithm class that resolves duplicate serialised keys for ``window.Next.context``.
-      The built-in classes are ``FirstWinsPolicy``, ``LastWinsPolicy``, ``RaiseOnConflictPolicy``, and ``DeepMergePolicy``.
-      Selected through ``JS_CONTEXT_POLICY`` inside static backend ``OPTIONS``. See :doc:`/content/topics/static-assets/js-context`.
+      Selected through ``JS_CONTEXT_POLICY`` inside static backend ``OPTIONS``, see :doc:`/content/topics/static-assets/js-context`.
 
    NextScriptBuilder
       Constructs the ``next.min.js`` tag, preload link, and ``Next._init`` shell.
@@ -76,6 +75,7 @@ Terms used throughout the next.dj documentation.
    manager
       The singleton orchestrator for one subsystem.
       Examples include ``page``, ``components_manager``, ``router_manager``, ``form_action_manager``.
+      ``page`` is the outlier without a ``_manager`` suffix because the rendering manager is exposed as a decorator-style facade rather than a named singleton.
 
    origin page
       The page that rendered a form.

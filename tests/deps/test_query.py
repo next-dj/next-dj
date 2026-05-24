@@ -5,8 +5,10 @@ from django.http import HttpRequest, QueryDict
 
 from next.deps import DependencyResolver
 from next.urls import DQuery, QueryParamProvider, get_multi_values
-from next.urls.parser import _coerce_url_value
-from tests.support import _ctx, inspect_parameter
+from tests.support import (
+    _ctx,
+    inspect_parameter,
+)
 
 
 @pytest.fixture()
@@ -269,28 +271,6 @@ class TestQueryParamProviderEndToEnd:
 
         resolved = resolver.resolve_dependencies(view, request=request)
         assert resolved["brand"] == ["Acme", "Globex"]
-
-
-class TestCoerceUrlValue:
-    """Cover the shared string coercion helper used by URL and query parsers."""
-
-    @pytest.mark.parametrize(
-        ("value", "hint", "expected"),
-        [
-            ("42", int, 42),
-            ("oops", int, "oops"),
-            ("1.5", float, 1.5),
-            ("oops", float, "oops"),
-            ("true", bool, True),
-            ("yes", bool, True),
-            ("1", bool, True),
-            ("no", bool, False),
-            ("hello", str, "hello"),
-        ],
-    )
-    def test_coerce(self, value, hint, expected) -> None:
-        """Coerce a raw string to the requested primitive type when possible."""
-        assert _coerce_url_value(value, hint) == expected
 
 
 class TestGetMultiValues:

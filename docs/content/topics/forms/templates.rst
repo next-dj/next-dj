@@ -29,7 +29,7 @@ The tag does six things.
 2. Emits a ``<form method="post">`` element with ``action`` set to ``/_next/form/<uid>/``.
 3. Emits a hidden ``csrfmiddlewaretoken`` input with the current CSRF token.
 4. Emits a hidden ``_next_form_page`` field with the absolute path to the current ``page.py``.
-5. Emits a hidden ``_next_form_origin`` field with the request path of the rendering page, consumed by ``redirect_to_origin``.
+5. Emits a hidden ``_next_form_origin`` field set to ``request.path`` verbatim, consumed by ``redirect_to_origin``.
 6. Publishes a ``form`` variable inside the block, either the unbound form on a GET or the bound form on a re-rendered failure.
 
 The Action Reference
@@ -85,7 +85,9 @@ Captured URL Parameters
 -----------------------
 
 The tag does not need any argument to forward captured URL parameters.
-When the page URL captures a parameter the tag emits a hidden ``_url_param_<name>`` field for every captured kwarg in ``request.resolver_match.kwargs``, skipping the dispatch ``uid`` and any name reserved by the dependency resolver.
+
+At render time the tag reads ``request.resolver_match.kwargs`` and emits a hidden ``_url_param_<name>`` field for every captured kwarg, skipping the dispatch ``uid`` and any name reserved by the dependency resolver.
+The captured values come from the URL converters of the rendering page.
 
 .. code-block:: jinja
    :caption: notes/pages/notes/[id]/template.djx
@@ -97,7 +99,11 @@ When the page URL captures a parameter the tag emits a hidden ``_url_param_<name
 
 A page whose URL captures ``id`` therefore posts a hidden ``_url_param_id`` field automatically.
 The handler receives the same value through ``DUrl["id", int]`` or any other URL marker.
-On the POST the dispatcher reads these hidden ``_url_param_*`` fields back into the handler's URL kwargs, since the dispatch URL itself captures only the action UID.
+
+On the POST the dispatch URL captures only the action UID.
+The dispatcher recovers the page URL kwargs by reading every ``_url_param_*`` field from ``request.POST``, stripping the prefix from each name.
+Each recovered value is a string from the form body, so the dispatcher tries ``int(value)`` first and falls back to the original string when the cast fails.
+Declare the handler parameter as ``DUrl["id", int]`` to keep the int shape on both the initial render and the re-render, or as ``DUrl["id", str]`` to opt out of the int-first coercion.
 
 The form Variable
 -----------------
@@ -115,6 +121,7 @@ Re-rendered page after a failing POST.
 
 The tag does not read a ``form`` context key.
 On the initial render it reads a context key named after the action that holds a ``SimpleNamespace`` with a ``form`` attribute, and falls back to building that namespace itself when the key is absent.
+A namespaced action name contains ``:`` and is not addressable from the template scope, so its context lookup runs in Python only.
 Customise the initial form by overriding ``get_initial`` on the form class rather than publishing a ``form`` context.
 
 .. code-block:: python

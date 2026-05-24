@@ -14,7 +14,6 @@ Prerequisites
 You have finished :doc:`tutorial02`.
 The root layout publishes ``site_name``, ``tagline``, and ``note_count``.
 The detail page at ``/notes/<id>/`` renders one note from the URL.
-:doc:`tutorial04` adds form actions on top of this component-driven UI.
 
 Walkthrough
 -----------

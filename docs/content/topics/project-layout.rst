@@ -118,7 +118,9 @@ When you need to override a single key inside ``DEFAULT_PAGE_BACKENDS`` without 
        )
    }
 
-The helper merges the new dict into the existing first backend entry.
+The helper deep copies the default list and patches the first backend entry.
+Scalar and list overrides replace the existing value.
+Dict overrides such as ``OPTIONS`` are merged one level deep into the default dict.
 Use it for narrow overrides such as changing the page directory name.
 
 Per Project Page DIRS

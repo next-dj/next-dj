@@ -43,12 +43,13 @@ Pass the formset class as ``form_class``.
 .. code-block:: python
    :caption: notes/pages/notes/bulk/page.py
 
+   from django.forms.formsets import BaseFormSet
    from django.http import HttpResponseRedirect
    from django.urls import reverse
    from next.forms import action
    from notes.forms import NoteFormSet
 
-   def build_bulk_formset() -> tuple[type[NoteFormSet], dict]:
+   def build_bulk_formset() -> tuple[type[BaseFormSet], dict]:
        return NoteFormSet, {"initial": [{"title": "Draft"}]}
 
    @action("bulk_create_notes", form_class=build_bulk_formset)
@@ -147,6 +148,7 @@ Use ``modelformset_factory`` for editing several existing instances.
 
    from types import SimpleNamespace
 
+   from django.forms.formsets import BaseFormSet
    from django.http import HttpResponseRedirect
    from django.urls import reverse
    from next.forms import action
@@ -159,7 +161,7 @@ Use ``modelformset_factory`` for editing several existing instances.
        formset = NoteEditFormSet(queryset=Note.objects.all())
        return SimpleNamespace(form=formset)
 
-   def build_edit_formset() -> tuple[type[NoteEditFormSet], dict]:
+   def build_edit_formset() -> tuple[type[BaseFormSet], dict]:
        return NoteEditFormSet, {"queryset": Note.objects.all()}
 
    @action("edit_all_notes", form_class=build_edit_formset)
@@ -179,52 +181,54 @@ Field errors render on each row through ``row.errors`` and non field errors rend
 Validating an Inline Formset
 ----------------------------
 
-When a parent form owns an inline formset, validate the formset inside the parent form ``clean`` method.
-Raising ``ValidationError`` from ``clean`` routes the failure through the standard re-render pipeline instead of producing a bare error response.
+A parent form that owns an inline formset attaches the formset on construction and validates it inside ``clean``.
+Raising ``ValidationError`` from ``clean`` routes the failure through the standard re-render pipeline.
 
-The framework does not attach the inline formset to the parent form.
-The handler builds the formset and assigns it to the form before calling ``form.is_valid()``.
+Use a factory callable as ``form_class`` so the dispatcher binds the inline formset to the parent form before calling ``form.is_valid()``.
+The factory returns ``(FormClass, init_kwargs)`` and the dispatcher passes those kwargs to the constructor.
+``NoteForm.__init__`` rebinds ``row_formset`` to ``self.data`` with ``instance=self.instance`` so the formset validates against the same POST as the parent form.
 
 .. code-block:: python
    :caption: notes/forms.py
 
-   from django.core.exceptions import ValidationError
+   from django.forms import inlineformset_factory
    from next.forms import ModelForm
+   from notes.models import Note, Row
+
+   RowFormSet = inlineformset_factory(Note, Row, fields=("label",), extra=1)
 
    class NoteForm(ModelForm):
        class Meta:
            model = Note
-           fields = ("title",)
+           fields = ("title", "body")
+
+       def __init__(self, *args, **kwargs):
+           super().__init__(*args, **kwargs)
+           self.row_formset = RowFormSet(
+               data=self.data or None,
+               instance=self.instance,
+               prefix="rows",
+           )
 
        def clean(self):
            cleaned = super().clean()
-           row_formset = getattr(self, "row_formset", None)
-           if row_formset is not None and not row_formset.is_valid():
-               raise ValidationError("Fix the rows before saving.")
+           if not self.row_formset.is_valid():
+               self.add_error(None, "Fix the row errors below.")
            return cleaned
-
-Use a factory callable as ``form_class`` to attach the inline formset before the dispatcher calls ``form.is_valid()``.
-The factory is dependency-resolved, so it fetches the parent instance and constructs the formset at request time.
-It returns ``(FormClass, init_kwargs)`` and the dispatcher creates the form with those kwargs, so ``row_formset`` is already attached when ``is_valid()`` runs.
-The handler receives the already-validated form and calls ``save()`` directly.
 
 .. code-block:: python
    :caption: notes/pages/notes/[id]/edit/page.py
 
-   from django.forms import inlineformset_factory
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
    from next.forms import action
    from next.urls import DUrl
    from notes.forms import NoteForm
-   from notes.models import Note, Row
-
-   RowFormSet = inlineformset_factory(Note, Row, fields=("label",), extra=1)
+   from notes.models import Note
 
    def note_form_factory(note_id: DUrl["id", int]) -> tuple:
        note = get_object_or_404(Note, pk=note_id)
-       row_formset = RowFormSet(prefix="rows")
-       return NoteForm, {"instance": note, "row_formset": row_formset}
+       return NoteForm, {"instance": note}
 
    @action("update_note", form_class=note_form_factory)
    def update_note(form: NoteForm) -> HttpResponseRedirect:
@@ -232,27 +236,7 @@ The handler receives the already-validated form and calls ``save()`` directly.
        form.row_formset.save()
        return HttpResponseRedirect("/")
 
-``NoteForm`` must accept ``row_formset`` in its constructor so ``clean`` can see it.
-
-.. code-block:: python
-   :caption: notes/forms.py (NoteForm additions)
-
-   class NoteForm(ModelForm):
-       def __init__(self, *args, row_formset=None, **kwargs):
-           super().__init__(*args, **kwargs)
-           self.row_formset = row_formset
-
-       def clean(self):
-           row_formset = getattr(self, "row_formset", None)
-           if row_formset is not None and not row_formset.is_valid():
-               raise ValidationError("Row formset has errors.")
-
-       class Meta:
-           model = Note
-           fields = ["title", "body"]
-
-The parent page re-renders with both the parent form errors and the row errors in scope.
-See ``examples/admin`` for a worked inline formset.
+The parent page re-renders with both the parent and the row errors in scope on validation failure.
 
 Common Patterns
 ---------------

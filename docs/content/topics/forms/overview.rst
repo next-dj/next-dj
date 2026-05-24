@@ -11,27 +11,6 @@ This page covers the mental model behind that pipeline.
    :local:
    :depth: 2
 
-Overview
---------
-
-Five things make a form work.
-
-Form class.
-   A subclass of ``next.forms.Form`` or ``next.forms.ModelForm``.
-
-Action.
-   A Python callable decorated with ``@action("name", form_class=...)``.
-
-Template tag.
-   ``{% form @action="name" %}`` opens a block, closed by ``{% endform %}``, that resolves the action UID, posts to its dispatch URL, and injects a CSRF token.
-
-Dispatch endpoint.
-   One URL per action that binds POST data and calls the handler when valid.
-   A non-POST request to a dispatch URL returns HTTP 405.
-
-Re-render pipeline.
-   On validation failure the framework renders the origin page again with the bound form in scope.
-
 Concepts
 --------
 
@@ -64,14 +43,22 @@ The :doc:`dependency resolver </content/topics/dependency-injection>` fills each
        note_id: DUrl["id", int],
        request: HttpRequest,
    ) -> HttpResponseRedirect:
+       form.instance.pk = note_id
        form.save()
-       return HttpResponseRedirect("/")
+       return HttpResponseRedirect(request.path)
 
 Validation Outcomes
 ~~~~~~~~~~~~~~~~~~~
 
-A submission is valid, invalid, handler-only, or malformed.
-See :doc:`validation-rerender` for each outcome and its status code.
+Each POST resolves to one outcome and the dispatcher decides what to send back.
+
+- Valid. The handler runs and its return value reaches the client.
+- Invalid. The origin page re-renders with the bound failing form in scope.
+- Malformed. The dispatcher returns ``HTTP 400`` when the origin reference is missing or unsafe.
+
+The orthogonal axis is whether the action declares a ``form_class``.
+Actions without one skip form construction and call the handler directly.
+See :doc:`actions` for the form-less variant and :doc:`validation-rerender` for the re-render flow.
 
 Where to Declare Actions
 ------------------------

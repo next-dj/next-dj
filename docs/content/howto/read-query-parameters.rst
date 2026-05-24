@@ -14,7 +14,7 @@ Solution
 
 Annotate a ``@context`` parameter with the ``DQuery[T]`` marker.
 The framework reads :attr:`request.GET <django:django.http.HttpRequest.GET>`, coerces the value to the annotated type, and injects it.
-``DQuery`` supports ``str``, ``int``, ``bool``, ``float``, and ``list[T]`` for multi-value parameters.
+``DQuery`` supports ``str``, ``int``, ``bool``, ``float``, ``UUID``, ``Decimal``, ``date``, ``datetime``, and ``list[T]`` for multi-value parameters.
 
 Walkthrough
 -----------
@@ -67,17 +67,28 @@ The annotation drives coercion of the raw query string.
 ``DQuery[bool]``.
    ``True`` when the value is ``1``, ``true``, or ``yes``, case-insensitive. Every other value, including ``0`` and ``false``, is ``False``.
 
+``DQuery[UUID]``.
+   Parsed with :class:`UUID(...) <uuid.UUID>`. A value that does not parse falls back to the raw string.
+
+``DQuery[Decimal]``.
+   Parsed with :class:`Decimal(...) <decimal.Decimal>`. A value that does not parse falls back to the raw string.
+
+``DQuery[date]`` and ``DQuery[datetime]``.
+   Parsed via :meth:`date.fromisoformat <datetime.date.fromisoformat>` and :meth:`datetime.fromisoformat <datetime.datetime.fromisoformat>`. A value that does not parse falls back to the raw string.
+
 ``DQuery[str]``.
    The raw value, unchanged.
 
 ``DQuery[list[T]]``.
-   The value is split across three wire formats in priority order.
-   The plain repeated form ``?brand=Acme&brand=Globex`` wins first.
-   The bracket-suffix form ``?brand[]=Acme&brand[]=Globex`` (emitted by axios and similar clients) is the second fallback.
-   The comma-delimited form ``?brand=Acme,Globex`` is the third fallback.
+   Three wire formats are accepted, but only one is consulted per request.
+   ``request.GET.getlist(name)`` runs first.
+   When it returns more than one value, the plain repeated form ``?brand=Acme&brand=Globex`` is used as-is.
+   When the plain value is empty, the resolver falls back to the bracket form ``?brand[]=Acme&brand[]=Globex``.
+   When the plain value is a single non-empty string that contains a comma, the resolver falls back to the comma-delimited form ``?brand=Acme,Globex``.
    Each element is then coerced using the same rules as the scalar form for ``T``.
 
-A parameter that is absent from the query string receives the declared default, or ``None`` when no default is given.
+A scalar parameter that is absent from the query string receives the declared default, or ``None`` when no default is given.
+A ``DQuery[list[T]]`` parameter that is absent in all three wire formats returns the declared default, or an empty list when no default is given.
 
 Read Several Typed Parameters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

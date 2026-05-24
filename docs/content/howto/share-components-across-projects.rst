@@ -11,8 +11,8 @@ Several Django projects in the same repository should reuse a single UI kit inst
 Scope
 -----
 
-:doc:`/content/topics/multi-project` is the full guide: page ``DIRS``, shared static, autoreload, and naming conventions.
-This page is the shortest path: point ``DEFAULT_COMPONENT_BACKENDS`` at one shared folder.
+:doc:`/content/topics/multi-project` is the full guide and covers page ``DIRS``, shared static, autoreload, and naming conventions.
+This page is the shortest path and points ``DEFAULT_COMPONENT_BACKENDS`` at one shared folder.
 
 Solution
 --------
@@ -86,8 +86,8 @@ A project can override a shared component by placing a component with the same n
 
    projects/admin/admin_app/_components/button/component.djx
 
-The project local version wins because the visibility resolver scores it by scope specificity.
-A component inside the project's own page tree is more specific than a global ``DIRS`` root, so it shadows the shared component of the same name.
+The project local version wins because the visibility resolver scores the project's page-tree root and a global ``DIRS`` root equally and breaks the tie by registration order.
+The page-tree backend registers first during the URL router walk, so its components shadow same-name entries contributed through ``DIRS``.
 
 Static Files
 ~~~~~~~~~~~~

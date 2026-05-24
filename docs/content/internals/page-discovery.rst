@@ -21,17 +21,18 @@ Pipeline
 .. mermaid::
 
    flowchart LR
-       Walk[Filesystem walk] --> Loaders[Template loaders]
-       Loaders --> Manager[Page]
-       Manager --> TemplateCache[Template cache]
+       Walk[Filesystem walk] --> Dispatcher[FilesystemTreeDispatcher]
+       Dispatcher --> Pairs["(url_path, page.py) pairs"]
+       Pairs --> Manager[Page]
        Manager --> ContextReg[Context registry]
-       TemplateCache --> Render[Render request]
-       ContextReg --> Render
-       Render --> InheritedCtx[Inherited page.py context]
+       Manager --> RenderReq[Render request]
+       ContextReg --> RenderReq
+       RenderReq --> Loaders[Template loaders]
+       Loaders --> LayoutCompose[Layout composition]
+       LayoutCompose --> InheritedCtx[Inherited page.py context]
        InheritedCtx --> PageCtx[Page @context functions]
        PageCtx --> Processors[Context processors]
-       Processors --> LayoutCompose[Layout composition]
-       LayoutCompose --> Output[Final HTML body]
+       Processors --> Output[Final HTML body]
 
 Modules
 -------
@@ -63,12 +64,28 @@ Render Path
 
 1. The view loads the page module through the mtime-keyed module memo, reading from disk only when the file changed.
 2. The body source produces the page body string.
-3. ``Page.build_render_context`` assembles the template scope, see `Context Resolution`_ below.
-4. The framework composes the ancestor layout chain, the innermost layout wrapping the page body first and each outer layout wrapping the result.
-5. Each layout substitutes the wrapped content into ``{% block template %}{% endblock template %}``.
+3. The framework composes the ancestor layout chain, the innermost layout wrapping the page body first and each outer layout wrapping the result.
+   Each layout substitutes the wrapped content into ``{% block template %}{% endblock template %}``.
+4. ``Page.build_render_context`` assembles the template scope, see `Context Resolution`_ below.
+5. The composed template string renders against the assembled scope.
 6. The static manager replaces the ``{% collect_styles %}`` and ``{% collect_scripts %}`` placeholder tokens with the rendered tags accumulated by the request-scoped ``StaticCollector``.
 
 When the body source is a ``render`` function that returns an ``HttpResponseBase``, the response is returned verbatim and steps 3 through 6 do not run.
+
+Composed-Template Cache
+-----------------------
+
+``Page`` keeps two parallel dicts that short-circuit the layout composition step when nothing on disk has changed.
+
+``_template_registry``.
+   Maps a ``page.py`` path to its already-composed template string.
+
+``_template_source_mtimes``.
+   Snapshots the modification time of every file that contributed to the composition, including the page body source and each ancestor ``layout.djx``.
+
+On every request ``_is_template_stale`` compares the current mtimes against the snapshot.
+A change to any contributing file evicts the entry, the composition step rebuilds the template string, and the new snapshot is stored.
+The dynamic ``render`` path bypasses this cache entirely, so a ``render`` function that returns a fresh body never poisons the registry.
 
 Layout Composition
 ------------------

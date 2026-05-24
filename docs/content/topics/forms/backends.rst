@@ -91,7 +91,8 @@ An unknown UID returns 404 from the parent dispatch, and the audit row still rec
 See :doc:`/content/howto/write-a-form-action-backend` for the guarded pattern that recovers the action name from the UID index.
 
 The ``validated_next_form_page_path(request)`` helper validates the hidden ``_next_form_page`` POST field and returns a trusted ``Path | None``.
-Call it inside a ``dispatch`` override when the custom backend needs to know which page initiated the form submission — for example, to build a custom redirect target.
+Call it inside a ``dispatch`` override when the custom backend needs to know which page initiated the form submission.
+A custom redirect target keyed off that page is one such case.
 
 Registering a Custom Backend
 ----------------------------
@@ -125,6 +126,22 @@ An override runs inside the dispatch and can change or block the response.
 A signal receiver runs decoupled and only observes.
 Use the override when the side effect must be transactional with the dispatch.
 
+FormActionManager
+-----------------
+
+The module-level ``form_action_manager`` instance holds the active backends behind a thin facade.
+Application code reaches it through ``from next.forms import form_action_manager``.
+See :doc:`/content/ref/forms` for the full member list of ``next.forms.manager``.
+
+Testing
+-------
+
+Tests that register actions through ``@action`` must drop the global registry between cases so action names from one test do not leak into the next.
+Call :func:`next.testing.reset_form_actions` from a pytest fixture or a ``setUp`` method.
+The helper invokes ``form_action_manager._reload_config()``, which rebuilds the backend list from the current ``NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]`` setting and discards any actions registered against the previous backend instances.
+
+See :doc:`/content/topics/testing` for the surrounding helpers and fixtures.
+
 System Checks
 -------------
 
@@ -154,6 +171,8 @@ Custom Error Fragment
 
 Override ``render_form_fragment`` to return custom HTML for the validation error path.
 The override signature is ``render_form_fragment(request, action_name, form, template_fragment=None, *, page_file_path=None)``.
+The bundled ``RegistryFormActionBackend`` ignores ``template_fragment`` and always re-renders the origin page through the page-template loader.
+The argument stays in the signature so an override can use it, but the default implementation does not consult it.
 When no action meta or template body is found, the default implementation falls back to ``form.as_p()``.
 Override ``render_form_fragment`` to replace this fallback entirely.
 

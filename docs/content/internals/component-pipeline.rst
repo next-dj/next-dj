@@ -76,12 +76,13 @@ Resolution Order
 A component reference resolves through the visibility resolver.
 The resolver collects every component visible from the template path, then scores each by scope specificity.
 The highest score wins.
-A component in the template's own page tree outscores a same-named component contributed through ``DIRS``.
-Equal scores fall back first to component name, then to registration order.
+A component nested in a sub-folder of the template's own page tree outscores a same-named component contributed at a tree root or through a ``DIRS`` root.
+A page-tree root and a ``DIRS`` root both score zero, so the tie breaks on registration order.
 
 The full sort key is ``(-score, component.name, registration_position)``.
 Equal scores break first by component name, then by registration order, so the component discovered first shadows a later same-named one.
 Registration order operates inside a single ``FileComponentsBackend``.
+The page-tree backend records its roots during the URL router walk before ``DIRS`` roots are scanned, so its components shadow same-name entries from ``DIRS``.
 Across backends, the order of entries in ``DEFAULT_COMPONENT_BACKENDS`` decides which backend is consulted first.
 
 Two components in the same scope with the same name are reported by ``next.E020``.
@@ -101,7 +102,8 @@ Component Context Resolution
 
 Each ``@component.context("key")`` function runs once per component render.
 When a component's ``component.py`` fails to import, the renderer falls back to plain template rendering and the ``@component.context`` callables in that module do not run.
-On the template render path the resolver shares the request-scoped dependency cache through ``get_request_dep_cache``, so values produced by page level context are visible inside the component.
+On the template render path the resolver shares the request-scoped dependency cache through ``get_request_dep_cache``, so DI parameters resolved earlier in the request are reused inside the component callables.
+Page context values reach the component through the template scope, not through the DI cache.
 A component whose ``component.py`` defines a ``render`` function uses a fresh ``DependencyCache`` for that call instead of the shared request cache.
 The surrounding template scope (props and page context variables) is still forwarded to the resolver as DI parameters.
 The lazy ``csrf_token`` and any ``@component.context`` callables are not run on this path.

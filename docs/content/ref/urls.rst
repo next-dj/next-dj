@@ -24,8 +24,9 @@ Backends
 Manager
 ~~~~~~~
 
-``urlpatterns`` is a ``list`` subclass that rebuilds the router and form-action patterns on each access.
-A route added after import is therefore visible without a process restart.
+``urlpatterns`` is a ``list`` subclass that recollects router and form-action patterns from the active backends on each access.
+The backends themselves are cached by ``router_manager`` and are only rebuilt when ``router_manager.reload()`` runs or when ``DEFAULT_PAGE_BACKENDS`` changes.
+A route added after import is therefore visible without a process restart, but each access still iterates the cached backend list rather than walking the page tree again.
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
 
 .. automodule:: next.urls.manager
@@ -39,6 +40,11 @@ Parser
 
 Dispatcher
 ~~~~~~~~~~
+
+.. admonition:: Deep import path
+
+   The names in ``next.urls.dispatcher`` are not re-exported from ``next.urls``.
+   Import them through the submodule path when a custom backend or test needs to call them directly.
 
 .. automodule:: next.urls.dispatcher
    :members:
@@ -79,6 +85,46 @@ They are exported from ``next.urls`` for introspection and for authors writing c
 
 See :doc:`/content/internals/di-resolver` for the full provider registration sequence and the resolution order.
 
+``DUrl`` and ``DQuery`` both accept ``str``, ``int``, ``bool``, ``float``, ``UUID``, ``Decimal``, ``date``, and ``datetime``.
+``DQuery`` additionally accepts ``list[T]`` for any of those scalars.
+
+The following table is the canonical coercion reference.
+A value that fails to parse falls back to the raw captured string rather than raising.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 35 40
+
+   * - Annotation type
+     - Accepted wire values
+     - Result
+   * - ``str``
+     - Any captured string.
+     - Returned unchanged.
+   * - ``int``
+     - Decimal digit string.
+     - ``int(value)``.
+   * - ``float``
+     - Decimal float string.
+     - ``float(value)``.
+   * - ``bool``
+     - ``"1"``, ``"true"``, ``"yes"`` map to ``True``, anything else to ``False``.
+     - Boolean.
+   * - ``UUID``
+     - Canonical UUID string, or an already parsed :class:`~uuid.UUID`.
+     - :class:`~uuid.UUID` instance.
+   * - ``Decimal``
+     - Numeric string parseable by :class:`~decimal.Decimal`.
+     - :class:`~decimal.Decimal` instance.
+   * - ``date``
+     - ISO 8601 date accepted by :meth:`date.fromisoformat <datetime.date.fromisoformat>`.
+     - :class:`~datetime.date` instance.
+   * - ``datetime``
+     - ISO 8601 datetime accepted by :meth:`datetime.fromisoformat <datetime.datetime.fromisoformat>`.
+     - :class:`~datetime.datetime` instance.
+
+See :doc:`/content/topics/dependency-injection` and :doc:`/content/topics/file-router` for the narrative coverage of each marker.
+
 Signals
 -------
 
@@ -92,6 +138,24 @@ The URL subsystem fires two signals.
    The sender is the ``RouterManager`` class.
 
 See :doc:`signals` and :doc:`/content/topics/signals` for the wider signal catalog.
+
+Checks
+------
+
+``next.urls.checks`` registers Django system checks that validate the URL configuration at startup.
+
+``check_next_pages_configuration``.
+   Validates the ``NEXT_FRAMEWORK['DEFAULT_PAGE_BACKENDS']`` structure, the ``BACKEND`` path, and per-backend ``DIRS``/``APP_DIRS``/``PAGES_DIR``/``OPTIONS`` keys.
+
+``check_duplicate_url_parameters``.
+   Fails with :ref:`next.E028 <ref-system-checks>` when one route repeats a captured parameter name.
+
+``check_url_patterns``.
+   Fails with :ref:`next.E015 <ref-system-checks>` when two file routes resolve to the same Django path string.
+
+.. automodule:: next.urls.checks
+   :members:
+   :no-index:
 
 See Also
 --------

@@ -70,7 +70,9 @@ Share Site Context
 ~~~~~~~~~~~~~~~~~~
 
 The layout references ``site_name`` and ``tagline``, but no page module produces them yet.
-Add a ``page.py`` next to ``layout.djx`` to publish those values with ``inherit_context=True`` so every descendant page can read them.
+Add a ``page.py`` next to ``layout.djx`` and define a :term:`context function` for each value.
+A context function is a callable decorated with ``@context("key")`` that publishes a value to the template scope.
+Pass ``inherit_context=True`` so every descendant page can read the value too.
 
 .. code-block:: python
    :caption: notes/pages/page.py
@@ -85,7 +87,7 @@ Add a ``page.py`` next to ``layout.djx`` to publish those values with ``inherit_
    def tagline() -> str:
        return "A small tutorial application."
 
-``inherit_context`` defaults to ``False``, so a layout context value is visible only to the page that declares it.
+``inherit_context`` defaults to ``False``, so a context value published in ``page.py`` is visible only to the page that declares it.
 Passing ``inherit_context=True`` publishes the value to every descendant page as well.
 Without that flag the layout would still render but pages further down the tree would not see them.
 
@@ -151,6 +153,7 @@ Drop a second layout inside ``notes/pages/notes/`` to wrap only the detail pages
 
 Reload ``/notes/1/`` and you should see both layouts at once.
 The root layout wraps the inner layout which wraps the detail template.
+Composition works by folding each descendant body into the parent ``{% block template %}`` placeholder, so adding ancestor layouts never requires changes to the inner templates.
 
 Use Counts Across Pages
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -203,12 +206,14 @@ Common Pitfalls
 ---------------
 
 Layout shows but page body does not.
-   Add ``{% block template %}{% endblock template %}`` where the page body should land.
-   When the layout omits the block the framework still renders the layout, but the body has no explicit slot.
+   Add ``{% block template %}{% endblock template %}`` to the innermost ``layout.djx`` that wraps the page.
+   An ancestor layout that omits the block still wraps its descendants because the framework folds the inner layout into a ``{% block template %}`` block on the way out.
+   The placeholder is mandatory only in the innermost layout that should host the page body.
 
 ``DUrl`` resolves to ``None`` when the captured segment is missing.
-   ``DUrl[T]`` reads the segment whose name matches the parameter and coerces to ``T`` for ``int``, ``bool``, and ``float`` as described in :doc:`/content/topics/dependency-injection`.
-   ``DUrl["name"]`` returns the raw string for that segment.
+   ``DUrl[T]`` reads the segment whose name matches the parameter and coerces the value to ``T``.
+   The supported types are documented in :doc:`/content/topics/dependency-injection`.
+   ``DUrl["name"]`` returns the captured segment in string form.
    When the Python parameter name differs from the segment, use ``DUrl["id", int]`` for an ``[id]`` directory.
 
 Inherited context not available in a descendant.

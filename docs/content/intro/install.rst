@@ -13,7 +13,8 @@ Requirements
 - Django 4.2 or newer (4.2, 5.0, 5.1, 5.2, 6.0 supported).
 - An ASGI or WSGI server compatible with the Django version in use.
 
-next.dj extends Django. It does not replace the ORM, migrations, admin, or auth (:ref:`intro-overview-django-unchanged`).
+next.dj extends Django.
+It does not replace the ORM, migrations, admin, or auth (:ref:`intro-overview-django-unchanged`).
 
 Install the Package
 -------------------
@@ -66,7 +67,7 @@ This list replaces the one ``django-admin startproject`` generates.
 It intentionally drops ``django.contrib.admin`` because next.dj does not require the admin site.
 Add ``django.contrib.admin`` back if the project needs it.
 
-The ``next`` app registers system checks, template tags, autoreload hooks, and signal connections at startup.
+The ``next`` app registers system checks, template tag builtins, autoreload hooks, and static file collectors at startup.
 
 Configure NEXT_FRAMEWORK
 ------------------------
@@ -107,11 +108,6 @@ A fresh ``django-admin startproject`` already includes it, and ``manage.py check
 Mount the Router
 ----------------
 
-.. note::
-
-   Without this ``include("next.urls")`` edit Django never reaches the file router.
-   Every page returns a 404 until the line is in place.
-
 Forward all unmatched URLs to next.dj by replacing ``config/urls.py`` with the file below.
 This replacement also removes the ``admin`` import that ``startproject`` generated, which pairs with dropping ``django.contrib.admin`` from ``INSTALLED_APPS`` above.
 
@@ -123,6 +119,11 @@ This replacement also removes the ``admin`` import that ``startproject`` generat
    urlpatterns = [
        path("", include("next.urls")),
    ]
+
+.. note::
+
+   Without this ``include("next.urls")`` edit Django never reaches the file router.
+   Every page returns a 404 until the line is in place.
 
 URLs declared above the ``include`` keep working.
 Anything not matched by Django falls through to the file router, which resolves it against your ``pages/`` tree.
@@ -190,4 +191,3 @@ The environment is ready for the tutorial.
 
    :doc:`tutorial01` builds the first real page of the Notes application.
    :doc:`/content/topics/project-layout` explains where files belong as the project grows.
-   :doc:`/content/deployment/index` covers production setup once the application is feature complete.
