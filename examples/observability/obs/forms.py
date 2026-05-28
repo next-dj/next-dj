@@ -1,4 +1,5 @@
 from django import forms as django_forms
+from django.http import HttpRequest, HttpResponseRedirect
 
 from next.forms import Form
 
@@ -24,3 +25,8 @@ class WindowFilterForm(Form):
             },
         ),
     )
+
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        """Persist the picked window via the querystring and redirect back."""
+        chosen = self.cleaned_data["window"]
+        return HttpResponseRedirect(f"/stats/?window={chosen}")

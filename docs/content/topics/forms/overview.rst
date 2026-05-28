@@ -3,76 +3,151 @@
 Forms Overview
 ==============
 
-The forms subsystem registers Python callables as named actions, exposes them under stable URLs, and dispatches form submissions through a validation pipeline.
-A failed submission re-renders the origin page with the bound form, errors, and a fresh CSRF token.
-This page covers the mental model behind that pipeline.
+The forms subsystem treats each form class as a self-registering unit.
+Declaring a subclass of ``next.forms.Form`` or ``next.forms.ModelForm`` is enough to make that form reachable by name in any template in the project.
+No decorator, no manual registry call, and no URL wiring is required.
 
 .. contents::
    :local:
    :depth: 2
 
-Concepts
---------
+Auto-Registration
+-----------------
 
-Origin Page
-~~~~~~~~~~~
+Every subclass of ``next.forms.BaseForm`` or ``next.forms.BaseModelForm`` registers itself through the ``__init_subclass__`` hook the moment Python executes the ``class`` statement.
 
-The ``{% form %}`` tag emits a hidden ``_next_form_page`` field with the absolute path to the current ``page.py``, so the dispatcher knows which page to re-render on failure.
+The framework derives the action name from the class name by converting ``CamelCase`` to ``snake_case``:
+``ArticleEditForm`` becomes ``article_edit_form``, ``ContactForm`` becomes ``contact_form``.
 
-Action Name
-~~~~~~~~~~~
-
-The framework hashes each action name into a 16 character UID that becomes part of the dispatch URL.
-See :doc:`actions` for the namespace syntax and the ``next.E041`` collision rules.
-
-Handler Signature
-~~~~~~~~~~~~~~~~~
-
-The :doc:`dependency resolver </content/topics/dependency-injection>` fills each handler parameter from a provider, and the handler receives only the parameters it declares.
+The framework also records which file the class was declared in and uses that to decide its scope.
 
 .. code-block:: python
-   :caption: handler with multiple parameters
+   :caption: page.py — auto-registered as ``article_edit_form``
 
-   from django.http import HttpRequest, HttpResponseRedirect
+   import next.forms
+   from django.http import HttpRequest
+   from next.forms import redirect_to_origin
+
+   class ArticleEditForm(next.forms.ModelForm):
+       class Meta:
+           model = Article
+           fields = ["title", "body"]
+
+       def on_valid(self, request: HttpRequest):
+           self.save()
+           return redirect_to_origin(request)
+
+File Scope (Anchor Files)
+-------------------------
+
+When a form class is declared in ``page.py`` or ``component.py``, its scope is ``page``.
+A page-scoped form is keyed to its definition file, so two different pages may each declare an ``ArticleEditForm`` without collision.
+The ``{% form "article_edit_form" %}`` tag on a given page resolves the form registered in that page's own file first.
+
+Shared Scope
+------------
+
+A form class declared in any other file (``forms.py``, ``models.py``, a module imported by ``AppConfig.ready``, etc.) receives ``shared`` scope.
+A shared form has a project-wide name and is reachable from any template.
+
+.. code-block:: python
+   :caption: app/forms.py — auto-registered as ``contact_form`` (shared)
+
+   import next.forms
+   from next.forms import redirect_to_origin
+
+   class ContactForm(next.forms.Form):
+       email = next.forms.EmailField()
+
+       def on_valid(self, request):
+           send_email(self.cleaned_data["email"])
+           return redirect_to_origin(request)
+
+Override Scope
+--------------
+
+Set ``Meta.scope`` to pin the form to a specific scope regardless of file name.
+
+.. code-block:: python
+   :caption: forcing page scope from forms.py
+
+   class LoginForm(next.forms.Form):
+       class Meta:
+           scope = "page"
+
+       username = next.forms.CharField()
+       password = next.forms.CharField(widget=next.forms.PasswordInput)
+
+Valid values are ``"page"`` and ``"shared"``.
+Any other value triggers the ``next.E047`` system check and the form is not registered.
+
+Handling Submissions
+--------------------
+
+Override ``on_valid`` to run code after the form passes validation.
+The method receives at least ``request`` and may declare any parameter the dependency injector knows how to resolve.
+
+.. code-block:: python
+
+   def on_valid(self, request):
+       self.save()
+       return redirect_to_origin(request)
+
+The default implementation on ``BaseForm`` calls ``redirect_to_origin(request)`` and returns.
+The default implementation on ``BaseModelForm`` additionally calls ``self.save()`` before redirecting.
+Override either to add application logic.
+
+``get_initial`` prepopulates the form before the first render.
+Declare it as a ``classmethod`` with the same DI-friendly signature.
+
+.. code-block:: python
+
+   @classmethod
+   def get_initial(cls, request, note_id: int | None = None):
+       if note_id is None:
+           return {}
+       return Note.objects.get(pk=note_id)
+
+Form-Less Actions
+-----------------
+
+Use ``@action("name")`` to register a plain function when no form fields are needed — for example a logout button or a delete confirmation.
+
+.. code-block:: python
+   :caption: page.py
+
    from next.forms import action
    from next.urls import DUrl
 
-   @action("update_note", form_class=NoteForm)
-   def update_note(
-       form: NoteForm,
-       note_id: DUrl["id", int],
-       request: HttpRequest,
-   ) -> HttpResponseRedirect:
-       form.instance.pk = note_id
-       form.save()
-       return HttpResponseRedirect(request.path)
+   @action("delete_article")
+   def delete_article(article_id: DUrl["id", int]):
+       Article.objects.filter(pk=article_id).delete()
+       return redirect_to_origin(request)
 
-Validation Outcomes
-~~~~~~~~~~~~~~~~~~~
+The template tag works the same way, but ``form`` is not defined inside the block because there is no form class.
 
-Each POST resolves to one outcome and the dispatcher decides what to send back.
+Template Usage
+--------------
 
-- Valid. The handler runs and its return value reaches the client.
-- Invalid. The origin page re-renders with the bound failing form in scope.
-- Malformed. The dispatcher returns ``HTTP 400`` when the origin reference is missing or unsafe.
+The ``{% form "name" %}`` block tag renders the ``<form>`` element, injects the CSRF token, and publishes ``form`` inside the block body.
 
-The orthogonal axis is whether the action declares a ``form_class``.
-Actions without one skip form construction and call the handler directly.
-See :doc:`actions` for the form-less variant and :doc:`validation-rerender` for the re-render flow.
+.. code-block:: jinja
+   :caption: template.djx
 
-Where to Declare Actions
-------------------------
+   {% form "article_edit_form" %}
+     {{ form.title }}
+     {{ form.body }}
+     <button type="submit">Save</button>
+   {% endform %}
 
-An ``@action`` decorator registers the handler when its module is imported, so ``page.py`` and ``component.py`` files register without extra wiring.
-A single module can register many actions and each stays addressable by name from any template in the project.
-See :doc:`actions` for the full placement rules and :doc:`templates` for a worked end-to-end example.
+See :doc:`templates` for the full tag reference.
 
 See Also
 --------
 
 .. seealso::
 
-   :doc:`actions` for handler patterns.
+   :doc:`actions` for auto-registration details, name derivation, and system checks.
    :doc:`templates` for the ``{% form %}`` tag.
    :doc:`validation-rerender` for the re-render pipeline.
    :doc:`backends` for swapping the dispatch backend.

@@ -3,201 +3,111 @@
 Form Templates
 ==============
 
-The ``{% form %}`` template tag renders a form bound to a registered action, and this page covers every shape of the tag, the variables it publishes, and the rendering patterns for single and multi form pages.
+The ``{% form "name" %}`` block tag renders a ``<form>`` element, injects the CSRF token, and publishes the form instance inside the block body.
 
 .. contents::
    :local:
    :depth: 2
 
-The form Tag
+The Form Tag
 ------------
 
-The block form is the standard shape.
-
 .. code-block:: jinja
-   :caption: notes/pages/template.djx
+   :caption: template.djx
 
-   {% form @action="create_note" %}
+   {% form "article_edit_form" %}
      {{ form.title }}
      {{ form.body }}
      <button type="submit">Save</button>
    {% endform %}
 
-The tag does six things.
+The tag accepts exactly one argument: the action name as a quoted string or a context variable that resolves to a string.
+An opening tag with the wrong number of arguments raises ``TemplateSyntaxError`` at parse time.
 
-1. Looks up the action name in the registry and resolves its UID.
-2. Emits a ``<form method="post">`` element with ``action`` set to ``/_next/form/<uid>/``.
-3. Emits a hidden ``csrfmiddlewaretoken`` input with the current CSRF token.
-4. Emits a hidden ``_next_form_page`` field with the absolute path to the current ``page.py``.
-5. Emits a hidden ``_next_form_origin`` field set to ``request.path`` verbatim, consumed by ``redirect_to_origin``.
-6. Publishes a ``form`` variable inside the block, either the unbound form on a GET or the bound form on a re-rendered failure.
+The tag does the following.
 
-The Action Reference
---------------------
+1. Looks up the action name in the registry, preferring a page-scoped match for the current page, then falling back to shared scope.
+2. Resolves the stable dispatch URL for that action.
+3. Emits ``<form action="..." method="post">``.
+4. Emits a hidden ``csrfmiddlewaretoken`` input.
+5. Emits a hidden ``_next_form_origin`` input set to ``request.path``, used by ``redirect_to_origin``.
+6. Emits a hidden ``_next_form_page`` input with the absolute path to the current ``page.py``, used on re-render.
+7. Publishes ``form`` inside the block body (see `The form Variable`_ below).
 
-The ``@action`` argument names the action.
-It accepts either a plain name or a namespaced name.
+A name that is not in the registry raises ``RuntimeError`` at render time.
 
-.. code-block:: jinja
-   :caption: plain vs namespaced
+Scope Resolution
+----------------
 
-   {% form @action="create_note" %}...{% endform %}
-   {% form @action="notes:save" %}...{% endform %}
+When the template renders inside a page, the tag first looks for a page-scoped registration whose file matches the current ``page.py``.
+If no page-scoped match exists the tag falls back to the shared registry.
+This means a page-local ``NoteForm`` takes precedence over a shared ``NoteForm`` with the same derived name.
 
-The bare ``action="..."`` spelling without the ``@`` is also accepted and equivalent, with ``@action`` being the recommended spelling.
-An opening tag without an ``@action`` argument raises ``TemplateSyntaxError`` at parse time.
-A name that is not in the registry resolves to an empty ``action`` attribute rather than raising.
+The ``form`` Variable
+---------------------
 
-Render-Time Failures
---------------------
+Inside the block body the variable ``form`` holds the form instance.
 
-The tag raises ``ImproperlyConfigured`` at render time in two cases.
+Initial render (GET).
+   The framework calls ``get_initial`` through the dependency resolver, constructs an unbound form from the returned data or instance, and publishes it as ``form``.
 
-Missing ``request``.
-   The tag reads ``request`` from the template context to build the CSRF token and the hidden fields.
-   Add ``django.template.context_processors.request`` to ``TEMPLATES[*].OPTIONS.context_processors`` so the request reaches the context.
+Re-rendered page after a failing POST.
+   The variable is the bound form with validation errors attached.
+   The template renders the user input plus any error messages without branching.
 
-Missing ``current_page_module_path``.
-   The tag reads ``current_page_module_path`` to emit the ``_next_form_page`` origin field.
-   The file router sets this variable on every rendered page.
-   Render the form through the file router rather than a hand-built view so the variable is present.
-
-The ``next.E019`` system check, described in :doc:`/content/security/csrf-and-forms`, catches the missing context processor before a request reaches the tag.
-
-Class and Extra Attributes
---------------------------
-
-Every ``key=value`` pair on the opening tag other than ``@action`` and ``method`` becomes a literal attribute on the ``<form>`` element.
-The tag does not interpret extra pairs as URL parameters.
-
-.. code-block:: jinja
-   :caption: tag attributes
-
-   {% form @action="upload" enctype="multipart/form-data" class="card" %}
-     {{ form.file }}
-     <button type="submit">Upload</button>
-   {% endform %}
-
-The dispatcher always processes POST submissions and the tag always renders ``method="post"``.
-A ``method`` argument on the tag is ignored.
+Form-less action.
+   When the action is a plain function registered with ``@action`` (no form class), ``form`` resolves to ``None``.
+   The block body should not attempt to render field widgets in this case.
 
 Captured URL Parameters
 -----------------------
 
-The tag does not need any argument to forward captured URL parameters.
-
-At render time the tag reads ``request.resolver_match.kwargs`` and emits a hidden ``_url_param_<name>`` field for every captured kwarg, skipping the dispatch ``uid`` and any name reserved by the dependency resolver.
-The captured values come from the URL converters of the rendering page.
+The tag does not need any extra argument to forward URL parameters.
+At render time it reads ``request.resolver_match.kwargs`` and emits a hidden ``_url_param_<name>`` field for every captured kwarg, skipping ``uid`` and names reserved by the dependency resolver.
 
 .. code-block:: jinja
-   :caption: notes/pages/notes/[id]/template.djx
+   :caption: page for /notes/<int:note_id>/
 
-   {% form @action="update_note" %}
+   {% form "note_form" %}
      {{ form.title }}
      <button type="submit">Save</button>
    {% endform %}
 
-A page whose URL captures ``id`` therefore posts a hidden ``_url_param_id`` field automatically.
-The handler receives the same value through ``DUrl["id", int]`` or any other URL marker.
-
-On the POST the dispatch URL captures only the action UID.
-The dispatcher recovers the page URL kwargs by reading every ``_url_param_*`` field from ``request.POST``, stripping the prefix from each name.
-Each recovered value is a string from the form body, so the dispatcher tries ``int(value)`` first and falls back to the original string when the cast fails.
-Declare the handler parameter as ``DUrl["id", int]`` to keep the int shape on both the initial render and the re-render, or as ``DUrl["id", str]`` to opt out of the int-first coercion.
-
-The form Variable
------------------
-
-The block body has access to a variable named ``form``.
-The framework decides what to publish based on the request lifecycle.
-
-Initial render on GET.
-   The variable is an unbound form.
-   The framework calls ``get_initial`` through the dependency resolver, then constructs the form from the returned initial data or model instance.
-
-Re-rendered page after a failing POST.
-   The variable is the bound form with errors.
-   The template renders the user input plus any field errors.
-
-The tag does not read a ``form`` context key.
-On the initial render it reads a context key named after the action that holds a ``SimpleNamespace`` with a ``form`` attribute, and falls back to building that namespace itself when the key is absent.
-A namespaced action name contains ``:`` and is not addressable from the template scope, so its context lookup runs in Python only.
-Customise the initial form by overriding ``get_initial`` on the form class rather than publishing a ``form`` context.
-
-.. code-block:: python
-   :caption: notes/forms.py
-
-   from typing import Any
-
-   from django.http import HttpRequest
-   from next.forms import ModelForm
-   from notes.models import Note
-
-   class NoteForm(ModelForm):
-       class Meta:
-           model = Note
-           fields = ("title", "body")
-
-       @classmethod
-       def get_initial(cls, request: HttpRequest, id: int | None = None) -> Note | dict[str, Any]:
-           if id is None:
-               return {}
-           return Note.objects.get(pk=id)
-
-On a re-rendered failure the dispatcher always supplies the bound failing form under the action-named key.
-The template therefore does not need to branch on bound vs unbound.
+A page whose URL captures ``note_id`` posts a hidden ``_url_param_note_id`` field automatically.
+The handler receives the same value through ``DUrl["note_id", int]``.
 
 Multiple Forms on One Page
 --------------------------
 
-Each call to ``{% form %}`` references a different action.
-The dispatcher routes submissions through the URL alone, so different forms do not interfere with each other.
+Each ``{% form %}`` call references a different action name.
+The dispatcher routes submissions by URL alone, so the forms do not interfere.
 
 .. code-block:: jinja
-   :caption: index with search and create
+   :caption: page with two forms
 
-   {% form @action="search" class="search-form" %}
-     {{ form.query }}
-     <button type="submit">Search</button>
-   {% endform %}
-
-   {% form @action="create_note" class="create-form" %}
+   {% form "note_form" %}
      {{ form.title }}
      {{ form.body }}
-     <button type="submit">Create</button>
+     <button type="submit">Save</button>
    {% endform %}
 
-A page can also publish multiple bound forms by registering several ``@context("...")`` functions with distinct keys.
-The block always publishes the bound form under the name ``form``, so each ``{% form %}`` block sees its own form even when two blocks render on the same page.
+   {% form "delete_note" %}
+     <button type="submit" class="danger">Delete</button>
+   {% endform %}
 
-Manual CSRF
------------
-
-The tag emits the hidden ``csrfmiddlewaretoken`` input automatically.
-Add Django's :doc:`{% csrf_token %} <django:ref/csrf>` manually only when you build the form element without the tag, for example in a plain ``<form>``.
-Even then, the dispatcher still requires the hidden ``_next_form_page`` field so a hand crafted form must include it.
-
-.. code-block:: jinja
-   :caption: hand crafted form
-
-   <form action="/_next/form/{{ action_uid }}/" method="post">
-     {% csrf_token %}
-     <input type="hidden" name="_next_form_page" value="{{ current_page_module_path }}">
-     <button type="submit">Send</button>
-   </form>
-
-The ``current_page_module_path`` variable is published by the framework on every rendered page.
+``delete_note`` is a form-less action.
+The second block has no ``{{ form }}`` usage because ``form`` is ``None``.
 
 Rendering Field Errors
 ----------------------
 
 Errors live on the bound form.
-Render them inline with each field or as a list at the top of the form.
+Render them inline or as a summary at the top.
 
 .. code-block:: jinja
    :caption: inline errors
 
-   {% form @action="create_note" %}
+   {% form "note_form" %}
      <div>
        {{ form.title }}
        {% if form.title.errors %}
@@ -208,13 +118,13 @@ Render them inline with each field or as a list at the top of the form.
    {% endform %}
 
 .. code-block:: jinja
-   :caption: error list
+   :caption: error summary
 
-   {% form @action="create_note" %}
+   {% form "note_form" %}
      {% if form.errors %}
-       <ul class="errors">
+       <ul>
          {% for field, messages in form.errors.items %}
-           {% for message in messages %}<li>{{ field }} {{ message }}</li>{% endfor %}
+           {% for message in messages %}<li>{{ field }} — {{ message }}</li>{% endfor %}
          {% endfor %}
        </ul>
      {% endif %}
@@ -223,10 +133,21 @@ Render them inline with each field or as a list at the top of the form.
      <button type="submit">Save</button>
    {% endform %}
 
-Empty Form Bodies
------------------
+Manual CSRF
+-----------
 
-A tag block with only a submit button is the confirmation pattern covered in :ref:`Actions Without form_class <topics-forms-actions-no-form-class>`.
+The tag emits ``csrfmiddlewaretoken`` automatically.
+Only add Django's ``{% csrf_token %}`` manually when you build the ``<form>`` element by hand and skip the tag entirely.
+A hand-crafted form must also include the ``_next_form_page`` hidden field or the dispatcher cannot re-render on failure.
+
+.. code-block:: jinja
+   :caption: hand-crafted form
+
+   <form action="/_next/form/{{ action_uid }}/" method="post">
+     {% csrf_token %}
+     <input type="hidden" name="_next_form_page" value="{{ current_page_module_path }}">
+     <button type="submit">Send</button>
+   </form>
 
 Common Patterns
 ---------------
@@ -234,26 +155,28 @@ Common Patterns
 Form in a Component
 ~~~~~~~~~~~~~~~~~~~
 
-A component template can host a ``{% form %}`` tag.
-The framework injects the same ``current_page_module_path`` because the surrounding page provides it.
+A component template hosts ``{% form %}`` exactly like a page template.
+The framework injects ``current_page_module_path`` from the surrounding page, so re-renders land on the correct page.
 
 Form in a Layout
 ~~~~~~~~~~~~~~~~
 
-Layouts also receive ``current_page_module_path``.
-A login form rendered from the root layout therefore re-renders the original page on validation failure instead of dropping back to the layout.
+Layouts receive ``current_page_module_path`` from the page they wrap.
+A login form placed in the root layout re-renders the original page on validation failure.
 
-Inline Form with Plain HTML
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Render-Time Failures
+--------------------
 
-Use plain HTML when you need full control over markup or aria attributes.
-Include both ``{% csrf_token %}`` and the hidden ``_next_form_page`` field to keep the dispatcher happy.
+The tag raises ``ImproperlyConfigured`` when ``request`` is absent from the template context.
+Add ``django.template.context_processors.request`` to ``TEMPLATES[*].OPTIONS.context_processors`` to make the request available.
+
+The ``next.E019`` system check, described in :doc:`/content/security/csrf-and-forms`, catches the missing context processor before a request reaches the tag.
 
 See Also
 --------
 
 .. seealso::
 
-   :doc:`actions` for the handler side of the contract.
+   :doc:`actions` for auto-registration and the handler side of the contract.
    :doc:`validation-rerender` for what runs after a failing submission.
    :doc:`/content/ref/template-tags` for every template tag the framework registers.

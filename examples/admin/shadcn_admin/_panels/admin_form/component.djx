@@ -7,7 +7,7 @@
     {% endif %}
   {% /component %}
 
-  {% form @action=form_state.action_name class="space-y-4" %}
+  {% form form_state.action_name %}
     {% if form_state.form_spec.non_field_errors %}
       {% #component "alert" variant="destructive" %}
         {% #slot "content" %}

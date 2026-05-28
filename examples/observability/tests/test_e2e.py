@@ -207,7 +207,7 @@ class TestFilterFormDispatch:
 
     def test_post_redirects_with_window_querystring(self, client) -> None:
         with SignalRecorder(action_dispatched) as recorder:
-            response = client.post_action("obs:filter_window", {"window": "1m"})
+            response = client.post_action("window_filter_form", {"window": "1m"})
         assert response.status_code == 302
         assert "window=1m" in response["Location"]
         events = recorder.events_for(action_dispatched)
@@ -241,7 +241,7 @@ class TestSignalGroupsCovered:
             iter_all_autoreload_watch_specs()
 
             _walk_dashboard(client)
-            client.post_action("obs:filter_window", {"window": "5m"})
+            client.post_action("window_filter_form", {"window": "5m"})
 
         for group, signals in GROUP_SAMPLES.items():
             hits = sum(len(recorder.events_for(sig)) for sig in signals)

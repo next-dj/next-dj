@@ -1,47 +1,57 @@
-"""The `@action` decorator used to register form handlers."""
+"""The @action decorator for form-less action handlers."""
 
-from __future__ import annotations
+import sys
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
-from typing import TYPE_CHECKING, Any
-
-from .backends import FormActionOptions
+from .base import _compute_scope
 from .manager import form_action_manager
 
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from django import forms as django_forms
+_action_applied_to_class: list[str] = []
 
 
 def action(
     name: str,
     *,
-    form_class: type[django_forms.Form]
-    | Callable[..., type[django_forms.Form]]
-    | None = None,
-    namespace: str | None = None,
+    form_class: Callable[..., Any] | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Register a named form action. Names must be unique across the project.
+    """Register a callable as a named action.
 
-    Pass `namespace="app_label"` to prefix the stored key with
-    `"app_label:"`, which lets two apps use the same short name without
-    colliding. Reverse is by the namespaced name.
-
-    `form_class` may be a `Form` subclass or a callable that returns one
-    when called. Factory callables are dependency-resolved at dispatch
-    time with the request and URL kwargs, which lets admin-style
-    handlers shape the form per request (for example via
-    `ModelAdmin.get_form()`).
+    For form-less functions, omit `form_class`. For actions that need a
+    dynamically constructed form class (e.g. a DI factory), pass it as
+    `form_class`. Do NOT pass a static Form subclass — those register
+    automatically via __init_subclass__.
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        opts = FormActionOptions(form_class=form_class, namespace=namespace)
-        full_name = f"{namespace}:{name}" if namespace else name
-        form_action_manager.register_action(full_name, func, options=opts)
+        if isinstance(func, type):
+            _action_applied_to_class.append(func.__qualname__)
+            msg = (
+                "@action is for form-less actions only. "
+                "Form classes register automatically through __init_subclass__."
+            )
+            raise TypeError(msg)
+        if isinstance(form_class, type):
+            msg = (
+                "Passing a Form class to @action is no longer supported. "
+                "Let the class register itself via __init_subclass__ instead."
+            )
+            raise TypeError(msg)
+        frame = sys._getframe(1)
+        file_path = frame.f_code.co_filename
+        scope = _compute_scope(file_path)
+        form_action_manager.register_action(
+            name,
+            handler=func,
+            form_class=form_class,
+            file_path=str(Path(file_path).resolve()),
+            scope=scope,
+        )
         return func
 
     return decorator
 
 
-__all__ = ["action"]
+__all__ = ["_action_applied_to_class", "action"]

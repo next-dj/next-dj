@@ -5,7 +5,8 @@
 
   {% component "progress_bar" %}
 
-  {% form @action="access:request_step" class="space-y-3 rounded-md border border-border bg-card p-6 shadow-sm" %}
+  <div class="space-y-3 rounded-md border border-border bg-card p-6 shadow-sm">
+  {% form "request_step_form" %}
     <input type="hidden" name="step" value="{{ current_step }}">
 
     {% component "step_section" step="applicant" %}
@@ -20,4 +21,5 @@
       {% endif %}
     </div>
   {% endform %}
+  </div>
 </div>

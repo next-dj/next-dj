@@ -1,11 +1,9 @@
 from typing import Any
 
-from django.http import HttpRequest, HttpResponseRedirect
+from django.http import HttpRequest
 from obs import metrics
-from obs.forms import WindowFilterForm
 from obs.serializers import WrappedJsContextSerializer
 
-from next.forms import action
 from next.pages import context
 
 
@@ -63,10 +61,3 @@ def live_stats(window: str = DEFAULT_WINDOW) -> dict[str, Any]:
             "actions": sum(actions.values()),
         },
     }
-
-
-@action("filter_window", namespace="obs", form_class=WindowFilterForm)
-def filter_window(form: WindowFilterForm) -> HttpResponseRedirect:
-    """Persist the picked window via the querystring and redirect back."""
-    chosen = form.cleaned_data["window"]
-    return HttpResponseRedirect(f"/stats/?window={chosen}")

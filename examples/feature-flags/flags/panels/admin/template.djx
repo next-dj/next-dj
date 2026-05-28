@@ -2,7 +2,7 @@
   {% #component "section" title="Bulk toggle" description="Check the rows you want enabled and submit. Saving triggers a post_save receiver that invalidates the per-flag cache entry, so the next read reflects the new state." %}
     {% #slot "content" %}
       {% if flags %}
-        {% form @action="bulk_toggle" class="space-y-3" %}
+        {% form "bulk_toggle_form" %}
           <ul class="space-y-2">
             {% for flag in flags %}
               <li class="flex items-start justify-between gap-4 rounded-md border border-border bg-card p-4 shadow-sm">

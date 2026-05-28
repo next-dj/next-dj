@@ -15,7 +15,6 @@ from django.test import override_settings
 
 from next.components.manager import components_manager
 from next.deps.resolver import resolver
-from next.forms.backends import FormActionOptions
 from next.forms.manager import form_action_manager
 from next.static.manager import default_manager
 
@@ -95,7 +94,11 @@ def override_form_action(
     registry_snapshot = dict(getattr(backend, "_registry", {}))
     uid_snapshot = dict(getattr(backend, "_uid_to_name", {}))
     form_action_manager.register_action(
-        name, handler, options=FormActionOptions(form_class=form_class)
+        name,
+        handler=handler,
+        form_class=form_class,
+        file_path=__file__,
+        scope="shared",
     )
     try:
         yield

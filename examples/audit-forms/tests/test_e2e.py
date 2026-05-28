@@ -23,7 +23,7 @@ VALID_REVIEW = {"step": "review"}
 
 
 def _post_step(client, payload: dict[str, str]):
-    return client.post_action("access:request_step", payload)
+    return client.post_action("request_step_form", payload)
 
 
 def _walk_three_steps(client) -> None:
@@ -89,7 +89,7 @@ class TestValidationFailure:
     def test_invalid_submit_records_signal_validation_row(self, client) -> None:
         with SignalRecorder(form_validation_failed) as recorder:
             response = client.post_action(
-                "access:request_step",
+                "request_step_form",
                 {**VALID_APPLICANT, "email": ""},
             )
 
@@ -116,7 +116,7 @@ class TestAdminAuditPage:
 
     def test_admin_lists_both_sources(self, client) -> None:
         _post_step(client, VALID_APPLICANT)
-        client.post_action("access:request_step", {**VALID_APPLICANT, "email": ""})
+        client.post_action("request_step_form", {**VALID_APPLICANT, "email": ""})
 
         response = client.get("/admin/audit/")
         assert response.status_code == 200
@@ -130,7 +130,7 @@ class TestAdminAuditPage:
 
     def test_admin_filter_narrows_to_one_kind(self, client) -> None:
         _post_step(client, VALID_APPLICANT)
-        client.post_action("access:request_step", {**VALID_APPLICANT, "email": ""})
+        client.post_action("request_step_form", {**VALID_APPLICANT, "email": ""})
 
         response = client.get("/admin/audit/?kind=validation_failed")
         body = response.content.decode()
@@ -144,15 +144,15 @@ class TestAdminAuditPage:
 
 
 class TestNamespacedAction:
-    """`namespace="access"` stores the action under the prefixed key."""
+    """Auto-name `request_step_form` resolves without a namespace prefix."""
 
-    def test_namespaced_action_url_resolves(self) -> None:
-        url = resolve_action_url("access:request_step")
+    def test_auto_name_resolves(self) -> None:
+        url = resolve_action_url("request_step_form")
         assert url.startswith("/_next/form/")
 
-    def test_bare_name_does_not_resolve(self) -> None:
+    def test_namespaced_name_does_not_resolve(self) -> None:
         with pytest.raises(KeyError):
-            resolve_action_url("request_step")
+            resolve_action_url("access:request_step")
 
 
 class TestSessionResume:
@@ -267,7 +267,7 @@ class TestStepSection:
         # framework cannot locate the page; here we POST through an active GET
         # to seed the session, then submit invalid data on the same step.
         response = client.post_action(
-            "access:request_step",
+            "request_step_form",
             {**VALID_APPLICANT, "email": "", "_next_form_page": ""},
         )
         # Bad-page → 400, but the validation_failed signal already fired and

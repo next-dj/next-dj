@@ -75,7 +75,7 @@ class TestArticleCreation:
     """Posting the create form publishes a fresh `/wiki/<slug>/` URL."""
 
     def test_creating_article_publishes_url(self, client: NextClient) -> None:
-        url = client.get_action_url("wiki:article_create")
+        url = client.get_action_url("article_create_form")
         response = client.post(
             url,
             {
@@ -103,7 +103,7 @@ class TestArticleCreation:
         )
         assert match, "Create page did not render the hidden _next_form_page field."
         response = client.post(
-            client.get_action_url("wiki:article_create"),
+            client.get_action_url("article_create_form"),
             {
                 "_next_form_page": match.group(1),
                 "slug": routing_doc.slug,
@@ -121,7 +121,7 @@ class TestArticleEdit:
     def test_editing_article_changes_body(
         self, client: NextClient, routing_doc: Article
     ) -> None:
-        url = client.get_action_url("wiki:article_edit")
+        url = client.get_action_url("article_edit_form")
         response = client.post(
             url,
             {
@@ -175,7 +175,7 @@ class TestArticleEdit:
         )
         assert match, "Edit page did not render the hidden _next_form_page field."
         response = client.post(
-            client.get_action_url("wiki:article_edit"),
+            client.get_action_url("article_edit_form"),
             {
                 "_next_form_page": match.group(1),
                 "article_id": routing_doc.pk,
@@ -199,7 +199,7 @@ class TestArticleEdit:
         )
         assert match, "Edit page did not render the hidden _next_form_page field."
         response = client.post(
-            client.get_action_url("wiki:article_edit"),
+            client.get_action_url("article_edit_form"),
             {
                 "_next_form_page": match.group(1),
                 "article_id": routing_doc.pk,
@@ -306,7 +306,7 @@ class TestValidationPreservesPreview:
             new_page.content.decode(),
         )
         assert match, "Form did not render the hidden _next_form_page field."
-        action_url = client.get_action_url("wiki:article_create")
+        action_url = client.get_action_url("article_create_form")
         response = client.post(
             action_url,
             {

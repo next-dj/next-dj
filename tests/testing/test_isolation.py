@@ -16,12 +16,16 @@ class TestResetFormActions:
 
     def test_clears_registry_and_can_be_repopulated(self) -> None:
         backend = RegistryFormActionBackend()
-        backend.register_action("alpha", lambda: None)
-        assert "alpha" in backend._registry
+        backend.register_action(
+            "alpha", handler=lambda: None, file_path="/fake/forms.py", scope="shared"
+        )
+        assert any(name == "alpha" for _, name in backend._registry)
         backend.clear_registry()
         assert backend._registry == {}
-        backend.register_action("alpha", lambda: None)
-        assert "alpha" in backend._registry
+        backend.register_action(
+            "alpha", handler=lambda: None, file_path="/fake/forms.py", scope="shared"
+        )
+        assert any(name == "alpha" for _, name in backend._registry)
 
     def test_reset_form_actions_clears_global_manager(self) -> None:
         saved_registry = dict(form_action_manager.default_backend._registry)

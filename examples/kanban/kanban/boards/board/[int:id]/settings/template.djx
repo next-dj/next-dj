@@ -1,7 +1,7 @@
 <div class="grid gap-6 md:grid-cols-2">
   {% #component "section" title="Rename board" %}
     {% #slot "content" %}
-      {% form @action="kanban:rename_board" class="space-y-2" %}
+      {% form "rename_board_form" %}
         <input type="hidden" name="board_id" value="{{ board.id }}">
         {% #component "field" label="Title" for_id="rename-title" %}
           {% #slot "control" %}
@@ -16,7 +16,7 @@
 
   {% #component "section" title="Add column" %}
     {% #slot "content" %}
-      {% form @action="kanban:create_column" class="space-y-2" %}
+      {% form "create_column_form" %}
         <input type="hidden" name="board_id" value="{{ board.id }}">
         {% #component "field" label="Title" for_id="column-title" %}
           {% #slot "control" %}
@@ -38,7 +38,7 @@
   <div class="md:col-span-2">
     {% #component "section" title="Archive" description="Archived boards disappear from the index but their data is kept." %}
       {% #slot "content" %}
-        {% form @action="kanban:archive_board" class="space-y-2" %}
+        {% form "archive_board_form" %}
           <input type="hidden" name="board_id" value="{{ board.id }}">
           <label class="inline-flex items-center gap-2 text-sm">
             <input type="checkbox" name="archived" value="1"

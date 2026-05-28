@@ -5,7 +5,7 @@ from access.steps import STEP_ORDER, normalise_step
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 
-from next.forms import Form, action
+from next.forms import Form
 from next.pages import context
 
 
@@ -89,6 +89,32 @@ class RequestStepForm(Form):
         draft["step"] = normalise_step(step)
         return draft
 
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        """Persist the current step into the session, then move on or commit."""
+        step = self.cleaned_data["step"]
+        draft_data = dict(request.session.get(SESSION_KEY, {}))
+        for key, value in self.cleaned_data.items():
+            if key == "step":
+                continue
+            draft_data[key] = value
+        request.session[SESSION_KEY] = draft_data
+        request.session.modified = True
+        if step != STEP_ORDER[-1]:
+            next_step = STEP_ORDER[STEP_ORDER.index(step) + 1]
+            return HttpResponseRedirect(f"/request/{next_step}/")
+        access_request = AccessRequest.objects.create(
+            full_name=draft_data["full_name"],
+            email=draft_data["email"],
+            team=draft_data["team"],
+            project_slug=draft_data["project_slug"],
+            reason=draft_data["reason"],
+            expires_in_days=draft_data["expires_in_days"],
+        )
+        request.session.pop(SESSION_KEY, None)
+        request.session[LAST_CREATED_KEY] = access_request.pk
+        request.session.modified = True
+        return HttpResponseRedirect(f"/request/{access_request.pk}/audit/?just=1")
+
 
 @context("current_step")
 def current_step(step: str = "applicant") -> str:
@@ -98,34 +124,3 @@ def current_step(step: str = "applicant") -> str:
 @context("draft")
 def draft(request: HttpRequest) -> dict[str, Any]:
     return dict(request.session.get(SESSION_KEY, {}))
-
-
-@action("request_step", namespace="access", form_class=RequestStepForm)
-def request_step(
-    form: RequestStepForm,
-    request: HttpRequest,
-) -> HttpResponseRedirect:
-    """Persist the current step into the session, then move on or commit."""
-    step = form.cleaned_data["step"]
-    draft_data = dict(request.session.get(SESSION_KEY, {}))
-    for key, value in form.cleaned_data.items():
-        if key == "step":
-            continue
-        draft_data[key] = value
-    request.session[SESSION_KEY] = draft_data
-    request.session.modified = True
-    if step != STEP_ORDER[-1]:
-        next_step = STEP_ORDER[STEP_ORDER.index(step) + 1]
-        return HttpResponseRedirect(f"/request/{next_step}/")
-    access_request = AccessRequest.objects.create(
-        full_name=draft_data["full_name"],
-        email=draft_data["email"],
-        team=draft_data["team"],
-        project_slug=draft_data["project_slug"],
-        reason=draft_data["reason"],
-        expires_in_days=draft_data["expires_in_days"],
-    )
-    request.session.pop(SESSION_KEY, None)
-    request.session[LAST_CREATED_KEY] = access_request.pk
-    request.session.modified = True
-    return HttpResponseRedirect(f"/request/{access_request.pk}/audit/?just=1")

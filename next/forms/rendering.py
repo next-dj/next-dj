@@ -1,14 +1,12 @@
 """HTML rendering for validation-error responses."""
 
-from __future__ import annotations
-
 import types
 from typing import TYPE_CHECKING
 
 from next.pages import page
 from next.pages.loaders import _load_python_module_memo
 
-from .dispatch import _url_kwargs_from_post
+from ._request_utils import _url_kwargs_from_post
 
 
 if TYPE_CHECKING:
@@ -20,13 +18,12 @@ if TYPE_CHECKING:
     from .backends import FormActionBackend
 
 
-def render_form_page_with_errors(  # noqa: PLR0913
-    backend: FormActionBackend,
-    request: HttpRequest,
+def render_form_page_with_errors(
+    backend: "FormActionBackend",
+    request: "HttpRequest",
     action_name: str,
-    form: django_forms.Form | None,
-    template_fragment: str | None,
-    page_file_path: Path,
+    form: "django_forms.Form | None",
+    page_file_path: "Path",
 ) -> str:
     """Render the page template for `page_file_path` with a bound form in context.
 
@@ -35,8 +32,6 @@ def render_form_page_with_errors(  # noqa: PLR0913
     request-aware backend (such as a per-tenant URL prefix) sees the
     same `request` it does on the canonical render path.
     """
-    del template_fragment
-
     meta = backend.get_meta(action_name)
     if not meta:
         return form.as_p() if form else ""

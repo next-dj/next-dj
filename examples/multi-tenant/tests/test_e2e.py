@@ -123,7 +123,7 @@ class TestNoteEditForm:
     ) -> None:
         note = _acme_note(acme)
         response = client.post_action(
-            "notes:note_edit",
+            "note_edit_form",
             {
                 "note_id": note.pk,
                 "title": note.title,
@@ -141,7 +141,7 @@ class TestNoteEditForm:
     ) -> None:
         note = _acme_note(acme)
         response = client.post_action(
-            "notes:note_edit",
+            "note_edit_form",
             {
                 "note_id": note.pk,
                 "title": "hijack",
@@ -174,7 +174,7 @@ class TestNoteEditFormErrorRerender:
     ) -> None:
         note = _acme_note(acme)
         response = client.post_action(
-            "notes:note_edit",
+            "note_edit_form",
             {
                 "note_id": note.pk,
                 "title": "",
@@ -210,7 +210,7 @@ class TestNoteCreate:
     ) -> None:
         existing = set(Note.objects.filter(tenant=acme).values_list("pk", flat=True))
         response = client.post_action(
-            "notes:note_create",
+            "note_create_form",
             {"title": "Fresh idea", "body": "## body"},
             HTTP_X_TENANT="acme",
         )
@@ -231,7 +231,7 @@ class TestNoteCreate:
         self, client: NextClient, acme: Tenant, globex: Tenant
     ) -> None:
         client.post_action(
-            "notes:note_create",
+            "note_create_form",
             {"title": "Globex only", "body": ""},
             HTTP_X_TENANT="globex",
         )

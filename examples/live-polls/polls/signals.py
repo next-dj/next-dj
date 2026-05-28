@@ -19,7 +19,7 @@ from next.static.signals import collector_finalized
 from polls.broker import broker, build_snapshot
 
 
-VOTE_ACTION_NAME = "polls:vote"
+VOTE_ACTION_NAME = "vote_form"
 
 
 @receiver(action_dispatched)

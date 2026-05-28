@@ -1,13 +1,11 @@
-from __future__ import annotations
-
 import secrets
 
 from django import forms
 from django.db import IntegrityError, transaction
-from django.http import HttpResponseRedirect
+from django.http import HttpRequest, HttpResponseRedirect
 from shortener.models import Link
 
-from next.forms import Form, action
+from next.forms import Form
 from next.pages import context
 
 
@@ -30,6 +28,11 @@ class CreateLinkForm(Form):
             }
         ),
     )
+
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        """Create a shortened link and redirect home."""
+        _create_link_with_unique_slug(self.cleaned_data["url"])
+        return HttpResponseRedirect("/")
 
 
 def _random_slug(length: int) -> str:
@@ -54,9 +57,3 @@ def _create_link_with_unique_slug(url: str, length: int = 6) -> Link:
 @context("recent_links")
 def recent_links() -> list[Link]:
     return list(Link.objects.all()[:5])
-
-
-@action("create_link", form_class=CreateLinkForm)
-def create_link(form: CreateLinkForm) -> HttpResponseRedirect:
-    _create_link_with_unique_slug(form.cleaned_data["url"])
-    return HttpResponseRedirect("/")

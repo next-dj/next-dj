@@ -10,16 +10,14 @@ from django.http import HttpRequest, HttpResponseRedirect
 from next.forms import (
     BaseModelForm,
     Form,
-    FormActionOptions,
     ModelForm,
-    RegistryFormActionBackend,
-    _form_action_context_callable,
-    _url_kwargs_from_post,
     build_form_namespace_for_action,
     validated_next_form_page_path,
 )
-from next.forms.decorators import action as action_decorator
-from next.forms.manager import FormActionManager, form_action_manager
+from next.forms._request_utils import _url_kwargs_from_post
+from next.forms.decorators import _action_applied_to_class, action as action_decorator
+from next.forms.dispatch import _form_action_context_callable
+from next.forms.manager import form_action_manager
 
 
 PAGE_MODULE_FOR_FORM_TESTS = (
@@ -38,47 +36,69 @@ class TestBuildFormNamespaceForAction:
         assert build_form_namespace_for_action("test_no_form", req) is None
 
 
-class TestActionNamespacing:
-    """`@action(namespace=...)` stores keys as `namespace:name`."""
+class TestActionDecorator:
+    """``@action("name")`` registers a form-less handler."""
 
-    def test_namespace_prefixes_registered_name(self) -> None:
-        """Registered key is `namespace:name`, bare name does not resolve."""
-        manager = FormActionManager()
-        original_manager = form_action_manager._backends
-        form_action_manager._backends = manager._backends
-        try:
+    def test_registers_form_less_action(self) -> None:
+        """A decorated function is registered in the backend without form_class."""
 
-            @action_decorator("save", namespace="billing")
-            def handler(request: HttpRequest) -> HttpResponseRedirect:
-                return HttpResponseRedirect("/")
+        def logout_handler(request: HttpRequest) -> HttpResponseRedirect:
+            return HttpResponseRedirect("/")
 
-            assert (
-                form_action_manager.default_backend.get_meta("billing:save") is not None
-            )
-            assert form_action_manager.default_backend.get_meta("save") is None
-        finally:
-            form_action_manager._backends = original_manager
+        action_decorator("logout_test")(logout_handler)
 
-    def test_same_name_different_namespaces_coexist(self) -> None:
-        """Two apps can register `save` under different namespaces."""
-        manager = FormActionManager()
-        original = form_action_manager._backends
-        form_action_manager._backends = manager._backends
-        try:
+        meta = form_action_manager.default_backend.get_meta("logout_test")
+        assert meta is not None
+        assert meta["handler"] is logout_handler
+        assert meta["form_class"] is None
 
-            @action_decorator("save", namespace="billing")
-            def billing_handler(request: HttpRequest) -> HttpResponseRedirect:
-                return HttpResponseRedirect("/billing/")
+    def test_returns_original_function(self) -> None:
+        """Decorator returns the original function unchanged."""
 
-            @action_decorator("save", namespace="shipping")
-            def shipping_handler(request: HttpRequest) -> HttpResponseRedirect:
-                return HttpResponseRedirect("/shipping/")
+        def my_handler(request: HttpRequest) -> HttpResponseRedirect:
+            return HttpResponseRedirect("/")
 
-            backend = form_action_manager.default_backend
-            assert backend.get_meta("billing:save") is not None
-            assert backend.get_meta("shipping:save") is not None
-        finally:
-            form_action_manager._backends = original
+        result = action_decorator("return_test_handler")(my_handler)
+        assert result is my_handler
+
+    def test_raises_type_error_when_applied_to_class(self) -> None:
+        """Applying @action to a class raises TypeError immediately."""
+        with pytest.raises(TypeError, match="form-less actions only"):
+
+            @action_decorator("bad_class_action")
+            class SomeClass:
+                pass
+
+    def test_class_name_recorded_in_applied_to_class_list(self) -> None:
+        """When @action is applied to a class, its qualname is recorded."""
+        with pytest.raises(TypeError):
+
+            @action_decorator("recorded_class")
+            class MyBadClass:
+                pass
+
+        assert any("MyBadClass" in entry for entry in _action_applied_to_class)
+
+    def test_raises_type_error_when_form_class_is_a_type(self) -> None:
+        """Passing a class as form_class raises TypeError."""
+
+        class MyForm(django_forms.Form):
+            name = django_forms.CharField()
+
+        with pytest.raises(TypeError, match="no longer supported"):
+            action_decorator("bad_form_class", form_class=MyForm)(lambda: None)
+
+    def test_scope_is_shared_for_non_anchor_file(self) -> None:
+        """Handler registered from a non-anchor file gets scope='shared'."""
+
+        def handler(request: HttpRequest) -> None:
+            pass
+
+        action_decorator("shared_scope_handler")(handler)
+
+        meta = form_action_manager.default_backend.get_meta("shared_scope_handler")
+        assert meta is not None
+        assert meta["scope"] == "shared"
 
 
 class TestBaseFormGetInitial:
@@ -110,7 +130,6 @@ class TestBaseFormGetInitial:
 
             @classmethod
             def get_initial(cls, request: HttpRequest) -> dict:
-                # Access request attributes
                 return {"name": request.method}
 
         request = HttpRequest()
@@ -128,64 +147,34 @@ class TestBaseFormGetInitial:
 
     def test_form_class_without_get_initial_raises_error_in_context(self) -> None:
         """Form class without get_initial raises TypeError when lazy context runs."""
-        backend = RegistryFormActionBackend()
 
-        # Create a form class that doesn't inherit from BaseForm
         class CustomDjangoForm(django_forms.Form):
             name = django_forms.CharField(max_length=100)
 
-        def handler(
-            request: HttpRequest, form: CustomDjangoForm
-        ) -> HttpResponseRedirect:
-            return HttpResponseRedirect("/")
-
-        backend.register_action(
-            "test_action",
-            handler,
-            options=FormActionOptions(form_class=CustomDjangoForm),
-        )
-
-        request = HttpRequest()
-        assert backend.get_meta("test_action") is not None
-
         with pytest.raises(TypeError, match="must have get_initial method"):
-            _form_action_context_callable(CustomDjangoForm)(request)
+            _form_action_context_callable(CustomDjangoForm)(HttpRequest())
 
     def test_form_with_model_instance_but_not_modelform_raises_error(self) -> None:
-        """Test that using instance parameter with non-ModelForm raises TypeError."""
-        backend = RegistryFormActionBackend()
+        """Using instance parameter with non-ModelForm raises TypeError."""
 
         class CustomForm(Form):
             name = forms.CharField(max_length=100)
 
             @classmethod
             def get_initial(cls, request: HttpRequest) -> object:
-                # Return a mock model instance
                 mock_instance = MagicMock()
                 mock_instance._meta = MagicMock()
                 mock_instance._meta.model = MagicMock()
                 return mock_instance
 
-        def handler(request: HttpRequest, form: CustomForm) -> HttpResponseRedirect:
-            return HttpResponseRedirect("/")
-
-        backend.register_action(
-            "test_action", handler, options=FormActionOptions(form_class=CustomForm)
-        )
-
         request = HttpRequest()
-        assert backend.get_meta("test_action") is not None
-
         with pytest.raises(
             TypeError, match="instance parameter only supported for ModelForm"
         ):
             _form_action_context_callable(CustomForm)(request)
 
     def test_context_func_with_modelform_returning_instance(self) -> None:
-        """Test context_func creates form with instance when ModelForm returns instance."""
-        backend = RegistryFormActionBackend()
-
-        # Create a simple mock model
+        """context_func creates form with instance when ModelForm returns instance."""
         mock_model = MagicMock()
         mock_model._meta = MagicMock()
         mock_model._meta.get_fields.return_value = []
@@ -199,22 +188,12 @@ class TestBaseFormGetInitial:
 
             @classmethod
             def get_initial(cls, request: HttpRequest) -> object:
-                # Return a mock model instance
                 mock_instance = MagicMock()
                 mock_instance._meta = MagicMock()
                 mock_instance._meta.model = mock_model
                 return mock_instance
 
-        def handler(request: HttpRequest, form: TestModelForm) -> HttpResponseRedirect:
-            return HttpResponseRedirect("/")
-
-        backend.register_action(
-            "test_action", handler, options=FormActionOptions(form_class=TestModelForm)
-        )
-
         request = HttpRequest()
-        assert backend.get_meta("test_action") is not None
-
         result = _form_action_context_callable(TestModelForm)(request)
         assert hasattr(result, "form")
         assert result.form is not None
@@ -222,8 +201,7 @@ class TestBaseFormGetInitial:
     def test_context_func_gets_url_kwargs_from_post_when_no_resolver_match(
         self,
     ) -> None:
-        """Test context_func extracts url params from POST when resolver_match has no kwargs."""
-        backend = RegistryFormActionBackend()
+        """context_func extracts url params from POST when resolver_match has no kwargs."""
 
         class FormWithId(Form):
             name = forms.CharField(max_length=100)
@@ -232,15 +210,6 @@ class TestBaseFormGetInitial:
             def get_initial(cls, request: HttpRequest, id: int) -> dict:  # noqa: A002
                 return {"name": f"from-{id}"}
 
-        def handler(request: HttpRequest, form: FormWithId) -> HttpResponseRedirect:
-            return HttpResponseRedirect("/")
-
-        backend.register_action(
-            "post_params_action",
-            handler,
-            options=FormActionOptions(form_class=FormWithId),
-        )
-        assert backend.get_meta("post_params_action") is not None
         request = HttpRequest()
         request.method = "POST"
         request.POST = {"_url_param_id": "42"}
@@ -249,8 +218,7 @@ class TestBaseFormGetInitial:
         assert result.form.initial.get("name") == "from-42"
 
     def test_context_func_gets_url_kwargs_from_resolver_match(self) -> None:
-        """Test context_func uses resolver_match.kwargs when present."""
-        backend = RegistryFormActionBackend()
+        """context_func uses resolver_match.kwargs when present."""
 
         class FormWithId(Form):
             name = forms.CharField(max_length=100)
@@ -259,15 +227,6 @@ class TestBaseFormGetInitial:
             def get_initial(cls, request: HttpRequest, id: int) -> dict:  # noqa: A002
                 return {"name": f"resolver-{id}"}
 
-        def handler(request: HttpRequest, form: FormWithId) -> HttpResponseRedirect:
-            return HttpResponseRedirect("/")
-
-        backend.register_action(
-            "resolver_params_action",
-            handler,
-            options=FormActionOptions(form_class=FormWithId),
-        )
-        assert backend.get_meta("resolver_params_action") is not None
         request = HttpRequest()
         request.resolver_match = MagicMock()
         request.resolver_match.kwargs = {"id": 7}
@@ -275,8 +234,7 @@ class TestBaseFormGetInitial:
         assert result.form.initial.get("name") == "resolver-7"
 
     def test_context_func_post_url_param_non_digit_string(self) -> None:
-        """Test context_func uses POST value as-is when not convertible to int."""
-        backend = RegistryFormActionBackend()
+        """context_func uses POST value as-is when not convertible to int."""
 
         class FormWithSlug(Form):
             slug = forms.CharField(max_length=100)
@@ -285,15 +243,6 @@ class TestBaseFormGetInitial:
             def get_initial(cls, request: HttpRequest, slug: str) -> dict:
                 return {"slug": slug}
 
-        def handler(request: HttpRequest, form: FormWithSlug) -> HttpResponseRedirect:
-            return HttpResponseRedirect("/")
-
-        backend.register_action(
-            "slug_action",
-            handler,
-            options=FormActionOptions(form_class=FormWithSlug),
-        )
-        assert backend.get_meta("slug_action") is not None
         request = HttpRequest()
         request.method = "POST"
         request.POST = {"_url_param_slug": "my-slug"}

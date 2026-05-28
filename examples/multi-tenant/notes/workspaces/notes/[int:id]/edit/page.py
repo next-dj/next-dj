@@ -8,7 +8,7 @@ from notes.access import get_active_tenant
 from notes.models import Note
 from notes.providers import DTenant
 
-from next.forms import Form, action
+from next.forms import Form
 from next.pages import context
 
 
@@ -48,24 +48,21 @@ class NoteEditForm(Form):
         note = get_owned_note(tenant, id)
         return {"note_id": note.pk, "title": note.title, "body": note.body}
 
+    def on_valid(
+        self, request: HttpRequest, active_tenant: DTenant
+    ) -> HttpResponseRedirect:
+        """Persist the new title and body, scoped to the active tenant."""
+        note_id = self.cleaned_data["note_id"]
+        note_obj = get_owned_note(active_tenant, note_id)
+        note_obj.title = self.cleaned_data["title"]
+        note_obj.body = self.cleaned_data.get("body", "")
+        note_obj.save()
+        return HttpResponseRedirect(
+            reverse("next:page_notes_int_id_edit", kwargs={"id": note_obj.pk}),
+        )
+
 
 @context("note")
 def note(active_tenant: DTenant, id: int) -> Note:  # noqa: A002
     """Return the note iff it belongs to the active tenant."""
     return get_owned_note(active_tenant, id)
-
-
-@action("note_edit", namespace="notes", form_class=NoteEditForm)
-def note_edit(
-    form: NoteEditForm,
-    active_tenant: DTenant,
-) -> HttpResponseRedirect:
-    """Persist the new title and body, scoped to the active tenant."""
-    note_id = form.cleaned_data["note_id"]
-    note_obj = get_owned_note(active_tenant, note_id)
-    note_obj.title = form.cleaned_data["title"]
-    note_obj.body = form.cleaned_data.get("body", "")
-    note_obj.save()
-    return HttpResponseRedirect(
-        reverse("next:page_notes_int_id_edit", kwargs={"id": note_obj.pk}),
-    )

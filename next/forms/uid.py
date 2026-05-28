@@ -1,27 +1,13 @@
-"""Stable UIDs and related helpers for `@action` endpoints."""
+"""UID generation and redirect helpers for form actions."""
 
-from __future__ import annotations
-
-import hashlib
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from django.conf import settings
-from django.http import HttpResponseRedirect
-
-
-if TYPE_CHECKING:
-    from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponseRedirect
 
 
 URL_NAME_FORM_ACTION = "form_action"
 FORM_ACTION_REVERSE_NAME = "next:form_action"
-
-
-def _make_uid(action_name: str) -> str:
-    """Return a stable short id derived from the action name."""
-    raw = f"next.form.action:{action_name}".encode()
-    return hashlib.sha256(raw).hexdigest()[:16]
 
 
 def validated_next_form_page_path(request: HttpRequest) -> Path | None:  # noqa: PLR0911
@@ -84,7 +70,6 @@ def redirect_to_origin(
 __all__ = [
     "FORM_ACTION_REVERSE_NAME",
     "URL_NAME_FORM_ACTION",
-    "_make_uid",
     "redirect_to_origin",
     "validated_next_form_page_path",
 ]

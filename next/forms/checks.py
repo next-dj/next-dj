@@ -1,55 +1,28 @@
 """System checks for the forms subsystem."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any
-
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Tags, register
+from django.core.checks import (
+    CheckMessage,
+    Error,
+    Tags,
+    Warning as DjangoWarning,
+    register,
+)
 
 from next.conf import import_class_cached
 
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from .backends import (
+    FormActionBackend,
+    _action_collisions,
+    _handler_fingerprint,
+    clear_action_collisions,
+    record_possible_collision,
+)
+from .base import _invalid_meta_scope_classes, _outside_base_dir_classes
+from .decorators import _action_applied_to_class
 
 
 _FORM_ACTION_BACKEND_SETTINGS_KEY = "DEFAULT_FORM_ACTION_BACKENDS"
-
-_action_collisions: dict[str, set[tuple[str, str]]] = {}
-
-
-def _handler_fingerprint(handler: Callable[..., Any]) -> tuple[str, str]:
-    """Return a module+qualname tuple that survives reloads for one function."""
-    module = getattr(handler, "__module__", "") or ""
-    qualname = getattr(handler, "__qualname__", "") or getattr(handler, "__name__", "")
-    return (str(module), str(qualname))
-
-
-def record_possible_collision(
-    action_name: str,
-    old_handler: Callable[..., Any],
-    new_handler: Callable[..., Any],
-) -> None:
-    """Record a collision when a name is re-registered with a distinct handler.
-
-    Called by `RegistryFormActionBackend.register_action` only on the
-    overwrite path, so the common first-registration case pays nothing.
-    Identity match (module reload of the exact same object) short-circuits
-    before the fingerprint comparison.
-    """
-    if old_handler is new_handler:
-        return
-    old_fp = _handler_fingerprint(old_handler)
-    new_fp = _handler_fingerprint(new_handler)
-    if old_fp == new_fp:
-        return
-    _action_collisions.setdefault(action_name, {old_fp}).add(new_fp)
-
-
-def clear_action_collisions() -> None:
-    """Drop the collision-check state. Intended for test isolation."""
-    _action_collisions.clear()
 
 
 @register(Tags.compatibility)
@@ -60,8 +33,7 @@ def check_form_action_collisions(
     """Flag two `@action` calls that share a name but come from different handlers.
 
     Re-registration of the same handler (for example during autoreload) is
-    safe and does not trigger the check because the fingerprint stays
-    identical.
+    safe and does not trigger the check.
     """
     return [
         Error(
@@ -118,8 +90,6 @@ def _validate_single_form_action_backend(
                 id="next.E044",
             ),
         ]
-    from .backends import FormActionBackend  # noqa: PLC0415
-
     try:
         cls = import_class_cached(backend_path)
     except ImportError as exc:
@@ -141,9 +111,62 @@ def _validate_single_form_action_backend(
     return []
 
 
+@register(Tags.compatibility)
+def check_forms_outside_base_dir(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when form classes are declared outside BASE_DIR."""
+    return [
+        DjangoWarning(
+            f"Form class {cls_name!r} declared in {file_path!r} which is outside "
+            "BASE_DIR. It won't be registered automatically.",
+            id="next.E046",
+        )
+        for cls_name, file_path in _outside_base_dir_classes
+    ]
+
+
+@register(Tags.compatibility)
+def check_invalid_form_meta_scope(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Error when form class has invalid Meta.scope value."""
+    return [
+        Error(
+            f"Form class {cls_name!r} has Meta.scope = {bad_value!r}. "
+            "Valid values are 'page' and 'shared'.",
+            id="next.E047",
+        )
+        for cls_name, bad_value in _invalid_meta_scope_classes
+    ]
+
+
+@register(Tags.compatibility)
+def check_action_applied_to_class(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Error when @action decorator was applied to a class."""
+    return [
+        Error(
+            f"@action was applied to class {cls_name!r}. "
+            "Form classes register automatically through __init_subclass__.",
+            id="next.E053",
+        )
+        for cls_name in _action_applied_to_class
+    ]
+
+
 __all__ = [
+    "_action_collisions",
+    "_handler_fingerprint",
+    "check_action_applied_to_class",
     "check_form_action_backends_configuration",
     "check_form_action_collisions",
+    "check_forms_outside_base_dir",
+    "check_invalid_form_meta_scope",
     "clear_action_collisions",
     "record_possible_collision",
 ]

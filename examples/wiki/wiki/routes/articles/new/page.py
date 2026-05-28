@@ -4,7 +4,7 @@ from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 from wiki.models import RESERVED_SLUGS, Article
 
-from next.forms import Form, action
+from next.forms import Form
 from next.pages import context
 
 
@@ -44,6 +44,15 @@ class ArticleCreateForm(Form):
         """Empty initial state for the create form."""
         return {}
 
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        """Persist a new article and redirect to its public URL."""
+        article = Article.objects.create(
+            slug=self.cleaned_data["slug"],
+            title=self.cleaned_data["title"],
+            body_md=self.cleaned_data.get("body_md", ""),
+        )
+        return HttpResponseRedirect(article.url)
+
     def clean_slug(self) -> str:
         """Reject reserved prefixes and existing slugs."""
         slug = self.cleaned_data["slug"]
@@ -60,14 +69,3 @@ class ArticleCreateForm(Form):
 def preview_body(request: HttpRequest) -> str:
     """Body to seed the markdown preview pane between submissions."""
     return request.POST.get("body_md", "")
-
-
-@action("article_create", namespace="wiki", form_class=ArticleCreateForm)
-def article_create(form: ArticleCreateForm) -> HttpResponseRedirect:
-    """Persist a new article and redirect to its public URL."""
-    article = Article.objects.create(
-        slug=form.cleaned_data["slug"],
-        title=form.cleaned_data["title"],
-        body_md=form.cleaned_data.get("body_md", ""),
-    )
-    return HttpResponseRedirect(article.url)

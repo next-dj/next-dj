@@ -4,7 +4,7 @@
     ← Back to notes
   </a>
 
-  {% form @action="notes:note_create" class="grid gap-6 md:grid-cols-2" %}
+  {% form "note_create_form" %}
     <div class="space-y-3">
       {% #component "field" label="Title" for_id="id_title" %}
         {% #slot "control" %}{{ form.title }}{% /slot %}

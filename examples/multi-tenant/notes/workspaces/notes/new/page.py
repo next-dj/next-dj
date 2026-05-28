@@ -1,12 +1,12 @@
 from typing import Any
 
 from django import forms as django_forms
-from django.http import HttpResponseRedirect
+from django.http import HttpRequest, HttpResponseRedirect
 from django.urls import reverse
 from notes.models import Note
 from notes.providers import DTenant
 
-from next.forms import Form, action
+from next.forms import Form
 from next.pages import context
 
 
@@ -36,24 +36,21 @@ class NoteCreateForm(Form):
         """Empty initial state for the create form."""
         return {}
 
+    def on_valid(
+        self, request: HttpRequest, active_tenant: DTenant
+    ) -> HttpResponseRedirect:
+        """Create a new note scoped to the active tenant and redirect to its editor."""
+        note_obj = Note.objects.create(
+            tenant=active_tenant,
+            title=self.cleaned_data["title"],
+            body=self.cleaned_data.get("body", ""),
+        )
+        return HttpResponseRedirect(
+            reverse("next:page_notes_int_id_edit", kwargs={"id": note_obj.pk}),
+        )
+
 
 @context("draft_body")
 def draft_body() -> str:
     """Seed an empty body so the markdown preview pane renders on first paint."""
     return ""
-
-
-@action("note_create", namespace="notes", form_class=NoteCreateForm)
-def note_create(
-    form: NoteCreateForm,
-    active_tenant: DTenant,
-) -> HttpResponseRedirect:
-    """Create a new note scoped to the active tenant and redirect to its editor."""
-    note_obj = Note.objects.create(
-        tenant=active_tenant,
-        title=form.cleaned_data["title"],
-        body=form.cleaned_data.get("body", ""),
-    )
-    return HttpResponseRedirect(
-        reverse("next:page_notes_int_id_edit", kwargs={"id": note_obj.pk}),
-    )

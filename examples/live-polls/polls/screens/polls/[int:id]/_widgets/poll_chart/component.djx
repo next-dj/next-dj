@@ -26,7 +26,7 @@
     <p class="text-xs text-muted-foreground">
       Pick a choice and the bar above moves for everyone watching.
     </p>
-    {% form @action="polls:vote" class="mt-3 grid gap-2" %}
+    {% form "vote_form" %}
       <input type="hidden" name="poll" value="{{ results.poll_id }}">
       <div class="grid gap-2 sm:grid-cols-2">
         {% for choice in results.choices %}

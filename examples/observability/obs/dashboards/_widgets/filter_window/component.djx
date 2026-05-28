@@ -1,4 +1,4 @@
-{% form @action="obs:filter_window" class="flex items-center gap-2" %}
+{% form "window_filter_form" %}
   <label for="filter-window" class="text-xs uppercase tracking-wide text-slate-500">Window</label>
   <select
     id="filter-window"

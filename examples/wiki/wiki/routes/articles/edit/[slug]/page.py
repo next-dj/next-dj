@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404
 from wiki.models import RESERVED_SLUGS, Article
 from wiki.providers import DArticle
 
-from next.forms import Form, action
+from next.forms import Form
 from next.pages import context
 
 
@@ -54,6 +54,15 @@ class ArticleEditForm(Form):
             "body_md": article.body_md,
         }
 
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        """Persist edits to an existing article and redirect to its public URL."""
+        article_obj = get_object_or_404(Article, pk=self.cleaned_data["article_id"])
+        article_obj.slug = self.cleaned_data["slug"]
+        article_obj.title = self.cleaned_data["title"]
+        article_obj.body_md = self.cleaned_data.get("body_md", "")
+        article_obj.save()
+        return HttpResponseRedirect(article_obj.url)
+
     def clean_slug(self) -> str:
         """Reject reserved prefixes and slugs taken by another article."""
         slug = self.cleaned_data["slug"]
@@ -81,14 +90,3 @@ def preview_body(request: HttpRequest, item: DArticle[Article]) -> str:
     if posted is not None:
         return posted
     return item.body_md
-
-
-@action("article_edit", namespace="wiki", form_class=ArticleEditForm)
-def article_edit(form: ArticleEditForm) -> HttpResponseRedirect:
-    """Persist edits to an existing article and redirect to its public URL."""
-    article_obj = get_object_or_404(Article, pk=form.cleaned_data["article_id"])
-    article_obj.slug = form.cleaned_data["slug"]
-    article_obj.title = form.cleaned_data["title"]
-    article_obj.body_md = form.cleaned_data.get("body_md", "")
-    article_obj.save()
-    return HttpResponseRedirect(article_obj.url)

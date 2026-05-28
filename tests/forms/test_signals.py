@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from django import forms as django_forms
 from django.dispatch import Signal
 
 from next.forms import Form, RegistryFormActionBackend, form_action_manager
@@ -16,6 +17,8 @@ from next.forms.signals import (
 PAGE_MODULE_FOR_FORM_TESTS = (
     Path(__file__).resolve().parent.parent / "site_pages" / "page.py"
 ).resolve()
+
+_FAKE_FILE = "/fake/myapp/forms.py"
 
 
 @pytest.fixture()
@@ -221,7 +224,12 @@ class TestActionRegisteredWiring:
     ) -> None:
         """Registering a new action via the backend emits the signal."""
         backend = RegistryFormActionBackend()
-        backend.register_action("wired_action", lambda: None)
+        backend.register_action(
+            "wired_action",
+            handler=lambda: None,
+            file_path=_FAKE_FILE,
+            scope="shared",
+        )
         events = [
             e
             for e in capture_action_registered
@@ -233,6 +241,29 @@ class TestActionRegisteredWiring:
         assert "uid" in event
         assert event["form_class"] is None
         assert event["namespace"] is None
+
+    def test_fires_with_form_class(
+        self, capture_action_registered: list[dict[str, Any]]
+    ) -> None:
+        """Registering a form_class action fires the signal with form_class set."""
+        backend = RegistryFormActionBackend()
+
+        class MySignalForm(django_forms.Form):
+            name = django_forms.CharField()
+
+        backend.register_action(
+            "form_signal_test",
+            form_class=MySignalForm,
+            file_path=_FAKE_FILE,
+            scope="shared",
+        )
+        events = [
+            e
+            for e in capture_action_registered
+            if e.get("action_name") == "form_signal_test"
+        ]
+        assert len(events) == 1
+        assert events[0]["form_class"] is MySignalForm
 
 
 @pytest.mark.django_db()
@@ -262,13 +293,12 @@ class TestActionDispatchedWiring:
         client_no_csrf,
         capture_action_dispatched: list[dict[str, Any]],
     ) -> None:
-        """A valid bound form fires the signal after the handler runs."""
-        url = form_action_manager.get_action_url("test_redirect")
+        """A valid bound form fires the signal after on_valid runs."""
+        url = form_action_manager.get_action_url("simple_form_redirect")
         resp = client_no_csrf.post(
             url,
             data={
                 "name": "Alice",
-                "email": "",
                 "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
             },
             follow=False,
@@ -276,7 +306,7 @@ class TestActionDispatchedWiring:
         assert resp.status_code == 302
         assert len(capture_action_dispatched) == 1
         event = capture_action_dispatched[0]
-        assert event["action_name"] == "test_redirect"
+        assert event["action_name"] == "simple_form_redirect"
         assert event["response_status"] == 302
         assert isinstance(event["form"], Form)
         assert event["form"].cleaned_data["name"] == "Alice"
@@ -299,7 +329,7 @@ class TestActionDispatchedWiring:
         capture_action_dispatched: list[dict[str, Any]],
     ) -> None:
         """An invalid form never reaches the handler, so no dispatched signal."""
-        url = form_action_manager.get_action_url("test_submit")
+        url = form_action_manager.get_action_url("simple_form")
         client_no_csrf.post(
             url,
             data={
@@ -321,7 +351,7 @@ class TestFormValidationFailedWiring:
         capture_form_validation_failed: list[dict[str, Any]],
     ) -> None:
         """An invalid POST fires the signal with action_name, errors, fields."""
-        url = form_action_manager.get_action_url("test_submit")
+        url = form_action_manager.get_action_url("simple_form")
         resp = client_no_csrf.post(
             url,
             data={
@@ -333,6 +363,6 @@ class TestFormValidationFailedWiring:
         assert resp.status_code == 200
         assert len(capture_form_validation_failed) == 1
         event = capture_form_validation_failed[0]
-        assert event["action_name"] == "test_submit"
+        assert event["action_name"] == "simple_form"
         assert event["error_count"] >= 1
         assert "name" in event["field_names"]

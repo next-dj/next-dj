@@ -15,7 +15,9 @@ class TestShorten:
     """Submitting the form creates a Link and redirects home."""
 
     def test_post_creates_link_and_redirects(self, client) -> None:
-        response = client.post_action("create_link", {"url": "https://example.com/a"})
+        response = client.post_action(
+            "create_link_form", {"url": "https://example.com/a"}
+        )
         assert response.status_code == 302
         assert response["Location"] == "/"
         assert Link.objects.count() == 1
@@ -25,7 +27,7 @@ class TestShorten:
             Path(__file__).resolve().parent.parent / "shortener" / "routes" / "page.py"
         )
         response = client.post_action(
-            "create_link",
+            "create_link_form",
             {"url": "not-a-url", "_next_form_page": str(page_path)},
         )
         assert response.status_code == 200

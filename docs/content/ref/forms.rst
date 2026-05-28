@@ -6,8 +6,9 @@ Forms Reference
 Module Summary
 --------------
 
-``next.forms`` exposes form action registration, dispatch, formset helpers, frozen field and form specs, and a curated set of commonly used Django form fields and widgets.
-It also re-exports ``page`` from ``next.pages`` so that a single ``from next.forms import action, page`` covers the two most common decorators in a ``page.py``.
+``next.forms`` exposes form base classes, a form-less action decorator, dispatch infrastructure,
+formset helpers, frozen field and form specs,
+and a curated set of commonly used Django form fields and widgets.
 
 API Tiers
 ---------
@@ -17,17 +18,29 @@ The lists below are representative.
 The autodoc blocks under `Public API`_ are the exhaustive surface.
 
 Stable.
-   ``@action``, ``page``, ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``DForm``, ``FormActionManager``, ``form_action_manager``, and the UID helpers (``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``, ``redirect_to_origin``).
+   ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``@action``, ``redirect_to_origin``,
+   ``FormActionManager``, ``form_action_manager``, ``DForm``,
+   and the UID helpers (``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``).
    Use these in application code.
 
 Advanced.
-   ``FormProvider``, ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``, ``FormActionDispatch``, ``FormActionOptions``, ``ActionMeta``, ``build_form_namespace_for_action``, ``validated_next_form_page_path``, the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``, ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``, ``formset_spec``), the formset helper ``cleanup_extra_initial``, and the ``signals`` and ``checks`` submodules.
+   ``FormProvider``, ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``,
+   ``FormActionDispatch``, ``FormActionOptions``, ``ActionMeta``,
+   ``build_form_namespace_for_action``, ``validated_next_form_page_path``,
+   the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``,
+   ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``,
+   ``formset_spec``), the formset helper ``cleanup_extra_initial``,
+   and the ``signals`` and ``checks`` submodules.
    Use these when writing a custom backend or a form renderer.
-   ``FormProvider`` auto-registers through the ``__init_subclass__`` hook on ``RegisteredParameterProvider`` and resolves the bound ``form`` parameter, so application code never instantiates it.
+   ``FormProvider`` auto-registers through the ``__init_subclass__`` hook on
+   ``RegisteredParameterProvider`` and resolves the bound ``form`` parameter, so application
+   code never instantiates it.
 
 Internal hooks.
-   Symbols with a leading underscore are implementation details re-exported for testing and advanced backend authoring.
-   The full set lives in ``next.forms.__all__``, which is the source of truth for the internal hook surface.
+   Symbols with a leading underscore are implementation details re-exported for testing and
+   advanced backend authoring.
+   The full set lives in ``next.forms.__all__``, which is the source of truth for the internal
+   hook surface.
    Do not import these names in application code.
 
 Public API
@@ -48,15 +61,16 @@ Form Base Classes
    :members:
 
 .. autoclass:: next.forms.BaseForm
-   :members:
+   :members: get_initial, on_valid
 
 .. autoclass:: next.forms.BaseModelForm
-   :members:
+   :members: get_initial, on_valid
 
 Fields and Widgets
 ~~~~~~~~~~~~~~~~~~
 
-The framework re-exports a curated set of commonly used Django form fields and widgets through ``next.forms`` so a single import covers most form definitions.
+The framework re-exports a curated set of commonly used Django form fields and widgets through
+``next.forms`` so a single import covers most form definitions.
 Import any other Django field or widget directly from ``django.forms``.
 
 .. automodule:: next.forms.base
@@ -72,8 +86,9 @@ Markers
 Dispatch
 ~~~~~~~~
 
-``FormActionDispatch`` and ``build_form_namespace_for_action`` are the public members of this module, in the Advanced tier described above.
-The underscore-prefixed helpers (``_bind_form_for_post``, ``_normalize_handler_response``, and similar symbols) are internal hooks and stay off the autodoc surface below.
+``FormActionDispatch`` and ``build_form_namespace_for_action`` are the public members of this
+module, in the Advanced tier described above.
+The underscore-prefixed helpers are internal hooks and stay off the autodoc surface below.
 Treat them as the ``Internal hooks`` tier described above.
 
 .. automodule:: next.forms.dispatch
@@ -88,6 +103,9 @@ Manager
 
 Backends
 ~~~~~~~~
+
+``FormActionOptions`` is a reserved dataclass.
+It is accepted by ``register_action`` for forward compatibility but carries no fields currently.
 
 .. automodule:: next.forms.backends
    :members:
@@ -114,7 +132,8 @@ Frozen Specs
 Signals
 -------
 
-See :doc:`signals` and :doc:`/content/topics/forms/signals` for the form signals (``action_registered``, ``action_dispatched``, ``form_validation_failed``).
+See :doc:`signals` and :doc:`/content/topics/forms/signals` for the form signals
+(``action_registered``, ``action_dispatched``, ``form_validation_failed``).
 
 See Also
 --------

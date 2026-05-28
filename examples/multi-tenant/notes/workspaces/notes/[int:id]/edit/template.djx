@@ -4,7 +4,7 @@
     ← Back to notes
   </a>
 
-  {% form @action="notes:note_edit" class="grid gap-6 md:grid-cols-2" %}
+  {% form "note_edit_form" %}
     <div class="space-y-3">
       <input type="hidden" name="note_id" value="{{ note.pk }}">
       {% #component "field" label="Title" for_id="id_title" %}

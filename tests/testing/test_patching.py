@@ -107,14 +107,14 @@ class TestOverrideFormAction:
 
     def test_registers_and_restores(self) -> None:
         backend = form_action_manager.default_backend
-        assert "_pt_override" not in backend._registry  # type: ignore[attr-defined]
+        assert not any(name == "_pt_override" for _, name in backend._registry)  # type: ignore[attr-defined]
 
         def handler() -> str:
             return "ok"
 
         with override_form_action("_pt_override", handler):
-            assert "_pt_override" in backend._registry  # type: ignore[attr-defined]
-        assert "_pt_override" not in backend._registry  # type: ignore[attr-defined]
+            assert any(name == "_pt_override" for _, name in backend._registry)  # type: ignore[attr-defined]
+        assert not any(name == "_pt_override" for _, name in backend._registry)  # type: ignore[attr-defined]
 
     def test_restores_after_exception(self) -> None:
         backend = form_action_manager.default_backend
@@ -124,7 +124,7 @@ class TestOverrideFormAction:
 
         with pytest.raises(RuntimeError), override_form_action("_pt_err", handler):
             raise _BOOM
-        assert "_pt_err" not in backend._registry  # type: ignore[attr-defined]
+        assert not any(name == "_pt_err" for _, name in backend._registry)  # type: ignore[attr-defined]
 
 
 class TestOverrideComponentBackends:
