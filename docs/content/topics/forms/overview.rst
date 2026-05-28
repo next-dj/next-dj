@@ -63,6 +63,13 @@ A shared form has a project-wide name and is reachable from any template.
            send_email(self.cleaned_data["email"])
            return redirect_to_origin(request)
 
+Autodiscover
+------------
+
+``NextFrameworkConfig.ready`` calls ``autodiscover_forms()`` once on startup.
+It imports the ``forms`` submodule of every installed app so shared forms declared in ``app/forms.py`` register before the first request arrives.
+Set ``NEXT_FRAMEWORK["FORM_AUTODISCOVER"] = False`` to disable the automatic import.
+
 Override Scope
 --------------
 
@@ -116,11 +123,12 @@ Use ``@action("name")`` to register a plain function when no form fields are nee
 .. code-block:: python
    :caption: page.py
 
-   from next.forms import action
+   from django.http import HttpRequest
+   from next.forms import action, redirect_to_origin
    from next.urls import DUrl
 
    @action("delete_article")
-   def delete_article(article_id: DUrl["id", int]):
+   def delete_article(article_id: DUrl["id", int], request: HttpRequest):
        Article.objects.filter(pk=article_id).delete()
        return redirect_to_origin(request)
 

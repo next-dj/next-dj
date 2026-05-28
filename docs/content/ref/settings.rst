@@ -99,6 +99,26 @@ Default value.
        }
    ]
 
+FORM_AUTODISCOVER
+~~~~~~~~~~~~~~~~~
+
+Boolean that controls whether ``NextFrameworkConfig.ready`` imports the ``forms`` submodule of every installed app on startup.
+
+Default value ``True``.
+
+When ``True``, shared forms declared in ``app/forms.py`` register before the first request arrives.
+Set to ``False`` to disable the automatic import and manage registration manually.
+
+FORM_ANCHOR_FILES
+~~~~~~~~~~~~~~~~~
+
+List of file basenames that receive ``page`` scope during auto-registration.
+A form class declared in a file whose basename appears in this list is keyed to the absolute path of that file.
+All other files produce ``shared`` scope.
+
+Default value ``None``, which uses the built-in set ``["page.py", "component.py"]``.
+Set to a list of strings to extend or replace the default set.
+
 Routing
 -------
 

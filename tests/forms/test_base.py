@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 from django import forms as django_forms
 from django.http import HttpRequest
 
-from next.forms import Form, ModelForm
+from next.forms import Form, ModelForm, reset_form_registration_state
+from next.forms.autodiscover import _discovered
 from next.forms.base import (
     _FRAMEWORK_ROOT,
     _auto_register_form_class,
@@ -17,6 +18,7 @@ from next.forms.base import (
     clear_auto_registration_state,
 )
 from next.forms.checks import _action_collisions, clear_action_collisions
+from next.forms.decorators import _action_applied_to_class
 from next.forms.manager import form_action_manager
 
 
@@ -425,3 +427,42 @@ class TestBaseFormOnValid:
         assert response.status_code == 302
         assert response.url == "/model-origin/"
         instance.save.assert_called_once()
+
+
+class TestAbstractForms:
+    """Meta.abstract opts a base form class out of auto-registration."""
+
+    def test_abstract_meta_form_skips_registration(self) -> None:
+        """A form with Meta.abstract = True is not auto-registered."""
+        backend = form_action_manager.default_backend
+
+        class AbstractIntermediateForm(Form):
+            class Meta:
+                abstract = True
+
+        assert backend.get_meta("abstract_intermediate_form") is None
+
+
+class TestResetFormRegistrationState:
+    """reset_form_registration_state clears every registry and warning buffer."""
+
+    def test_reset_clears_all_buffers(self) -> None:
+        """The aggregate reset empties the registry and every tracking list."""
+        backend = form_action_manager.default_backend
+        backend.register_action(
+            "reset_probe",
+            handler=lambda _request: None,
+            file_path="/x/page.py",
+            scope="page",
+        )
+        _outside_base_dir_classes.append(("Probe", "/x/forms.py"))
+        _action_applied_to_class.append("Probe")
+        _discovered.add("probe.forms")
+
+        reset_form_registration_state()
+
+        assert backend._registry == {}
+        assert backend._name_index == {}
+        assert _outside_base_dir_classes == []
+        assert _action_applied_to_class == []
+        assert _discovered == set()

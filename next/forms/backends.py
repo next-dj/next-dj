@@ -156,6 +156,7 @@ class RegistryFormActionBackend(FormActionBackend):
         """Create an empty action map. `config` is accepted for factory parity."""
         self._registry: dict[tuple[str, str], ActionMeta] = {}
         self._uid_to_name: dict[str, tuple[str, str]] = {}
+        self._name_index: dict[str, tuple[str, str]] = {}
 
     def clear_registry(self) -> None:
         """Drop every registered action and reset the UID index.
@@ -165,6 +166,7 @@ class RegistryFormActionBackend(FormActionBackend):
         """
         self._registry.clear()
         self._uid_to_name.clear()
+        self._name_index.clear()
 
     def register_action(
         self,
@@ -207,6 +209,7 @@ class RegistryFormActionBackend(FormActionBackend):
             "file_path": file_path,
             "scope": scope,
         }
+        self._name_index.setdefault(name, key)
         action_registered.send(
             sender=self.__class__,
             action_name=name,
@@ -228,14 +231,14 @@ class RegistryFormActionBackend(FormActionBackend):
                     except NoReverseMatch:
                         return reverse(URL_NAME_FORM_ACTION, kwargs={"uid": uid})
 
-        for (_scope_key, name), meta in self._registry.items():
-            if name == action_name:
-                uid = meta["uid"]
-                if uid is not None:
-                    try:
-                        return reverse(FORM_ACTION_REVERSE_NAME, kwargs={"uid": uid})
-                    except NoReverseMatch:
-                        return reverse(URL_NAME_FORM_ACTION, kwargs={"uid": uid})
+        fallback_key = self._name_index.get(action_name)
+        if fallback_key is not None:
+            uid = self._registry[fallback_key]["uid"]
+            if uid is not None:
+                try:
+                    return reverse(FORM_ACTION_REVERSE_NAME, kwargs={"uid": uid})
+                except NoReverseMatch:
+                    return reverse(URL_NAME_FORM_ACTION, kwargs={"uid": uid})
 
         msg = f"Unknown form action: {action_name}"
         raise KeyError(msg)
@@ -270,9 +273,9 @@ class RegistryFormActionBackend(FormActionBackend):
             if meta is not None:
                 return cast("dict[str, Any]", meta)
 
-        for (_scope_key, name), meta in self._registry.items():
-            if name == action_name:
-                return cast("dict[str, Any]", meta)
+        fallback_key = self._name_index.get(action_name)
+        if fallback_key is not None:
+            return cast("dict[str, Any]", self._registry[fallback_key])
 
         return None
 

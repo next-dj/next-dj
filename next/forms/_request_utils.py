@@ -22,7 +22,7 @@ def _url_kwargs_from_post(request: "HttpRequest") -> dict[str, object]:
     for key, value in request.POST.items():
         if not key.startswith("_url_param_"):
             continue
-        param_name = key.replace("_url_param_", "")
+        param_name = key[len("_url_param_") :]
         if param_name in RESERVED_KEYS:
             continue
         if isinstance(value, str):

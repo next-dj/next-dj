@@ -43,12 +43,15 @@ Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 @action
 ~~~~~~~
 
-.. py:decorator:: @action(name, *, form_class=None, namespace=None)
+.. py:decorator:: @action(name, *, form_class=None)
 
-Registers a form action handler under ``name``.
+Registers a plain callable as a named form-less action under ``name``.
 ``name`` is the first positional argument and must be unique across the project.
-Pass ``form_class=`` for forms that need validation.
-Pass ``namespace=`` to scope short names, which prefixes the stored key with ``"<namespace>:"``.
+Use ``@action`` only for handlers that need no form validation — for example delete confirmations or logout buttons.
+Form classes register automatically through ``__init_subclass__`` and must not use ``@action``.
+Pass ``form_class=`` only when the action requires a dynamically constructed form class supplied by a factory callable.
+Passing a static ``Form`` subclass as ``form_class`` raises ``TypeError`` immediately.
+Applying ``@action`` to a class also raises ``TypeError`` and triggers ``next.E053``.
 
 Dependency Markers
 ------------------

@@ -39,8 +39,9 @@ def _is_framework_file(file_path: str) -> bool:
 
 def _compute_scope(file_path: str) -> str:
     """Return 'page' if file_path names an anchor file, otherwise 'shared'."""
-    custom_anchors = getattr(next_framework_settings, "FORM_ANCHOR_FILES", None)
-    anchor_names = frozenset(custom_anchors or _ANCHOR_FILE_NAMES)
+    anchor_names = frozenset(
+        next_framework_settings.FORM_ANCHOR_FILES or _ANCHOR_FILE_NAMES
+    )
     return "page" if Path(file_path).resolve().name in anchor_names else "shared"
 
 
@@ -152,6 +153,9 @@ def _find_definition_frame() -> str:
 
 def _auto_register_form_class(cls: type) -> None:
     """Register a form subclass with form_action_manager."""
+    if getattr(getattr(cls, "Meta", None), "abstract", False):
+        return
+
     file_path = _find_definition_frame()
 
     # Skip virtual frames (importlib bootstrap, interactive shell, etc.)
@@ -171,7 +175,7 @@ def _auto_register_form_class(cls: type) -> None:
 
     meta_scope = getattr(getattr(cls, "Meta", None), "scope", None)
     if meta_scope is not None and meta_scope not in ("page", "shared"):
-        _invalid_meta_scope_classes.append((cls.__qualname__, str(meta_scope)))
+        _record_invalid_meta_scope(cls, meta_scope)
         return
 
     scope = meta_scope if meta_scope is not None else _compute_scope(file_path)

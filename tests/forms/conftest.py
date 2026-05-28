@@ -3,7 +3,8 @@ import copy
 import pytest
 from django.test import Client
 
-import tests.forms.actions  # noqa: F401 - ensures actions are registered before first snapshot
+from next.forms.autodiscover import _discovered
+from next.forms.backends import _action_collisions, clear_action_collisions
 from next.forms.base import (
     _instance_from_url_on_non_model_form,
     _instance_from_url_unknown_field,
@@ -11,9 +12,14 @@ from next.forms.base import (
     _outside_base_dir_classes,
     clear_auto_registration_state,
 )
-from next.forms.checks import _action_collisions, clear_action_collisions
 from next.forms.decorators import _action_applied_to_class
 from next.forms.manager import form_action_manager
+from tests.forms import actions
+
+
+# `actions` registers baseline form actions on import. Bind it so the registry
+# snapshot below always reflects them, whatever the collection order happens to be.
+_BASELINE_ACTIONS = actions
 
 
 @pytest.fixture()
@@ -32,6 +38,8 @@ def _isolate_form_registries():
     backend = form_action_manager.default_backend
     registry_snapshot = copy.deepcopy(backend._registry)
     uid_snapshot = copy.deepcopy(backend._uid_to_name)
+    name_index_snapshot = copy.deepcopy(backend._name_index)
+    discovered_snapshot = set(_discovered)
     outside_snapshot = list(_outside_base_dir_classes)
     invalid_snapshot = list(_invalid_meta_scope_classes)
     unknown_field_snapshot = list(_instance_from_url_unknown_field)
@@ -45,6 +53,11 @@ def _isolate_form_registries():
     backend._registry.update(registry_snapshot)
     backend._uid_to_name.clear()
     backend._uid_to_name.update(uid_snapshot)
+    backend._name_index.clear()
+    backend._name_index.update(name_index_snapshot)
+
+    _discovered.clear()
+    _discovered.update(discovered_snapshot)
 
     clear_auto_registration_state()
     _outside_base_dir_classes.extend(outside_snapshot)

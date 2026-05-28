@@ -1,5 +1,3 @@
-from typing import Any
-
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 from django.urls import reverse
@@ -30,11 +28,6 @@ class NoteCreateForm(Form):
             attrs={"class": TEXTAREA_CLASS, "placeholder": "# Markdown body"},
         ),
     )
-
-    @classmethod
-    def get_initial(cls) -> dict[str, Any]:
-        """Empty initial state for the create form."""
-        return {}
 
     def on_valid(
         self, request: HttpRequest, active_tenant: DTenant

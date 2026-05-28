@@ -63,12 +63,14 @@ class NextFrameworkSettings:
             "DEFAULT_STATIC_BACKENDS",
             "DEFAULT_FORM_ACTION_BACKENDS",
             "TEMPLATE_LOADERS",
+            "FORM_ANCHOR_FILES",
         }
     )
     _BOOL_KEYS: ClassVar[frozenset[str]] = frozenset(
         {
             "STRICT_CONTEXT",
             "LAZY_COMPONENT_MODULES",
+            "FORM_AUTODISCOVER",
         }
     )
 

@@ -1,5 +1,3 @@
-from typing import Any
-
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 from wiki.models import RESERVED_SLUGS, Article
@@ -38,11 +36,6 @@ class ArticleCreateForm(Form):
             },
         ),
     )
-
-    @classmethod
-    def get_initial(cls) -> dict[str, Any]:
-        """Empty initial state for the create form."""
-        return {}
 
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
         """Persist a new article and redirect to its public URL."""

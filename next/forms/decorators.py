@@ -12,6 +12,11 @@ from .manager import form_action_manager
 _action_applied_to_class: list[str] = []
 
 
+def clear_action_applied_to_class() -> None:
+    """Drop the recorded @action-on-class misuses. For test isolation."""
+    _action_applied_to_class.clear()
+
+
 def action(
     name: str,
     *,
@@ -54,4 +59,4 @@ def action(
     return decorator
 
 
-__all__ = ["_action_applied_to_class", "action"]
+__all__ = ["action", "clear_action_applied_to_class"]

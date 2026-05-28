@@ -20,7 +20,8 @@ The autodoc blocks under `Public API`_ are the exhaustive surface.
 Stable.
    ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``@action``, ``redirect_to_origin``,
    ``FormActionManager``, ``form_action_manager``, ``DForm``,
-   and the UID helpers (``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``).
+   the UID helpers (``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``),
+   ``autodiscover_forms``, and ``reset_form_registration_state``.
    Use these in application code.
 
 Advanced.
@@ -45,6 +46,13 @@ Internal hooks.
 
 Public API
 ----------
+
+Autodiscover
+~~~~~~~~~~~~
+
+.. autofunction:: next.forms.autodiscover_forms
+
+.. autofunction:: next.forms.reset_form_registration_state
 
 Decorator
 ~~~~~~~~~

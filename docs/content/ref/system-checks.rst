@@ -223,6 +223,18 @@ Errors
    * - ``next.E045``
      - A form action backend class does not subclass ``FormActionBackend``.
      - ``next.forms.checks``
+   * - ``next.E047``
+     - A form class has ``Meta.scope`` set to a value other than ``"page"`` or ``"shared"``.
+     - ``next.forms.checks``
+   * - ``next.E048``
+     - ``Meta.instance_from_url`` references a field name that does not exist on the model.
+     - ``next.forms.checks``
+   * - ``next.E049``
+     - ``Meta.instance_from_url`` is set on a class that is not a ``ModelForm`` subclass.
+     - ``next.forms.checks``
+   * - ``next.E053``
+     - ``@action`` was applied to a class instead of a function.
+     - ``next.forms.checks``
 
 A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -251,6 +263,9 @@ Warnings
    * - ``next.W043``
      - A ``page.py`` declares more than one body source and the lower-priority ones are ignored.
      - ``next.pages.checks``
+   * - ``next.W046``
+     - A form class is declared in a file outside ``BASE_DIR`` and will not be registered automatically.
+     - ``next.forms.checks``
 
 .. note::
 

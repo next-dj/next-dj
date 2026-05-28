@@ -11,12 +11,14 @@ submodule import clarifies intent.
 from next.pages import page
 
 from . import checks, signals
+from .autodiscover import autodiscover_forms, clear_discovered
 from .backends import (
     ActionMeta,
     FormActionBackend,
     FormActionFactory,
     FormActionOptions,
     RegistryFormActionBackend,
+    clear_action_collisions,
 )
 from .base import (
     BaseForm,
@@ -55,7 +57,7 @@ from .base import (
     Widget,
     clear_auto_registration_state,
 )
-from .decorators import action
+from .decorators import action, clear_action_applied_to_class
 from .dispatch import FormActionDispatch
 from .formsets import cleanup_extra_initial
 from .manager import (
@@ -81,6 +83,20 @@ from .uid import (
     redirect_to_origin,
     validated_next_form_page_path,
 )
+
+
+def reset_form_registration_state() -> None:
+    """Clear every form registry and registration-warning buffer.
+
+    Resets the action registry, the auto-registration warning buffers, the
+    collision tracker, the @action-on-class tracker, and the autodiscover
+    guard. Intended for test isolation and manual hot-reload flows.
+    """
+    form_action_manager.clear_registries()
+    clear_auto_registration_state()
+    clear_action_collisions()
+    clear_action_applied_to_class()
+    clear_discovered()
 
 
 __all__ = [
@@ -136,6 +152,7 @@ __all__ = [
     "ValidationError",
     "Widget",
     "action",
+    "autodiscover_forms",
     "build_form_namespace_for_action",
     "checks",
     "cleanup_extra_initial",
@@ -145,6 +162,7 @@ __all__ = [
     "formset_spec",
     "page",
     "redirect_to_origin",
+    "reset_form_registration_state",
     "signals",
     "validated_next_form_page_path",
 ]

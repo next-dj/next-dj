@@ -1,16 +1,18 @@
 import pytest
 
 from next.forms import RegistryFormActionBackend
-from next.forms.base import _invalid_meta_scope_classes, _outside_base_dir_classes
-from next.forms.checks import (
+from next.forms.backends import (
     _action_collisions,
     _handler_fingerprint,
+    record_possible_collision,
+)
+from next.forms.base import _invalid_meta_scope_classes, _outside_base_dir_classes
+from next.forms.checks import (
     check_action_applied_to_class,
     check_form_action_backends_configuration,
     check_form_action_collisions,
     check_forms_outside_base_dir,
     check_invalid_form_meta_scope,
-    record_possible_collision,
 )
 from next.forms.decorators import _action_applied_to_class, action
 from next.forms.signals import action_registered
@@ -168,7 +170,7 @@ class TestFormActionBackendsConfigurationCheck:
 
 
 class TestCheckFormsOutsideBaseDir:
-    """check_forms_outside_base_dir: E046 warning when form is declared outside BASE_DIR."""
+    """check_forms_outside_base_dir: W046 warning when form is declared outside BASE_DIR."""
 
     def test_no_outside_classes_returns_empty(self) -> None:
         """No warnings when no forms are outside BASE_DIR."""
@@ -176,12 +178,12 @@ class TestCheckFormsOutsideBaseDir:
         assert check_forms_outside_base_dir() == []
 
     def test_outside_class_triggers_warning(self) -> None:
-        """A form class outside BASE_DIR produces an E046 warning."""
+        """A form class outside BASE_DIR produces a W046 warning."""
         _outside_base_dir_classes.clear()
         _outside_base_dir_classes.append(("OutsideForm", "/outside/dir/forms.py"))
         warnings = check_forms_outside_base_dir()
         assert len(warnings) == 1
-        assert warnings[0].id == "next.E046"
+        assert warnings[0].id == "next.W046"
         assert "OutsideForm" in warnings[0].msg
         _outside_base_dir_classes.clear()
 
@@ -193,7 +195,7 @@ class TestCheckFormsOutsideBaseDir:
         warnings = check_forms_outside_base_dir()
         assert len(warnings) == 2
         ids = {w.id for w in warnings}
-        assert ids == {"next.E046"}
+        assert ids == {"next.W046"}
         _outside_base_dir_classes.clear()
 
 

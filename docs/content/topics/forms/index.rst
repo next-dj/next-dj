@@ -23,6 +23,9 @@ Read :doc:`overview` first, then jump to the page that matches the part you are 
 :doc:`modelforms`
    Use Django ``ModelForm`` for create and edit pages.
 
+:doc:`plain-forms`
+   Use a plain ``Form`` for filter, search, voting, and bulk-operation pages.
+
 :doc:`formsets`
    Render and validate Django formsets through the same dispatch pipeline.
 
@@ -50,6 +53,7 @@ Read :doc:`overview` first, then jump to the page that matches the part you are 
    actions
    templates
    modelforms
+   plain-forms
    formsets
    validation-rerender
    serializers

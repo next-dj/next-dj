@@ -1,7 +1,14 @@
 import pytest
+from django.test import override_settings
 
+from next.conf import next_framework_settings
 from next.forms.backends import _file_to_dotted_module
-from next.forms.base import _FRAMEWORK_ROOT, _is_framework_file, _to_snake_case
+from next.forms.base import (
+    _FRAMEWORK_ROOT,
+    _compute_scope,
+    _is_framework_file,
+    _to_snake_case,
+)
 
 
 @pytest.mark.parametrize(
@@ -66,3 +73,21 @@ class TestIsFrameworkFileUsed:
     def test_non_framework_file_not_detected(self, tmp_path) -> None:
         """A path outside the framework root is not a framework file."""
         assert _is_framework_file(str(tmp_path / "myapp" / "forms.py")) is False
+
+
+class TestComputeScope:
+    """_compute_scope maps anchor file names to page scope, others to shared."""
+
+    def test_default_anchor_names(self, tmp_path) -> None:
+        """Without FORM_ANCHOR_FILES, page.py and component.py are anchors."""
+        assert _compute_scope(str(tmp_path / "page.py")) == "page"
+        assert _compute_scope(str(tmp_path / "component.py")) == "page"
+        assert _compute_scope(str(tmp_path / "forms.py")) == "shared"
+
+    def test_form_anchor_files_setting_overrides_defaults(self, tmp_path) -> None:
+        """FORM_ANCHOR_FILES replaces which file names count as anchors."""
+        with override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": ["screen.py"]}):
+            next_framework_settings.reload()
+            assert _compute_scope(str(tmp_path / "screen.py")) == "page"
+            assert _compute_scope(str(tmp_path / "page.py")) == "shared"
+        next_framework_settings.reload()

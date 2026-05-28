@@ -32,11 +32,11 @@ def render_form_page_with_errors(
     request-aware backend (such as a per-tenant URL prefix) sees the
     same `request` it does on the canonical render path.
     """
-    meta = backend.get_meta(action_name)
+    file_path = page_file_path
+    meta = backend.get_meta(action_name, page_path=str(file_path))
     if not meta:
         return form.as_p() if form else ""
 
-    file_path = page_file_path
     module = _load_python_module_memo(file_path)
     body = page._load_static_body(file_path, module)
     template_str = page._layout_manager._layout_loader.compose_body(body, file_path)

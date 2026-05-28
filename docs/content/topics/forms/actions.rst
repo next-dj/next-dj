@@ -78,6 +78,7 @@ Override with ``Meta.scope``.
    Any other value triggers ``next.E047`` and the class is not registered.
 
 Customise the set of anchor file names through ``NEXT_FRAMEWORK["FORM_ANCHOR_FILES"]``.
+The default set is ``["page.py", "component.py"]``.
 
 The ``on_valid`` Method
 -----------------------
@@ -127,11 +128,12 @@ Typical use cases include logout buttons, delete confirmations, and any simple P
 .. code-block:: python
    :caption: page.py
 
-   from next.forms import action
+   from django.http import HttpRequest
+   from next.forms import action, redirect_to_origin
    from next.urls import DUrl
 
    @action("delete_note")
-   def delete_note(note_id: DUrl["id", int]):
+   def delete_note(note_id: DUrl["id", int], request: HttpRequest):
        Note.objects.filter(pk=note_id).delete()
        return redirect_to_origin(request)
 
@@ -150,13 +152,19 @@ The forms subsystem contributes Django system checks that run through ``python m
    Two or more registrations share the same action name but come from different handlers.
    Rename one of them or move one to a different scope.
 
-``next.E046``
+``next.W046`` (Warning)
    A form class was declared in a file outside ``BASE_DIR``.
    The class is not registered automatically.
 
 ``next.E047``
    A form class has ``Meta.scope`` set to a value other than ``"page"`` or ``"shared"``.
    The class is not registered.
+
+``next.E048``
+   ``Meta.instance_from_url`` references a field name that does not exist on the model.
+
+``next.E049``
+   ``Meta.instance_from_url`` is set on a class that does not subclass ``next.forms.ModelForm``.
 
 ``next.E053``
    ``@action`` was applied to a class.

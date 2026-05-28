@@ -14,7 +14,6 @@ from next.conf import import_class_cached
 from .backends import (
     FormActionBackend,
     _action_collisions,
-    _handler_fingerprint,
     clear_action_collisions,
     record_possible_collision,
 )
@@ -126,7 +125,7 @@ def check_forms_outside_base_dir(
         DjangoWarning(
             f"Form class {cls_name!r} declared in {file_path!r} which is outside "
             "BASE_DIR. It won't be registered automatically.",
-            id="next.E046",
+            id="next.W046",
         )
         for cls_name, file_path in _outside_base_dir_classes
     ]
@@ -197,8 +196,6 @@ def check_instance_from_url_on_non_model_form(
 
 
 __all__ = [
-    "_action_collisions",
-    "_handler_fingerprint",
     "check_action_applied_to_class",
     "check_form_action_backends_configuration",
     "check_form_action_collisions",
