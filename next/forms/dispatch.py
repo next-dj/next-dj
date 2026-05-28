@@ -1,5 +1,6 @@
 """POST dispatch pipeline for form actions."""
 
+import inspect
 import time
 import types
 from dataclasses import dataclass, field
@@ -96,6 +97,46 @@ def _form_from_initial_data(
     return _build_form(form_class, initial_data, request=None, init_kwargs=init_kwargs)
 
 
+def _accepts_var_keyword(func: "Callable[..., Any]") -> bool:
+    """Return True when `func` declares a `**kwargs` parameter."""
+    try:
+        sig = inspect.signature(func)
+    except (TypeError, ValueError):
+        return False
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+
+
+def _call_get_initial(
+    form_class: "type[django_forms.Form]",
+    request: "HttpRequest",
+    url_kwargs: dict[str, Any],
+    *,
+    cache: dict[str, Any],
+    stack: list[str],
+) -> object:
+    """Resolve `get_initial` dependencies and call it, feeding url_kwargs to **kwargs.
+
+    Named parameters are filled by the resolver as before. A `get_initial`
+    that declares `**kwargs` also receives the raw url_kwargs, which lets the
+    default ModelForm implementation read `Meta.instance_from_url`.
+    """
+    if not hasattr(form_class, "get_initial"):
+        msg = f"Form class {form_class} must have get_initial method"
+        raise TypeError(msg)
+    get_initial = form_class.get_initial
+    resolved = resolver.resolve_dependencies(
+        get_initial,
+        request=request,
+        _cache=cache,
+        _stack=stack,
+        **url_kwargs,
+    )
+    if _accepts_var_keyword(get_initial):
+        for key, value in url_kwargs.items():
+            resolved.setdefault(key, value)
+    return get_initial(**resolved)
+
+
 def _form_action_context_callable(
     form_class: "type[django_forms.Form]",
 ) -> "Callable[[HttpRequest], types.SimpleNamespace]":
@@ -117,17 +158,9 @@ def _form_action_context_callable(
                 resolved_form_class, None, init_kwargs=init_kwargs
             )
             return types.SimpleNamespace(form=form_instance)
-        if not hasattr(resolved_form_class, "get_initial"):
-            msg = f"Form class {resolved_form_class} must have get_initial method"
-            raise TypeError(msg)
-        resolved = resolver.resolve_dependencies(
-            resolved_form_class.get_initial,
-            request=request,
-            _cache=dep_cache,
-            _stack=dep_stack,
-            **url_kwargs,
+        initial_data = _call_get_initial(
+            resolved_form_class, request, url_kwargs, cache=dep_cache, stack=dep_stack
         )
-        initial_data = resolved_form_class.get_initial(**resolved)
         form_instance = _form_from_initial_data(resolved_form_class, initial_data)
         return types.SimpleNamespace(form=form_instance)
 
@@ -314,17 +347,13 @@ class FormActionDispatch:
                 params.form_class, request, None, init_kwargs=params.init_kwargs
             )
         else:
-            if not hasattr(params.form_class, "get_initial"):
-                msg = f"Form class {params.form_class} must have get_initial method"
-                raise TypeError(msg)
-            resolved = resolver.resolve_dependencies(
-                params.form_class.get_initial,
-                request=request,
-                _cache=state.dep_cache,
-                _stack=state.dep_stack,
-                **state.url_kwargs,
+            initial_data = _call_get_initial(
+                params.form_class,
+                request,
+                state.url_kwargs,
+                cache=state.dep_cache,
+                stack=state.dep_stack,
             )
-            initial_data = params.form_class.get_initial(**resolved)
             form = _bind_form_for_post(params.form_class, request, initial_data)
         if not form.is_valid():
             if form_validation_failed.receivers:
@@ -443,7 +472,9 @@ __all__ = [
     "FormActionDispatch",
     "_DispatchState",
     "_FormDispatchParams",
+    "_accepts_var_keyword",
     "_bind_form_for_post",
+    "_call_get_initial",
     "_form_action_context_callable",
     "_form_from_initial_data",
     "_get_caller_path",

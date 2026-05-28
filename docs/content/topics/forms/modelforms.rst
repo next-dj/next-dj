@@ -5,7 +5,7 @@ ModelForms
 
 A :doc:`ModelForm <django:topics/forms/modelforms>` adapts a Django model to a form.
 next.dj supports ModelForms anywhere a plain ``Form`` works.
-This page covers the ``next.forms.ModelForm`` base class, the ``get_initial`` hook that pre fills create and edit pages, and the patterns for routing instance lookups through the dependency injector.
+This page covers the ``next.forms.ModelForm`` base class, the declarative ``Meta.instance_from_url`` key that loads an instance for edit pages, and the create-and-edit-with-one-class pattern that follows from it.
 
 .. contents::
    :local:
@@ -15,235 +15,241 @@ Base Class Setup
 ----------------
 
 Subclass the framework's ``ModelForm`` base class.
+The class is the unit of registration.
+Declaring it is enough to make it reachable by name from any template, and the action name is the ``snake_case`` of the class name.
 
 .. code-block:: python
-   :caption: notes/forms.py
+   :caption: notes/pages/notes/edit/[slug]/page.py — auto-registered as ``note_edit_form``
 
-   from next.forms import ModelForm
+   import next.forms
    from notes.models import Note
 
-   class NoteForm(ModelForm):
+   class NoteEditForm(next.forms.ModelForm):
        class Meta:
            model = Note
-           fields = ("title", "body")
+           fields = ["slug", "title", "body"]
+           instance_from_url = "slug"
 
-``next.forms.ModelForm`` adds the ``get_initial`` classmethod that ``next.forms.Form`` also adds for plain forms.
-The dispatcher calls ``get_initial`` to compute the initial bound state of the form before binding the POST body.
+There is no ``@action`` decorator on the class and no ``form_class`` argument anywhere.
+Subclassing ``next.forms.ModelForm`` registers the form through the ``__init_subclass__`` hook the moment Python runs the ``class`` statement.
+See :doc:`actions` for the full registration rules and scope derivation.
 
-get_initial
------------
+Loading an Instance From the URL
+--------------------------------
 
-The framework calls ``get_initial`` at render time to compute the initial bound state of the form.
-A ModelForm can return either a dict for fresh creation or an instance for editing.
+``Meta.instance_from_url`` tells the default ``get_initial`` how to find the model instance an edit page operates on.
+It is the primary CRUD path and replaces the hand-written instance lookup that older code carried in both ``get_initial`` and the handler.
+
+String Form
+~~~~~~~~~~~
+
+A string names a URL kwarg that doubles as the model lookup field.
 
 .. code-block:: python
-   :caption: notes/forms.py
+   :caption: notes/pages/notes/edit/[slug]/page.py
 
-   from typing import Any
-
-   from django.http import Http404, HttpRequest
-   from next.forms import ModelForm
-   from notes.models import Note
-
-   class NoteForm(ModelForm):
+   class NoteEditForm(next.forms.ModelForm):
        class Meta:
            model = Note
-           fields = ("title", "body")
+           fields = ["slug", "title", "body"]
+           instance_from_url = "slug"
+
+On a page whose route captures ``slug``, the default ``get_initial`` runs :func:`~django.shortcuts.get_object_or_404` with ``Note.objects.get(slug=<captured value>)`` and binds the result as the form instance.
+
+Dict Form
+~~~~~~~~~
+
+A dict maps a URL kwarg name to a different model lookup field for the case where the two names differ.
+
+.. code-block:: python
+   :caption: notes/pages/notes/edit/[int:id]/page.py
+
+   class NoteEditForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["slug", "title", "body"]
+           instance_from_url = {"id": "pk"}
+
+Here the route captures ``id`` and the form loads the instance with ``Note.objects.get(pk=<captured value>)``.
+The dict key is the URL kwarg name and the value is the model field used in the lookup.
+
+Lookup Behaviour
+~~~~~~~~~~~~~~~~
+
+The declarative key has two boundary behaviours worth stating plainly.
+
+A missing URL kwarg yields an unbound form.
+On a create page with no ``[slug]`` segment, the captured kwarg is absent, ``get_initial`` returns an empty dict, and the form renders fresh.
+
+A not-found object yields a 404.
+When the kwarg is present but no row matches, :func:`~django.shortcuts.get_object_or_404` raises ``Http404`` and the request returns the standard 404 response.
+
+The field named by ``instance_from_url`` should be unique.
+:func:`~django.shortcuts.get_object_or_404` turns only the not-found case into a 404, so a lookup matching several rows surfaces as a server error instead.
+
+Before and After
+----------------
+
+The wiki example carried an ``ArticleEditForm`` that loaded the article twice and mapped each field by hand.
+
+.. code-block:: python
+   :caption: before — manual lookup duplicated across get_initial and on_valid
+
+   class ArticleEditForm(next.forms.Form):
+       article_id = next.forms.IntegerField(widget=next.forms.HiddenInput)
+       slug = next.forms.CharField()
+       title = next.forms.CharField()
+       body_md = next.forms.CharField(required=False)
 
        @classmethod
-       def get_initial(cls, request: HttpRequest, id: int | None = None) -> Note | dict[str, Any]:
-           if id is None:
+       def get_initial(cls, request, slug=None):
+           if slug is None:
                return {}
-           try:
-               return Note.objects.get(pk=id)
-           except Note.DoesNotExist as exc:
-               raise Http404 from exc
+           article = get_object_or_404(Article, slug=slug)
+           return {
+               "article_id": article.pk,
+               "slug": article.slug,
+               "title": article.title,
+               "body_md": article.body_md,
+           }
 
-The method runs through the dependency injector.
-Add captured URL parameters as keyword arguments and the framework fills them automatically.
+       def on_valid(self, request):
+           article = get_object_or_404(Article, pk=self.cleaned_data["article_id"])
+           article.slug = self.cleaned_data["slug"]
+           article.title = self.cleaned_data["title"]
+           article.body_md = self.cleaned_data.get("body_md", "")
+           article.save()
+           return redirect_to_origin(request)
 
-When the method returns an instance, the framework constructs the form with ``instance=...`` so the rendered fields show the existing values.
-When it returns a dict, the framework constructs an unbound form with ``initial=...``.
-
-Create Page
------------
-
-A create page renders the unbound form and saves it on submission.
-
-.. code-block:: python
-   :caption: notes/pages/notes/new/page.py
-
-   from django.http import HttpResponseRedirect
-   from django.urls import reverse
-   from next.forms import action
-   from notes.forms import NoteForm
-
-   @action("create_note", form_class=NoteForm)
-   def create_note(form: NoteForm) -> HttpResponseRedirect:
-       form.save()
-       return HttpResponseRedirect(reverse("next:page_"))
-
-.. code-block:: jinja
-   :caption: notes/pages/notes/new/template.djx
-
-   {% form @action="create_note" %}
-     {{ form.title }}
-     {{ form.body }}
-     <button type="submit">Create</button>
-   {% endform %}
-
-The ``get_initial`` method returns an empty dict, so the form renders as unbound.
-
-Edit Page
----------
-
-An edit page reuses the same form class and saves the bound instance.
+The hidden ``article_id`` field, the second :func:`~django.shortcuts.get_object_or_404`, and the field-by-field assignment all exist only to relocate the instance the page already addressed in its URL.
 
 .. code-block:: python
-   :caption: notes/pages/notes/[id]/edit/page.py
+   :caption: after — instance loading is a single declarative line
 
-   from django.http import HttpResponseRedirect
+   class ArticleEditForm(next.forms.ModelForm):
+       class Meta:
+           model = Article
+           fields = ["slug", "title", "body_md"]
+           instance_from_url = "slug"
+
+The default ``get_initial`` loads the article and the default ``on_valid`` saves it.
+The instance-loading plumbing collapses to one line.
+The hidden ``article_id`` field, the second :func:`~django.shortcuts.get_object_or_404`, and the field-by-field copy all give way to ``instance_from_url = "slug"``.
+A real ModelForm still carries whatever genuine logic the page needs, such as a custom ``on_valid``, a ``clean_slug`` validator, or widget overrides under ``Meta.widgets``.
+
+Create and Edit With One Class
+------------------------------
+
+The same ModelForm class can drive both a create page and an edit page.
+The route shape decides which mode the form runs in.
+
+On a create page the route has no captured kwarg, so the form renders unbound and ``self.save()`` inserts a new row.
+
+On an edit page the route captures the kwarg named by ``instance_from_url``, so the form loads the existing row and ``self.save()`` updates it.
+
+.. code-block:: python
+   :caption: notes/pages/notes/new/page.py — create, no captured kwarg
+
+   import next.forms
+   from notes.models import Note
+
+   class NoteEditForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["slug", "title", "body"]
+           instance_from_url = "slug"
+
+The class above behaves as a create form on ``notes/new/`` and as an edit form on ``notes/edit/[slug]/``, with no per-page branching.
+Auto-registration keys on the ``snake_case`` of the class name, so two pages that share one class share one action name and one action URL.
+
+Separate create and edit forms are just as common, and the examples take that route.
+The wiki create page declares a plain ``ArticleCreateForm`` while the edit page keeps the ``ArticleEditForm`` ModelForm.
+The multi-tenant create page likewise declares its own ``NoteCreateForm`` apart from the edit form.
+Split the two when the create and edit fields diverge, when validation differs, or when the rows must be scoped to something the URL does not carry.
+
+Handling Submissions
+--------------------
+
+The default ``on_valid`` on ``ModelForm`` calls ``self.save()`` and then redirects to the origin page.
+Override it only when the redirect target differs or extra logic must run after saving.
+
+.. code-block:: python
+
+   from django.http import HttpRequest, HttpResponseRedirect
+
+   def on_valid(self, request: HttpRequest):
+       article = self.save()
+       return HttpResponseRedirect(article.url)
+
+To attach a request-derived value before writing the row, save with ``commit=False`` first.
+
+.. code-block:: python
+
+   def on_valid(self, request: HttpRequest):
+       note = self.save(commit=False)
+       note.modified_by = request.user
+       note.save()
+       return redirect_to_origin(request)
+
+Call ``self.save_m2m()`` after ``note.save()`` when the model has many-to-many fields.
+
+Custom get_initial Escape Hatch
+-------------------------------
+
+Define ``get_initial`` only when the lookup the page needs cannot be expressed by ``instance_from_url``, for example a tenant-scoped query.
+
+.. code-block:: python
+
+   from django.http import HttpRequest
    from django.shortcuts import get_object_or_404
-   from django.urls import reverse
-   from next.forms import action
-   from next.pages import context
-   from next.urls import DUrl
-   from notes.forms import NoteForm
-   from notes.models import Note
+   from notes.access import get_active_tenant
 
-   @context("note")
-   def fetch_note(note_id: DUrl["id", int]) -> Note:
-       return get_object_or_404(Note, pk=note_id)
+   class NoteEditForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title", "body"]
 
-   @action("update_note", form_class=NoteForm)
-   def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
-       form.instance = get_object_or_404(Note, pk=note_id)
-       form.save()
-       return HttpResponseRedirect(reverse("next:page_notes_id", kwargs={"id": note_id}))
+       @classmethod
+       def get_initial(cls, request: HttpRequest, id: int | None = None):
+           tenant = get_active_tenant(request)
+           if tenant is None or id is None:
+               return {}
+           return get_object_or_404(Note, pk=id, tenant=tenant)
 
-The ``get_initial`` method receives ``id`` as a keyword argument because the URL captures it.
-On render the form is constructed with the matching instance.
-On submission the handler reattaches the instance before saving.
-
-Captured Instance Through DI
-----------------------------
-
-A custom DI provider can centralise the instance lookup.
-
-.. code-block:: python
-   :caption: notes/providers.py
-
-   from typing import get_args, get_origin
-   from django.http import Http404
-   from next.deps import DDependencyBase, RegisteredParameterProvider
-
-   class DInstance[T](DDependencyBase[T]):
-       __slots__ = ()
-
-   class InstanceProvider(RegisteredParameterProvider):
-       def can_handle(self, param, _context) -> bool:
-           return get_origin(param.annotation) is DInstance
-
-       def resolve(self, param, context):
-           (model_cls,) = get_args(param.annotation)
-           pk = context.url_kwargs["id"]
-           try:
-               return model_cls.objects.get(pk=pk)
-           except model_cls.DoesNotExist as exc:
-               raise Http404 from exc
-
-Subclassing ``RegisteredParameterProvider`` auto-registers the provider with the dependency resolver at import time, so importing ``notes/providers.py`` is enough to wire it.
-
-The handler can now take the instance directly.
-
-.. code-block:: python
-   :caption: notes/pages/notes/[id]/edit/page.py
-
-   from django.http import HttpResponseRedirect
-   from django.urls import reverse
-   from next.forms import action
-   from notes.forms import NoteForm
-   from notes.models import Note
-   from notes.providers import DInstance
-
-   @action("update_note", form_class=NoteForm)
-   def update_note(
-       form: NoteForm,
-       note: DInstance[Note],
-   ) -> HttpResponseRedirect:
-       form.instance = note
-       form.save()
-       return HttpResponseRedirect(reverse("next:page_notes_id", kwargs={"id": note.id}))
-
-See :doc:`/content/topics/dependency-injection` for the marker mechanics.
+The ``get_active_tenant`` helper reads the tenant the middleware attached to the request, so the lookup stays scoped to the active tenant.
+Declare ``get_initial`` as a ``classmethod`` with a DI-friendly signature.
+The framework resolves ``request`` and captured URL parameters as keyword arguments.
+Return a model instance to bind an existing row for editing, or a dict to seed an unbound form.
 
 Validation Failure
 ------------------
 
 A failing validation re-renders the origin page with the bound form in scope.
-For a ModelForm this means the user sees the values they typed plus any field errors.
+For a ModelForm the user sees the values they typed plus any field errors.
 
 The framework does not call ``save()`` when validation fails.
-The handler runs only when ``form.is_valid()`` returns ``True``.
-
-Setting an Audit Field
-----------------------
-
-A ModelForm carries no request-derived attributes.
-The dispatcher resolves ``request`` into the handler signature, so set audit fields in the handler with ``form.save(commit=False)`` before the final save.
-
-.. code-block:: python
-   :caption: notes/pages/notes/new/page.py
-
-   from django.http import HttpRequest, HttpResponseRedirect
-   from django.urls import reverse
-   from next.forms import action
-   from notes.forms import NoteForm
-
-   @action("create_note", form_class=NoteForm)
-   def create_note(form: NoteForm, request: HttpRequest) -> HttpResponseRedirect:
-       note = form.save(commit=False)
-       note.modified_by = request.user
-       note.save()
-       return HttpResponseRedirect(reverse("next:page_"))
-
-``form.save(commit=False)`` returns the unsaved instance so the handler can attach the user before writing the row.
-Call ``form.save_m2m()`` after ``note.save()`` when the model has many-to-many fields.
+``on_valid`` runs only after ``self.is_valid()`` returns ``True``.
+See :doc:`validation-rerender` for the re-render pipeline.
 
 System Checks
 -------------
 
-The forms subsystem contributes the same ``next.E041`` collision check that flags two ``@action`` registrations sharing a name.
-A handler that declares a ``form`` parameter still needs ``form_class`` on the decorator, otherwise no form is bound and the ``form`` parameter resolves to ``None`` at dispatch time.
+Two checks guard ``Meta.instance_from_url``.
+Both run statically when the class is declared, so ``uv run python manage.py check`` surfaces them before a request ever arrives.
 
-Run ``uv run python manage.py check`` after every form definition change.
+``next.E048`` fires when ``instance_from_url`` names a field that does not exist on the model.
+Correct the field name, or use the dict form to map the URL kwarg to the real model field.
 
-Common Patterns
----------------
-
-Inline Create Form on the Listing
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Render the create form on the listing page so the user can add a note without navigating.
-A failed submission re-renders the listing with the bound form intact.
-
-Separate Create and Edit Forms
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Define two ModelForm classes when create and edit need different fields.
-Each action takes the appropriate form class.
-
-Per User Initial Data
-~~~~~~~~~~~~~~~~~~~~~
-
-Use ``get_initial`` to pre fill fields with values from ``request.user`` such as the user name and email.
+``next.E049`` fires when ``instance_from_url`` is set on a class that is not a ModelForm.
+The key only loads model instances, so move the declaration onto a ``next.forms.ModelForm`` subclass.
 
 See Also
 --------
 
 .. seealso::
 
-   :doc:`actions` for handler patterns.
+   :doc:`actions` for auto-registration, name derivation, and scope.
+   :doc:`templates` for the ``{% form %}`` tag.
    :doc:`formsets` for collections of model instances.
    :doc:`/content/howto/use-modelform-for-crud` for a step-by-step recipe.
    :doc:`/content/ref/forms` for the public API.

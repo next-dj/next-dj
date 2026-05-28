@@ -125,7 +125,7 @@ class TestArticleEdit:
         response = client.post(
             url,
             {
-                "article_id": routing_doc.pk,
+                "_url_param_slug": routing_doc.slug,
                 "slug": routing_doc.slug,
                 "title": routing_doc.title,
                 "body_md": "Rewritten body of the article.",
@@ -178,7 +178,7 @@ class TestArticleEdit:
             client.get_action_url("article_edit_form"),
             {
                 "_next_form_page": match.group(1),
-                "article_id": routing_doc.pk,
+                "_url_param_slug": routing_doc.slug,
                 "slug": bad_slug,
                 "title": routing_doc.title,
                 "body_md": "",
@@ -202,7 +202,7 @@ class TestArticleEdit:
             client.get_action_url("article_edit_form"),
             {
                 "_next_form_page": match.group(1),
-                "article_id": routing_doc.pk,
+                "_url_param_slug": routing_doc.slug,
                 "slug": "docs",
                 "title": routing_doc.title,
                 "body_md": "**posted preview**",

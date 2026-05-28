@@ -6,7 +6,6 @@
 
   {% form "note_edit_form" %}
     <div class="space-y-3">
-      <input type="hidden" name="note_id" value="{{ note.pk }}">
       {% #component "field" label="Title" for_id="id_title" %}
         {% #slot "control" %}{{ form.title }}{% /slot %}
       {% /component %}

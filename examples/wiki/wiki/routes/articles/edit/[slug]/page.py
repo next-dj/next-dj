@@ -1,12 +1,11 @@
-from typing import Any
+from typing import ClassVar
 
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
-from django.shortcuts import get_object_or_404
 from wiki.models import RESERVED_SLUGS, Article
 from wiki.providers import DArticle
 
-from next.forms import Form
+from next.forms import ModelForm
 from next.pages import context
 
 
@@ -17,51 +16,23 @@ INPUT_CLASS = (
 TEXTAREA_CLASS = INPUT_CLASS + " min-h-[260px] font-mono"
 
 
-class ArticleEditForm(Form):
-    article_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
-    slug = django_forms.SlugField(
-        max_length=80,
-        widget=django_forms.TextInput(attrs={"class": INPUT_CLASS}),
-    )
-    title = django_forms.CharField(
-        max_length=200,
-        widget=django_forms.TextInput(attrs={"class": INPUT_CLASS}),
-    )
-    body_md = django_forms.CharField(
-        required=False,
-        widget=django_forms.Textarea(
-            attrs={
-                "class": TEXTAREA_CLASS,
-                "data-markdown-source": "true",
-            },
-        ),
-    )
-
-    @classmethod
-    def get_initial(
-        cls,
-        request: HttpRequest,  # noqa: ARG003
-        slug: str | None = None,
-    ) -> dict[str, Any]:
-        """Seed the form from the existing article on GET requests."""
-        if slug is None:
-            return {}
-        article = get_object_or_404(Article, slug=slug)
-        return {
-            "article_id": article.pk,
-            "slug": article.slug,
-            "title": article.title,
-            "body_md": article.body_md,
+class ArticleEditForm(ModelForm):
+    class Meta:
+        model = Article
+        fields: ClassVar = ["slug", "title", "body_md"]
+        instance_from_url = "slug"
+        widgets: ClassVar = {
+            "slug": django_forms.TextInput(attrs={"class": INPUT_CLASS}),
+            "title": django_forms.TextInput(attrs={"class": INPUT_CLASS}),
+            "body_md": django_forms.Textarea(
+                attrs={"class": TEXTAREA_CLASS, "data-markdown-source": "true"},
+            ),
         }
 
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
         """Persist edits to an existing article and redirect to its public URL."""
-        article_obj = get_object_or_404(Article, pk=self.cleaned_data["article_id"])
-        article_obj.slug = self.cleaned_data["slug"]
-        article_obj.title = self.cleaned_data["title"]
-        article_obj.body_md = self.cleaned_data.get("body_md", "")
-        article_obj.save()
-        return HttpResponseRedirect(article_obj.url)
+        self.save()
+        return HttpResponseRedirect(self.instance.url)
 
     def clean_slug(self) -> str:
         """Reject reserved prefixes and slugs taken by another article."""
@@ -69,8 +40,7 @@ class ArticleEditForm(Form):
         if slug in RESERVED_SLUGS:
             msg = "This slug collides with a file route."
             raise django_forms.ValidationError(msg)
-        article_id = self.cleaned_data.get("article_id")
-        clash = Article.objects.filter(slug=slug).exclude(pk=article_id).exists()
+        clash = Article.objects.filter(slug=slug).exclude(pk=self.instance.pk).exists()
         if clash:
             msg = "Slug already taken by another article."
             raise django_forms.ValidationError(msg)

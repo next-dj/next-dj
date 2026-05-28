@@ -7,9 +7,11 @@ from typing import Any, Final
 
 from django import forms as django_forms
 from django.conf import settings
+from django.core.exceptions import FieldDoesNotExist
 from django.forms.forms import BaseForm as DjangoBaseForm, DeclarativeFieldsMetaclass
 from django.forms.models import BaseModelForm as DjangoBaseModelForm, ModelFormMetaclass
 from django.http import HttpRequest, HttpResponseRedirect
+from django.shortcuts import get_object_or_404
 
 from next.conf import next_framework_settings
 
@@ -44,6 +46,8 @@ def _compute_scope(file_path: str) -> str:
 
 _outside_base_dir_classes: list[tuple[str, str]] = []
 _invalid_meta_scope_classes: list[tuple[str, str]] = []
+_instance_from_url_unknown_field: list[tuple[str, str, str]] = []
+_instance_from_url_on_non_model_form: list[str] = []
 
 
 def _record_invalid_meta_scope(cls: type, bad_value: object) -> None:
@@ -55,6 +59,64 @@ def clear_auto_registration_state() -> None:
     """Clear accumulated registration warnings. For test isolation."""
     _outside_base_dir_classes.clear()
     _invalid_meta_scope_classes.clear()
+    _instance_from_url_unknown_field.clear()
+    _instance_from_url_on_non_model_form.clear()
+
+
+def _instance_from_url_db_fields(spec: object) -> list[str]:
+    """Return the model lookup field names named by an instance_from_url spec."""
+    if isinstance(spec, str):
+        return [spec]
+    if isinstance(spec, dict):
+        return [str(v) for v in spec.values()]
+    return []
+
+
+def _instance_lookup_from_spec(
+    spec: object, url_kwargs: dict[str, object]
+) -> dict[str, object] | None:
+    """Build a `Model.objects.get` lookup from the spec, or None when a kwarg is absent.
+
+    A string spec names a URL kwarg that doubles as the model field. A dict
+    spec maps `{url_kwarg_name: model_field_name}` for mismatched names.
+    """
+    if isinstance(spec, str):
+        value = url_kwargs.get(spec)
+        if value is None:
+            return None
+        return {spec: value}
+    if isinstance(spec, dict):
+        lookup: dict[str, object] = {}
+        for url_kwarg_name, db_field in spec.items():
+            value = url_kwargs.get(url_kwarg_name)
+            if value is None:
+                return None
+            lookup[str(db_field)] = value
+        return lookup
+    return None
+
+
+def _validate_instance_from_url(cls: type, *, is_model_form: bool) -> None:
+    """Record E048/E049 problems for a class that declares Meta.instance_from_url."""
+    meta = getattr(cls, "Meta", None)
+    spec = getattr(meta, "instance_from_url", None)
+    if not spec:
+        return
+    if not is_model_form:
+        _instance_from_url_on_non_model_form.append(cls.__qualname__)
+        return
+    model = getattr(meta, "model", None)
+    if model is None:
+        return
+    for db_field in _instance_from_url_db_fields(spec):
+        if db_field == "pk":
+            continue
+        try:
+            model._meta.get_field(db_field.split("__")[0])
+        except FieldDoesNotExist:
+            _instance_from_url_unknown_field.append(
+                (cls.__qualname__, model._meta.label, db_field)
+            )
 
 
 _DJANGO_FORMS_SKIP_PARTS = frozenset({"widgets.py", "forms.py", "models.py"})
@@ -129,6 +191,7 @@ class BaseForm(DjangoBaseForm):
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)
         _auto_register_form_class(cls)
+        _validate_instance_from_url(cls, is_model_form=False)
 
     @classmethod
     def get_initial(cls) -> dict[str, Any]:
@@ -147,11 +210,18 @@ class BaseModelForm(DjangoBaseModelForm):
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)
         _auto_register_form_class(cls)
+        _validate_instance_from_url(cls, is_model_form=True)
 
     @classmethod
-    def get_initial(cls) -> dict[str, Any] | object:
-        """Return initial data or a model instance for this form."""
-        return {}
+    def get_initial(cls, **url_kwargs: object) -> object:
+        """Return a model instance loaded from the URL, or an empty dict."""
+        spec = getattr(getattr(cls, "Meta", None), "instance_from_url", None)
+        if not spec:
+            return {}
+        lookup = _instance_lookup_from_spec(spec, url_kwargs)
+        if lookup is None:
+            return {}
+        return get_object_or_404(cls._meta.model, **lookup)
 
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
         """Save this model form and redirect to origin."""

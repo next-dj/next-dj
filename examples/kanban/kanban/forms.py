@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from django import forms as django_forms
 from django.db import transaction
 from django.http import (
@@ -9,7 +11,7 @@ from django.http import (
 
 from kanban.models import Board, Card, Column
 from kanban.providers import DBoard
-from next.forms import Form
+from next.forms import Form, ModelForm
 
 
 _INPUT_CLASS = (
@@ -135,6 +137,8 @@ class CreateCardForm(Form):
 class CreateColumnForm(Form):
     """Append a new column to a board at the next free position."""
 
+    # board_id stays a hidden field here as a deferred cleanup, not an
+    # instance_from_url case, since this creates a column under the board.
     board_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
     title = django_forms.CharField(
         max_length=120,
@@ -159,36 +163,31 @@ class CreateColumnForm(Form):
         return HttpResponseRedirect(f"/board/{board.pk}/settings/")
 
 
-class RenameBoardForm(Form):
+class RenameBoardForm(ModelForm):
     """Rename a board, preserving its slug."""
 
-    board_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
-    title = django_forms.CharField(
-        max_length=120,
-        widget=django_forms.TextInput(attrs=_INPUT_ATTRS),
-    )
+    class Meta:
+        model = Board
+        fields: ClassVar = ["title"]
+        instance_from_url: ClassVar = {"id": "pk"}
 
-    def on_valid(
-        self, request: HttpRequest, board: DBoard[Board]
-    ) -> HttpResponseRedirect:
-        """Update the board title while keeping its slug stable."""
-        board.title = self.cleaned_data["title"]
-        board.save(update_fields=["title"])
-        return HttpResponseRedirect(f"/board/{board.pk}/settings/")
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        """Update the board title and return to settings."""
+        self.save()
+        return HttpResponseRedirect(f"/board/{self.instance.pk}/settings/")
 
 
-class ArchiveBoardForm(Form):
-    """Toggle the `archived` flag on a board."""
+class ArchiveBoardForm(ModelForm):
+    """Toggle the archived flag on a board."""
 
-    board_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
-    archived = django_forms.BooleanField(required=False)
+    class Meta:
+        model = Board
+        fields: ClassVar = ["archived"]
+        instance_from_url: ClassVar = {"id": "pk"}
 
-    def on_valid(
-        self, request: HttpRequest, board: DBoard[Board]
-    ) -> HttpResponseRedirect:
-        """Toggle the archived flag on the board."""
-        board.archived = bool(self.cleaned_data["archived"])
-        board.save(update_fields=["archived"])
-        if board.archived:
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        """Toggle the archived flag and redirect."""
+        self.save()
+        if self.instance.archived:
             return HttpResponseRedirect("/")
-        return HttpResponseRedirect(f"/board/{board.pk}/settings/")
+        return HttpResponseRedirect(f"/board/{self.instance.pk}/settings/")

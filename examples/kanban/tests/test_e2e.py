@@ -138,7 +138,7 @@ class TestSettings:
     ) -> None:
         response = client.post_action(
             "rename_board_form",
-            {"board_id": board.pk, "title": "New title"},
+            {"_url_param_id": board.pk, "title": "New title"},
         )
         assert response.status_code == 302
         board.refresh_from_db()
@@ -151,7 +151,7 @@ class TestSettings:
     ) -> None:
         response = client.post_action(
             "archive_board_form",
-            {"board_id": board.pk, "archived": "1"},
+            {"_url_param_id": board.pk, "archived": "1"},
         )
         assert response.status_code == 302
         board.refresh_from_db()
@@ -162,12 +162,16 @@ class TestSettings:
         client: NextClient,
         board: Board,
     ) -> None:
+        board.archived = True
+        board.save(update_fields=["archived"])
         response = client.post_action(
             "archive_board_form",
-            {"board_id": board.pk},
+            {"_url_param_id": board.pk},
         )
         assert response.status_code == 302
         assert response["Location"] == f"/board/{board.pk}/settings/"
+        board.refresh_from_db()
+        assert board.archived is False
 
     def test_add_column_form_post(
         self,

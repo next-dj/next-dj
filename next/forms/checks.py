@@ -18,7 +18,12 @@ from .backends import (
     clear_action_collisions,
     record_possible_collision,
 )
-from .base import _invalid_meta_scope_classes, _outside_base_dir_classes
+from .base import (
+    _instance_from_url_on_non_model_form,
+    _instance_from_url_unknown_field,
+    _invalid_meta_scope_classes,
+    _outside_base_dir_classes,
+)
 from .decorators import _action_applied_to_class
 
 
@@ -159,6 +164,38 @@ def check_action_applied_to_class(
     ]
 
 
+@register(Tags.compatibility)
+def check_instance_from_url_unknown_field(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Error when Meta.instance_from_url references a field absent on the model."""
+    return [
+        Error(
+            f"Form class {cls_name!r} sets Meta.instance_from_url referencing "
+            f"{field!r}, which is not a field on {model_label}.",
+            id="next.E048",
+        )
+        for cls_name, model_label, field in _instance_from_url_unknown_field
+    ]
+
+
+@register(Tags.compatibility)
+def check_instance_from_url_on_non_model_form(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Error when Meta.instance_from_url is set on a class that is not a ModelForm."""
+    return [
+        Error(
+            f"Form class {cls_name!r} sets Meta.instance_from_url but is not a "
+            "ModelForm. Subclass next.forms.ModelForm to load instances by URL.",
+            id="next.E049",
+        )
+        for cls_name in _instance_from_url_on_non_model_form
+    ]
+
+
 __all__ = [
     "_action_collisions",
     "_handler_fingerprint",
@@ -166,6 +203,8 @@ __all__ = [
     "check_form_action_backends_configuration",
     "check_form_action_collisions",
     "check_forms_outside_base_dir",
+    "check_instance_from_url_on_non_model_form",
+    "check_instance_from_url_unknown_field",
     "check_invalid_form_meta_scope",
     "clear_action_collisions",
     "record_possible_collision",

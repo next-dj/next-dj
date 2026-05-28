@@ -8,7 +8,6 @@
 
   {% form "article_edit_form" %}
     <div class="space-y-4">
-      <input type="hidden" name="article_id" value="{{ article.pk }}">
       {% #component "field" label="Slug" for_id="id_slug" error=form.slug.errors|join:" " %}
         {% #slot "control" %}{{ form.slug }}{% /slot %}
       {% /component %}

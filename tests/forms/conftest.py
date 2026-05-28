@@ -5,6 +5,8 @@ from django.test import Client
 
 import tests.forms.actions  # noqa: F401 - ensures actions are registered before first snapshot
 from next.forms.base import (
+    _instance_from_url_on_non_model_form,
+    _instance_from_url_unknown_field,
     _invalid_meta_scope_classes,
     _outside_base_dir_classes,
     clear_auto_registration_state,
@@ -32,6 +34,8 @@ def _isolate_form_registries():
     uid_snapshot = copy.deepcopy(backend._uid_to_name)
     outside_snapshot = list(_outside_base_dir_classes)
     invalid_snapshot = list(_invalid_meta_scope_classes)
+    unknown_field_snapshot = list(_instance_from_url_unknown_field)
+    non_model_form_snapshot = list(_instance_from_url_on_non_model_form)
     collision_snapshot = copy.deepcopy(_action_collisions)
     class_snapshot = list(_action_applied_to_class)
 
@@ -45,6 +49,8 @@ def _isolate_form_registries():
     clear_auto_registration_state()
     _outside_base_dir_classes.extend(outside_snapshot)
     _invalid_meta_scope_classes.extend(invalid_snapshot)
+    _instance_from_url_unknown_field.extend(unknown_field_snapshot)
+    _instance_from_url_on_non_model_form.extend(non_model_form_snapshot)
 
     clear_action_collisions()
     _action_collisions.update(collision_snapshot)

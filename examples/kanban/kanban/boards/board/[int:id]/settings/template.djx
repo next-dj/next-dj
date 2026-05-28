@@ -2,7 +2,6 @@
   {% #component "section" title="Rename board" %}
     {% #slot "content" %}
       {% form "rename_board_form" %}
-        <input type="hidden" name="board_id" value="{{ board.id }}">
         {% #component "field" label="Title" for_id="rename-title" %}
           {% #slot "control" %}
             <input id="rename-title" type="text" name="title" value="{{ board.title }}"
@@ -39,7 +38,6 @@
     {% #component "section" title="Archive" description="Archived boards disappear from the index but their data is kept." %}
       {% #slot "content" %}
         {% form "archive_board_form" %}
-          <input type="hidden" name="board_id" value="{{ board.id }}">
           <label class="inline-flex items-center gap-2 text-sm">
             <input type="checkbox" name="archived" value="1"
               {% if board.archived %}checked{% endif %}>

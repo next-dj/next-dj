@@ -125,7 +125,7 @@ class TestNoteEditForm:
         response = client.post_action(
             "note_edit_form",
             {
-                "note_id": note.pk,
+                "_url_param_id": note.pk,
                 "title": note.title,
                 "body": "edited body content",
             },
@@ -143,7 +143,7 @@ class TestNoteEditForm:
         response = client.post_action(
             "note_edit_form",
             {
-                "note_id": note.pk,
+                "_url_param_id": note.pk,
                 "title": "hijack",
                 "body": "should not save",
             },
@@ -176,7 +176,6 @@ class TestNoteEditFormErrorRerender:
         response = client.post_action(
             "note_edit_form",
             {
-                "note_id": note.pk,
                 "title": "",
                 "body": "x",
                 "_next_form_page": str(EDIT_PAGE_FILE),
