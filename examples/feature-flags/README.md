@@ -203,8 +203,10 @@ child context so `DFlag[Flag]` resolves via the prop rather than via
 
 ### 6. Bulk-toggle form
 
-[`flags/panels/admin/page.py`](flags/panels/admin/page.py) registers a
-single `@forms.action("bulk_toggle")` handling a checkbox grid:
+[`flags/panels/admin/page.py`](flags/panels/admin/page.py) declares a
+single self-registering `BulkToggleForm` (auto-name `bulk_toggle_form`,
+rendered with `{% form "bulk_toggle_form" %}`) handling a checkbox grid.
+The submit logic lives in `on_valid`:
 
 ```python
 class BulkToggleForm(Form):
@@ -219,16 +221,14 @@ class BulkToggleForm(Form):
             (name, name) for name in Flag.objects.values_list("name", flat=True)
         ]
 
-
-@action("bulk_toggle", form_class=BulkToggleForm)
-def bulk_toggle(form: BulkToggleForm) -> HttpResponseRedirect:
-    enabled = set(form.cleaned_data["enabled_names"])
-    for flag in Flag.objects.all():
-        should_be_on = flag.name in enabled
-        if flag.enabled != should_be_on:
-            flag.enabled = should_be_on
-            flag.save(update_fields=["enabled", "updated_at"])
-    return HttpResponseRedirect("/admin/")
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        enabled = set(self.cleaned_data["enabled_names"])
+        for flag in Flag.objects.all():
+            should_be_on = flag.name in enabled
+            if flag.enabled != should_be_on:
+                flag.enabled = should_be_on
+                flag.save(update_fields=["enabled", "updated_at"])
+        return HttpResponseRedirect("/admin/")
 ```
 
 Two details worth noting:

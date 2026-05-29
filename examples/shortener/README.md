@@ -53,7 +53,7 @@ A directory under `routes/` with a `page.py` becomes a URL. The framework compos
 
 - **`layout.djx`** (any ancestor directory) — the outer shell. Must contain an empty placeholder `{% block template %}{% endblock template %}` where the child content is substituted.
 - **`template.djx`** (sibling of `page.py`) — the page body. Just HTML. No `{% block template %}` wrapping needed because the framework handles substitution.
-- **`page.py`** — Python side: context functions (`@context`), optional form actions (`@forms.action`), optional `template = "..."` module attribute, optional `render(request, ...) -> HttpResponse`.
+- **`page.py`** — Python side: context functions (`@context`), optional self-registering form classes (`next.forms.Form`/`ModelForm`), optional `template = "..."` module attribute, optional `render(request, ...) -> HttpResponse`.
 
 Ancestor layouts cascade: `routes/admin/stats/` inherits `routes/admin/layout.djx`, which itself is wrapped by `routes/layout.djx`. Look at the nested toolbar in [`admin/layout.djx`](shortener/routes/admin/layout.djx):
 
@@ -119,30 +119,32 @@ def recent_links() -> list[Link]:
 
 Declared once in [`admin/page.py`](shortener/routes/admin/page.py), available in `admin/stats/` and `admin/links/<slug>/` templates. Use it for toolbar-level data. Do not mark heavy queries `inherit_context=True` unless every sub-page actually needs them.
 
-### 5. Forms — `@forms.action` + `{% form %}`
+### 5. Forms — class-bound `Form` + `{% form %}`
 
-[`routes/page.py`](shortener/routes/page.py) declares the handler:
+[`routes/page.py`](shortener/routes/page.py) declares the form class. A `next.forms.Form` subclass registers itself by file path through `__init_subclass__`, so its auto-name is `create_link_form` (snake_case of the class). The submit logic lives in `on_valid`, no separate handler:
 
 ```python
-@action("create_link", form_class=CreateLinkForm)
-def create_link(form: CreateLinkForm) -> HttpResponseRedirect:
-    _create_link_with_unique_slug(form.cleaned_data["url"])
-    return HttpResponseRedirect("/")
+class CreateLinkForm(Form):
+    url = forms.URLField(max_length=2000, assume_scheme="https")
+
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        _create_link_with_unique_slug(self.cleaned_data["url"])
+        return HttpResponseRedirect("/")
 ```
 
-The handler receives only the parameters it declares. No unused `request` — the DI resolver only fills what the signature asks for.
+`on_valid` receives only the parameters it declares — the DI resolver fills what the signature asks for.
 
-[`routes/template.djx`](shortener/routes/template.djx) renders the form:
+[`routes/template.djx`](shortener/routes/template.djx) renders the form by its auto-name:
 
 ```djx
-{% form @action="create_link" class="space-y-3 …" %}
+{% form "create_link_form" %}
   {{ form.url }}
   {% if form.errors %}<p class="text-rose-600">{{ form.url.errors|first }}</p>{% endif %}
   <button type="submit">Shorten</button>
 {% endform %}
 ```
 
-The `{% form @action="…" %}` tag resolves the action to its stable UID endpoint and injects a CSRF token.
+The `{% form "name" %}` tag resolves the form to its stable UID endpoint, injects a CSRF token, and exposes the bound `form` in the block.
 
 > `{% form %}`, `{% component %}`, `{% collect_styles %}`, `{% url %}` etc. are all globally loaded template tags. **Do not** write `{% load forms components next_static %}` — `next.apps.templates.install()` registers them as Django builtins at startup.
 
