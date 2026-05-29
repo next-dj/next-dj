@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from django import forms as django_forms
+from django.contrib.sessions.backends.db import SessionStore
 from django.http import HttpRequest, HttpResponseRedirect, QueryDict
 
 from next.components.context import component as component_ctx
@@ -28,6 +29,7 @@ from next.forms.dispatch import (
 )
 from next.forms.manager import build_form_namespace_for_action
 from next.forms.signals import action_dispatched
+from next.forms.wizard import FormWizard
 from next.pages.registry import PageContextRegistry
 
 
@@ -36,6 +38,89 @@ PAGE_MODULE_FOR_FORM_TESTS = (
 ).resolve()
 
 _FAKE_FILE = "/fake/myapp/forms.py"
+
+
+class WizardIdentityStep(Form):
+    """First step of the dispatch wizard."""
+
+    name = django_forms.CharField(max_length=100)
+
+
+class WizardScopeStep(Form):
+    """Second step of the dispatch wizard."""
+
+    scope = django_forms.CharField(max_length=100)
+
+
+class WizardExtraStep(Form):
+    """Conditional step toggled by earlier answers."""
+
+    extra = django_forms.CharField(max_length=100)
+
+
+class DispatchWizard(FormWizard):
+    """Two-step wizard exercised through HTTP dispatch."""
+
+    class Meta:
+        """Two ordered steps routed through the wizard backend."""
+
+        steps: ClassVar = [
+            ("identity", WizardIdentityStep),
+            ("scope", WizardScopeStep),
+        ]
+
+    done_payloads: ClassVar[list] = []
+
+    def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
+        """Record the merged cleaned data and redirect to a thank-you page."""
+        type(self).done_payloads.append(cleaned_data)
+        return HttpResponseRedirect("/thanks/")
+
+
+class ConditionalDispatchWizard(FormWizard):
+    """Wizard that inserts a step based on the first step's answer."""
+
+    class Meta:
+        """Two declared steps that a steps_for override can expand."""
+
+        steps: ClassVar = [
+            ("identity", WizardIdentityStep),
+            ("scope", WizardScopeStep),
+        ]
+
+    done_payloads: ClassVar[list] = []
+
+    def steps_for(self, cleaned_so_far: dict) -> list:
+        """Insert an extra step when the name asks for it."""
+        base = [("identity", WizardIdentityStep), ("scope", WizardScopeStep)]
+        if cleaned_so_far.get("name") == "needs-extra":
+            base.insert(1, ("extra", WizardExtraStep))
+        return base
+
+    def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
+        """Record the merged cleaned data and redirect."""
+        type(self).done_payloads.append(cleaned_data)
+        return HttpResponseRedirect("/thanks/")
+
+
+class KwargsDispatchWizard(FormWizard):
+    """Wizard that feeds a prefix to its step form through get_form_kwargs."""
+
+    class Meta:
+        """One step routed through the wizard backend."""
+
+        steps: ClassVar = [("identity", WizardIdentityStep)]
+
+    seen_kwargs: ClassVar[list] = []
+
+    def get_form_kwargs(self, step: str, cleaned_so_far: dict) -> dict:
+        """Pass a prefix and record the cross-step inputs it was given."""
+        type(self).seen_kwargs.append((step, dict(cleaned_so_far)))
+        return {"prefix": "wiz"}
+
+    def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
+        """Redirect once the only step validates."""
+        return HttpResponseRedirect("/thanks/")
 
 
 def _run_component_context(tmp_path: Path, request: object) -> object:
@@ -913,3 +998,117 @@ class TestBuildFormNamespaceEdgeCases:
         result = build_form_namespace_for_action("simple_form", req)
         assert result is not None
         assert hasattr(result, "form")
+
+
+@pytest.mark.django_db()
+class TestBuildWizardNamespace:
+    """build_form_namespace_for_action returns the wizard's form+wizard namespace."""
+
+    def test_wizard_action_yields_form_and_wizard(self, mock_http_request) -> None:
+        """A wizard action produces a namespace carrying the current step form."""
+        req = mock_http_request(method="GET", resolver_match=None)
+        result = build_form_namespace_for_action("dispatch_wizard", req)
+        assert result is not None
+        assert isinstance(result.form, WizardIdentityStep)
+        assert isinstance(result.wizard, DispatchWizard)
+
+
+@pytest.mark.django_db()
+class TestWizardDispatchViaClient:
+    """FormWizard step routing, finalisation, and re-render via the test client."""
+
+    def _post_step(
+        self,
+        client,
+        step: str,
+        data: dict,
+        *,
+        action: str = "dispatch_wizard",
+        origin: str = "/request/identity/",
+    ):
+        url = form_action_manager.get_action_url(action)
+        payload = {
+            "_url_param_step": step,
+            "_next_form_origin": origin,
+            "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+            **data,
+        }
+        return client.post(url, data=payload, follow=False)
+
+    def test_valid_first_step_redirects_to_next(self, client_no_csrf) -> None:
+        """A valid first step advances to the next step via goto."""
+        resp = self._post_step(client_no_csrf, "identity", {"name": "Ada"})
+        assert resp.status_code == 302
+        assert resp.url == "/request/scope/"
+
+    def test_invalid_step_re_renders_page(self, client_no_csrf) -> None:
+        """An invalid step re-renders the page and stores nothing."""
+        resp = self._post_step(client_no_csrf, "identity", {"name": ""})
+        assert resp.status_code == 200
+
+    def test_last_step_calls_done_with_merged_data(self, client_no_csrf) -> None:
+        """The final step finalises with the merged cleaned data and clears storage."""
+        DispatchWizard.done_payloads.clear()
+        self._post_step(client_no_csrf, "identity", {"name": "Ada"})
+        resp = self._post_step(client_no_csrf, "scope", {"scope": "ops"})
+        assert resp.status_code == 302
+        assert resp.url == "/thanks/"
+        assert DispatchWizard.done_payloads == [{"name": "Ada", "scope": "ops"}]
+
+    def test_unknown_step_returns_bad_request(self, client_no_csrf) -> None:
+        """A wizard whose current step has no form class returns 400."""
+
+        class EmptyDispatchWizard(FormWizard):
+            class Meta:
+                steps: ClassVar = []
+
+            def done(self, request, cleaned_data) -> HttpResponseRedirect:
+                return HttpResponseRedirect("/thanks/")
+
+        url = form_action_manager.get_action_url("empty_dispatch_wizard")
+        resp = client_no_csrf.post(
+            url,
+            data={
+                "_url_param_step": "ghost",
+                "_next_form_origin": "/request/identity/",
+                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+            },
+            follow=False,
+        )
+        assert resp.status_code == 400
+
+    def test_back_navigation_prefills_from_storage(
+        self, client_no_csrf, mock_http_request
+    ) -> None:
+        """A revisited step rebuilds its form prefilled from saved data."""
+        self._post_step(client_no_csrf, "identity", {"name": "Ada"})
+        session_key = client_no_csrf.session.session_key
+        store = SessionStore(session_key=session_key)
+        req = mock_http_request(method="GET", session=store, resolver_match=None)
+        namespace = build_form_namespace_for_action("dispatch_wizard", req)
+        assert namespace.form.initial == {"name": "Ada"}
+
+    def test_conditional_step_routing(self, client_no_csrf) -> None:
+        """A steps_for override inserts a step the wizard then routes through."""
+        ConditionalDispatchWizard.done_payloads.clear()
+        first = self._post_step(
+            client_no_csrf,
+            "identity",
+            {"name": "needs-extra"},
+            action="conditional_dispatch_wizard",
+        )
+        assert first.status_code == 302
+        assert first.url == "/request/extra/"
+
+    def test_get_form_kwargs_feeds_step_form(self, client_no_csrf) -> None:
+        """A get_form_kwargs override supplies the prefix the bound form expects."""
+        KwargsDispatchWizard.seen_kwargs.clear()
+        resp = self._post_step(
+            client_no_csrf,
+            "identity",
+            {"wiz-name": "Ada"},
+            action="kwargs_dispatch_wizard",
+        )
+        assert resp.status_code == 302
+        assert resp.url == "/thanks/"
+        assert KwargsDispatchWizard.seen_kwargs[0][0] == "identity"

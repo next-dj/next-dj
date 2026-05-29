@@ -232,6 +232,12 @@ Errors
    * - ``next.E049``
      - ``Meta.instance_from_url`` is set on a class that is not a ``ModelForm`` subclass.
      - ``next.forms.checks``
+   * - ``next.E050``
+     - A ``FormWizard`` declares no ``Meta.steps`` or an empty list.
+     - ``next.forms.checks``
+   * - ``next.E051``
+     - ``DEFAULT_FORM_WIZARD_BACKEND`` is malformed, non-importable, or names a class that does not subclass ``FormWizardBackend``.
+     - ``next.forms.checks``
    * - ``next.E053``
      - ``@action`` was applied to a class instead of a function.
      - ``next.forms.checks``

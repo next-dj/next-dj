@@ -19,7 +19,7 @@ The autodoc blocks under `Public API`_ are the exhaustive surface.
 
 Stable.
    ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``@action``, ``redirect_to_origin``,
-   ``FormActionManager``, ``form_action_manager``, ``DForm``,
+   ``FormWizard``, ``FormActionManager``, ``form_action_manager``, ``DForm``,
    the UID helpers (``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``),
    ``autodiscover_forms``, and ``reset_form_registration_state``.
    Use these in application code.
@@ -27,6 +27,7 @@ Stable.
 Advanced.
    ``FormProvider``, ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``,
    ``FormActionDispatch``, ``FormActionOptions``, ``ActionMeta``,
+   ``FormWizardBackend``, ``CacheFormWizardBackend``, ``WizardBackendManager``, ``wizard_backend_manager``,
    ``build_form_namespace_for_action``, ``validated_next_form_page_path``,
    the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``,
    ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``,
@@ -73,6 +74,22 @@ Form Base Classes
 
 .. autoclass:: next.forms.BaseModelForm
    :members: get_initial, on_valid
+
+Form Wizard
+~~~~~~~~~~~
+
+``FormWizard`` routes a sequence of step forms across requests.
+``FormWizardBackend`` is the draft-persistence contract, and ``CacheFormWizardBackend`` is the bundled default.
+See :doc:`/content/topics/forms/wizard` and :doc:`/content/topics/forms/wizard-backend` for the topic guides.
+
+.. autoclass:: next.forms.FormWizard
+   :members:
+
+.. autoclass:: next.forms.FormWizardBackend
+   :members:
+
+.. autoclass:: next.forms.CacheFormWizardBackend
+   :members:
 
 Fields and Widgets
 ~~~~~~~~~~~~~~~~~~
@@ -141,7 +158,8 @@ Signals
 -------
 
 See :doc:`signals` and :doc:`/content/topics/forms/signals` for the form signals
-(``action_registered``, ``action_dispatched``, ``form_validation_failed``).
+(``action_registered``, ``action_dispatched``, ``form_validation_failed``,
+``wizard_step_submitted``, ``wizard_completed``).
 
 See Also
 --------

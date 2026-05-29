@@ -83,20 +83,31 @@ from .uid import (
     redirect_to_origin,
     validated_next_form_page_path,
 )
+from .wizard import (
+    CacheFormWizardBackend,
+    FormWizard,
+    FormWizardBackend,
+    WizardBackendManager,
+    clear_wizard_registration_state,
+    wizard_backend_manager,
+)
 
 
 def reset_form_registration_state() -> None:
     """Clear every form registry and registration-warning buffer.
 
     Resets the action registry, the auto-registration warning buffers, the
-    collision tracker, the @action-on-class tracker, and the autodiscover
-    guard. Intended for test isolation and manual hot-reload flows.
+    collision tracker, the @action-on-class tracker, the autodiscover guard,
+    the wizard registry, and the cached wizard backend. Intended for test
+    isolation and manual hot-reload flows.
     """
     form_action_manager.clear_registries()
     clear_auto_registration_state()
     clear_action_collisions()
     clear_action_applied_to_class()
     clear_discovered()
+    clear_wizard_registration_state()
+    wizard_backend_manager.reset()
 
 
 __all__ = [
@@ -106,6 +117,7 @@ __all__ = [
     "BaseForm",
     "BaseModelForm",
     "BooleanField",
+    "CacheFormWizardBackend",
     "CharField",
     "CheckboxInput",
     "ChoiceField",
@@ -130,6 +142,8 @@ __all__ = [
     "FormProvider",
     "FormSectionSpec",
     "FormSpec",
+    "FormWizard",
+    "FormWizardBackend",
     "FormsetRowSpec",
     "FormsetSpec",
     "HiddenInput",
@@ -151,6 +165,7 @@ __all__ = [
     "URLInput",
     "ValidationError",
     "Widget",
+    "WizardBackendManager",
     "action",
     "autodiscover_forms",
     "build_form_namespace_for_action",
@@ -165,4 +180,5 @@ __all__ = [
     "reset_form_registration_state",
     "signals",
     "validated_next_form_page_path",
+    "wizard_backend_manager",
 ]

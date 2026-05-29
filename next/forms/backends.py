@@ -83,6 +83,7 @@ class ActionMeta(TypedDict, total=False):
 
     handler: "Callable[..., Any] | None"
     form_class: "type[django_forms.Form] | Callable[..., Any] | None"
+    wizard_class: "type | None"
     uid: str
     file_path: str
     scope: str
@@ -97,12 +98,13 @@ class FormActionBackend(ABC):
     """Storage and HTTP dispatch for `@action` handlers."""
 
     @abstractmethod
-    def register_action(
+    def register_action(  # noqa: PLR0913
         self,
         name: str,
         *,
         form_class: "type[django_forms.Form] | Callable[..., Any] | None" = None,
         handler: "Callable[..., Any] | None" = None,
+        wizard_class: "type | None" = None,
         file_path: str,
         scope: str,
     ) -> None:
@@ -168,16 +170,17 @@ class RegistryFormActionBackend(FormActionBackend):
         self._uid_to_name.clear()
         self._name_index.clear()
 
-    def register_action(
+    def register_action(  # noqa: PLR0913
         self,
         name: str,
         *,
         form_class: "type[django_forms.Form] | Callable[..., Any] | None" = None,
         handler: "Callable[..., Any] | None" = None,
+        wizard_class: "type | None" = None,
         file_path: str,
         scope: str,
     ) -> None:
-        """Store handler or form_class, and stable uid for the action name."""
+        """Store handler, form_class, or wizard_class and a stable uid for the name."""
         if scope == "page":
             scope_key = str(Path(file_path).resolve())
         else:
@@ -197,14 +200,19 @@ class RegistryFormActionBackend(FormActionBackend):
         key = (scope_key, name)
         previous = self._registry.get(key)
         if previous is not None:
-            old_obj = previous.get("handler") or previous.get("form_class")
-            new_obj = handler or form_class
+            old_obj = (
+                previous.get("handler")
+                or previous.get("form_class")
+                or previous.get("wizard_class")
+            )
+            new_obj = handler or form_class or wizard_class
             if old_obj is not None and new_obj is not None:
                 record_possible_collision(f"{scope_key}:{name}", old_obj, new_obj)
 
         self._registry[key] = {
             "handler": handler,
             "form_class": form_class,
+            "wizard_class": wizard_class,
             "uid": uid,
             "file_path": file_path,
             "scope": scope,

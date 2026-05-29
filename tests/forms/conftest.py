@@ -1,6 +1,7 @@
 import copy
 
 import pytest
+from django.core.cache import cache
 from django.test import Client
 
 from next.forms.autodiscover import _discovered
@@ -14,6 +15,7 @@ from next.forms.base import (
 )
 from next.forms.decorators import _action_applied_to_class
 from next.forms.manager import form_action_manager
+from next.forms.wizard import _wizard_without_steps, wizard_backend_manager
 from tests.forms import actions
 
 
@@ -46,6 +48,10 @@ def _isolate_form_registries():
     non_model_form_snapshot = list(_instance_from_url_on_non_model_form)
     collision_snapshot = copy.deepcopy(_action_collisions)
     class_snapshot = list(_action_applied_to_class)
+    wizard_without_steps_snapshot = list(_wizard_without_steps)
+
+    wizard_backend_manager.reset()
+    cache.clear()
 
     yield
 
@@ -70,3 +76,9 @@ def _isolate_form_registries():
 
     _action_applied_to_class.clear()
     _action_applied_to_class.extend(class_snapshot)
+
+    _wizard_without_steps.clear()
+    _wizard_without_steps.extend(wizard_without_steps_snapshot)
+
+    wizard_backend_manager.reset()
+    cache.clear()

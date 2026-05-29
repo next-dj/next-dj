@@ -5,7 +5,7 @@
   {% #component "app_shell" brand="next.dj access requests" brand_href="/" brand_icon="🛂" %}
     {% #slot "actions" %}
       {% component "nav_link" url_name="next:page_" label="Home" variant="bar" %}
-      {% component "nav_link" url="/request/applicant/" active_when="page_request_step" label="Start request" variant="bar" %}
+      {% component "nav_link" url="/request/identity/" active_when="page_request_step" label="Start request" variant="bar" %}
       {% component "nav_link" url_name="next:page_admin_audit" label="Audit log" variant="bar" %}
     {% /slot %}
     {% #slot "content" %}

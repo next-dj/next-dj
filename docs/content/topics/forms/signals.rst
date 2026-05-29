@@ -3,7 +3,7 @@
 Form Signals
 ============
 
-The forms subsystem emits ``action_registered``, ``action_dispatched``, and ``form_validation_failed`` from ``next.forms.signals``.
+The forms subsystem emits ``action_registered``, ``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, and ``wizard_completed`` from ``next.forms.signals``.
 Import either from the owning module or from the aggregator ``next.signals``.
 Register receiver imports from ``AppConfig.ready`` so receivers exist before the first request.
 
@@ -153,6 +153,57 @@ The dispatcher only builds the payload and sends the signal when at least one re
        )
 
 The signal fires once per failed submission, so log volume scales with the failure rate rather than the request rate.
+
+.. _topics-forms-signals-wizard-step-submitted:
+
+wizard_step_submitted
+---------------------
+
+Fires after a ``FormWizard`` step validates during dispatch.
+The sender is ``FormActionDispatch``.
+
+The payload carries ``wizard_class``, ``step``, and ``cleaned_data``.
+``wizard_class`` is the wizard subclass that owns the step.
+``step`` is the step name from ``Meta.steps``.
+``cleaned_data`` is a copy of the validated cleaned data for that step.
+
+.. code-block:: python
+   :caption: access/receivers.py
+
+   import logging
+   from django.dispatch import receiver
+   from next.forms.signals import wizard_step_submitted
+
+   logger = logging.getLogger("access.wizard")
+
+   @receiver(wizard_step_submitted)
+   def log_step(sender, *, wizard_class, step, cleaned_data, **kwargs) -> None:
+       logger.info("step %s submitted for %s", step, wizard_class.__name__)
+
+The signal fires once per validated step, so a multi-step submission emits one event per step.
+
+.. _topics-forms-signals-wizard-completed:
+
+wizard_completed
+----------------
+
+Fires after the wizard ``done`` method runs for the final step.
+The sender is ``FormActionDispatch``.
+
+The payload carries ``wizard_class`` and ``cleaned_data``.
+``cleaned_data`` is the merged mapping passed to ``done``, flattening the keys of every step form.
+
+.. code-block:: python
+   :caption: access/receivers.py
+
+   from django.dispatch import receiver
+   from next.forms.signals import wizard_completed
+
+   @receiver(wizard_completed)
+   def log_completion(sender, *, wizard_class, cleaned_data, **kwargs) -> None:
+       logger.info("wizard %s completed", wizard_class.__name__)
+
+The signal fires once per completed wizard, after ``done`` returns its response.
 
 See Also
 --------

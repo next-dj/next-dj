@@ -59,7 +59,9 @@ class AuditedFormActionBackend(RegistryFormActionBackend):
         action_name = self._uid_to_name.get(uid)
         if action_name is None:
             return super().dispatch(request, uid)
-        step = request.POST.get("step", "") if request.method == "POST" else ""
+        step = (
+            request.POST.get("_url_param_step", "") if request.method == "POST" else ""
+        )
         payload: dict[str, Any] = (
             _safe_form_payload(request) if request.method == "POST" else {}
         )

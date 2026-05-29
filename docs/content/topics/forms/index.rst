@@ -29,6 +29,14 @@ Read :doc:`overview` first, then jump to the page that matches the part you are 
 :doc:`formsets`
    Render and validate Django formsets through the same dispatch pipeline.
 
+.. rubric:: Multi-step
+
+:doc:`wizard`
+   Route a sequence of forms across requests and finalise on the last step.
+
+:doc:`wizard-backend`
+   Persist per-step draft data through the configured wizard backend.
+
 .. rubric:: Mechanics
 
 :doc:`validation-rerender`
@@ -55,6 +63,8 @@ Read :doc:`overview` first, then jump to the page that matches the part you are 
    modelforms
    plain-forms
    formsets
+   wizard
+   wizard-backend
    validation-rerender
    serializers
    backends

@@ -1,4 +1,5 @@
 import pytest
+from django.test import override_settings
 
 from next.forms import RegistryFormActionBackend
 from next.forms.backends import (
@@ -11,11 +12,14 @@ from next.forms.checks import (
     check_action_applied_to_class,
     check_form_action_backends_configuration,
     check_form_action_collisions,
+    check_form_wizard_backend,
+    check_form_wizard_steps,
     check_forms_outside_base_dir,
     check_invalid_form_meta_scope,
 )
 from next.forms.decorators import _action_applied_to_class, action
 from next.forms.signals import action_registered
+from next.forms.wizard import _wizard_without_steps
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
@@ -250,3 +254,87 @@ class TestCheckActionAppliedToClass:
         assert len(errors) == 1
         assert errors[0].id == "next.E053"
         _action_applied_to_class.clear()
+
+
+class TestCheckFormWizardSteps:
+    """check_form_wizard_steps: E050 when a wizard declares no steps."""
+
+    def test_no_stepless_wizards_returns_empty(self) -> None:
+        """No errors when every wizard declares steps."""
+        _wizard_without_steps.clear()
+        assert check_form_wizard_steps() == []
+
+    def test_stepless_wizard_triggers_error(self) -> None:
+        """A wizard with empty Meta.steps produces an E050 error."""
+        _wizard_without_steps.clear()
+        _wizard_without_steps.append("EmptyWizard")
+        errors = check_form_wizard_steps()
+        assert len(errors) == 1
+        assert errors[0].id == "next.E050"
+        assert "EmptyWizard" in errors[0].msg
+        _wizard_without_steps.clear()
+
+
+class TestCheckFormWizardBackend:
+    """check_form_wizard_backend: E051 for a malformed DEFAULT_FORM_WIZARD_BACKEND."""
+
+    def test_no_setting_yields_no_errors(self, settings) -> None:
+        """An absent key returns an empty list."""
+        settings.NEXT_FRAMEWORK = {}
+        assert check_form_wizard_backend() == []
+
+    def test_settings_not_dict_yields_no_errors(self, settings) -> None:
+        """`NEXT_FRAMEWORK` not being a dict short-circuits cleanly."""
+        settings.NEXT_FRAMEWORK = "garbage"
+        assert check_form_wizard_backend() == []
+
+    @override_settings(
+        NEXT_FRAMEWORK={
+            "DEFAULT_FORM_WIZARD_BACKEND": {
+                "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
+                "OPTIONS": {},
+            }
+        }
+    )
+    def test_default_config_is_clean(self) -> None:
+        """The default cache backend config passes the check."""
+        assert check_form_wizard_backend() == []
+
+    @override_settings(
+        NEXT_FRAMEWORK={"DEFAULT_FORM_WIZARD_BACKEND": ["not", "a", "dict"]}
+    )
+    def test_non_dict_config_is_e051(self) -> None:
+        """A non-dict config triggers E051."""
+        errors = check_form_wizard_backend()
+        assert len(errors) == 1
+        assert errors[0].id == "next.E051"
+
+    @override_settings(NEXT_FRAMEWORK={"DEFAULT_FORM_WIZARD_BACKEND": {"BACKEND": 7}})
+    def test_non_string_backend_is_e051(self) -> None:
+        """`BACKEND` must be a string."""
+        errors = check_form_wizard_backend()
+        assert any(e.id == "next.E051" for e in errors)
+
+    @override_settings(
+        NEXT_FRAMEWORK={"DEFAULT_FORM_WIZARD_BACKEND": {"BACKEND": "no.such.Module"}}
+    )
+    def test_unimportable_backend_is_e051(self) -> None:
+        """A path that fails to import surfaces an E051 error."""
+        errors = check_form_wizard_backend()
+        assert any(
+            e.id == "next.E051" and "cannot be imported" in e.msg for e in errors
+        )
+
+    @override_settings(
+        NEXT_FRAMEWORK={
+            "DEFAULT_FORM_WIZARD_BACKEND": {
+                "BACKEND": "next.forms.RegistryFormActionBackend"
+            }
+        }
+    )
+    def test_non_wizard_backend_class_is_e051(self) -> None:
+        """A real class that is not a FormWizardBackend triggers E051."""
+        errors = check_form_wizard_backend()
+        assert len(errors) == 1
+        assert errors[0].id == "next.E051"
+        assert "FormWizardBackend" in errors[0].msg

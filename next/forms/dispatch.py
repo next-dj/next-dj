@@ -22,8 +22,13 @@ from ._request_utils import (
     _url_kwargs_from_resolver_or_post,
 )
 from .rendering import render_form_page_with_errors
-from .signals import action_dispatched, form_validation_failed
-from .uid import validated_next_form_page_path
+from .signals import (
+    action_dispatched,
+    form_validation_failed,
+    wizard_completed,
+    wizard_step_submitted,
+)
+from .uid import _validated_origin_path, validated_next_form_page_path
 
 
 if TYPE_CHECKING:
@@ -264,6 +269,7 @@ class FormActionDispatch:
         """Validate the form, run the handler, or re-render errors."""
         handler = meta.get("handler")
         form_class = meta.get("form_class")
+        wizard_class = meta.get("wizard_class")
 
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
@@ -274,6 +280,11 @@ class FormActionDispatch:
             dep_stack=[],
         )
         setattr(request, REQUEST_DEP_CACHE_ATTR, state.dep_cache)
+
+        if wizard_class is not None:
+            return FormActionDispatch._dispatch_wizard(
+                backend, request, action_name, wizard_class, state
+            )
 
         if form_class is None and handler is not None:
             return FormActionDispatch._dispatch_handler_only(
@@ -401,6 +412,86 @@ class FormActionDispatch:
         action_dispatched.send(
             sender=FormActionDispatch,
             action_name=params.action_name,
+            form=form,
+            url_kwargs=dict(state.url_kwargs),
+            duration_ms=duration_ms,
+            response_status=response.status_code,
+            dep_cache=dict(state.dep_cache),
+        )
+        return response
+
+    @staticmethod
+    def _dispatch_wizard(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        action_name: str,
+        wizard_class: type,
+        state: _DispatchState,
+    ) -> HttpResponse:
+        """Validate the current wizard step, then route forward or finalise."""
+        origin = (
+            _validated_origin_path(request.POST.get("_next_form_origin"))
+            or request.path
+        )
+        wizard = wizard_class(
+            request=request, url_kwargs=state.url_kwargs, base_path=origin
+        )
+        step_name = wizard.current_step()
+        cleaned_so_far = wizard.cleaned_data_so_far()
+        form_class = wizard.step_form_class(step_name)
+        if form_class is None:
+            return HttpResponseBadRequest("Unknown wizard step")
+
+        form_kwargs = wizard.get_form_kwargs(step_name, cleaned_so_far)
+        files = request.FILES if hasattr(request, "FILES") else None
+        form = form_class(request.POST, files, **form_kwargs)
+        if not form.is_valid():
+            if form_validation_failed.receivers:
+                error_count = sum(len(errors) for errors in form.errors.values())
+                form_validation_failed.send(
+                    sender=FormActionDispatch,
+                    action_name=action_name,
+                    error_count=error_count,
+                    field_names=tuple(form.errors.keys()),
+                )
+            return FormActionDispatch.form_response(
+                backend, request, action_name, form, None
+            )
+
+        cleaned = dict(form.cleaned_data)
+        wizard.save_step(step_name, cleaned)
+        wizard_step_submitted.send(
+            sender=FormActionDispatch,
+            wizard_class=wizard_class,
+            step=step_name,
+            cleaned_data=cleaned,
+        )
+
+        next_step = wizard.next_step(step_name)
+        if next_step is None:
+            merged = wizard.cleaned_data_so_far()
+            start = time.perf_counter()
+            raw = wizard.done(request, merged)
+            duration_ms = (time.perf_counter() - start) * 1000
+            response = FormActionDispatch.ensure_http_response(
+                _normalize_handler_response(raw),
+                request=request,
+                action_name=action_name,
+                backend=backend,
+            )
+            wizard.clear_storage()
+            wizard_completed.send(
+                sender=FormActionDispatch,
+                wizard_class=wizard_class,
+                cleaned_data=merged,
+            )
+        else:
+            response = HttpResponseRedirect(wizard.goto(next_step))
+            duration_ms = 0.0
+
+        action_dispatched.send(
+            sender=FormActionDispatch,
+            action_name=action_name,
             form=form,
             url_kwargs=dict(state.url_kwargs),
             duration_ms=duration_ms,

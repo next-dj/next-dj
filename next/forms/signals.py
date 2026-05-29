@@ -18,6 +18,16 @@ resolved during this dispatch without re-running their providers.
 The `form_validation_failed` signal fires when the bound form fails
 validation during dispatch. The sender is `FormActionDispatch`. The
 keyword arguments are `action_name`, `error_count`, and `field_names`.
+
+The `wizard_step_submitted` signal fires after a FormWizard step
+validates during dispatch. The sender is `FormActionDispatch`. The
+keyword arguments are `wizard_class`, `step`, and `cleaned_data`.
+`cleaned_data` is a copy of the validated cleaned data for that step.
+
+The `wizard_completed` signal fires after the wizard `done` method runs
+for the final step. The sender is `FormActionDispatch`. The keyword
+arguments are `wizard_class` and `cleaned_data`. `cleaned_data` is the
+merged mapping passed to `done`.
 """
 
 from __future__ import annotations
@@ -28,6 +38,14 @@ from django.dispatch import Signal
 action_registered: Signal = Signal()
 action_dispatched: Signal = Signal()
 form_validation_failed: Signal = Signal()
+wizard_step_submitted: Signal = Signal()
+wizard_completed: Signal = Signal()
 
 
-__all__ = ["action_dispatched", "action_registered", "form_validation_failed"]
+__all__ = [
+    "action_dispatched",
+    "action_registered",
+    "form_validation_failed",
+    "wizard_completed",
+    "wizard_step_submitted",
+]

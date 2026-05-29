@@ -8,6 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from next.conf import next_framework_settings
 
+from ._request_utils import _url_kwargs_from_resolver_or_post
 from .backends import FormActionFactory
 from .dispatch import _form_action_context_callable
 
@@ -67,12 +68,13 @@ class FormActionManager:
         if not self._backends:
             self._reload_config()
 
-    def register_action(
+    def register_action(  # noqa: PLR0913
         self,
         name: str,
         *,
         form_class: "type[django_forms.Form] | Callable[..., Any] | None" = None,
         handler: "Callable[..., Any] | None" = None,
+        wizard_class: "type | None" = None,
         file_path: str,
         scope: str,
     ) -> None:
@@ -82,6 +84,7 @@ class FormActionManager:
             name,
             form_class=form_class,
             handler=handler,
+            wizard_class=wizard_class,
             file_path=file_path,
             scope=scope,
         )
@@ -146,6 +149,11 @@ def build_form_namespace_for_action(
         meta = backend.get_meta(action_name, page_path=page_path)
         if meta is None:
             continue
+        wizard_class = meta.get("wizard_class")
+        if wizard_class is not None:
+            url_kwargs = _url_kwargs_from_resolver_or_post(request)
+            wizard = wizard_class(request=request, url_kwargs=url_kwargs)
+            return cast("types.SimpleNamespace", wizard.template_namespace())
         fc = meta.get("form_class")
         if fc is None:
             return None

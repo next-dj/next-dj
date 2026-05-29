@@ -24,9 +24,11 @@ from .base import (
     _outside_base_dir_classes,
 )
 from .decorators import _action_applied_to_class
+from .wizard import FormWizardBackend, _wizard_without_steps
 
 
 _FORM_ACTION_BACKEND_SETTINGS_KEY = "DEFAULT_FORM_ACTION_BACKENDS"
+_FORM_WIZARD_BACKEND_SETTINGS_KEY = "DEFAULT_FORM_WIZARD_BACKEND"
 
 
 @register(Tags.compatibility)
@@ -195,10 +197,85 @@ def check_instance_from_url_on_non_model_form(
     ]
 
 
+@register(Tags.compatibility)
+def check_form_wizard_steps(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Error when a FormWizard declares no steps."""
+    return [
+        Error(
+            f"FormWizard {cls_name!r} has no Meta.steps or Meta.steps is empty. "
+            "Declare steps as a list of (name, FormClass) tuples.",
+            id="next.E050",
+        )
+        for cls_name in _wizard_without_steps
+    ]
+
+
+@register(Tags.compatibility)
+def check_form_wizard_backend(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Validate `DEFAULT_FORM_WIZARD_BACKEND` shape and import path."""
+    raw = getattr(settings, "NEXT_FRAMEWORK", None)
+    if not isinstance(raw, dict):
+        return []
+    config = raw.get(_FORM_WIZARD_BACKEND_SETTINGS_KEY)
+    if config is None:
+        return []
+    return _validate_form_wizard_backend(config)
+
+
+def _validate_form_wizard_backend(config: object) -> list[CheckMessage]:
+    key = _FORM_WIZARD_BACKEND_SETTINGS_KEY
+    if not isinstance(config, dict):
+        return [
+            Error(
+                f"NEXT_FRAMEWORK[{key!r}] must be a dict with a BACKEND key.",
+                obj=settings,
+                id="next.E051",
+            ),
+        ]
+    backend_path = config.get("BACKEND")
+    if not isinstance(backend_path, str):
+        return [
+            Error(
+                f"NEXT_FRAMEWORK[{key!r}].BACKEND must be a string.",
+                obj=settings,
+                id="next.E051",
+            ),
+        ]
+    try:
+        cls = import_class_cached(backend_path)
+    except ImportError as exc:
+        return [
+            Error(
+                f"NEXT_FRAMEWORK[{key!r}].BACKEND {backend_path!r} cannot be "
+                f"imported: {exc}.",
+                obj=settings,
+                id="next.E051",
+            ),
+        ]
+    if not (isinstance(cls, type) and issubclass(cls, FormWizardBackend)):
+        return [
+            Error(
+                f"NEXT_FRAMEWORK[{key!r}].BACKEND {backend_path!r} must subclass "
+                "FormWizardBackend.",
+                obj=settings,
+                id="next.E051",
+            ),
+        ]
+    return []
+
+
 __all__ = [
     "check_action_applied_to_class",
     "check_form_action_backends_configuration",
     "check_form_action_collisions",
+    "check_form_wizard_backend",
+    "check_form_wizard_steps",
     "check_forms_outside_base_dir",
     "check_instance_from_url_on_non_model_form",
     "check_instance_from_url_unknown_field",

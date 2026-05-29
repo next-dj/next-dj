@@ -1,8 +1,10 @@
-from access.steps import STEP_FIELDS, STEP_LABEL, normalise_step
+from dataclasses import dataclass
+
 from django import forms as django_forms
-from django.http import HttpRequest
 from django.template import Context, Template
 from django.utils.html import escape
+
+from next.forms import FormWizard
 
 
 _FIELDS_TEMPLATE = Template(
@@ -56,75 +58,100 @@ _FIELD_LABELS = {
     "expires_in_days": "Expires in days",
 }
 
+_STEP_LABELS = {
+    "identity": "Identity",
+    "scope": "Scope",
+    "approval": "Approval",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _Section:
+    """One wizard step's render inputs: its owner step and stored truth."""
+
+    name: str
+    active: str
+    owned: list[str]
+    stored: dict[str, object]
+    saved: bool
+
 
 def render(
     form: django_forms.Form,
-    request: HttpRequest,
-    step: str,
-    current_step: str = "applicant",
+    wizard: FormWizard,
 ) -> str:
-    """Render one section of the multi-step request form.
+    """Render every wizard step as a section gated on its stored state.
 
-    The composite owns the section's chrome — borders, error highlight,
-    "saved" badge, the review summary — based on the relationship
-    between ``step`` (the section's owner) and ``current_step`` (the
-    active page step), plus whatever the bound form reports under
-    ``form.errors``. Every step is rendered on every step page so the
-    user sees previously-captured context alongside the active fields.
+    The active step shows its bound fields (or the review summary on the
+    final step). Completed steps show a saved summary with a badge.
+    Pending steps render an empty placeholder.
     """
-    target = normalise_step(step)
-    active = normalise_step(current_step)
-    saved = _is_saved(request, target)
-    has_errors = target == active and _has_errors(form, STEP_FIELDS[target])
-    state = _state(target, active, saved=saved, has_errors=has_errors)
+    active = wizard.current_step()
+    completed = set(wizard.completed_steps())
+    stored = wizard.cleaned_data_so_far()
+    fields_by_step = _fields_by_step(wizard)
+    chunks = []
+    for name in wizard.step_names():
+        section = _Section(
+            name=name,
+            active=active,
+            owned=fields_by_step.get(name, []),
+            stored=stored,
+            saved=name in completed,
+        )
+        has_errors = name == active and _has_errors(form)
+        state = _state(name, active, saved=section.saved, has_errors=has_errors)
+        chunks.append(_render_section(form, section, state))
+    return "".join(chunks)
 
-    body = _body_for(form, request, target, active)
-    badge = _badge(state)
-    border = _border_class(state)
 
+def _fields_by_step(wizard: FormWizard) -> dict[str, list[str]]:
+    by_step: dict[str, list[str]] = {}
+    for name in wizard.step_names():
+        form_class = wizard.step_form_class(name)
+        by_step[name] = list(form_class.base_fields) if form_class is not None else []
+    return by_step
+
+
+def _render_section(form: django_forms.Form, section: _Section, state: str) -> str:
+    label = _STEP_LABELS.get(section.name, section.name.replace("_", " ").title())
+    body = _body_for(form, section)
     return (
-        f'<section data-step-section="{escape(target)}" data-state="{state}" '
-        f'class="{border} rounded-lg p-4 space-y-3">'
+        f'<section data-step-section="{escape(section.name)}" data-state="{state}" '
+        f'class="{_border_class(state)} rounded-lg p-4 space-y-3">'
         f'<header class="flex items-center justify-between text-xs uppercase '
-        f'tracking-wide text-slate-500"><span>{escape(STEP_LABEL[target])}</span>'
-        f"{badge}</header>"
+        f'tracking-wide text-slate-500"><span>{escape(label)}</span>'
+        f"{_badge(state)}</header>"
         f"{body}</section>"
     )
 
 
-def _body_for(
-    form: django_forms.Form,
-    request: HttpRequest,
-    target: str,
-    active: str,
-) -> str:
-    if target == active and target == "review":
-        draft = dict(request.session.get("access_request", {}))
-        return _REVIEW_TEMPLATE.render(Context({"draft": draft}))
-    if target == active:
+def _body_for(form: django_forms.Form, section: _Section) -> str:
+    if section.name == section.active and not section.owned:
+        return _REVIEW_TEMPLATE.render(Context({"draft": section.stored}))
+    if section.name == section.active:
         rendered = [
             {
-                "label": _FIELD_LABELS.get(name, name.replace("_", " ").title()),
-                "widget": str(form[name]),
-                "errors": form[name].errors,
+                "label": _FIELD_LABELS.get(field, field.replace("_", " ").title()),
+                "widget": str(form[field]),
+                "errors": form[field].errors,
             }
-            for name in STEP_FIELDS[target]
-            if name in form.fields
+            for field in section.owned
+            if field in form.fields
         ]
         return _FIELDS_TEMPLATE.render(Context({"rendered_fields": rendered}))
-    if _is_saved(request, target):
-        return _saved_summary(request, target)
+    if section.saved:
+        return _saved_summary(section.owned, section.stored)
     return ""
 
 
-def _saved_summary(request: HttpRequest, target: str) -> str:
-    draft = request.session.get("access_request", {})
+def _saved_summary(owned: list[str], stored: dict[str, object]) -> str:
     entries = [
         {
-            "label": _FIELD_LABELS.get(name, name.replace("_", " ").title()),
-            "value": _display(draft.get(name, "")),
+            "label": _FIELD_LABELS.get(field, field.replace("_", " ").title()),
+            "value": _display(stored.get(field, "")),
         }
-        for name in STEP_FIELDS[target]
+        for field in owned
     ]
     return _SAVED_SUMMARY_TEMPLATE.render(Context({"entries": entries}))
 
@@ -140,20 +167,14 @@ def _display(value: object) -> str:
     return text
 
 
-def _is_saved(request: HttpRequest, step: str) -> bool:
-    draft = request.session.get("access_request", {})
-    fields = STEP_FIELDS[step]
-    return bool(fields) and all(field in draft for field in fields)
+def _has_errors(form: django_forms.Form) -> bool:
+    return bool(getattr(form, "is_bound", False) and form.errors)
 
 
-def _has_errors(form: django_forms.Form, field_names: list[str]) -> bool:
-    return any(form[name].errors for name in field_names if name in form.fields)
-
-
-def _state(target: str, active: str, *, saved: bool, has_errors: bool) -> str:
+def _state(name: str, active: str, *, saved: bool, has_errors: bool) -> str:
     if has_errors:
         return "errors"
-    if target == active:
+    if name == active:
         return "active"
     if saved:
         return "saved"

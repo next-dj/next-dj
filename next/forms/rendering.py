@@ -7,6 +7,7 @@ from next.pages import page
 from next.pages.loaders import _load_python_module_memo
 
 from ._request_utils import _url_kwargs_from_post
+from .uid import _validated_origin_path
 
 
 if TYPE_CHECKING:
@@ -47,7 +48,19 @@ def render_form_page_with_errors(
 
     context_data = page.build_render_context(file_path, request, **url_kwargs)
     if form is not None:
-        context_data[action_name] = types.SimpleNamespace(form=form)
+        namespace = types.SimpleNamespace(form=form)
+        wizard_class = meta.get("wizard_class")
+        if wizard_class is not None:
+            origin = (
+                _validated_origin_path(request.POST.get("_next_form_origin"))
+                or request.path
+            )
+            wizard = wizard_class(
+                request=request, url_kwargs=url_kwargs, base_path=origin
+            )
+            namespace.wizard = wizard
+            context_data["wizard"] = wizard
+        context_data[action_name] = namespace
         context_data["form"] = form
 
     rendered, _collector = page.render_with_static_assets(

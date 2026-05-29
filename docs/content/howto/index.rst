@@ -78,6 +78,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`use-formsets`
    Render and validate a Django formset.
 
+:doc:`build-multi-step-wizard`
+   Gather data across several steps and finalise one row at the end.
+
 :doc:`write-a-form-action-backend`
    Plug a new validation pipeline into the dispatcher.
 
@@ -134,6 +137,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    handle-file-uploads
    use-modelform-for-crud
    use-formsets
+   build-multi-step-wizard
    write-a-form-action-backend
    extend-a-default-backend
    test-a-page-with-actions

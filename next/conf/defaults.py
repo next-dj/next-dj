@@ -54,4 +54,8 @@ DEFAULTS: dict[str, Any] = {
     "FORM_AUTODISCOVER": True,
     "FORM_ANCHOR_FILES": None,
     "JS_CONTEXT_SERIALIZER": None,
+    "DEFAULT_FORM_WIZARD_BACKEND": {
+        "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
+        "OPTIONS": {},
+    },
 }

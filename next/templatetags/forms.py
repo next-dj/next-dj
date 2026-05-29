@@ -137,13 +137,18 @@ class FormNode(template.Node):
         form_obj = context.get(action_name)
         if form_obj and hasattr(form_obj, "form"):
             form_instance = form_obj.form
+            wizard_instance = getattr(form_obj, "wizard", None)
         else:
             built = build_form_namespace_for_action(
                 action_name, request, page_path=next_form_page
             )
             form_instance = built.form if built is not None else None
+            wizard_instance = getattr(built, "wizard", None) if built else None
 
-        with context.push(form=form_instance):
+        push_kwargs: dict[str, object] = {"form": form_instance}
+        if wizard_instance is not None:
+            push_kwargs["wizard"] = wizard_instance
+        with context.push(**push_kwargs):
             content = self.nodelist.render(context)
 
         return f"{opening_tag}\n{hidden_inputs}\n{content}\n</form>"

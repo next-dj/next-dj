@@ -9,8 +9,8 @@ side by side.
 
 The example focuses on the form-action subsystem of next-dj: a custom
 backend wired through `NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]`, a
-single namespaced `@action` handling all three steps, three composite
-components (`progress_bar` and `step_section` inside the form,
+declarative `FormWizard` that routes all three steps from one class, three
+composite components (`progress_bar` and `step_section` inside the form,
 `audit_row` shared between the admin and per-request audit pages),
 session-backed step state with a `request_id` correlation column on
 `AuditEntry`, and full coverage of the `next.testing` `SignalRecorder`
@@ -21,18 +21,18 @@ API.
 | URL | Description |
 |-----|-------------|
 | `/` | Landing page. Recent requests link to their per-request audit. |
-| `/request/applicant/` | Step 1 — full name, email, team. Saved sections show "✓ saved" pills. |
-| `/request/justification/` | Step 2 — project slug, free-form reason, expiry days. |
-| `/request/review/` | Step 3 — read-only confirmation summary. |
+| `/request/identity/` | Step 1 — full name, email, team. Saved sections show "✓ saved" pills. |
+| `/request/scope/` | Step 2 — project slug, free-form reason, expiry days. |
+| `/request/approval/` | Step 3 — read-only confirmation summary. |
 | `/request/<id>/audit/` | Per-request audit trail, opened on submit with a "✅ Submitted" banner. |
 | `/admin/audit/` | Global audit log. Filter by `kind` via `?kind=…`. Backend rows link to their per-request page. |
 
 The user flow:
 
 ```
-/  →  /request/applicant/  →  /request/justification/  →  /request/review/  →  submit
-                                                                                  ↓
-                                                         /request/<new id>/audit/?just=1
+/  →  /request/identity/  →  /request/scope/  →  /request/approval/  →  submit
+                                                                          ↓
+                                                  /request/<new id>/audit/?just=1
 ```
 
 ## How to run
@@ -45,10 +45,11 @@ uv run pytest
 ```
 
 Tailwind loads via the Play CDN in
-[`access/views/layout.djx`](access/views/layout.djx). No Node, no build
-step. The example uses Django sessions to thread step data, so make sure
-`SESSION` middleware stays in `MIDDLEWARE` (it is by default in
-[`config/settings.py`](config/settings.py)).
+[`portal/layout.djx`](portal/layout.djx). No Node, no build step. The
+wizard threads step data across requests through the configured
+`DEFAULT_FORM_WIZARD_BACKEND`, which defaults to the Django cache and is
+namespaced per session, so keep `SessionMiddleware` in `MIDDLEWARE` (it
+is by default in [`config/settings.py`](config/settings.py)).
 
 ## Walking the code
 
@@ -114,58 +115,68 @@ If the dotted path fails to import, the `next.E044` system check fires at
 `next.E045` does. Both checks live in
 [`next/forms/checks.py`](../../next/forms/checks.py).
 
-### 3. One namespaced action for three steps
+### 3. One declarative `FormWizard` for three steps
 
 ```python
 # access/views/request/[step]/page.py
-@action("request_step", namespace="access", form_class=RequestStepForm)
-def request_step(form: RequestStepForm, request: HttpRequest) -> ...
+class AccessRequestWizard(next.forms.FormWizard):
+    class Meta:
+        steps = [
+            ("identity", IdentityStep),
+            ("scope", ScopeStep),
+            ("approval", ApprovalStep),
+        ]
+        url_param = "step"
+
+    def done(self, request, cleaned_data):
+        access_request = AccessRequest.objects.create(**cleaned_data)
+        request.session["access_request_just_created"] = access_request.pk
+        return HttpResponseRedirect(f"/request/{access_request.pk}/audit/?just=1")
 ```
 
-The action key in the registry becomes `"access:request_step"`. Two apps
-can register `request_step` under different namespaces without colliding,
-and `resolve_action_url("access:request_step")` finds it. The bare name
-does not — see `tests/test_e2e.py::TestNamespacedAction`.
+The class declares itself as one action through `__init_subclass__`, so
+the auto-name `access_request_wizard` resolves with
+`resolve_action_url("access_request_wizard")`. A namespaced name does
+not — see `tests/test_e2e.py::TestNamespacedAction`. Adding a step is one
+edit to `Meta.steps`.
 
-### 4. A single `Form` whose fields change per step
+### 4. Three ordinary forms, one per step
 
-`RequestStepForm.__init__` reads the bound or initial `step` value, then
-attaches the field set for that step from `STEP_FIELD_BUILDERS`. Step 1
-collects identity, step 2 collects justification, step 3 has no extra
-fields and only renders a confirmation. The handler reads
-`form.cleaned_data["step"]` to decide whether to redirect to the next
-step or commit the `AccessRequest`.
+Each step is a plain `next.forms.ModelForm` (or `Form`):
 
-The form declares `get_initial(cls, request, step)` as a classmethod.
-You never call it directly — the framework calls it automatically with
-`step` resolved from the page URL kwarg through the dependency
-resolver, and uses the returned dict to seed the form on every GET.
-Combined with the session merge in the handler, that gives you
-"saved data on every step page" without writing any view code.
+- `IdentityStep` — a `ModelForm` on `["full_name", "email", "team"]`.
+- `ScopeStep` — a `ModelForm` on `["project_slug", "reason", "expires_in_days"]`.
+- `ApprovalStep` — a fieldless `Form` that only confirms the merged request.
+
+The wizard binds the current step's form to the POST, validates only
+that step's fields, and saves the cleaned data through the wizard
+backend. On a non-final step it 302-redirects to the next step's URL, computed by
+swapping the `[step]` segment of the origin path. On the final step it
+calls `done(request, cleaned_data)` with the merged dict of every step,
+so `AccessRequest.objects.create(**cleaned_data)` builds the row once.
+No per-step `.save()`, no hidden id fields, no hand-written routing.
 
 ### 5. Two composite components, two patterns
 
 The example ships three composite components that demonstrate two
 different ways the framework lets a component contribute logic:
 
-- **`progress_bar/` — synthesised state from session truth.** Lives at
-  `views/request/[step]/_blocks/progress_bar/`. It does NOT consume a
-  pre-built `progress_steps` from the page; it builds the step list
-  itself by inspecting `request.session["access_request"]` and the
-  current URL kwarg. A step is `current` when it matches the URL,
-  `saved` when every field it owns is in the session draft, otherwise
-  `pending`. Page-level context shrinks to just `current_step` and
-  `draft` — all step knowledge lives in the component.
+- **`progress_bar/` — synthesised state from wizard truth.** Lives at
+  `views/request/[step]/_blocks/progress_bar/`. Its `@component.context`
+  functions take the `wizard` instance (pushed into the template context
+  by the `{% form %}` tag) and read `current_step()`, `step_names()`, and
+  `completed_steps()`. A step is `current` when it is the active step,
+  `saved` when it has stored data, otherwise `pending`. No page-level
+  step context is needed — all step knowledge lives in the wizard.
 
-- **`step_section/` — Python `render()` gating on form state.** Lives
+- **`step_section/` — Python `render()` gating on wizard state.** Lives
   next to `progress_bar`. Has only a `component.py` (no `.djx`); the
-  `render()` function takes `form`, `request`, `step`, and
-  `current_step` via DI, then assembles HTML through inline
-  `django.template.Template` instances. It owns the section chrome:
-  red border on validation errors, "✓ saved" pill plus a compact
-  value summary when the step is past, slate placeholder for steps
-  not yet visited. The page template just calls
-  `{% component "step_section" step="applicant" %}` three times.
+  `render()` function takes `form` and `wizard` via DI, then assembles
+  HTML through inline `django.template.Template` instances. It owns the
+  section chrome: red border on validation errors, "✓ saved" pill plus a
+  compact value summary when a step is past, slate placeholder for steps
+  not yet visited. The page template calls `{% component "step_section" %}`
+  once and the component renders every step.
 
 - **`audit_row/` — `@component.context` deriving display data.** Lives
   at `views/_blocks/audit_row/` (one scope above the admin and
@@ -186,20 +197,23 @@ first, so `/request/5/audit/` reaches the per-request page even though
 
 The correlation column on `AuditEntry.request` is **only** populated by
 the backend channel, on the **dispatched** row of the final step. The
-form handler stores `request.session["access_request_just_created"]`
+wizard's `done` stores `request.session["access_request_just_created"]`
 right after `AccessRequest.objects.create(...)`, and
 `AuditedFormActionBackend.dispatch` pops that key after `super()`
 returns. Signal-channel rows stay unlinked by design — that is a
-teaching point in itself: the signal channel sees only what the A3
-payload ships, and `AccessRequest.id` is not in that payload.
+teaching point in itself: the signal channel sees only the kwargs the
+signal ships, and `AccessRequest.id` is not among them.
 
-### 7. Session state, not hidden form fields
+### 7. Wizard backend, not hidden form fields
 
-Each step posts the visible fields (plus a hidden `step`). The handler
-merges them into `request.session["access_request"]` and redirects. The
-form's `get_initial` reads back the same session dict, so on `GET` of
-step 2 you can see "Computing" already filled into the team summary —
-that is what `tests/test_e2e.py::TestSessionResume` asserts.
+Each step posts only its visible fields plus the framework's hidden
+`_url_param_step`, `_next_form_origin`, and `_next_form_page` (all emitted
+by the `{% form %}` tag). The wizard saves the cleaned data through the
+configured `DEFAULT_FORM_WIZARD_BACKEND` (the Django cache by default),
+so on `GET` of step 2 you can see "Computing" already filled into the
+team summary — that is what `tests/test_e2e.py::TestSessionResume`
+asserts. Point `DEFAULT_FORM_WIZARD_BACKEND` at a Redis or custom backend
+without touching any view code.
 
 ### 8. Admin filter by GET query
 
@@ -226,12 +240,16 @@ want decoupling and minimal coupling to the backend implementation.
 
 ## Further reading
 
+- [`next/forms/wizard.py`](../../next/forms/wizard.py) — the declarative
+  `FormWizard` base class, the `FormWizardBackend` contract, and the
+  default cache-backed `CacheFormWizardBackend` this example builds on.
 - [`next/forms/manager.py`](../../next/forms/manager.py) — the lazy,
   settings-driven `FormActionManager` used by every example.
 - [`next/forms/backends.py`](../../next/forms/backends.py) — the
   `FormActionBackend` ABC and `RegistryFormActionBackend` superclass.
 - [`next/forms/dispatch.py`](../../next/forms/dispatch.py) — where
-  `action_dispatched` and `form_validation_failed` are sent.
+  `action_dispatched`, `form_validation_failed`, `wizard_step_submitted`,
+  and `wizard_completed` are sent.
 - [`next/forms/checks.py`](../../next/forms/checks.py) — `next.E041`
   (duplicate handlers), `next.E044` (bad backend config), `next.E045`
   (wrong backend type).

@@ -1,23 +1,46 @@
 import types
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import pytest
+from django import forms as django_forms
 from django.core.exceptions import ImproperlyConfigured
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponseRedirect
 from django.middleware.csrf import get_token
 from django.template import Context, TemplateSyntaxError
 
 from next.forms import (
+    Form,
     RegistryFormActionBackend,
     form_action_manager,
 )
+from next.forms.wizard import FormWizard
 from tests.forms.actions import SimpleForm
 
 
 PAGE_MODULE_FOR_FORM_TESTS = (
     Path(__file__).resolve().parent.parent / "site_pages" / "page.py"
 ).resolve()
+
+
+class RenderWizardStep(Form):
+    """Step form for the form-tag wizard render test."""
+
+    name = django_forms.CharField(max_length=100)
+
+
+class RenderWizard(FormWizard):
+    """Wizard exercised through the {% form %} template tag."""
+
+    class Meta:
+        """One step routed through the wizard backend."""
+
+        steps: ClassVar = [("identity", RenderWizardStep)]
+
+    def done(self, request, cleaned_data) -> HttpResponseRedirect:
+        """Redirect once the wizard finishes."""
+        return HttpResponseRedirect("/thanks/")
 
 
 class TestRenderFormFragment:
@@ -143,6 +166,26 @@ class TestFormTagRender:
         assert "action=" in html
         assert 'method="post"' in html
         assert "</form>" in html
+
+    def test_wizard_action_pushes_wizard_into_context(
+        self, form_engine, csrf_request
+    ) -> None:
+        """A wizard action exposes the wizard alongside the current step form."""
+        t = form_engine.from_string(
+            '{% form "render_wizard" %}'
+            "{{ wizard.current_step }}{{ form.as_p }}"
+            "{% endform %}"
+        )
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert "identity" in html
+        assert 'name="name"' in html
 
     def test_resolves_action_from_context_variable(
         self, form_engine, csrf_request

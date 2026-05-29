@@ -85,6 +85,10 @@ class NextFrameworkSettings:
             raw = user[key]
             if key == "URL_NAME_TEMPLATE" and isinstance(raw, str):
                 out[key] = raw
+            elif key == "DEFAULT_FORM_WIZARD_BACKEND" and isinstance(raw, dict):
+                merged = copy.deepcopy(self.DEFAULTS[key])
+                merged.update(copy.deepcopy(raw))
+                out[key] = merged
             elif (key in self._LIST_KEYS and isinstance(raw, list)) or (
                 key == "NEXT_JS_OPTIONS" and isinstance(raw, dict)
             ):
