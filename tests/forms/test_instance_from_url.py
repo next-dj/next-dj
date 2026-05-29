@@ -7,7 +7,13 @@ from django import forms as django_forms
 from django.contrib.auth.models import Group
 from django.http import Http404, HttpRequest, QueryDict
 
-from next.forms import Form, FormActionDispatch, ModelForm, RegistryFormActionBackend
+from next.forms import (
+    ActionRegistration,
+    Form,
+    FormActionDispatch,
+    ModelForm,
+    RegistryFormActionBackend,
+)
 from next.forms.base import (
     _instance_from_url_db_fields,
     _instance_from_url_on_non_model_form,
@@ -417,11 +423,13 @@ class TestDispatchInstanceFromUrlEndToEnd:
     def _backend_for(self, form_class: type[ModelForm]) -> RegistryFormActionBackend:
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "edit_group",
-            handler=_saving_handler,
-            form_class=form_class,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="edit_group",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=_saving_handler,
+                form_class=form_class,
+            )
         )
         return backend
 

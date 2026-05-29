@@ -54,9 +54,8 @@ The action name is the ``CamelCase`` class name converted to ``snake_case`` by i
    * - ``Form``
      - ``form``
 
-The conversion is mechanical and does not special-case acronyms.
-``HTMLForm`` becomes ``h_t_m_l_form``, not ``html_form``.
-Prefer class names where every acronym is written in title case: ``HtmlForm`` → ``html_form``.
+The conversion collapses consecutive uppercase runs, so an acronym stays a single word.
+``HTTPLoginForm`` becomes ``http_login_form`` and ``HTMLForm`` becomes ``html_form``.
 
 .. warning::
 

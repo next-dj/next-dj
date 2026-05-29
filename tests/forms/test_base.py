@@ -5,7 +5,12 @@ from unittest.mock import MagicMock, patch
 from django import forms as django_forms
 from django.http import HttpRequest
 
-from next.forms import Form, ModelForm, reset_form_registration_state
+from next.forms import (
+    ActionRegistration,
+    Form,
+    ModelForm,
+    reset_form_registration_state,
+)
 from next.forms.autodiscover import _discovered
 from next.forms.base import (
     _FRAMEWORK_ROOT,
@@ -58,7 +63,7 @@ class TestAutoRegistration:
                 title = django_forms.CharField()
 
         backend = form_action_manager.default_backend
-        meta = backend.get_meta("page_scope_form", page_path=fake_path)
+        meta = backend.get_meta("page_scope_form", fake_path)
         assert meta is not None
         assert meta["scope"] == "page"
 
@@ -78,7 +83,7 @@ class TestAutoRegistration:
                 title = django_forms.CharField()
 
         backend = form_action_manager.default_backend
-        meta = backend.get_meta("component_scope_form", page_path=fake_path)
+        meta = backend.get_meta("component_scope_form", fake_path)
         assert meta is not None
         assert meta["scope"] == "page"
 
@@ -99,7 +104,7 @@ class TestAutoRegistration:
                     scope = "page"
 
         backend = form_action_manager.default_backend
-        meta = backend.get_meta("meta_page_form", page_path=fake_path)
+        meta = backend.get_meta("meta_page_form", fake_path)
         assert meta is not None
         assert meta["scope"] == "page"
 
@@ -222,16 +227,20 @@ class TestAutoRegistration:
         handler_v2.__qualname__ = "collision_v2"
 
         form_action_manager.register_action(
-            "dup_test",
-            handler=handler_v1,
-            file_path=fake_path,
-            scope="shared",
+            ActionRegistration(
+                name="dup_test",
+                file_path=fake_path,
+                scope="shared",
+                handler=handler_v1,
+            )
         )
         form_action_manager.register_action(
-            "dup_test",
-            handler=handler_v2,
-            file_path=fake_path,
-            scope="shared",
+            ActionRegistration(
+                name="dup_test",
+                file_path=fake_path,
+                scope="shared",
+                handler=handler_v2,
+            )
         )
 
         assert len(_action_collisions) >= 1
@@ -333,7 +342,7 @@ class TestModelFormAutoRegistration:
                     fields = "__all__"
 
         backend = form_action_manager.default_backend
-        meta = backend.get_meta("page_model_form", page_path=fake_path)
+        meta = backend.get_meta("page_model_form", fake_path)
         assert meta is not None
         assert meta["scope"] == "page"
 
@@ -450,10 +459,12 @@ class TestResetFormRegistrationState:
         """The aggregate reset empties the registry and every tracking list."""
         backend = form_action_manager.default_backend
         backend.register_action(
-            "reset_probe",
-            handler=lambda _request: None,
-            file_path="/x/page.py",
-            scope="page",
+            ActionRegistration(
+                name="reset_probe",
+                file_path="/x/page.py",
+                scope="page",
+                handler=lambda _request: None,
+            )
         )
         _outside_base_dir_classes.append(("Probe", "/x/forms.py"))
         _action_applied_to_class.append("Probe")

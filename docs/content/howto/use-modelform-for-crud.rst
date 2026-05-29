@@ -15,8 +15,11 @@ Declare one ``next.forms.ModelForm`` subclass.
 Add ``Meta.instance_from_url`` so the edit page loads its row from the captured URL kwarg.
 The same class drives the create page, where the kwarg is absent and the form renders unbound.
 
-Edit Page
----------
+Walkthrough
+-----------
+
+Edit page
+~~~~~~~~~
 
 The edit page lives under a route that captures the lookup field.
 Here the route segment is ``[slug]``, so the captured kwarg is ``slug``.
@@ -50,8 +53,8 @@ No handler, no hidden lookup field, and no second lookup are needed.
 The ``{% form %}`` tag resolves the action by name, opens the ``<form>`` element, injects the CSRF token, and publishes ``form`` inside the block.
 Because the route captures ``slug``, the tag also emits a hidden ``_url_param_slug`` field carrying the current value, so the submission re-attaches to the same row.
 
-Create Page
------------
+Create page
+~~~~~~~~~~~
 
 The create page reuses the same class on a route with no captured kwarg.
 

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from django.db.models import Count, Sum
 from shortener.cache import pending_clicks
 from shortener.models import Link

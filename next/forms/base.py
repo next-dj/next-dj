@@ -16,6 +16,7 @@ from django.shortcuts import get_object_or_404
 
 from next.conf import next_framework_settings
 
+from .backends import ActionRegistration
 from .manager import form_action_manager
 from .uid import redirect_to_origin
 
@@ -174,10 +175,12 @@ def _auto_register_form_class(cls: type) -> None:
     scope = meta_scope if meta_scope is not None else _compute_scope(file_path)
     name = _to_snake_case(cls.__name__)
     form_action_manager.register_action(
-        name,
-        form_class=cls,
-        file_path=str(Path(file_path).resolve()),
-        scope=scope,
+        ActionRegistration(
+            name=name,
+            file_path=str(Path(file_path).resolve()),
+            scope=scope,
+            form_class=cls,
+        )
     )
 
 

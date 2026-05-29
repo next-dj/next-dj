@@ -75,7 +75,8 @@ admin page can show them side by side. Pick whichever fits your project —
 or run both, like this example does.
 
 > **PII caveat.** `_safe_form_payload` strips framework-internal fields
-> (CSRF token, `_next_form_uid`, `_next_form_page`, `_url_param_*`) but
+> (`csrfmiddlewaretoken`, `_next_form_page`, `_next_form_origin`, and the
+> `_url_param_*` fields) but
 > stores every other POST value verbatim, including emails and free-text
 > reasons. If you adopt this pattern in production, extend
 > `_RESERVED_FORM_KEYS` with any password / secret / personal-data field

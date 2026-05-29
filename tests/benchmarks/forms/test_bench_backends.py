@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from next.forms.backends import FormActionOptions, RegistryFormActionBackend
+from next.forms.backends import ActionRegistration, RegistryFormActionBackend
 from next.forms.signals import action_registered
 from tests.benchmarks.factories import noop_form_handler, noop_signal_receiver
 
@@ -17,9 +17,12 @@ class TestBenchFormActionBackend:
             backend = RegistryFormActionBackend()
             for i in range(_BULK):
                 backend.register_action(
-                    f"act_{i}",
-                    noop_form_handler,
-                    options=FormActionOptions(),
+                    ActionRegistration(
+                        name=f"act_{i}",
+                        file_path=__file__,
+                        scope="shared",
+                        handler=noop_form_handler,
+                    )
                 )
 
         benchmark(run)
@@ -34,9 +37,12 @@ class TestBenchFormActionBackend:
                 backend = RegistryFormActionBackend()
                 for i in range(_BULK):
                     backend.register_action(
-                        f"act_{i}",
-                        noop_form_handler,
-                        options=FormActionOptions(),
+                        ActionRegistration(
+                            name=f"act_{i}",
+                            file_path=__file__,
+                            scope="shared",
+                            handler=noop_form_handler,
+                        )
                     )
 
             benchmark(run)

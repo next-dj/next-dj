@@ -202,9 +202,9 @@ extra lookup table.
 
 The single template file
 [`admin_form/component.djx`](shadcn_admin/_panels/admin_form/component.djx)
-uses one `{% form @action=form_state.action_name %}` block. The action
-name resolves at render time from the context value (see core change
-below).
+uses one `{% form form_state.action_name %}` block. The tag takes a
+single positional action name. Here it is a context variable, so the
+action name resolves at render time (see core change below).
 
 ### 5. Inline formsets validate alongside the main form
 
@@ -344,8 +344,10 @@ fix carry the example.
   factory through `resolver.resolve_dependencies` once per request, so
   admin pages produce a class shaped by `ModelAdmin.get_form()` on the
   fly.
-* **`{% form @action=variable %}`.** The tag accepts a context
-  variable, not only a string literal.
+* **`{% form "action_name" %}`.** The tag takes a single positional
+  action name and accepts a context variable, not only a string literal.
+  It does not accept `@action=` or HTML attributes such as `class=`.
+  Styling goes on a wrapping element.
   [`next/templatetags/forms.py`](../../next/templatetags/forms.py)
   compiles the value through `parser.compile_filter`, so the
   `admin_form` template keeps one `{% form %}` block and resolves

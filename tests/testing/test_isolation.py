@@ -1,7 +1,11 @@
 from pathlib import Path
 
 from next.components.manager import components_manager
-from next.forms import RegistryFormActionBackend, form_action_manager
+from next.forms import (
+    ActionRegistration,
+    RegistryFormActionBackend,
+    form_action_manager,
+)
 from next.pages.manager import page
 from next.testing import (
     reset_components,
@@ -17,13 +21,23 @@ class TestResetFormActions:
     def test_clears_registry_and_can_be_repopulated(self) -> None:
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "alpha", handler=lambda: None, file_path="/fake/forms.py", scope="shared"
+            ActionRegistration(
+                name="alpha",
+                file_path="/fake/forms.py",
+                scope="shared",
+                handler=lambda: None,
+            )
         )
         assert any(name == "alpha" for _, name in backend._registry)
         backend.clear_registry()
         assert backend._registry == {}
         backend.register_action(
-            "alpha", handler=lambda: None, file_path="/fake/forms.py", scope="shared"
+            ActionRegistration(
+                name="alpha",
+                file_path="/fake/forms.py",
+                scope="shared",
+                handler=lambda: None,
+            )
         )
         assert any(name == "alpha" for _, name in backend._registry)
 

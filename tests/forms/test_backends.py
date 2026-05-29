@@ -7,6 +7,7 @@ from django.http import HttpRequest, HttpResponse
 from django.urls import NoReverseMatch
 
 from next.forms import (
+    ActionRegistration,
     FormActionBackend,
     FormActionFactory,
     FormActionManager,
@@ -73,10 +74,12 @@ class TestRegistryFormActionBackend:
             pass
 
         backend.register_action(
-            "my_action",
-            handler=my_handler,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="my_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=my_handler,
+            )
         )
         meta = backend.get_meta("my_action")
         assert meta is not None
@@ -91,10 +94,12 @@ class TestRegistryFormActionBackend:
             name = django_forms.CharField()
 
         backend.register_action(
-            "my_form_action",
-            form_class=MyForm,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="my_form_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=MyForm,
+            )
         )
         meta = backend.get_meta("my_form_action")
         assert meta is not None
@@ -112,11 +117,13 @@ class TestRegistryFormActionBackend:
             pass
 
         backend.register_action(
-            "dual_action",
-            form_class=DualForm,
-            handler=dual_handler,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="dual_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=DualForm,
+                handler=dual_handler,
+            )
         )
         meta = backend.get_meta("dual_action")
         assert meta is not None
@@ -134,12 +141,14 @@ class TestRegistryFormActionBackend:
             pass
 
         backend.register_action(
-            "page_action",
-            handler=handler,
-            file_path=page_file,
-            scope="page",
+            ActionRegistration(
+                name="page_action",
+                file_path=page_file,
+                scope="page",
+                handler=handler,
+            )
         )
-        meta = backend.get_meta("page_action", page_path=page_file)
+        meta = backend.get_meta("page_action", page_file)
         assert meta is not None
         assert meta["scope"] == "page"
 
@@ -147,10 +156,12 @@ class TestRegistryFormActionBackend:
         """Raise ImproperlyConfigured when two distinct names share a UID."""
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "alpha",
-            handler=lambda: None,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="alpha",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+            )
         )
         first_uid = next(iter(backend._uid_to_name))
         with (
@@ -161,26 +172,32 @@ class TestRegistryFormActionBackend:
             pytest.raises(ImproperlyConfigured, match="UID collision"),
         ):
             backend.register_action(
-                "beta",
-                handler=lambda: None,
-                file_path=_FAKE_FILE,
-                scope="shared",
+                ActionRegistration(
+                    name="beta",
+                    file_path=_FAKE_FILE,
+                    scope="shared",
+                    handler=lambda: None,
+                )
             )
 
     def test_register_action_reregistration_same_name_ok(self) -> None:
         """Re-registering the same name (e.g. reload) does not raise."""
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "alpha",
-            handler=lambda: None,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="alpha",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+            )
         )
         backend.register_action(
-            "alpha",
-            handler=lambda: None,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="alpha",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+            )
         )
         assert backend.get_meta("alpha") is not None
 
@@ -192,10 +209,12 @@ class TestRegistryFormActionBackend:
             pass
 
         backend.register_action(
-            "tuple_test",
-            handler=h,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="tuple_test",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=h,
+            )
         )
         keys = list(backend._registry.keys())
         assert all(isinstance(k, tuple) and len(k) == 2 for k in keys)
@@ -208,10 +227,12 @@ class TestRegistryFormActionBackend:
             pass
 
         backend.register_action(
-            "uid_tuple_test",
-            handler=h,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="uid_tuple_test",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=h,
+            )
         )
         values = list(backend._uid_to_name.values())
         assert all(isinstance(v, tuple) and len(v) == 2 for v in values)
@@ -225,12 +246,14 @@ class TestRegistryFormActionBackend:
             pass
 
         backend.register_action(
-            "page_meta_test",
-            handler=h,
-            file_path=page_path,
-            scope="page",
+            ActionRegistration(
+                name="page_meta_test",
+                file_path=page_path,
+                scope="page",
+                handler=h,
+            )
         )
-        meta = backend.get_meta("page_meta_test", page_path=page_path)
+        meta = backend.get_meta("page_meta_test", page_path)
         assert meta is not None
         assert meta["scope"] == "page"
 
@@ -242,10 +265,12 @@ class TestRegistryFormActionBackend:
             pass
 
         backend.register_action(
-            "any_scope_test",
-            handler=h,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="any_scope_test",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=h,
+            )
         )
         meta = backend.get_meta("any_scope_test")
         assert meta is not None
@@ -262,10 +287,12 @@ class TestRegistryFormActionBackend:
         """clear_registry drops all registrations and UID mapping."""
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "to_clear",
-            handler=lambda: None,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="to_clear",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+            )
         )
         backend.clear_registry()
         assert backend._registry == {}
@@ -381,10 +408,12 @@ class TestGetActionUrlNoReverseMatchFallback:
             pass
 
         backend.register_action(
-            "fallback_action",
-            handler=h,
-            file_path=page_path,
-            scope="page",
+            ActionRegistration(
+                name="fallback_action",
+                file_path=page_path,
+                scope="page",
+                handler=h,
+            )
         )
 
         original_reverse = __import__("django.urls", fromlist=["reverse"]).reverse

@@ -14,9 +14,9 @@ from . import checks, signals
 from .autodiscover import autodiscover_forms, clear_discovered
 from .backends import (
     ActionMeta,
+    ActionRegistration,
     FormActionBackend,
     FormActionFactory,
-    FormActionOptions,
     RegistryFormActionBackend,
     clear_action_collisions,
 )
@@ -95,13 +95,7 @@ from .wizard import (
 
 
 def reset_form_registration_state() -> None:
-    """Clear every form registry and registration-warning buffer.
-
-    Resets the action registry, the auto-registration warning buffers, the
-    collision tracker, the @action-on-class tracker, the autodiscover guard,
-    the wizard registry, and the cached wizard backend. Intended for test
-    isolation and manual hot-reload flows.
-    """
+    """Clear every form registry and registration-warning buffer for test isolation."""
     form_action_manager.clear_registries()
     clear_auto_registration_state()
     clear_action_collisions()
@@ -115,6 +109,7 @@ __all__ = [
     "FORM_ACTION_REVERSE_NAME",
     "URL_NAME_FORM_ACTION",
     "ActionMeta",
+    "ActionRegistration",
     "BaseForm",
     "BaseModelForm",
     "BooleanField",
@@ -140,7 +135,6 @@ __all__ = [
     "FormActionDispatch",
     "FormActionFactory",
     "FormActionManager",
-    "FormActionOptions",
     "FormProvider",
     "FormSectionSpec",
     "FormSpec",

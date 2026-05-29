@@ -5,6 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .backends import ActionRegistration
 from .base import _compute_scope
 from .manager import form_action_manager
 
@@ -22,12 +23,10 @@ def action(
     *,
     form_class: Callable[..., Any] | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Register a callable as a named action.
+    """Register a form-less callable as a named action.
 
-    For form-less functions, omit `form_class`. For actions that need a
-    dynamically constructed form class (e.g. a DI factory), pass it as
-    `form_class`. Do NOT pass a static Form subclass — those register
-    automatically via __init_subclass__.
+    Pass `form_class` only as a factory callable. Static Form subclasses
+    register automatically through __init_subclass__.
     """
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -48,11 +47,13 @@ def action(
         file_path = frame.f_code.co_filename
         scope = _compute_scope(file_path)
         form_action_manager.register_action(
-            name,
-            handler=func,
-            form_class=form_class,
-            file_path=str(Path(file_path).resolve()),
-            scope=scope,
+            ActionRegistration(
+                name=name,
+                file_path=str(Path(file_path).resolve()),
+                scope=scope,
+                handler=func,
+                form_class=form_class,
+            )
         )
         return func
 

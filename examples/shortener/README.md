@@ -132,7 +132,7 @@ class CreateLinkForm(Form):
         return HttpResponseRedirect("/")
 ```
 
-`on_valid` receives only the parameters it declares — the DI resolver fills what the signature asks for.
+`on_valid` receives only the parameters it declares — the DI resolver fills what the signature asks for. In the real `page.py` the `url` field uses a `ComponentWidget("input", type="url", ...)`, so `{{ form.url }}` renders through the next `input` component rather than Django's default widget.
 
 [`routes/template.djx`](shortener/routes/template.djx) renders the form by its auto-name:
 
@@ -159,7 +159,7 @@ A component lives in `_widgets/<name>/`:
 
 ```python
 @component.context("short_url")
-def _short_url(link: Link) -> str:
+def short_url(link: Link) -> str:
     return reverse("slug_redirect", kwargs={"slug": link.slug})
 ```
 
@@ -171,7 +171,7 @@ Usage in a loop:
 {% endfor %}
 ```
 
-`{% component "name" %}` accepts only **literal string props**. To pass the loop variable, the framework automatically forwards the parent template's flattened context, so the `link` loop variable lands inside the component and `ContextByNameProvider` fills the `link: Link` parameter of `_short_url`.
+`{% component "name" %}` accepts only **literal string props**. To pass the loop variable, the framework automatically forwards the parent template's flattened context, so the `link` loop variable lands inside the component and `ContextByNameProvider` fills the `link: Link` parameter of `short_url`.
 
 ### 7. Shared `nav_link` — DRY the active-state logic
 

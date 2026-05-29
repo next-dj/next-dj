@@ -44,7 +44,7 @@ Register the action.
    from notes.forms import NoteFormSet
 
    def build_bulk_formset() -> tuple[type[BaseFormSet], dict]:
-       return NoteFormSet, {}
+       return NoteFormSet, {"prefix": "notes"}
 
    @action("bulk_create", form_class=build_bulk_formset)
    def bulk_create(form: NoteFormSet) -> HttpResponseRedirect:
@@ -53,9 +53,10 @@ Register the action.
                row.save()
        return HttpResponseRedirect(reverse("next:page_"))
 
-Passing a formset class directly to ``form_class`` raises ``TypeError`` at dispatch time because the dispatcher expects a ``get_initial`` method on the form class.
+Passing a formset class directly to ``@action``'s ``form_class`` raises ``TypeError`` at decoration time, because the ``@action`` type-guard rejects any class.
 Register a factory callable that returns a ``(FormSetClass, init_kwargs)`` tuple instead.
-The ``init_kwargs`` reach the formset constructor and the dispatcher skips the ``get_initial`` step.
+The ``init_kwargs`` reach the formset constructor, and a non-empty dict makes the dispatcher skip the ``get_initial`` step.
+A formset has no ``get_initial``, so the ``init_kwargs`` must be non-empty even if they only set the ``prefix``.
 
 The ``page_{path}`` URL name follows the file-router naming convention, see :doc:`/content/topics/file-router`.
 

@@ -11,6 +11,7 @@ from django.core.cache import caches
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 
+from .backends import ActionRegistration
 from .base import (
     _compute_scope,
     _find_definition_frame,
@@ -186,10 +187,12 @@ def _auto_register_wizard_class(cls: type) -> None:
     if not list(getattr(getattr(cls, "Meta", None), "steps", []) or []):
         _wizard_without_steps.append(cls.__qualname__)
     form_action_manager.register_action(
-        name,
-        wizard_class=cls,
-        file_path=str(Path(file_path).resolve()),
-        scope=scope,
+        ActionRegistration(
+            name=name,
+            file_path=str(Path(file_path).resolve()),
+            scope=scope,
+            wizard_class=cls,
+        )
     )
 
 
@@ -216,7 +219,10 @@ class FormWizard:
         """Bind the wizard to a request, its URL kwargs, and a page path."""
         self.request = request
         self.url_kwargs = dict(url_kwargs or {})
-        self.base_path = base_path or getattr(request, "path", "") or ""
+        if base_path is not None:
+            self.base_path = base_path
+        else:
+            self.base_path = getattr(request, "path", "") or ""
         self.wizard_id = _to_snake_case(type(self).__name__)
         self._backend = wizard_backend_manager.get()
 
@@ -268,8 +274,8 @@ class FormWizard:
         """Return the active step from the URL kwarg, defaulting to the first."""
         names = self.step_names()
         raw = self.url_kwargs.get(self.url_param)
-        if isinstance(raw, str) and raw in names:
-            return raw
+        if raw is not None and str(raw) in names:
+            return str(raw)
         return names[0] if names else ""
 
     def is_first(self) -> bool:

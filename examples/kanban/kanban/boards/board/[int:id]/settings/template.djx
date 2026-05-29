@@ -2,13 +2,15 @@
   {% #component "section" title="Rename board" %}
     {% #slot "content" %}
       {% form "rename_board_form" %}
-        {% #component "field" label="Title" for_id="rename-title" %}
-          {% #slot "control" %}
-            <input id="rename-title" type="text" name="title" value="{{ board.title }}"
-              class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-          {% /slot %}
-        {% /component %}
-        {% component "button" type="submit" text="Save" variant="default" size="sm" %}
+        <div class="space-y-2">
+          {% #component "field" label="Title" for_id="rename-title" %}
+            {% #slot "control" %}
+              <input id="rename-title" type="text" name="title" value="{{ board.title }}"
+                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+            {% /slot %}
+          {% /component %}
+          {% component "button" type="submit" text="Save" variant="default" size="sm" %}
+        </div>
       {% endform %}
     {% /slot %}
   {% /component %}
@@ -16,20 +18,22 @@
   {% #component "section" title="Add column" %}
     {% #slot "content" %}
       {% form "create_column_form" %}
-        <input type="hidden" name="board_id" value="{{ board.id }}">
-        {% #component "field" label="Title" for_id="column-title" %}
-          {% #slot "control" %}
-            <input id="column-title" type="text" name="title"
-              class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-          {% /slot %}
-        {% /component %}
-        {% #component "field" label="WIP limit (optional)" for_id="wip-limit" %}
-          {% #slot "control" %}
-            <input id="wip-limit" type="number" name="wip_limit" min="1"
-              class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-          {% /slot %}
-        {% /component %}
-        {% component "button" type="submit" text="Create" variant="default" size="sm" %}
+        <div class="space-y-2">
+          <input type="hidden" name="board_id" value="{{ board.id }}">
+          {% #component "field" label="Title" for_id="column-title" %}
+            {% #slot "control" %}
+              <input id="column-title" type="text" name="title"
+                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+            {% /slot %}
+          {% /component %}
+          {% #component "field" label="WIP limit (optional)" for_id="wip-limit" %}
+            {% #slot "control" %}
+              <input id="wip-limit" type="number" name="wip_limit" min="1"
+                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+            {% /slot %}
+          {% /component %}
+          {% component "button" type="submit" text="Create" variant="default" size="sm" %}
+        </div>
       {% endform %}
     {% /slot %}
   {% /component %}
@@ -38,12 +42,14 @@
     {% #component "section" title="Archive" description="Archived boards disappear from the index but their data is kept." %}
       {% #slot "content" %}
         {% form "archive_board_form" %}
-          <label class="inline-flex items-center gap-2 text-sm">
-            <input type="checkbox" name="archived" value="1"
-              {% if board.archived %}checked{% endif %}>
-            Archived
-          </label>
-          {% component "button" type="submit" text="Apply" variant="outline" size="sm" extra="ml-3" %}
+          <div class="space-y-2">
+            <label class="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" name="archived" value="1"
+                {% if board.archived %}checked{% endif %}>
+              Archived
+            </label>
+            {% component "button" type="submit" text="Apply" variant="outline" size="sm" extra="ml-3" %}
+          </div>
         {% endform %}
       {% /slot %}
     {% /component %}

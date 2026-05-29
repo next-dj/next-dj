@@ -36,6 +36,10 @@ Terms used throughout the next.dj documentation.
       A reusable template fragment under the components root.
       Has a template and optional Python module.
 
+   ComponentWidget
+      A form widget that renders a field through a registered next.dj component instead of a Django widget template.
+      One field maps to one component, and the component owns the markup.
+
    context function
       A Python callable decorated with ``@context("key")`` that publishes a value to the template scope.
 
@@ -54,6 +58,14 @@ Terms used throughout the next.dj documentation.
    FormSpec
       A frozen dataclass that describes a form layout.
       Used to render forms in custom templates.
+
+   FormWizard
+      A multi-step form that routes a sequence of step forms across requests.
+      Steps are declared as ``(name, FormClass)`` tuples in ``Meta.steps``, and ``done`` runs after the final step validates.
+
+   form wizard backend
+      The draft-persistence contract for a ``FormWizard``, a ``FormWizardBackend`` subclass that stores each step's cleaned data between requests.
+      Selected through ``NEXT_FRAMEWORK["DEFAULT_FORM_WIZARD_BACKEND"]``, with the bundled ``CacheFormWizardBackend`` as the default.
 
    inherit_context
       The ``inherit_context=True`` flag on ``@context`` in ``page.py``.

@@ -3,15 +3,19 @@
       title="Shrink a link"
       description="Paste a URL, get a short slug, and every visit to /s/<slug>/ is counted in LocMemCache. Run `manage.py flush_clicks` to persist the counters." %}
 
+  <div class="rounded-lg border border-border bg-card p-4 shadow-sm">
   {% form "create_link_form" %}
-    {% #component "field" label="Long URL" for_id="id_url" %}
-      {% #slot "control" %}{{ form.url }}{% /slot %}
-    {% /component %}
-    {% if form.errors %}
-      {% component "alert" variant="destructive" text=form.url.errors|first %}
-    {% endif %}
-    {% component "button" type="submit" text="Shorten" variant="default" %}
+    <div class="space-y-3">
+      {% #component "field" label="Long URL" for_id="id_url" %}
+        {% #slot "control" %}{{ form.url }}{% /slot %}
+      {% /component %}
+      {% if form.errors %}
+        {% component "alert" variant="destructive" text=form.url.errors|first %}
+      {% endif %}
+      {% component "button" type="submit" text="Shorten" variant="default" %}
+    </div>
   {% endform %}
+  </div>
 
   {% #component "section" title="Latest shortened links" %}
     {% #slot "content" %}

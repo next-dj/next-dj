@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from flags.metrics import render_counts
 from flags.receivers import feature_guard_count
 

@@ -45,7 +45,7 @@ class RenderWizard(FormWizard):
 
 
 class TestRenderFormFragment:
-    """render_form_fragment: unknown action, template_fragment, fallback, context."""
+    """render_form_fragment: unknown action, page template, fallback, context."""
 
     def test_unknown_action_returns_empty(self, mock_http_request) -> None:
         """Unknown action renders empty string."""
@@ -55,7 +55,7 @@ class TestRenderFormFragment:
         )
         assert html == ""
 
-    def test_with_template_fragment(self, mock_http_request) -> None:
+    def test_renders_with_page_template(self, mock_http_request) -> None:
         """Render form using the page template for ``page_file_path``."""
         request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "test"})
@@ -63,7 +63,6 @@ class TestRenderFormFragment:
             request,
             "simple_form",
             form,
-            template_fragment=None,
             page_file_path=PAGE_MODULE_FOR_FORM_TESTS,
         )
         assert "test" in html or "name" in html
@@ -76,7 +75,6 @@ class TestRenderFormFragment:
             request,
             "simple_form",
             form,
-            template_fragment=None,
             page_file_path=PAGE_MODULE_FOR_FORM_TESTS,
         )
         assert isinstance(html, str)
@@ -89,7 +87,6 @@ class TestRenderFormFragment:
             request,
             "simple_form",
             form=None,
-            template_fragment=None,
             page_file_path=PAGE_MODULE_FOR_FORM_TESTS,
         )
         assert isinstance(html, str)
@@ -151,7 +148,6 @@ class TestRenderFormFragment:
             request,
             "simple_form",
             form,
-            template_fragment=None,
             page_file_path=page_file,
         )
         if output_mode == "path":

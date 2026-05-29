@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
 
 _FACTORY_TUPLE_LEN = 2
+_HTTP_ERROR_FLOOR = 400
 
 
 def _get_caller_path(back_count: int = 1) -> "Path":
@@ -367,7 +368,7 @@ class FormActionDispatch:
                     field_names=tuple(form.errors.keys()),
                 )
             return FormActionDispatch.form_response(
-                backend, request, params.action_name, form, None
+                backend, request, params.action_name, form
             )
 
         if params.handler is None:
@@ -420,10 +421,9 @@ class FormActionDispatch:
         state: _DispatchState,
     ) -> HttpResponse:
         """Validate the current wizard step, then route forward or finalise."""
-        origin = (
-            _validated_origin_path(request.POST.get("_next_form_origin"))
-            or request.path
-        )
+        origin = _validated_origin_path(request.POST.get("_next_form_origin"))
+        if origin is None:
+            return HttpResponseBadRequest("Missing or invalid _next_form_origin")
         wizard = wizard_class(
             request=request, url_kwargs=state.url_kwargs, base_path=origin
         )
@@ -444,9 +444,7 @@ class FormActionDispatch:
                     error_count=error_count,
                     field_names=tuple(form.errors.keys()),
                 )
-            return FormActionDispatch.form_response(
-                backend, request, action_name, form, None
-            )
+            return FormActionDispatch.form_response(backend, request, action_name, form)
 
         cleaned = dict(form.cleaned_data)
         wizard.save_step(step_name, cleaned)
@@ -469,12 +467,13 @@ class FormActionDispatch:
                 action_name=action_name,
                 backend=backend,
             )
-            wizard.clear_storage()
-            wizard_completed.send(
-                sender=FormActionDispatch,
-                wizard_class=wizard_class,
-                cleaned_data=merged,
-            )
+            if response.status_code < _HTTP_ERROR_FLOOR:
+                wizard.clear_storage()
+                wizard_completed.send(
+                    sender=FormActionDispatch,
+                    wizard_class=wizard_class,
+                    cleaned_data=merged,
+                )
         else:
             response = HttpResponseRedirect(wizard.goto(next_step))
             duration_ms = 0.0
@@ -496,19 +495,12 @@ class FormActionDispatch:
         request: "HttpRequest",
         action_name: str,
         form: "django_forms.Form | None",
-        template_fragment: str | None,
     ) -> HttpResponse:
         """Return full-page HTML for an invalid form submission."""
         page_path = validated_next_form_page_path(request)
         if page_path is None:
             return HttpResponseBadRequest("Missing or invalid _next_form_page")
-        html = backend.render_form_fragment(
-            request,
-            action_name,
-            form,
-            template_fragment,
-            page_file_path=page_path,
-        )
+        html = backend.render_form_fragment(request, action_name, form, page_path)
         return HttpResponse(html)
 
     @staticmethod
@@ -541,7 +533,7 @@ class FormActionDispatch:
         if response is None:
             if request and action_name and backend:
                 return FormActionDispatch.form_response(
-                    backend, request, action_name, None, None
+                    backend, request, action_name, None
                 )
             return HttpResponse(status=204)
         if isinstance(response, HttpResponse):

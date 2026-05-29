@@ -3,9 +3,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
+from access.backends import _safe_form_payload
 from access.models import AccessRequest, AuditEntry
 from django.contrib.sessions.backends.db import SessionStore
-from django.http import HttpRequest
+from django.http import HttpRequest, QueryDict
 
 
 EXAMPLE_ROOT = Path(__file__).resolve().parent.parent
@@ -47,6 +48,25 @@ def _wizard(step: str, stored: dict[str, dict[str, object]] | None = None):
     for name, data in (stored or {}).items():
         wizard.save_step(name, data)
     return wizard
+
+
+class TestSafeFormPayload:
+    """`_safe_form_payload` keeps real fields and drops framework-internal keys."""
+
+    def test_strips_framework_keys_and_keeps_fields(self) -> None:
+        """The persisted payload omits csrf, page, origin, and url-param fields."""
+        request = HttpRequest()
+        request.method = "POST"
+        request.POST = QueryDict(
+            "csrfmiddlewaretoken=tok"
+            "&_next_form_page=/p/page.py"
+            "&_next_form_origin=/request/identity/"
+            "&_url_param_step=identity"
+            "&email=ada@example.com"
+            "&full_name=Ada"
+        )
+        payload = _safe_form_payload(request)
+        assert payload == {"email": ["ada@example.com"], "full_name": ["Ada"]}
 
 
 class TestModelStr:

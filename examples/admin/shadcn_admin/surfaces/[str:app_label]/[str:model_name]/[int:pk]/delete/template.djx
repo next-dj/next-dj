@@ -31,12 +31,12 @@
   </section>
 
   {% if delete_state.can_delete %}
-    <div class="flex items-center justify-end gap-2 pt-2">
     {% form "admin:delete" %}
-      {% component "button" href=delete_state.change_url text="Cancel" variant="outline" %}
-      {% component "button" type="submit" text="Yes, delete" variant="destructive" %}
+      <div class="flex items-center justify-end gap-2 pt-2">
+        {% component "button" href=delete_state.change_url text="Cancel" variant="outline" %}
+        {% component "button" type="submit" text="Yes, delete" variant="destructive" %}
+      </div>
     {% endform %}
-    </div>
   {% else %}
     <div class="flex items-center justify-end gap-2 pt-2">
       {% component "button" href=delete_state.change_url text="Back" variant="outline" %}

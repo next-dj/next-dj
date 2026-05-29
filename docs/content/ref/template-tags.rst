@@ -25,8 +25,9 @@ Forms
 
    Captured URL parameters from ``request.resolver_match.kwargs`` are emitted automatically as ``_url_param_<name>`` hidden inputs.
 
-   The tag requires ``request`` and ``current_page_module_path`` in the template context.
-   The file router supplies both, so ``{% form %}`` works only inside a file-routed page.
+   The tag requires ``request`` in the template context for the CSRF token.
+   It also uses ``current_page_module_path`` when present to scope the action lookup to the origin page, which is how the file router renders it.
+   That context value is not strictly required: when it is absent the action lookup falls back to the name index.
 
 Components
 ----------

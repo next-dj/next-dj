@@ -7,12 +7,14 @@ from django import forms
 from django.http import HttpResponse, HttpResponseRedirect
 
 from next.forms import Form
-from next.forms.backends import FormActionOptions, RegistryFormActionBackend
+from next.forms._request_utils import (
+    _filter_reserved_url_kwargs,
+    _url_kwargs_from_post,
+)
+from next.forms.backends import ActionRegistration, RegistryFormActionBackend
 from next.forms.dispatch import (
     FormActionDispatch,
-    _filter_reserved_url_kwargs,
     _normalize_handler_response,
-    _url_kwargs_from_post,
 )
 from tests.support.helpers import build_mock_http_request
 
@@ -69,9 +71,13 @@ class TestBenchDispatchEndToEnd:
         """Valid submission — handler runs, redirect emitted."""
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "bench_action",
-            _ok_handler,
-            options=FormActionOptions(form_class=_BenchForm),
+            ActionRegistration(
+                name="bench_action",
+                file_path=__file__,
+                scope="shared",
+                handler=_ok_handler,
+                form_class=_BenchForm,
+            )
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
@@ -91,9 +97,13 @@ class TestBenchDispatchEndToEnd:
         """Invalid submission — validation_failed signal + errors payload."""
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "bench_action",
-            _ok_handler,
-            options=FormActionOptions(form_class=_BenchForm),
+            ActionRegistration(
+                name="bench_action",
+                file_path=__file__,
+                scope="shared",
+                handler=_ok_handler,
+                form_class=_BenchForm,
+            )
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
@@ -125,9 +135,13 @@ class TestBenchDispatchEndToEnd:
 
         backend = _SubclassedBackend()
         backend.register_action(
-            "bench_action",
-            _ok_handler,
-            options=FormActionOptions(form_class=_BenchForm),
+            ActionRegistration(
+                name="bench_action",
+                file_path=__file__,
+                scope="shared",
+                handler=_ok_handler,
+                form_class=_BenchForm,
+            )
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None

@@ -8,9 +8,11 @@
         <div class="flex items-center gap-3 text-sm">
           {% if user.is_authenticated %}
             <span class="text-muted-foreground">{{ user.get_username }}</span>
-            {% form "admin:logout" %}
-              {% component "button" type="submit" text="Sign out" variant="outline" size="sm" %}
-            {% endform %}
+            <div class="inline">
+              {% form "admin:logout" %}
+                {% component "button" type="submit" text="Sign out" variant="outline" size="sm" %}
+              {% endform %}
+            </div>
           {% else %}
             {% component "button" href="/admin/login/" text="Sign in" variant="outline" size="sm" %}
           {% endif %}

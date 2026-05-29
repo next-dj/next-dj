@@ -26,7 +26,7 @@ Stable.
 
 Advanced.
    ``FormProvider``, ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``,
-   ``FormActionDispatch``, ``FormActionOptions``, ``ActionMeta``,
+   ``FormActionDispatch``, ``ActionRegistration``, ``ActionMeta``, ``ComponentWidget``,
    ``FormWizardBackend``, ``CacheFormWizardBackend``, ``WizardBackendManager``, ``wizard_backend_manager``,
    ``build_form_namespace_for_action``, ``validated_next_form_page_path``,
    the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``,
@@ -102,6 +102,12 @@ Import any other Django field or widget directly from ``django.forms``.
    :members:
    :exclude-members: BaseForm, BaseModelForm, Form, ModelForm
 
+``ComponentWidget`` renders a field through a registered next.dj component instead of a Django widget template.
+See :doc:`/content/topics/forms/field-components` for the topic guide.
+
+.. autoclass:: next.forms.ComponentWidget
+   :members:
+
 Markers
 ~~~~~~~
 
@@ -129,8 +135,9 @@ Manager
 Backends
 ~~~~~~~~
 
-``FormActionOptions`` is a reserved dataclass.
-It is accepted by ``register_action`` for forward compatibility but carries no fields currently.
+``ActionRegistration`` is the value object passed to ``register_action``.
+It carries the action ``name``, the declaration-site ``file_path``, the ``scope``, and the action target.
+The target is one of ``handler``, ``form_class``, or ``wizard_class``, which lets a single ``register_action`` call serve the ``@action`` decorator, a class-bound form, and a ``FormWizard``.
 
 .. automodule:: next.forms.backends
    :members:

@@ -89,25 +89,28 @@ class ActionMeta(TypedDict, total=False):
     scope: str
 
 
-@dataclass
-class FormActionOptions:
-    """Options for register_action. Extend to add backend-specific settings."""
+@dataclass(frozen=True)
+class ActionRegistration:
+    """A form action to register: its name, declaration site, and target.
+
+    Exactly one of `handler`, `form_class`, or `wizard_class` is the action
+    target, except the `@action(form_class=...)` path which supplies a handler
+    and a form-factory together.
+    """
+
+    name: str
+    file_path: str
+    scope: str
+    handler: "Callable[..., Any] | None" = None
+    form_class: "type[django_forms.Form] | Callable[..., Any] | None" = None
+    wizard_class: "type | None" = None
 
 
 class FormActionBackend(ABC):
     """Storage and HTTP dispatch for `@action` handlers."""
 
     @abstractmethod
-    def register_action(  # noqa: PLR0913
-        self,
-        name: str,
-        *,
-        form_class: "type[django_forms.Form] | Callable[..., Any] | None" = None,
-        handler: "Callable[..., Any] | None" = None,
-        wizard_class: "type | None" = None,
-        file_path: str,
-        scope: str,
-    ) -> None:
+    def register_action(self, registration: ActionRegistration) -> None:
         """Record an action from the decorator or __init_subclass__."""
 
     @abstractmethod
@@ -124,21 +127,18 @@ class FormActionBackend(ABC):
 
     def get_meta(
         self,
-        action_name: str,  # noqa: ARG002
-        *,
-        page_path: str | None = None,  # noqa: ARG002
+        _action_name: str,
+        _page_path: str | None = None,
     ) -> "dict[str, Any] | None":
         """Return optional per-action metadata for subclasses."""
         return None
 
     def render_form_fragment(
         self,
-        request: "HttpRequest",  # noqa: ARG002
-        action_name: str,  # noqa: ARG002
-        form: "django_forms.Form | None",  # noqa: ARG002
-        template_fragment: str | None = None,  # noqa: ARG002
-        *,
-        page_file_path: "Path | None" = None,  # noqa: ARG002
+        _request: "HttpRequest",
+        _action_name: str,
+        _form: "django_forms.Form | None",
+        _page_file_path: "Path | None" = None,
     ) -> str:
         """Return custom HTML for validation errors (override in subclasses)."""
         return ""
@@ -154,8 +154,8 @@ def _make_uid_for_action(scope_key: str, name: str) -> str:
 class RegistryFormActionBackend(FormActionBackend):
     """In-memory actions behind one dispatcher path keyed by UID."""
 
-    def __init__(self, config: dict[str, Any] | None = None) -> None:  # noqa: ARG002
-        """Create an empty action map. `config` is accepted for factory parity."""
+    def __init__(self, _config: dict[str, Any] | None = None) -> None:
+        """Create an empty action map. `_config` is accepted for factory parity."""
         self._registry: dict[tuple[str, str], ActionMeta] = {}
         self._uid_to_name: dict[str, tuple[str, str]] = {}
         self._name_index: dict[str, tuple[str, str]] = {}
@@ -166,17 +166,14 @@ class RegistryFormActionBackend(FormActionBackend):
         self._uid_to_name.clear()
         self._name_index.clear()
 
-    def register_action(  # noqa: PLR0913
-        self,
-        name: str,
-        *,
-        form_class: "type[django_forms.Form] | Callable[..., Any] | None" = None,
-        handler: "Callable[..., Any] | None" = None,
-        wizard_class: "type | None" = None,
-        file_path: str,
-        scope: str,
-    ) -> None:
+    def register_action(self, registration: ActionRegistration) -> None:
         """Store handler, form_class, or wizard_class and a stable uid for the name."""
+        name = registration.name
+        file_path = registration.file_path
+        scope = registration.scope
+        handler = registration.handler
+        form_class = registration.form_class
+        wizard_class = registration.wizard_class
         if scope == "page":
             scope_key = str(Path(file_path).resolve())
         else:
@@ -268,7 +265,6 @@ class RegistryFormActionBackend(FormActionBackend):
     def get_meta(
         self,
         action_name: str,
-        *,
         page_path: str | None = None,
     ) -> "dict[str, Any] | None":
         """Return stored `ActionMeta` for the name, if any."""
@@ -289,12 +285,9 @@ class RegistryFormActionBackend(FormActionBackend):
         request: "HttpRequest",
         action_name: str,
         form: "django_forms.Form | None",
-        template_fragment: str | None = None,
-        *,
         page_file_path: "Path | None" = None,
     ) -> str:
         """Render validation-error HTML for a page module path."""
-        del template_fragment
         target_path = page_file_path
         if target_path is None:
             target_path = validated_next_form_page_path(request)
@@ -322,8 +315,8 @@ class FormActionFactory:
 
 __all__ = [
     "ActionMeta",
+    "ActionRegistration",
     "FormActionBackend",
     "FormActionFactory",
-    "FormActionOptions",
     "RegistryFormActionBackend",
 ]

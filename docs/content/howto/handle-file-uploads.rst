@@ -105,10 +105,8 @@ Verification
 Submit the form with a file and confirm that the model row is created.
 Inspect ``MEDIA_ROOT`` and verify the file appears under ``attachments/``.
 
-Tests
------
-
-Use ``SimpleUploadedFile`` to feed a fake file into ``NextClient``.
+A test feeds a fake file into ``NextClient`` with ``SimpleUploadedFile``.
+A valid submission redirects, and a submission missing the ``file`` key re-renders the origin page with the missing-file error.
 
 .. code-block:: python
    :caption: tests/test_upload.py
@@ -123,11 +121,6 @@ Use ``SimpleUploadedFile`` to feed a fake file into ``NextClient``.
            {"title": "First", "file": fake},
        )
        assert response.status_code == 302
-
-A submission without the ``file`` key re-renders the origin page with the missing-file error.
-
-.. code-block:: python
-   :caption: tests/test_upload.py
 
    def test_upload_without_file_rerenders(db) -> None:
        response = NextClient().post_action(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from next.forms import form_action_manager
-from next.forms.backends import FormActionOptions
+from next.forms.backends import ActionRegistration
 from next.testing.isolation import reset_form_actions
 from tests.benchmarks.factories import noop_form_handler
 
@@ -21,9 +21,12 @@ class TestBenchResetFormActions:
             backend = form_action_manager.default_backend
             for i in range(_REGISTRY_SIZE):
                 backend.register_action(
-                    f"act_{i}",
-                    noop_form_handler,
-                    options=FormActionOptions(),
+                    ActionRegistration(
+                        name=f"act_{i}",
+                        file_path=__file__,
+                        scope="shared",
+                        handler=noop_form_handler,
+                    )
                 )
             return (), {}
 

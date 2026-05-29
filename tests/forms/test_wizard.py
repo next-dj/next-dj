@@ -236,6 +236,19 @@ class TestWizardStepIntrospection:
         wizard = DemoWizard(_request(), url_kwargs={"step": 7})
         assert wizard.current_step() == "identity"
 
+    def test_current_step_matches_int_coerced_kwarg(self) -> None:
+        """A url kwarg coerced to int still resolves to its string step name."""
+
+        class NumericStepWizard(FormWizard):
+            class Meta:
+                steps: ClassVar = [("1", IdentityStep), ("2", ScopeStep)]
+
+            def done(self, request, cleaned_data) -> HttpResponse:
+                return HttpResponseRedirect("/done/")
+
+        wizard = NumericStepWizard(_request(), url_kwargs={"step": 2})
+        assert wizard.current_step() == "2"
+
     def test_is_first_on_first_step(self) -> None:
         """`is_first` is True on the first step and False elsewhere."""
         assert DemoWizard(_request()).is_first() is True

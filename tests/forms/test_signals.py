@@ -7,7 +7,12 @@ from django import forms as django_forms
 from django.dispatch import Signal
 from django.http import HttpRequest, HttpResponseRedirect
 
-from next.forms import Form, RegistryFormActionBackend, form_action_manager
+from next.forms import (
+    ActionRegistration,
+    Form,
+    RegistryFormActionBackend,
+    form_action_manager,
+)
 from next.forms.dispatch import FormActionDispatch
 from next.forms.signals import (
     action_dispatched,
@@ -298,10 +303,12 @@ class TestActionRegisteredWiring:
         """Registering a new action via the backend emits the signal."""
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "wired_action",
-            handler=lambda: None,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="wired_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+            )
         )
         events = [
             e
@@ -327,10 +334,12 @@ class TestActionRegisteredWiring:
             name = django_forms.CharField()
 
         backend.register_action(
-            "form_signal_test",
-            form_class=MySignalForm,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="form_signal_test",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=MySignalForm,
+            )
         )
         events = [
             e

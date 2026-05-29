@@ -170,11 +170,13 @@ read it without re-resolving the tenant, and the URL kwargs handler in
 ### 5. The note edit form with a composite preview
 
 [`notes/workspaces/notes/[int:id]/edit/page.py`](notes/workspaces/notes/[int:id]/edit/page.py)
-defines `NoteEditForm` with hidden `note_id`, plain `title`, and free-form
-`body` fields. The handler ignores the URL kwarg `id` and trusts only
-`form.cleaned_data["note_id"]`, then routes the lookup through
-`get_object_or_404(Note, pk=note_id, tenant=active_tenant)` so a tenant
-posting another tenant's note id receives a `404`.
+defines `NoteEditForm`, a `ModelForm` whose `Meta.fields` lists only
+`title` and `body`. There is no `note_id` field. The form binds to an
+instance through `get_initial`, which reads the URL kwarg `id` and routes
+the lookup through `get_object_or_404(Note, pk=id, tenant=active_tenant)`,
+so a tenant requesting another tenant's note id receives a `404`. On a
+valid submission `on_valid` calls `self.save()` and redirects back to the
+editor.
 
 The body textarea is rendered side by side with the
 `markdown_preview` composite ([`_blocks/markdown_preview/`](notes/workspaces/notes/_blocks/markdown_preview/)).

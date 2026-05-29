@@ -14,9 +14,13 @@ from polls.broker import (
 )
 from polls.models import Choice, Poll
 
-from next.forms.autodiscover import _discovered
 from next.forms.signals import action_dispatched, form_validation_failed
-from next.testing import NextClient, SignalRecorder, resolve_action_url
+from next.testing import (
+    NextClient,
+    SignalRecorder,
+    build_form_for,
+    resolve_action_url,
+)
 
 
 pytestmark = pytest.mark.django_db
@@ -405,4 +409,6 @@ class TestProductionStartup:
     """App startup registers vote_form through autodiscover, not a test import."""
 
     def test_vote_form_discovered_through_app_ready(self) -> None:
-        assert "polls.forms" in _discovered
+        form = build_form_for("vote_form")
+        assert type(form).__name__ == "VoteForm"
+        assert type(form).__module__ == "polls.forms"

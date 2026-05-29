@@ -41,7 +41,7 @@ def render_form_page_with_errors(
     same `request` it does on the canonical render path.
     """
     file_path = page_file_path
-    meta = backend.get_meta(action_name, page_path=str(file_path))
+    meta = backend.get_meta(action_name, str(file_path))
     if not meta:
         return _form_fallback_html(form)
 
@@ -58,10 +58,7 @@ def render_form_page_with_errors(
         namespace = types.SimpleNamespace(form=form)
         wizard_class = meta.get("wizard_class")
         if wizard_class is not None:
-            origin = (
-                _validated_origin_path(request.POST.get("_next_form_origin"))
-                or request.path
-            )
+            origin = _validated_origin_path(request.POST.get("_next_form_origin")) or ""
             wizard = wizard_class(
                 request=request, url_kwargs=url_kwargs, base_path=origin
             )

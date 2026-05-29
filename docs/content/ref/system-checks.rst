@@ -238,6 +238,9 @@ Errors
    * - ``next.E051``
      - ``DEFAULT_FORM_WIZARD_BACKEND`` is malformed, non-importable, or names a class that does not subclass ``FormWizardBackend``.
      - ``next.forms.checks``
+   * - ``next.E052``
+     - ``FORM_ANCHOR_FILES`` is not None or a list, tuple, or set of strings.
+     - ``next.forms.checks``
    * - ``next.E053``
      - ``@action`` was applied to a class instead of a function.
      - ``next.forms.checks``

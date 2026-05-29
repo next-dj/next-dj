@@ -14,14 +14,14 @@ from .dispatch import _form_action_context_callable
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Iterator
     from pathlib import Path
 
     from django import forms as django_forms
     from django.http import HttpRequest
     from django.urls import URLPattern
 
-    from .backends import FormActionBackend
+    from .backends import ActionRegistration, FormActionBackend
 
 
 logger = logging.getLogger(__name__)
@@ -68,26 +68,10 @@ class FormActionManager:
         if not self._backends:
             self._reload_config()
 
-    def register_action(  # noqa: PLR0913
-        self,
-        name: str,
-        *,
-        form_class: "type[django_forms.Form] | Callable[..., Any] | None" = None,
-        handler: "Callable[..., Any] | None" = None,
-        wizard_class: "type | None" = None,
-        file_path: str,
-        scope: str,
-    ) -> None:
+    def register_action(self, registration: "ActionRegistration") -> None:
         """Forward registration to the first backend."""
         self._ensure_backends()
-        self._backends[0].register_action(
-            name,
-            form_class=form_class,
-            handler=handler,
-            wizard_class=wizard_class,
-            file_path=file_path,
-            scope=scope,
-        )
+        self._backends[0].register_action(registration)
 
     def clear_registries(self) -> None:
         """Clear every backend exposing `clear_registry`. For test isolation."""
@@ -100,7 +84,7 @@ class FormActionManager:
         """Return the reverse URL from the first backend that knows `action_name`."""
         self._ensure_backends()
         for backend in self._backends:
-            if backend.get_meta(action_name, page_path=page_path) is not None:
+            if backend.get_meta(action_name, page_path) is not None:
                 return backend.get_action_url(action_name, page_path=page_path)
         msg = f"Unknown form action: {action_name}"
         raise KeyError(msg)
@@ -110,8 +94,6 @@ class FormActionManager:
         request: "HttpRequest",
         action_name: str,
         form: "django_forms.Form | None",
-        template_fragment: str | None = None,
-        *,
         page_file_path: "Path | None" = None,
     ) -> str:
         """Delegate rendering to the first backend."""
@@ -120,8 +102,7 @@ class FormActionManager:
             request,
             action_name,
             form,
-            template_fragment,
-            page_file_path=page_file_path,
+            page_file_path,
         )
 
     @property
@@ -142,7 +123,7 @@ def build_form_namespace_for_action(
     """Build the form namespace used by the form template tag."""
     form_action_manager._ensure_backends()
     for backend in form_action_manager._backends:
-        meta = backend.get_meta(action_name, page_path=page_path)
+        meta = backend.get_meta(action_name, page_path)
         if meta is None:
             continue
         wizard_class = meta.get("wizard_class")

@@ -180,7 +180,7 @@
 
 <span class="c-kw">def</span> <span class="c-fn">test_create_note</span>():
     response = <span class="c-fn">NextClient</span>().<span class="c-fn">post_action</span>(
-        <span class="c-str">"create_note"</span>, {<span class="c-str">"title"</span>: <span class="c-str">"Test"</span>, <span class="c-str">"body"</span>: <span class="c-str">""</span>},
+        <span class="c-str">"note_form"</span>, {<span class="c-str">"title"</span>: <span class="c-str">"Test"</span>, <span class="c-str">"body"</span>: <span class="c-str">""</span>},
     )
     <span class="c-kw">assert</span> response.status_code == <span class="c-num">302</span></pre>
         </div>

@@ -1,7 +1,7 @@
 import pytest
 from django.test import override_settings
 
-from next.forms import RegistryFormActionBackend
+from next.forms import ActionRegistration, RegistryFormActionBackend
 from next.forms.backends import (
     _action_collisions,
     _handler_fingerprint,
@@ -47,26 +47,32 @@ class TestFormActionCollisions:
     def test_single_registration_is_clean(self) -> None:
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "solo",
-            handler=lambda: None,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="solo",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+            )
         )
         assert check_form_action_collisions() == []
 
     def test_duplicate_handlers_trigger_error(self) -> None:
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "dup",
-            handler=_distinct_handler("a"),
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="dup",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=_distinct_handler("a"),
+            )
         )
         backend.register_action(
-            "dup",
-            handler=_distinct_handler("b"),
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="dup",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=_distinct_handler("b"),
+            )
         )
         errors = check_form_action_collisions()
         assert len(errors) == 1
@@ -77,16 +83,20 @@ class TestFormActionCollisions:
         backend = RegistryFormActionBackend()
         same = _distinct_handler("stable")
         backend.register_action(
-            "reload_me",
-            handler=same,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="reload_me",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=same,
+            )
         )
         backend.register_action(
-            "reload_me",
-            handler=same,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="reload_me",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=same,
+            )
         )
         assert check_form_action_collisions() == []
 
@@ -106,10 +116,12 @@ class TestFormActionCollisions:
         """Common case: a name registered once never touches the collision map."""
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "only",
-            handler=_distinct_handler("x"),
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="only",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=_distinct_handler("x"),
+            )
         )
         assert _action_collisions == {}
 

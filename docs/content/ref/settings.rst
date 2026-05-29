@@ -119,6 +119,25 @@ All other files produce ``shared`` scope.
 Default value ``None``, which uses the built-in set ``["page.py", "component.py"]``.
 Set to a list of strings to extend or replace the default set.
 
+DEFAULT_FORM_WIZARD_BACKEND
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Single form wizard backend configuration.
+The backend persists a wizard's per-step draft data between requests.
+
+Default value.
+
+.. code-block:: python
+
+   {
+       "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
+       "OPTIONS": {},
+   }
+
+The bundled ``CacheFormWizardBackend`` stores each step's cleaned data in the Django cache.
+Set ``BACKEND`` to a dotted path that subclasses ``FormWizardBackend`` to swap the persistence layer.
+See :doc:`/content/topics/forms/wizard-backend` for the contract and a custom backend.
+
 Routing
 -------
 

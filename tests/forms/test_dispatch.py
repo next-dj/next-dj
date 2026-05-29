@@ -6,13 +6,20 @@ from unittest.mock import MagicMock, patch
 import pytest
 from django import forms as django_forms
 from django.contrib.sessions.backends.db import SessionStore
-from django.http import HttpRequest, HttpResponseRedirect, QueryDict
+from django.http import (
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBadRequest,
+    HttpResponseRedirect,
+    QueryDict,
+)
 
 from next.components.context import component as component_ctx
 from next.components.info import ComponentInfo
 from next.components.renderers import _inject_component_context
 from next.deps import REQUEST_DEP_CACHE_ATTR, Depends, resolver
 from next.forms import (
+    ActionRegistration,
     Form,
     FormActionDispatch,
     ModelForm,
@@ -337,10 +344,12 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "only",
-            handler=h,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="only",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=h,
+            )
         )
         req = mock_http_request(method="GET")
         form = F()
@@ -366,10 +375,12 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "frag",
-            handler=h,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="frag",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=h,
+            )
         )
         req = mock_http_request(method="GET")
         form = F()
@@ -415,16 +426,18 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "test_action",
-            handler=handler,
-            form_class=TestModelForm,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="test_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=TestModelForm,
+            )
         )
 
-        mock_post = MagicMock()
-        mock_post.items.return_value = [("name", "test")]
-        request = mock_http_request(method="POST", POST=mock_post, FILES=None)
+        post = QueryDict(mutable=True)
+        post["name"] = "test"
+        request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = backend.get_meta("test_action")
         assert meta is not None
@@ -452,11 +465,13 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "test_action",
-            handler=handler,
-            form_class=TestForm,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="test_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=TestForm,
+            )
         )
 
         mock_post = MagicMock()
@@ -490,11 +505,13 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "test_action",
-            handler=handler,
-            form_class=TestForm,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="test_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=TestForm,
+            )
         )
 
         mock_post = MagicMock()
@@ -510,7 +527,6 @@ class TestFormDispatchRenderFragmentBranches:
                 request,
                 "test_action",
                 form,
-                template_fragment=None,
                 page_file_path=file_path,
             )
             assert isinstance(html, str)
@@ -531,15 +547,16 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "test_action",
-            handler=handler,
-            form_class=CustomDjangoForm,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="test_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=CustomDjangoForm,
+            )
         )
 
-        post = MagicMock()
-        post.items.return_value = []
+        post = QueryDict(mutable=True)
         request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = backend.get_meta("test_action")
@@ -568,15 +585,16 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "test_action",
-            handler=handler,
-            form_class=CustomForm,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="test_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=CustomForm,
+            )
         )
 
-        post = MagicMock()
-        post.items.return_value = []
+        post = QueryDict(mutable=True)
         request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = backend.get_meta("test_action")
@@ -592,8 +610,7 @@ class TestFormDispatchRenderFragmentBranches:
     ) -> None:
         """Dispatch with no form_class and no handler returns 400."""
         backend = RegistryFormActionBackend()
-        post = MagicMock()
-        post.items.return_value = []
+        post = QueryDict(mutable=True)
         request = mock_http_request(method="POST", POST=post, FILES=None)
 
         # Construct meta manually without form_class or handler.
@@ -624,15 +641,17 @@ class TestDispatchOnValid:
                 return HttpResponseRedirect("/redirected/")
 
         backend.register_action(
-            "redirect_form",
-            form_class=RedirectForm,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="redirect_form",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=RedirectForm,
+            )
         )
 
-        mock_post = MagicMock()
-        mock_post.items.return_value = [("name", "Alice")]
-        request = mock_http_request(method="POST", POST=mock_post, FILES=None)
+        post = QueryDict(mutable=True)
+        post["name"] = "Alice"
+        request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = backend.get_meta("redirect_form")
         assert meta is not None
@@ -654,15 +673,17 @@ class TestDispatchOnValid:
                 return None
 
         backend.register_action(
-            "none_form",
-            form_class=NoneForm,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="none_form",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=NoneForm,
+            )
         )
 
-        mock_post = MagicMock()
-        mock_post.items.return_value = [("name", "Alice")]
-        request = mock_http_request(method="POST", POST=mock_post, FILES=None)
+        post = QueryDict(mutable=True)
+        post["name"] = "Alice"
+        request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = backend.get_meta("none_form")
         assert meta is not None
@@ -808,11 +829,13 @@ class TestFormClassInitKwargs:
 
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "init_kwargs_action",
-            handler=handler,
-            form_class=factory,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="init_kwargs_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=factory,
+            )
         )
 
         post = QueryDict(mutable=True)
@@ -844,15 +867,16 @@ class TestDispatchSharedDepCache:
             return "ok"
 
         backend.register_action(
-            "only_handler",
-            handler=handler,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="only_handler",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+            )
         )
 
-        mock_post = MagicMock()
-        mock_post.items.return_value = []
-        request = mock_http_request(method="POST", POST=mock_post)
+        post = QueryDict(mutable=True)
+        request = mock_http_request(method="POST", POST=post)
 
         meta = backend.get_meta("only_handler")
         assert meta is not None
@@ -875,10 +899,12 @@ class TestDispatchSharedDepCache:
             return greeting
 
         backend.register_action(
-            "dep_handler",
-            handler=handler,
-            file_path=_FAKE_FILE,
-            scope="shared",
+            ActionRegistration(
+                name="dep_handler",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+            )
         )
 
         seen: dict[str, object] = {}
@@ -888,9 +914,8 @@ class TestDispatchSharedDepCache:
 
         action_dispatched.connect(receiver)
         try:
-            mock_post = MagicMock()
-            mock_post.items.return_value = []
-            request = mock_http_request(method="POST", POST=mock_post)
+            post = QueryDict(mutable=True)
+            request = mock_http_request(method="POST", POST=post)
             meta = backend.get_meta("dep_handler")
             assert meta is not None
             FormActionDispatch.dispatch(backend, request, "dep_handler", meta)
@@ -1078,6 +1103,48 @@ class TestWizardDispatchViaClient:
             follow=False,
         )
         assert resp.status_code == 400
+
+    def test_missing_origin_returns_bad_request(self, client_no_csrf) -> None:
+        """A wizard POST without a valid _next_form_origin returns 400."""
+        url = form_action_manager.get_action_url("dispatch_wizard")
+        resp = client_no_csrf.post(
+            url,
+            data={
+                "_url_param_step": "identity",
+                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+                "name": "Ada",
+            },
+            follow=False,
+        )
+        assert resp.status_code == 400
+
+    def test_done_error_response_preserves_draft(
+        self, client_no_csrf, mock_http_request
+    ) -> None:
+        """A done() error response keeps the saved draft so the user can retry."""
+
+        class FailingDoneWizard(FormWizard):
+            class Meta:
+                steps: ClassVar = [
+                    ("identity", WizardIdentityStep),
+                    ("scope", WizardScopeStep),
+                ]
+
+            def done(self, request, cleaned_data) -> HttpResponse:
+                return HttpResponseBadRequest("downstream failed")
+
+        self._post_step(
+            client_no_csrf, "identity", {"name": "Ada"}, action="failing_done_wizard"
+        )
+        resp = self._post_step(
+            client_no_csrf, "scope", {"scope": "ops"}, action="failing_done_wizard"
+        )
+        assert resp.status_code == 400
+        session_key = client_no_csrf.session.session_key
+        store = SessionStore(session_key=session_key)
+        req = mock_http_request(method="GET", session=store, resolver_match=None)
+        namespace = build_form_namespace_for_action("failing_done_wizard", req)
+        assert namespace.form.initial == {"name": "Ada"}
 
     def test_back_navigation_prefills_from_storage(
         self, client_no_csrf, mock_http_request

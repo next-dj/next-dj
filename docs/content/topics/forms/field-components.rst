@@ -20,7 +20,7 @@ Import the widget and attach it to a field with the component name and any extra
    :caption: a plain Form with field-level widgets
 
    import next.forms
-   from next.forms.widgets import ComponentWidget
+   from next.forms import ComponentWidget
 
    class ArticleCreateForm(next.forms.Form):
        slug = next.forms.CharField(widget=ComponentWidget("input", placeholder="URL slug"))
@@ -33,7 +33,7 @@ A ``ModelForm`` declares the same widgets through ``Meta.widgets``, mapping each
    :caption: a ModelForm with Meta.widgets
 
    import next.forms
-   from next.forms.widgets import ComponentWidget
+   from next.forms import ComponentWidget
    from wiki.models import Article
 
    class ArticleEditForm(next.forms.ModelForm):
@@ -85,7 +85,7 @@ HTML ``attrs``.
    The widget exposes each one under an underscore alias at the top level, so a component reads ``{{ aria_invalid }}`` or ``{{ aria_describedby }}``.
    The raw mapping under ``attrs`` keeps the original hyphenated keys for iteration.
 
-   .. code-block:: html+django
+   .. code-block:: jinja
       :caption: reading an aliased attribute
 
       {% if aria_invalid %}aria-invalid="{{ aria_invalid }}"{% endif %}
@@ -94,7 +94,7 @@ Extra keyword arguments.
    Every keyword passed to ``ComponentWidget("input", placeholder=..., rows=...)`` is spread to the top level too.
    A ``placeholder`` argument reaches the template as ``{{ placeholder }}``.
 
-.. code-block:: html+django
+.. code-block:: jinja
    :caption: a minimal input component
 
    <input

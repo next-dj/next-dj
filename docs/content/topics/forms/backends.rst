@@ -37,8 +37,9 @@ The Backend Contract
 
 A backend subclasses ``next.forms.FormActionBackend``, an abstract base class with four abstract methods.
 
-``register_action(name, handler, *, options)``.
-   Records an action from the ``@action`` decorator.
+``register_action(registration)``.
+   Records an action from the ``@action`` decorator, a class-bound form, or a ``FormWizard``.
+   The single argument is an ``ActionRegistration`` carrying the ``name``, the declaration-site ``file_path``, the ``scope``, and the action target as one of ``handler``, ``form_class``, or ``wizard_class``.
 
 ``get_action_url(action_name)``.
    Returns the reverse URL for an action name.

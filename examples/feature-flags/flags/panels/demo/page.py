@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from flags.models import Flag
 
 from next.pages import context

@@ -305,7 +305,7 @@ admin layout uses exact matches (`next:page_admin`, `next:page_admin_metrics`).
 | `panels/demo/page.py` | `/demo/` | `next:page_demo` |
 
 The bulk-toggle action is mounted at the framework's action URL. Tests use
-`NextClient.post_action("bulk_toggle", {...})` instead of a hardcoded path.
+`NextClient.post_action("bulk_toggle_form", {...})` instead of a hardcoded path.
 
 ## Gotchas
 

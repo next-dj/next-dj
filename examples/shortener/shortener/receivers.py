@@ -1,8 +1,8 @@
 """Signal receivers that count form-action dispatches into the shared cache.
 
-Hooked on `action_dispatched` so every `@forms.action` handler adds one to
-a per-action counter. The admin "Stats" page reads the counters to show
-how often each form has been submitted this process.
+Hooked on `action_dispatched` so every form dispatch bumps a per-action
+counter keyed by the form's auto-name. The admin "Stats" page reads the
+counters to show how often each form has been submitted this process.
 """
 
 from __future__ import annotations

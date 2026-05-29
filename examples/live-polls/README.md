@@ -16,7 +16,7 @@ ad-hoc plumbing in the framework core.
 | `/polls/` | Server-rendered list of polls. Each card shows choice count and total votes. |
 | `/polls/<id>/` | Vote page with the live chart and a button-per-choice form. Vue takes over the chart on mount. |
 | `/polls/<id>/stream/` | Server-Sent Events endpoint. First frame is the cached snapshot, then `update` frames flow on every vote. |
-| `POST polls:vote` | Atomically increments a choice via `F("votes") + 1`, publishes a fresh snapshot to the broker, redirects to the poll page. |
+| `POST vote_form` | Atomically increments a choice via `F("votes") + 1`, publishes a fresh snapshot to the broker, redirects to the poll page. |
 
 Two demo polls seed via a data migration (`tabs-or-spaces` and
 `vim-or-emacs`) so the index page is never empty on a fresh database.
@@ -252,7 +252,7 @@ def results(poll: Poll, request: HttpRequest) -> dict[str, object]:
     return {
         "poll_id": poll.pk,
         "stream_url": f"/polls/{poll.pk}/stream/",
-        "vote_url": form_action_manager.get_action_url("polls:vote"),
+        "vote_url": form_action_manager.get_action_url("vote_form"),
         "csrf": get_token(request),
         "choices": [...],
         "total_votes": ...,

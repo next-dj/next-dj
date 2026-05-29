@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from next.components.registry import ComponentRegistry
-from next.forms.backends import FormActionOptions, RegistryFormActionBackend
+from next.forms.backends import ActionRegistration, RegistryFormActionBackend
 from tests.benchmarks.factories import build_component_info_list, noop_form_handler
 
 
@@ -24,9 +24,12 @@ def populated_form_backend() -> RegistryFormActionBackend:
     backend = RegistryFormActionBackend()
     for i in range(100):
         backend.register_action(
-            f"act_{i}",
-            noop_form_handler,
-            options=FormActionOptions(),
+            ActionRegistration(
+                name=f"act_{i}",
+                file_path=__file__,
+                scope="shared",
+                handler=noop_form_handler,
+            )
         )
     return backend
 

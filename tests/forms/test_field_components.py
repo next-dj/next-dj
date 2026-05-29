@@ -8,7 +8,7 @@ from django import forms as django_forms
 from django.core.checks import Warning as DjangoWarning
 from django.utils.safestring import SafeString
 
-from next.components import FileComponentsBackend, components_manager
+from next.forms.backends import ActionRegistration
 from next.forms.checks import (
     check_component_widget_components,
     check_component_widget_field_types,
@@ -16,6 +16,7 @@ from next.forms.checks import (
 from next.forms.manager import form_action_manager
 from next.forms.widgets import ComponentWidget, bind_component_widgets
 from next.static import StaticCollector
+from next.testing import override_component_backends
 
 
 _ECHO_TEMPLATE = (
@@ -35,6 +36,11 @@ _ECHO_TEMPLATE = (
 )
 
 
+def _components_config(root: Path) -> dict[str, object]:
+    """Build a FileComponentsBackend config rooted at `root`."""
+    return {"DIRS": [str(root)], "COMPONENTS_DIR": "_components"}
+
+
 @pytest.fixture()
 def echo_component(tmp_path: Path) -> Generator[Path, None, None]:
     """Register an `echo` component that prints context vars, yield the anchor path."""
@@ -42,16 +48,8 @@ def echo_component(tmp_path: Path) -> Generator[Path, None, None]:
     root.mkdir()
     (root / "echo.djx").write_text(_ECHO_TEMPLATE)
 
-    config = {"DIRS": [str(root)], "COMPONENTS_DIR": "_components"}
-    backend = FileComponentsBackend(config)
-    previous = list(components_manager._backends)
-    components_manager._backends.clear()
-    components_manager._backends.append(backend)
-    try:
+    with override_component_backends(_components_config(root)):
         yield tmp_path / "page.djx"
-    finally:
-        components_manager._backends.clear()
-        components_manager._backends.extend(previous)
 
 
 @pytest.fixture()
@@ -63,16 +61,8 @@ def echo_box_component(tmp_path: Path) -> Generator[Path, None, None]:
     (comp_dir / "component.djx").write_text("<div>name={{ name }}</div>")
     (comp_dir / "component.css").write_text(".echo-box {}")
 
-    config = {"DIRS": [str(root)], "COMPONENTS_DIR": "_components"}
-    backend = FileComponentsBackend(config)
-    previous = list(components_manager._backends)
-    components_manager._backends.clear()
-    components_manager._backends.append(backend)
-    try:
+    with override_component_backends(_components_config(root)):
         yield tmp_path / "page.djx"
-    finally:
-        components_manager._backends.clear()
-        components_manager._backends.extend(previous)
 
 
 def _echo_form(widget: ComponentWidget) -> type[django_forms.Form]:
@@ -89,10 +79,12 @@ def _register_form(
 ) -> None:
     """Register a page-scoped form action through the default backend."""
     form_action_manager.default_backend.register_action(
-        name,
-        form_class=form_class,
-        file_path=file_path,
-        scope="page",
+        ActionRegistration(
+            name=name,
+            file_path=file_path,
+            scope="page",
+            form_class=form_class,
+        )
     )
 
 
@@ -395,10 +387,12 @@ class TestCheckComponentWidgetComponents:
 
     def test_meta_with_no_form_class_is_skipped(self) -> None:
         form_action_manager.default_backend.register_action(
-            "formless",
-            handler=lambda *_: None,
-            file_path="/fake/page.py",
-            scope="page",
+            ActionRegistration(
+                name="formless",
+                file_path="/fake/page.py",
+                scope="page",
+                handler=lambda *_: None,
+            )
         )
         assert check_component_widget_components() == []
 
@@ -467,9 +461,11 @@ class TestCheckComponentWidgetFieldTypes:
 
     def test_meta_with_no_form_class_is_skipped(self) -> None:
         form_action_manager.default_backend.register_action(
-            "formless_types",
-            handler=lambda *_: None,
-            file_path="/fake/page.py",
-            scope="page",
+            ActionRegistration(
+                name="formless_types",
+                file_path="/fake/page.py",
+                scope="page",
+                handler=lambda *_: None,
+            )
         )
         assert check_component_widget_field_types() == []
