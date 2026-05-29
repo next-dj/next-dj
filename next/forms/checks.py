@@ -1,5 +1,7 @@
 """System checks for the forms subsystem."""
 
+from pathlib import Path
+
 from django.conf import settings
 from django.core.checks import (
     CheckMessage,
@@ -8,7 +10,9 @@ from django.core.checks import (
     Warning as DjangoWarning,
     register,
 )
+from django.forms import FileField, MultiValueField
 
+from next.components.facade import get_component
 from next.conf import import_class_cached
 
 from .backends import (
@@ -24,6 +28,8 @@ from .base import (
     _outside_base_dir_classes,
 )
 from .decorators import _action_applied_to_class
+from .manager import form_action_manager
+from .widgets import ComponentWidget
 from .wizard import FormWizardBackend, _wizard_without_steps
 
 
@@ -270,8 +276,79 @@ def _validate_form_wizard_backend(config: object) -> list[CheckMessage]:
     return []
 
 
+@register(Tags.compatibility)
+def check_component_widget_components(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when a ComponentWidget names a component that does not resolve."""
+    base = getattr(settings, "BASE_DIR", None)
+    seen: set[str] = set()
+    messages: list[CheckMessage] = []
+    registry = getattr(form_action_manager.default_backend, "_registry", {})
+    for meta in registry.values():
+        form_class = meta.get("form_class")
+        base_fields = getattr(form_class, "base_fields", None)
+        if base_fields is None:
+            continue
+        anchor = meta.get("file_path") or base
+        if anchor is None:
+            continue
+        for field in base_fields.values():
+            widget = getattr(field, "widget", None)
+            if not isinstance(widget, ComponentWidget):
+                continue
+            name = widget.component_name
+            if name in seen:
+                continue
+            if get_component(name, Path(anchor)) is None:
+                seen.add(name)
+                messages.append(
+                    DjangoWarning(
+                        f"ComponentWidget references component {name!r} that "
+                        "is not registered.",
+                        id="next.W054",
+                    )
+                )
+    return messages
+
+
+@register(Tags.compatibility)
+def check_component_widget_field_types(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when a ComponentWidget is attached to an unsupported field type."""
+    messages: list[CheckMessage] = []
+    registry = getattr(form_action_manager.default_backend, "_registry", {})
+    for meta in registry.values():
+        form_class = meta.get("form_class")
+        base_fields = getattr(form_class, "base_fields", None)
+        if base_fields is None:
+            continue
+        for field_name, field in base_fields.items():
+            if not isinstance(field.widget, ComponentWidget):
+                continue
+            if not isinstance(field, FileField | MultiValueField):
+                continue
+            field_label = f"{form_class.__name__}.{field_name}"
+            field_type = type(field).__name__
+            messages.append(
+                DjangoWarning(
+                    f"ComponentWidget is attached to {field_label} which is a "
+                    f"{field_type}. ComponentWidget supports single-value "
+                    "text-like fields only. FileField and MultiValueField are "
+                    "not supported.",
+                    id="next.W055",
+                )
+            )
+    return messages
+
+
 __all__ = [
     "check_action_applied_to_class",
+    "check_component_widget_components",
+    "check_component_widget_field_types",
     "check_form_action_backends_configuration",
     "check_form_action_collisions",
     "check_form_wizard_backend",

@@ -107,8 +107,8 @@ class StaticManager:
         collector: StaticCollector,
     ) -> None:
         """Forward component asset discovery to the shared discovery instance."""
-        self._ensure_backends()  # pragma: no cover
-        self.discovery.discover_component_assets(info, collector)  # pragma: no cover
+        self._ensure_backends()
+        self.discovery.discover_component_assets(info, collector)
 
     def inject(
         self,

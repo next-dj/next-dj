@@ -27,6 +27,8 @@ SCRIPTS_PLACEHOLDER = "<!-- next:scripts -->"
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from next.components import ComponentInfo
+
 
 CSS_URL = "https://cdn.example.com/a.css"
 JS_URL = "https://cdn.example.com/a.js"
@@ -321,6 +323,21 @@ class TestDiscoveryForwarding:
         assert [a.url for a in collector.assets_in_slot("styles")] == [
             "/static/next/index.css"
         ]
+
+    def test_discover_component_assets_delegates(
+        self,
+        composite_component: ComponentInfo,
+        fresh_manager: StaticManager,
+    ) -> None:
+        collector = StaticCollector()
+        with mock.patch(
+            "next.static.backends.staticfiles_storage.url",
+            return_value="/static/next/components/widget.css",
+        ):
+            fresh_manager.discover_component_assets(composite_component, collector)
+        style_urls = [a.url for a in collector.assets_in_slot("styles")]
+        assert "/static/next/components/widget.css" in style_urls
+        assert "https://cdn.example.com/extra.css" in style_urls
 
 
 class TestDefaultManagerLazy:

@@ -83,6 +83,7 @@ from .uid import (
     redirect_to_origin,
     validated_next_form_page_path,
 )
+from .widgets import ComponentWidget
 from .wizard import (
     CacheFormWizardBackend,
     FormWizard,
@@ -121,6 +122,7 @@ __all__ = [
     "CharField",
     "CheckboxInput",
     "ChoiceField",
+    "ComponentWidget",
     "DForm",
     "DateField",
     "DateInput",

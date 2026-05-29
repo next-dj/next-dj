@@ -5,28 +5,18 @@ from notes.models import Note
 from notes.providers import DTenant
 
 from next.forms import Form
+from next.forms.widgets import ComponentWidget
 from next.pages import context
-
-
-INPUT_CLASS = (
-    "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm "
-    "text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400"
-)
-TEXTAREA_CLASS = INPUT_CLASS + " min-h-[200px] font-mono"
 
 
 class NoteCreateForm(Form):
     title = django_forms.CharField(
         max_length=160,
-        widget=django_forms.TextInput(
-            attrs={"class": INPUT_CLASS, "placeholder": "Note title"},
-        ),
+        widget=ComponentWidget("input", placeholder="Note title"),
     )
     body = django_forms.CharField(
         required=False,
-        widget=django_forms.Textarea(
-            attrs={"class": TEXTAREA_CLASS, "placeholder": "# Markdown body"},
-        ),
+        widget=ComponentWidget("textarea", placeholder="# Markdown body", rows=8),
     )
 
     def on_valid(

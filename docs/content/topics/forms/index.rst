@@ -26,6 +26,9 @@ Read :doc:`overview` first, then jump to the page that matches the part you are 
 :doc:`plain-forms`
    Use a plain ``Form`` for filter, search, voting, and bulk-operation pages.
 
+:doc:`field-components`
+   Render a field through a next.dj component with ``ComponentWidget``.
+
 :doc:`formsets`
    Render and validate Django formsets through the same dispatch pipeline.
 
@@ -62,6 +65,7 @@ Read :doc:`overview` first, then jump to the page that matches the part you are 
    templates
    modelforms
    plain-forms
+   field-components
    formsets
    wizard
    wizard-backend

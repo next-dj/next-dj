@@ -146,7 +146,9 @@ class TestArticleEdit:
             reverse("next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug})
         )
         assert response.status_code == 200
-        assert routing_doc.title in response.content.decode()
+        body = response.content.decode()
+        assert routing_doc.title in body
+        assert 'data-markdown-source="true"' in body
 
     @pytest.mark.parametrize(
         ("clash_slug", "bad_slug", "expected_error"),

@@ -6,14 +6,8 @@ from wiki.models import RESERVED_SLUGS, Article
 from wiki.providers import DArticle
 
 from next.forms import ModelForm
+from next.forms.widgets import ComponentWidget
 from next.pages import context
-
-
-INPUT_CLASS = (
-    "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm "
-    "text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-)
-TEXTAREA_CLASS = INPUT_CLASS + " min-h-[260px] font-mono"
 
 
 class ArticleEditForm(ModelForm):
@@ -22,11 +16,9 @@ class ArticleEditForm(ModelForm):
         fields: ClassVar = ["slug", "title", "body_md"]
         instance_from_url = "slug"
         widgets: ClassVar = {
-            "slug": django_forms.TextInput(attrs={"class": INPUT_CLASS}),
-            "title": django_forms.TextInput(attrs={"class": INPUT_CLASS}),
-            "body_md": django_forms.Textarea(
-                attrs={"class": TEXTAREA_CLASS, "data-markdown-source": "true"},
-            ),
+            "slug": ComponentWidget("input"),
+            "title": ComponentWidget("input"),
+            "body_md": ComponentWidget("textarea", rows=12, markdown_source=True),
         }
 
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:

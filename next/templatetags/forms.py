@@ -10,6 +10,7 @@ from django.utils.html import escape, format_html
 from next.deps import RESERVED_KEYS
 from next.forms import form_action_manager
 from next.forms.manager import build_form_namespace_for_action
+from next.forms.widgets import bind_component_widgets
 
 
 _NEXT_FORM_PAGE = "_next_form_page"
@@ -144,6 +145,15 @@ class FormNode(template.Node):
             )
             form_instance = built.form if built is not None else None
             wizard_instance = getattr(built, "wizard", None) if built else None
+
+        if form_instance is not None:
+            bind_component_widgets(
+                form_instance,
+                template_path=context.get("current_template_path"),
+                request=request,
+                collector=context.get("_static_collector"),
+                with_errors=form_instance.is_bound,
+            )
 
         push_kwargs: dict[str, object] = {"form": form_instance}
         if wizard_instance is not None:

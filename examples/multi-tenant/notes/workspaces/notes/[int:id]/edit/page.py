@@ -1,6 +1,5 @@
 from typing import ClassVar
 
-from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -9,14 +8,8 @@ from notes.models import Note
 from notes.providers import DTenant
 
 from next.forms import ModelForm
+from next.forms.widgets import ComponentWidget
 from next.pages import context
-
-
-INPUT_CLASS = (
-    "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm "
-    "text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400"
-)
-TEXTAREA_CLASS = INPUT_CLASS + " min-h-[200px] font-mono"
 
 
 def get_owned_note(tenant: object, note_id: int) -> Note:
@@ -29,8 +22,8 @@ class NoteEditForm(ModelForm):
         model = Note
         fields: ClassVar = ["title", "body"]
         widgets: ClassVar = {
-            "title": django_forms.TextInput(attrs={"class": INPUT_CLASS}),
-            "body": django_forms.Textarea(attrs={"class": TEXTAREA_CLASS}),
+            "title": ComponentWidget("input"),
+            "body": ComponentWidget("textarea", rows=8),
         }
 
     @classmethod
