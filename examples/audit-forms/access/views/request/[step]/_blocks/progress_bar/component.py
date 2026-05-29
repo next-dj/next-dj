@@ -16,7 +16,7 @@ def _label(step: str) -> str:
 
 
 @component.context("steps")
-def _steps(wizard: FormWizard) -> list[dict[str, Any]]:
+def steps(wizard: FormWizard) -> list[dict[str, Any]]:
     """Describe each step with its label, index, and status from the wizard.
 
     Status is sourced from wizard storage truth, not URL position: a step
@@ -45,16 +45,16 @@ def _status(key: str, current: str, completed: set[str]) -> str:
 
 
 @component.context("step_index")
-def _step_index(wizard: FormWizard) -> int:
+def step_index(wizard: FormWizard) -> int:
     names = wizard.step_names()
     return names.index(wizard.current_step()) + 1
 
 
 @component.context("step_total")
-def _step_total(wizard: FormWizard) -> int:
+def step_total(wizard: FormWizard) -> int:
     return len(wizard.step_names())
 
 
 @component.context("step_label")
-def _step_label(wizard: FormWizard) -> str:
+def step_label(wizard: FormWizard) -> str:
     return _label(wizard.current_step())

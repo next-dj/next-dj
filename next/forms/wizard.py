@@ -59,14 +59,7 @@ class FormWizardBackend(ABC):
 
 
 class CacheFormWizardBackend(FormWizardBackend):
-    """Stores drafts in the Django cache, namespaced by session and wizard id.
-
-    Durability and worker sharing follow whichever cache Django is configured
-    with (in-memory, Redis, Memcached, or database). Stored values must be
-    picklable for any cache backend that serialises its entries. `OPTIONS`
-    accepts `CACHE_ALIAS` (default `"default"`) and `TIMEOUT` (defaults to
-    `SESSION_COOKIE_AGE`).
-    """
+    """Stores drafts in the Django cache, namespaced by session and wizard id."""
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         """Read `CACHE_ALIAS` and `TIMEOUT` from the backend `OPTIONS`."""
@@ -149,11 +142,7 @@ def clear_wizard_registration_state() -> None:
 
 
 def _replace_step_segment(path: str, current: str, target: str) -> str:
-    """Return `path` with the segment naming `current` swapped for `target`.
-
-    Falls back to the last non-empty segment when `current` is absent, which
-    keeps a default-step landing URL routable.
-    """
+    """Return `path` with the segment naming `current` swapped for `target`."""
     if not path:
         return path
     parts = path.split("/")
@@ -205,13 +194,7 @@ def _auto_register_wizard_class(cls: type) -> None:
 
 
 class FormWizard:
-    """Routes a sequence of forms across requests and finalises on the last step.
-
-    Subclasses declare `Meta.steps` as `[(name, FormClass), ...]` and implement
-    `done(request, cleaned_data)`. The class registers itself as a single
-    action through `__init_subclass__`, mirroring `next.forms.Form`. Draft state
-    lives in the configured `DEFAULT_FORM_WIZARD_BACKEND`.
-    """
+    """Routes a sequence of forms across requests and finalises on the last step."""
 
     class Meta:
         """Default wizard options, overridden on subclasses."""
@@ -250,18 +233,11 @@ class FormWizard:
         """Return the URL kwarg name that carries the current step."""
         return getattr(self._meta(), "url_param", "step")
 
-    def steps_for(
-        self,
-        cleaned_so_far: dict[str, Any],  # noqa: ARG002
-    ) -> list[tuple[str, type]]:
+    def steps_for(self) -> list[tuple[str, type]]:
         """Return the step list. Override for conditional steps."""
         return self._static_steps()
 
-    def get_form_kwargs(
-        self,
-        step: str,  # noqa: ARG002
-        cleaned_so_far: dict[str, Any],  # noqa: ARG002
-    ) -> dict[str, Any]:
+    def get_form_kwargs(self) -> dict[str, Any]:
         """Return extra kwargs for a step form. Override for cross-step inputs."""
         return {}
 
@@ -286,7 +262,7 @@ class FormWizard:
 
     def step_names(self) -> list[str]:
         """Return the ordered step names for this request."""
-        return [name for name, _ in self.steps_for(self.cleaned_data_so_far())]
+        return [name for name, _ in self.steps_for()]
 
     def current_step(self) -> str:
         """Return the active step from the URL kwarg, defaulting to the first."""
@@ -322,7 +298,7 @@ class FormWizard:
     def step_form_class(self, step: str | None = None) -> type | None:
         """Return the form class registered for `step` (or the current step)."""
         target = step or self.current_step()
-        return dict(self.steps_for(self.cleaned_data_so_far())).get(target)
+        return dict(self.steps_for()).get(target)
 
     def current_form(self) -> "DjangoForm | None":
         """Return an unbound form for the current step, prefilled from storage."""
@@ -330,7 +306,7 @@ class FormWizard:
         form_class = self.step_form_class(step)
         if form_class is None:
             return None
-        kwargs = dict(self.get_form_kwargs(step, self.cleaned_data_so_far()))
+        kwargs = dict(self.get_form_kwargs())
         stored = self._backend.load(self.request, self.wizard_id).get(step)
         if stored is not None:
             kwargs.setdefault("initial", dict(stored))

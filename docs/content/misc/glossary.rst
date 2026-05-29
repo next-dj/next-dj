@@ -8,8 +8,10 @@ Terms used throughout the next.dj documentation.
 .. glossary::
 
    action
-      A Python callable registered with ``@action("name")``.
-      The handler receives the validated form plus any DI-resolved parameters, and the framework derives a stable dispatch URL from the action name.
+      A registered entry point for a form POST.
+      Form classes register automatically through ``__init_subclass__`` with a ``snake_case`` name derived from the class name.
+      Form-less functions register through ``@action("name")``.
+      The framework derives a stable dispatch URL from the action name.
 
    asset
       A file registered with the static pipeline.

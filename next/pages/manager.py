@@ -47,25 +47,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _extract_request(
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-) -> HttpRequest | None:
-    """Return the `HttpRequest` from positional or keyword arguments.
-
-    Most call sites pass the active request as the first positional
-    argument, but programmatic callers of `Page.render` may also
-    supply it through the `request` keyword. The helper accepts both
-    forms and returns `None` when neither carries an `HttpRequest`.
-    """
-    if args and isinstance(args[0], HttpRequest):
-        return args[0]
-    candidate = kwargs.get("request")
-    if isinstance(candidate, HttpRequest):
-        return candidate
-    return None
-
-
 @dataclass(frozen=True, slots=True)
 class _BodyResolution:
     """Per-request outcome of `Page._resolve_page_body`.
@@ -160,7 +141,7 @@ class Page:
     def build_render_context(
         self,
         file_path: Path,
-        *args: object,
+        request: HttpRequest | None = None,
         **kwargs: object,
     ) -> dict[str, object]:
         """Build the full render context dict used by `render`.
@@ -179,17 +160,13 @@ class Page:
         context_data.update(kwargs)
 
         context_result = self._context_manager.collect_context(
-            file_path, *args, **kwargs
+            file_path, request, **kwargs
         )
         context_data.update(context_result.context_data)
         context_data["_next_js_context"] = context_result.js_context
         context_data["_next_js_context_serializers"] = (
             context_result.js_context_serializers
         )
-
-        request: HttpRequest | None = None
-        if args and isinstance(args[0], HttpRequest):
-            request = args[0]
 
         if request is not None:
             context_data["request"] = request
@@ -241,7 +218,7 @@ class Page:
         self,
         file_path: Path,
         module: types.ModuleType | None,
-        *args: object,
+        request: HttpRequest | None = None,
         **kwargs: object,
     ) -> _BodyResolution:
         """Resolve the page body per-request.
@@ -257,7 +234,7 @@ class Page:
             render_func = getattr(module, "render", None)
             if callable(render_func):
                 return self._call_render_function(
-                    render_func, file_path, *args, **kwargs
+                    render_func, file_path, request, **kwargs
                 )
         return _BodyResolution(body=self._load_static_body(file_path, module))
 
@@ -265,11 +242,10 @@ class Page:
         self,
         render_func: Callable[..., object],
         file_path: Path,
-        *args: object,
+        request: HttpRequest | None = None,
         **kwargs: object,
     ) -> _BodyResolution:
         """Invoke `render_func` with DI-resolved arguments and classify the result."""
-        request = args[0] if args and isinstance(args[0], HttpRequest) else None
         dep_cache: dict[str, Any] = {}
         dep_stack: list[str] = []
         resolved = self._get_resolver().resolve_dependencies(
@@ -339,12 +315,11 @@ class Page:
         file_path: Path,
         template_str: str,
         start: float,
-        *args: object,
+        request: HttpRequest | None = None,
         **kwargs: object,
     ) -> str:
         """Build context, render `template_str`, inject static assets, emit signal."""
-        context_data = self.build_render_context(file_path, *args, **kwargs)
-        request = _extract_request(args, kwargs)
+        context_data = self.build_render_context(file_path, request, **kwargs)
         result, collector = self.render_with_static_assets(
             file_path,
             template_str,
@@ -367,7 +342,7 @@ class Page:
         self,
         file_path: Path,
         body: str,
-        *args: object,
+        request: HttpRequest | None = None,
         **kwargs: object,
     ) -> str:
         """Compose `body` through layouts and render.
@@ -377,9 +352,14 @@ class Page:
         """
         start = time.perf_counter()
         composed = self._layout_manager._layout_loader.compose_body(body, file_path)
-        return self._render_template_str(file_path, composed, start, *args, **kwargs)
+        return self._render_template_str(file_path, composed, start, request, **kwargs)
 
-    def render(self, file_path: Path, *args: object, **kwargs: object) -> str:
+    def render(
+        self,
+        file_path: Path,
+        request: HttpRequest | None = None,
+        **kwargs: object,
+    ) -> str:
         """Render the page with Django `Template` and the static collector.
 
         The static body source is the `template` attribute or any
@@ -402,7 +382,7 @@ class Page:
             self._record_template_source_mtimes(file_path)
         template_str = self._template_registry[file_path]
         return self._render_template_str(
-            file_path, template_str, start, *args, **kwargs
+            file_path, template_str, start, request, **kwargs
         )
 
     def _create_unified_view(

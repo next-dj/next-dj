@@ -6,6 +6,7 @@ from django.http import HttpRequest, HttpResponseRedirect
 from shortener.models import Link
 
 from next.forms import Form
+from next.forms.widgets import ComponentWidget
 from next.pages import context
 
 
@@ -18,14 +19,10 @@ class CreateLinkForm(Form):
     url = forms.URLField(
         max_length=2000,
         assume_scheme="https",
-        widget=forms.URLInput(
-            attrs={
-                "class": (
-                    "w-full rounded-lg border border-slate-300 px-3 py-2 "
-                    "focus:border-slate-500 focus:outline-none"
-                ),
-                "placeholder": "https://example.com/very/long/path",
-            }
+        widget=ComponentWidget(
+            "input",
+            type="url",
+            placeholder="https://example.com/very/long/path",
         ),
     )
 

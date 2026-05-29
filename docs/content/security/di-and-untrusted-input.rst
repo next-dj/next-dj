@@ -146,18 +146,21 @@ Validate destination URLs before passing them to ``HttpResponseRedirect``.
 .. code-block:: python
    :caption: notes/actions.py
 
-   from django.http import HttpResponseRedirect
+   from django.http import HttpRequest, HttpResponseRedirect
    from django.urls import resolve, Resolver404
-   from next.forms import action
+   from next.forms import Form, CharField
    from next.urls import DQuery
 
-   @action("login", form_class=LoginForm)
-   def login(form: LoginForm, next_url: DQuery[str] = "/"):
-       try:
-           resolve(next_url)
-       except Resolver404:
-           next_url = "/"
-       return HttpResponseRedirect(next_url)
+   class LoginForm(Form):
+       username = CharField()
+       password = CharField()
+
+       def on_valid(self, request: HttpRequest, next_url: DQuery[str] = "/") -> HttpResponseRedirect:
+           try:
+               resolve(next_url)
+           except Resolver404:
+               next_url = "/"
+           return HttpResponseRedirect(next_url)
 
 The ``resolve`` call rejects external URLs and unknown paths.
 

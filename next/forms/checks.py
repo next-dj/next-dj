@@ -35,6 +35,7 @@ from .wizard import FormWizardBackend, _wizard_without_steps
 
 _FORM_ACTION_BACKEND_SETTINGS_KEY = "DEFAULT_FORM_ACTION_BACKENDS"
 _FORM_WIZARD_BACKEND_SETTINGS_KEY = "DEFAULT_FORM_WIZARD_BACKEND"
+_FORM_ANCHOR_FILES_SETTINGS_KEY = "FORM_ANCHOR_FILES"
 
 
 @register(Tags.compatibility)
@@ -42,11 +43,7 @@ def check_form_action_collisions(
     *_args: object,
     **_kwargs: object,
 ) -> list[CheckMessage]:
-    """Flag two `@action` calls that share a name but come from different handlers.
-
-    Re-registration of the same handler (for example during autoreload) is
-    safe and does not trigger the check.
-    """
+    """Flag two `@action` calls that share a name but come from different handlers."""
     return [
         Error(
             f"Form action {name!r} is registered by {len(fps)} different "
@@ -277,6 +274,41 @@ def _validate_form_wizard_backend(config: object) -> list[CheckMessage]:
 
 
 @register(Tags.compatibility)
+def check_form_anchor_files(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Validate that FORM_ANCHOR_FILES is None or a collection of strings."""
+    raw = getattr(settings, "NEXT_FRAMEWORK", None)
+    if not isinstance(raw, dict):
+        return []
+    value = raw.get(_FORM_ANCHOR_FILES_SETTINGS_KEY)
+    if value is None:
+        return []
+    key = _FORM_ANCHOR_FILES_SETTINGS_KEY
+    # A bare string is iterable but would split into single characters, so it
+    # must be rejected rather than silently treated as a one-element collection.
+    if isinstance(value, str) or not isinstance(value, (list, tuple, set)):
+        return [
+            Error(
+                f"NEXT_FRAMEWORK[{key!r}] must be None or a list, tuple, or set "
+                "of strings.",
+                obj=settings,
+                id="next.E052",
+            ),
+        ]
+    if not all(isinstance(item, str) for item in value):
+        return [
+            Error(
+                f"NEXT_FRAMEWORK[{key!r}] must contain only strings.",
+                obj=settings,
+                id="next.E052",
+            ),
+        ]
+    return []
+
+
+@register(Tags.compatibility)
 def check_component_widget_components(
     *_args: object,
     **_kwargs: object,
@@ -351,6 +383,7 @@ __all__ = [
     "check_component_widget_field_types",
     "check_form_action_backends_configuration",
     "check_form_action_collisions",
+    "check_form_anchor_files",
     "check_form_wizard_backend",
     "check_form_wizard_steps",
     "check_forms_outside_base_dir",

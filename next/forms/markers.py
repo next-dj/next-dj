@@ -1,7 +1,5 @@
 """Dependency injection markers and provider for form parameters."""
 
-from __future__ import annotations
-
 import inspect
 from typing import get_args, get_origin
 

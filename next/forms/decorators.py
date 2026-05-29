@@ -40,8 +40,8 @@ def action(
             raise TypeError(msg)
         if isinstance(form_class, type):
             msg = (
-                "Passing a Form class to @action is no longer supported. "
-                "Let the class register itself via __init_subclass__ instead."
+                "@action's form_class must be a factory callable, not a Form class. "
+                "Form classes register automatically through __init_subclass__."
             )
             raise TypeError(msg)
         frame = sys._getframe(1)

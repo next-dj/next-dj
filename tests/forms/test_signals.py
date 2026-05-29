@@ -313,7 +313,9 @@ class TestActionRegisteredWiring:
         assert event["sender"] is RegistryFormActionBackend
         assert "uid" in event
         assert event["form_class"] is None
-        assert event["namespace"] is None
+        assert "namespace" not in event
+        assert event["file_path"] == _FAKE_FILE
+        assert event["scope"] == "shared"
 
     def test_fires_with_form_class(
         self, capture_action_registered: list[dict[str, Any]]

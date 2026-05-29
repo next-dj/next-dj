@@ -66,15 +66,19 @@ Use Inside an Action Handler
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from django.http import HttpResponseRedirect
-   from next.forms import action
+   from django.http import HttpRequest, HttpResponseRedirect
+   from notes.models import Note
+   from next.forms import ModelForm
    from next.urls import page_reverse
-   from notes.forms import NoteForm
 
-   @action("create_note", form_class=NoteForm)
-   def create_note(form: NoteForm) -> HttpResponseRedirect:
-       note = form.save()
-       return HttpResponseRedirect(page_reverse("notes/[id]", id=note.id))
+   class CreateNoteForm(ModelForm):
+       class Meta:
+           model = Note
+           fields = ("title", "body")
+
+       def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+           note = self.save()
+           return HttpResponseRedirect(page_reverse("notes/[id]", id=note.id))
 
 Use Inside a Component
 ~~~~~~~~~~~~~~~~~~~~~~

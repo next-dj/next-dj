@@ -33,13 +33,14 @@ Import that module from ``AppConfig.ready`` so every receiver is connected befor
 action_registered
 -----------------
 
-Fires once per ``@action`` when the backend stores the handler.
+Fires once per form class or ``@action`` call when the backend stores the handler.
 This happens at import time, before any request lands.
 The sender is the backend class.
 
-The payload carries ``action_name``, ``uid``, ``form_class``, ``namespace``, and ``handler``.
-``form_class`` is whatever was passed to the decorator, which may be ``None``, a ``Form`` subclass, or a factory callable.
-``namespace`` is ``None`` unless the decorator received one.
+The payload carries ``action_name``, ``uid``, ``form_class``, ``file_path``, ``scope``, and ``handler``.
+``form_class`` is the form class for a class-bound registration, a factory callable for a dynamic formset action, or ``None`` for a form-less handler.
+``file_path`` is the absolute path to the file where the class or function was declared.
+``scope`` is ``"page"`` for anchor-file declarations (``page.py``, ``component.py``) and ``"shared"`` for all other files.
 
 .. code-block:: python
    :caption: notes/receivers.py
@@ -56,16 +57,14 @@ The payload carries ``action_name``, ``uid``, ``form_class``, ``namespace``, and
 
 Use this to build an inventory of every action in the project, for example a debug page that lists registered handlers.
 
-Read ``namespace`` from the payload to group actions by the app that declared them.
-It is ``None`` for an action declared without a namespace, so guard the lookup with a default.
+Read ``file_path`` and ``scope`` from the payload to group actions by their registration source.
 
 .. code-block:: python
-   :caption: reading the namespace
+   :caption: grouping by scope
 
    @receiver(action_registered)
-   def group_by_namespace(sender, *, action_name, namespace, **kwargs) -> None:
-       bucket = namespace or "global"
-       logger.info("action %s belongs to %s", action_name, bucket)
+   def group_by_scope(sender, *, action_name, file_path, scope, **kwargs) -> None:
+       logger.info("action %s declared in %s (%s scope)", action_name, file_path, scope)
 
 .. _topics-forms-signals-action-dispatched:
 

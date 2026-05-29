@@ -85,7 +85,7 @@ class TestActionDecorator:
         class MyForm(django_forms.Form):
             name = django_forms.CharField()
 
-        with pytest.raises(TypeError, match="no longer supported"):
+        with pytest.raises(TypeError, match="must be a factory callable"):
             action_decorator("bad_form_class", form_class=MyForm)(lambda: None)
 
     def test_scope_is_shared_for_non_anchor_file(self) -> None:

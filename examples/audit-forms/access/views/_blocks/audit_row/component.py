@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 from access.models import AuditEntry
@@ -19,17 +17,17 @@ _SOURCE_CLASS = {
 
 
 @component.context("kind_class")
-def _kind_class(entry: AuditEntry) -> str:
+def kind_class(entry: AuditEntry) -> str:
     return _KIND_CLASS.get(entry.kind, "bg-slate-100 text-slate-700")
 
 
 @component.context("source_class")
-def _source_class(entry: AuditEntry) -> str:
+def source_class(entry: AuditEntry) -> str:
     return _SOURCE_CLASS.get(entry.source, "bg-slate-100 text-slate-700")
 
 
 @component.context("summary")
-def _summary(entry: AuditEntry) -> str:
+def summary(entry: AuditEntry) -> str:
     """Return a short human description derived from the row's metric fields."""
     parts: list[str] = []
     if entry.duration_ms is not None:
@@ -49,24 +47,24 @@ def _summary(entry: AuditEntry) -> str:
 
 
 @component.context("status_label")
-def _status_label(entry: AuditEntry) -> str:
+def status_label(entry: AuditEntry) -> str:
     return str(entry.response_status) if entry.response_status is not None else ""
 
 
 @component.context("payload_keys")
-def _payload_keys(entry: AuditEntry) -> list[str]:
+def payload_keys(entry: AuditEntry) -> list[str]:
     if not isinstance(entry.payload, dict):
         return []
     return [str(k) for k in entry.payload if k != "redirect"]
 
 
 @component.context("data_attrs")
-def _data_attrs(entry: AuditEntry) -> dict[str, Any]:
+def data_attrs(entry: AuditEntry) -> dict[str, Any]:
     return {"source": entry.source, "kind": entry.kind}
 
 
 @component.context("request_link")
-def _request_link(entry: AuditEntry) -> str:
+def request_link(entry: AuditEntry) -> str:
     """Return the per-request audit URL when the row is correlated."""
     if entry.request_id is None:
         return ""

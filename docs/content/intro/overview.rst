@@ -31,9 +31,10 @@ Components.
    The framework discovers them by name and renders them through the ``{% component %}`` tag.
 
 Form actions.
-   A ``@action`` decorator registers a callable as a form handler under the name passed to the decorator, for example ``@action("create_note", form_class=NoteForm)``.
-   The ``{% form %}`` template tag points at that handler by the same name.
-   The framework injects only the parameters that the handler signature asks for.
+   Subclassing ``next.forms.Form`` or ``next.forms.ModelForm`` automatically registers the form under a ``snake_case`` name derived from the class name.
+   The ``{% form "name" %}`` template tag renders that form by name.
+   The framework validates the submitted data and calls the ``on_valid`` method, injecting only the parameters the method signature asks for.
+   Plain functions with no form can also register as actions with ``@action("name")`` — useful for logout buttons and simple confirmations.
 
 .. _intro-overview-django-unchanged:
 

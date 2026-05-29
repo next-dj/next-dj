@@ -167,15 +167,19 @@ An action handler can return an ``HttpResponseRedirect`` to a reversed page URL.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from django.http import HttpResponseRedirect
-   from notes.forms import NoteForm
-   from next.forms import action
+   from django.http import HttpRequest, HttpResponseRedirect
+   from notes.models import Note
+   from next.forms import ModelForm
    from next.urls import page_reverse
 
-   @action("create_note", form_class=NoteForm)
-   def create_note(form: NoteForm) -> HttpResponseRedirect:
-       form.save()
-       return HttpResponseRedirect(page_reverse())
+   class CreateNoteForm(ModelForm):
+       class Meta:
+           model = Note
+           fields = ("title", "body")
+
+       def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+           self.save()
+           return HttpResponseRedirect(page_reverse())
 
 Building Links in Components
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

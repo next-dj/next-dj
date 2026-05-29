@@ -122,13 +122,14 @@ The framework gives each action a stable URL.
 
    def test_create_note_action(db) -> None:
        client = NextClient()
-       response = client.post_action("create_note", {"title": "From test", "body": "body"})
+       response = client.post_action("create_note_form", {"title": "From test", "body": "body"})
        assert response.status_code == 302
        assert Note.objects.filter(title="From test").exists()
        assert response["Location"] == reverse("next:page_")
 
 ``post_action`` looks the action name up through ``resolve_action_url`` and posts the data to the dispatch endpoint.
-The redirect target matches ``next:page_`` because the handler returns ``HttpResponseRedirect(reverse("next:page_"))``.
+The action name ``create_note_form`` is derived automatically from the class name ``CreateNoteForm``.
+The redirect target matches ``next:page_`` because ``on_valid`` calls ``redirect_to_origin``.
 
 Capture Action Signals
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -145,11 +146,11 @@ Every dispatch fires the ``action_dispatched`` signal.
 
    def test_create_emits_action_dispatched(db) -> None:
        with SignalRecorder(action_dispatched) as recorder:
-           NextClient().post_action("create_note", {"title": "Signal", "body": ""})
+           NextClient().post_action("create_note_form", {"title": "Signal", "body": ""})
 
        assert len(recorder) == 1
        event = recorder.first_for(action_dispatched)
-       assert event.kwargs["action_name"] == "create_note"
+       assert event.kwargs["action_name"] == "create_note_form"
        assert event.kwargs["form"].cleaned_data["title"] == "Signal"
 
 ``action_dispatched`` is re-exported from ``next.signals`` and also lives on its owning module ``next.forms.signals``.
@@ -169,7 +170,7 @@ The pipeline re-renders the origin page with the bound form and a non-zero error
 
    def test_create_with_blank_title_rerenders(db) -> None:
        client = NextClient()
-       response = client.post_action("create_note", {"title": "", "body": "x"})
+       response = client.post_action("create_note_form", {"title": "", "body": "x"})
        assert response.status_code == 200
        assert b"This field is required" in response.content
 
@@ -240,8 +241,9 @@ Common Pitfalls
 ---------------
 
 ``post_action`` raises an unknown action error.
-   An ``@action`` handler registers only when its ``page.py`` is imported.
-   Call ``eager_load_pages`` in the test setup so every handler registers before the first dispatch.
+   A form class registers only when its module is imported.
+   Call ``eager_load_pages`` in the test setup so every form and handler registers before the first dispatch.
+   For forms in ``forms.py``, also import that module explicitly or rely on ``autodiscover_forms()``.
 
 Tests that rewrite page files on disk see stale handlers.
    ``eager_load_pages`` memoises each directory it has already imported.

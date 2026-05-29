@@ -14,11 +14,10 @@ def validated_next_form_page_path(request: HttpRequest) -> Path | None:  # noqa:
     """Return a trusted `page.py` path from POST `_next_form_page`, or `None`.
 
     Accepts both real `page.py` files and virtual ones — directories whose
-    only source is a sibling `template.djx` (the file router already emits
-    routes for those; see `FilesystemTreeDispatcher._visit`). The downstream
-    renderer (`_load_python_module_memo`, `_load_static_body`) tolerates a
-    missing module and falls back to the template, so virtual pages survive
-    the re-render path on form-validation failures.
+    only source is a sibling `template.djx`. The file router already emits
+    routes for those. The downstream renderer tolerates a missing module
+    and falls back to the template, so virtual pages survive the re-render
+    path on form-validation failures.
     """
     if not hasattr(request, "POST"):
         return None

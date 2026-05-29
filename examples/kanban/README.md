@@ -219,6 +219,17 @@ Page modules that use these markers do not start with
 `from __future__ import annotations`, because the DI resolver compares
 parameter annotations by identity.
 
+### Known limitation: sibling-form input is not preserved on a failed submit
+
+The settings page hosts three independent `<form>` blocks. Each one
+posts to its own action URL, so a submit sends only that form's fields.
+If a user starts typing into "Add column", then submits "Rename board"
+and rename fails validation, the re-rendered page shows the rename
+errors but the "Add column" text is gone. The browser never transmitted
+the unsubmitted form's input, so the server has nothing to restore. This
+is inherent to the server-side post-and-rerender model and is best
+addressed client-side. Submitting a single form at a time is unaffected.
+
 ## Further reading
 
 - [`kanban/apps.py`](kanban/apps.py) — `KanbanConfig.ready()` with the two registry calls.

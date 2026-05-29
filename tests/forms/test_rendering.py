@@ -15,6 +15,7 @@ from next.forms import (
     RegistryFormActionBackend,
     form_action_manager,
 )
+from next.forms.rendering import render_form_page_with_errors
 from next.forms.wizard import FormWizard
 from tests.forms.actions import SimpleForm
 
@@ -93,6 +94,33 @@ class TestRenderFormFragment:
         )
         assert isinstance(html, str)
 
+    def test_unknown_action_with_form_renders_fallback(self, mock_http_request) -> None:
+        """An unknown action with a bound form falls back to the form's own render."""
+        request = mock_http_request(method="GET")
+        backend = form_action_manager.default_backend
+        form = SimpleForm(initial={"name": "fallback"})
+        html = render_form_page_with_errors(
+            backend,
+            request,
+            "unknown_action_xyz",
+            form,
+            PAGE_MODULE_FOR_FORM_TESTS,
+        )
+        assert "name" in html
+
+    def test_unknown_action_without_form_returns_empty(self, mock_http_request) -> None:
+        """An unknown action with no form falls back to an empty string."""
+        request = mock_http_request(method="GET")
+        backend = form_action_manager.default_backend
+        html = render_form_page_with_errors(
+            backend,
+            request,
+            "unknown_action_xyz",
+            None,
+            PAGE_MODULE_FOR_FORM_TESTS,
+        )
+        assert html == ""
+
     @pytest.mark.parametrize(
         ("template_body", "output_mode"),
         [
@@ -152,7 +180,7 @@ class TestFormTagRender:
     def test_renders_attributes(self, form_engine, csrf_request) -> None:
         """Form tag renders action, method, form content."""
         t = form_engine.from_string(
-            '{% form "simple_form" %}{{ form.as_p }}{% endform %}'
+            '{% form "simple_form" %}{{ form.as_div }}{% endform %}'
         )
         html = t.render(
             Context(
@@ -173,7 +201,7 @@ class TestFormTagRender:
         """A wizard action exposes the wizard alongside the current step form."""
         t = form_engine.from_string(
             '{% form "render_wizard" %}'
-            "{{ wizard.current_step }}{{ form.as_p }}"
+            "{{ wizard.current_step }}{{ form.as_div }}"
             "{% endform %}"
         )
         html = t.render(

@@ -91,6 +91,8 @@ Return any ``HttpResponse``, most often a redirect away from the wizard.
 
 Keep ``done`` idempotent.
 A retried final submission can run it again, so guard against creating a duplicate row.
+Concurrent submissions from two browser tabs can also overwrite each other's step data because the backend performs an unlocked read-modify-write.
+Make ``done`` safe to run twice with the same data, for example by using ``get_or_create`` instead of ``create``.
 
 Rendering
 ---------
@@ -206,14 +208,14 @@ Conditional Steps
 -----------------
 
 Override ``steps_for`` to choose the step list from the data gathered so far.
-The hook receives the merged cleaned data and returns the same ``[(name, FormClass), ...]`` shape as ``Meta.steps``.
+The hook reads the accumulated data through ``self.cleaned_data_so_far()`` and returns the same ``[(name, FormClass), ...]`` shape as ``Meta.steps``.
 
 .. code-block:: python
    :caption: dropping the approval step for low-risk requests
 
-   def steps_for(self, cleaned_so_far):
+   def steps_for(self):
        steps = [("identity", IdentityStep), ("scope", ScopeStep)]
-       if cleaned_so_far.get("expires_in_days", 0) > 7:
+       if self.cleaned_data_so_far().get("expires_in_days", 0) > 7:
            steps.append(("approval", ApprovalStep))
        return steps
 
@@ -224,14 +226,14 @@ Cross-Step Inputs
 -----------------
 
 Override ``get_form_kwargs`` to pass extra constructor arguments into a step form.
-The hook receives the step name and the merged cleaned data so far, and returns a dict of keyword arguments for the step form constructor.
+The hook reads the active step through ``self.current_step()`` and the merged cleaned data through ``self.cleaned_data_so_far()``, and returns a dict of keyword arguments for the step form constructor.
 
 .. code-block:: python
    :caption: seeding the approval step from an earlier choice
 
-   def get_form_kwargs(self, step, cleaned_so_far):
-       if step == "approval":
-           return {"reviewer_pool": teams_for(cleaned_so_far.get("team"))}
+   def get_form_kwargs(self):
+       if self.current_step() == "approval":
+           return {"reviewer_pool": teams_for(self.cleaned_data_so_far().get("team"))}
        return {}
 
 A step form that accepts ``reviewer_pool`` reads it in its own ``__init__`` to build a field choice list.

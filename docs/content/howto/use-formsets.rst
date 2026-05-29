@@ -64,7 +64,7 @@ Render the formset.
 .. code-block:: jinja
    :caption: notes/pages/notes/bulk/template.djx
 
-   {% form @action="bulk_create" %}
+   {% form "bulk_create" %}
      {{ form.management_form }}
      {% for row in form %}
        <fieldset>

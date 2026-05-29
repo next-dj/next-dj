@@ -33,6 +33,8 @@ Define the form.
 .. code-block:: python
    :caption: notes/forms.py
 
+   from django.http import HttpRequest, HttpResponseRedirect
+   from django.urls import reverse
    from next.forms import ModelForm
    from notes.models import Attachment
 
@@ -41,34 +43,31 @@ Define the form.
            model = Attachment
            fields = ("title", "file")
 
-Register the action.
+       def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+           self.save()
+           return HttpResponseRedirect(reverse("next:page_attachments"))
 
-.. code-block:: python
-   :caption: notes/pages/attachments/page.py
-
-   from django.http import HttpResponseRedirect
-   from django.urls import reverse
-   from next.forms import action
-   from notes.forms import AttachmentForm
-
-   @action("upload_attachment", form_class=AttachmentForm)
-   def upload_attachment(form: AttachmentForm) -> HttpResponseRedirect:
-       form.save()
-       return HttpResponseRedirect(reverse("next:page_attachments"))
+``AttachmentForm`` registers automatically as ``attachment_form`` via autodiscovery on startup.
+No manual import is needed in the page module.
 
 Render the form with the right encoding type.
+The ``{% form %}`` tag does not accept HTML attributes.
+Add the ``enctype`` attribute directly to a wrapping ``<form>`` element, or use the Django low-level form rendering pattern.
 
 .. code-block:: jinja
    :caption: notes/pages/attachments/template.djx
 
-   {% form @action="upload_attachment" enctype="multipart/form-data" %}
-     {{ form.title }}
-     {{ form.file }}
-     <button type="submit">Upload</button>
-   {% endform %}
+   <form method="post" enctype="multipart/form-data">
+     {% form "attachment_form" %}
+       {{ form.title }}
+       {{ form.file }}
+       <button type="submit">Upload</button>
+     {% endform %}
+   </form>
 
-Set ``enctype="multipart/form-data"`` on the form.
+Set ``enctype="multipart/form-data"`` on the ``<form>`` element.
 Without it the browser submits only text values and ``form.file`` arrives empty.
+The ``{% form %}`` tag emits the CSRF token and ``_next_form_page`` field inside its rendered output, so the outer ``<form>`` element should not add a separate ``{% csrf_token %}``.
 
 Configure media storage.
 
@@ -120,7 +119,7 @@ Use ``SimpleUploadedFile`` to feed a fake file into ``NextClient``.
    def test_upload(db) -> None:
        fake = SimpleUploadedFile("file.txt", b"hello")
        response = NextClient().post_action(
-           "upload_attachment",
+           "attachment_form",
            {"title": "First", "file": fake},
        )
        assert response.status_code == 302
@@ -132,7 +131,7 @@ A submission without the ``file`` key re-renders the origin page with the missin
 
    def test_upload_without_file_rerenders(db) -> None:
        response = NextClient().post_action(
-           "upload_attachment",
+           "attachment_form",
            {"title": "First"},
        )
        assert response.status_code == 200

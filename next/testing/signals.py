@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self
 
+from next import signals as framework_signals
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -132,10 +134,6 @@ def capture_framework_signals() -> SignalRecorder:
     Handy when a test wants to verify that nothing unexpected fires
     without wiring each signal by hand.
     """
-    # Lazy-imported to keep `next.testing` from pulling in every framework
-    # subsystem at import time.
-    from next import signals as framework_signals  # noqa: PLC0415
-
     tracked = tuple(
         getattr(framework_signals, name) for name in framework_signals.__all__
     )

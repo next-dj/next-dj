@@ -1,22 +1,16 @@
-from __future__ import annotations
-
 import importlib.util
 from pathlib import Path
-from typing import TYPE_CHECKING
+from types import ModuleType
 from unittest.mock import Mock
 
 import pytest
-from django.http import HttpRequest
+from django.http import HttpRequest, QueryDict
 from django.test import override_settings
 from notes.backends import TenantPrefixStaticBackend
 from notes.context_processors import tenant_theme
 from notes.middleware import TenantMiddleware
 from notes.models import Note, Tenant
 from notes.providers import DTenant, TenantProvider
-
-
-if TYPE_CHECKING:
-    from types import ModuleType
 
 
 EXAMPLE_ROOT = Path(__file__).resolve().parent.parent
@@ -104,8 +98,6 @@ class TestTenantMiddleware:
     @override_settings(DEBUG=False)
     def test_query_fallback_disabled_in_production(self) -> None:
         Tenant.objects.create(slug="payer", name="Payer")
-        from django.http import QueryDict  # noqa: PLC0415
-
         request = self._request(get=QueryDict("tenant=payer"))
         middleware = TenantMiddleware(Mock())
         response = middleware(request)
@@ -115,8 +107,6 @@ class TestTenantMiddleware:
     @override_settings(DEBUG=True)
     def test_debug_query_redirects_with_cookie(self) -> None:
         Tenant.objects.create(slug="payer", name="Payer")
-        from django.http import QueryDict  # noqa: PLC0415
-
         request = self._request(get=QueryDict("tenant=payer"))
         middleware = TenantMiddleware(Mock())
         response = middleware(request)

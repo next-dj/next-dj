@@ -90,11 +90,7 @@ class FormActionManager:
         )
 
     def clear_registries(self) -> None:
-        """Clear every backend that exposes a `clear_registry` method.
-
-        Intended for test isolation. Backends that do not implement
-        `clear_registry` are skipped silently.
-        """
+        """Clear every backend exposing `clear_registry`. For test isolation."""
         for backend in self._backends:
             clear = getattr(backend, "clear_registry", None)
             if callable(clear):

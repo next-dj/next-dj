@@ -3,24 +3,8 @@ from typing import Any, ClassVar
 from access.models import AccessRequest
 from django.http import HttpRequest, HttpResponseRedirect
 
-from next.forms import (
-    EmailInput,
-    Form,
-    FormWizard,
-    ModelForm,
-    NumberInput,
-    Textarea,
-    TextInput,
-)
-
-
-_INPUT_CLASS = (
-    "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm "
-    "text-slate-900 placeholder:text-slate-400 focus:outline-none "
-    "focus:ring-2 focus:ring-slate-400 focus:border-transparent"
-)
-_INPUT_ATTRS = {"class": _INPUT_CLASS}
-_TEXTAREA_ATTRS = {"class": _INPUT_CLASS + " resize-none", "rows": "4"}
+from next.forms import Form, FormWizard, ModelForm
+from next.forms.widgets import ComponentWidget
 
 
 class IdentityStep(ModelForm):
@@ -30,9 +14,9 @@ class IdentityStep(ModelForm):
         model = AccessRequest
         fields: ClassVar = ["full_name", "email", "team"]
         widgets: ClassVar = {
-            "full_name": TextInput(attrs=_INPUT_ATTRS),
-            "email": EmailInput(attrs=_INPUT_ATTRS),
-            "team": TextInput(attrs=_INPUT_ATTRS),
+            "full_name": ComponentWidget("input"),
+            "email": ComponentWidget("input", type="email"),
+            "team": ComponentWidget("input"),
         }
 
 
@@ -43,9 +27,9 @@ class ScopeStep(ModelForm):
         model = AccessRequest
         fields: ClassVar = ["project_slug", "reason", "expires_in_days"]
         widgets: ClassVar = {
-            "project_slug": TextInput(attrs=_INPUT_ATTRS),
-            "reason": Textarea(attrs=_TEXTAREA_ATTRS),
-            "expires_in_days": NumberInput(attrs=_INPUT_ATTRS),
+            "project_slug": ComponentWidget("input"),
+            "reason": ComponentWidget("textarea", rows=4),
+            "expires_in_days": ComponentWidget("input", type="number"),
         }
 
 

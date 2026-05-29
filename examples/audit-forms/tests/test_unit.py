@@ -110,7 +110,7 @@ class TestProgressBarSteps:
     """`progress_bar` synthesises step status from the wizard state."""
 
     def test_active_step_is_current(self) -> None:
-        steps = _progress._steps(_wizard("scope"))
+        steps = _progress.steps(_wizard("scope"))
         statuses = {entry["key"]: entry["status"] for entry in steps}
         assert statuses["identity"] == "pending"
         assert statuses["scope"] == "current"
@@ -118,18 +118,18 @@ class TestProgressBarSteps:
 
     def test_stored_step_is_marked_saved(self) -> None:
         wizard = _wizard("scope", {"identity": {"team": "Computing"}})
-        steps = _progress._steps(wizard)
+        steps = _progress.steps(wizard)
         statuses = {entry["key"]: entry["status"] for entry in steps}
         assert statuses["identity"] == "saved"
 
     def test_label_helpers_return_canonical_values(self) -> None:
-        assert _progress._step_label(_wizard("scope")) == "Scope"
-        assert _progress._step_index(_wizard("approval")) == 3
-        assert _progress._step_total(_wizard("identity")) == 3
+        assert _progress.step_label(_wizard("scope")) == "Scope"
+        assert _progress.step_index(_wizard("approval")) == 3
+        assert _progress.step_total(_wizard("identity")) == 3
 
 
 class TestAuditRowHelpers:
-    """`_payload_keys` and `_summary` derive admin row fields from `AuditEntry`."""
+    """`payload_keys` and `summary` derive admin row fields from `AuditEntry`."""
 
     def test_payload_keys_returns_dict_keys_excluding_redirect(self) -> None:
         entry = AuditEntry(
@@ -138,7 +138,7 @@ class TestAuditRowHelpers:
             source=AuditEntry.SOURCE_BACKEND,
             payload={"redirect": "/", "team": "Computing", "email": "a@b"},
         )
-        assert sorted(_audit_row._payload_keys(entry)) == ["email", "team"]
+        assert sorted(_audit_row.payload_keys(entry)) == ["email", "team"]
 
     def test_payload_keys_returns_empty_for_non_dict_payload(self) -> None:
         entry = AuditEntry(
@@ -147,7 +147,7 @@ class TestAuditRowHelpers:
             source=AuditEntry.SOURCE_BACKEND,
         )
         entry.payload = None  # type: ignore[assignment]
-        assert _audit_row._payload_keys(entry) == []
+        assert _audit_row.payload_keys(entry) == []
 
     def test_summary_falls_back_to_dash_when_no_metrics(self) -> None:
         entry = AuditEntry(
@@ -156,7 +156,7 @@ class TestAuditRowHelpers:
             source=AuditEntry.SOURCE_BACKEND,
             payload={},
         )
-        assert _audit_row._summary(entry) == "—"
+        assert _audit_row.summary(entry) == "—"
 
     def test_summary_pluralisation_matches_error_count(self) -> None:
         entry = AuditEntry(
@@ -166,7 +166,7 @@ class TestAuditRowHelpers:
             error_count=1,
             field_names=["email"],
         )
-        rendered = _audit_row._summary(entry)
+        rendered = _audit_row.summary(entry)
         assert "1 error" in rendered
         assert "errors" not in rendered
         assert "email" in rendered

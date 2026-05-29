@@ -12,15 +12,7 @@ from django.http import (
 from kanban.models import Board, Card, Column
 from kanban.providers import DBoard
 from next.forms import Form, ModelForm
-
-
-_INPUT_CLASS = (
-    "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm "
-    "text-slate-900 placeholder:text-slate-400 focus:outline-none "
-    "focus:ring-2 focus:ring-slate-400 focus:border-transparent"
-)
-_INPUT_ATTRS = {"class": _INPUT_CLASS}
-_TEXTAREA_ATTRS = {"class": _INPUT_CLASS + " resize-none", "rows": "4"}
+from next.forms.widgets import ComponentWidget
 
 
 class MoveCardForm(Form):
@@ -89,11 +81,11 @@ class CreateCardForm(Form):
     column_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
     title = django_forms.CharField(
         max_length=200,
-        widget=django_forms.TextInput(attrs=_INPUT_ATTRS),
+        widget=ComponentWidget("input"),
     )
     body = django_forms.CharField(
         required=False,
-        widget=django_forms.Textarea(attrs=_TEXTAREA_ATTRS),
+        widget=ComponentWidget("textarea", rows=4),
     )
 
     def clean(self) -> dict[str, object]:
@@ -142,12 +134,12 @@ class CreateColumnForm(Form):
     board_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
     title = django_forms.CharField(
         max_length=120,
-        widget=django_forms.TextInput(attrs=_INPUT_ATTRS),
+        widget=ComponentWidget("input"),
     )
     wip_limit = django_forms.IntegerField(
         required=False,
         min_value=1,
-        widget=django_forms.NumberInput(attrs=_INPUT_ATTRS),
+        widget=ComponentWidget("input", type="number"),
     )
 
     def on_valid(

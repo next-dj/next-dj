@@ -14,11 +14,7 @@ _discovered: set[str] = set()
 
 
 def autodiscover_forms() -> None:
-    """Import the `forms` submodule of each installed app once.
-
-    A missing `forms` module is skipped. A module that exists but raises
-    on import propagates, as that is a user error.
-    """
+    """Import the `forms` submodule of each installed app once."""
     if not next_framework_settings.FORM_AUTODISCOVER:
         return
     for app_config in apps.get_app_configs():

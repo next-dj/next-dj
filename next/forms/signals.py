@@ -2,7 +2,10 @@
 
 The `action_registered` signal fires after the backend stores a handler
 for a name. The sender is the backend class. The keyword arguments are
-`action_name`, `uid`, `form_class`, `namespace`, and `handler`.
+`action_name`, `uid`, `form_class`, `file_path`, `scope`, and `handler`.
+`file_path` is the module the form or handler was declared in and `scope`
+is `"page"` or `"shared"`. Together they give receivers a real grouping
+key under the file-scoped model.
 
 The `action_dispatched` signal fires after a handler runs and the
 response has been coerced. The sender is `FormActionDispatch`. The

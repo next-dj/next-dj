@@ -90,10 +90,10 @@ class ConditionalDispatchWizard(FormWizard):
 
     done_payloads: ClassVar[list] = []
 
-    def steps_for(self, cleaned_so_far: dict) -> list:
+    def steps_for(self) -> list:
         """Insert an extra step when the name asks for it."""
         base = [("identity", WizardIdentityStep), ("scope", WizardScopeStep)]
-        if cleaned_so_far.get("name") == "needs-extra":
+        if self.cleaned_data_so_far().get("name") == "needs-extra":
             base.insert(1, ("extra", WizardExtraStep))
         return base
 
@@ -113,9 +113,11 @@ class KwargsDispatchWizard(FormWizard):
 
     seen_kwargs: ClassVar[list] = []
 
-    def get_form_kwargs(self, step: str, cleaned_so_far: dict) -> dict:
+    def get_form_kwargs(self) -> dict:
         """Pass a prefix and record the cross-step inputs it was given."""
-        type(self).seen_kwargs.append((step, dict(cleaned_so_far)))
+        type(self).seen_kwargs.append(
+            (self.current_step(), dict(self.cleaned_data_so_far()))
+        )
         return {"prefix": "wiz"}
 
     def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
@@ -324,8 +326,8 @@ class TestDispatchViaClient:
 class TestFormDispatchRenderFragmentBranches:
     """``FormActionDispatch.render_form_fragment`` fallbacks."""
 
-    def test_unknown_action_uses_form_as_p(self, mock_http_request) -> None:
-        """Unknown action meta falls back to ``form.as_p()``."""
+    def test_unknown_action_uses_form_fallback(self, mock_http_request) -> None:
+        """Unknown action meta falls back to the version-safe bare-form render."""
         backend = RegistryFormActionBackend()
 
         class F(Form):
@@ -349,12 +351,12 @@ class TestFormDispatchRenderFragmentBranches:
             form,
             PAGE_MODULE_FOR_FORM_TESTS,
         )
-        assert html == form.as_p()
+        assert html == form.render(form.template_name_p)
 
-    def test_empty_template_body_uses_form_as_p(
+    def test_empty_template_body_uses_form_fallback(
         self, mock_http_request, tmp_path
     ) -> None:
-        """A page.py with no body source and no ancestor layout falls back to ``form.as_p()``."""
+        """A page.py without body and no ancestor layout falls back to a bare render."""
         backend = RegistryFormActionBackend()
 
         class F(Form):
@@ -381,7 +383,7 @@ class TestFormDispatchRenderFragmentBranches:
             form,
             blank_page,
         )
-        assert html == form.as_p()
+        assert html == form.render(form.template_name_p)
 
     def test_dispatch_with_modelform_returning_instance(
         self, mock_http_request

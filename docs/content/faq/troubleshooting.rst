@@ -50,7 +50,7 @@ HTTP 400 From Form Submission
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The dispatcher rejected the request because ``_next_form_page`` is missing or invalid.
-Always render the form through ``{% form @action="name" %}`` or include both ``csrf_token`` and the ``_next_form_page`` field by hand.
+Always render the form through ``{% form "name" %}`` or include both ``csrf_token`` and the ``_next_form_page`` field by hand.
 
 HTTP 403 on POST
 ~~~~~~~~~~~~~~~~

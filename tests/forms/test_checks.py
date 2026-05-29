@@ -12,6 +12,7 @@ from next.forms.checks import (
     check_action_applied_to_class,
     check_form_action_backends_configuration,
     check_form_action_collisions,
+    check_form_anchor_files,
     check_form_wizard_backend,
     check_form_wizard_steps,
     check_forms_outside_base_dir,
@@ -338,3 +339,54 @@ class TestCheckFormWizardBackend:
         assert len(errors) == 1
         assert errors[0].id == "next.E051"
         assert "FormWizardBackend" in errors[0].msg
+
+
+class TestCheckFormAnchorFiles:
+    """check_form_anchor_files: E052 for a malformed FORM_ANCHOR_FILES setting."""
+
+    def test_settings_not_dict_yields_no_errors(self, settings) -> None:
+        """`NEXT_FRAMEWORK` not being a dict short-circuits cleanly."""
+        settings.NEXT_FRAMEWORK = "garbage"
+        assert check_form_anchor_files() == []
+
+    @override_settings(NEXT_FRAMEWORK={})
+    def test_absent_value_is_clean(self) -> None:
+        """An absent FORM_ANCHOR_FILES is valid and yields no errors."""
+        assert check_form_anchor_files() == []
+
+    @override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": None})
+    def test_none_value_is_clean(self) -> None:
+        """An explicit None is valid and yields no errors."""
+        assert check_form_anchor_files() == []
+
+    @override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": ["page.py", "view.py"]})
+    def test_list_of_strings_is_clean(self) -> None:
+        """A list of strings is valid and yields no errors."""
+        assert check_form_anchor_files() == []
+
+    @override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": ("page.py",)})
+    def test_tuple_of_strings_is_clean(self) -> None:
+        """A tuple of strings is valid and yields no errors."""
+        assert check_form_anchor_files() == []
+
+    @override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": "page.py"})
+    def test_bare_string_is_e052(self) -> None:
+        """A bare string is rejected so it never iterates into characters."""
+        errors = check_form_anchor_files()
+        assert len(errors) == 1
+        assert errors[0].id == "next.E052"
+
+    @override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": 7})
+    def test_non_collection_is_e052(self) -> None:
+        """A non-collection value is rejected."""
+        errors = check_form_anchor_files()
+        assert len(errors) == 1
+        assert errors[0].id == "next.E052"
+
+    @override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": ["page.py", 7]})
+    def test_non_string_member_is_e052(self) -> None:
+        """A collection with a non-string member is rejected."""
+        errors = check_form_anchor_files()
+        assert len(errors) == 1
+        assert errors[0].id == "next.E052"
+        assert "only strings" in errors[0].msg

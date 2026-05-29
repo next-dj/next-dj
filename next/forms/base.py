@@ -10,6 +10,7 @@ from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist
 from django.forms.forms import BaseForm as DjangoBaseForm, DeclarativeFieldsMetaclass
 from django.forms.models import BaseModelForm as DjangoBaseModelForm, ModelFormMetaclass
+from django.forms.renderers import DjangoTemplates
 from django.http import HttpRequest, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 
@@ -76,11 +77,7 @@ def _instance_from_url_db_fields(spec: object) -> list[str]:
 def _instance_lookup_from_spec(
     spec: object, url_kwargs: dict[str, object]
 ) -> dict[str, object] | None:
-    """Build a `Model.objects.get` lookup from the spec, or None when a kwarg is absent.
-
-    A string spec names a URL kwarg that doubles as the model field. A dict
-    spec maps `{url_kwarg_name: model_field_name}` for mismatched names.
-    """
+    """Build a `Model.objects.get` lookup from the spec, or None on a missing kwarg."""
     if isinstance(spec, str):
         value = url_kwargs.get(spec)
         if value is None:
@@ -124,11 +121,7 @@ _DJANGO_FORMS_SKIP_PARTS = frozenset({"widgets.py", "forms.py", "models.py"})
 
 
 def _find_definition_frame() -> str:
-    """Walk the call stack to find the file where a class was defined.
-
-    Skips framework internals (metaclass __new__, __init_subclass__) to find
-    the actual caller site.
-    """
+    """Walk the call stack to find the file where a class was defined."""
     depth = 1
     while True:
         try:
@@ -188,8 +181,22 @@ def _auto_register_form_class(cls: type) -> None:
     )
 
 
+class _DivFormRenderer(DjangoTemplates):
+    """Renderer pinning the div template so `{{ form }}` is stable across versions."""
+
+    # The transitional default renderer on Django 4.2 proxies to the deprecated
+    # table layout and warns. Pinning the div template matches the Django 5.0+
+    # default and keeps bare `{{ form }}` output warning-free on every version.
+    form_template_name = "django/forms/div.html"
+
+
+_div_form_renderer = _DivFormRenderer()
+
+
 class BaseForm(DjangoBaseForm):
     """Custom `BaseForm` extended with `get_initial` and `on_valid`."""
+
+    default_renderer = _div_form_renderer
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Register subclass in form_action_manager automatically."""
@@ -209,6 +216,8 @@ class BaseForm(DjangoBaseForm):
 
 class BaseModelForm(DjangoBaseModelForm):
     """Custom `BaseModelForm` with `get_initial` and `on_valid` support."""
+
+    default_renderer = _div_form_renderer
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Register subclass in form_action_manager automatically."""

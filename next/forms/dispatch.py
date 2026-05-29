@@ -67,11 +67,7 @@ def _build_form(
     request: "HttpRequest | None",
     init_kwargs: dict[str, Any] | None = None,
 ) -> "django_forms.Form":
-    """Build a form, bound to POST when `request` is given.
-
-    Non-empty `init_kwargs` bypass `get_initial` and pass `**init_kwargs`
-    straight to the form constructor.
-    """
+    """Build a form, bound to POST when `request` is given."""
     post_data = request.POST if request is not None else None
     files = request.FILES if request is not None and hasattr(request, "FILES") else None
     bound = request is not None
@@ -119,12 +115,7 @@ def _call_get_initial(
     cache: dict[str, Any],
     stack: list[str],
 ) -> object:
-    """Resolve `get_initial` dependencies and call it, feeding url_kwargs to **kwargs.
-
-    Named parameters are filled by the resolver as before. A `get_initial`
-    that declares `**kwargs` also receives the raw url_kwargs, which lets the
-    default ModelForm implementation read `Meta.instance_from_url`.
-    """
+    """Resolve `get_initial` dependencies and call it, feeding url_kwargs to kwargs."""
     if not hasattr(form_class, "get_initial"):
         msg = f"Form class {form_class} must have get_initial method"
         raise TypeError(msg)
@@ -437,12 +428,11 @@ class FormActionDispatch:
             request=request, url_kwargs=state.url_kwargs, base_path=origin
         )
         step_name = wizard.current_step()
-        cleaned_so_far = wizard.cleaned_data_so_far()
         form_class = wizard.step_form_class(step_name)
         if form_class is None:
             return HttpResponseBadRequest("Unknown wizard step")
 
-        form_kwargs = wizard.get_form_kwargs(step_name, cleaned_so_far)
+        form_kwargs = wizard.get_form_kwargs()
         files = request.FILES if hasattr(request, "FILES") else None
         form = form_class(request.POST, files, **form_kwargs)
         if not form.is_valid():

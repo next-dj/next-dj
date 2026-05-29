@@ -19,6 +19,13 @@ if TYPE_CHECKING:
     from .backends import FormActionBackend
 
 
+def _form_fallback_html(form: "django_forms.Form | None") -> str:
+    """Render a bare form without tripping the Django 4.2 default-renderer warning."""
+    if form is None:
+        return ""
+    return str(form.render(form.template_name_p))
+
+
 def render_form_page_with_errors(
     backend: "FormActionBackend",
     request: "HttpRequest",
@@ -36,13 +43,13 @@ def render_form_page_with_errors(
     file_path = page_file_path
     meta = backend.get_meta(action_name, page_path=str(file_path))
     if not meta:
-        return form.as_p() if form else ""
+        return _form_fallback_html(form)
 
     module = _load_python_module_memo(file_path)
     body = page._load_static_body(file_path, module)
     template_str = page._layout_manager._layout_loader.compose_body(body, file_path)
     if not template_str:
-        return form.as_p() if form else ""
+        return _form_fallback_html(form)
 
     url_kwargs = _url_kwargs_from_post(request)
 

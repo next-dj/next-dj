@@ -84,6 +84,18 @@ def _echo_form(widget: ComponentWidget) -> type[django_forms.Form]:
     return _EchoForm
 
 
+def _register_form(
+    name: str, form_class: type[django_forms.Form], file_path: str
+) -> None:
+    """Register a page-scoped form action through the default backend."""
+    form_action_manager.default_backend.register_action(
+        name,
+        form_class=form_class,
+        file_path=file_path,
+        scope="page",
+    )
+
+
 class TestComponentWidgetInit:
     """`ComponentWidget.__init__` stores name and extra render kwargs."""
 
@@ -346,21 +358,11 @@ class TestBindComponentWidgets:
 class TestCheckComponentWidgetComponents:
     """`check_component_widget_components` emits W054 for unresolved components."""
 
-    def _register_form(
-        self, name: str, form_class: type[django_forms.Form], file_path: str
-    ) -> None:
-        form_action_manager.default_backend.register_action(
-            name,
-            form_class=form_class,
-            file_path=file_path,
-            scope="page",
-        )
-
     def test_missing_component_yields_w054(self, echo_component: Path) -> None:
         class _MissingForm(django_forms.Form):
             field = django_forms.CharField(widget=ComponentWidget("nope"))
 
-        self._register_form("missing_form", _MissingForm, str(echo_component))
+        _register_form("missing_form", _MissingForm, str(echo_component))
         warnings = check_component_widget_components()
         assert len(warnings) == 1
         assert isinstance(warnings[0], DjangoWarning)
@@ -371,7 +373,7 @@ class TestCheckComponentWidgetComponents:
         class _OkForm(django_forms.Form):
             field = django_forms.CharField(widget=ComponentWidget("echo"))
 
-        self._register_form("ok_form", _OkForm, str(echo_component))
+        _register_form("ok_form", _OkForm, str(echo_component))
         assert check_component_widget_components() == []
 
     def test_same_missing_component_reported_once(self, echo_component: Path) -> None:
@@ -379,7 +381,7 @@ class TestCheckComponentWidgetComponents:
             one = django_forms.CharField(widget=ComponentWidget("nope"))
             two = django_forms.CharField(widget=ComponentWidget("nope"))
 
-        self._register_form("two_field_form", _TwoFieldForm, str(echo_component))
+        _register_form("two_field_form", _TwoFieldForm, str(echo_component))
         warnings = check_component_widget_components()
         assert len(warnings) == 1
         assert warnings[0].id == "next.W054"
@@ -388,7 +390,7 @@ class TestCheckComponentWidgetComponents:
         class _PlainForm(django_forms.Form):
             field = django_forms.CharField(widget=django_forms.TextInput())
 
-        self._register_form("plain_form", _PlainForm, str(echo_component))
+        _register_form("plain_form", _PlainForm, str(echo_component))
         assert check_component_widget_components() == []
 
     def test_meta_with_no_form_class_is_skipped(self) -> None:
@@ -413,21 +415,11 @@ class TestCheckComponentWidgetComponents:
 class TestCheckComponentWidgetFieldTypes:
     """`check_component_widget_field_types` emits W055 for unsupported field types."""
 
-    def _register_form(
-        self, name: str, form_class: type[django_forms.Form], file_path: str
-    ) -> None:
-        form_action_manager.default_backend.register_action(
-            name,
-            form_class=form_class,
-            file_path=file_path,
-            scope="page",
-        )
-
     def test_file_field_yields_w055(self, echo_component: Path) -> None:
         class _FileForm(django_forms.Form):
             upload = django_forms.FileField(widget=ComponentWidget("echo"))
 
-        self._register_form("file_form", _FileForm, str(echo_component))
+        _register_form("file_form", _FileForm, str(echo_component))
         warnings = check_component_widget_field_types()
         assert len(warnings) == 1
         assert isinstance(warnings[0], DjangoWarning)
@@ -442,7 +434,7 @@ class TestCheckComponentWidgetFieldTypes:
                 require_all_fields=False,
             )
 
-        self._register_form("multi_form", _MultiForm, str(echo_component))
+        _register_form("multi_form", _MultiForm, str(echo_component))
         warnings = check_component_widget_field_types()
         assert len(warnings) == 1
         assert warnings[0].id == "next.W055"
@@ -452,7 +444,7 @@ class TestCheckComponentWidgetFieldTypes:
         class _CharForm(django_forms.Form):
             slug = django_forms.CharField(widget=ComponentWidget("echo"))
 
-        self._register_form("char_form", _CharForm, str(echo_component))
+        _register_form("char_form", _CharForm, str(echo_component))
         assert check_component_widget_field_types() == []
 
     def test_textarea_widget_char_field_yields_no_warning(
@@ -461,7 +453,7 @@ class TestCheckComponentWidgetFieldTypes:
         class _BodyForm(django_forms.Form):
             body = django_forms.CharField(widget=django_forms.Textarea())
 
-        self._register_form("body_form", _BodyForm, str(echo_component))
+        _register_form("body_form", _BodyForm, str(echo_component))
         assert check_component_widget_field_types() == []
 
     def test_file_field_without_component_widget_is_clean(
@@ -470,7 +462,7 @@ class TestCheckComponentWidgetFieldTypes:
         class _PlainFileForm(django_forms.Form):
             upload = django_forms.FileField(widget=django_forms.ClearableFileInput())
 
-        self._register_form("plain_file_form", _PlainFileForm, str(echo_component))
+        _register_form("plain_file_form", _PlainFileForm, str(echo_component))
         assert check_component_widget_field_types() == []
 
     def test_meta_with_no_form_class_is_skipped(self) -> None:

@@ -45,5 +45,5 @@ jobs:
       run: uv pip install "django==${{ matrix.django-version }}"
     - name: Run example tests
       env:
-        PYTEST: ${{ github.workspace }}/.venv/bin/pytest
+        PYTEST: uv run pytest
       run: make test-examples

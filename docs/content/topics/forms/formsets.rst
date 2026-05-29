@@ -74,7 +74,7 @@ The block body iterates the formset and renders each row.
 .. code-block:: jinja
    :caption: notes/pages/notes/bulk/template.djx
 
-   {% form @action="bulk_create_notes" %}
+   {% form "bulk_create_notes" %}
      {{ form.management_form }}
      {% for row in form %}
        <fieldset>

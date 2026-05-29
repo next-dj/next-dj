@@ -1,16 +1,10 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, get_args, get_origin
+import inspect
+from typing import get_args, get_origin
 
 from next.deps import DDependencyBase, RegisteredParameterProvider
+from next.deps.context import ResolutionContext
 
 from .cache import get_cached_flag
-
-
-if TYPE_CHECKING:
-    import inspect
-
-    from next.deps.context import ResolutionContext
 
 
 class DFlag[T](DDependencyBase[T]):

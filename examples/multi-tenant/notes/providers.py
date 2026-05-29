@@ -1,16 +1,9 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
+import inspect
 
 from next.deps import DDependencyBase, RegisteredParameterProvider
+from next.deps.context import ResolutionContext
 from notes.access import get_active_tenant
-
-
-if TYPE_CHECKING:
-    import inspect
-
-    from next.deps.context import ResolutionContext
-    from notes.models import Tenant
+from notes.models import Tenant
 
 
 class DTenant(DDependencyBase["Tenant"]):

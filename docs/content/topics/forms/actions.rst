@@ -58,6 +58,12 @@ The conversion is mechanical and does not special-case acronyms.
 ``HTMLForm`` becomes ``h_t_m_l_form``, not ``html_form``.
 Prefer class names where every acronym is written in title case: ``HtmlForm`` → ``html_form``.
 
+.. warning::
+
+   Renaming a form class changes its action name.
+   Any ``{% form "old_name" %}`` tag or reverse URL that used the old name will fail at render time with an unknown-action error.
+   Update every template and reverse call when renaming a class.
+
 Anchor Files and Scope
 ----------------------
 

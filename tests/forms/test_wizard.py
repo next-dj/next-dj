@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from django import forms as django_forms
 from django.contrib.sessions.backends.cache import SessionStore
-from django.core.cache import cache, caches
+from django.core.cache import caches
 from django.http import HttpResponse, HttpResponseRedirect
 from django.test import RequestFactory, override_settings
 
@@ -69,14 +69,6 @@ class DemoWizard(FormWizard):
         """Record the merged cleaned data and return a redirect."""
         type(self).done_payloads.append(cleaned_data)
         return HttpResponseRedirect("/done/")
-
-
-@pytest.fixture(autouse=True)
-def _clear_wizard_cache():
-    """Clear the Django cache around each wizard test for storage isolation."""
-    cache.clear()
-    yield
-    cache.clear()
 
 
 def _request(*, path: str = "/wizard/identity/"):
@@ -386,7 +378,7 @@ class TestWizardHooks:
     def test_steps_for_default_returns_static_steps(self) -> None:
         """The default `steps_for` returns the declared steps."""
         wizard = DemoWizard(_request())
-        assert [name for name, _ in wizard.steps_for({})] == [
+        assert [name for name, _ in wizard.steps_for()] == [
             "identity",
             "scope",
             "approval",
@@ -399,9 +391,9 @@ class TestWizardHooks:
             class Meta:
                 steps: ClassVar = [("identity", IdentityStep), ("scope", ScopeStep)]
 
-            def steps_for(self, cleaned_so_far):
+            def steps_for(self):
                 base = [("identity", IdentityStep), ("scope", ScopeStep)]
-                if cleaned_so_far.get("name") == "needs-detail":
+                if self.cleaned_data_so_far().get("name") == "needs-detail":
                     base.insert(1, ("optional", OptionalStep))
                 return base
 
@@ -419,7 +411,7 @@ class TestWizardHooks:
     def test_get_form_kwargs_default_is_empty(self) -> None:
         """The default `get_form_kwargs` returns an empty mapping."""
         wizard = DemoWizard(_request())
-        assert wizard.get_form_kwargs("identity", {}) == {}
+        assert wizard.get_form_kwargs() == {}
 
     def test_get_form_kwargs_override_feeds_current_form(self) -> None:
         """A `get_form_kwargs` override flows into the constructed step form."""
@@ -431,7 +423,7 @@ class TestWizardHooks:
             class Meta:
                 steps: ClassVar = [("only", PrefixField)]
 
-            def get_form_kwargs(self, step, cleaned_so_far):
+            def get_form_kwargs(self):
                 return {"prefix": "wiz"}
 
             def done(self, request, cleaned_data) -> HttpResponse:

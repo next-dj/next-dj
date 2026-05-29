@@ -46,7 +46,7 @@ jobs:
     needs: build
     uses: ./.github/workflows/test-matrix.yml
     with:
-      test-command: ".venv/bin/pytest tests/ -v --junitxml=junit.xml --cov=next --cov-report=xml --cov-report=term-missing --cov-fail-under=100"
+      test-command: "uv run pytest tests/ -v --junitxml=junit.xml --cov=next --cov-report=xml --cov-report=term-missing --cov-fail-under=100"
       upload-codecov: true
     secrets: inherit
 

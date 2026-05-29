@@ -161,11 +161,7 @@ class RegistryFormActionBackend(FormActionBackend):
         self._name_index: dict[str, tuple[str, str]] = {}
 
     def clear_registry(self) -> None:
-        """Drop every registered action and reset the UID index.
-
-        Intended for test isolation. Use this to clear actions between
-        independent test sessions that register overlapping names.
-        """
+        """Drop every registered action and reset the UID index. For test isolation."""
         self._registry.clear()
         self._uid_to_name.clear()
         self._name_index.clear()
@@ -223,7 +219,8 @@ class RegistryFormActionBackend(FormActionBackend):
             action_name=name,
             uid=uid,
             form_class=form_class,
-            namespace=None,
+            file_path=file_path,
+            scope=scope,
             handler=handler,
         )
 
@@ -317,14 +314,7 @@ class FormActionFactory:
 
     @classmethod
     def create_backend(cls, config: dict[str, Any]) -> FormActionBackend:
-        """Return a single backend instance for one settings entry.
-
-        The `BACKEND` key must be present and resolve to a `FormActionBackend`
-        subclass. The `next.E044` system check guarantees the key is present
-        and importable. The `next.E045` system check guarantees the imported
-        class subclasses `FormActionBackend`. Both run before the factory does
-        in production.
-        """
+        """Return a single backend instance for one settings entry."""
         backend_path = config["BACKEND"]
         backend_class = import_class_cached(backend_path)
         return cast("FormActionBackend", backend_class(config))
