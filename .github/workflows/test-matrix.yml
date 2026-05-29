@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       test-command:
-        description: Command to run tests (run via uv run against the wheel-installed venv)
+        description: Command to run tests (run via `uv run --no-project` against the wheel-installed venv)
         required: true
         type: string
       upload-codecov:
@@ -68,7 +68,7 @@ jobs:
       run: uv pip install "django==${{ matrix.django-version }}"
     - name: Verify Django version
       run: |
-        uv run python -c 'import django; print(f"Django version: {django.get_version()}")'
+        uv run --no-project python -c 'import django; print(f"Django version: {django.get_version()}")'
     - name: Run tests
       run: ${{ inputs.test-command }}
     - name: Upload coverage to Codecov
