@@ -45,10 +45,10 @@ Read :doc:`overview` first, then jump to the page that matches the part you are 
 :doc:`validation-rerender`
    What happens between a failing POST and the re-rendered origin page.
 
+.. rubric:: Extending
+
 :doc:`serializers`
    The frozen field, formset, and form specs for rendering a form in a custom template engine.
-
-.. rubric:: Extending
 
 :doc:`backends`
    Swap the validation pipeline through ``DEFAULT_FORM_ACTION_BACKENDS``.

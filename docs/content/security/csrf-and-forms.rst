@@ -67,6 +67,13 @@ Use a plain ``<form method="get">`` for search inputs and filtering panels.
 
 Use ``DQuery[str]`` in the page context to read the value.
 
+.. note::
+
+   The dispatch endpoint accepts only POST.
+   A GET to ``/_next/form/<uid>/`` returns HTTP 405 for a registered action and HTTP 404 for an unknown one, with no CSRF check on the GET.
+   The two status codes let the action surface be probed without a token.
+   This is intended, the 405 reveals only that a uid is registered and no handler runs on a GET, so do not place secrets in action uids.
+
 AJAX Submissions
 ----------------
 
@@ -99,6 +106,16 @@ This works because every ``{% form %}`` block emits the ``_next_form_page`` hidd
 
 To post without a rendered form, re-publish the existing value through a callable that resolves it from the page context.
 Declare a ``page.py`` callable annotated ``path: str = Context("current_page_module_path")`` and decorate it with ``@context("current_page_module_path", serialize=True)`` so the value reaches ``window.Next.context``.
+
+Wizard Steps
+------------
+
+A wizard step POST is stricter than a plain form POST about the origin field.
+For a plain form a missing or off-site ``_next_form_origin`` falls back to ``/`` and the handler still runs.
+For a wizard step the dispatcher requires a same-site ``_next_form_origin`` that starts with ``/`` and not with ``//``, and returns HTTP 400 when it is missing or off-site.
+
+The ``{% form %}`` tag emits the field on every render, so a tag-rendered wizard needs nothing extra.
+A hand-crafted wizard POST or an AJAX wizard submission must include the ``_next_form_origin`` field with the current page path.
 
 Cross Origin Requests
 ---------------------

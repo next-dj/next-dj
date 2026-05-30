@@ -6,8 +6,8 @@ Signals Reference
 Module Summary
 --------------
 
-``next.signals`` is an aggregator that re-exports every signal emitted by the framework.
-Importing a signal from ``next.signals`` is equivalent to importing it from its subpackage.
+``next.signals`` is an aggregator that re-exports the framework signals.
+Importing a signal from ``next.signals`` is equivalent to importing it from its subpackage, except for ``wizard_step_submitted`` and ``wizard_completed``, which import from ``next.forms.signals`` only.
 
 Signal Catalog
 --------------
@@ -33,7 +33,7 @@ fire for that sender.
        ``dep_cache`` is a copy of the dispatch dependency-injection cache.
    * - ``action_registered``
      - Form action backend class
-     - ``action_name``, ``uid``, ``form_class``, ``namespace``, ``handler``
+     - ``action_name``, ``uid``, ``form_class``, ``file_path``, ``scope``, ``handler``
      - After the backend stores a handler for an action name.
    * - ``asset_registered``
      - The ``StaticAsset`` instance
@@ -103,6 +103,14 @@ fire for that sender.
      - ``iter_all_autoreload_watch_specs``
      - ``specs``
      - After the reloader resolves the full list of watch specs.
+   * - ``wizard_completed``
+     - ``FormActionDispatch``
+     - ``wizard_class``, ``cleaned_data``
+     - After the wizard ``done`` method runs for the final step. ``cleaned_data`` is the merged mapping passed to ``done``.
+   * - ``wizard_step_submitted``
+     - ``FormActionDispatch``
+     - ``wizard_class``, ``step``, ``cleaned_data``
+     - After a ``FormWizard`` step validates during dispatch. ``cleaned_data`` is a copy of that step's validated data.
 
 Subpackage Signals
 ------------------

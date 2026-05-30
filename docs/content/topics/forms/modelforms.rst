@@ -3,7 +3,11 @@
 ModelForms
 ==========
 
-A :doc:`ModelForm <django:topics/forms/modelforms>` adapts a Django model to a form.
+An edit page in plain Django reloads the instance by hand in both the initial render and the save handler, mapping each field twice.
+next.dj collapses that to one declarative line.
+A :doc:`ModelForm <django:topics/forms/modelforms>` adapts a Django model to a form, and ``Meta.instance_from_url`` loads the row the page already addresses in its URL, so a single class serves both create and edit.
+The `Before and After`_ section below shows the delta against the hand-written lookup.
+
 next.dj supports ModelForms anywhere a plain ``Form`` works.
 This page covers the ``next.forms.ModelForm`` base class, the declarative ``Meta.instance_from_url`` key that loads an instance for edit pages, and the create-and-edit-with-one-class pattern that follows from it.
 
@@ -87,6 +91,32 @@ When the kwarg is present but no row matches, :func:`~django.shortcuts.get_objec
 The field named by ``instance_from_url`` should be unique.
 :func:`~django.shortcuts.get_object_or_404` turns only the not-found case into a 404, so a lookup matching several rows surfaces as a server error instead.
 
+Security: the lookup is not ownership-scoped
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. warning::
+
+   The default ``get_initial`` runs an unscoped ``get_object_or_404(model, slug=<value>)``.
+   The lookup value comes from the URL, and on a POST it can also arrive through a hidden ``_url_param_slug`` field that the browser sends.
+   Either source is user-controlled, so any user who can reach the action can load and save a row they do not own by supplying a different value.
+   This is an insecure direct object reference.
+
+   Scope the lookup to the current user or tenant.
+   Override ``get_initial`` with a scoped query.
+
+   .. code-block:: python
+      :caption: ownership-scoped get_initial
+
+      @classmethod
+      def get_initial(cls, request: HttpRequest, slug: str | None = None):
+          if slug is None:
+              return {}
+          return get_object_or_404(Note, slug=slug, owner=request.user)
+
+   The extra ``owner=request.user`` term turns another user's slug into a 404 instead of an editable instance.
+   If the lookup cannot carry the scope, verify ownership in ``on_valid`` before ``self.save()``.
+   See :doc:`/content/security/di-and-untrusted-input` for the untrusted-input rules and :doc:`/content/security/overview` for object-level authorization.
+
 Before and After
 ----------------
 
@@ -121,7 +151,7 @@ The wiki example carried an ``ArticleEditForm`` that loaded the article twice an
            article.save()
            return redirect_to_origin(request)
 
-The hidden ``article_id`` field, the second :func:`~django.shortcuts.get_object_or_404`, and the field-by-field assignment all exist only to relocate the instance the page already addressed in its URL.
+Every piece of that plumbing exists only to relocate the instance the page already addressed in its URL.
 
 .. code-block:: python
    :caption: after — instance loading is a single declarative line
@@ -141,7 +171,8 @@ Create and Edit With One Class
 ------------------------------
 
 The same ModelForm class can drive both a create page and an edit page.
-The route shape decides which mode the form runs in.
+The URL shape encodes the intent: a route that captures the lookup kwarg means edit, and a route without it means create.
+The route shape decides which mode the form runs in, with no branching in the form.
 
 On a create page the route has no captured kwarg, so the form renders unbound and ``self.save()`` inserts a new row.
 
@@ -162,7 +193,7 @@ On an edit page the route captures the kwarg named by ``instance_from_url``, so 
 The class above behaves as a create form on ``notes/new/`` and as an edit form on ``notes/edit/[slug]/``, with no per-page branching.
 Auto-registration keys on the ``snake_case`` of the class name, so two pages that share one class share one action name and one action URL.
 
-Separate create and edit forms are just as common, and the examples take that route.
+Separate create and edit forms are an option, and the examples take that route.
 The wiki create page declares a plain ``ArticleCreateForm`` while the edit page keeps the ``ArticleEditForm`` ModelForm.
 The multi-tenant create page likewise declares its own ``NoteCreateForm`` apart from the edit form.
 Split the two when the create and edit fields diverge, when validation differs, or when the rows must be scoped to something the URL does not carry.
@@ -172,6 +203,12 @@ Handling Submissions
 
 The default ``on_valid`` on ``ModelForm`` calls ``self.save()`` and then redirects to the origin page.
 Override it only when the redirect target differs or extra logic must run after saving.
+
+.. warning::
+
+   The action endpoint requires no authentication by default, so any visitor who can POST to it reaches ``on_valid`` and ``self.save()``.
+   Check ``request.user.is_authenticated`` and the row's ownership in ``on_valid`` before saving, especially when ``instance_from_url`` loads the instance from a user-controlled value.
+   See :doc:`/content/security/overview` for access control and :doc:`/content/howto/require-login-on-pages` for a project-wide login requirement.
 
 .. code-block:: python
 

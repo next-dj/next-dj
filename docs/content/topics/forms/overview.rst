@@ -3,8 +3,9 @@
 Forms Overview
 ==============
 
-The forms subsystem treats each form class as a self-registering unit.
-Declaring a subclass of ``next.forms.Form`` or ``next.forms.ModelForm`` is enough to make that form reachable by name in any template in the project.
+A Django form usually costs a URL entry, a view, manual CSRF handling, and a redirect-on-success per action before it accepts a single POST.
+The forms subsystem removes that wiring.
+Declaring a subclass of ``next.forms.Form`` or ``next.forms.ModelForm`` is enough to make that form reachable by name in any template in the project, with a POST endpoint, CSRF, and re-render-on-failure already attached.
 No decorator, no manual registry call, and no URL wiring is required.
 
 .. contents::
@@ -20,6 +21,7 @@ The framework derives the action name from the class name by converting ``CamelC
 ``ArticleEditForm`` becomes ``article_edit_form``, ``ContactForm`` becomes ``contact_form``.
 
 The framework also records which file the class was declared in and uses that to decide its scope.
+:doc:`actions` is the canonical reference for name derivation and scope.
 
 .. code-block:: python
    :caption: page.py — auto-registered as ``article_edit_form``
@@ -37,9 +39,18 @@ The framework also records which file the class was declared in and uses that to
            self.save()
            return redirect_to_origin(request)
 
+Why a Stable URL
+----------------
+
+The framework hashes the action name into a single POST endpoint at ``/_next/form/<uid>/``.
+The URL is derived deterministically from the class, so a form needs no URL wiring and no per-page route.
+The same form can be embedded on any page that renders its tag and every copy submits to the same endpoint.
+
 File Scope (Anchor Files)
 -------------------------
 
+A single global registry would force every form name to be unique across the whole project, so two teams could not both ship a ``NoteForm`` without coordinating names.
+File scope removes that coupling.
 When a form class is declared in ``page.py`` or ``component.py``, its scope is ``page``.
 A page-scoped form is keyed to its definition file, so two different pages may each declare an ``ArticleEditForm`` without collision.
 The ``{% form "article_edit_form" %}`` tag on a given page resolves the form registered in that page's own file first.
@@ -100,9 +111,8 @@ The method receives at least ``request`` and may declare any parameter the depen
        self.save()
        return redirect_to_origin(request)
 
-The default implementation on ``BaseForm`` calls ``redirect_to_origin(request)`` and returns.
-The default implementation on ``BaseModelForm`` additionally calls ``self.save()`` before redirecting.
-Override either to add application logic.
+The default implementation redirects to the origin page, and a ModelForm saves first.
+See :doc:`actions` for the exact default behaviour and return contract.
 
 ``get_initial`` prepopulates the form before the first render.
 Declare it as a ``classmethod`` with the same DI-friendly signature.
@@ -115,10 +125,22 @@ Declare it as a ``classmethod`` with the same DI-friendly signature.
            return {}
        return Note.objects.get(pk=note_id)
 
+The framework calls ``get_initial`` through the dependency injector, never application code.
+``request`` is supplied automatically, a parameter named after a URL segment is filled from the URL, and the rest resolve through providers.
+See :doc:`actions` for the full signature rules.
+
+Shared Dependency Cache
+-----------------------
+
+``get_initial``, the handler, and the re-render share one per-request dependency cache.
+An expensive provider such as a tenant lookup or a permission check runs once per request, even when validation fails and the page re-renders.
+See :doc:`validation-rerender` for the cache mechanics and the access path.
+
 Form-Less Actions
 -----------------
 
-Use ``@action("name")`` to register a plain function when no form fields are needed — for example a logout button or a delete confirmation.
+Use ``@action("name")`` to register a plain function when no form fields are needed.
+A logout button or a delete confirmation is a typical case.
 
 .. code-block:: python
    :caption: page.py

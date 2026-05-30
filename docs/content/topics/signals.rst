@@ -15,7 +15,8 @@ Import Surface
 --------------
 
 Every signal lives in the subpackage that emits it.
-The aggregator ``next.signals`` re-exports every name so handlers can pull from a single import.
+The aggregator ``next.signals`` re-exports most names so handlers can pull from a single import.
+The two wizard signals ``wizard_step_submitted`` and ``wizard_completed`` are the exception and import from ``next.forms.signals`` only.
 
 .. code-block:: python
    :caption: import patterns
@@ -84,6 +85,12 @@ each signal.
    * - ``form_validation_failed``
      - Forms
      - When a bound form fails validation during dispatch.
+   * - ``wizard_step_submitted``
+     - Forms
+     - After a ``FormWizard`` step validates during dispatch.
+   * - ``wizard_completed``
+     - Forms
+     - After the wizard ``done`` method runs for the final step.
    * - ``asset_registered``
      - Static
      - After a file is registered with a backend and added to the collector.

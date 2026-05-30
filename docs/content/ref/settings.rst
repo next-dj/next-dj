@@ -135,6 +135,7 @@ Default value.
    }
 
 The bundled ``CacheFormWizardBackend`` stores each step's cleaned data in the Django cache.
+It reads two keys from ``OPTIONS``: ``CACHE_ALIAS`` names the cache to use, defaulting to ``"default"``, and ``TIMEOUT`` sets the draft expiry in seconds, defaulting to ``SESSION_COOKIE_AGE``.
 Set ``BACKEND`` to a dotted path that subclasses ``FormWizardBackend`` to swap the persistence layer.
 See :doc:`/content/topics/forms/wizard-backend` for the contract and a custom backend.
 

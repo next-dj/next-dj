@@ -33,6 +33,18 @@ next.dj Settings
 Tune ``NEXT_FRAMEWORK`` using :doc:`settings` (production-oriented commentary and patterns).
 Canonical semantics for each key live in :doc:`/content/ref/settings`.
 
+Wizard Drafts
+-------------
+
+Review these when the project ships a ``FormWizard``.
+
+- Point ``DEFAULT_FORM_WIZARD_BACKEND`` at a cache shared across workers, not local memory.
+- Set a short ``TIMEOUT`` for drafts, especially when a step collects personal data.
+- Use a signed or encrypted backend for sensitive flows, and re-check invariants in ``done``.
+- Validate draft completeness in ``done`` so an expired draft fails with a friendly message, not an integrity error.
+
+See :doc:`/content/topics/forms/wizard-backend` for the backend trade-offs.
+
 Static Files
 ------------
 

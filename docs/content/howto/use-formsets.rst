@@ -32,6 +32,9 @@ Define the row form and the formset.
 
    NoteFormSet = formset_factory(NoteRowForm, extra=3, can_delete=True)
 
+Subclassing ``ModelForm`` registers ``NoteRowForm`` as the action ``note_row_form`` through ``__init_subclass__``, even though only the formset factory action is intended.
+Render the formset through ``bulk_create`` and do not target ``{% form 'note_row_form' %}``, which would post a single row rather than the formset.
+
 Register the action.
 
 .. code-block:: python
@@ -105,7 +108,10 @@ Use ``cleanup_extra_initial`` to clear initial values from blank extra rows befo
    def bulk_create_form() -> SimpleNamespace:
        return SimpleNamespace(form=build_formset([{"title": "Draft"}]))
 
-The ``@context`` callable named after the action publishes the formset under the key the ``{% form %}`` tag reads on the initial render.
+The ``{% form %}`` tag looks up a context variable named after the action and reads its ``.form`` attribute.
+A regular form action satisfies this through its own ``get_initial``, but a formset has no ``get_initial``, so the ``@context`` callable must publish the value itself.
+The callable name must match the action name, and the returned object must expose ``.form``, hence the ``SimpleNamespace(form=...)`` wrapper.
+Returning the bare formset, or publishing it under a different key, leaves ``form`` as ``None`` in the template.
 
 Verification
 ------------

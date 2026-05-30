@@ -252,13 +252,6 @@ Partial Save
 
 Save only the valid rows by iterating the formset and skipping rows whose ``cleaned_data`` is empty or carries a truthy ``DELETE``.
 
-Inline Formset
-~~~~~~~~~~~~~~
-
-Use ``inlineformset_factory`` for parent and child relationships.
-The handler builds the formset, assigns it to the parent form, and validates them together.
-See `Validating an Inline Formset`_ above for the worked pattern.
-
 See Also
 --------
 

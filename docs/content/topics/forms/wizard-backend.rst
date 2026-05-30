@@ -53,6 +53,44 @@ The backend reads two keys from ``OPTIONS``.
 ``TIMEOUT``.
    The draft lifetime in seconds, defaulting to the ``SESSION_COOKIE_AGE`` setting.
 
+For an anonymous visitor the backend creates a session on the first saved step, so the draft is keyed by that pre-login session.
+A draft started before login stays under the pre-login key unless the login flow rotates the session, in which case the visitor loses the draft.
+Start a wizard after login, or carry the draft across the rotation, when continuity matters for anonymous starts.
+
+Trust and Tamperability
+-----------------------
+
+.. warning::
+
+   Each step is validated once, in isolation, when it is submitted.
+   The stored draft then lives in an external store such as the cache or Redis, and ``done`` receives the merged ``cleaned_data`` without re-running any validation.
+   A cache that is shared, writable from another process, or otherwise reachable is part of the trust boundary.
+
+   For a sensitive flow, use a signed or encrypted backend so a tampered draft is rejected, and re-check cross-step invariants inside ``done`` rather than trusting the merged dict.
+
+Sensitive Data in Drafts
+------------------------
+
+.. warning::
+
+   ``save_step`` writes each step's cleaned data into the store as-is and keeps it until ``TIMEOUT``, which defaults to ``SESSION_COOKIE_AGE``.
+   A wizard that collects personal data leaves that data in the cache for the full lifetime.
+
+   Set a short ``TIMEOUT`` for drafts that hold personal data, prefer an encrypted or signed backend over a plain shared cache, and rely on ``done`` clearing the draft after a successful finish.
+   The wizard calls ``clear`` after a successful ``done``, so a draft that never completes is what lingers.
+   See :doc:`/content/deployment/checklist` for the production review.
+
+Draft Expiry Mid-Wizard
+-----------------------
+
+A draft can expire between two steps when ``TIMEOUT`` is short or the cache evicts under pressure.
+The backend reads a missing entry as an empty mapping, so ``done`` can receive a partial or empty ``cleaned_data``.
+
+.. warning::
+
+   A naive ``Model.objects.create(**cleaned_data)`` on a partial dict raises a database integrity error instead of a friendly message.
+   Validate completeness at the top of ``done``, for example by checking that every required step key is present, and redirect back to the first step when a draft has expired.
+
 Configuration
 -------------
 
@@ -138,6 +176,11 @@ Point ``DEFAULT_FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
 
 The framework instantiates the backend lazily on first use and caches the instance, so the constructor runs once per process.
 A signed-cookie store or an external draft service follows the same shape, reading its own options from ``OPTIONS``.
+
+The lazy instance lives behind ``next.forms.wizard_backend_manager``, an instance of ``WizardBackendManager``.
+It reads ``DEFAULT_FORM_WIZARD_BACKEND`` on first ``get()`` and caches the result.
+Application code never touches it directly.
+The framework resets it when settings reload, and the test isolation helper :func:`next.forms.reset_form_registration_state` resets it between cases.
 
 See Also
 --------

@@ -3,9 +3,11 @@
 Form Wizards
 ============
 
-A ``next.forms.FormWizard`` routes a sequence of ordinary forms across requests and finalises once on the last step.
+A multi-step form across several requests usually means hand-rolling step routing, stashing partial data in the session, and re-wiring all of it to support the browser back button or a branch that skips a step.
+A ``next.forms.FormWizard`` carries that load.
+It routes a sequence of ordinary forms across requests and finalises once on the last step.
 Each step is a plain ``next.forms.Form`` or ``next.forms.ModelForm``.
-The wizard handles step routing, persists per-step drafts through the configured wizard backend, and calls ``done`` with the merged cleaned data after the final step.
+The wizard handles step routing and back-navigation, supports conditional branching through ``steps_for``, persists per-step drafts through the configured wizard backend, and calls ``done`` with the merged cleaned data after the final step.
 
 .. contents::
    :local:
@@ -91,8 +93,58 @@ Return any ``HttpResponse``, most often a redirect away from the wizard.
 
 Keep ``done`` idempotent.
 A retried final submission can run it again, so guard against creating a duplicate row.
-Concurrent submissions from two browser tabs can also overwrite each other's step data because the backend performs an unlocked read-modify-write.
 Make ``done`` safe to run twice with the same data, for example by using ``get_or_create`` instead of ``create``.
+
+The backend performs an unlocked read-modify-write, so concurrent submissions from two browser tabs overwrite each other's step data.
+Last write wins is the deliberate design for a single linear flow.
+An idempotent ``done`` keeps the final write correct under retries, which is the case that matters.
+A flow that must serialise concurrent tabs needs a custom backend that locks or compares and swaps the stored bucket.
+
+``done`` Takes a Fixed Signature
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``done`` is not dependency-injected.
+The dispatcher calls ``wizard.done(request, cleaned_data)`` directly, so the method always takes exactly ``self``, ``request``, and ``cleaned_data``.
+This differs from an action handler or ``on_valid``, where the injector resolves extra parameters.
+A ``done`` method cannot declare ``DUrl[...]`` markers or named providers and expect them to fill.
+Read the URL kwargs from ``self.url_kwargs`` and any provider value from inside ``done`` when one is needed.
+
+The ``done`` Return Value
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The return value of ``done`` follows the same coercion as an action handler.
+
+- An ``HttpResponse`` subclass is sent as is. A redirect is the usual choice.
+- A string becomes an ``HttpResponse`` body with status 200.
+- A value with a truthy ``url`` attribute becomes an ``HttpResponseRedirect`` to that URL.
+- ``None`` re-renders the origin page with the final step still bound.
+
+.. warning::
+
+   Returning ``None`` from ``done`` does not finalise the wizard.
+   The stored drafts are cleared only when ``done`` returns a response with a status below 400, so a ``None`` return leaves the drafts in place and re-renders the last step.
+   Always return an explicit response, almost always a redirect away from the wizard.
+
+How Step Forms Differ From Standalone Forms
+-------------------------------------------
+
+A wizard step is a plain ``next.forms.Form`` or ``next.forms.ModelForm``, but the wizard drives it through a different path than a standalone form action.
+Two hooks that fire for a standalone form never fire for a step.
+
+``get_initial`` is not called on POST.
+   The dispatcher builds the step form as ``form_class(request.POST, files, **get_form_kwargs())``.
+   It never calls ``get_initial`` on the step class during validation.
+   Prefilling a step instead flows through the saved draft, which the wizard injects as ``initial`` when it builds the unbound form for a GET.
+   Pass cross-step values through ``get_form_kwargs`` on the wizard, not through ``get_initial`` on the step.
+
+``on_valid`` is never called.
+   A standalone form runs ``on_valid`` after it validates.
+   A step does not.
+   The wizard saves the cleaned data, advances to the next step, and runs ``done`` once after the final step.
+   Put per-step side effects nowhere, and put the single finalising write in ``done``.
+
+A step that defines ``get_initial`` or ``on_valid`` sees neither method run inside the wizard.
+Both are silently inert on a step class.
 
 Rendering
 ---------
@@ -119,34 +171,34 @@ Wizard Template API
 The ``wizard`` variable carries the methods used to build progress indicators and navigation.
 The zero-argument methods are auto-called by Django templates, so a template writes ``{{ wizard.current_step }}`` without parentheses.
 
-``current_step()``.
-   The active step name, read from the URL kwarg and defaulting to the first step.
-   Zero-argument, usable directly as ``{{ wizard.current_step }}``.
+.. list-table::
+   :header-rows: 1
+   :widths: 25 45 30
 
-``step_names()``.
-   The ordered step names for this request, after any ``steps_for`` filtering.
-   Zero-argument, iterable as ``{% for name in wizard.step_names %}``.
-
-``is_first()``.
-   ``True`` when the current step is the first step.
-   Zero-argument.
-
-``is_last()``.
-   ``True`` when the current step is the last step.
-   Zero-argument.
-
-``completed_steps()``.
-   The names of steps that already have a saved draft.
-   Zero-argument.
-
-``cleaned_data_so_far()``.
-   The merged cleaned data of every saved step.
-   Zero-argument.
-
-``goto(step)``.
-   A Python helper that returns the page URL for ``step``, derived from the current page path by swapping the step segment.
-   It takes an argument, so Django templates cannot call it inside ``{{ }}``.
-   Call it from a ``@page.context`` or ``@component.context`` function to precompute per-step URLs and publish the result.
+   * - Method
+     - Returns
+     - Notes
+   * - ``current_step()``
+     - The active step name, read from the URL kwarg and defaulting to the first step.
+     - Zero-argument, usable as ``{{ wizard.current_step }}``.
+   * - ``step_names()``
+     - The ordered step names for this request, after any ``steps_for`` filtering.
+     - Zero-argument, iterable as ``{% for name in wizard.step_names %}``.
+   * - ``is_first()``
+     - ``True`` when the current step is the first step.
+     - Zero-argument.
+   * - ``is_last()``
+     - ``True`` when the current step is the last step.
+     - Zero-argument.
+   * - ``completed_steps()``
+     - The names of steps that already have a saved draft.
+     - Zero-argument.
+   * - ``cleaned_data_so_far()``
+     - The merged cleaned data of every saved step.
+     - Zero-argument.
+   * - ``goto(step)``
+     - The page URL for ``step``, derived from the current page path by swapping the step segment.
+     - Takes an argument, so call it from a ``@page.context`` or ``@component.context`` function and publish the result.
 
 A progress bar reads the step status in Python and iterates the precomputed list in the template.
 
@@ -203,6 +255,17 @@ An invalid step re-renders the current step with its errors, and the draft alrea
 Back-navigation works through the same URL.
 Visiting an earlier step prefills its form from the saved draft, so the user sees the values they entered before.
 The current step is always resolved from the URL kwarg, which keeps the browser back button and bookmarked step URLs working.
+
+The ``form`` Variable Has Two Sources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ``form`` published inside the ``{% form %}`` block is built differently on a GET than on a validation failure.
+
+- On a GET the wizard returns ``current_form()``, an unbound form prefilled with the saved draft as its ``initial`` data.
+- On a validation failure the dispatcher injects the bound failing form directly, so ``form`` carries the rejected values and the field errors.
+
+The template variable is the same name in both cases.
+A template that renders ``{{ form.field.errors }}`` shows nothing on a clean GET and the validation errors on a re-render.
 
 Conditional Steps
 -----------------

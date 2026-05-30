@@ -3,8 +3,9 @@
 Validation and Re-render
 ========================
 
+When a submission fails validation, users keep what they typed and you write no re-render code.
 A failing POST does not produce an error page.
-The dispatcher re-renders the origin page with the bound form, the cached dependencies, and a fresh CSRF token.
+The dispatcher re-renders the origin page with the bound form, the cached dependencies, and a fresh CSRF token, so the page comes back with the entered values and field errors in place.
 This page explains the validation and re-render flow end to end.
 
 .. contents::
@@ -50,7 +51,7 @@ A failing form does not redirect, the user stays on the same URL.
 What Survives Re-render
 -----------------------
 
-One important thing carries over from the initial render.
+One thing carries over from the initial render.
 
 Dependency cache.
    Read the per-request cache through ``next.deps.get_request_dep_cache(request)``.
@@ -182,7 +183,7 @@ Edge Cases
 
 - Missing or stale ``_next_form_page`` field returns HTTP 400. Plain HTML forms must set the field to ``{{ current_page_module_path }}``.
 - Origin ``page.py`` renamed or deleted returns HTTP 400 when the path no longer exists on disk.
-- Renaming the form class has no effect on the UID, which is hashed from the action name.
+- The UID is hashed from the scope key and the action name, not the name alone. For a page-scoped form the scope key is the absolute ``page.py`` path, so moving the file or renaming the class changes the UID. For a shared form the scope key is the dotted module, so moving the module changes the UID. See :ref:`UID stability <topics-forms-actions-uid>` in :doc:`actions`.
 - A handler that returns ``HttpResponseRedirect`` skips the re-render path entirely. Use this on success only.
 - Virtual page origins backed by ``template.djx`` resolve through the template loader, as :ref:`topics-forms-validation-rerender-origin` explains above.
 - The re-render emits a fresh ``csrfmiddlewaretoken`` through ``get_token``, so the browser cookie stays valid and the resubmission passes CSRF without a reload.

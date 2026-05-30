@@ -4,7 +4,8 @@ Form Signals
 ============
 
 The forms subsystem emits ``action_registered``, ``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, and ``wizard_completed`` from ``next.forms.signals``.
-Import either from the owning module or from the aggregator ``next.signals``.
+Import the three core signals from the owning module or from the aggregator ``next.signals``.
+The two wizard signals are exported from ``next.forms.signals`` only, so import them from there directly.
 Register receiver imports from ``AppConfig.ready`` so receivers exist before the first request.
 
 .. contents::

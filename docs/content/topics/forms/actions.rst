@@ -71,7 +71,8 @@ The scope of a form class depends on the file it is declared in.
 Page scope.
    A class declared in ``page.py`` or ``component.py`` receives ``page`` scope.
    The framework keys it to the absolute path of that file.
-   Two pages may each declare a ``NoteForm`` without collision.
+   A page-scoped name is local to its directory, the way a name is local to a Python module.
+   Two pages may each declare a ``NoteForm`` with no coordination, and a form opts into a project-wide name by moving to a shared file.
 
 Shared scope.
    A class declared in any other file receives ``shared`` scope.
@@ -84,6 +85,35 @@ Override with ``Meta.scope``.
 
 Customise the set of anchor file names through ``NEXT_FRAMEWORK["FORM_ANCHOR_FILES"]``.
 The default set is ``["page.py", "component.py"]``.
+
+.. _topics-forms-actions-uid:
+
+UID Stability
+-------------
+
+Each action gets a stable URL at ``/_next/form/<uid>/``.
+The UID is the first 16 hex characters of ``SHA-256("next:form:{scope_key}:{name}")``, where ``name`` is the derived action name and ``scope_key`` depends on the scope.
+
+Page scope.
+   ``scope_key`` is the absolute filesystem path of the declaring ``page.py`` or ``component.py``.
+   The UID is therefore stable only as long as the file stays where it is.
+
+Shared scope.
+   ``scope_key`` is the dotted module name, walked up from the file while an ``__init__.py`` exists.
+   The UID is stable as long as the module path stays the same.
+
+This has one practical consequence.
+
+.. warning::
+
+   Moving a page-scoped form's file or renaming its class changes the UID, and so changes the POST URL.
+   A bookmarked or cached ``/_next/form/<uid>/`` URL from the old location stops resolving.
+   The same holds for a shared form when its module moves.
+   Treat a file move or a class rename as a URL change and expect old action URLs to 404.
+
+The UID is derived, never stored in a template by hand.
+A ``{% form "name" %}`` tag reverses the current UID at render time, so a freshly rendered page always posts to the right URL.
+Only out-of-band references to a stale UID break.
 
 The ``on_valid`` Method
 -----------------------
@@ -124,6 +154,14 @@ The classmethod is DI-resolved, so it can receive ``request``, URL parameters, o
 The framework uses it as the ``instance`` kwarg when constructing the form.
 ``BaseForm.get_initial`` must return a dict.
 
+You never call ``get_initial`` yourself.
+The dispatcher calls it through the dependency injector before the initial render.
+``request`` is supplied by the framework.
+A parameter whose name matches a captured URL segment is filled from the URL, so ``note_id`` above receives the ``note_id`` route kwarg.
+Any other parameter resolves through a registered provider, the same as on a handler.
+The base signatures carry no positional arguments of their own: ``BaseForm.get_initial(cls)`` takes none, and ``BaseModelForm.get_initial(cls, **url_kwargs)`` accepts the URL kwargs as keywords.
+Declare only the parameters an override actually reads.
+
 Form-Less Actions
 -----------------
 
@@ -148,6 +186,83 @@ All other files produce shared actions.
 Applying ``@action`` to a class raises ``TypeError`` immediately and triggers the ``next.E053`` system check.
 Form classes register through ``__init_subclass__`` and must not use ``@action``.
 
+Injecting the Form Into a Handler
+---------------------------------
+
+A handler registered with ``@action("name", form_class=...)`` receives the bound, validated form.
+A parameter named ``form`` resolves to it, untyped.
+Annotate the parameter with ``DForm[FormClass]`` to type the form for editors and type checkers.
+
+.. code-block:: python
+   :caption: page.py
+
+   from next.forms import action
+   from next.forms.markers import DForm
+
+   @action("create_contact", form_class=ContactForm)
+   def create_contact(form: DForm[ContactForm]):
+       form.save()
+       return "/contacts/"
+
+The marker only types the parameter.
+The framework still injects the same bound form a parameter named ``form`` would receive.
+See :doc:`/content/ref/decorators` for ``DForm`` and ``FormProvider``.
+
+Dynamic Form Classes
+--------------------
+
+A ``form_class=`` argument may be a factory callable instead of a form class.
+The factory is dependency-injected, so it can read ``request`` and URL kwargs, and it returns one of two shapes.
+
+A plain form class.
+   The dispatcher then calls ``get_initial`` on it and binds the form as usual.
+
+A ``(FormClass, init_kwargs)`` tuple.
+   The dispatcher passes ``**init_kwargs`` straight to the form constructor and skips ``get_initial`` entirely.
+   Use this when the constructor needs arguments that ``get_initial`` cannot supply, such as a preloaded model ``instance`` or a formset ``queryset``.
+
+.. code-block:: python
+   :caption: page.py — a factory returning the tuple form
+
+   from django.shortcuts import get_object_or_404
+   from next.forms import action
+   from next.urls import DUrl
+
+   def edit_form_factory(note_id: DUrl["id", int]) -> tuple:
+       note = get_object_or_404(Note, pk=note_id)
+       return NoteForm, {"instance": note}
+
+   @action("edit_note", form_class=edit_form_factory)
+   def edit_note(form: NoteForm):
+       form.save()
+       return "/notes/"
+
+The tuple path bypasses ``get_initial``, so do not rely on ``get_initial`` running when a factory returns the tuple form.
+See :doc:`formsets` for the same pattern applied to formset and inline-formset actions.
+
+Preventing Registration
+-----------------------
+
+A project base class that other forms subclass should not register as an action of its own.
+Set ``Meta.abstract = True`` to skip auto-registration.
+
+.. code-block:: python
+   :caption: app/forms.py — a shared base that does not register
+
+   class TenantForm(next.forms.Form):
+       class Meta:
+           abstract = True
+
+       def on_valid(self, request):
+           return redirect_to_origin(request)
+
+   class InviteForm(TenantForm):
+       email = next.forms.EmailField()
+
+``TenantForm`` is skipped at the ``__init_subclass__`` hook and never appears in the registry.
+``InviteForm`` registers normally as ``invite_form`` and inherits the base behaviour.
+The same ``Meta.abstract`` flag works on a ``FormWizard`` base class.
+
 System Checks
 -------------
 
@@ -171,12 +286,16 @@ The forms subsystem contributes Django system checks that run through ``python m
 ``next.E049``
    ``Meta.instance_from_url`` is set on a class that does not subclass ``next.forms.ModelForm``.
 
+``next.E052``
+   ``FORM_ANCHOR_FILES`` is not None or a list, tuple, or set of strings.
+
 ``next.E053``
    ``@action`` was applied to a class.
    Remove the decorator and let the class register through ``__init_subclass__``.
 
-A UID hash collision between two distinct action names is not reported as a system check.
-It raises ``ImproperlyConfigured`` at import time.
+A UID hash collision between two distinct registrations is not reported as a system check.
+It raises ``ImproperlyConfigured`` at import time when two different ``(scope_key, name)`` pairs hash to the same UID.
+This is distinct from the ``next.E041`` name collision above, which fires when one name is registered from two different handlers.
 
 See Also
 --------

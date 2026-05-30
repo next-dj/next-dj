@@ -42,7 +42,7 @@ Add the pytest configuration.
    addopts = --tb=short
 
 Add a ``conftest.py`` at the project root.
-The conftest imports every ``page.py`` so actions register before the tests run.
+The conftest imports ``notes.forms`` and every ``page.py`` so actions register before the tests run.
 The ``PAGES_DIR`` path must match the actual app and page-root names, so a project that did not name its app ``notes`` adjusts the path accordingly.
 
 .. code-block:: python
@@ -50,22 +50,31 @@ The ``PAGES_DIR`` path must match the actual app and page-root names, so a proje
 
    from pathlib import Path
    import pytest
-   from next.testing.isolation import reset_registries
+   from notes import forms  # noqa: F401
+   from next.forms import autodiscover_forms
    from next.testing.loaders import eager_load_pages
 
    PAGES_DIR = Path(__file__).resolve().parent / "notes" / "pages"
 
-   @pytest.fixture(autouse=True)
-   def _next_dj_isolation():
-       reset_registries()
+   @pytest.fixture(autouse=True, scope="session")
+   def _next_dj_registration():
+       autodiscover_forms()
        eager_load_pages(PAGES_DIR)
        yield
-       reset_registries()
 
-``reset_registries()`` runs first to create fresh form-action and component backends, so every ``@action`` and ``@component.context`` registration that follows lands on a clean slate.
-``eager_load_pages`` then walks ``notes/pages`` and imports every ``page.py``, which runs the decorators and registers them on those fresh backends.
-The teardown ``reset_registries()`` clears all state before the next test runs.
+Importing ``notes.forms`` at the top registers ``CreateNoteForm`` and ``DeleteNoteForm`` exactly as startup autodiscovery does.
+Form classes register through ``__init_subclass__`` when their module is first imported, so the registration survives for the whole session and re-importing a cached module does nothing.
+``autodiscover_forms`` covers any other app whose forms live in ``<app>/forms.py``.
+``eager_load_pages`` walks ``notes/pages`` and imports every ``page.py``, which runs the page decorators.
+Both calls are idempotent, so the session-scoped fixture runs the registration once.
 Database access uses the standard ``db`` fixture from pytest-django, no extra fixture is needed.
+
+.. note::
+
+   Do not call ``reset_registries()`` in an autouse fixture for this project.
+   It rebuilds the form-action backend from settings and drops every form registered at import.
+   Re-importing ``notes/forms.py`` will not re-register them because Python caches the module, so the next ``post_action`` raises an unknown-action error.
+   Reach for ``reset_registries()`` only in a test that deliberately swaps ``NEXT_FRAMEWORK`` backends, and re-register the affected forms inside that test.
 
 Write the First End-to-End Test
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -116,7 +125,6 @@ The framework gives each action a stable URL.
 .. code-block:: python
    :caption: tests/test_notes_actions.py
 
-   from django.urls import reverse
    from notes.models import Note
    from next.testing.client import NextClient
 
@@ -125,16 +133,17 @@ The framework gives each action a stable URL.
        response = client.post_action("create_note_form", {"title": "From test", "body": "body"})
        assert response.status_code == 302
        assert Note.objects.filter(title="From test").exists()
-       assert response["Location"] == reverse("next:page_")
+       assert response["Location"] == "/"  # redirect_to_origin falls back to "/"
 
 ``post_action`` looks the action name up through ``resolve_action_url`` and posts the data to the dispatch endpoint.
 The action name ``create_note_form`` is derived automatically from the class name ``CreateNoteForm``.
-The redirect target matches ``next:page_`` because ``on_valid`` calls ``redirect_to_origin``.
+The redirect target is ``"/"`` because ``on_valid`` calls ``redirect_to_origin``, which sends the visitor back to the page that rendered the form and falls back to ``"/"``.
 
 Capture Action Signals
 ~~~~~~~~~~~~~~~~~~~~~~
 
-Every dispatch fires the ``action_dispatched`` signal.
+Every successful dispatch fires the ``action_dispatched`` signal.
+A validation failure fires ``form_validation_failed`` instead and never reaches ``action_dispatched``.
 ``SignalRecorder`` collects events so the test can assert what happened.
 
 .. code-block:: python

@@ -23,9 +23,8 @@ None of these fit the create-one-row shape that :doc:`modelforms` covers, so a p
 Registration
 ------------
 
-A plain ``Form`` registers exactly like a ``ModelForm``.
-Subclassing ``next.forms.Form`` triggers the ``__init_subclass__`` hook, which records the file the class was declared in and derives the action name from the ``snake_case`` of the class name.
-There is no ``@action`` decorator and no manual registry call.
+Subclassing ``next.forms.Form`` registers the class and derives its action name and scope, exactly like a ``ModelForm``.
+See :doc:`actions` for the registration rules.
 
 .. code-block:: python
    :caption: obs/forms.py — auto-registered as ``window_filter_form`` (shared)
@@ -52,7 +51,6 @@ Handling Submissions
 --------------------
 
 The default ``on_valid`` on a plain ``Form`` calls ``redirect_to_origin(request)`` and returns.
-That suits a form whose only job is to record input and re-render the page it came from.
 
 Override ``on_valid`` when the submission needs a different redirect or its own logic.
 A filter form, for example, redirects with the picked value on the query string.

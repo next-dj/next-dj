@@ -3,9 +3,11 @@
 Field Components
 ================
 
-``ComponentWidget`` is a form widget that renders a registered next.dj component instead of a Django widget template.
+Changing an input's classes or accessibility markup across a project usually means editing every form, or overriding Django's project-wide ``FORM_RENDERER`` and its widget templates.
+``ComponentWidget`` keeps that change in one place.
+It is a form widget that renders a registered next.dj component instead of a Django widget template.
 One field maps to one component.
-The component owns the markup and the styling, so the same ``input`` or ``textarea`` lives in a single ``component.djx`` and every form reuses it.
+The component owns the markup and the styling, so the same ``input`` or ``textarea`` lives in a single ``component.djx`` that every form reuses, and a styling or accessibility change ships once instead of propagating across every form.
 
 .. contents::
    :local:
@@ -93,6 +95,15 @@ HTML ``attrs``.
 Extra keyword arguments.
    Every keyword passed to ``ComponentWidget("input", placeholder=..., rows=...)`` is spread to the top level too.
    A ``placeholder`` argument reaches the template as ``{{ placeholder }}``.
+
+.. warning::
+
+   ``value`` is user-supplied input.
+   On a bound form it carries what the visitor posted, so a component template must let Django auto-escape it.
+   Rendering it through ``{{ value|safe }}`` or inside ``{% autoescape off %}`` turns the posted value into HTML, and the widget then wraps the whole render in a ``SafeString``, which produces a stored or reflected cross-site scripting vector.
+   Bind ``value`` plainly, as ``value="{{ value }}"``.
+
+   The ``attrs`` props and the extra keyword arguments are developer-supplied, not request input, so the same caution does not apply to them.
 
 .. code-block:: jinja
    :caption: a minimal input component

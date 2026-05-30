@@ -52,6 +52,18 @@ Every page gets a stable URL name derived from its directory path.
 The name is predictable, so a reader can reverse it without consulting a URL configuration file.
 Moving a directory changes both the URL and its name, and ``{% url %}`` calls must be updated to match.
 
+Forms and Form Dispatch
+-----------------------
+
+A form action is wired the same way a page is.
+The class is the unit of registration, file scope decides its reach, and ``__init_subclass__`` registers it the moment Python runs the ``class`` statement, so a form needs no URL entry, no view, and no decorator.
+This follows the same filesystem-as-source-of-truth rule the rest of the framework keeps.
+
+Every action posts to one endpoint, ``/_next/form/<uid>/``, where the ``uid`` is a stable short id derived from the action's scope and name.
+A per-view dispatch URL would couple each form to a route and re-introduce the URL wiring file scope exists to avoid.
+A single endpoint keyed by a derived uid keeps the invariant that moving a form between pages, or declaring two forms of the same name in different files, never changes the URL configuration.
+The dispatcher resolves the uid back to the registered action and runs the validation and re-render pipeline.
+
 Small Public Surfaces
 ---------------------
 

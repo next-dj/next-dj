@@ -69,6 +69,25 @@ Open redirect.
    ``HttpResponseRedirect`` accepts any URL.
    Validate destinations before passing user input into a redirect target.
 
+Object-level authorization.
+   A lookup keyed only on a URL value loads whatever row matches, regardless of who owns it.
+   The ModelForm ``Meta.instance_from_url`` lookup is unscoped, so scope it to the user or tenant.
+   See :doc:`/content/topics/forms/modelforms` for the ownership-scoped pattern and :doc:`di-and-untrusted-input` for the hidden URL parameters that feed the lookup.
+
+Access Control
+--------------
+
+Form actions are unauthenticated by default.
+The ``/_next/form/<uid>/`` endpoint accepts a POST from any visitor, so a registered edit or delete action runs without an identity check unless the handler adds one.
+
+Enforce access at one of three layers.
+
+- Check ``request.user.is_authenticated`` and ownership inside ``on_valid`` before ``self.save()``.
+- Apply a project-wide login requirement through middleware, see :doc:`/content/howto/require-login-on-pages`.
+- Enforce a policy in a custom form action backend that wraps every dispatch.
+
+An action that mutates data and an action that loads an instance through ``instance_from_url`` both need this guard.
+
 Production Hardening
 --------------------
 

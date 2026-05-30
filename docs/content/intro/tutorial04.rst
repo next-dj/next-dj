@@ -38,14 +38,15 @@ Create ``notes/forms.py``.
            model = Note
            fields = ("title", "body")
 
-       def on_valid(self, request: HttpRequest):
-           self.save()
-           return redirect_to_origin(request)
+       # The inherited ModelForm.on_valid already saves and redirects to origin,
+       # so CreateNoteForm needs no override.
 
    class DeleteNoteForm(Form):
        confirm = BooleanField(required=True)
 
        def on_valid(self, request: HttpRequest):
+           # Stub: redirect only, no delete yet. The Delete a Note section
+           # below replaces this with the real delete logic.
            return redirect_to_origin(request)
 
 ``next.forms.ModelForm`` and ``next.forms.Form`` are the framework form base classes.
@@ -164,6 +165,8 @@ It receives the same DI-resolved parameters as any other callable, including URL
        note = form.save()
        return HttpResponseRedirect(reverse("next:page_notes_id", kwargs={"id": note.id}))
 
+The reverse name ``next:page_notes_id`` assumes the untyped ``notes/[id]/`` directory used in this tutorial.
+A typed segment such as ``notes/[int:id]/`` produces ``page_notes_int_id`` instead.
 The factory passed to ``form_class`` is dependency-resolved at dispatch time, so it receives the captured URL ``id`` and returns the form class paired with the ``instance`` to bind.
 The dispatcher builds and validates that bound form before it calls ``update_note``, so the handler only saves it.
 An ``id`` that matches no note makes ``get_object_or_404`` return Django's standard 404 response.
@@ -253,7 +256,7 @@ The complete file now looks like this.
    from django.shortcuts import get_object_or_404
    from django.urls import reverse
    from notes.models import Note
-   from next.forms import BooleanField, Form, ModelForm, redirect_to_origin
+   from next.forms import BooleanField, Form, ModelForm
    from next.urls import DUrl
 
    class CreateNoteForm(ModelForm):
@@ -261,9 +264,7 @@ The complete file now looks like this.
            model = Note
            fields = ("title", "body")
 
-       def on_valid(self, request: HttpRequest):
-           self.save()
-           return redirect_to_origin(request)
+       # ModelForm.on_valid saves and redirects to origin by default.
 
    class DeleteNoteForm(Form):
        confirm = BooleanField(required=True)

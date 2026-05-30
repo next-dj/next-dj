@@ -275,6 +275,12 @@ Warnings
    * - ``next.W046``
      - A form class is declared in a file outside ``BASE_DIR`` and will not be registered automatically.
      - ``next.forms.checks``
+   * - ``next.W054``
+     - A ``ComponentWidget`` names a component that does not resolve.
+     - ``next.forms.checks``
+   * - ``next.W055``
+     - A ``ComponentWidget`` is attached to a ``FileField`` or ``MultiValueField``, which it does not support.
+     - ``next.forms.checks``
 
 .. note::
 

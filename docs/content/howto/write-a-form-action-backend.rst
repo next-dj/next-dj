@@ -79,6 +79,38 @@ Return an ``HttpResponse`` before calling ``super().dispatch`` to short circuit.
        def _over_limit(self, request) -> bool:
            return False
 
+Read an Option
+~~~~~~~~~~~~~~
+
+A backend reads its own settings from the ``OPTIONS`` dict of its config entry.
+The factory passes the whole config entry to the constructor, so declare ``__init__`` and pull ``OPTIONS`` out of it.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   from typing import Any
+   from next.forms import RegistryFormActionBackend
+
+   class RateLimitedBackend(RegistryFormActionBackend):
+       def __init__(self, config: dict[str, Any] | None = None) -> None:
+           super().__init__(config)
+           options = (config or {}).get("OPTIONS", {})
+           self._limit = options.get("RATE_PER_MINUTE", 60)
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   NEXT_FRAMEWORK = {
+       "DEFAULT_FORM_ACTION_BACKENDS": [
+           {
+               "BACKEND": "notes.backends.RateLimitedBackend",
+               "OPTIONS": {"RATE_PER_MINUTE": 30},
+           },
+       ]
+   }
+
+Forward ``config`` to ``super().__init__`` so the registry is set up before you read any option.
+
 Verification
 ------------
 
