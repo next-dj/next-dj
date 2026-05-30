@@ -15,6 +15,7 @@ from django.http import (
 )
 
 from next.deps import REQUEST_DEP_CACHE_ATTR, resolver
+from next.deps.resolver import _cached_signature
 from next.utils import caller_source_path
 
 from ._request_utils import (
@@ -102,7 +103,7 @@ def _form_from_initial_data(
 def _accepts_var_keyword(func: "Callable[..., Any]") -> bool:
     """Return True when `func` declares a `**kwargs` parameter."""
     try:
-        sig = inspect.signature(func)
+        sig = _cached_signature(func)
     except (TypeError, ValueError):
         return False
     return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())

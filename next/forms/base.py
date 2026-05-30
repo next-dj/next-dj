@@ -16,7 +16,7 @@ from django.shortcuts import get_object_or_404
 
 from next.conf import next_framework_settings
 
-from .backends import ActionRegistration
+from .backends import ActionRegistration, _resolved_path_str
 from .manager import form_action_manager
 from .uid import redirect_to_origin
 
@@ -32,7 +32,7 @@ def _to_snake_case(name: str) -> str:
 
 def _is_framework_file(file_path: str) -> bool:
     try:
-        Path(file_path).resolve().relative_to(_FRAMEWORK_ROOT)
+        Path(_resolved_path_str(file_path)).relative_to(_FRAMEWORK_ROOT)
     except ValueError:
         return False
     else:
@@ -44,7 +44,9 @@ def _compute_scope(file_path: str) -> str:
     anchor_names = frozenset(
         next_framework_settings.FORM_ANCHOR_FILES or _ANCHOR_FILE_NAMES
     )
-    return "page" if Path(file_path).resolve().name in anchor_names else "shared"
+    return (
+        "page" if Path(_resolved_path_str(file_path)).name in anchor_names else "shared"
+    )
 
 
 _outside_base_dir_classes: list[tuple[str, str]] = []
@@ -137,7 +139,7 @@ def _find_definition_frame() -> str:
             continue
         # Skip our own framework files
         try:
-            p.resolve().relative_to(_FRAMEWORK_ROOT)
+            Path(_resolved_path_str(filename)).relative_to(_FRAMEWORK_ROOT)
             depth += 1
             continue
         except ValueError:
@@ -162,7 +164,9 @@ def _auto_register_form_class(cls: type) -> None:
     base = getattr(settings, "BASE_DIR", None)
     if base is not None:
         try:
-            Path(file_path).resolve().relative_to(Path(base).resolve())
+            Path(_resolved_path_str(file_path)).relative_to(
+                Path(_resolved_path_str(str(base)))
+            )
         except ValueError:
             _outside_base_dir_classes.append((cls.__qualname__, file_path))
             return
@@ -177,7 +181,7 @@ def _auto_register_form_class(cls: type) -> None:
     form_action_manager.register_action(
         ActionRegistration(
             name=name,
-            file_path=str(Path(file_path).resolve()),
+            file_path=_resolved_path_str(file_path),
             scope=scope,
             form_class=cls,
         )

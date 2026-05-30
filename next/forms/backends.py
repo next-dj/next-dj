@@ -32,9 +32,27 @@ if TYPE_CHECKING:
     from django.urls import URLPattern
 
 
+# Memoised by raw path: both hit a filesystem syscall on every registration and
+# scoped lookup. No invalidation needed since resolve() is process-stable.
+_resolved_path_cache: dict[str, str] = {}
+_dotted_module_cache: dict[str, str] = {}
+
+
+def _resolved_path_str(file_path: str) -> str:
+    """Return the resolved absolute path string, memoised by raw path."""
+    resolved = _resolved_path_cache.get(file_path)
+    if resolved is None:
+        resolved = str(Path(file_path).resolve())
+        _resolved_path_cache[file_path] = resolved
+    return resolved
+
+
 def _file_to_dotted_module(file_path: str) -> str:
     """Return a dotted module name by walking up while __init__.py exists."""
-    p = Path(file_path).resolve()
+    cached = _dotted_module_cache.get(file_path)
+    if cached is not None:
+        return cached
+    p = Path(_resolved_path_str(file_path))
     parts: list[str] = []
     current = p.with_suffix("")
     while True:
@@ -44,9 +62,12 @@ def _file_to_dotted_module(file_path: str) -> str:
         parts.append(current.name)
         current = current.parent
     if not parts:
-        return p.stem
-    parts.reverse()
-    return ".".join(parts)
+        dotted = p.stem
+    else:
+        parts.reverse()
+        dotted = ".".join(parts)
+    _dotted_module_cache[file_path] = dotted
+    return dotted
 
 
 _action_collisions: dict[str, set[tuple[str, str]]] = {}
@@ -175,7 +196,7 @@ class RegistryFormActionBackend(FormActionBackend):
         form_class = registration.form_class
         wizard_class = registration.wizard_class
         if scope == "page":
-            scope_key = str(Path(file_path).resolve())
+            scope_key = _resolved_path_str(file_path)
         else:
             scope_key = _file_to_dotted_module(file_path)
 
@@ -224,7 +245,7 @@ class RegistryFormActionBackend(FormActionBackend):
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
         """Return the reverse URL for a registered action name."""
         if page_path is not None:
-            key = (str(Path(page_path).resolve()), action_name)
+            key = (_resolved_path_str(page_path), action_name)
             if key in self._registry:
                 uid = self._registry[key]["uid"]
                 if uid is not None:
@@ -269,7 +290,7 @@ class RegistryFormActionBackend(FormActionBackend):
     ) -> "dict[str, Any] | None":
         """Return stored `ActionMeta` for the name, if any."""
         if page_path is not None:
-            key = (str(Path(page_path).resolve()), action_name)
+            key = (_resolved_path_str(page_path), action_name)
             meta = self._registry.get(key)
             if meta is not None:
                 return cast("dict[str, Any]", meta)

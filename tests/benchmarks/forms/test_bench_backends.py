@@ -66,3 +66,34 @@ class TestBenchFormActionBackend:
         self, populated_form_backend: RegistryFormActionBackend, benchmark
     ) -> None:
         benchmark(populated_form_backend.generate_urls)
+
+
+class TestBenchScopedLookup:
+    """Lookups that pass ``page_path`` resolve the path before the keyed hit.
+
+    This is the per-request path the ``{% form %}`` tag drives, distinct from the
+    unscoped name-index fallback in ``test_get_meta_hit``.
+    """
+
+    @staticmethod
+    def _page_scoped_backend() -> RegistryFormActionBackend:
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="scoped_action",
+                file_path=__file__,
+                scope="page",
+                handler=noop_form_handler,
+            )
+        )
+        return backend
+
+    @pytest.mark.benchmark(group="forms.backends")
+    def test_get_meta_scoped_hit(self, benchmark) -> None:
+        backend = self._page_scoped_backend()
+        benchmark(backend.get_meta, "scoped_action", __file__)
+
+    @pytest.mark.benchmark(group="forms.backends")
+    def test_get_meta_scoped_miss(self, benchmark) -> None:
+        backend = self._page_scoped_backend()
+        benchmark(backend.get_meta, "scoped_action", "/no/such/page.py")

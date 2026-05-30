@@ -10,7 +10,7 @@ Providers register by simply importing their module, which runs the
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast, get_type_hints
 
 from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache, DependencyCycleError
 from .context import RESERVED_KEYS, ResolutionContext
@@ -24,6 +24,38 @@ if TYPE_CHECKING:
 
 
 T = TypeVar("T")
+
+
+# Memoise per-callable introspection. A bound method is recreated each access, so
+# key by its stable `__func__` (never the instance) plus a bound flag.
+_signature_cache: dict[Any, inspect.Signature] = {}
+_type_hints_cache: dict[Any, dict[str, Any]] = {}
+
+
+def _introspect_key(func: Callable[..., Any]) -> tuple[object, bool]:
+    if inspect.ismethod(func):
+        return (func.__func__, True)
+    return (func, False)
+
+
+def _cached_signature(func: Callable[..., Any]) -> inspect.Signature:
+    """Return `inspect.signature(func)`, memoised per callable."""
+    key = _introspect_key(func)
+    cached = _signature_cache.get(key)
+    if cached is None:
+        cached = inspect.signature(func)
+        _signature_cache[key] = cached
+    return cached
+
+
+def _cached_type_hints(func: Callable[..., Any]) -> dict[str, Any]:
+    """Return `get_type_hints(func)`, memoised per callable."""
+    key = _introspect_key(func)
+    cached = _type_hints_cache.get(key)
+    if cached is None:
+        cached = get_type_hints(func)
+        _type_hints_cache[key] = cached
+    return cached
 
 
 class DependencyResolver:
@@ -156,7 +188,7 @@ class DependencyResolver:
         self._resolve_call_stack.append(func)
         try:
             try:
-                sig = inspect.signature(func)
+                sig = _cached_signature(func)
             except (ValueError, TypeError):
                 return {}
 

@@ -11,7 +11,7 @@ from django.core.cache import caches
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 
-from .backends import ActionRegistration
+from .backends import ActionRegistration, _resolved_path_str
 from .base import (
     _compute_scope,
     _find_definition_frame,
@@ -172,7 +172,9 @@ def _auto_register_wizard_class(cls: type) -> None:
     base = getattr(settings, "BASE_DIR", None)
     if base is not None:
         try:
-            Path(file_path).resolve().relative_to(Path(base).resolve())
+            Path(_resolved_path_str(file_path)).relative_to(
+                Path(_resolved_path_str(str(base)))
+            )
         except ValueError:
             _outside_base_dir_classes.append((cls.__qualname__, file_path))
             return
@@ -189,7 +191,7 @@ def _auto_register_wizard_class(cls: type) -> None:
     form_action_manager.register_action(
         ActionRegistration(
             name=name,
-            file_path=str(Path(file_path).resolve()),
+            file_path=_resolved_path_str(file_path),
             scope=scope,
             wizard_class=cls,
         )
@@ -225,6 +227,7 @@ class FormWizard:
             self.base_path = getattr(request, "path", "") or ""
         self.wizard_id = _to_snake_case(type(self).__name__)
         self._backend = wizard_backend_manager.get()
+        self._loaded: dict[str, Any] | None = None
 
     @classmethod
     def _meta(cls) -> object:
@@ -247,24 +250,32 @@ class FormWizard:
         """Return extra kwargs for a step form. Override for cross-step inputs."""
         return {}
 
+    def _stored_steps(self) -> dict[str, Any]:
+        """Return the stored `{step: data}` mapping, loaded once per request."""
+        if self._loaded is None:
+            self._loaded = self._backend.load(self.request, self.wizard_id)
+        return self._loaded
+
     def cleaned_data_so_far(self) -> dict[str, Any]:
         """Return the merged cleaned data of every stored step."""
         merged: dict[str, Any] = {}
-        for data in self._backend.load(self.request, self.wizard_id).values():
+        for data in self._stored_steps().values():
             merged.update(data)
         return merged
 
     def completed_steps(self) -> list[str]:
         """Return the names of steps that already have stored data."""
-        return list(self._backend.load(self.request, self.wizard_id))
+        return list(self._stored_steps())
 
     def save_step(self, step: str, data: dict[str, Any]) -> None:
         """Persist cleaned data for one step through the backend."""
         self._backend.save_step(self.request, self.wizard_id, step, data)
+        self._loaded = None
 
     def clear_storage(self) -> None:
         """Drop every stored step for this wizard through the backend."""
         self._backend.clear(self.request, self.wizard_id)
+        self._loaded = None
 
     def step_names(self) -> list[str]:
         """Return the ordered step names for this request."""
@@ -313,7 +324,7 @@ class FormWizard:
         if form_class is None:
             return None
         kwargs = dict(self.get_form_kwargs())
-        stored = self._backend.load(self.request, self.wizard_id).get(step)
+        stored = self._stored_steps().get(step)
         if stored is not None:
             kwargs.setdefault("initial", dict(stored))
         return cast("DjangoForm", form_class(**kwargs))
