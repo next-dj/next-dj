@@ -25,15 +25,17 @@ An equivalent processor that supplies ``request`` works as well, so layouts rece
 Origin Validation
 -----------------
 
-The framework adds a second hidden field named ``_next_form_page`` with the absolute path to the rendering page.
-The dispatcher validates the path before invoking the handler.
+The framework adds a second hidden field named ``_next_form_page``.
+The ``{% form %}`` tag sets it to the BASE_DIR-relative token for the rendering ``page.py``, so the HTML never exposes the server filesystem layout.
+The dispatcher reads the field only when it has to re-render the origin page: on a validation failure, and when a form-backed handler returns ``None`` so the page renders again.
+A valid submission whose handler returns a response never reads the field, so the check is a re-render lookup, not a pre-handler origin gate.
 
-Two checks apply, and they fail in different ways.
+When the field is read, these checks apply.
 
-The posted ``_next_form_page`` must resolve under ``settings.BASE_DIR``.
-It must name ``page.py`` (the framework stores the absolute path to that module).
+A relative value resolves against ``settings.BASE_DIR``, and an absolute path is accepted as is.
+The resolved path must stay under ``BASE_DIR`` and must name ``page.py``.
 Either the file must exist, or the directory must contain a sibling ``template.djx`` so virtual routes can re-render after validation failures.
-A submission that fails this check returns HTTP 400 and the handler does not run.
+A re-render whose field fails these checks returns HTTP 400.
 
 The hidden field ``_next_form_origin`` carries a same-site path that starts with ``/`` and not with ``//``.
 The ``{% form %}`` tag emits it on every render.
@@ -80,7 +82,7 @@ AJAX Submissions
 JavaScript that posts to the dispatch URL must supply the CSRF token, in the ``X-CSRFToken`` header or the ``csrfmiddlewaretoken`` body field, and the ``_next_form_page`` value in the request body.
 The standard Django approach reads the token from the cookie or from a meta tag.
 
-The simplest way to obtain the origin path is to read the hidden ``_next_form_page`` field that the rendered ``{% form %}`` tag already emits.
+The simplest way to obtain the page token is to read the hidden ``_next_form_page`` field that the rendered ``{% form %}`` tag already emits.
 
 .. code-block:: javascript
    :caption: fetch wrapper
@@ -91,13 +93,13 @@ The simplest way to obtain the origin path is to read the hidden ``_next_form_pa
    const token = cookie ? cookie.split("=")[1] : "";
 
    const formElement = document.querySelector("form");
-   const originPath = formElement.elements._next_form_page.value;
+   const pageToken = formElement.elements._next_form_page.value;
 
    fetch(formElement.action, {
      method: "POST",
      headers: {"X-CSRFToken": token},
      body: new URLSearchParams({
-       _next_form_page: originPath,
+       _next_form_page: pageToken,
        title: "From JS",
      }),
    });
@@ -106,6 +108,7 @@ This works because every ``{% form %}`` block emits the ``_next_form_page`` hidd
 
 To post without a rendered form, re-publish the existing value through a callable that resolves it from the page context.
 Declare a ``page.py`` callable annotated ``path: str = Context("current_page_module_path")`` and decorate it with ``@context("current_page_module_path", serialize=True)`` so the value reaches ``window.Next.context``.
+The published value is the absolute module path, which the validator accepts alongside the relative token.
 
 Wizard Steps
 ------------
@@ -151,7 +154,7 @@ Common Pitfalls
 ---------------
 
 Form post without ``_next_form_page``.
-   The dispatcher returns HTTP 400.
+   A validation failure or a handler ``None`` return cannot re-render the origin page and returns HTTP 400.
    Always use ``{% form %}`` or include the field manually.
 
 Stale token after deploy.

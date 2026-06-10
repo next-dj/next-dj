@@ -31,9 +31,9 @@ the last through a custom `BabelJsxBackend` that emits
 | `/stats/components/` | Per-component render counts. |
 | `/stats/forms/` | Action dispatch and validation-failure counts. |
 | `/stats/static/` | Asset, dedup, and HTML-injection totals. |
-| `POST obs:filter_window` | Persists the chosen window via querystring and redirects back. |
+| `POST` to `window_filter_form` | Persists the chosen window via querystring and redirects back. |
 
-The filter form uses the framework `{% form @action %}` tag.
+The filter form uses the framework `{% form "window_filter_form" %}` tag.
 Submitting it fires `forms.action_dispatched` so the example exercises
 the full form path without adding a model write.
 
@@ -235,11 +235,13 @@ the table fires at least once during the walk.
 
 ### 6. The filter form, time-bucketing, and `action_dispatched`
 
-`WindowFilterForm` carries one `ChoiceField`. The action handler in
-`obs/dashboards/stats/page.py` redirects with `?window=...` and
-returns a `HttpResponseRedirect` so subsequent renders inherit the new
-window through the `@context("window", inherit_context=True)`
-callable on the same page.
+`WindowFilterForm` carries one `ChoiceField`. Subclassing
+`next.forms.Form` in [obs/forms.py](obs/forms.py) auto-registers the
+action as `window_filter_form`. Its `on_valid` method redirects with
+`?window=...` and returns a `HttpResponseRedirect` so subsequent
+renders inherit the new window through the
+`@context("window", inherit_context=True)` callable in
+`obs/dashboards/stats/page.py`.
 
 Behind the form, `metrics.incr` writes both a cumulative counter and
 a minute-floor bucket key. `metrics.read_window(kind, minutes)` sums
@@ -251,9 +253,9 @@ sub-pages (`/stats/pages/`, `/stats/components/`, `/stats/forms/`,
 
 The form composite lives under
 [`_widgets/filter_window/`](obs/dashboards/_widgets/filter_window/).
-It uses `{% form @action="obs:filter_window" %}` so submission goes
-through the framework dispatcher and `forms.action_dispatched` fires
-end to end, not only in tests.
+It uses `{% form "window_filter_form" %}` so submission goes through
+the framework dispatcher and `forms.action_dispatched` fires end to
+end, not only in tests.
 
 ### 7. The flush command
 
@@ -286,6 +288,6 @@ calling out before adopting the pattern in production.
 ## Further reading
 
 - Aggregated signal catalogue at
-  [docs/content/api/signals.rst](../../docs/content/api/signals.rst).
-- Static-asset pipeline and the per-decorator serializer override at
-  [docs/content/guide/static-assets.rst](../../docs/content/guide/static-assets.rst).
+  [docs/content/ref/signals.rst](../../docs/content/ref/signals.rst).
+- JS context serialization and the per-decorator serializer override at
+  [docs/content/topics/static-assets/js-context.rst](../../docs/content/topics/static-assets/js-context.rst).

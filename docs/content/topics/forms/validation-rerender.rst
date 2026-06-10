@@ -17,8 +17,9 @@ This page explains the validation and re-render flow end to end.
 The Origin Page
 ---------------
 
-Every rendered ``{% form %}`` tag emits a hidden ``_next_form_page`` field that contains the absolute path to the current ``page.py``.
+Every rendered ``{% form %}`` tag emits a hidden ``_next_form_page`` field that carries the BASE_DIR-relative token for the current ``page.py``.
 The dispatcher reads that field on the re-render branch to locate the origin page.
+A relative value resolves against ``BASE_DIR``, and an absolute path is accepted as is.
 
 On a validation failure the dispatcher rejects the submission and returns ``HTTP 400 Missing or invalid _next_form_page`` when any of the following holds.
 
@@ -149,9 +150,9 @@ Origin Versus Page Fields
 Two hidden fields travel with every submission and serve different roles.
 
 ``_next_form_page``.
-   The absolute filesystem path to the ``page.py`` that rendered the form.
-   The dispatcher uses it to locate the origin module for the re-render.
-   It is a disk path, never a URL.
+   The BASE_DIR-relative token for the ``page.py`` that rendered the form.
+   The dispatcher resolves it against ``BASE_DIR`` to locate the origin module for the re-render.
+   It is a filesystem token, never a URL.
 
 ``_next_form_origin``.
    The request path the form was rendered under, such as ``/notes/42/``.
@@ -190,7 +191,7 @@ See :doc:`signals` for the full list and payload shapes.
 Edge Cases
 ----------
 
-- Missing or stale ``_next_form_page`` field returns HTTP 400. Plain HTML forms must set the field to ``{{ current_page_module_path }}``.
+- Missing or stale ``_next_form_page`` field returns HTTP 400. Plain HTML forms must set the field to the BASE_DIR-relative path of the page module, the token the tag emits.
 - Origin ``page.py`` renamed or deleted returns HTTP 400 when the path no longer exists on disk.
 - The UID is hashed from the scope key and the action name, not the name alone. For a page-scoped form the scope key is the absolute ``page.py`` path, so moving the file or renaming the class changes the UID. For a shared form the scope key is the dotted module, so moving the module changes the UID. See :ref:`UID stability <topics-forms-actions-uid>` in :doc:`actions`.
 - A handler that returns ``HttpResponseRedirect`` skips the re-render path entirely. Use this on success only.

@@ -21,20 +21,38 @@ The Form Tag
      <button type="submit">Save</button>
    {% endform %}
 
-The tag accepts exactly one argument: the action name as a quoted string or a context variable that resolves to a string.
-An opening tag with the wrong number of arguments raises ``TemplateSyntaxError`` at parse time.
+The first argument is the action name as a quoted string or a context variable that resolves to a string.
+An opening tag without the action name raises ``TemplateSyntaxError`` at parse time.
+Optional ``key="value"`` arguments after the name render as HTML attributes on the ``<form>`` element (see `HTML Attributes`_ below).
 
 The tag does the following.
 
 1. Looks up the action name in the registry, preferring a page-scoped match for the current page, then falling back to shared scope.
 2. Resolves the stable dispatch URL for that action.
-3. Emits ``<form action="..." method="post">``.
+3. Emits ``<form action="..." method="post">`` plus any attributes passed to the tag.
 4. Emits a hidden ``csrfmiddlewaretoken`` input.
 5. Emits a hidden ``_next_form_origin`` input set to ``request.path``, used by ``redirect_to_origin``.
-6. Emits a hidden ``_next_form_page`` input with the absolute path to the current ``page.py``, used on re-render.
+6. Emits a hidden ``_next_form_page`` input with the BASE_DIR-relative token for the current ``page.py``, used on re-render.
 7. Publishes ``form`` inside the block body (see `The form Variable`_ below).
 
 A name that is not in the registry raises ``RuntimeError`` at render time.
+
+HTML Attributes
+---------------
+
+Every ``key="value"`` argument after the action name lands on the ``<form>`` element.
+A file-upload form sets the encoding type directly on the tag.
+
+.. code-block:: jinja
+   :caption: extra attributes
+
+   {% form "attachment_form" enctype="multipart/form-data" class="stack" %}
+     {{ form.file }}
+     <button type="submit">Upload</button>
+   {% endform %}
+
+Attribute values are escaped, and an unquoted value resolves as a context variable.
+The ``action`` and ``method`` attributes belong to the tag, and passing either raises ``TemplateSyntaxError`` at parse time.
 
 Scope Resolution
 ----------------
@@ -139,13 +157,15 @@ Manual CSRF
 The tag emits ``csrfmiddlewaretoken`` automatically.
 Only add Django's ``{% csrf_token %}`` manually when you build the ``<form>`` element by hand and skip the tag entirely.
 A hand-crafted form must also include the ``_next_form_page`` hidden field or the dispatcher cannot re-render on failure.
+Set it to the BASE_DIR-relative path of the page module, the same token the tag emits.
+The validator resolves a relative value against ``BASE_DIR`` and also accepts an absolute path such as ``{{ current_page_module_path }}``, at the cost of exposing the server filesystem layout in the HTML.
 
 .. code-block:: jinja
    :caption: hand-crafted form
 
    <form action="/_next/form/{{ action_uid }}/" method="post">
      {% csrf_token %}
-     <input type="hidden" name="_next_form_page" value="{{ current_page_module_path }}">
+     <input type="hidden" name="_next_form_page" value="notes/pages/page.py">
      <button type="submit">Send</button>
    </form>
 

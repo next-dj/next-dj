@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, cast
 from django import template
 from django.core.exceptions import ImproperlyConfigured
 from django.middleware.csrf import get_token
-from django.utils.html import escape, format_html
+from django.utils.html import escape, format_html, format_html_join
 
 from next.deps import RESERVED_KEYS
 from next.forms import form_action_manager
@@ -17,7 +17,8 @@ from next.forms.widgets import bind_component_widgets
 
 _NEXT_FORM_PAGE = "_next_form_page"
 _NEXT_FORM_ORIGIN = "_next_form_origin"
-_FORM_TAG_BITS = 2
+_MIN_FORM_TAG_BITS = 2
+_RESERVED_FORM_ATTRS = frozenset({"action", "method"})
 
 
 if TYPE_CHECKING:
@@ -30,30 +31,52 @@ register = template.Library()
 
 @register.tag(name="form")
 def do_form(parser: template.base.Parser, token: template.base.Token) -> "FormNode":
-    """Block tag accepting a single quoted action name."""
+    """Block tag accepting an action name plus optional HTML attributes."""
     bits = token.split_contents()
-    if len(bits) != _FORM_TAG_BITS:
-        msg = f"{bits[0]!r} tag requires exactly one argument: the action name"
+    if len(bits) < _MIN_FORM_TAG_BITS:
+        msg = f"{bits[0]!r} tag requires the action name as its first argument"
         raise template.TemplateSyntaxError(msg)
     action_expr = parser.compile_filter(bits[1])
+    attrs = tuple(_parse_form_attr(parser, bits[0], bit) for bit in bits[2:])
     nodelist = parser.parse(("endform",))
     parser.delete_first_token()
-    return FormNode(action_expr=action_expr, nodelist=nodelist)
+    return FormNode(action_expr=action_expr, nodelist=nodelist, attrs=attrs)
+
+
+def _parse_form_attr(
+    parser: template.base.Parser,
+    tag_name: str,
+    bit: str,
+) -> "tuple[str, FilterExpression]":
+    """Parse one `key="value"` tag argument into an attribute name and value."""
+    name, eq, value = bit.partition("=")
+    if not eq or not name or not value:
+        msg = (
+            f"{tag_name!r} tag arguments after the action name must use "
+            f'the key="value" form, got {bit!r}'
+        )
+        raise template.TemplateSyntaxError(msg)
+    if name in _RESERVED_FORM_ATTRS:
+        msg = f"{tag_name!r} tag sets the {name!r} attribute itself"
+        raise template.TemplateSyntaxError(msg)
+    return name, parser.compile_filter(value)
 
 
 class FormNode(template.Node):
     """Render `<form>` with action URL, method=post, csrf_token."""
 
-    __slots__ = ("action_expr", "nodelist")
+    __slots__ = ("action_expr", "attrs", "nodelist")
 
     def __init__(
         self,
         action_expr: "FilterExpression",
         nodelist: template.NodeList,
+        attrs: "tuple[tuple[str, FilterExpression], ...]" = (),
     ) -> None:
-        """Initialize with parsed action expression and template nodelist."""
+        """Initialize with the action expression, nodelist, and HTML attributes."""
         self.action_expr = action_expr
         self.nodelist = nodelist
+        self.attrs = attrs
 
     def _get_request(self, context: template.Context) -> "HttpRequest":
         """Extract request from context or raise ImproperlyConfigured."""
@@ -142,6 +165,21 @@ class FormNode(template.Node):
             params = _url_kwargs_from_post(request)
         return params
 
+    def _opening_tag(self, context: template.Context, action_url: str) -> str:
+        """Build the opening form element with any extra HTML attributes."""
+        if not self.attrs:
+            return format_html('<form action="{}" method="post">', escape(action_url))
+        rendered_attrs = format_html_join(
+            " ",
+            '{}="{}"',
+            ((name, escape(str(expr.resolve(context)))) for name, expr in self.attrs),
+        )
+        return format_html(
+            '<form action="{}" method="post" {}>',
+            escape(action_url),
+            rendered_attrs,
+        )
+
     def render(self, context: template.Context) -> str:
         """Render form tag with action URL, method=post, CSRF, and content."""
         request = self._get_request(context)
@@ -159,10 +197,7 @@ class FormNode(template.Node):
             msg = f"Unknown form action: {action_name!r}"
             raise RuntimeError(msg) from None
 
-        opening_tag = format_html(
-            '<form action="{}" method="post">',
-            escape(action_url),
-        )
+        opening_tag = self._opening_tag(context, action_url)
         hidden_inputs = self._build_hidden_inputs(
             request,
             next_form_page=next_form_page,

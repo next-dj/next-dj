@@ -51,23 +51,25 @@ Define the form.
 No manual import is needed in the page module.
 
 Render the form with the right encoding type.
-The ``{% form %}`` tag does not accept HTML attributes.
-Add the ``enctype`` attribute directly to a wrapping ``<form>`` element, or use the Django low-level form rendering pattern.
+Pass ``enctype="multipart/form-data"`` to the ``{% form %}`` tag and it renders the attribute on the ``<form>`` element it emits.
+Without it the browser submits only text values and ``form.file`` arrives empty.
 
 .. code-block:: jinja
    :caption: notes/pages/attachments/template.djx
 
-   <form method="post" enctype="multipart/form-data">
-     {% form "attachment_form" %}
-       {{ form.title }}
-       {{ form.file }}
-       <button type="submit">Upload</button>
-     {% endform %}
-   </form>
+   {% form "attachment_form" enctype="multipart/form-data" %}
+     {{ form.title }}
+     {{ form.file }}
+     <button type="submit">Upload</button>
+   {% endform %}
 
-Set ``enctype="multipart/form-data"`` on the ``<form>`` element.
-Without it the browser submits only text values and ``form.file`` arrives empty.
-The ``{% form %}`` tag emits the CSRF token and ``_next_form_page`` field inside its rendered output, so the outer ``<form>`` element should not add a separate ``{% csrf_token %}``.
+The tag emits the CSRF token and the hidden ``_next_form_page`` field on its own, so the template adds nothing else.
+
+.. warning::
+
+   Render the file input through the plain Django widget, ``{{ form.file }}``, or a hand-written ``<input type="file" name="file">``.
+   ``ComponentWidget`` does not support ``FileField``, and the ``next.W055`` system check warns about that pairing at startup.
+   See :doc:`/content/topics/forms/field-components` for the widget limitations.
 
 Configure media storage.
 

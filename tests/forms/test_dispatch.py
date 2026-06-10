@@ -35,7 +35,7 @@ from next.forms.dispatch import (
     _resolve_form_class,
 )
 from next.forms.manager import build_form_namespace_for_action
-from next.forms.signals import action_dispatched
+from next.forms.signals import action_dispatched, wizard_completed
 from next.forms.wizard import FormWizard
 from next.pages.registry import PageContextRegistry
 
@@ -1143,6 +1143,44 @@ class TestWizardDispatchViaClient:
         req = mock_http_request(method="GET", session=store, resolver_match=None)
         namespace = build_form_namespace_for_action("failing_done_wizard", req)
         assert namespace.form.initial == {"name": "Ada"}
+
+    def test_done_none_coerces_to_success_and_clears_draft(
+        self, client_no_csrf, mock_http_request
+    ) -> None:
+        """A done() None return re-renders, clears the drafts, fires completion."""
+
+        class NoneDoneWizard(FormWizard):
+            class Meta:
+                steps: ClassVar = [
+                    ("identity", WizardIdentityStep),
+                    ("scope", WizardScopeStep),
+                ]
+
+            def done(self, request, cleaned_data) -> None:
+                """Return None to exercise the success coercion."""
+
+        completed: list[dict] = []
+
+        def on_completed(sender, **kwargs: object) -> None:
+            completed.append(kwargs)
+
+        wizard_completed.connect(on_completed)
+        try:
+            self._post_step(
+                client_no_csrf, "identity", {"name": "Ada"}, action="none_done_wizard"
+            )
+            resp = self._post_step(
+                client_no_csrf, "scope", {"scope": "ops"}, action="none_done_wizard"
+            )
+        finally:
+            wizard_completed.disconnect(on_completed)
+        assert resp.status_code == 200
+        assert completed[0]["cleaned_data"] == {"name": "Ada", "scope": "ops"}
+        session_key = client_no_csrf.session.session_key
+        store = SessionStore(session_key=session_key)
+        req = mock_http_request(method="GET", session=store, resolver_match=None)
+        namespace = build_form_namespace_for_action("none_done_wizard", req)
+        assert namespace.form.initial == {}
 
     def test_back_navigation_prefills_from_storage(
         self, client_no_csrf, mock_http_request

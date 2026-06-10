@@ -117,13 +117,13 @@ The return value of ``done`` follows the same coercion as an action handler.
 - An ``HttpResponse`` subclass is sent as is. A redirect is the usual choice.
 - A string becomes an ``HttpResponse`` body with status 200.
 - A value with a truthy ``url`` attribute becomes an ``HttpResponseRedirect`` to that URL.
-- ``None`` re-renders the origin page with the final step still bound.
+- ``None`` coerces to a success response that re-renders the origin page.
 
 .. warning::
 
-   Returning ``None`` from ``done`` does not finalise the wizard.
-   The stored drafts are cleared only when ``done`` returns a response with a status below 400, so a ``None`` return leaves the drafts in place and re-renders the last step.
-   Always return an explicit response, almost always a redirect away from the wizard.
+   Returning ``None`` from ``done`` still finalises the wizard.
+   The dispatcher coerces ``None`` into a success re-render of the origin page with status 200, so the stored drafts are cleared and ``wizard_completed`` fires.
+   The user is left on the last step with no confirmation, so return an explicit redirect away from the wizard.
 
 How Step Forms Differ From Standalone Forms
 -------------------------------------------

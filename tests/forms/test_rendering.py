@@ -167,10 +167,18 @@ class TestFormTagSyntax:
         with pytest.raises(TemplateSyntaxError):
             form_engine.from_string("{% form %}x{% endform %}")
 
-    def test_too_many_args_raises(self, form_engine) -> None:
-        """{% form %} with two args raises TemplateSyntaxError."""
-        with pytest.raises(TemplateSyntaxError):
+    def test_positional_second_arg_raises(self, form_engine) -> None:
+        """{% form %} with a second positional argument raises TemplateSyntaxError."""
+        with pytest.raises(TemplateSyntaxError, match=r'key="value"'):
             form_engine.from_string('{% form "foo" "bar" %}x{% endform %}')
+
+    @pytest.mark.parametrize("attr", ["action", "method"])
+    def test_reserved_attribute_raises(self, form_engine, attr: str) -> None:
+        """{% form %} rejects the attributes the tag itself owns."""
+        with pytest.raises(TemplateSyntaxError, match=attr):
+            form_engine.from_string(
+                f'{{% form "simple_form" {attr}="/x/" %}}x{{% endform %}}'
+            )
 
 
 class TestFormTagRender:
@@ -191,8 +199,62 @@ class TestFormTagRender:
         )
         assert "<form" in html
         assert "action=" in html
-        assert 'method="post"' in html
+        assert 'method="post">' in html
         assert "</form>" in html
+
+    def test_renders_enctype_attribute(self, form_engine, csrf_request) -> None:
+        """An enctype attribute lands on the opening form element."""
+        t = form_engine.from_string(
+            '{% form "simple_form" enctype="multipart/form-data" %}x{% endform %}'
+        )
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert 'method="post" enctype="multipart/form-data">' in html
+
+    def test_renders_multiple_attributes_escaped(
+        self, form_engine, csrf_request
+    ) -> None:
+        """Multiple attributes render in declaration order with escaped values."""
+        t = form_engine.from_string(
+            '{% form "simple_form" enctype="multipart/form-data"'
+            ' class="stack wide" data-info="a&b" %}x{% endform %}'
+        )
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert (
+            'enctype="multipart/form-data" class="stack wide" data-info="a&amp;b">'
+            in html
+        )
+
+    def test_attribute_value_resolves_from_context(
+        self, form_engine, csrf_request
+    ) -> None:
+        """An unquoted attribute value resolves as a context variable."""
+        t = form_engine.from_string(
+            '{% form "simple_form" class=css_class %}x{% endform %}'
+        )
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                    "css_class": "from-ctx",
+                }
+            )
+        )
+        assert 'method="post" class="from-ctx">' in html
 
     def test_wizard_action_pushes_wizard_into_context(
         self, form_engine, csrf_request

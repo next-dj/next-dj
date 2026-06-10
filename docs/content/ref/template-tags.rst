@@ -12,16 +12,18 @@ Templates therefore use them without an explicit ``{% load %}`` statement.
 Forms
 -----
 
-.. describe:: {% form "<name>" %}...{% endform %}
+.. describe:: {% form "<name>" key="value" ... %}...{% endform %}
 
    Renders a form bound to a registered action.
-   Takes exactly one positional argument: the quoted action name string.
+   The first argument is the action name, a quoted string or a context variable that resolves to a string.
    Injects the CSRF token and the hidden ``_next_form_page`` origin field.
    The block body has access to the bound or unbound form through ``{{ form }}``.
 
-   The HTTP method is always ``post``. It cannot be passed as an argument.
-   HTML attributes such as ``enctype`` cannot be passed as tag keywords.
-   Set them on a wrapping ``<form>`` element if you need attributes the tag does not emit.
+   Optional ``key="value"`` arguments after the action name render as HTML attributes on the ``<form>`` element, for example ``{% form "upload_form" enctype="multipart/form-data" class="stack" %}``.
+   Attribute values are escaped, and an unquoted value resolves as a context variable.
+
+   The HTTP method is always ``post``.
+   The tag owns the ``action`` and ``method`` attributes, and passing either raises ``TemplateSyntaxError`` at parse time.
 
    Captured URL parameters from ``request.resolver_match.kwargs`` are emitted automatically as ``_url_param_<name>`` hidden inputs.
 
