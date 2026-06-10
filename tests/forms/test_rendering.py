@@ -15,7 +15,7 @@ from next.forms import (
     RegistryFormActionBackend,
     form_action_manager,
 )
-from next.forms.rendering import render_form_page_with_errors
+from next.forms.rendering import _ErrorRenderParams, render_form_page_with_errors
 from next.forms.wizard import FormWizard
 from tests.forms.actions import SimpleForm
 
@@ -99,8 +99,9 @@ class TestRenderFormFragment:
         html = render_form_page_with_errors(
             backend,
             request,
-            "unknown_action_xyz",
-            form,
+            _ErrorRenderParams(
+                action_name="unknown_action_xyz", form=form, url_kwargs={}
+            ),
             PAGE_MODULE_FOR_FORM_TESTS,
         )
         assert "name" in html
@@ -112,8 +113,9 @@ class TestRenderFormFragment:
         html = render_form_page_with_errors(
             backend,
             request,
-            "unknown_action_xyz",
-            None,
+            _ErrorRenderParams(
+                action_name="unknown_action_xyz", form=None, url_kwargs={}
+            ),
             PAGE_MODULE_FOR_FORM_TESTS,
         )
         assert html == ""

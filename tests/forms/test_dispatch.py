@@ -331,7 +331,7 @@ class TestDispatchViaClient:
 
 
 class TestFormDispatchRenderFragmentBranches:
-    """``FormActionDispatch.render_form_fragment`` fallbacks."""
+    """``RegistryFormActionBackend.render_form_fragment`` fallbacks."""
 
     def test_unknown_action_uses_form_fallback(self, mock_http_request) -> None:
         """Unknown action meta falls back to the version-safe bare-form render."""
@@ -353,8 +353,7 @@ class TestFormDispatchRenderFragmentBranches:
         )
         req = mock_http_request(method="GET")
         form = F()
-        html = FormActionDispatch.render_form_fragment(
-            backend,
+        html = backend.render_form_fragment(
             req,
             "missing_action",
             form,
@@ -387,8 +386,7 @@ class TestFormDispatchRenderFragmentBranches:
         blank_page = tmp_path / "page.py"
         blank_page.write_text("")
 
-        html = FormActionDispatch.render_form_fragment(
-            backend,
+        html = backend.render_form_fragment(
             req,
             "frag",
             form,

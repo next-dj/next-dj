@@ -13,9 +13,10 @@ from django.views.decorators.http import require_http_methods
 
 from next.conf import import_class_cached
 
+from ._request_utils import _url_kwargs_from_post
 from .dispatch import FormActionDispatch
 from .registration import registration_diagnostics
-from .rendering import render_form_page_with_errors
+from .rendering import _ErrorRenderParams, render_form_page_with_errors
 from .signals import action_registered
 from .uid import (
     URL_NAME_FORM_ACTION,
@@ -154,6 +155,7 @@ class FormActionBackend(ABC):
         _action_name: str,
         _form: "django_forms.Form | None",
         _page_file_path: "Path | None" = None,
+        _url_kwargs: dict[str, object] | None = None,
     ) -> str:
         """Return custom HTML for validation errors (override in subclasses)."""
         return ""
@@ -294,6 +296,7 @@ class RegistryFormActionBackend(FormActionBackend):
         action_name: str,
         form: "django_forms.Form | None",
         page_file_path: "Path | None" = None,
+        url_kwargs: dict[str, object] | None = None,
     ) -> str:
         """Render validation-error HTML for a page module path."""
         target_path = page_file_path
@@ -301,13 +304,14 @@ class RegistryFormActionBackend(FormActionBackend):
             target_path = validated_next_form_page_path(request)
         if target_path is None:
             return ""
-        return render_form_page_with_errors(
-            self,
-            request,
-            action_name,
-            form,
-            target_path,
+        if url_kwargs is None:
+            url_kwargs = _url_kwargs_from_post(request)
+        params = _ErrorRenderParams(
+            action_name=action_name,
+            form=form,
+            url_kwargs=url_kwargs,
         )
+        return render_form_page_with_errors(self, request, params, target_path)
 
 
 class FormActionFactory:

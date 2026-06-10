@@ -22,7 +22,6 @@ from ._request_utils import (
     _url_kwargs_from_post,
     _url_kwargs_from_resolver_or_post,
 )
-from .rendering import render_form_page_with_errors
 from .signals import (
     action_dispatched,
     form_validation_failed,
@@ -230,6 +229,18 @@ def _normalize_handler_response(
     return None
 
 
+@dataclass(frozen=True, slots=True)
+class _ActionOutcome:
+    """One pipeline decision waiting to be shaped into an HTTP response."""
+
+    kind: str
+    action_name: str
+    raw: Any = None
+    form: "django_forms.Form | None" = None
+    redirect_to: str | None = None
+    url_kwargs: dict[str, object] | None = None
+
+
 @dataclass
 class _DispatchState:
     """Bundle of mutable dispatch state threaded through helper methods."""
@@ -281,6 +292,7 @@ class FormActionDispatch:
 
         if form_class is None and handler is not None:
             return FormActionDispatch._dispatch_handler_only(
+                backend,
                 handler,
                 request,
                 action_name,
@@ -309,6 +321,7 @@ class FormActionDispatch:
 
     @staticmethod
     def _dispatch_handler_only(
+        backend: "FormActionBackend",
         handler: "Callable[..., Any]",
         request: "HttpRequest",
         action_name: str,
@@ -324,9 +337,10 @@ class FormActionDispatch:
         start = time.perf_counter()
         raw = handler(**resolved)
         duration_ms = (time.perf_counter() - start) * 1000
-        response = FormActionDispatch.ensure_http_response(
-            _normalize_handler_response(raw),
-            request=request,
+        response = FormActionDispatch.shape_response(
+            backend,
+            request,
+            _ActionOutcome(kind="result", action_name=action_name, raw=raw),
         )
         action_dispatched.send(
             sender=FormActionDispatch,
@@ -368,8 +382,15 @@ class FormActionDispatch:
                     error_count=error_count,
                     field_names=tuple(form.errors.keys()),
                 )
-            return FormActionDispatch.form_response(
-                backend, request, params.action_name, form
+            return FormActionDispatch.shape_response(
+                backend,
+                request,
+                _ActionOutcome(
+                    kind="invalid",
+                    action_name=params.action_name,
+                    form=form,
+                    url_kwargs=state.url_kwargs,
+                ),
             )
 
         if params.handler is None:
@@ -396,11 +417,12 @@ class FormActionDispatch:
             raw = params.handler(**resolved)
 
         duration_ms = (time.perf_counter() - start) * 1000
-        response = FormActionDispatch.ensure_http_response(
-            _normalize_handler_response(raw),
-            request=request,
-            action_name=params.action_name,
-            backend=backend,
+        response = FormActionDispatch.shape_response(
+            backend,
+            request,
+            _ActionOutcome(
+                kind="result", action_name=params.action_name, raw=raw, form=form
+            ),
         )
         action_dispatched.send(
             sender=FormActionDispatch,
@@ -445,7 +467,16 @@ class FormActionDispatch:
                     error_count=error_count,
                     field_names=tuple(form.errors.keys()),
                 )
-            return FormActionDispatch.form_response(backend, request, action_name, form)
+            return FormActionDispatch.shape_response(
+                backend,
+                request,
+                _ActionOutcome(
+                    kind="invalid",
+                    action_name=action_name,
+                    form=form,
+                    url_kwargs=state.url_kwargs,
+                ),
+            )
 
         cleaned = dict(form.cleaned_data)
         wizard.save_step(step_name, cleaned)
@@ -462,11 +493,12 @@ class FormActionDispatch:
             start = time.perf_counter()
             raw = wizard.done(request, merged)
             duration_ms = (time.perf_counter() - start) * 1000
-            response = FormActionDispatch.ensure_http_response(
-                _normalize_handler_response(raw),
-                request=request,
-                action_name=action_name,
-                backend=backend,
+            response = FormActionDispatch.shape_response(
+                backend,
+                request,
+                _ActionOutcome(
+                    kind="result", action_name=action_name, raw=raw, form=form
+                ),
             )
             if response.status_code < _HTTP_ERROR_FLOOR:
                 wizard.clear_storage()
@@ -476,7 +508,15 @@ class FormActionDispatch:
                     cleaned_data=merged,
                 )
         else:
-            response = HttpResponseRedirect(wizard.goto(next_step))
+            response = FormActionDispatch.shape_response(
+                backend,
+                request,
+                _ActionOutcome(
+                    kind="wizard_advance",
+                    action_name=action_name,
+                    redirect_to=wizard.goto(next_step),
+                ),
+            )
             duration_ms = 0.0
 
         action_dispatched.send(
@@ -491,6 +531,36 @@ class FormActionDispatch:
         return response
 
     @staticmethod
+    def shape_response(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        outcome: _ActionOutcome,
+    ) -> HttpResponse:
+        """Turn one pipeline outcome into the HTTP response sent to the client."""
+        if outcome.kind == "invalid":
+            page_path = validated_next_form_page_path(request)
+            if page_path is None:
+                return HttpResponseBadRequest("Missing or invalid _next_form_page")
+            html = backend.render_form_fragment(
+                request,
+                outcome.action_name,
+                outcome.form,
+                page_path,
+                outcome.url_kwargs,
+            )
+            return HttpResponse(html)
+        if outcome.kind == "wizard_advance":
+            return HttpResponseRedirect(cast("str", outcome.redirect_to))
+        if outcome.form is None:
+            return FormActionDispatch.ensure_http_response(outcome.raw, request=request)
+        return FormActionDispatch.ensure_http_response(
+            outcome.raw,
+            request=request,
+            action_name=outcome.action_name,
+            backend=backend,
+        )
+
+    @staticmethod
     def form_response(
         backend: "FormActionBackend",
         request: "HttpRequest",
@@ -498,27 +568,10 @@ class FormActionDispatch:
         form: "django_forms.Form | None",
     ) -> HttpResponse:
         """Return full-page HTML for an invalid form submission."""
-        page_path = validated_next_form_page_path(request)
-        if page_path is None:
-            return HttpResponseBadRequest("Missing or invalid _next_form_page")
-        html = backend.render_form_fragment(request, action_name, form, page_path)
-        return HttpResponse(html)
-
-    @staticmethod
-    def render_form_fragment(
-        backend: "FormActionBackend",
-        request: "HttpRequest",
-        action_name: str,
-        form: "django_forms.Form | None",
-        page_file_path: "Path",
-    ) -> str:
-        """Delegate to `render_form_page_with_errors` for the given page file."""
-        return render_form_page_with_errors(
+        return FormActionDispatch.shape_response(
             backend,
             request,
-            action_name,
-            form,
-            page_file_path,
+            _ActionOutcome(kind="invalid", action_name=action_name, form=form),
         )
 
     @staticmethod

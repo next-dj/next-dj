@@ -1,12 +1,12 @@
 """HTML rendering for validation-error responses."""
 
 import types
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from next.pages import page
 from next.pages.loaders import _load_python_module_memo
 
-from ._request_utils import _url_kwargs_from_post
 from .uid import _validated_origin_path
 
 
@@ -26,11 +26,19 @@ def _form_fallback_html(form: "django_forms.Form | None") -> str:
     return str(form.render(form.template_name_p))
 
 
+@dataclass(frozen=True, slots=True)
+class _ErrorRenderParams:
+    """Bundle of failed-submission params for the validation-error re-render."""
+
+    action_name: str
+    form: "django_forms.Form | None"
+    url_kwargs: dict[str, object]
+
+
 def render_form_page_with_errors(
     backend: "FormActionBackend",
     request: "HttpRequest",
-    action_name: str,
-    form: "django_forms.Form | None",
+    params: _ErrorRenderParams,
     page_file_path: "Path",
 ) -> str:
     """Render the page template for `page_file_path` with a bound form in context.
@@ -41,6 +49,8 @@ def render_form_page_with_errors(
     same `request` it does on the canonical render path.
     """
     file_path = page_file_path
+    action_name = params.action_name
+    form = params.form
     meta = backend.get_meta(action_name, str(file_path))
     if not meta:
         return _form_fallback_html(form)
@@ -51,7 +61,7 @@ def render_form_page_with_errors(
     if not template_str:
         return _form_fallback_html(form)
 
-    url_kwargs = _url_kwargs_from_post(request)
+    url_kwargs = params.url_kwargs
 
     context_data = page.build_render_context(file_path, request, **url_kwargs)
     if form is not None:
@@ -76,4 +86,4 @@ def render_form_page_with_errors(
     return rendered
 
 
-__all__ = ["render_form_page_with_errors"]
+__all__ = ["_ErrorRenderParams", "render_form_page_with_errors"]

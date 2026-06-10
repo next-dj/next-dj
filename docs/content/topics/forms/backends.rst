@@ -215,6 +215,9 @@ A custom ``dispatch`` that drives the pipeline by hand reuses two static helpers
    Coerces a handler return value into an ``HttpResponse``.
    A string becomes a body, an object with a ``url`` becomes a redirect, and ``None`` re-renders through ``form_response`` when ``request``, ``action_name``, and ``backend`` are passed, otherwise it returns a 204.
 
+Both helpers funnel into ``shape_response(backend, request, outcome)``, the single method that turns every outcome of the standard pipeline into the final ``HttpResponse``.
+A layer that must reshape responses globally hooks that one method instead of patching each dispatch branch.
+
 Backend vs Signal
 -----------------
 
@@ -270,7 +273,8 @@ Custom Error Fragment
 ~~~~~~~~~~~~~~~~~~~~~
 
 Override ``render_form_fragment`` to return custom HTML for the validation error path.
-The override signature is ``render_form_fragment(request, action_name, form, page_file_path=None)``.
+The override signature is ``render_form_fragment(request, action_name, form, page_file_path=None, url_kwargs=None)``.
+The dispatcher passes the URL kwargs it already parsed from the submission, and ``None`` tells the backend to parse them from the request.
 The abstract base returns an empty string.
 The bundled ``RegistryFormActionBackend`` re-renders the origin page through the page-template loader.
 When no action meta or template body is found, it falls back to rendering the form with its ``<p>`` layout template.
