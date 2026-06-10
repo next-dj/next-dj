@@ -50,11 +50,11 @@ The ``page`` decorator is also re-exported from ``next.forms`` as a convenience.
 It is the same object documented under :doc:`/content/ref/pages` and carries no forms-specific behaviour.
 
 Internal hooks.
-   Symbols with a leading underscore are implementation details re-exported for testing and
-   advanced backend authoring.
-   The full set lives in ``next.forms.__all__``, which is the source of truth for the internal
-   hook surface.
-   Do not import these names in application code.
+   Underscore-prefixed helpers inside the submodules, such as the form-building functions in
+   ``next.forms.dispatch``, are implementation details.
+   ``next.forms.__all__`` is the source of truth for the public surface and exports no
+   underscore names.
+   Do not import underscore names in application code.
 
 Public API
 ----------
@@ -102,6 +102,9 @@ See :doc:`/content/topics/forms/wizard` and :doc:`/content/topics/forms/wizard-b
 .. autoclass:: next.forms.CacheFormWizardBackend
    :members:
 
+.. autoclass:: next.forms.WizardBackendManager
+   :members:
+
 Fields and Widgets
 ~~~~~~~~~~~~~~~~~~
 
@@ -128,14 +131,13 @@ Markers
 Dispatch
 ~~~~~~~~
 
-``FormActionDispatch`` and ``build_form_namespace_for_action`` are the public members of this
-module, in the Advanced tier described above.
-The underscore-prefixed helpers are internal hooks and stay off the autodoc surface below.
-Treat them as the ``Internal hooks`` tier described above.
+``FormActionDispatch`` is the only public member of this module, in the Advanced tier described above.
+Its ``shape_response`` static method is the single point that turns every pipeline outcome into the final ``HttpResponse``.
+``form_response`` and ``ensure_http_response`` are thin delegates into it, kept for custom backends that drive the pipeline by hand.
+The underscore-prefixed helpers are internal hooks per the ``Internal hooks`` tier described above.
 
 .. automodule:: next.forms.dispatch
    :members:
-   :exclude-members: _bind_form_for_post, _filter_reserved_url_kwargs, _form_action_context_callable, _form_from_initial_data, _get_caller_path, _normalize_handler_response, _url_kwargs_from_post, _url_kwargs_from_resolver_or_post
 
 Manager
 ~~~~~~~
@@ -155,6 +157,10 @@ The target is one of ``handler``, ``form_class``, or ``wizard_class``, which let
 
 Action URL Helpers
 ~~~~~~~~~~~~~~~~~~
+
+``reverse_form_action`` resolves the dispatch URL for an action UID under either URL wiring,
+the namespaced ``next:form_action`` route or the bare ``form_action`` route.
+It lives in ``next.forms.uid`` and is not re-exported at the package level.
 
 .. automodule:: next.forms.uid
    :members:

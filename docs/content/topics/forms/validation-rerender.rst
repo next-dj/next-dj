@@ -48,6 +48,15 @@ A request to ``/_next/form/<uid>/`` follows a fixed pipeline.
 The pipeline stays inside the same request.
 A failing form does not redirect, the user stays on the same URL.
 
+One Response Funnel
+-------------------
+
+Every outcome of the pipeline leaves through one funnel.
+``FormActionDispatch.shape_response`` turns the dispatch outcome — a handler return value, a wizard advance, or an invalid form — into the ``HttpResponse`` sent to the client.
+For an invalid form it asks the active backend's ``render_form_fragment`` to produce the re-rendered page HTML.
+A custom backend overrides that one method to change how validation errors render, without touching the rest of the pipeline.
+See :doc:`backends` for the override signature and the bundled implementation.
+
 What Survives Re-render
 -----------------------
 

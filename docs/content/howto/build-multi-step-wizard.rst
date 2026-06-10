@@ -56,14 +56,14 @@ The wizard lists them in order.
            AccessRequest.objects.create(**cleaned_data)
            return redirect_to_origin(request)
 
-The wizard registers itself as the ``access_request_wizard`` action through subclassing.
-``Meta.url_param`` defaults to ``"step"``, which matches the ``[step]`` route segment, so no extra configuration is needed.
+Subclassing registers the wizard as the ``access_request_wizard`` action, and the default ``Meta.url_param`` of ``"step"`` matches the ``[step]`` route segment with no extra configuration.
+:doc:`/content/topics/forms/wizard` covers the registration, scope, and ``Meta.steps`` semantics in depth.
 
 Route Through the Step Segment
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The page directory is ``request/[step]/``, so the route captures a ``step`` kwarg.
-The wizard reads that kwarg to pick the current step and swaps the segment when it advances.
+The page directory is ``request/[step]/``, so the route captures a ``step`` kwarg that the wizard reads to pick the current step and swaps when it advances.
+See :doc:`/content/topics/forms/wizard` for the routing and back-navigation rules.
 
 Render the Wizard
 ~~~~~~~~~~~~~~~~~~
@@ -80,22 +80,15 @@ The ``{% form %}`` tag publishes ``form`` for the current step and ``wizard`` fo
      </button>
    {% endform %}
 
-A valid non-final step saves its data and redirects to the next step's URL.
-A valid final step calls ``done``, which creates the row and redirects away.
-An invalid step re-renders with errors and leaves the earlier steps' saved drafts untouched.
+A valid step saves its draft and advances, the final step calls ``done``, and an invalid step re-renders with errors.
+Per-step drafts persist through the configured wizard backend (see :doc:`/content/topics/forms/wizard-backend`).
 
 Finalise the Wizard
 ~~~~~~~~~~~~~~~~~~~~
 
-``done`` receives the merged cleaned data of every step.
-Because the data steps are ModelForms over the same model, the merged dict maps straight onto the model constructor.
-
-.. code-block:: python
-   :caption: the done method
-
-   def done(self, request, cleaned_data):
-       AccessRequest.objects.create(**cleaned_data)
-       return redirect_to_origin(request)
+``done`` receives the merged cleaned data of every step, so for ModelForm steps over one model the dict maps straight onto the constructor.
+The ``create`` call in the wizard above is the whole finaliser.
+:doc:`/content/topics/forms/wizard` documents the ``done`` contract, its return-value coercion, and the idempotency requirement.
 
 Verification
 ------------
