@@ -18,6 +18,7 @@ from next.conf import next_framework_settings
 
 from .backends import ActionRegistration, _resolved_path_str
 from .manager import form_action_manager
+from .registration import registration_diagnostics
 from .uid import redirect_to_origin
 
 
@@ -49,23 +50,11 @@ def _compute_scope(file_path: str) -> str:
     )
 
 
-_outside_base_dir_classes: list[tuple[str, str]] = []
-_invalid_meta_scope_classes: list[tuple[str, str]] = []
-_instance_from_url_unknown_field: list[tuple[str, str, str]] = []
-_instance_from_url_on_non_model_form: list[str] = []
-
-
 def _record_invalid_meta_scope(cls: type, bad_value: object) -> None:
     """Append a (qualname, bad_scope) entry for the E047 system check."""
-    _invalid_meta_scope_classes.append((cls.__qualname__, str(bad_value)))
-
-
-def clear_auto_registration_state() -> None:
-    """Clear accumulated registration warnings. For test isolation."""
-    _outside_base_dir_classes.clear()
-    _invalid_meta_scope_classes.clear()
-    _instance_from_url_unknown_field.clear()
-    _instance_from_url_on_non_model_form.clear()
+    registration_diagnostics.invalid_meta_scope.append(
+        (cls.__qualname__, str(bad_value))
+    )
 
 
 def _instance_from_url_db_fields(spec: object) -> list[str]:
@@ -104,7 +93,9 @@ def _validate_instance_from_url(cls: type, *, is_model_form: bool) -> None:
     if not spec:
         return
     if not is_model_form:
-        _instance_from_url_on_non_model_form.append(cls.__qualname__)
+        registration_diagnostics.instance_from_url_on_non_model_form.append(
+            cls.__qualname__
+        )
         return
     model = getattr(meta, "model", None)
     if model is None:
@@ -115,7 +106,7 @@ def _validate_instance_from_url(cls: type, *, is_model_form: bool) -> None:
         try:
             model._meta.get_field(db_field.split("__")[0])
         except FieldDoesNotExist:
-            _instance_from_url_unknown_field.append(
+            registration_diagnostics.instance_from_url_unknown_field.append(
                 (cls.__qualname__, model._meta.label, db_field)
             )
 
@@ -168,7 +159,9 @@ def _auto_register_form_class(cls: type) -> None:
                 Path(_resolved_path_str(str(base)))
             )
         except ValueError:
-            _outside_base_dir_classes.append((cls.__qualname__, file_path))
+            registration_diagnostics.outside_base_dir.append(
+                (cls.__qualname__, file_path)
+            )
             return
 
     meta_scope = getattr(getattr(cls, "Meta", None), "scope", None)

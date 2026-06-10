@@ -16,15 +16,11 @@ from next.forms.base import (
     _FRAMEWORK_ROOT,
     _auto_register_form_class,
     _find_definition_frame,
-    _invalid_meta_scope_classes,
     _is_framework_file,
-    _outside_base_dir_classes,
     _record_invalid_meta_scope,
-    clear_auto_registration_state,
 )
-from next.forms.checks import _action_collisions, clear_action_collisions
-from next.forms.decorators import _action_applied_to_class
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 
 
 class TestAutoRegistration:
@@ -130,14 +126,14 @@ class TestAutoRegistration:
         assert meta["scope"] == "shared"
 
     def test_meta_scope_invalid_records_error(self, settings, tmp_path) -> None:
-        """Invalid Meta.scope appends to _invalid_meta_scope_classes without registering."""
+        """Invalid Meta.scope is recorded as a diagnostic without registering."""
         settings.BASE_DIR = tmp_path
         app_dir = tmp_path / "myapp"
         app_dir.mkdir()
         fake_path = str(app_dir / "forms.py")
         Path(fake_path).write_text("")
 
-        clear_auto_registration_state()
+        registration_diagnostics.clear()
         with patch("next.forms.base._find_definition_frame", return_value=fake_path):
 
             class BadMetaScopeForm(Form):
@@ -147,27 +143,31 @@ class TestAutoRegistration:
                     scope = "invalid_scope"
 
         assert any(
-            "BadMetaScopeForm" in name for name, _ in _invalid_meta_scope_classes
+            "BadMetaScopeForm" in name
+            for name, _ in registration_diagnostics.invalid_meta_scope
         )
         backend = form_action_manager.default_backend
         meta = backend.get_meta("bad_meta_scope_form")
         assert meta is None
 
     def test_outside_base_dir_records_warning(self, settings, tmp_path) -> None:
-        """Form outside BASE_DIR appends to _outside_base_dir_classes without registering."""
+        """Form outside BASE_DIR is recorded as a diagnostic without registering."""
         settings.BASE_DIR = tmp_path / "project_root"
         outside = tmp_path / "outside"
         outside.mkdir()
         fake_path = str(outside / "forms.py")
         Path(fake_path).write_text("")
 
-        clear_auto_registration_state()
+        registration_diagnostics.clear()
         with patch("next.forms.base._find_definition_frame", return_value=fake_path):
 
             class OutsideForm(Form):
                 title = django_forms.CharField()
 
-        assert any("OutsideForm" in name for name, _ in _outside_base_dir_classes)
+        assert any(
+            "OutsideForm" in name
+            for name, _ in registration_diagnostics.outside_base_dir
+        )
         backend = form_action_manager.default_backend
         assert backend.get_meta("outside_form") is None
 
@@ -215,7 +215,7 @@ class TestAutoRegistration:
         fake_path = str(app_dir / "forms.py")
         Path(fake_path).write_text("")
 
-        clear_action_collisions()
+        registration_diagnostics.action_collisions.clear()
 
         def handler_v1() -> None:
             pass
@@ -243,7 +243,7 @@ class TestAutoRegistration:
             )
         )
 
-        assert len(_action_collisions) >= 1
+        assert len(registration_diagnostics.action_collisions) >= 1
 
     def test_no_base_dir_still_registers(self, settings, tmp_path) -> None:
         """When BASE_DIR is not set, forms register without location check."""
@@ -346,13 +346,13 @@ class TestModelFormAutoRegistration:
         assert meta is not None
         assert meta["scope"] == "page"
 
-    def test_clear_auto_registration_state_clears_both_lists(self) -> None:
-        """clear_auto_registration_state empties both tracking lists."""
-        _outside_base_dir_classes.append(("FakeOuter", "/fake/path.py"))
-        _invalid_meta_scope_classes.append(("FakeInvalid", "bad_scope"))
-        clear_auto_registration_state()
-        assert _outside_base_dir_classes == []
-        assert _invalid_meta_scope_classes == []
+    def test_diagnostics_clear_empties_both_lists(self) -> None:
+        """registration_diagnostics.clear empties both tracking lists."""
+        registration_diagnostics.outside_base_dir.append(("FakeOuter", "/fake/path.py"))
+        registration_diagnostics.invalid_meta_scope.append(("FakeInvalid", "bad_scope"))
+        registration_diagnostics.clear()
+        assert registration_diagnostics.outside_base_dir == []
+        assert registration_diagnostics.invalid_meta_scope == []
 
 
 class TestAutoRegisterFormClassDirectly:
@@ -379,14 +379,14 @@ class TestRecordInvalidMetaScope:
 
     def test_appends_entry(self) -> None:
         """Calling _record_invalid_meta_scope adds an entry to the list."""
-        clear_auto_registration_state()
+        registration_diagnostics.clear()
 
         class FakeForm:
             __qualname__ = "FakeForm"
 
         _record_invalid_meta_scope(FakeForm, "notvalid")
-        assert ("FakeForm", "notvalid") in _invalid_meta_scope_classes
-        clear_auto_registration_state()
+        assert ("FakeForm", "notvalid") in registration_diagnostics.invalid_meta_scope
+        registration_diagnostics.clear()
 
 
 class TestBaseFormOnValid:
@@ -466,14 +466,14 @@ class TestResetFormRegistrationState:
                 handler=lambda _request: None,
             )
         )
-        _outside_base_dir_classes.append(("Probe", "/x/forms.py"))
-        _action_applied_to_class.append("Probe")
+        registration_diagnostics.outside_base_dir.append(("Probe", "/x/forms.py"))
+        registration_diagnostics.action_applied_to_class.append("Probe")
         _discovered.add("probe.forms")
 
         reset_form_registration_state()
 
         assert backend._registry == {}
         assert backend._name_index == {}
-        assert _outside_base_dir_classes == []
-        assert _action_applied_to_class == []
+        assert registration_diagnostics.outside_base_dir == []
+        assert registration_diagnostics.action_applied_to_class == []
         assert _discovered == set()

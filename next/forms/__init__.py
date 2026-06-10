@@ -18,7 +18,6 @@ from .backends import (
     FormActionBackend,
     FormActionFactory,
     RegistryFormActionBackend,
-    clear_action_collisions,
 )
 from .base import (
     BaseForm,
@@ -55,9 +54,8 @@ from .base import (
     URLInput,
     ValidationError,
     Widget,
-    clear_auto_registration_state,
 )
-from .decorators import action, clear_action_applied_to_class
+from .decorators import action
 from .dispatch import FormActionDispatch
 from .formsets import cleanup_extra_initial
 from .manager import (
@@ -66,6 +64,7 @@ from .manager import (
     form_action_manager,
 )
 from .markers import DForm, FormProvider
+from .registration import registration_diagnostics
 from .serializers import (
     FieldKind,
     FieldSpec,
@@ -89,7 +88,6 @@ from .wizard import (
     FormWizard,
     FormWizardBackend,
     WizardBackendManager,
-    clear_wizard_registration_state,
     wizard_backend_manager,
 )
 
@@ -97,11 +95,8 @@ from .wizard import (
 def reset_form_registration_state() -> None:
     """Clear every form registry and registration-warning buffer for test isolation."""
     form_action_manager.clear_registries()
-    clear_auto_registration_state()
-    clear_action_collisions()
-    clear_action_applied_to_class()
+    registration_diagnostics.clear()
     clear_discovered()
-    clear_wizard_registration_state()
     wizard_backend_manager.reset()
 
 

@@ -17,11 +17,11 @@ from .base import (
     _compute_scope,
     _find_definition_frame,
     _is_framework_file,
-    _outside_base_dir_classes,
     _record_invalid_meta_scope,
     _to_snake_case,
 )
 from .manager import form_action_manager
+from .registration import registration_diagnostics
 
 
 if TYPE_CHECKING:
@@ -143,14 +143,6 @@ def _on_settings_reloaded(**_kwargs: object) -> None:
 settings_reloaded.connect(_on_settings_reloaded)
 
 
-_wizard_without_steps: list[str] = []
-
-
-def clear_wizard_registration_state() -> None:
-    """Drop accumulated wizard registration state. For test isolation."""
-    _wizard_without_steps.clear()
-
-
 def _replace_step_segment(path: str, current: str, target: str) -> str:
     """Return `path` with the segment naming `current` swapped for `target`."""
     if not path:
@@ -185,7 +177,9 @@ def _auto_register_wizard_class(cls: type) -> None:
                 Path(_resolved_path_str(str(base)))
             )
         except ValueError:
-            _outside_base_dir_classes.append((cls.__qualname__, file_path))
+            registration_diagnostics.outside_base_dir.append(
+                (cls.__qualname__, file_path)
+            )
             return
 
     meta_scope = getattr(getattr(cls, "Meta", None), "scope", None)
@@ -196,7 +190,7 @@ def _auto_register_wizard_class(cls: type) -> None:
     scope = meta_scope if meta_scope is not None else _compute_scope(file_path)
     name = _to_snake_case(cls.__name__)
     if not list(getattr(getattr(cls, "Meta", None), "steps", []) or []):
-        _wizard_without_steps.append(cls.__qualname__)
+        registration_diagnostics.wizard_without_steps.append(cls.__qualname__)
     form_action_manager.register_action(
         ActionRegistration(
             name=name,
@@ -357,6 +351,5 @@ __all__ = [
     "FormWizard",
     "FormWizardBackend",
     "WizardBackendManager",
-    "clear_wizard_registration_state",
     "wizard_backend_manager",
 ]

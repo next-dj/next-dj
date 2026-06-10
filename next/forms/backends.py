@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 from next.conf import import_class_cached
 
 from .dispatch import FormActionDispatch
+from .registration import registration_diagnostics
 from .rendering import render_form_page_with_errors
 from .signals import action_registered
 from .uid import (
@@ -69,9 +70,6 @@ def _file_to_dotted_module(file_path: str) -> str:
     return dotted
 
 
-_action_collisions: dict[str, set[tuple[str, str]]] = {}
-
-
 def _handler_fingerprint(handler: "Callable[..., Any]") -> tuple[str, str]:
     module = getattr(handler, "__module__", "") or ""
     qualname = getattr(handler, "__qualname__", "") or getattr(handler, "__name__", "")
@@ -90,12 +88,9 @@ def record_possible_collision(
     new_fp = _handler_fingerprint(new_handler)
     if old_fp == new_fp:
         return
-    _action_collisions.setdefault(action_name, {old_fp}).add(new_fp)
-
-
-def clear_action_collisions() -> None:
-    """Drop the collision-check state. Intended for test isolation."""
-    _action_collisions.clear()
+    registration_diagnostics.action_collisions.setdefault(action_name, {old_fp}).add(
+        new_fp
+    )
 
 
 class ActionMeta(TypedDict, total=False):

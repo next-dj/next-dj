@@ -7,14 +7,7 @@ from typing import Any
 from .backends import ActionRegistration, _resolved_path_str
 from .base import _compute_scope
 from .manager import form_action_manager
-
-
-_action_applied_to_class: list[str] = []
-
-
-def clear_action_applied_to_class() -> None:
-    """Drop the recorded @action-on-class misuses. For test isolation."""
-    _action_applied_to_class.clear()
+from .registration import registration_diagnostics
 
 
 def action(
@@ -30,7 +23,7 @@ def action(
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         if isinstance(func, type):
-            _action_applied_to_class.append(func.__qualname__)
+            registration_diagnostics.action_applied_to_class.append(func.__qualname__)
             msg = (
                 "@action is for form-less actions only. "
                 "Form classes register automatically through __init_subclass__."
@@ -59,4 +52,4 @@ def action(
     return decorator
 
 
-__all__ = ["action", "clear_action_applied_to_class"]
+__all__ = ["action"]

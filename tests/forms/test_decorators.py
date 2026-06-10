@@ -15,9 +15,10 @@ from next.forms import (
     validated_next_form_page_path,
 )
 from next.forms._request_utils import _url_kwargs_from_post
-from next.forms.decorators import _action_applied_to_class, action as action_decorator
+from next.forms.decorators import action as action_decorator
 from next.forms.dispatch import _form_action_context_callable
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 
 
 PAGE_MODULE_FOR_FORM_TESTS = (
@@ -77,7 +78,10 @@ class TestActionDecorator:
             class MyBadClass:
                 pass
 
-        assert any("MyBadClass" in entry for entry in _action_applied_to_class)
+        assert any(
+            "MyBadClass" in entry
+            for entry in registration_diagnostics.action_applied_to_class
+        )
 
     def test_raises_type_error_when_form_class_is_a_type(self) -> None:
         """Passing a class as form_class raises TypeError."""

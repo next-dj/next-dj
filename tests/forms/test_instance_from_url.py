@@ -16,8 +16,6 @@ from next.forms import (
 )
 from next.forms.base import (
     _instance_from_url_db_fields,
-    _instance_from_url_on_non_model_form,
-    _instance_from_url_unknown_field,
     _instance_lookup_from_spec,
 )
 from next.forms.checks import (
@@ -29,6 +27,7 @@ from next.forms.dispatch import (
     _call_get_initial,
     _form_action_context_callable,
 )
+from next.forms.registration import registration_diagnostics
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
@@ -195,7 +194,7 @@ class TestValidateInstanceFromUrlE048:
 
         assert any(
             qualname.endswith("UnknownFieldForm") and field == "does_not_exist"
-            for qualname, _label, field in _instance_from_url_unknown_field
+            for qualname, _label, field in registration_diagnostics.instance_from_url_unknown_field
         )
 
     def test_pk_field_records_nothing(self) -> None:
@@ -209,7 +208,7 @@ class TestValidateInstanceFromUrlE048:
 
         assert not any(
             qualname.endswith("PkLookupForm")
-            for qualname, _label, _field in _instance_from_url_unknown_field
+            for qualname, _label, _field in registration_diagnostics.instance_from_url_unknown_field
         )
 
     def test_valid_field_records_nothing(self) -> None:
@@ -223,7 +222,7 @@ class TestValidateInstanceFromUrlE048:
 
         assert not any(
             qualname.endswith("ValidFieldForm")
-            for qualname, _label, _field in _instance_from_url_unknown_field
+            for qualname, _label, _field in registration_diagnostics.instance_from_url_unknown_field
         )
 
     def test_double_underscore_validates_first_segment(self) -> None:
@@ -237,7 +236,7 @@ class TestValidateInstanceFromUrlE048:
 
         assert not any(
             qualname.endswith("RelatedLookupForm")
-            for qualname, _label, _field in _instance_from_url_unknown_field
+            for qualname, _label, _field in registration_diagnostics.instance_from_url_unknown_field
         )
 
     def test_no_model_records_nothing(self) -> None:
@@ -249,7 +248,7 @@ class TestValidateInstanceFromUrlE048:
 
         assert not any(
             qualname.endswith("NoModelForm")
-            for qualname, _label, _field in _instance_from_url_unknown_field
+            for qualname, _label, _field in registration_diagnostics.instance_from_url_unknown_field
         )
 
 
@@ -272,7 +271,7 @@ class TestValidateInstanceFromUrlE049:
 
         assert any(
             qualname.endswith("PlainFormWithSpec")
-            for qualname in _instance_from_url_on_non_model_form
+            for qualname in registration_diagnostics.instance_from_url_on_non_model_form
         )
 
 
@@ -281,7 +280,7 @@ class TestChecksE048E049:
 
     def test_unknown_field_check_emits_one_error(self) -> None:
         """Each unknown-field entry produces one next.E048 error."""
-        _instance_from_url_unknown_field.append(
+        registration_diagnostics.instance_from_url_unknown_field.append(
             ("SomeForm", "auth.Group", "does_not_exist")
         )
         errors = check_instance_from_url_unknown_field()
@@ -292,7 +291,7 @@ class TestChecksE048E049:
 
     def test_non_model_form_check_emits_one_error(self) -> None:
         """Each non-ModelForm entry produces one next.E049 error."""
-        _instance_from_url_on_non_model_form.append("PlainForm")
+        registration_diagnostics.instance_from_url_on_non_model_form.append("PlainForm")
         errors = check_instance_from_url_on_non_model_form()
         assert len(errors) == 1
         assert errors[0].id == "next.E049"

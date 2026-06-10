@@ -2,12 +2,7 @@ import pytest
 from django.test import override_settings
 
 from next.forms import ActionRegistration, RegistryFormActionBackend
-from next.forms.backends import (
-    _action_collisions,
-    _handler_fingerprint,
-    record_possible_collision,
-)
-from next.forms.base import _invalid_meta_scope_classes, _outside_base_dir_classes
+from next.forms.backends import _handler_fingerprint, record_possible_collision
 from next.forms.checks import (
     check_action_applied_to_class,
     check_form_action_backends_configuration,
@@ -19,10 +14,10 @@ from next.forms.checks import (
     check_forms_outside_base_dir,
     check_invalid_form_meta_scope,
 )
-from next.forms.decorators import _action_applied_to_class, action
+from next.forms.decorators import action
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.forms.signals import action_registered
-from next.forms.wizard import _wizard_without_steps
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
@@ -30,9 +25,9 @@ _FAKE_FILE = "/fake/myapp/forms.py"
 
 @pytest.fixture(autouse=True)
 def _reset_collision_cache():
-    _action_collisions.clear()
+    registration_diagnostics.action_collisions.clear()
     yield
-    _action_collisions.clear()
+    registration_diagnostics.action_collisions.clear()
 
 
 def _distinct_handler(tag: str):
@@ -125,7 +120,7 @@ class TestFormActionCollisions:
                 handler=_distinct_handler("x"),
             )
         )
-        assert _action_collisions == {}
+        assert registration_diagnostics.action_collisions == {}
 
 
 class TestFormActionBackendsConfigurationCheck:
@@ -193,29 +188,31 @@ class TestCheckFormsOutsideBaseDir:
 
     def test_no_outside_classes_returns_empty(self) -> None:
         """No warnings when no forms are outside BASE_DIR."""
-        _outside_base_dir_classes.clear()
+        registration_diagnostics.outside_base_dir.clear()
         assert check_forms_outside_base_dir() == []
 
     def test_outside_class_triggers_warning(self) -> None:
         """A form class outside BASE_DIR produces a W046 warning."""
-        _outside_base_dir_classes.clear()
-        _outside_base_dir_classes.append(("OutsideForm", "/outside/dir/forms.py"))
+        registration_diagnostics.outside_base_dir.clear()
+        registration_diagnostics.outside_base_dir.append(
+            ("OutsideForm", "/outside/dir/forms.py")
+        )
         warnings = check_forms_outside_base_dir()
         assert len(warnings) == 1
         assert warnings[0].id == "next.W046"
         assert "OutsideForm" in warnings[0].msg
-        _outside_base_dir_classes.clear()
+        registration_diagnostics.outside_base_dir.clear()
 
     def test_multiple_outside_classes(self) -> None:
         """Multiple outside-BASE_DIR forms each produce one warning."""
-        _outside_base_dir_classes.clear()
-        _outside_base_dir_classes.append(("FormA", "/a/forms.py"))
-        _outside_base_dir_classes.append(("FormB", "/b/forms.py"))
+        registration_diagnostics.outside_base_dir.clear()
+        registration_diagnostics.outside_base_dir.append(("FormA", "/a/forms.py"))
+        registration_diagnostics.outside_base_dir.append(("FormB", "/b/forms.py"))
         warnings = check_forms_outside_base_dir()
         assert len(warnings) == 2
         ids = {w.id for w in warnings}
         assert ids == {"next.W046"}
-        _outside_base_dir_classes.clear()
+        registration_diagnostics.outside_base_dir.clear()
 
 
 class TestCheckInvalidFormMetaScope:
@@ -223,19 +220,19 @@ class TestCheckInvalidFormMetaScope:
 
     def test_no_invalid_classes_returns_empty(self) -> None:
         """No errors when all forms have valid Meta.scope."""
-        _invalid_meta_scope_classes.clear()
+        registration_diagnostics.invalid_meta_scope.clear()
         assert check_invalid_form_meta_scope() == []
 
     def test_invalid_meta_scope_triggers_error(self) -> None:
         """A form with invalid Meta.scope produces an E047 error."""
-        _invalid_meta_scope_classes.clear()
-        _invalid_meta_scope_classes.append(("BadScopeForm", "global"))
+        registration_diagnostics.invalid_meta_scope.clear()
+        registration_diagnostics.invalid_meta_scope.append(("BadScopeForm", "global"))
         errors = check_invalid_form_meta_scope()
         assert len(errors) == 1
         assert errors[0].id == "next.E047"
         assert "BadScopeForm" in errors[0].msg
         assert "global" in errors[0].msg
-        _invalid_meta_scope_classes.clear()
+        registration_diagnostics.invalid_meta_scope.clear()
 
 
 class TestCheckActionAppliedToClass:
@@ -243,22 +240,22 @@ class TestCheckActionAppliedToClass:
 
     def test_no_class_applications_returns_empty(self) -> None:
         """No errors when @action was never applied to a class."""
-        _action_applied_to_class.clear()
+        registration_diagnostics.action_applied_to_class.clear()
         assert check_action_applied_to_class() == []
 
     def test_class_application_triggers_error(self) -> None:
         """Using @action on a class produces an E053 error."""
-        _action_applied_to_class.clear()
-        _action_applied_to_class.append("MyBadClass")
+        registration_diagnostics.action_applied_to_class.clear()
+        registration_diagnostics.action_applied_to_class.append("MyBadClass")
         errors = check_action_applied_to_class()
         assert len(errors) == 1
         assert errors[0].id == "next.E053"
         assert "MyBadClass" in errors[0].msg
-        _action_applied_to_class.clear()
+        registration_diagnostics.action_applied_to_class.clear()
 
     def test_applying_action_to_class_raises_and_records(self) -> None:
         """@action raises TypeError on a class and records the qualname in E053 list."""
-        _action_applied_to_class.clear()
+        registration_diagnostics.action_applied_to_class.clear()
         with pytest.raises(TypeError, match="form-less actions only"):
 
             @action("bad_class")
@@ -268,7 +265,7 @@ class TestCheckActionAppliedToClass:
         errors = check_action_applied_to_class()
         assert len(errors) == 1
         assert errors[0].id == "next.E053"
-        _action_applied_to_class.clear()
+        registration_diagnostics.action_applied_to_class.clear()
 
 
 class TestCheckFormWizardSteps:
@@ -276,18 +273,18 @@ class TestCheckFormWizardSteps:
 
     def test_no_stepless_wizards_returns_empty(self) -> None:
         """No errors when every wizard declares steps."""
-        _wizard_without_steps.clear()
+        registration_diagnostics.wizard_without_steps.clear()
         assert check_form_wizard_steps() == []
 
     def test_stepless_wizard_triggers_error(self) -> None:
         """A wizard with empty Meta.steps produces an E050 error."""
-        _wizard_without_steps.clear()
-        _wizard_without_steps.append("EmptyWizard")
+        registration_diagnostics.wizard_without_steps.clear()
+        registration_diagnostics.wizard_without_steps.append("EmptyWizard")
         errors = check_form_wizard_steps()
         assert len(errors) == 1
         assert errors[0].id == "next.E050"
         assert "EmptyWizard" in errors[0].msg
-        _wizard_without_steps.clear()
+        registration_diagnostics.wizard_without_steps.clear()
 
 
 class TestCheckFormWizardBackend:

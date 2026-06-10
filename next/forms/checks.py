@@ -15,22 +15,11 @@ from django.forms import FileField, MultiValueField
 from next.components.facade import get_component
 from next.conf import import_class_cached, next_framework_settings
 
-from .backends import (
-    FormActionBackend,
-    _action_collisions,
-    clear_action_collisions,
-    record_possible_collision,
-)
-from .base import (
-    _instance_from_url_on_non_model_form,
-    _instance_from_url_unknown_field,
-    _invalid_meta_scope_classes,
-    _outside_base_dir_classes,
-)
-from .decorators import _action_applied_to_class
+from .backends import FormActionBackend, record_possible_collision
 from .manager import form_action_manager
+from .registration import registration_diagnostics
 from .widgets import ComponentWidget
-from .wizard import CacheFormWizardBackend, FormWizardBackend, _wizard_without_steps
+from .wizard import CacheFormWizardBackend, FormWizardBackend
 
 
 _FORM_ACTION_BACKEND_SETTINGS_KEY = "DEFAULT_FORM_ACTION_BACKENDS"
@@ -52,7 +41,7 @@ def check_form_action_collisions(
             obj=settings,
             id="next.E041",
         )
-        for name, fps in _action_collisions.items()
+        for name, fps in registration_diagnostics.action_collisions.items()
     ]
 
 
@@ -132,7 +121,7 @@ def check_forms_outside_base_dir(
             "BASE_DIR. It won't be registered automatically.",
             id="next.W046",
         )
-        for cls_name, file_path in _outside_base_dir_classes
+        for cls_name, file_path in registration_diagnostics.outside_base_dir
     ]
 
 
@@ -148,7 +137,7 @@ def check_invalid_form_meta_scope(
             "Valid values are 'page' and 'shared'.",
             id="next.E047",
         )
-        for cls_name, bad_value in _invalid_meta_scope_classes
+        for cls_name, bad_value in registration_diagnostics.invalid_meta_scope
     ]
 
 
@@ -164,7 +153,7 @@ def check_action_applied_to_class(
             "Form classes register automatically through __init_subclass__.",
             id="next.E053",
         )
-        for cls_name in _action_applied_to_class
+        for cls_name in registration_diagnostics.action_applied_to_class
     ]
 
 
@@ -180,7 +169,11 @@ def check_instance_from_url_unknown_field(
             f"{field!r}, which is not a field on {model_label}.",
             id="next.E048",
         )
-        for cls_name, model_label, field in _instance_from_url_unknown_field
+        for (
+            cls_name,
+            model_label,
+            field,
+        ) in registration_diagnostics.instance_from_url_unknown_field
     ]
 
 
@@ -196,7 +189,7 @@ def check_instance_from_url_on_non_model_form(
             "ModelForm. Subclass next.forms.ModelForm to load instances by URL.",
             id="next.E049",
         )
-        for cls_name in _instance_from_url_on_non_model_form
+        for cls_name in registration_diagnostics.instance_from_url_on_non_model_form
     ]
 
 
@@ -212,7 +205,7 @@ def check_form_wizard_steps(
             "Declare steps as a list of (name, FormClass) tuples.",
             id="next.E050",
         )
-        for cls_name in _wizard_without_steps
+        for cls_name in registration_diagnostics.wizard_without_steps
     ]
 
 
@@ -424,6 +417,5 @@ __all__ = [
     "check_instance_from_url_on_non_model_form",
     "check_instance_from_url_unknown_field",
     "check_invalid_form_meta_scope",
-    "clear_action_collisions",
     "record_possible_collision",
 ]

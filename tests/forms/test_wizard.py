@@ -12,8 +12,9 @@ from django.test import RequestFactory, override_settings
 
 from next.conf import next_framework_settings
 from next.forms import Form
-from next.forms.base import _FRAMEWORK_ROOT, _outside_base_dir_classes
+from next.forms.base import _FRAMEWORK_ROOT
 from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.forms.wizard import (
     CacheFormWizardBackend,
     FormWizard,
@@ -21,8 +22,6 @@ from next.forms.wizard import (
     WizardBackendManager,
     _ensure_session_key,
     _replace_step_segment,
-    _wizard_without_steps,
-    clear_wizard_registration_state,
     wizard_backend_manager,
 )
 
@@ -127,7 +126,9 @@ class TestWizardRegistration:
             class Meta:
                 steps: ClassVar = []
 
-        assert SteplessWizard.__qualname__ in _wizard_without_steps
+        assert (
+            SteplessWizard.__qualname__ in registration_diagnostics.wizard_without_steps
+        )
 
     def test_invalid_scope_skips_registration(self) -> None:
         """A wizard with an invalid Meta.scope is not registered."""
@@ -151,12 +152,12 @@ class TestWizardRegistration:
         assert meta is not None
         assert meta["scope"] == "shared"
 
-    def test_clear_registration_state_empties_lists(self) -> None:
-        """`clear_wizard_registration_state` drops accumulated registration state."""
-        snapshot_without = list(_wizard_without_steps)
-        clear_wizard_registration_state()
-        assert _wizard_without_steps == []
-        _wizard_without_steps.extend(snapshot_without)
+    def test_diagnostics_clear_empties_wizard_list(self) -> None:
+        """`registration_diagnostics.clear` drops accumulated registration state."""
+        snapshot = registration_diagnostics.snapshot()
+        registration_diagnostics.clear()
+        assert registration_diagnostics.wizard_without_steps == []
+        registration_diagnostics.restore(snapshot)
 
     def test_virtual_path_skips_registration(self) -> None:
         """A wizard defined in a virtual frame is not registered."""
@@ -205,7 +206,10 @@ class TestWizardRegistration:
                 class Meta:
                     steps: ClassVar = [("identity", IdentityStep)]
 
-        assert any("OutsideWizard" in name for name, _ in _outside_base_dir_classes)
+        assert any(
+            "OutsideWizard" in name
+            for name, _ in registration_diagnostics.outside_base_dir
+        )
         assert form_action_manager.default_backend.get_meta("outside_wizard") is None
 
 
