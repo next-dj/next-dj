@@ -56,19 +56,13 @@ def _file_to_dotted_module(file_path: str) -> str:
     if cached is not None:
         return cached
     p = Path(_resolved_path_str(file_path))
-    parts: list[str] = []
-    current = p.with_suffix("")
-    while True:
-        init = current.parent / "__init__.py"
-        if not init.exists():
-            break
-        parts.append(current.name)
-        current = current.parent
-    if not parts:
-        dotted = p.stem
-    else:
-        parts.reverse()
-        dotted = ".".join(parts)
+    parts: list[str] = [p.stem]
+    directory = p.parent
+    while (directory / "__init__.py").exists():
+        parts.append(directory.name)
+        directory = directory.parent
+    parts.reverse()
+    dotted = ".".join(parts)
     _dotted_module_cache[file_path] = dotted
     return dotted
 
@@ -258,15 +252,15 @@ class RegistryFormActionBackend(FormActionBackend):
 
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
         """Return the reverse URL for a registered action name."""
-        key: tuple[str, str] | None = None
+        meta: ActionMeta | None = None
         if page_path is not None:
-            scoped_key = (_resolved_path_str(page_path), action_name)
-            if scoped_key in self._registry:
-                key = scoped_key
-        if key is None:
-            key = self._name_index.get(action_name)
-        if key is not None:
-            uid = self._registry[key]["uid"]
+            meta = self._registry.get((_resolved_path_str(page_path), action_name))
+        if meta is None:
+            fallback_key = self._name_index.get(action_name)
+            if fallback_key is not None:
+                meta = self._registry.get(fallback_key)
+        if meta is not None:
+            uid = meta.get("uid")
             if uid is not None:
                 # The script prefix is request-scoped state and reverse() bakes
                 # it into the URL, so it must be part of the cache key.
@@ -311,7 +305,9 @@ class RegistryFormActionBackend(FormActionBackend):
 
         fallback_key = self._name_index.get(action_name)
         if fallback_key is not None:
-            return cast("dict[str, Any]", self._registry[fallback_key])
+            fallback_meta = self._registry.get(fallback_key)
+            if fallback_meta is not None:
+                return cast("dict[str, Any]", fallback_meta)
 
         return None
 

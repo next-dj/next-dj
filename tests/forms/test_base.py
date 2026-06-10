@@ -1,3 +1,4 @@
+import importlib.util
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -261,6 +262,65 @@ class TestAutoRegistration:
         backend = form_action_manager.default_backend
         meta = backend.get_meta("no_dir_form")
         assert meta is not None
+
+
+def _exec_module_from_file(module_name: str, module_file: Path) -> None:
+    spec = importlib.util.spec_from_file_location(module_name, module_file)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+
+class TestUserFormsPackageRegistration:
+    """Forms declared in a user forms/ package register via the real frame walk."""
+
+    def test_form_in_forms_package_module_registers(self, settings, tmp_path) -> None:
+        """A Form in myapp/forms/models.py registers with its own file_path."""
+        settings.BASE_DIR = tmp_path
+        forms_pkg = tmp_path / "myapp" / "forms"
+        forms_pkg.mkdir(parents=True)
+        (tmp_path / "myapp" / "__init__.py").write_text("")
+        (forms_pkg / "__init__.py").write_text("")
+        module_file = forms_pkg / "models.py"
+        module_file.write_text(
+            "from next.forms import CharField, Form\n"
+            "\n"
+            "\n"
+            "class PackagedModelsForm(Form):\n"
+            "    title = CharField()\n"
+        )
+
+        _exec_module_from_file("user_forms_pkg_models", module_file)
+
+        backend = form_action_manager.default_backend
+        meta = backend.get_meta("packaged_models_form")
+        assert meta is not None
+        assert meta["file_path"] == str(module_file.resolve())
+        assert meta["scope"] == "shared"
+
+    def test_form_in_forms_package_init_registers(self, settings, tmp_path) -> None:
+        """A Form in myapp/forms/__init__.py registers with its own file_path."""
+        settings.BASE_DIR = tmp_path
+        forms_pkg = tmp_path / "myapp" / "forms"
+        forms_pkg.mkdir(parents=True)
+        (tmp_path / "myapp" / "__init__.py").write_text("")
+        module_file = forms_pkg / "__init__.py"
+        module_file.write_text(
+            "from next.forms import CharField, Form\n"
+            "\n"
+            "\n"
+            "class PackagedInitForm(Form):\n"
+            "    title = CharField()\n"
+        )
+
+        _exec_module_from_file("user_forms_pkg_init", module_file)
+
+        backend = form_action_manager.default_backend
+        meta = backend.get_meta("packaged_init_form")
+        assert meta is not None
+        assert meta["file_path"] == str(module_file.resolve())
+        assert meta["scope"] == "shared"
 
 
 class TestFindDefinitionFrame:

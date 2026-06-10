@@ -6,6 +6,7 @@ from django.conf import settings as django_settings
 from next.components.manager import components_manager
 from next.deps.providers import ParameterProvider
 from next.deps.resolver import resolver
+from next.forms import ActionRegistration
 from next.forms.manager import form_action_manager
 from next.static.collector import StaticCollector
 from next.static.manager import StaticManager, default_manager
@@ -125,6 +126,61 @@ class TestOverrideFormAction:
         with pytest.raises(RuntimeError), override_form_action("_pt_err", handler):
             raise _BOOM
         assert not any(name == "_pt_err" for _, name in backend._registry)  # type: ignore[attr-defined]
+
+    def test_overrides_existing_action_and_restores_index(self, tmp_path) -> None:
+        backend = form_action_manager.default_backend
+        snapshots = {
+            attr: dict(getattr(backend, attr))
+            for attr in ("_registry", "_uid_to_name", "_name_index", "_url_cache")
+        }
+
+        def original() -> str:
+            return "original"
+
+        def replacement() -> str:
+            return "replacement"
+
+        app_dir = tmp_path / "someapp"
+        app_dir.mkdir()
+        (app_dir / "__init__.py").write_text("")
+        forms_file = app_dir / "forms.py"
+        forms_file.write_text("")
+        try:
+            form_action_manager.register_action(
+                ActionRegistration(
+                    name="_pt_existing",
+                    file_path=str(forms_file),
+                    scope="shared",
+                    handler=original,
+                )
+            )
+            with override_form_action("_pt_existing", replacement):
+                inside = backend.get_meta("_pt_existing")
+                assert inside is not None
+                assert inside["handler"] is replacement
+            after = backend.get_meta("_pt_existing")
+            assert after is not None
+            assert after["handler"] is original
+            assert backend._name_index["_pt_existing"] == (  # type: ignore[attr-defined]
+                "someapp.forms",
+                "_pt_existing",
+            )
+        finally:
+            for attr, snapshot in snapshots.items():
+                mapping = getattr(backend, attr)
+                mapping.clear()
+                mapping.update(snapshot)
+
+    def test_no_stale_index_entry_after_exit(self) -> None:
+        backend = form_action_manager.default_backend
+
+        def handler() -> str:
+            return "ok"
+
+        with override_form_action("_pt_index_probe", handler):
+            assert "_pt_index_probe" in backend._name_index  # type: ignore[attr-defined]
+        assert "_pt_index_probe" not in backend._name_index  # type: ignore[attr-defined]
+        assert backend.get_meta("_pt_index_probe") is None
 
 
 class TestOverrideComponentBackends:

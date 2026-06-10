@@ -2,7 +2,11 @@ import pytest
 from django.test import override_settings
 
 from next.conf import next_framework_settings
-from next.forms.backends import _file_to_dotted_module
+from next.forms.backends import (
+    ActionRegistration,
+    RegistryFormActionBackend,
+    _file_to_dotted_module,
+)
 from next.forms.base import (
     _FRAMEWORK_ROOT,
     _compute_scope,
@@ -39,8 +43,7 @@ class TestFileToDottedModule:
         assert _file_to_dotted_module(str(f)) == "mymodule"
 
     def test_file_in_package_returns_dotted_name(self, tmp_path) -> None:
-        """File inside a package returns package.module when a parent __init__.py exists."""
-        (tmp_path / "__init__.py").write_text("")
+        """File inside a package includes the top-level package in the dotted name."""
         pkg = tmp_path / "myapp"
         pkg.mkdir()
         (pkg / "__init__.py").write_text("")
@@ -50,16 +53,43 @@ class TestFileToDottedModule:
         assert result == "myapp.forms"
 
     def test_nested_package(self, tmp_path) -> None:
-        """Deeply nested package returns full dotted path when all ancestor inits exist."""
+        """Deeply nested package returns the full dotted path from the top package."""
         deep = tmp_path / "a" / "b"
         deep.mkdir(parents=True)
-        (tmp_path / "__init__.py").write_text("")
         (tmp_path / "a" / "__init__.py").write_text("")
         (deep / "__init__.py").write_text("")
         f = deep / "forms.py"
         f.write_text("")
         result = _file_to_dotted_module(str(f))
         assert result == "a.b.forms"
+
+
+class TestSharedScopeKeysAcrossApps:
+    """Same-named shared forms in different app packages stay distinct."""
+
+    def test_same_named_forms_in_two_apps_register_separately(self, tmp_path) -> None:
+        """Two shared registrations from different packages get distinct keys and UIDs."""
+        backend = RegistryFormActionBackend()
+        for app in ("appone", "apptwo"):
+            app_dir = tmp_path / app
+            app_dir.mkdir()
+            (app_dir / "__init__.py").write_text("")
+            forms_file = app_dir / "forms.py"
+            forms_file.write_text("")
+            backend.register_action(
+                ActionRegistration(
+                    name="contact_form",
+                    file_path=str(forms_file),
+                    scope="shared",
+                    handler=lambda: None,
+                )
+            )
+        assert sorted(backend._registry) == [
+            ("appone.forms", "contact_form"),
+            ("apptwo.forms", "contact_form"),
+        ]
+        uids = {meta["uid"] for meta in backend._registry.values()}
+        assert len(uids) == 2
 
 
 class TestIsFrameworkFileUsed:

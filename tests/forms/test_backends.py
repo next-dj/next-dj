@@ -51,6 +51,24 @@ class TestFormActionManager:
         assert len(patterns) >= 1
         assert any("_next/form" in str(p.pattern) for p in patterns)
 
+    def test_no_backends_configured_raises_improperly_configured(
+        self, settings
+    ) -> None:
+        """Empty DEFAULT_FORM_ACTION_BACKENDS raises ImproperlyConfigured."""
+        settings.NEXT_FRAMEWORK = {"DEFAULT_FORM_ACTION_BACKENDS": []}
+        manager = FormActionManager()
+        with pytest.raises(ImproperlyConfigured, match="No form action backends"):
+            manager.register_action(
+                ActionRegistration(
+                    name="orphan_action",
+                    file_path=_FAKE_FILE,
+                    scope="shared",
+                    handler=lambda: None,
+                )
+            )
+        with pytest.raises(ImproperlyConfigured, match="No form action backends"):
+            _ = manager.default_backend
+
 
 class TestRegistryFormActionBackend:
     """RegistryFormActionBackend: register_action, get_meta, generate_urls."""
@@ -275,6 +293,19 @@ class TestRegistryFormActionBackend:
         )
         meta = backend.get_meta("any_scope_test")
         assert meta is not None
+
+    def test_get_meta_tolerates_dangling_name_index_entry(self) -> None:
+        """A name index entry without a registry record returns None."""
+        backend = RegistryFormActionBackend()
+        backend._name_index["ghost"] = ("ghost_scope", "ghost")
+        assert backend.get_meta("ghost") is None
+
+    def test_get_action_url_tolerates_dangling_name_index_entry(self) -> None:
+        """A name index entry without a registry record raises the not-found KeyError."""
+        backend = RegistryFormActionBackend()
+        backend._name_index["ghost"] = ("ghost_scope", "ghost")
+        with pytest.raises(KeyError, match="Unknown form action"):
+            backend.get_action_url("ghost")
 
     def test_dispatch_unknown_uid_returns_404(self) -> None:
         """Dispatch with unknown UID returns 404 response."""

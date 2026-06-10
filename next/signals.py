@@ -19,6 +19,8 @@ from next.forms.signals import (
     action_dispatched,
     action_registered,
     form_validation_failed,
+    wizard_completed,
+    wizard_step_submitted,
 )
 from next.pages.signals import (
     context_registered,
@@ -55,4 +57,6 @@ __all__ = [
     "settings_reloaded",
     "template_loaded",
     "watch_specs_ready",
+    "wizard_completed",
+    "wizard_step_submitted",
 ]

@@ -1,5 +1,6 @@
 """Base form classes and auto-registration machinery for next.forms."""
 
+import inspect
 import re
 import sys
 from pathlib import Path
@@ -24,6 +25,7 @@ from .uid import redirect_to_origin
 
 _ANCHOR_FILE_NAMES: frozenset[str] = frozenset({"page.py", "component.py"})
 _FRAMEWORK_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
+_DJANGO_FORMS_ROOT: Final[Path] = Path(inspect.getfile(django_forms)).resolve().parent
 
 
 def _to_snake_case(name: str) -> str:
@@ -111,7 +113,13 @@ def _validate_instance_from_url(cls: type, *, is_model_form: bool) -> None:
             )
 
 
-_DJANGO_FORMS_SKIP_PARTS = frozenset({"widgets.py", "forms.py", "models.py"})
+def _is_django_forms_file(file_path: str) -> bool:
+    try:
+        Path(_resolved_path_str(file_path)).relative_to(_DJANGO_FORMS_ROOT)
+    except ValueError:
+        return False
+    else:
+        return True
 
 
 def _find_definition_frame() -> str:
@@ -123,18 +131,9 @@ def _find_definition_frame() -> str:
         except ValueError:
             return ""
         filename = frame.f_code.co_filename
-        p = Path(filename)
-        # Skip Django forms internals (metaclass machinery)
-        if p.parent.name == "forms" and p.name in _DJANGO_FORMS_SKIP_PARTS:
+        if _is_django_forms_file(filename) or _is_framework_file(filename):
             depth += 1
             continue
-        # Skip our own framework files
-        try:
-            Path(_resolved_path_str(filename)).relative_to(_FRAMEWORK_ROOT)
-            depth += 1
-            continue
-        except ValueError:
-            pass
         return filename
 
 

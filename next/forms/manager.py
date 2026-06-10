@@ -80,10 +80,20 @@ class FormActionManager:
         if not self._backends:
             self._reload_config()
 
+    def _first_backend(self) -> "FormActionBackend":
+        """Return the first backend or raise when none are configured."""
+        self._ensure_backends()
+        if not self._backends:
+            msg = (
+                "No form action backends configured. Add at least one entry to "
+                "NEXT_FRAMEWORK['DEFAULT_FORM_ACTION_BACKENDS']."
+            )
+            raise ImproperlyConfigured(msg)
+        return self._backends[0]
+
     def register_action(self, registration: "ActionRegistration") -> None:
         """Forward registration to the first backend."""
-        self._ensure_backends()
-        self._backends[0].register_action(registration)
+        self._first_backend().register_action(registration)
 
     def clear_registries(self) -> None:
         """Clear every backend exposing `clear_registry`. For test isolation."""
@@ -110,8 +120,7 @@ class FormActionManager:
         page_file_path: "Path | None" = None,
     ) -> str:
         """Delegate rendering to the first backend."""
-        self._ensure_backends()
-        return self._backends[0].render_form_fragment(
+        return self._first_backend().render_form_fragment(
             request,
             action_name,
             form,
@@ -121,8 +130,7 @@ class FormActionManager:
     @property
     def default_backend(self) -> "FormActionBackend":
         """Return the first configured backend."""
-        self._ensure_backends()
-        return self._backends[0]
+        return self._first_backend()
 
 
 form_action_manager = FormActionManager()
