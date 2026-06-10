@@ -56,9 +56,10 @@ class AuditedFormActionBackend(RegistryFormActionBackend):
         last step in the workflow). The session key is consumed so
         subsequent dispatches do not over-attach.
         """
-        action_name = self._uid_to_name.get(uid)
-        if action_name is None:
+        key = self._uid_to_name.get(uid)
+        if key is None:
             return super().dispatch(request, uid)
+        action_name = key[1]
         step = (
             request.POST.get("_url_param_step", "") if request.method == "POST" else ""
         )

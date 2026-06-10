@@ -92,7 +92,7 @@ class CreateCardForm(Form):
         """Reject creation when the column is at its WIP limit.
 
         The check is best-effort. The authoritative lock+check+insert
-        lives in the action handler under select_for_update.
+        lives in on_valid under select_for_update.
         """
         cleaned = super().clean() or {}
         column_id = cleaned.get("column_id")

@@ -248,18 +248,18 @@ cache write a handler-side `store_snapshot` would cause.
 
 ```python
 @component.context("results", serialize=True)
-def results(poll: Poll, request: HttpRequest) -> dict[str, object]:
+def results(poll: Poll) -> dict[str, object]:
     return {
         "poll_id": poll.pk,
         "stream_url": f"/polls/{poll.pk}/stream/",
-        "vote_url": form_action_manager.get_action_url("vote_form"),
-        "csrf": get_token(request),
         "choices": [...],
         "total_votes": ...,
     }
 ```
 
 `serialize=True` injects this dict into `window.Next.context.results`.
+Voting itself stays server-side through the `{% form %}` tag in the
+component template, so the payload carries no vote URL or CSRF token.
 The Vue `<script setup>` block reads it on mount, opens a single
 `EventSource(stream_url)`, and binds `snapshot` and `update`
 listeners that swap a reactive `choices` ref. The chart renders bar

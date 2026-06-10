@@ -18,11 +18,11 @@ top.
 | `/` | List of active boards. Archived boards are hidden. |
 | `/board/<id>/` | Server-rendered columns and cards plus React-mounted drag-and-drop with optimistic move. |
 | `/board/<id>/settings/` | Forms to rename a board, archive it, or add a column with a WIP limit. |
-| `POST kanban:move_card` | Move a card across columns. Renumbers card positions inside an atomic transaction. |
-| `POST kanban:create_card` | Create a card at the tail of a column under `select_for_update`. Rejected when the column is at its WIP limit. |
-| `POST kanban:create_column` | Append a column to the board with an optional `wip_limit`. |
-| `POST kanban:rename_board` | Update the board title. |
-| `POST kanban:archive_board` | Toggle the archived flag. Archived boards drop out of the index. |
+| `POST move_card_form` | Move a card across columns. Renumbers card positions inside an atomic transaction. |
+| `POST create_card_form` | Create a card at the tail of a column under `select_for_update`. Rejected when the column is at its WIP limit. |
+| `POST create_column_form` | Append a column to the board with an optional `wip_limit`. |
+| `POST rename_board_form` | Update the board title. |
+| `POST archive_board_form` | Toggle the archived flag. Archived boards drop out of the index. |
 
 Three demo boards seed via a data migration. Two are active
 (`engineering-roadmap` and `marketing-launch`) and one is archived
@@ -71,13 +71,13 @@ Every route and component owns its asset files in the same directory:
 
 ```
 boards/board/[int:id]/
-├── page.py           <- @context callables and @action handlers (move_card, create_card)
+├── page.py           <- @context callables building the board payload
 ├── page.jsx          <- named export Board, mounts ReactDOM
 ├── page.test.jsx     <- Vitest + RTL tests for Board
 ├── template.djx      <- server skeleton with <div id="kanban-board">
 ├── layout.djx        <- board header + Board/Settings nav
 ├── settings/
-│   ├── page.py       <- settings @context + create_column / rename_board / archive_board
+│   ├── page.py       <- settings @context marking the active tab
 │   └── template.djx
 └── _pieces/
     ├── card/
@@ -170,7 +170,7 @@ def board_payload(active_board: DBoard[Board], request: HttpRequest) -> dict:
     return {
         "id": active_board.pk,
         "csrf": get_token(request),
-        "move_card_url": form_action_manager.get_action_url("kanban:move_card"),
+        "move_card_url": form_action_manager.get_action_url("move_card_form"),
         "columns": [{..., "wip_limit": col.wip_limit, "cards": [
             {"id": c.id, "title": c.title, "position": c.position, "excerpt": c.excerpt}
             for c in col.cards.all()
@@ -199,11 +199,14 @@ composite as a graceful fallback when JavaScript is unavailable.
 ### 7. WIP-limit invariant in two layers
 
 `CreateCardForm.clean()` performs a best-effort count check so common
-posts surface a friendly error before the handler runs. The
-authoritative check sits inside the action handler under
+posts surface a friendly error before the save runs. The
+authoritative check sits inside `CreateCardForm.on_valid()` under
 `Column.objects.select_for_update()` and returns
 `HttpResponseBadRequest` if a concurrent post fills the slot between
-form validation and insertion. The React layer reflects the limit live
+form validation and insertion. All five form classes live in the
+app-level [`kanban/forms.py`](kanban/forms.py) picked up by
+autodiscover, because every one of them is shared across pages or
+components. The React layer reflects the limit live
 through the WIP badge that turns red when `cards.length` exceeds
 `wip_limit`.
 

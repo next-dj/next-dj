@@ -87,15 +87,16 @@ class TestFullSubmission:
 
     def test_backend_rows_capture_the_active_step(self, client) -> None:
         _walk_three_steps(client)
-        steps = list(
+        rows = list(
             AuditEntry.objects.filter(
                 source=AuditEntry.SOURCE_BACKEND,
                 kind=AuditEntry.KIND_REQUEST_STARTED,
             )
             .order_by("created_at")
-            .values_list("step", flat=True)
+            .values_list("step", "action_name")
         )
-        assert steps == ["identity", "scope", "approval"]
+        assert [step for step, _ in rows] == ["identity", "scope", "approval"]
+        assert {name for _, name in rows} == {"access_request_wizard"}
 
     def test_signal_rows_carry_timing_and_status(self, client) -> None:
         _walk_three_steps(client)
