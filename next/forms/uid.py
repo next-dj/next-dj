@@ -12,6 +12,22 @@ URL_NAME_FORM_ACTION = "form_action"
 FORM_ACTION_REVERSE_NAME = "next:form_action"
 
 
+# Memoised by the raw BASE_DIR string: resolve() hits the filesystem on every
+# error re-render. No invalidation needed since resolve() is process-stable
+# per path string, and a changed BASE_DIR yields a different key.
+_resolved_base_dirs: dict[str, Path] = {}
+
+
+def _resolved_base_dir(base: object) -> Path:
+    """Return `base` resolved to an absolute path, memoised by its string form."""
+    key = str(base)
+    resolved = _resolved_base_dirs.get(key)
+    if resolved is None:
+        resolved = Path(key).resolve()
+        _resolved_base_dirs[key] = resolved
+    return resolved
+
+
 def reverse_form_action(uid: str) -> str:
     """Return the dispatch URL for a form action uid.
 
@@ -56,7 +72,7 @@ def validated_next_form_page_path(request: HttpRequest) -> Path | None:
     if base is None:
         return None
     try:
-        p.relative_to(Path(base).resolve())
+        p.relative_to(_resolved_base_dir(base))
     except ValueError:
         return None
     return p

@@ -5,8 +5,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
+from weakref import WeakSet
 
 from django.core.exceptions import ImproperlyConfigured
+from django.core.signals import setting_changed
 from django.http import HttpResponseNotFound
 from django.urls import path
 from django.views.decorators.http import require_http_methods
@@ -168,6 +170,19 @@ def _make_uid_for_action(scope_key: str, name: str) -> str:
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
+_url_caching_backends: "WeakSet[RegistryFormActionBackend]" = WeakSet()
+
+
+def _on_setting_changed(*, setting: str, **_kwargs: object) -> None:
+    """Drop cached action URLs when the URLconf is swapped under override_settings."""
+    if setting == "ROOT_URLCONF":
+        for backend in _url_caching_backends:
+            backend._url_cache.clear()
+
+
+setting_changed.connect(_on_setting_changed)
+
+
 class RegistryFormActionBackend(FormActionBackend):
     """In-memory actions behind one dispatcher path keyed by UID."""
 
@@ -176,12 +191,15 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry: dict[tuple[str, str], ActionMeta] = {}
         self._uid_to_name: dict[str, tuple[str, str]] = {}
         self._name_index: dict[str, tuple[str, str]] = {}
+        self._url_cache: dict[str, str] = {}
+        _url_caching_backends.add(self)
 
     def clear_registry(self) -> None:
         """Drop every registered action and reset the UID index. For test isolation."""
         self._registry.clear()
         self._uid_to_name.clear()
         self._name_index.clear()
+        self._url_cache.clear()
 
     def register_action(self, registration: ActionRegistration) -> None:
         """Store handler, form_class, or wizard_class and a stable uid for the name."""
@@ -250,7 +268,11 @@ class RegistryFormActionBackend(FormActionBackend):
         if key is not None:
             uid = self._registry[key]["uid"]
             if uid is not None:
-                return reverse_form_action(uid)
+                url = self._url_cache.get(uid)
+                if url is None:
+                    url = reverse_form_action(uid)
+                    self._url_cache[uid] = url
+                return url
 
         msg = f"Unknown form action: {action_name}"
         raise KeyError(msg)

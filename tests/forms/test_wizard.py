@@ -71,6 +71,21 @@ class DemoWizard(FormWizard):
         return HttpResponseRedirect("/done/")
 
 
+class CountingStepsWizard(FormWizard):
+    """Two-step wizard counting `steps_for` evaluations per instance."""
+
+    class Meta:
+        """Two ordered steps with the default URL parameter."""
+
+        steps: ClassVar = [("identity", IdentityStep), ("scope", ScopeStep)]
+        url_param = "step"
+
+    def steps_for(self):
+        """Count each evaluation and delegate to the declared steps."""
+        self.steps_for_calls = getattr(self, "steps_for_calls", 0) + 1
+        return super().steps_for()
+
+
 def _request(*, path: str = "/wizard/identity/"):
     """Return a POST request with a cache-backed session attached."""
     request = RequestFactory().post(path)
@@ -388,6 +403,42 @@ class TestWizardFormResolution:
         namespace = wizard.template_namespace()
         assert isinstance(namespace.form, IdentityStep)
         assert namespace.wizard is wizard
+
+
+class TestWizardStepCache:
+    """Step lookups reuse one `steps_for` evaluation until stored data changes."""
+
+    def test_repeated_lookups_call_steps_for_once(self) -> None:
+        """`step_names`, `is_first`, `is_last`, and `step_form_class` share one evaluation."""
+        wizard = CountingStepsWizard(_request())
+        wizard.step_names()
+        wizard.is_first()
+        wizard.is_last()
+        assert wizard.step_form_class("scope") is ScopeStep
+        assert wizard.steps_for_calls == 1
+
+    def test_save_step_invalidates_step_cache(self) -> None:
+        """`save_step` drops the cache so conditional steps see fresh data."""
+        wizard = CountingStepsWizard(_request())
+        wizard.step_names()
+        wizard.save_step("identity", {"name": "x"})
+        wizard.step_names()
+        assert wizard.steps_for_calls == 2
+
+    def test_clear_storage_invalidates_step_cache(self) -> None:
+        """`clear_storage` drops the cache alongside the stored data."""
+        wizard = CountingStepsWizard(_request())
+        wizard.step_names()
+        wizard.clear_storage()
+        wizard.step_names()
+        assert wizard.steps_for_calls == 2
+
+    def test_step_form_class_reuses_cached_mapping(self) -> None:
+        """Repeated `step_form_class` lookups reuse one cached mapping."""
+        wizard = CountingStepsWizard(_request())
+        assert wizard.step_form_class("identity") is IdentityStep
+        assert wizard.step_form_class("scope") is ScopeStep
+        assert wizard.steps_for_calls == 1
 
 
 class TestWizardHooks:

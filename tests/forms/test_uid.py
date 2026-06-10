@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from next.forms import redirect_to_origin
+from next.forms.uid import _resolved_base_dir, _resolved_base_dirs
 
 
 class TestRedirectToOrigin:
@@ -50,3 +51,15 @@ class TestRedirectToOrigin:
         request = mock_http_request(method="POST", POST=post)
         response = redirect_to_origin(request, fallback="/x/")
         assert response.url == "/x/"
+
+
+class TestResolvedBaseDir:
+    def test_first_call_populates_cache(self, tmp_path) -> None:
+        resolved = _resolved_base_dir(tmp_path)
+        assert resolved == tmp_path.resolve()
+        assert _resolved_base_dirs[str(tmp_path)] == resolved
+
+    def test_second_call_returns_cached_value(self, tmp_path) -> None:
+        first = _resolved_base_dir(tmp_path)
+        second = _resolved_base_dir(tmp_path)
+        assert second is first

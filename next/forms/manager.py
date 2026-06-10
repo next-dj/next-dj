@@ -27,6 +27,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _action_url_or_none(
+    backend: "FormActionBackend",
+    action_name: str,
+    page_path: str | None,
+) -> str | None:
+    """Return the backend URL for the action, or `None` when it is unknown."""
+    try:
+        return backend.get_action_url(action_name, page_path=page_path)
+    except KeyError:
+        return None
+
+
 class FormActionManager:
     """Holds one or more backends and yields their URL patterns."""
 
@@ -84,8 +96,9 @@ class FormActionManager:
         """Return the reverse URL from the first backend that knows `action_name`."""
         self._ensure_backends()
         for backend in self._backends:
-            if backend.get_meta(action_name, page_path) is not None:
-                return backend.get_action_url(action_name, page_path=page_path)
+            url = _action_url_or_none(backend, action_name, page_path)
+            if url is not None:
+                return url
         msg = f"Unknown form action: {action_name}"
         raise KeyError(msg)
 

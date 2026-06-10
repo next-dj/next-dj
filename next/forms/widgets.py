@@ -1,7 +1,7 @@
 """Form widgets that render through next-component runtime."""
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Final
 
 from django import forms as django_forms
 from django.conf import settings
@@ -11,6 +11,15 @@ from django.utils.safestring import SafeString
 
 from next.components.facade import get_component, render_component
 from next.static import default_manager
+
+
+if TYPE_CHECKING:
+    from next.components.info import ComponentInfo
+
+
+# Per-request component lookup cache attached to the request object, mirroring
+# REQUEST_DEP_CACHE_ATTR in next.deps. Keyed by (component name, anchor path).
+COMPONENT_LOOKUP_CACHE_ATTR: Final[str] = "_next_component_lookup_cache"
 
 
 class ComponentWidget(django_forms.Widget):
@@ -33,6 +42,24 @@ class ComponentWidget(django_forms.Widget):
         self.extra_kwargs = component_kwargs
         super().__init__(attrs)
 
+    def _resolve_component(self, anchor: "str | Path") -> "ComponentInfo | None":
+        """Resolve the named component, cached per request when one is bound."""
+        request = getattr(self, "_request", None)
+        cache: dict[tuple[str, str], ComponentInfo] | None = None
+        key = (self.component_name, str(anchor))
+        if request is not None:
+            cache = getattr(request, COMPONENT_LOOKUP_CACHE_ATTR, None)
+            if cache is None:
+                cache = {}
+                setattr(request, COMPONENT_LOOKUP_CACHE_ATTR, cache)
+            cached = cache.get(key)
+            if cached is not None:
+                return cached
+        info = get_component(self.component_name, Path(anchor))
+        if cache is not None and info is not None:
+            cache[key] = info
+        return info
+
     def render(
         self,
         name: str,
@@ -47,7 +74,7 @@ class ComponentWidget(django_forms.Widget):
             or getattr(settings, "BASE_DIR", None)
             or Path.cwd()
         )
-        info = get_component(self.component_name, Path(anchor))
+        info = self._resolve_component(anchor)
         if info is None:
             msg = (
                 f"ComponentWidget references component {self.component_name!r} "

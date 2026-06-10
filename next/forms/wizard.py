@@ -231,6 +231,8 @@ class FormWizard:
         self.wizard_id = _to_snake_case(type(self).__name__)
         self._backend = wizard_backend_manager.get()
         self._loaded: dict[str, Any] | None = None
+        self._steps_cache: list[tuple[str, type]] | None = None
+        self._step_map_cache: dict[str, type] | None = None
 
     @classmethod
     def _meta(cls) -> object:
@@ -274,15 +276,28 @@ class FormWizard:
         """Persist cleaned data for one step through the backend."""
         self._backend.save_step(self.request, self.wizard_id, step, data)
         self._loaded = None
+        self._invalidate_step_caches()
 
     def clear_storage(self) -> None:
         """Drop every stored step for this wizard through the backend."""
         self._backend.clear(self.request, self.wizard_id)
         self._loaded = None
+        self._invalidate_step_caches()
+
+    def _invalidate_step_caches(self) -> None:
+        """Drop cached steps so `steps_for` re-evaluates against fresh stored data."""
+        self._steps_cache = None
+        self._step_map_cache = None
+
+    def _resolved_steps(self) -> list[tuple[str, type]]:
+        """Return the `steps_for` output, cached until stored data changes."""
+        if self._steps_cache is None:
+            self._steps_cache = list(self.steps_for())
+        return self._steps_cache
 
     def step_names(self) -> list[str]:
         """Return the ordered step names for this request."""
-        return [name for name, _ in self.steps_for()]
+        return [name for name, _ in self._resolved_steps()]
 
     def current_step(self) -> str:
         """Return the active step from the URL kwarg, defaulting to the first."""
@@ -318,7 +333,9 @@ class FormWizard:
     def step_form_class(self, step: str | None = None) -> type | None:
         """Return the form class registered for `step` (or the current step)."""
         target = step or self.current_step()
-        return dict(self.steps_for()).get(target)
+        if self._step_map_cache is None:
+            self._step_map_cache = dict(self._resolved_steps())
+        return self._step_map_cache.get(target)
 
     def current_form(self) -> "DjangoForm | None":
         """Return an unbound form for the current step, prefilled from storage."""

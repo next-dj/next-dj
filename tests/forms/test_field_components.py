@@ -6,15 +6,21 @@ from unittest import mock
 import pytest
 from django import forms as django_forms
 from django.core.checks import Warning as DjangoWarning
+from django.http import HttpRequest
 from django.utils.safestring import SafeString
 
+from next.components.facade import get_component
 from next.forms.backends import ActionRegistration
 from next.forms.checks import (
     check_component_widget_components,
     check_component_widget_field_types,
 )
 from next.forms.manager import form_action_manager
-from next.forms.widgets import ComponentWidget, bind_component_widgets
+from next.forms.widgets import (
+    COMPONENT_LOOKUP_CACHE_ATTR,
+    ComponentWidget,
+    bind_component_widgets,
+)
 from next.static import StaticCollector
 from next.testing import override_component_backends
 
@@ -164,6 +170,42 @@ class TestComponentWidgetRender:
         widget._template_path = echo_component
         with pytest.raises(RuntimeError, match="is not registered"):
             widget.render("slug", "v", attrs=None)
+
+
+class TestComponentWidgetRequestCache:
+    """`render` caches component lookups on the bound request."""
+
+    def test_repeat_render_hits_request_cache(self, echo_component: Path) -> None:
+        widget = ComponentWidget("echo")
+        widget._template_path = echo_component
+        widget._request = HttpRequest()
+        with mock.patch(
+            "next.forms.widgets.get_component", wraps=get_component
+        ) as lookup:
+            widget.render("slug", "a", attrs={})
+            widget.render("slug", "b", attrs={})
+        assert lookup.call_count == 1
+        cache = getattr(widget._request, COMPONENT_LOOKUP_CACHE_ATTR)
+        assert ("echo", str(echo_component)) in cache
+
+    def test_render_without_request_skips_cache(self, echo_component: Path) -> None:
+        widget = ComponentWidget("echo")
+        widget._template_path = echo_component
+        with mock.patch(
+            "next.forms.widgets.get_component", wraps=get_component
+        ) as lookup:
+            widget.render("slug", "a", attrs={})
+            widget.render("slug", "b", attrs={})
+        assert lookup.call_count == 2
+
+    def test_unresolved_component_is_not_cached(self, echo_component: Path) -> None:
+        widget = ComponentWidget("does_not_exist")
+        widget._template_path = echo_component
+        widget._request = HttpRequest()
+        with pytest.raises(RuntimeError, match="is not registered"):
+            widget.render("slug", "v", attrs={})
+        cache = getattr(widget._request, COMPONENT_LOOKUP_CACHE_ATTR)
+        assert cache == {}
 
 
 class TestComponentWidgetConstructorAttrs:

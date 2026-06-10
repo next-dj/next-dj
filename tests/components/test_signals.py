@@ -286,3 +286,23 @@ class TestComponentRenderedSignal:
         event = capture_component_rendered[0]
         assert event["info"] is info
         assert event["template_path"] == template_path
+
+    def test_render_component_skips_send_without_listeners(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """``render_component`` does not dispatch when no listener is connected."""
+        template_path = tmp_path / "card.djx"
+        template_path.write_text("<h3>{{ title }}</h3>")
+        info = ComponentInfo(
+            name="card",
+            scope_root=tmp_path,
+            scope_relative="",
+            template_path=template_path,
+            module_path=None,
+            is_simple=True,
+        )
+        with patch.object(component_rendered, "send") as send:
+            html = render_component(info, {"title": "Hello"})
+        assert "Hello" in html
+        send.assert_not_called()

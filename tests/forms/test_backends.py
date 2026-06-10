@@ -4,6 +4,7 @@ import pytest
 from django import forms as django_forms
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse
+from django.test import override_settings
 from django.urls import NoReverseMatch
 
 from next.forms import (
@@ -427,6 +428,55 @@ class TestGetActionUrlNoReverseMatchFallback:
         with patch("next.forms.uid.reverse", side_effect=mock_reverse):
             url = backend.get_action_url("fallback_action", page_path=page_path)
         assert "_next/form/" in url
+
+
+class TestActionUrlCache:
+    """get_action_url memoises reversed URLs per uid on the backend instance."""
+
+    @staticmethod
+    def _backend_with_action() -> RegistryFormActionBackend:
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="cached_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+            )
+        )
+        return backend
+
+    def test_second_call_skips_reverse(self) -> None:
+        """The second lookup is served from the cache without reversing again."""
+        backend = self._backend_with_action()
+        first = backend.get_action_url("cached_action")
+        with patch("next.forms.backends.reverse_form_action") as mocked:
+            second = backend.get_action_url("cached_action")
+        assert second == first
+        mocked.assert_not_called()
+
+    def test_clear_registry_drops_url_cache(self) -> None:
+        """clear_registry resets the URL cache together with the registry."""
+        backend = self._backend_with_action()
+        backend.get_action_url("cached_action")
+        backend.clear_registry()
+        assert backend._url_cache == {}
+
+    def test_root_urlconf_change_drops_url_cache(self) -> None:
+        """Overriding ROOT_URLCONF invalidates cached URLs."""
+        backend = self._backend_with_action()
+        backend.get_action_url("cached_action")
+        assert backend._url_cache != {}
+        with override_settings(ROOT_URLCONF="next.urls"):
+            assert backend._url_cache == {}
+
+    def test_unrelated_setting_change_keeps_url_cache(self) -> None:
+        """Overriding an unrelated setting leaves cached URLs in place."""
+        backend = self._backend_with_action()
+        url = backend.get_action_url("cached_action")
+        with override_settings(APPEND_SLASH=False):
+            assert backend._url_cache != {}
+            assert backend.get_action_url("cached_action") == url
 
 
 class TestManagerClearRegistries:
