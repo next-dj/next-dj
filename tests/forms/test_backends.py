@@ -5,7 +5,7 @@ from django import forms as django_forms
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse
 from django.test import override_settings
-from django.urls import NoReverseMatch
+from django.urls import NoReverseMatch, clear_script_prefix, set_script_prefix
 
 from next.forms import (
     ActionRegistration,
@@ -477,6 +477,18 @@ class TestActionUrlCache:
         with override_settings(APPEND_SLASH=False):
             assert backend._url_cache != {}
             assert backend.get_action_url("cached_action") == url
+
+    def test_script_prefix_is_part_of_the_cache_key(self) -> None:
+        """A request-scoped script prefix never serves another prefix's URL."""
+        backend = self._backend_with_action()
+        bare = backend.get_action_url("cached_action")
+        try:
+            set_script_prefix("/mounted/")
+            prefixed = backend.get_action_url("cached_action")
+        finally:
+            clear_script_prefix()
+        assert prefixed == f"/mounted{bare}"
+        assert backend.get_action_url("cached_action") == bare
 
 
 class TestManagerClearRegistries:

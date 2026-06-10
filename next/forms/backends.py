@@ -10,7 +10,7 @@ from weakref import WeakSet
 from django.core.exceptions import ImproperlyConfigured
 from django.core.signals import setting_changed
 from django.http import HttpResponseNotFound
-from django.urls import path
+from django.urls import get_script_prefix, path
 from django.views.decorators.http import require_http_methods
 
 from next.conf import import_class_cached
@@ -191,7 +191,7 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry: dict[tuple[str, str], ActionMeta] = {}
         self._uid_to_name: dict[str, tuple[str, str]] = {}
         self._name_index: dict[str, tuple[str, str]] = {}
-        self._url_cache: dict[str, str] = {}
+        self._url_cache: dict[tuple[str, str], str] = {}
         _url_caching_backends.add(self)
 
     def clear_registry(self) -> None:
@@ -268,10 +268,13 @@ class RegistryFormActionBackend(FormActionBackend):
         if key is not None:
             uid = self._registry[key]["uid"]
             if uid is not None:
-                url = self._url_cache.get(uid)
+                # The script prefix is request-scoped state and reverse() bakes
+                # it into the URL, so it must be part of the cache key.
+                cache_key = (get_script_prefix(), uid)
+                url = self._url_cache.get(cache_key)
                 if url is None:
                     url = reverse_form_action(uid)
-                    self._url_cache[uid] = url
+                    self._url_cache[cache_key] = url
                 return url
 
         msg = f"Unknown form action: {action_name}"

@@ -41,15 +41,41 @@ def reverse_form_action(uid: str) -> str:
         return reverse(URL_NAME_FORM_ACTION, kwargs={"uid": uid})
 
 
+def page_path_token(file_path: str) -> str:
+    """Return the client-facing token for a page module path.
+
+    The token is the path relative to BASE_DIR, so rendered HTML never
+    exposes the server filesystem layout. Falls back to the raw path
+    when BASE_DIR is unset or does not contain the file.
+    """
+    base = getattr(settings, "BASE_DIR", None)
+    if base is None:
+        return file_path
+    try:
+        return str(Path(file_path).resolve().relative_to(_resolved_base_dir(base)))
+    except (OSError, ValueError):
+        return file_path
+
+
 def _posted_page_path(request: HttpRequest) -> Path | None:
-    """Return the resolved POST `_next_form_page` value, or `None`."""
+    """Return the resolved POST `_next_form_page` value, or `None`.
+
+    Relative values resolve against BASE_DIR, matching the token the
+    form tag emits.
+    """
     if not hasattr(request, "POST"):
         return None
     raw = request.POST.get("_next_form_page")
     if not raw or not isinstance(raw, str) or not raw.strip():
         return None
+    candidate = Path(raw.strip())
+    if not candidate.is_absolute():
+        base = getattr(settings, "BASE_DIR", None)
+        if base is None:
+            return None
+        candidate = _resolved_base_dir(base) / candidate
     try:
-        return Path(raw.strip()).resolve()
+        return candidate.resolve()
     except OSError:
         return None
 
@@ -102,6 +128,7 @@ def redirect_to_origin(
 __all__ = [
     "FORM_ACTION_REVERSE_NAME",
     "URL_NAME_FORM_ACTION",
+    "page_path_token",
     "redirect_to_origin",
     "reverse_form_action",
     "validated_next_form_page_path",

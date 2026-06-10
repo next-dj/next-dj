@@ -10,6 +10,7 @@ from django.utils.html import escape, format_html
 from next.deps import RESERVED_KEYS
 from next.forms import form_action_manager
 from next.forms.manager import build_form_namespace_for_action
+from next.forms.uid import page_path_token
 from next.forms.widgets import bind_component_widgets
 
 
@@ -83,7 +84,7 @@ class FormNode(template.Node):
                 format_html(
                     '<input type="hidden" name="{}" value="{}">',
                     _NEXT_FORM_PAGE,
-                    escape(next_form_page),
+                    escape(page_path_token(next_form_page)),
                 )
             )
         origin = getattr(request, "path", None)

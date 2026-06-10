@@ -16,6 +16,7 @@ from next.forms import (
     form_action_manager,
 )
 from next.forms.rendering import _ErrorRenderParams, render_form_page_with_errors
+from next.forms.uid import page_path_token
 from next.forms.wizard import FormWizard
 from tests.forms.actions import SimpleForm
 
@@ -247,7 +248,7 @@ class TestFormTagRender:
         assert "csrfmiddlewaretoken" in html
 
     def test_includes_next_form_page_hidden(self, form_engine, csrf_request) -> None:
-        """Form includes _next_form_page from current_page_module_path."""
+        """Form includes _next_form_page as a BASE_DIR-relative token."""
         t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
         html = t.render(
             Context(
@@ -258,7 +259,8 @@ class TestFormTagRender:
             )
         )
         assert "_next_form_page" in html
-        assert str(PAGE_MODULE_FOR_FORM_TESTS) in html
+        assert page_path_token(str(PAGE_MODULE_FOR_FORM_TESTS)) in html
+        assert str(PAGE_MODULE_FOR_FORM_TESTS) not in html
 
     def test_includes_next_form_origin_hidden(self, form_engine, csrf_request) -> None:
         """Form emits `_next_form_origin` hidden field set to `request.path`."""
