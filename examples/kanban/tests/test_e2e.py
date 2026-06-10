@@ -53,6 +53,23 @@ def _next_init_payload(html: str) -> dict:
     return json.loads(match.group(1))
 
 
+def _rename_form_block(html: str) -> str:
+    blocks = re.findall(r"<form[^>]*>.*?</form>", html, flags=re.S)
+    return next(b for b in blocks if 'name="title"' in b and "wip_limit" not in b)
+
+
+def _form_action_url(block: str) -> str:
+    match = re.search(r'<form action="([^"]+)"', block)
+    assert match is not None
+    return match.group(1)
+
+
+def _hidden_fields(block: str) -> dict[str, str]:
+    return dict(
+        re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', block)
+    )
+
+
 class TestBoardList:
     """The index page lists active boards and hides archived ones."""
 
@@ -172,6 +189,32 @@ class TestSettings:
         assert response["Location"] == f"/board/{board.pk}/settings/"
         board.refresh_from_db()
         assert board.archived is False
+
+    def test_invalid_then_fixed_resubmit_renames_in_place(
+        self,
+        client: NextClient,
+        board: Board,
+    ) -> None:
+        rename = _rename_form_block(_settings_html(client, board))
+        invalid = client.post(
+            _form_action_url(rename),
+            {**_hidden_fields(rename), "title": ""},
+        )
+        assert invalid.status_code == 200
+        rerendered = _rename_form_block(invalid.content.decode())
+        refields = _hidden_fields(rerendered)
+        assert refields["_url_param_id"] == str(board.pk)
+        assert refields["_next_form_origin"] == f"/board/{board.pk}/settings/"
+        before = Board.objects.count()
+        fixed = client.post(
+            _form_action_url(rerendered),
+            {**refields, "title": "Fixed title"},
+        )
+        assert fixed.status_code == 302
+        assert fixed["Location"] == f"/board/{board.pk}/settings/"
+        assert Board.objects.count() == before
+        board.refresh_from_db()
+        assert board.title == "Fixed title"
 
     def test_add_column_form_post(
         self,

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,24 @@ def _walk_three_steps(client) -> None:
     _post_step(client, "identity", IDENTITY)
     _post_step(client, "scope", SCOPE)
     _post_step(client, "approval", APPROVAL)
+
+
+def _wizard_form_block(html: str) -> str:
+    match = re.search(r"<form[^>]*>.*?</form>", html, flags=re.S)
+    assert match is not None
+    return match.group(0)
+
+
+def _form_action_url(block: str) -> str:
+    match = re.search(r'<form action="([^"]+)"', block)
+    assert match is not None
+    return match.group(1)
+
+
+def _hidden_fields(block: str) -> dict[str, str]:
+    return dict(
+        re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', block)
+    )
 
 
 class TestFullSubmission:
@@ -137,6 +156,23 @@ class TestValidationFailure:
         body = response.content.decode()
         assert 'data-step-section="identity"' in body
         assert 'data-step-section="identity" data-state="saved"' not in body
+
+    def test_invalid_then_fixed_resubmit_advances_to_next_step(self, client) -> None:
+        page = client.get("/request/identity/")
+        assert page.status_code == 200
+        block = _wizard_form_block(page.content.decode())
+        invalid = client.post(
+            _form_action_url(block),
+            {**_hidden_fields(block), **IDENTITY, "email": ""},
+        )
+        assert invalid.status_code == 200
+        rerendered = _wizard_form_block(invalid.content.decode())
+        refields = _hidden_fields(rerendered)
+        assert refields["_url_param_step"] == "identity"
+        assert refields["_next_form_origin"] == "/request/identity/"
+        fixed = client.post(_form_action_url(rerendered), {**refields, **IDENTITY})
+        assert fixed.status_code == 302
+        assert fixed["Location"] == "/request/scope/"
 
 
 class TestSessionResume:

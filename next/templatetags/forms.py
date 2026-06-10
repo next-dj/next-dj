@@ -9,8 +9,9 @@ from django.utils.html import escape, format_html
 
 from next.deps import RESERVED_KEYS
 from next.forms import form_action_manager
+from next.forms._request_utils import _url_kwargs_from_post
 from next.forms.manager import build_form_namespace_for_action
-from next.forms.uid import page_path_token
+from next.forms.uid import _validated_origin_path, page_path_token
 from next.forms.widgets import bind_component_widgets
 
 
@@ -87,7 +88,7 @@ class FormNode(template.Node):
                     escape(page_path_token(next_form_page)),
                 )
             )
-        origin = getattr(request, "path", None)
+        origin = self._origin_path(request)
         if origin:
             inputs.append(
                 format_html(
@@ -97,18 +98,49 @@ class FormNode(template.Node):
                 )
             )
 
-        if request.resolver_match and request.resolver_match.kwargs:
-            for key, value in request.resolver_match.kwargs.items():
-                if key != "uid" and key not in RESERVED_KEYS:
-                    inputs.append(
-                        format_html(
-                            '<input type="hidden" name="_url_param_{}" value="{}">',
-                            escape(key),
-                            escape(str(value)),
-                        )
-                    )
+        for key, value in self._url_params(request).items():
+            inputs.append(
+                format_html(
+                    '<input type="hidden" name="_url_param_{}" value="{}">',
+                    escape(key),
+                    escape(str(value)),
+                )
+            )
 
         return "\n".join(inputs)
+
+    @staticmethod
+    def _origin_path(request: "HttpRequest") -> str | None:
+        """Return the page path the form belongs to.
+
+        On the validation-error re-render the request targets the action
+        endpoint, so the posted origin of the original page wins over
+        `request.path`.
+        """
+        if getattr(request, "method", None) == "POST":
+            posted = _validated_origin_path(request.POST.get(_NEXT_FORM_ORIGIN))
+            if posted is not None:
+                return posted
+        return getattr(request, "path", None)
+
+    @staticmethod
+    def _url_params(request: "HttpRequest") -> dict[str, object]:
+        """Return the URL kwargs of the page the form belongs to.
+
+        On the validation-error re-render the resolver match holds only the
+        dispatch `uid`, so the `_url_param_*` fields posted from the original
+        page win.
+        """
+        params: dict[str, object] = {}
+        if request.resolver_match and request.resolver_match.kwargs:
+            params = {
+                key: value
+                for key, value in request.resolver_match.kwargs.items()
+                if key != "uid" and key not in RESERVED_KEYS
+            }
+        if not params:
+            params = _url_kwargs_from_post(request)
+        return params
 
     def render(self, context: template.Context) -> str:
         """Render form tag with action URL, method=post, CSRF, and content."""

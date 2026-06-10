@@ -277,6 +277,73 @@ class TestFormTagRender:
         assert "_next_form_origin" in html
         assert "/admin/library/book/1/change/" in html
 
+    @staticmethod
+    def _rerender_request(csrf_request, post: dict) -> object:
+        csrf_request.method = "POST"
+        csrf_request.path = "/_next/form/abc123/"
+        csrf_request.POST = post
+        csrf_request.resolver_match = MagicMock()
+        csrf_request.resolver_match.kwargs = {"uid": "abc123"}
+        return csrf_request
+
+    def test_error_rerender_keeps_posted_origin(
+        self, form_engine, csrf_request
+    ) -> None:
+        """On the action-POST re-render the posted origin wins over request.path."""
+        request = self._rerender_request(
+            csrf_request, {"_next_form_origin": "/board/4/settings/"}
+        )
+        t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
+        html = t.render(
+            Context(
+                {
+                    "request": request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert 'name="_next_form_origin" value="/board/4/settings/"' in html
+        assert 'value="/_next/form/abc123/"' not in html
+
+    def test_error_rerender_keeps_posted_url_params(
+        self, form_engine, csrf_request
+    ) -> None:
+        """On the action-POST re-render the posted _url_param_* fields survive."""
+        request = self._rerender_request(
+            csrf_request,
+            {"_next_form_origin": "/board/4/settings/", "_url_param_id": "4"},
+        )
+        t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
+        html = t.render(
+            Context(
+                {
+                    "request": request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert 'name="_url_param_id" value="4"' in html
+
+    def test_resolver_kwargs_win_over_posted_url_params(
+        self, form_engine, csrf_request
+    ) -> None:
+        """On a regular page render the resolver kwargs stay authoritative."""
+        csrf_request.method = "POST"
+        csrf_request.POST = {"_url_param_id": "999"}
+        csrf_request.resolver_match = MagicMock()
+        csrf_request.resolver_match.kwargs = {"id": 4}
+        t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+        assert 'name="_url_param_id" value="4"' in html
+        assert 'value="999"' not in html
+
     def test_unknown_action_raises_runtime_error(
         self, form_engine, csrf_request
     ) -> None:
