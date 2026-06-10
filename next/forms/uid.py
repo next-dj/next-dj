@@ -4,13 +4,41 @@ from pathlib import Path
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponseRedirect
+from django.urls import reverse
+from django.urls.exceptions import NoReverseMatch
 
 
 URL_NAME_FORM_ACTION = "form_action"
 FORM_ACTION_REVERSE_NAME = "next:form_action"
 
 
-def validated_next_form_page_path(request: HttpRequest) -> Path | None:  # noqa: PLR0911
+def reverse_form_action(uid: str) -> str:
+    """Return the dispatch URL for a form action uid.
+
+    The route name depends on how the project wired next URLs: included
+    under the `next` namespace it reverses as `next:form_action`, included
+    bare it reverses as `form_action`.
+    """
+    try:
+        return reverse(FORM_ACTION_REVERSE_NAME, kwargs={"uid": uid})
+    except NoReverseMatch:
+        return reverse(URL_NAME_FORM_ACTION, kwargs={"uid": uid})
+
+
+def _posted_page_path(request: HttpRequest) -> Path | None:
+    """Return the resolved POST `_next_form_page` value, or `None`."""
+    if not hasattr(request, "POST"):
+        return None
+    raw = request.POST.get("_next_form_page")
+    if not raw or not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        return Path(raw.strip()).resolve()
+    except OSError:
+        return None
+
+
+def validated_next_form_page_path(request: HttpRequest) -> Path | None:
     """Return a trusted `page.py` path from POST `_next_form_page`, or `None`.
 
     Accepts both real `page.py` files and virtual ones — directories whose
@@ -19,19 +47,8 @@ def validated_next_form_page_path(request: HttpRequest) -> Path | None:  # noqa:
     and falls back to the template, so virtual pages survive the re-render
     path on form-validation failures.
     """
-    if not hasattr(request, "POST"):
-        return None
-    raw = request.POST.get("_next_form_page")
-    if not raw or not isinstance(raw, str):
-        return None
-    raw_stripped = raw.strip()
-    if not raw_stripped:
-        return None
-    try:
-        p = Path(raw_stripped).resolve()
-    except OSError:
-        return None
-    if p.name != "page.py":
+    p = _posted_page_path(request)
+    if p is None or p.name != "page.py":
         return None
     if not p.is_file() and not (p.parent / "template.djx").is_file():
         return None
@@ -70,5 +87,6 @@ __all__ = [
     "FORM_ACTION_REVERSE_NAME",
     "URL_NAME_FORM_ACTION",
     "redirect_to_origin",
+    "reverse_form_action",
     "validated_next_form_page_path",
 ]

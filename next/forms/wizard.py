@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django.conf import settings
 from django.core.cache import caches
+from django.core.exceptions import ImproperlyConfigured
 
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
@@ -91,6 +92,14 @@ class CacheFormWizardBackend(FormWizardBackend):
     ) -> None:
         """Persist cleaned data for one step, creating a session when absent."""
         session_key = _ensure_session_key(request, create=True)
+        if not session_key:
+            msg = (
+                "CacheFormWizardBackend requires Django sessions to key stored "
+                "steps. Add django.contrib.sessions to INSTALLED_APPS and "
+                "SessionMiddleware to MIDDLEWARE, or configure a custom backend "
+                "in DEFAULT_FORM_WIZARD_BACKEND."
+            )
+            raise ImproperlyConfigured(msg)
         key = self._key(session_key, wizard_id)
         bucket = dict(self._cache().get(key, {}))
         bucket[step] = dict(data)

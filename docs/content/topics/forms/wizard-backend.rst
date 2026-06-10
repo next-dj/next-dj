@@ -36,6 +36,7 @@ The Cache Backend
 ``next.forms.CacheFormWizardBackend`` is the default backend.
 It stores drafts in Django's configured cache, namespaced by the session key and the wizard id.
 Because it keys drafts by session, ``SessionMiddleware`` must be enabled, and the backend creates a session on the first saved step.
+Saving a step on a request without session support raises ``ImproperlyConfigured`` instead of silently dropping the draft, and the ``next.W056`` system check flags the misconfiguration at startup.
 
 Durability and worker sharing follow whichever cache the project configures.
 A local-memory cache loses drafts on restart and does not share them between workers, which suits development and tests.

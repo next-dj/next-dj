@@ -424,7 +424,7 @@ class TestGetActionUrlNoReverseMatchFallback:
                 raise NoReverseMatch(msg)
             return original_reverse(name, **kwargs)
 
-        with patch("next.forms.backends.reverse", side_effect=mock_reverse):
+        with patch("next.forms.uid.reverse", side_effect=mock_reverse):
             url = backend.get_action_url("fallback_action", page_path=page_path)
         assert "_next/form/" in url
 

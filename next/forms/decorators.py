@@ -2,10 +2,9 @@
 
 import sys
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
-from .backends import ActionRegistration
+from .backends import ActionRegistration, _resolved_path_str
 from .base import _compute_scope
 from .manager import form_action_manager
 
@@ -49,7 +48,7 @@ def action(
         form_action_manager.register_action(
             ActionRegistration(
                 name=name,
-                file_path=str(Path(file_path).resolve()),
+                file_path=_resolved_path_str(file_path),
                 scope=scope,
                 handler=func,
                 form_class=form_class,

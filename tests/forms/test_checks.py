@@ -14,11 +14,13 @@ from next.forms.checks import (
     check_form_action_collisions,
     check_form_anchor_files,
     check_form_wizard_backend,
+    check_form_wizard_sessions,
     check_form_wizard_steps,
     check_forms_outside_base_dir,
     check_invalid_form_meta_scope,
 )
 from next.forms.decorators import _action_applied_to_class, action
+from next.forms.manager import form_action_manager
 from next.forms.signals import action_registered
 from next.forms.wizard import _wizard_without_steps
 
@@ -351,6 +353,72 @@ class TestCheckFormWizardBackend:
         assert len(errors) == 1
         assert errors[0].id == "next.E051"
         assert "FormWizardBackend" in errors[0].msg
+
+
+def _without_sessions(installed_apps: list[str]) -> list[str]:
+    return [app for app in installed_apps if app != "django.contrib.sessions"]
+
+
+class TestCheckFormWizardSessions:
+    """check_form_wizard_sessions: W056 for cache wizard storage without sessions."""
+
+    def _register_wizard(self) -> None:
+        form_action_manager.register_action(
+            ActionRegistration(
+                name="demo_wizard",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                wizard_class=type("DemoWizardStub", (), {}),
+            )
+        )
+
+    def test_sessions_installed_is_clean(self) -> None:
+        """No warning while django.contrib.sessions is installed."""
+        self._register_wizard()
+        assert check_form_wizard_sessions() == []
+
+    def test_no_wizards_is_clean(self, settings, monkeypatch) -> None:
+        """No warning when no wizard is registered."""
+        settings.INSTALLED_APPS = _without_sessions(settings.INSTALLED_APPS)
+        monkeypatch.setattr(
+            form_action_manager, "_backends", [RegistryFormActionBackend()]
+        )
+        assert check_form_wizard_sessions() == []
+
+    def test_non_string_backend_is_clean(self, settings) -> None:
+        """A malformed BACKEND value is E051 territory, not W056."""
+        settings.INSTALLED_APPS = _without_sessions(settings.INSTALLED_APPS)
+        settings.NEXT_FRAMEWORK = {"DEFAULT_FORM_WIZARD_BACKEND": {"BACKEND": 7}}
+        self._register_wizard()
+        assert check_form_wizard_sessions() == []
+
+    def test_unimportable_backend_is_clean(self, settings) -> None:
+        """An unimportable BACKEND path is E051 territory, not W056."""
+        settings.INSTALLED_APPS = _without_sessions(settings.INSTALLED_APPS)
+        settings.NEXT_FRAMEWORK = {
+            "DEFAULT_FORM_WIZARD_BACKEND": {"BACKEND": "no.such.Module"}
+        }
+        self._register_wizard()
+        assert check_form_wizard_sessions() == []
+
+    def test_non_cache_backend_is_clean(self, settings) -> None:
+        """A custom backend not keyed by session passes without warning."""
+        settings.INSTALLED_APPS = _without_sessions(settings.INSTALLED_APPS)
+        settings.NEXT_FRAMEWORK = {
+            "DEFAULT_FORM_WIZARD_BACKEND": {
+                "BACKEND": "next.forms.RegistryFormActionBackend"
+            }
+        }
+        self._register_wizard()
+        assert check_form_wizard_sessions() == []
+
+    def test_cache_backend_without_sessions_is_w056(self, settings) -> None:
+        """The default cache backend without sessions produces W056."""
+        settings.INSTALLED_APPS = _without_sessions(settings.INSTALLED_APPS)
+        self._register_wizard()
+        warnings = check_form_wizard_sessions()
+        assert len(warnings) == 1
+        assert warnings[0].id == "next.W056"
 
 
 class TestCheckFormAnchorFiles:

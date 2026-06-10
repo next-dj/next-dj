@@ -13,7 +13,7 @@ from django.core.checks import (
 from django.forms import FileField, MultiValueField
 
 from next.components.facade import get_component
-from next.conf import import_class_cached
+from next.conf import import_class_cached, next_framework_settings
 
 from .backends import (
     FormActionBackend,
@@ -30,7 +30,7 @@ from .base import (
 from .decorators import _action_applied_to_class
 from .manager import form_action_manager
 from .widgets import ComponentWidget
-from .wizard import FormWizardBackend, _wizard_without_steps
+from .wizard import CacheFormWizardBackend, FormWizardBackend, _wizard_without_steps
 
 
 _FORM_ACTION_BACKEND_SETTINGS_KEY = "DEFAULT_FORM_ACTION_BACKENDS"
@@ -274,6 +274,39 @@ def _validate_form_wizard_backend(config: object) -> list[CheckMessage]:
 
 
 @register(Tags.compatibility)
+def check_form_wizard_sessions(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when wizards rely on the cache backend without django.contrib.sessions."""
+    if "django.contrib.sessions" in settings.INSTALLED_APPS:
+        return []
+    registry = getattr(form_action_manager.default_backend, "_registry", {})
+    if not any(meta.get("wizard_class") for meta in registry.values()):
+        return []
+    config = next_framework_settings.DEFAULT_FORM_WIZARD_BACKEND
+    backend_path = config.get("BACKEND") if isinstance(config, dict) else None
+    if not isinstance(backend_path, str):
+        return []
+    try:
+        cls = import_class_cached(backend_path)
+    except ImportError:
+        return []
+    if not (isinstance(cls, type) and issubclass(cls, CacheFormWizardBackend)):
+        return []
+    return [
+        DjangoWarning(
+            "FormWizard subclasses are registered and the configured wizard "
+            "backend keys stored steps by session, but django.contrib.sessions "
+            "is not in INSTALLED_APPS. Saving a step will raise "
+            "ImproperlyConfigured at request time.",
+            obj=settings,
+            id="next.W056",
+        ),
+    ]
+
+
+@register(Tags.compatibility)
 def check_form_anchor_files(
     *_args: object,
     **_kwargs: object,
@@ -385,6 +418,7 @@ __all__ = [
     "check_form_action_collisions",
     "check_form_anchor_files",
     "check_form_wizard_backend",
+    "check_form_wizard_sessions",
     "check_form_wizard_steps",
     "check_forms_outside_base_dir",
     "check_instance_from_url_on_non_model_form",

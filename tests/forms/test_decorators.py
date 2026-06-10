@@ -207,12 +207,12 @@ class TestBaseFormGetInitial:
             name = forms.CharField(max_length=100)
 
             @classmethod
-            def get_initial(cls, request: HttpRequest, id: int) -> dict:  # noqa: A002
-                return {"name": f"from-{id}"}
+            def get_initial(cls, request: HttpRequest, item_id: int) -> dict:
+                return {"name": f"from-{item_id}"}
 
         request = HttpRequest()
         request.method = "POST"
-        request.POST = {"_url_param_id": "42"}
+        request.POST = {"_url_param_item_id": "42"}
         result = _form_action_context_callable(FormWithId)(request)
         assert hasattr(result, "form")
         assert result.form.initial.get("name") == "from-42"
@@ -224,12 +224,12 @@ class TestBaseFormGetInitial:
             name = forms.CharField(max_length=100)
 
             @classmethod
-            def get_initial(cls, request: HttpRequest, id: int) -> dict:  # noqa: A002
-                return {"name": f"resolver-{id}"}
+            def get_initial(cls, request: HttpRequest, item_id: int) -> dict:
+                return {"name": f"resolver-{item_id}"}
 
         request = HttpRequest()
         request.resolver_match = MagicMock()
-        request.resolver_match.kwargs = {"id": 7}
+        request.resolver_match.kwargs = {"item_id": 7}
         result = _form_action_context_callable(FormWithId)(request)
         assert result.form.initial.get("name") == "resolver-7"
 

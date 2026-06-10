@@ -6,6 +6,7 @@ import pytest
 from django import forms as django_forms
 from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import caches
+from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponse, HttpResponseRedirect
 from django.test import RequestFactory, override_settings
 
@@ -533,6 +534,13 @@ class TestCacheFormWizardBackend:
         request = _request()
         backend.save_step(request, "wiz", "identity", {"name": "Ada"})
         assert request.session.session_key is not None
+
+    def test_save_step_without_session_support_raises(self) -> None:
+        """`save_step` on a request without session support fails loudly."""
+        backend = CacheFormWizardBackend()
+        request = RequestFactory().post("/wizard/identity/")
+        with pytest.raises(ImproperlyConfigured, match="requires Django sessions"):
+            backend.save_step(request, "wiz", "identity", {"name": "Ada"})
 
     @override_settings(
         CACHES={

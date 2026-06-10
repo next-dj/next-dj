@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponseNotFound
-from django.urls import path, reverse
-from django.urls.exceptions import NoReverseMatch
+from django.urls import path
 from django.views.decorators.http import require_http_methods
 
 from next.conf import import_class_cached
@@ -18,8 +17,8 @@ from .dispatch import FormActionDispatch
 from .rendering import render_form_page_with_errors
 from .signals import action_registered
 from .uid import (
-    FORM_ACTION_REVERSE_NAME,
     URL_NAME_FORM_ACTION,
+    reverse_form_action,
     validated_next_form_page_path,
 )
 
@@ -244,24 +243,17 @@ class RegistryFormActionBackend(FormActionBackend):
 
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
         """Return the reverse URL for a registered action name."""
+        key: tuple[str, str] | None = None
         if page_path is not None:
-            key = (_resolved_path_str(page_path), action_name)
-            if key in self._registry:
-                uid = self._registry[key]["uid"]
-                if uid is not None:
-                    try:
-                        return reverse(FORM_ACTION_REVERSE_NAME, kwargs={"uid": uid})
-                    except NoReverseMatch:
-                        return reverse(URL_NAME_FORM_ACTION, kwargs={"uid": uid})
-
-        fallback_key = self._name_index.get(action_name)
-        if fallback_key is not None:
-            uid = self._registry[fallback_key]["uid"]
+            scoped_key = (_resolved_path_str(page_path), action_name)
+            if scoped_key in self._registry:
+                key = scoped_key
+        if key is None:
+            key = self._name_index.get(action_name)
+        if key is not None:
+            uid = self._registry[key]["uid"]
             if uid is not None:
-                try:
-                    return reverse(FORM_ACTION_REVERSE_NAME, kwargs={"uid": uid})
-                except NoReverseMatch:
-                    return reverse(URL_NAME_FORM_ACTION, kwargs={"uid": uid})
+                return reverse_form_action(uid)
 
         msg = f"Unknown form action: {action_name}"
         raise KeyError(msg)

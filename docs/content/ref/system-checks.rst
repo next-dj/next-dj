@@ -281,6 +281,9 @@ Warnings
    * - ``next.W055``
      - A ``ComponentWidget`` is attached to a ``FileField`` or ``MultiValueField``, which it does not support.
      - ``next.forms.checks``
+   * - ``next.W056``
+     - Wizards are registered and the configured wizard backend keys stored steps by session, but ``django.contrib.sessions`` is not installed.
+     - ``next.forms.checks``
 
 .. note::
 
