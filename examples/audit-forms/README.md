@@ -75,8 +75,7 @@ admin page can show them side by side. Pick whichever fits your project —
 or run both, like this example does.
 
 > **PII caveat.** `_safe_form_payload` strips framework-internal fields
-> (`csrfmiddlewaretoken`, `_next_form_page`, `_next_form_origin`, and the
-> `_url_param_*` fields) but
+> (`csrfmiddlewaretoken` and `_next_form_origin`) but
 > stores every other POST value verbatim, including emails and free-text
 > reasons. If you adopt this pattern in production, extend
 > `_RESERVED_FORM_KEYS` with any password / secret / personal-data field
@@ -208,8 +207,10 @@ signal ships, and `AccessRequest.id` is not among them.
 ### 7. Wizard backend, not hidden form fields
 
 Each step posts only its visible fields plus the framework's hidden
-`_url_param_step`, `_next_form_origin`, and `_next_form_page` (all emitted
-by the `{% form %}` tag). The wizard saves the cleaned data through the
+`_next_form_origin` (emitted by the `{% form %}` tag). The dispatcher
+resolves that origin URL against the URLconf to recover the typed
+`step` kwarg, and `_step_from_origin` in the audit backend does the
+same for the audit rows. The wizard saves the cleaned data through the
 configured `FORM_WIZARD_BACKEND` (the Django cache by default),
 so on `GET` of step 2 you can see "Computing" already filled into the
 team summary — that is what `tests/test_e2e.py::TestSessionResume`

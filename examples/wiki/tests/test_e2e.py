@@ -18,6 +18,12 @@ from next.urls.signals import router_reloaded
 pytestmark = pytest.mark.django_db
 
 
+def _origin_field(html: str) -> str:
+    match = re.search(r'name="_next_form_origin" value="([^"]+)"', html)
+    assert match, "Page did not render the hidden _next_form_origin field."
+    return match.group(1)
+
+
 @pytest.fixture()
 def routing_doc() -> Article:
     """Seed an article whose body matches the routing query for searches."""
@@ -97,15 +103,10 @@ class TestArticleCreation:
         self, client: NextClient, routing_doc: Article
     ) -> None:
         new_page = client.get(reverse("next:page_articles_new"))
-        match = re.search(
-            r'name="_next_form_page" value="([^"]+)"',
-            new_page.content.decode(),
-        )
-        assert match, "Create page did not render the hidden _next_form_page field."
         response = client.post(
             client.get_action_url("article_create_form"),
             {
-                "_next_form_page": match.group(1),
+                "_next_form_origin": _origin_field(new_page.content.decode()),
                 "slug": routing_doc.slug,
                 "title": "Duplicate",
                 "body_md": "",
@@ -121,15 +122,16 @@ class TestArticleEdit:
     def test_editing_article_changes_body(
         self, client: NextClient, routing_doc: Article
     ) -> None:
-        url = client.get_action_url("article_edit_form")
-        response = client.post(
-            url,
+        response = client.post_action(
+            "article_edit_form",
             {
-                "_url_param_slug": routing_doc.slug,
                 "slug": routing_doc.slug,
                 "title": routing_doc.title,
                 "body_md": "Rewritten body of the article.",
             },
+            origin=reverse(
+                "next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug}
+            ),
         )
         assert response.status_code in (302, 303)
 
@@ -171,16 +173,10 @@ class TestArticleEdit:
         edit_page = client.get(
             reverse("next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug})
         )
-        match = re.search(
-            r'name="_next_form_page" value="([^"]+)"',
-            edit_page.content.decode(),
-        )
-        assert match, "Edit page did not render the hidden _next_form_page field."
         response = client.post(
             client.get_action_url("article_edit_form"),
             {
-                "_next_form_page": match.group(1),
-                "_url_param_slug": routing_doc.slug,
+                "_next_form_origin": _origin_field(edit_page.content.decode()),
                 "slug": bad_slug,
                 "title": routing_doc.title,
                 "body_md": "",
@@ -195,16 +191,10 @@ class TestArticleEdit:
         edit_page = client.get(
             reverse("next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug})
         )
-        match = re.search(
-            r'name="_next_form_page" value="([^"]+)"',
-            edit_page.content.decode(),
-        )
-        assert match, "Edit page did not render the hidden _next_form_page field."
         response = client.post(
             client.get_action_url("article_edit_form"),
             {
-                "_next_form_page": match.group(1),
-                "_url_param_slug": routing_doc.slug,
+                "_next_form_origin": _origin_field(edit_page.content.decode()),
                 "slug": "docs",
                 "title": routing_doc.title,
                 "body_md": "**posted preview**",
@@ -303,16 +293,11 @@ class TestValidationPreservesPreview:
 
     def test_form_validation_error_shows_preview(self, client: NextClient) -> None:
         new_page = client.get(reverse("next:page_articles_new"))
-        match = re.search(
-            r'name="_next_form_page" value="([^"]+)"',
-            new_page.content.decode(),
-        )
-        assert match, "Form did not render the hidden _next_form_page field."
         action_url = client.get_action_url("article_create_form")
         response = client.post(
             action_url,
             {
-                "_next_form_page": match.group(1),
+                "_next_form_origin": _origin_field(new_page.content.decode()),
                 "slug": "docs",
                 "title": "Reserved slug",
                 "body_md": "**bold** preview",

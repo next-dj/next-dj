@@ -365,13 +365,11 @@ fix carry the example.
   `AdminForm.clean()` validate inline formsets and surface their errors
   on the bound form, with the user's typed data preserved.
 * **Virtual pages survive form re-render.**
-  [`next/forms/uid.py`](../../next/forms/uid.py) now accepts a
-  `_next_form_page` whose `page.py` does not exist on disk as long as
-  a sibling `template.djx` does — matching the same virtual-page rule
-  the file router already applies. That lets the add and change views
-  in this example live as `template.djx`-only directories (no empty
-  docstring-only `page.py` anchor) and still re-render correctly on
-  validation failure.
+  The dispatcher resolves the posted `_next_form_origin` URL against the
+  URLconf and reads the page identity from the matched view, so a page
+  that exists only as a `template.djx` directory (no `page.py` anchor)
+  re-renders correctly on validation failure. That lets the add and
+  change views in this example live as `template.djx`-only directories.
 
 Existing form-action code is unaffected. Passing a `Form` subclass and a
 quoted action name keeps the original control flow.

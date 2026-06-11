@@ -155,7 +155,8 @@ class TestSettings:
     ) -> None:
         response = client.post_action(
             "rename_board_form",
-            {"_url_param_id": board.pk, "title": "New title"},
+            {"title": "New title"},
+            origin=f"/board/{board.pk}/settings/",
         )
         assert response.status_code == 302
         board.refresh_from_db()
@@ -168,7 +169,8 @@ class TestSettings:
     ) -> None:
         response = client.post_action(
             "archive_board_form",
-            {"_url_param_id": board.pk, "archived": "1"},
+            {"archived": "1"},
+            origin=f"/board/{board.pk}/settings/",
         )
         assert response.status_code == 302
         board.refresh_from_db()
@@ -183,7 +185,7 @@ class TestSettings:
         board.save(update_fields=["archived"])
         response = client.post_action(
             "archive_board_form",
-            {"_url_param_id": board.pk},
+            origin=f"/board/{board.pk}/settings/",
         )
         assert response.status_code == 302
         assert response["Location"] == f"/board/{board.pk}/settings/"
@@ -203,7 +205,6 @@ class TestSettings:
         assert invalid.status_code == 200
         rerendered = _rename_form_block(invalid.content.decode())
         refields = _hidden_fields(rerendered)
-        assert refields["_url_param_id"] == str(board.pk)
         assert refields["_next_form_origin"] == f"/board/{board.pk}/settings/"
         before = Board.objects.count()
         fixed = client.post(

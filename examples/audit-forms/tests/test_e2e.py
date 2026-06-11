@@ -1,5 +1,4 @@
 import re
-from pathlib import Path
 
 import pytest
 from access.models import AccessRequest, AuditEntry
@@ -9,14 +8,6 @@ from next.testing import SignalRecorder, resolve_action_url
 
 
 WIZARD_ACTION = "access_request_wizard"
-STEP_PAGE = str(
-    Path(__file__).resolve().parent.parent
-    / "access"
-    / "views"
-    / "request"
-    / "[step]"
-    / "page.py"
-)
 
 IDENTITY = {
     "full_name": "Ada Lovelace",
@@ -32,11 +23,7 @@ APPROVAL: dict[str, str] = {}
 
 
 def _post_step(client, step: str, data: dict[str, str]):
-    payload = dict(data)
-    payload["_url_param_step"] = step
-    payload["_next_form_origin"] = f"/request/{step}/"
-    payload["_next_form_page"] = STEP_PAGE
-    return client.post_action(WIZARD_ACTION, payload)
+    return client.post_action(WIZARD_ACTION, dict(data), origin=f"/request/{step}/")
 
 
 def _walk_three_steps(client) -> None:
@@ -168,7 +155,6 @@ class TestValidationFailure:
         assert invalid.status_code == 200
         rerendered = _wizard_form_block(invalid.content.decode())
         refields = _hidden_fields(rerendered)
-        assert refields["_url_param_step"] == "identity"
         assert refields["_next_form_origin"] == "/request/identity/"
         fixed = client.post(_form_action_url(rerendered), {**refields, **IDENTITY})
         assert fixed.status_code == 302
@@ -238,7 +224,7 @@ class TestAdminAuditPage:
 class TestUnknownUid:
     def test_unknown_uid_skips_audit_and_returns_404(self, client) -> None:
         response = client.post(
-            "/_next/form/deadbeefdeadbeef/", {"_url_param_step": "identity"}
+            "/_next/form/deadbeefdeadbeef/", {"_next_form_origin": "/request/identity/"}
         )
         assert response.status_code == 404
         assert AuditEntry.objects.filter(source=AuditEntry.SOURCE_BACKEND).count() == 0

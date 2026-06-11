@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -125,10 +124,10 @@ class TestNoteEditForm:
         response = client.post_action(
             "note_edit_form",
             {
-                "_url_param_id": note.pk,
                 "title": note.title,
                 "body": "edited body content",
             },
+            origin=f"/notes/{note.pk}/edit/",
             HTTP_X_TENANT="acme",
         )
         assert response.status_code == 302
@@ -143,26 +142,15 @@ class TestNoteEditForm:
         response = client.post_action(
             "note_edit_form",
             {
-                "_url_param_id": note.pk,
                 "title": "hijack",
                 "body": "should not save",
             },
+            origin=f"/notes/{note.pk}/edit/",
             HTTP_X_TENANT="globex",
         )
         assert response.status_code == 404
         note.refresh_from_db()
         assert note.title != "hijack"
-
-
-EDIT_PAGE_FILE = (
-    Path(__file__).resolve().parent.parent
-    / "notes"
-    / "workspaces"
-    / "notes"
-    / "[int:id]"
-    / "edit"
-    / "page.py"
-)
 
 
 class TestNoteEditFormErrorRerender:
@@ -178,9 +166,8 @@ class TestNoteEditFormErrorRerender:
             {
                 "title": "",
                 "body": "x",
-                "_next_form_page": str(EDIT_PAGE_FILE),
-                "_url_param_id": str(note.pk),
             },
+            origin=f"/notes/{note.pk}/edit/",
             HTTP_X_TENANT="acme",
         )
         body = response.content.decode()

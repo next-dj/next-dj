@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
 
 from django.core.cache import cache
 from django.core.management import call_command
@@ -23,12 +22,10 @@ class TestShorten:
         assert Link.objects.count() == 1
 
     def test_invalid_url_renders_form_with_errors(self, client) -> None:
-        page_path = (
-            Path(__file__).resolve().parent.parent / "shortener" / "routes" / "page.py"
-        )
         response = client.post_action(
             "create_link_form",
-            {"url": "not-a-url", "_next_form_page": str(page_path)},
+            {"url": "not-a-url"},
+            origin="/",
         )
         assert response.status_code == 200
         assert b"Enter a valid URL" in response.content

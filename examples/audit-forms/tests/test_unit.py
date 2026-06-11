@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
-from access.backends import _safe_form_payload
+from access.backends import _safe_form_payload, _step_from_origin
 from access.models import AccessRequest, AuditEntry
 from django.contrib.sessions.backends.db import SessionStore
 from django.http import HttpRequest, QueryDict
@@ -54,19 +54,49 @@ class TestSafeFormPayload:
     """`_safe_form_payload` keeps real fields and drops framework-internal keys."""
 
     def test_strips_framework_keys_and_keeps_fields(self) -> None:
-        """The persisted payload omits csrf, page, origin, and url-param fields."""
+        """The persisted payload omits the csrf token and the origin field."""
         request = HttpRequest()
         request.method = "POST"
         request.POST = QueryDict(
             "csrfmiddlewaretoken=tok"
-            "&_next_form_page=/p/page.py"
             "&_next_form_origin=/request/identity/"
-            "&_url_param_step=identity"
             "&email=ada@example.com"
             "&full_name=Ada"
         )
         payload = _safe_form_payload(request)
         assert payload == {"email": ["ada@example.com"], "full_name": ["Ada"]}
+
+
+class TestStepFromOrigin:
+    """`_step_from_origin` recovers the wizard step from the origin URL."""
+
+    @staticmethod
+    def _request(origin: str | None) -> HttpRequest:
+        request = HttpRequest()
+        request.method = "POST"
+        query = f"_next_form_origin={origin}" if origin is not None else ""
+        request.POST = QueryDict(query)
+        return request
+
+    def test_resolves_step_kwarg_from_origin_path(self) -> None:
+        assert _step_from_origin(self._request("/request/scope/")) == "scope"
+
+    def test_ignores_query_string_on_the_origin(self) -> None:
+        assert _step_from_origin(self._request("/request/identity/?just=1")) == (
+            "identity"
+        )
+
+    def test_missing_origin_yields_empty_step(self) -> None:
+        assert _step_from_origin(self._request(None)) == ""
+
+    def test_relative_origin_yields_empty_step(self) -> None:
+        assert _step_from_origin(self._request("request/identity/")) == ""
+
+    def test_unroutable_origin_yields_empty_step(self) -> None:
+        assert _step_from_origin(self._request("/no/such/page/")) == ""
+
+    def test_origin_without_step_kwarg_yields_empty_step(self) -> None:
+        assert _step_from_origin(self._request("/")) == ""
 
 
 class TestModelStr:
