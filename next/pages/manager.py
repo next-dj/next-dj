@@ -13,7 +13,7 @@ import inspect
 import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from django.http import HttpRequest, HttpResponse
 from django.http.response import HttpResponseBase
@@ -45,6 +45,14 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+class _RoutedPageView(Protocol):
+    """A page view carrying the source path form dispatch resolves back to."""
+
+    next_page_path: Path
+
+    def __call__(self, request: HttpRequest, **kwargs: object) -> HttpResponseBase: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -391,7 +399,12 @@ class Page:
         _parameters: dict[str, str],
         module: types.ModuleType | None,
     ) -> Callable[..., HttpResponseBase]:
-        """Return a view that resolves the body, composes layouts, and renders."""
+        """Return a view that resolves the body, composes layouts, and renders.
+
+        The view carries `next_page_path` so the form dispatch can map a
+        resolved origin URL back to the page source, including the
+        synthesised `page.py` location of virtual `template.djx` pages.
+        """
 
         def view(request: HttpRequest, **kwargs: object) -> HttpResponseBase:
             resolution = self._resolve_page_body(file_path, module, request, **kwargs)
@@ -401,6 +414,7 @@ class Page:
             content = self._render_composed(file_path, body, request, **kwargs)
             return HttpResponse(content)
 
+        cast("_RoutedPageView", view).next_page_path = file_path
         return view
 
     def has_template(

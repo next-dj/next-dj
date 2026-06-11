@@ -20,8 +20,8 @@ from next.deps import REQUEST_DEP_CACHE_ATTR, resolver
 from next.deps.resolver import _cached_signature
 
 from ._request_utils import (
-    _url_kwargs_from_post,
-    _url_kwargs_from_resolver_or_post,
+    _resolve_origin,
+    _url_kwargs_for_request,
 )
 from .signals import (
     action_dispatched,
@@ -29,15 +29,16 @@ from .signals import (
     wizard_completed,
     wizard_step_submitted,
 )
-from .uid import _validated_origin_path, validated_next_form_page_path
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from django import forms as django_forms
     from django.http import HttpRequest
 
+    from ._request_utils import _OriginMatch
     from .backends import ActionMeta, FormActionBackend
     from .base import BaseForm as NextBaseForm
     from .wizard import FormWizard
@@ -132,7 +133,7 @@ def _form_action_context_callable(
     """Return a callable that builds a form instance for GET error rendering."""
 
     def context_func(request: "HttpRequest") -> types.SimpleNamespace:
-        url_kwargs = _url_kwargs_from_resolver_or_post(request)
+        url_kwargs = _url_kwargs_for_request(request)
         dep_cache: dict[str, Any] = {}
         dep_stack: list[str] = []
         resolved_form_class, init_kwargs = _resolve_form_class(
@@ -231,6 +232,51 @@ def _normalize_handler_response(
     return None
 
 
+def _emit_action_dispatched(
+    action_name: str,
+    form: "django_forms.Form | None",
+    state: "_DispatchState",
+    duration_ms: float,
+    response: HttpResponse,
+) -> None:
+    """Send `action_dispatched` when any receiver is connected."""
+    if action_dispatched.receivers:
+        action_dispatched.send(
+            sender=FormActionDispatch,
+            action_name=action_name,
+            form=form,
+            url_kwargs=dict(state.url_kwargs),
+            duration_ms=duration_ms,
+            response_status=response.status_code,
+            dep_cache=dict(state.dep_cache),
+        )
+
+
+def _emit_wizard_step_submitted(
+    wizard_class: type,
+    step_name: str,
+    cleaned: dict[str, Any],
+) -> None:
+    """Send `wizard_step_submitted` when any receiver is connected."""
+    if wizard_step_submitted.receivers:
+        wizard_step_submitted.send(
+            sender=FormActionDispatch,
+            wizard_class=wizard_class,
+            step=step_name,
+            cleaned_data=cleaned,
+        )
+
+
+def _emit_wizard_completed(wizard_class: type, merged: dict[str, Any]) -> None:
+    """Send `wizard_completed` when any receiver is connected."""
+    if wizard_completed.receivers:
+        wizard_completed.send(
+            sender=FormActionDispatch,
+            wizard_class=wizard_class,
+            cleaned_data=merged,
+        )
+
+
 class ActionOutcomeKind(StrEnum):
     """Discriminator for the pipeline outcomes a backend shapes into responses."""
 
@@ -254,6 +300,8 @@ class ActionOutcome:
     redirect_to: str | None = None
     url_kwargs: dict[str, object] | None = None
     wizard: "FormWizard | None" = None
+    page_path: "Path | None" = None
+    origin: str | None = None
 
 
 @dataclass
@@ -264,6 +312,17 @@ class _DispatchState:
     dep_cache: dict[str, Any]
     dep_stack: list[str]
     uid: str | None = None
+    origin_match: "_OriginMatch | None" = None
+
+    @property
+    def page_path(self) -> "Path | None":
+        """Return the origin page source path, if the origin resolved."""
+        return self.origin_match.page_path if self.origin_match else None
+
+    @property
+    def origin(self) -> str | None:
+        """Return the validated origin URL path, if the origin resolved."""
+        return self.origin_match.origin if self.origin_match else None
 
 
 @dataclass
@@ -294,11 +353,13 @@ class FormActionDispatch:
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
 
+        origin_match = _resolve_origin(request)
         state = _DispatchState(
-            url_kwargs=_url_kwargs_from_post(request),
+            url_kwargs=dict(origin_match.url_kwargs) if origin_match else {},
             dep_cache={},
             dep_stack=[],
             uid=meta.get("uid"),
+            origin_match=origin_match,
         )
         setattr(request, REQUEST_DEP_CACHE_ATTR, state.dep_cache)
 
@@ -363,15 +424,7 @@ class FormActionDispatch:
                 raw=raw,
             ),
         )
-        action_dispatched.send(
-            sender=FormActionDispatch,
-            action_name=action_name,
-            form=None,
-            url_kwargs=dict(state.url_kwargs),
-            duration_ms=duration_ms,
-            response_status=response.status_code,
-            dep_cache=dict(state.dep_cache),
-        )
+        _emit_action_dispatched(action_name, None, state, duration_ms, response)
         return response
 
     @staticmethod
@@ -411,6 +464,8 @@ class FormActionDispatch:
                     uid=state.uid,
                     form=form,
                     url_kwargs=state.url_kwargs,
+                    page_path=state.page_path,
+                    origin=state.origin,
                 ),
             )
 
@@ -448,14 +503,8 @@ class FormActionDispatch:
                 form=form,
             ),
         )
-        action_dispatched.send(
-            sender=FormActionDispatch,
-            action_name=params.action_name,
-            form=form,
-            url_kwargs=dict(state.url_kwargs),
-            duration_ms=duration_ms,
-            response_status=response.status_code,
-            dep_cache=dict(state.dep_cache),
+        _emit_action_dispatched(
+            params.action_name, form, state, duration_ms, response
         )
         return response
 
@@ -468,11 +517,12 @@ class FormActionDispatch:
         state: _DispatchState,
     ) -> HttpResponse:
         """Validate the current wizard step, then route forward or finalise."""
-        origin = _validated_origin_path(request.POST.get("_next_form_origin"))
-        if origin is None:
+        if state.origin_match is None:
             return HttpResponseBadRequest("Missing or invalid _next_form_origin")
         wizard = wizard_class(
-            request=request, url_kwargs=state.url_kwargs, base_path=origin
+            request=request,
+            url_kwargs=state.url_kwargs,
+            base_path=state.origin_match.origin,
         )
         step_name = wizard.current_step()
         form_class = wizard.step_form_class(step_name)
@@ -500,17 +550,14 @@ class FormActionDispatch:
                     form=form,
                     url_kwargs=state.url_kwargs,
                     wizard=wizard,
+                    page_path=state.page_path,
+                    origin=state.origin,
                 ),
             )
 
         cleaned = dict(form.cleaned_data)
         wizard.save_step(step_name, cleaned)
-        wizard_step_submitted.send(
-            sender=FormActionDispatch,
-            wizard_class=wizard_class,
-            step=step_name,
-            cleaned_data=cleaned,
-        )
+        _emit_wizard_step_submitted(wizard_class, step_name, cleaned)
 
         next_step = wizard.next_step(step_name)
         if next_step is None:
@@ -535,11 +582,7 @@ class FormActionDispatch:
             )
             if response.status_code < _HTTP_ERROR_FLOOR:
                 wizard.clear_storage()
-                wizard_completed.send(
-                    sender=FormActionDispatch,
-                    wizard_class=wizard_class,
-                    cleaned_data=merged,
-                )
+                _emit_wizard_completed(wizard_class, merged)
         else:
             response = backend.shape_response(
                 request,
@@ -553,15 +596,7 @@ class FormActionDispatch:
             )
             duration_ms = 0.0
 
-        action_dispatched.send(
-            sender=FormActionDispatch,
-            action_name=action_name,
-            form=form,
-            url_kwargs=dict(state.url_kwargs),
-            duration_ms=duration_ms,
-            response_status=response.status_code,
-            dep_cache=dict(state.dep_cache),
-        )
+        _emit_action_dispatched(action_name, form, state, duration_ms, response)
         return response
 
     @staticmethod
@@ -576,14 +611,13 @@ class FormActionDispatch:
         `X-Next-Form`/`X-Next-Action` headers, wizard advances redirect.
         """
         if outcome.kind == ActionOutcomeKind.INVALID:
-            page_path = validated_next_form_page_path(request)
-            if page_path is None:
-                return HttpResponseBadRequest("Missing or invalid _next_form_page")
+            if outcome.page_path is None:
+                return HttpResponseBadRequest("Missing or invalid _next_form_origin")
             html = backend.render_invalid_page(
                 request,
                 outcome.action_name,
                 outcome.form,
-                page_path,
+                outcome.page_path,
                 outcome.url_kwargs,
             )
             response = HttpResponse(html)
@@ -614,10 +648,16 @@ class FormActionDispatch:
         form: "django_forms.Form | None",
     ) -> HttpResponse:
         """Return full-page HTML for an invalid form submission."""
+        origin_match = _resolve_origin(request)
         return backend.shape_response(
             request,
             ActionOutcome(
-                kind=ActionOutcomeKind.INVALID, action_name=action_name, form=form
+                kind=ActionOutcomeKind.INVALID,
+                action_name=action_name,
+                form=form,
+                url_kwargs=dict(origin_match.url_kwargs) if origin_match else None,
+                page_path=origin_match.page_path if origin_match else None,
+                origin=origin_match.origin if origin_match else None,
             ),
         )
 

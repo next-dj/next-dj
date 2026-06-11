@@ -15,16 +15,11 @@ from django.views.decorators.http import require_http_methods
 
 from next.conf import import_class_cached
 
-from ._request_utils import _url_kwargs_from_post
 from .dispatch import ActionOutcome, FormActionDispatch
 from .registration import registration_diagnostics
 from .rendering import _ErrorRenderParams, render_form_page_with_errors
 from .signals import action_registered
-from .uid import (
-    URL_NAME_FORM_ACTION,
-    reverse_form_action,
-    validated_next_form_page_path,
-)
+from .uid import URL_NAME_FORM_ACTION, reverse_form_action
 
 
 if TYPE_CHECKING:
@@ -330,19 +325,14 @@ class RegistryFormActionBackend(FormActionBackend):
         url_kwargs: dict[str, object] | None = None,
     ) -> str:
         """Render validation-error HTML for a page module path."""
-        target_path = page_file_path
-        if target_path is None:
-            target_path = validated_next_form_page_path(request)
-        if target_path is None:
+        if page_file_path is None:
             return ""
-        if url_kwargs is None:
-            url_kwargs = _url_kwargs_from_post(request)
         params = _ErrorRenderParams(
             action_name=action_name,
             form=form,
-            url_kwargs=url_kwargs,
+            url_kwargs=url_kwargs if url_kwargs is not None else {},
         )
-        return render_form_page_with_errors(self, request, params, target_path)
+        return render_form_page_with_errors(self, request, params, page_file_path)
 
 
 class FormActionFactory:

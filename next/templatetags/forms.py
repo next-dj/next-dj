@@ -7,15 +7,12 @@ from django.core.exceptions import ImproperlyConfigured
 from django.middleware.csrf import get_token
 from django.utils.html import escape, format_html, format_html_join
 
-from next.deps import RESERVED_KEYS
 from next.forms import form_action_manager
-from next.forms._request_utils import _url_kwargs_from_post
 from next.forms.manager import build_form_namespace_for_action
-from next.forms.uid import _validated_origin_path, page_path_token
+from next.forms.uid import _validated_origin_path
 from next.forms.widgets import bind_component_widgets
 
 
-_NEXT_FORM_PAGE = "_next_form_page"
 _NEXT_FORM_ORIGIN = "_next_form_origin"
 _MIN_FORM_TAG_BITS = 2
 _RESERVED_FORM_ATTRS = frozenset({"action", "method"})
@@ -90,27 +87,14 @@ class FormNode(template.Node):
             raise ImproperlyConfigured(msg)
         return cast("HttpRequest", request)
 
-    def _build_hidden_inputs(
-        self,
-        request: "HttpRequest",
-        *,
-        next_form_page: str | None,
-    ) -> str:
-        """Build CSRF, origin page, and URL parameter hidden inputs."""
+    def _build_hidden_inputs(self, request: "HttpRequest") -> str:
+        """Build the CSRF and origin hidden inputs."""
         inputs = [
             format_html(
                 '<input type="hidden" name="csrfmiddlewaretoken" value="{}">',
                 get_token(request),
             )
         ]
-        if next_form_page:
-            inputs.append(
-                format_html(
-                    '<input type="hidden" name="{}" value="{}">',
-                    _NEXT_FORM_PAGE,
-                    escape(page_path_token(next_form_page)),
-                )
-            )
         origin = self._origin_path(request)
         if origin:
             inputs.append(
@@ -118,15 +102,6 @@ class FormNode(template.Node):
                     '<input type="hidden" name="{}" value="{}">',
                     _NEXT_FORM_ORIGIN,
                     escape(origin),
-                )
-            )
-
-        for key, value in self._url_params(request).items():
-            inputs.append(
-                format_html(
-                    '<input type="hidden" name="_url_param_{}" value="{}">',
-                    escape(key),
-                    escape(str(value)),
                 )
             )
 
@@ -145,25 +120,6 @@ class FormNode(template.Node):
             if posted is not None:
                 return posted
         return getattr(request, "path", None)
-
-    @staticmethod
-    def _url_params(request: "HttpRequest") -> dict[str, object]:
-        """Return the URL kwargs of the page the form belongs to.
-
-        On the validation-error re-render the resolver match holds only the
-        dispatch `uid`, so the `_url_param_*` fields posted from the original
-        page win.
-        """
-        params: dict[str, object] = {}
-        if request.resolver_match and request.resolver_match.kwargs:
-            params = {
-                key: value
-                for key, value in request.resolver_match.kwargs.items()
-                if key != "uid" and key not in RESERVED_KEYS
-            }
-        if not params:
-            params = _url_kwargs_from_post(request)
-        return params
 
     def _opening_tag(self, context: template.Context, action_url: str) -> str:
         """Build the opening form element with any extra HTML attributes."""
@@ -198,10 +154,7 @@ class FormNode(template.Node):
             raise RuntimeError(msg) from None
 
         opening_tag = self._opening_tag(context, action_url)
-        hidden_inputs = self._build_hidden_inputs(
-            request,
-            next_form_page=next_form_page,
-        )
+        hidden_inputs = self._build_hidden_inputs(request)
 
         form_obj = context.get(action_name)
         if form_obj and hasattr(form_obj, "form"):

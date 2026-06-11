@@ -1,5 +1,3 @@
-import pathlib
-from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock
 
@@ -12,18 +10,11 @@ from next.forms import (
     Form,
     ModelForm,
     build_form_namespace_for_action,
-    validated_next_form_page_path,
 )
-from next.forms._request_utils import _url_kwargs_from_post
 from next.forms.decorators import action as action_decorator
 from next.forms.dispatch import _form_action_context_callable
 from next.forms.manager import form_action_manager
 from next.forms.registration import registration_diagnostics
-
-
-PAGE_MODULE_FOR_FORM_TESTS = (
-    Path(__file__).resolve().parent.parent / "site_pages" / "page.py"
-).resolve()
 
 
 class TestBuildFormNamespaceForAction:
@@ -204,21 +195,21 @@ class TestBaseFormGetInitial:
         assert hasattr(result, "form")
         assert result.form is not None
 
-    def test_context_func_gets_url_kwargs_from_post_when_no_resolver_match(
+    def test_context_func_gets_url_kwargs_from_origin_when_no_resolver_match(
         self,
     ) -> None:
-        """context_func extracts url params from POST when resolver_match has no kwargs."""
+        """context_func resolves the posted origin when resolver_match is absent."""
 
         class FormWithId(Form):
             name = forms.CharField(max_length=100)
 
             @classmethod
-            def get_initial(cls, request: HttpRequest, item_id: int) -> dict:
-                return {"name": f"from-{item_id}"}
+            def get_initial(cls, request: HttpRequest, **kwargs: object) -> dict:
+                return {"name": f"from-{kwargs['id']}"}
 
         request = HttpRequest()
         request.method = "POST"
-        request.POST = {"_url_param_item_id": "42"}
+        request.POST = {"_next_form_origin": "/items/42/"}
         result = _form_action_context_callable(FormWithId)(request)
         assert hasattr(result, "form")
         assert result.form.initial.get("name") == "from-42"
@@ -239,128 +230,18 @@ class TestBaseFormGetInitial:
         result = _form_action_context_callable(FormWithId)(request)
         assert result.form.initial.get("name") == "resolver-7"
 
-    def test_context_func_post_url_param_non_digit_string(self) -> None:
-        """context_func uses POST value as-is when not convertible to int."""
+    def test_context_func_origin_string_kwarg_stays_a_string(self) -> None:
+        """A string URL converter value reaches get_initial untouched."""
 
-        class FormWithSlug(Form):
+        class FormWithName(Form):
             slug = forms.CharField(max_length=100)
 
             @classmethod
-            def get_initial(cls, request: HttpRequest, slug: str) -> dict:
-                return {"slug": slug}
+            def get_initial(cls, request: HttpRequest, name: str) -> dict:
+                return {"slug": name}
 
         request = HttpRequest()
         request.method = "POST"
-        request.POST = {"_url_param_slug": "my-slug"}
-        result = _form_action_context_callable(FormWithSlug)(request)
+        request.POST = {"_next_form_origin": "/groups/my-slug/"}
+        result = _form_action_context_callable(FormWithName)(request)
         assert result.form.initial.get("slug") == "my-slug"
-
-
-class TestUrlKwargsFromPostReserved:
-    """``_url_kwargs_from_post`` skips DI-reserved param names."""
-
-    def test_skips_url_param_request(self) -> None:
-        """``_url_param_request`` is not forwarded as ``request``."""
-        req = HttpRequest()
-        req.method = "POST"
-        req.POST = {"_url_param_request": "x", "_url_param_id": "7"}
-        out = _url_kwargs_from_post(req)
-        assert "request" not in out
-        assert out["id"] == 7
-
-
-class TestValidatedNextFormPagePath:
-    """``validated_next_form_page_path`` edge cases."""
-
-    def test_no_post_attr(self) -> None:
-        """Missing ``POST`` yields None."""
-
-        class NoPost:
-            pass
-
-        assert validated_next_form_page_path(NoPost()) is None  # type: ignore[arg-type]
-
-    def test_next_page_not_str(self) -> None:
-        """Non-string ``_next_form_page`` yields None."""
-        req = HttpRequest()
-        req.method = "POST"
-
-        class WeirdPost:
-            def get(self, _key: str, _default: object = None) -> object:
-                return 42
-
-        req.POST = WeirdPost()  # type: ignore[assignment]
-        assert validated_next_form_page_path(req) is None
-
-    def test_next_page_empty_after_strip(self) -> None:
-        """Whitespace-only ``_next_form_page`` yields None."""
-        req = HttpRequest()
-        req.method = "POST"
-        req.POST = {"_next_form_page": "   \n  "}
-        assert validated_next_form_page_path(req) is None
-
-    def test_resolve_raises_oserror(self, monkeypatch) -> None:
-        """``Path.resolve`` raising ``OSError`` yields None."""
-
-        def boom(self: pathlib.Path, *args: object, **kwargs: object) -> pathlib.Path:
-            msg = "boom"
-            raise OSError(msg)
-
-        monkeypatch.setattr(pathlib.Path, "resolve", boom)
-        req = HttpRequest()
-        req.method = "POST"
-        req.POST = {"_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS)}
-        assert validated_next_form_page_path(req) is None
-
-    def test_not_page_py(self, tmp_path) -> None:
-        """Filename other than ``page.py`` yields None."""
-        p = tmp_path / "foo.py"
-        p.write_text("x=1")
-        req = HttpRequest()
-        req.method = "POST"
-        req.POST = {"_next_form_page": str(p.resolve())}
-        assert validated_next_form_page_path(req) is None
-
-    def test_virtual_page_with_sibling_template(self, tmp_path, monkeypatch) -> None:
-        """Virtual `page.py` (only `template.djx` exists alongside) is accepted."""
-        page_dir = tmp_path / "project" / "leaf"
-        page_dir.mkdir(parents=True)
-        (page_dir / "template.djx").write_text("<p>ok</p>")
-        virtual = page_dir / "page.py"
-        req = HttpRequest()
-        req.method = "POST"
-        req.POST = {"_next_form_page": str(virtual)}
-        monkeypatch.setattr("django.conf.settings.BASE_DIR", tmp_path / "project")
-        result = validated_next_form_page_path(req)
-        assert result == virtual.resolve()
-
-    def test_missing_page_py_and_no_template(self, tmp_path, monkeypatch) -> None:
-        """Non-existent page.py with no sibling template.djx yields None."""
-        page_dir = tmp_path / "project" / "leaf"
-        page_dir.mkdir(parents=True)
-        virtual = page_dir / "page.py"
-        req = HttpRequest()
-        req.method = "POST"
-        req.POST = {"_next_form_page": str(virtual)}
-        monkeypatch.setattr("django.conf.settings.BASE_DIR", tmp_path / "project")
-        assert validated_next_form_page_path(req) is None
-
-    def test_base_dir_none(self, monkeypatch) -> None:
-        """Missing ``settings.BASE_DIR`` yields None."""
-        req = HttpRequest()
-        req.method = "POST"
-        req.POST = {"_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS)}
-        monkeypatch.setattr("django.conf.settings.BASE_DIR", None)
-        assert validated_next_form_page_path(req) is None
-
-    def test_outside_base_dir(self, tmp_path, monkeypatch) -> None:
-        """Path outside ``BASE_DIR`` yields None."""
-        outside = tmp_path / "outside"
-        outside.mkdir()
-        page_py = outside / "page.py"
-        page_py.write_text("# x")
-        req = HttpRequest()
-        req.method = "POST"
-        req.POST = {"_next_form_page": str(page_py.resolve())}
-        monkeypatch.setattr("django.conf.settings.BASE_DIR", tmp_path / "project")
-        assert validated_next_form_page_path(req) is None

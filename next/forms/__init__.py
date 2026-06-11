@@ -81,7 +81,6 @@ from .uid import (
     FORM_ACTION_REVERSE_NAME,
     URL_NAME_FORM_ACTION,
     redirect_to_origin,
-    validated_next_form_page_path,
 )
 from .widgets import ComponentWidget
 from .wizard import (
@@ -174,6 +173,5 @@ __all__ = [
     "redirect_to_origin",
     "reset_form_registration_state",
     "signals",
-    "validated_next_form_page_path",
     "wizard_backend_manager",
 ]

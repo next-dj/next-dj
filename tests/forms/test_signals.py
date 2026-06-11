@@ -1,5 +1,4 @@
 from collections.abc import Generator
-from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
@@ -23,10 +22,6 @@ from next.forms.signals import (
 )
 from next.forms.wizard import FormWizard
 
-
-PAGE_MODULE_FOR_FORM_TESTS = (
-    Path(__file__).resolve().parent.parent / "site_pages" / "page.py"
-).resolve()
 
 _FAKE_FILE = "/fake/myapp/forms.py"
 
@@ -130,12 +125,10 @@ def capture_wizard_completed() -> Generator[list[dict[str, Any]], None, None]:
 
 
 def _post_wizard_step(client, step: str, data: dict):
-    """POST one wizard step through the dispatch client with the tag's hidden fields."""
+    """POST one wizard step through the dispatch client with the tag's hidden field."""
     url = form_action_manager.get_action_url("signal_wizard")
     payload = {
-        "_url_param_step": step,
-        "_next_form_origin": "/request/identity/",
-        "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+        "_next_form_origin": f"/request/{step}/",
         **data,
     }
     return client.post(url, data=payload, follow=False)
@@ -381,10 +374,7 @@ class TestActionDispatchedWiring:
         url = form_action_manager.get_action_url("simple_form_redirect")
         resp = client_no_csrf.post(
             url,
-            data={
-                "name": "Alice",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
-            },
+            data={"name": "Alice"},
             follow=False,
         )
         assert resp.status_code == 302
@@ -396,14 +386,14 @@ class TestActionDispatchedWiring:
         assert event["form"].cleaned_data["name"] == "Alice"
         assert event["url_kwargs"] == {}
 
-    def test_payload_includes_url_kwargs_from_post_hidden_fields(
+    def test_payload_includes_url_kwargs_from_resolved_origin(
         self,
         client_no_csrf,
         capture_action_dispatched: list[dict[str, Any]],
     ) -> None:
-        """`_url_param_*` hidden fields surface as `url_kwargs` on the signal."""
+        """The resolved origin's typed URL kwargs surface as `url_kwargs`."""
         url = form_action_manager.get_action_url("test_no_form")
-        client_no_csrf.post(url, data={"_url_param_id": "42"})
+        client_no_csrf.post(url, data={"_next_form_origin": "/items/42/"})
         assert len(capture_action_dispatched) == 1
         assert capture_action_dispatched[0]["url_kwargs"] == {"id": 42}
 
@@ -418,7 +408,7 @@ class TestActionDispatchedWiring:
             url,
             data={
                 "name": "",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+                "_next_form_origin": "/",
             },
             follow=False,
         )
@@ -440,7 +430,7 @@ class TestFormValidationFailedWiring:
             url,
             data={
                 "name": "",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+                "_next_form_origin": "/",
             },
             follow=False,
         )

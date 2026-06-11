@@ -25,11 +25,20 @@ class NextClient(Client):
         self,
         action_name: str,
         data: dict[str, Any] | None = None,
+        *,
+        origin: str | None = None,
         **extra: Any,  # noqa: ANN401
     ) -> HttpResponse:
-        """Resolve `action_name` and POST `data` to the resulting URL."""
+        """Resolve `action_name` and POST `data` to the resulting URL.
+
+        `origin` fills the `_next_form_origin` hidden field the form tag
+        emits, unless `data` already carries one.
+        """
         url = resolve_action_url(action_name)
-        return cast("HttpResponse", self.post(url, data=data, **extra))
+        payload: dict[str, Any] = dict(data or {})
+        if origin is not None:
+            payload.setdefault("_next_form_origin", origin)
+        return cast("HttpResponse", self.post(url, data=payload, **extra))
 
     def get_action_url(self, action_name: str) -> str:
         """Return the reverse URL for a registered form action."""

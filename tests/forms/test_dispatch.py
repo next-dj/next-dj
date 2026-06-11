@@ -228,13 +228,13 @@ class TestDispatchViaClient:
         assert resp.status_code == 405
 
     def test_invalid_form_returns_200_with_errors(self, client_no_csrf) -> None:
-        """Invalid POST returns 200 with validation errors when _next_form_page is valid."""
+        """Invalid POST returns 200 with validation errors when the origin resolves."""
         url = form_action_manager.get_action_url("simple_form")
         resp = client_no_csrf.post(
             url,
             data={
                 "name": "",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+                "_next_form_origin": "/",
             },
             follow=False,
         )
@@ -245,10 +245,22 @@ class TestDispatchViaClient:
         assert resp["X-Next-Form"] == "invalid"
         assert resp["X-Next-Action"] == meta["uid"]
 
-    def test_invalid_form_without_next_page_returns_400(self, client_no_csrf) -> None:
-        """Invalid POST without _next_form_page returns 400."""
+    def test_invalid_form_without_origin_returns_400(self, client_no_csrf) -> None:
+        """Invalid POST without _next_form_origin returns 400."""
         url = form_action_manager.get_action_url("simple_form")
         resp = client_no_csrf.post(url, data={"name": ""}, follow=False)
+        assert resp.status_code == 400
+
+    def test_invalid_form_with_unresolvable_origin_returns_400(
+        self, client_no_csrf
+    ) -> None:
+        """Invalid POST whose origin matches no route returns 400."""
+        url = form_action_manager.get_action_url("simple_form")
+        resp = client_no_csrf.post(
+            url,
+            data={"name": "", "_next_form_origin": "/no/such/route/"},
+            follow=False,
+        )
         assert resp.status_code == 400
 
     def test_valid_form_calls_on_valid(self, client_no_csrf) -> None:
@@ -259,7 +271,6 @@ class TestDispatchViaClient:
             data={
                 "name": "Alice",
                 "email": "",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
                 "_next_form_origin": "/",
             },
             follow=False,
@@ -276,10 +287,7 @@ class TestDispatchViaClient:
         url = form_action_manager.get_action_url("simple_form_redirect")
         resp = client_no_csrf.post(
             url,
-            data={
-                "name": "Bob",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
-            },
+            data={"name": "Bob"},
             follow=False,
         )
         assert resp.status_code == 302
@@ -293,14 +301,14 @@ class TestDispatchViaClient:
         assert b"ok" in resp.content
 
     def test_on_valid_returning_none_uses_form_response(self, client_no_csrf) -> None:
-        """on_valid returning None with a valid _next_form_page re-renders the page."""
+        """on_valid returning None with a resolvable origin re-renders the page."""
         url = form_action_manager.get_action_url("simple_form")
         resp = client_no_csrf.post(
             url,
             data={
                 "name": "Alice",
                 "email": "",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+                "_next_form_origin": "/",
             },
             follow=False,
         )
@@ -421,57 +429,10 @@ class TestFormDispatchRenderInvalidPageBranches:
         response = FormActionDispatch.dispatch(backend, request, "test_action", meta)
         assert response.status_code == 302
 
-    @pytest.mark.parametrize(
-        "url_param_value",
-        [["list", "value"], "not_a_number"],
-        ids=["non_string", "string_not_int"],
-    )
-    def test_dispatch_survives_unusual_url_param_values(
-        self, mock_http_request, url_param_value
+    def test_render_invalid_page_defaults_url_kwargs_to_empty(
+        self, mock_http_request
     ) -> None:
-        """`dispatch` accepts url_param values that are not int-convertible strings."""
-        backend = RegistryFormActionBackend()
-
-        class TestForm(Form):
-            name = django_forms.CharField(max_length=100)
-
-        def handler(
-            request: HttpRequest, form: TestForm, **_kwargs: object
-        ) -> HttpResponseRedirect:
-            return HttpResponseRedirect("/")
-
-        backend.register_action(
-            ActionRegistration(
-                name="test_action",
-                file_path=_FAKE_FILE,
-                scope="shared",
-                handler=handler,
-                form_class=TestForm,
-            )
-        )
-
-        mock_post = MagicMock()
-        mock_post.items.return_value = [
-            ("_url_param_test", url_param_value),
-            ("name", "test"),
-        ]
-        request = mock_http_request(method="POST", POST=mock_post, FILES=None)
-
-        meta = backend.get_meta("test_action")
-        assert meta is not None
-
-        response = FormActionDispatch.dispatch(backend, request, "test_action", meta)
-        assert response.status_code == 302
-
-    @pytest.mark.parametrize(
-        "url_param_value",
-        [["list", "value"], "not_a_number"],
-        ids=["non_string", "string_not_int"],
-    )
-    def test_render_invalid_page_survives_unusual_url_param_values(
-        self, mock_http_request, url_param_value
-    ) -> None:
-        """`render_invalid_page` handles url_param values that aren't int-convertible strings."""
+        """`render_invalid_page` without explicit url_kwargs renders with none."""
         backend = RegistryFormActionBackend()
 
         class TestForm(Form):
@@ -490,9 +451,7 @@ class TestFormDispatchRenderInvalidPageBranches:
             )
         )
 
-        mock_post = MagicMock()
-        mock_post.items.return_value = [("_url_param_test", url_param_value)]
-        request = mock_http_request(POST=mock_post)
+        request = mock_http_request(method="POST", POST=QueryDict())
 
         file_path = PAGE_MODULE_FOR_FORM_TESTS
         original_registry = page._template_registry.copy()
@@ -509,6 +468,14 @@ class TestFormDispatchRenderInvalidPageBranches:
         finally:
             page._template_registry.clear()
             page._template_registry.update(original_registry)
+
+    def test_render_invalid_page_without_page_path_returns_empty(
+        self, mock_http_request
+    ) -> None:
+        """A missing page path short-circuits to an empty string."""
+        backend = RegistryFormActionBackend()
+        request = mock_http_request(method="POST", POST=QueryDict())
+        assert backend.render_invalid_page(request, "anything", None) == ""
 
     def test_dispatch_with_form_without_get_initial(self, mock_http_request) -> None:
         """Dispatch raises TypeError when form class doesn't have get_initial."""
@@ -636,10 +603,10 @@ class TestDispatchOnValid:
         assert response.status_code == 302
         assert response.url == "/redirected/"
 
-    def test_on_valid_returning_none_gives_400_without_next_page(
+    def test_on_valid_returning_none_gives_400_without_origin(
         self, mock_http_request
     ) -> None:
-        """on_valid returning None without _next_form_page gives 400 bad request."""
+        """on_valid returning None without _next_form_origin gives 400 bad request."""
         backend = RegistryFormActionBackend()
 
         class NoneForm(Form):
@@ -665,7 +632,7 @@ class TestDispatchOnValid:
         assert meta is not None
 
         # None → ensure_http_response(None, request, action_name, backend)
-        # → _form_response → validated_next_form_page_path → None → 400
+        # → _form_response → no resolvable origin → 400
         response = FormActionDispatch.dispatch(backend, request, "none_form", meta)
         assert response.status_code == 400
 
@@ -722,9 +689,7 @@ class TestShapeResponseHook:
         form = F(data={"name": ""})
         assert not form.is_valid()
 
-        post = QueryDict(mutable=True)
-        post["_next_form_page"] = str(PAGE_MODULE_FOR_FORM_TESTS)
-        request = mock_http_request(method="POST", POST=post, FILES=None)
+        request = mock_http_request(method="POST", POST=QueryDict(), FILES=None)
         response = FormActionDispatch.shape_response(
             backend,
             request,
@@ -732,6 +697,7 @@ class TestShapeResponseHook:
                 kind=ActionOutcomeKind.INVALID,
                 action_name="missing_action",
                 form=form,
+                page_path=PAGE_MODULE_FOR_FORM_TESTS,
             ),
         )
         assert response.status_code == 200
@@ -1096,13 +1062,11 @@ class TestWizardDispatchViaClient:
         data: dict,
         *,
         action: str = "dispatch_wizard",
-        origin: str = "/request/identity/",
+        origin: str | None = None,
     ):
         url = form_action_manager.get_action_url(action)
         payload = {
-            "_url_param_step": step,
-            "_next_form_origin": origin,
-            "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+            "_next_form_origin": origin if origin is not None else f"/request/{step}/",
             **data,
         }
         return client.post(url, data=payload, follow=False)
@@ -1131,12 +1095,7 @@ class TestWizardDispatchViaClient:
     def test_direct_last_step_post_never_finalises(self, client_no_csrf) -> None:
         """A fresh-session POST to the last step redirects to the first gap."""
         DispatchWizard.done_payloads.clear()
-        resp = self._post_step(
-            client_no_csrf,
-            "scope",
-            {"scope": "ops"},
-            origin="/request/scope/",
-        )
+        resp = self._post_step(client_no_csrf, "scope", {"scope": "ops"})
         assert resp.status_code == 302
         assert resp.url == "/request/identity/"
         assert DispatchWizard.done_payloads == []
@@ -1146,13 +1105,9 @@ class TestWizardDispatchViaClient:
     ) -> None:
         """A wizard bounced off the last step finalises once every step is stored."""
         DispatchWizard.done_payloads.clear()
-        self._post_step(
-            client_no_csrf, "scope", {"scope": "ops"}, origin="/request/scope/"
-        )
+        self._post_step(client_no_csrf, "scope", {"scope": "ops"})
         self._post_step(client_no_csrf, "identity", {"name": "Ada"})
-        resp = self._post_step(
-            client_no_csrf, "scope", {"scope": "ops"}, origin="/request/scope/"
-        )
+        resp = self._post_step(client_no_csrf, "scope", {"scope": "ops"})
         assert resp.status_code == 302
         assert resp.url == "/thanks/"
         assert DispatchWizard.done_payloads == [{"name": "Ada", "scope": "ops"}]
@@ -1170,11 +1125,7 @@ class TestWizardDispatchViaClient:
         url = form_action_manager.get_action_url("empty_dispatch_wizard")
         resp = client_no_csrf.post(
             url,
-            data={
-                "_url_param_step": "ghost",
-                "_next_form_origin": "/request/identity/",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
-            },
+            data={"_next_form_origin": "/request/ghost/"},
             follow=False,
         )
         assert resp.status_code == 400
@@ -1184,11 +1135,7 @@ class TestWizardDispatchViaClient:
         url = form_action_manager.get_action_url("dispatch_wizard")
         resp = client_no_csrf.post(
             url,
-            data={
-                "_url_param_step": "identity",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
-                "name": "Ada",
-            },
+            data={"name": "Ada"},
             follow=False,
         )
         assert resp.status_code == 400
@@ -1322,9 +1269,7 @@ class TestWizardOutcomePayload:
     def _wizard_post(mock_http_request, name: str) -> MagicMock:
         post = QueryDict(mutable=True)
         post["name"] = name
-        post["_url_param_step"] = "identity"
         post["_next_form_origin"] = "/request/identity/"
-        post["_next_form_page"] = str(PAGE_MODULE_FOR_FORM_TESTS)
         return mock_http_request(
             method="POST", POST=post, FILES=None, session=SessionStore()
         )

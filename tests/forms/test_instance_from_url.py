@@ -433,12 +433,12 @@ class TestDispatchInstanceFromUrlEndToEnd:
         return backend
 
     def test_string_spec_post_updates_existing_row(self, mock_http_request) -> None:
-        """A `_url_param_name` hidden field drives a string-spec UPDATE through dispatch."""
+        """The origin's `name` kwarg drives a string-spec UPDATE through dispatch."""
         group = Group.objects.create(name="editors")
         backend = self._backend_for(GroupByNameForm)
 
         post = QueryDict(mutable=True)
-        post["_url_param_name"] = "editors"
+        post["_next_form_origin"] = "/groups/editors/"
         post["name"] = "editors-renamed"
         request = mock_http_request(method="POST", POST=post, FILES=QueryDict())
 
@@ -452,12 +452,12 @@ class TestDispatchInstanceFromUrlEndToEnd:
         assert refreshed.name == "editors-renamed"
 
     def test_dict_spec_post_updates_existing_row(self, mock_http_request) -> None:
-        """A `_url_param_id` hidden field drives a dict-spec pk UPDATE through dispatch."""
+        """The origin's int `id` kwarg drives a dict-spec pk UPDATE through dispatch."""
         group = Group.objects.create(name="staff")
         backend = self._backend_for(GroupByPkForm)
 
         post = QueryDict(mutable=True)
-        post["_url_param_id"] = str(group.pk)
+        post["_next_form_origin"] = f"/items/{group.pk}/"
         post["name"] = "staff-renamed"
         request = mock_http_request(method="POST", POST=post, FILES=QueryDict())
 
@@ -470,8 +470,10 @@ class TestDispatchInstanceFromUrlEndToEnd:
         refreshed = Group.objects.get(pk=group.pk)
         assert refreshed.name == "staff-renamed"
 
-    def test_post_without_url_param_creates_new_row(self, mock_http_request) -> None:
-        """With no `_url_param_*` field the spec is dormant and dispatch creates a new row."""
+    def test_post_without_origin_kwargs_creates_new_row(
+        self, mock_http_request
+    ) -> None:
+        """With no origin URL kwargs the spec is dormant and dispatch creates a new row."""
         Group.objects.create(name="existing")
         backend = self._backend_for(GroupByNameForm)
 
@@ -496,7 +498,7 @@ class TestGetRenderInstanceFromUrl:
         """`_form_action_context_callable` loads the URL instance onto the render form."""
         group = Group.objects.create(name="reviewers")
         post = QueryDict(mutable=True)
-        post["_url_param_name"] = "reviewers"
+        post["_next_form_origin"] = "/groups/reviewers/"
         request = mock_http_request(method="POST", POST=post)
 
         namespace = _form_action_context_callable(GroupByNameForm)(request)
@@ -505,7 +507,7 @@ class TestGetRenderInstanceFromUrl:
         assert namespace.form.instance.name == "reviewers"
         assert namespace.form.is_bound is False
 
-    def test_render_without_url_param_is_unbound_create(
+    def test_render_without_origin_kwargs_is_unbound_create(
         self, mock_http_request
     ) -> None:
         """Absent URL kwarg yields an unbound create form whose instance has no pk."""
@@ -520,7 +522,7 @@ class TestGetRenderInstanceFromUrl:
         """A peer form with no spec renders an unbound create form regardless of url kwargs."""
         Group.objects.create(name="reviewers")
         post = QueryDict(mutable=True)
-        post["_url_param_name"] = "reviewers"
+        post["_next_form_origin"] = "/groups/reviewers/"
         request = mock_http_request(method="POST", POST=post)
 
         namespace = _form_action_context_callable(GroupNoSpecForm)(request)

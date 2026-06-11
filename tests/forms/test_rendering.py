@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from django import forms as django_forms
 from django.core.exceptions import ImproperlyConfigured
-from django.http import HttpRequest, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponseRedirect, QueryDict
 from django.middleware.csrf import get_token
 from django.template import Context, TemplateSyntaxError
 
@@ -16,7 +16,6 @@ from next.forms import (
     form_action_manager,
 )
 from next.forms.rendering import _ErrorRenderParams, render_form_page_with_errors
-from next.forms.uid import page_path_token
 from next.forms.wizard import FormWizard
 from tests.forms.actions import SimpleForm
 
@@ -120,6 +119,22 @@ class TestRenderInvalidPage:
             PAGE_MODULE_FOR_FORM_TESTS,
         )
         assert html == ""
+
+    def test_wizard_rerender_without_origin_uses_empty_base_path(
+        self, mock_http_request
+    ) -> None:
+        """A wizard re-render with no resolvable origin still renders."""
+        request = mock_http_request(method="POST", POST=QueryDict())
+        form = RenderWizardStep(data={"name": ""})
+        assert not form.is_valid()
+        html = form_action_manager.default_backend.render_invalid_page(
+            request,
+            "render_wizard",
+            form,
+            page_file_path=PAGE_MODULE_FOR_FORM_TESTS,
+        )
+        assert isinstance(html, str)
+        assert html.strip() != ""
 
     @pytest.mark.parametrize(
         ("template_body", "output_mode"),
@@ -309,8 +324,8 @@ class TestFormTagRender:
         )
         assert "csrfmiddlewaretoken" in html
 
-    def test_includes_next_form_page_hidden(self, form_engine, csrf_request) -> None:
-        """Form includes _next_form_page as a BASE_DIR-relative token."""
+    def test_emits_no_page_path_hidden_field(self, form_engine, csrf_request) -> None:
+        """The form never leaks the page source path into the markup."""
         t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
         html = t.render(
             Context(
@@ -320,8 +335,8 @@ class TestFormTagRender:
                 }
             )
         )
-        assert "_next_form_page" in html
-        assert page_path_token(str(PAGE_MODULE_FOR_FORM_TESTS)) in html
+        assert "_next_form_page" not in html
+        assert "page.py" not in html
         assert str(PAGE_MODULE_FOR_FORM_TESTS) not in html
 
     def test_includes_next_form_origin_hidden(self, form_engine, csrf_request) -> None:
@@ -366,45 +381,6 @@ class TestFormTagRender:
         )
         assert 'name="_next_form_origin" value="/board/4/settings/"' in html
         assert 'value="/_next/form/abc123/"' not in html
-
-    def test_error_rerender_keeps_posted_url_params(
-        self, form_engine, csrf_request
-    ) -> None:
-        """On the action-POST re-render the posted _url_param_* fields survive."""
-        request = self._rerender_request(
-            csrf_request,
-            {"_next_form_origin": "/board/4/settings/", "_url_param_id": "4"},
-        )
-        t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
-        html = t.render(
-            Context(
-                {
-                    "request": request,
-                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
-                }
-            )
-        )
-        assert 'name="_url_param_id" value="4"' in html
-
-    def test_resolver_kwargs_win_over_posted_url_params(
-        self, form_engine, csrf_request
-    ) -> None:
-        """On a regular page render the resolver kwargs stay authoritative."""
-        csrf_request.method = "POST"
-        csrf_request.POST = {"_url_param_id": "999"}
-        csrf_request.resolver_match = MagicMock()
-        csrf_request.resolver_match.kwargs = {"id": 4}
-        t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
-        html = t.render(
-            Context(
-                {
-                    "request": csrf_request,
-                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
-                }
-            )
-        )
-        assert 'name="_url_param_id" value="4"' in html
-        assert 'value="999"' not in html
 
     def test_unknown_action_raises_runtime_error(
         self, form_engine, csrf_request
@@ -465,22 +441,19 @@ class TestFormTagRender:
         html = t.render(context)
         assert "test_name" in html
 
-    def test_form_includes_url_parameters_as_hidden_fields(
+    def test_form_emits_no_url_parameter_hidden_fields(
         self, form_engine, csrf_request
     ) -> None:
-        """Form includes hidden fields for URL parameters from resolver_match."""
+        """URL kwargs never become hidden fields, the origin carries them."""
         t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
 
         request = HttpRequest()
         request.method = "GET"
+        request.path = "/items/123/"
         get_token(request)
 
         mock_resolver_match = MagicMock()
-        mock_resolver_match.kwargs = {
-            "id": 123,
-            "slug": "test-slug",
-            "uid": "should-be-skipped",
-        }
+        mock_resolver_match.kwargs = {"id": 123}
         request.resolver_match = mock_resolver_match
 
         context = Context(
@@ -492,8 +465,5 @@ class TestFormTagRender:
         )
         html = t.render(context)
 
-        assert "_url_param_id" in html or 'name="_url_param_id"' in html
-        assert 'value="123"' in html
-        assert "_url_param_slug" in html or 'name="_url_param_slug"' in html
-        assert 'value="test-slug"' in html
-        assert 'name="_url_param_uid"' not in html
+        assert "_url_param_" not in html
+        assert 'name="_next_form_origin" value="/items/123/"' in html

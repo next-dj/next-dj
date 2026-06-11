@@ -8,8 +8,9 @@ from django.http import HttpResponse, HttpResponseRedirect
 
 from next.forms import Form
 from next.forms._request_utils import (
+    _ORIGIN_MATCH_ATTR,
     _filter_reserved_url_kwargs,
-    _url_kwargs_from_post,
+    _resolve_origin,
 )
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
 from next.forms.dispatch import (
@@ -46,13 +47,28 @@ class TestBenchDispatchHelpers:
         benchmark(_filter_reserved_url_kwargs, payload)
 
     @pytest.mark.benchmark(group="forms.dispatch")
-    def test_url_kwargs_from_post(self, benchmark) -> None:
-        request = MagicMock()
-        request.POST = {
-            **{f"_url_param_k_{i}": str(i) for i in range(20)},
-            "csrf": "x",
-        }
-        benchmark(_url_kwargs_from_post, request)
+    def test_resolve_origin_cold(self, benchmark) -> None:
+        request = build_mock_http_request(
+            method="POST", POST={"_next_form_origin": "/items/42/"}
+        )
+
+        def run() -> object:
+            if hasattr(request, _ORIGIN_MATCH_ATTR):
+                delattr(request, _ORIGIN_MATCH_ATTR)
+            return _resolve_origin(request)
+
+        match = benchmark(run)
+        assert match is not None
+        assert match.url_kwargs == {"id": 42}
+
+    @pytest.mark.benchmark(group="forms.dispatch")
+    def test_resolve_origin_memoised(self, benchmark) -> None:
+        request = build_mock_http_request(
+            method="POST", POST={"_next_form_origin": "/items/42/"}
+        )
+        first = _resolve_origin(request)
+        match = benchmark(_resolve_origin, request)
+        assert match is first
 
 
 class _BenchForm(Form):

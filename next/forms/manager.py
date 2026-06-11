@@ -8,7 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from next.conf import next_framework_settings
 
-from ._request_utils import _url_kwargs_from_resolver_or_post
+from ._request_utils import _url_kwargs_for_request
 from .backends import FormActionFactory
 from .dispatch import _form_action_context_callable
 
@@ -132,7 +132,7 @@ def build_form_namespace_for_action(
             continue
         wizard_class = meta.get("wizard_class")
         if wizard_class is not None:
-            url_kwargs = _url_kwargs_from_resolver_or_post(request)
+            url_kwargs = _url_kwargs_for_request(request)
             wizard = wizard_class(request=request, url_kwargs=url_kwargs)
             return cast("types.SimpleNamespace", wizard.template_namespace())
         fc = meta.get("form_class")

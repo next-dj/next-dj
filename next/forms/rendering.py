@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from next.pages import page
 from next.pages.loaders import _load_python_module_memo
 
-from .uid import _validated_origin_path
+from ._request_utils import _resolve_origin
 
 
 if TYPE_CHECKING:
@@ -68,7 +68,8 @@ def render_form_page_with_errors(
         namespace = types.SimpleNamespace(form=form)
         wizard_class = meta.get("wizard_class")
         if wizard_class is not None:
-            origin = _validated_origin_path(request.POST.get("_next_form_origin")) or ""
+            origin_match = _resolve_origin(request)
+            origin = origin_match.origin if origin_match is not None else ""
             wizard = wizard_class(
                 request=request, url_kwargs=url_kwargs, base_path=origin
             )
