@@ -29,11 +29,15 @@ Define the row form and the formset.
        class Meta:
            model = Note
            fields = ("title", "body")
+           abstract = True
 
    NoteFormSet = formset_factory(NoteRowForm, extra=3, can_delete=True)
 
-Subclassing ``ModelForm`` registers ``NoteRowForm`` as the action ``note_row_form`` through ``__init_subclass__``, even though only the formset factory action is intended.
-Render the formset through ``bulk_create`` and do not target ``{% form 'note_row_form' %}``, which would post a single row rather than the formset.
+``abstract = True`` matters here.
+Without it, subclassing ``ModelForm`` would register ``NoteRowForm`` as the standalone action ``note_row_form`` through ``__init_subclass__``.
+That is a live endpoint that saves a single row through the default ``on_valid``, even though only the formset action is intended.
+The flag suppresses that registration, and ``formset_factory`` still builds the formset from the abstract class as usual.
+See :ref:`Preventing Registration <topics-forms-actions-abstract>` for the ``Meta.abstract`` semantics.
 
 Register the action.
 

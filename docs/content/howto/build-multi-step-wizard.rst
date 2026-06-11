@@ -35,14 +35,19 @@ The wizard lists them in order.
        class Meta:
            model = AccessRequest
            fields = ["full_name", "email", "team"]
+           abstract = True
 
    class ScopeStep(next.forms.ModelForm):
        class Meta:
            model = AccessRequest
            fields = ["project_slug", "reason", "expires_in_days"]
+           abstract = True
 
    class ApprovalStep(next.forms.Form):
        """Final step that only confirms the merged request."""
+
+       class Meta:
+           abstract = True
 
    class AccessRequestWizard(next.forms.FormWizard):
        class Meta:
@@ -57,6 +62,8 @@ The wizard lists them in order.
            return redirect_to_origin(request)
 
 Subclassing registers the wizard as the ``access_request_wizard`` action, and the default ``Meta.url_param`` of ``"step"`` matches the ``[step]`` route segment with no extra configuration.
+Every step form is ``abstract`` because a step is not a standalone action.
+Without the flag each step would register as its own form action whose default ``on_valid`` saves a partial row outside the wizard flow.
 :doc:`/content/topics/forms/wizard` covers the registration, scope, and ``Meta.steps`` semantics in depth.
 
 Route Through the Step Segment

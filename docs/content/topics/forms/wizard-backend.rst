@@ -16,7 +16,9 @@ The Backend Contract
 --------------------
 
 ``next.forms.FormWizardBackend`` is an abstract base class with three methods.
-Each method receives the ``HttpRequest`` and the wizard id, which is the ``snake_case`` of the wizard class name.
+Each method receives the ``HttpRequest`` and the wizard storage id.
+The storage id is the ``snake_case`` of the wizard class name prefixed with a short hash of the declaring scope, the same page path or dotted module the registration uses, so equally named wizards in different apps never share a draft.
+Backends treat the id as an opaque string.
 
 ``load(request, wizard_id) -> dict``.
    Returns the ``{step: cleaned_data}`` mapping for the wizard, in step order.
@@ -34,7 +36,7 @@ The Cache Backend
 -----------------
 
 ``next.forms.CacheFormWizardBackend`` is the default backend.
-It stores drafts in Django's configured cache, namespaced by the session key and the wizard id.
+It stores drafts in Django's configured cache, namespaced by the session key and the wizard storage id.
 Because it keys drafts by session, ``SessionMiddleware`` must be enabled, and the backend creates a session on the first saved step.
 Saving a step on a request without session support raises ``ImproperlyConfigured`` instead of silently dropping the draft, and the ``next.W056`` system check flags the misconfiguration at startup.
 

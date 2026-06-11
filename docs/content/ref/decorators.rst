@@ -51,7 +51,8 @@ Use ``@action`` only for handlers that need no form validation — for example d
 Form classes register automatically through ``__init_subclass__`` and must not use ``@action``.
 Pass ``form_class=`` only when the action requires a dynamically constructed form class supplied by a factory callable.
 Passing a static ``Form`` subclass as ``form_class`` raises ``TypeError`` immediately.
-Applying ``@action`` to a class also raises ``TypeError`` and triggers ``next.E053``.
+Applying ``@action`` to a class registers no action and returns the class unchanged.
+The misuse is recorded and reported as the ``next.E053`` system check by ``manage.py check``.
 
 Dependency Markers
 ------------------

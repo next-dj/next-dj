@@ -100,7 +100,7 @@ On the re-rendered page the variable ``form`` is the bound form with errors.
 The template can render error messages inline with each field.
 
 On re-render the dispatcher always supplies the bound failing form under the action-named context key so the user sees the input that triggered the failure.
-Override ``get_initial`` on the form class to control the initial render instead.
+``get_initial`` still runs on the POST bind to seed the form's ``initial``, but the submitted values win in the rendered fields.
 
 Multiple Forms On The Same Page
 -------------------------------
@@ -117,8 +117,10 @@ Influencing the Re-render
 One hook lets a page customise the form before it reaches the template.
 
 The ``get_initial`` hook.
-   Override ``get_initial`` on the form class to shape the initial data or the bound model instance on the initial render.
-   The dispatcher always supplies the bound failing form on re-render, so ``get_initial`` runs only on the initial GET.
+   Override ``get_initial`` on the form class to shape the initial data or the bound model instance.
+   The hook runs on the initial GET render and again on every POST bind, where its return value seeds the bound form's ``initial`` and, for a ModelForm, its ``instance``.
+   On the re-render the submitted POST values win over the seeded initial, so the user sees what they typed.
+   The one path that skips ``get_initial`` on POST is a ``form_class`` factory that returns a ``(FormClass, init_kwargs)`` tuple, see :doc:`actions`.
 
 Redirecting Back to the Origin
 ------------------------------

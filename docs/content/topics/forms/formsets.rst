@@ -37,8 +37,13 @@ Pass the formset class as ``form_class``.
        class Meta:
            model = Note
            fields = ("title", "body")
+           abstract = True
 
    NoteFormSet = formset_factory(NoteRowForm, extra=3, can_delete=True)
+
+Mark the row form ``abstract``.
+Without the flag, ``__init_subclass__`` registers ``NoteRowForm`` as a standalone single-row save action next to the formset action.
+``formset_factory`` accepts the abstract class as usual, see :ref:`Preventing Registration <topics-forms-actions-abstract>`.
 
 .. code-block:: python
    :caption: notes/pages/notes/bulk/page.py
@@ -59,7 +64,7 @@ Pass the formset class as ``form_class``.
                row.save()
        return HttpResponseRedirect(reverse("next:page_"))
 
-Passing a formset class directly to ``form_class`` raises ``TypeError`` at dispatch time because the dispatcher expects a ``get_initial`` method on the form class.
+Passing a formset class directly to ``form_class`` raises ``TypeError`` at decoration time, because the ``@action`` type-guard rejects any class.
 Register a factory callable that returns a ``(FormSetClass, init_kwargs)`` tuple instead.
 The ``init_kwargs`` reach the formset constructor and the dispatcher skips the ``get_initial`` step.
 
@@ -140,6 +145,7 @@ Use ``modelformset_factory`` for editing several existing instances.
        class Meta:
            model = Note
            fields = ("title", "body")
+           abstract = True
 
    NoteEditFormSet = modelformset_factory(Note, form=NoteForm, extra=0, can_delete=True)
 
@@ -187,6 +193,7 @@ Raising ``ValidationError`` from ``clean`` routes the failure through the standa
 Use a factory callable as ``form_class`` so the dispatcher binds the inline formset to the parent form before calling ``form.is_valid()``.
 The factory returns ``(FormClass, init_kwargs)`` and the dispatcher passes those kwargs to the constructor.
 ``NoteForm.__init__`` rebinds ``row_formset`` to ``self.data`` with ``instance=self.instance`` so the formset validates against the same POST as the parent form.
+The parent form is ``abstract`` because it dispatches only through the ``update_note`` factory action, not as a standalone ``note_form`` action.
 
 .. code-block:: python
    :caption: notes/forms.py
@@ -201,6 +208,7 @@ The factory returns ``(FormClass, init_kwargs)`` and the dispatcher passes those
        class Meta:
            model = Note
            fields = ("title", "body")
+           abstract = True
 
        def __init__(self, *args, **kwargs):
            super().__init__(*args, **kwargs)

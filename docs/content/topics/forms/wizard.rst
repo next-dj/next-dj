@@ -42,14 +42,19 @@ Each form class is a normal ``next.forms.Form`` or ``next.forms.ModelForm`` and 
        class Meta:
            model = AccessRequest
            fields = ["full_name", "email", "team"]
+           abstract = True
 
    class ScopeStep(next.forms.ModelForm):
        class Meta:
            model = AccessRequest
            fields = ["project_slug", "reason", "expires_in_days"]
+           abstract = True
 
    class ApprovalStep(next.forms.Form):
        """Final step that only confirms the merged request."""
+
+       class Meta:
+           abstract = True
 
    class AccessRequestWizard(next.forms.FormWizard):
        class Meta:
@@ -63,6 +68,10 @@ Each form class is a normal ``next.forms.Form`` or ``next.forms.ModelForm`` and 
        def done(self, request, cleaned_data):
            AccessRequest.objects.create(**cleaned_data)
            return redirect_to_origin(request)
+
+Every step form sets ``Meta.abstract = True``.
+A step is not a standalone action: without the flag, ``__init_subclass__`` registers each step as its own form action whose default ``on_valid`` saves a partial row.
+The flag suppresses that registration while the wizard still drives the class through ``Meta.steps``, see :ref:`Preventing Registration <topics-forms-actions-abstract>`.
 
 ``Meta.steps`` is required.
 An empty or missing list triggers the ``next.E050`` system check and the wizard is not usable.

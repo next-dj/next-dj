@@ -183,7 +183,7 @@ Typical use cases include logout buttons, delete confirmations, and any simple P
 The scope of a form-less action follows the same anchor-file rule: ``page.py`` and ``component.py`` produce page-scoped actions.
 All other files produce shared actions.
 
-Applying ``@action`` to a class raises ``TypeError`` immediately and triggers the ``next.E053`` system check.
+Applying ``@action`` to a class registers no action: the decorator records the misuse, returns the class unchanged, and ``manage.py check`` reports it as ``next.E053``.
 Form classes register through ``__init_subclass__`` and must not use ``@action``.
 
 Injecting the Form Into a Handler
@@ -239,6 +239,8 @@ A ``(FormClass, init_kwargs)`` tuple.
 
 The tuple path bypasses ``get_initial``, so do not rely on ``get_initial`` running when a factory returns the tuple form.
 See :doc:`formsets` for the same pattern applied to formset and inline-formset actions.
+
+.. _topics-forms-actions-abstract:
 
 Preventing Registration
 -----------------------

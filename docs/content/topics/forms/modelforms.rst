@@ -179,7 +179,7 @@ On a create page the route has no captured kwarg, so the form renders unbound an
 On an edit page the route captures the kwarg named by ``instance_from_url``, so the form loads the existing row and ``self.save()`` updates it.
 
 .. code-block:: python
-   :caption: notes/pages/notes/new/page.py — create, no captured kwarg
+   :caption: notes/forms.py — shared scope, one class for both pages
 
    import next.forms
    from notes.models import Note
@@ -191,7 +191,10 @@ On an edit page the route captures the kwarg named by ``instance_from_url``, so 
            instance_from_url = "slug"
 
 The class above behaves as a create form on ``notes/new/`` and as an edit form on ``notes/edit/[slug]/``, with no per-page branching.
-Auto-registration keys on the ``snake_case`` of the class name, so two pages that share one class share one action name and one action URL.
+One action name and one action URL for both pages require shared scope.
+Declare the class outside ``page.py`` and ``component.py`` as above, or set ``Meta.scope = "shared"`` inside a page module.
+A page-scoped class works differently: declaring a copy in each ``page.py`` keeps the shared action name, but every per-file registration gets its own action URL.
+See :doc:`actions` for the scope derivation and the UID rules.
 
 Separate create and edit forms are an option, and the examples take that route.
 The wiki create page declares a plain ``ArticleCreateForm`` while the edit page keeps the ``ArticleEditForm`` ModelForm.
