@@ -137,6 +137,9 @@ The router renders the template directly without invoking a Python page module.
 Virtual routes are useful for marketing pages, static content, and quick mockups.
 A virtual route can still receive layout wrapping from any ancestor ``layout.djx``.
 
+Every view the router generates, virtual routes included, carries a ``next_page_path`` attribute naming the page source.
+The form dispatcher reads it when it resolves a posted origin back to the page that should re-render after a validation failure, see :doc:`/content/topics/forms/validation-rerender`.
+
 URL Names
 ---------
 

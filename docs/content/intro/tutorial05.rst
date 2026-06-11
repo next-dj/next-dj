@@ -105,7 +105,7 @@ Create ``tests/test_notes_e2e.py``.
        assert "Second" in response.content.decode()
 
 ``NextClient`` extends Django's test client with two shortcuts for form actions.
-``post_action`` resolves an action name to its URL and POSTs in one call.
+``post_action`` resolves an action name to its URL and POSTs in one call, and its ``origin`` keyword fills the hidden ``_next_form_origin`` field the ``{% form %}`` tag emits in the browser.
 ``get_action_url`` returns that URL without dispatching.
 The router itself is built lazily through Django's URL resolver, exactly as in production.
 Use the same ``client.get`` and ``client.post`` calls you already know.
@@ -173,18 +173,20 @@ Test Validation Failure
 
 A failed validation does not produce a redirect.
 The pipeline re-renders the origin page with the bound form and a non-zero error count.
+The test passes ``origin="/"``, which fills the hidden ``_next_form_origin`` field a browser submission carries, so the dispatcher knows which page to re-render.
 
 .. code-block:: python
    :caption: tests/test_notes_actions.py
 
    def test_create_with_blank_title_rerenders(db) -> None:
        client = NextClient()
-       response = client.post_action("create_note_form", {"title": "", "body": "x"})
+       response = client.post_action("create_note_form", {"title": "", "body": "x"}, origin="/")
        assert response.status_code == 200
        assert b"This field is required" in response.content
 
 The response status is ``200`` because the index page rendered.
 This time the failing form replaces the unbound one in the template context.
+A failing POST without a resolvable ``origin`` returns HTTP 400 instead, because the dispatcher has no page to re-render.
 
 Use the Autoreloader
 ~~~~~~~~~~~~~~~~~~~~

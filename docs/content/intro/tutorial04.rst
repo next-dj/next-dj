@@ -224,9 +224,8 @@ Extend the detail template.
 
 The rendered form carries several hidden inputs from different sources.
 ``confirm`` is a real field on ``DeleteNoteForm``, so the template posts it explicitly.
-The ``{% form %}`` tag emits the framework fields shown below.
-``csrfmiddlewaretoken`` carries the CSRF token, ``_next_form_page`` identifies the origin page, ``_next_form_origin`` records the request path, and ``_url_param_id`` echoes the captured URL ``id``.
-The ``_url_param_id`` field lets the action handler resolve ``DUrl["id", int]`` without any extra argument on the tag.
+The ``{% form %}`` tag emits the framework fields itself: ``csrfmiddlewaretoken`` carries the CSRF token and ``_next_form_origin`` records the page URL, such as ``/notes/7/``.
+The dispatcher resolves that path against the URLconf, which recovers the captured ``id`` through the URL converter, so the action handler resolves ``DUrl["id", int]`` without any extra argument on the tag.
 Add the delete handler to the detail page.
 ``DeleteNoteForm`` is declared in ``notes/forms.py`` and registers automatically at startup via autodiscovery.
 The detail ``page.py`` only needs to add its own context.

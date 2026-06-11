@@ -55,17 +55,17 @@ The same scoping rule applies to the ModelForm ``Meta.instance_from_url`` key.
 Its default ``get_initial`` runs an unscoped ``get_object_or_404(model, slug=<value>)``, so a form that edits a per-user row must override ``get_initial`` with a scoped query such as ``get_object_or_404(Note, slug=slug, owner=request.user)``.
 See :doc:`/content/topics/forms/modelforms` for the full pattern.
 
-Hidden URL Parameters
----------------------
+URL Kwargs on a POST
+--------------------
 
-The ``{% form %}`` tag emits the page's captured URL kwargs as hidden ``_url_param_<name>`` fields.
-On a POST the dispatcher parses these fields back into ``url_kwargs`` (with a best-effort ``int`` cast) when no resolver match is present, then feeds them into ``get_initial`` and into DI-resolved ``on_valid`` parameters exactly like a live URL capture.
+A form POST targets the dispatch endpoint, not the page URL, so the page's captured kwargs are not in the request path.
+The dispatcher recovers them by resolving the hidden ``_next_form_origin`` field against the URLconf, which runs the real URL converters and feeds the typed kwargs into ``get_initial`` and into DI-resolved ``on_valid`` parameters exactly like a live URL capture.
 
-These fields are user-controlled.
-A client can change ``_url_param_slug`` before posting, so they carry the same trust level as the path itself, not the higher trust of a server-set value.
+The origin field is user-controlled.
+A client can replace it with the path of any other routed page before posting, so the recovered kwargs carry the same trust level as the path itself, not the higher trust of a server-set value.
 They are the mechanism behind the ``instance_from_url`` insecure direct object reference, because the value that selects the row to edit travels in the request body.
 
-Validate or scope every lookup that reads a URL kwarg, whether the value arrived in the path or in one of these hidden fields.
+Validate or scope every lookup that reads a URL kwarg, whether the value arrived in the live path or through the posted origin.
 
 Query Strings
 -------------
@@ -105,7 +105,7 @@ Whitelist fields.
    Avoid ``Meta.exclude`` because new fields default to editable.
 
 The ``cleaned_data`` rule covers the form fields, not the extra parameters DI injects into ``on_valid``.
-A ``DUrl`` parameter or a URL kwarg argument on ``on_valid`` originates from the same untrusted path and hidden ``_url_param_*`` fields described above, so validate or scope it the same way before using it in a lookup.
+A ``DUrl`` parameter or a URL kwarg argument on ``on_valid`` originates from the same untrusted path and posted origin described above, so validate or scope it the same way before using it in a lookup.
 
 Custom Validators
 -----------------

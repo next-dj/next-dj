@@ -49,8 +49,10 @@ Forms
 HTTP 400 From Form Submission
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The dispatcher rejected the request because ``_next_form_page`` is missing or invalid.
-Always render the form through ``{% form "name" %}`` or include both ``csrf_token`` and the ``_next_form_page`` field by hand.
+The dispatcher rejected the request because ``_next_form_origin`` is missing or does not resolve against the URLconf.
+Always render the form through ``{% form "name" %}`` or include both ``csrf_token`` and the ``_next_form_origin`` field by hand, set to the URL path of the page.
+A form rendered by a hand-written view re-renders only when that view carries a ``next_page_path`` attribute, see :ref:`topics-forms-templates-handwritten-views`.
+Under :func:`django.conf.urls.i18n.i18n_patterns` the same 400 appears when the user switches the language between the render and the submit, because the posted origin keeps the old language prefix and no longer resolves.
 
 HTTP 403 on POST
 ~~~~~~~~~~~~~~~~

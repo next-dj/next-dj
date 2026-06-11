@@ -194,6 +194,17 @@ Posting to Actions
        response = NextClient().post_action("create_note", {"title": "Test", "body": ""})
        assert response.status_code == 302
 
+The ``origin`` keyword fills the hidden ``_next_form_origin`` field the ``{% form %}`` tag emits in the browser, the page URL the dispatcher resolves to re-render on a validation failure.
+
+.. code-block:: python
+   :caption: failing submission re-renders the origin
+
+   def test_blank_title_rerenders(db) -> None:
+       response = NextClient().post_action("create_note", {"title": ""}, origin="/")
+       assert response.status_code == 200
+
+A value already present in ``data`` under ``_next_form_origin`` wins over the keyword, so protocol-level tests can drive the raw field directly, including posting without it to assert the HTTP 400 rejection.
+
 ``NextClient.get_action_url`` returns the dispatch URL without posting, for tests that need the URL itself.
 Both methods resolve the name through ``resolve_action_url`` from ``next.testing.actions``.
 

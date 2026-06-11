@@ -97,7 +97,7 @@ Security: the lookup is not ownership-scoped
 .. warning::
 
    The default ``get_initial`` runs an unscoped ``get_object_or_404(model, slug=<value>)``.
-   The lookup value comes from the URL, and on a POST it can also arrive through a hidden ``_url_param_slug`` field that the browser sends.
+   The lookup value comes from the URL, and on a POST it is recovered by resolving the hidden ``_next_form_origin`` path that the browser sends.
    Either source is user-controlled, so any user who can reach the action can load and save a row they do not own by supplying a different value.
    This is an insecure direct object reference.
 

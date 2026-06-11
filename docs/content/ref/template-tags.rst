@@ -16,7 +16,7 @@ Forms
 
    Renders a form bound to a registered action.
    The first argument is the action name, a quoted string or a context variable that resolves to a string.
-   Injects the CSRF token and the hidden ``_next_form_page`` origin field.
+   Injects two hidden inputs: the ``csrfmiddlewaretoken`` CSRF field and the ``_next_form_origin`` field carrying the URL path of the rendering page.
    The block body has access to the bound or unbound form through ``{{ form }}``.
 
    Optional ``key="value"`` arguments after the action name render as HTML attributes on the ``<form>`` element, for example ``{% form "upload_form" enctype="multipart/form-data" class="stack" %}``.
@@ -25,7 +25,7 @@ Forms
    The HTTP method is always ``post``.
    The tag owns the ``action`` and ``method`` attributes, and passing either raises ``TemplateSyntaxError`` at parse time.
 
-   Captured URL parameters from ``request.resolver_match.kwargs`` are emitted automatically as ``_url_param_<name>`` hidden inputs.
+   Captured URL parameters travel inside the origin path, the dispatcher recovers them by resolving ``_next_form_origin`` against the URLconf.
 
    The tag requires ``request`` in the template context for the CSRF token.
    It also uses ``current_page_module_path`` when present to scope the action lookup to the origin page, which is how the file router renders it.

@@ -31,9 +31,10 @@ The tag does the following.
 2. Resolves the stable dispatch URL for that action.
 3. Emits ``<form action="..." method="post">`` plus any attributes passed to the tag.
 4. Emits a hidden ``csrfmiddlewaretoken`` input.
-5. Emits a hidden ``_next_form_origin`` input set to ``request.path``, used by ``redirect_to_origin``.
-6. Emits a hidden ``_next_form_page`` input with the BASE_DIR-relative token for the current ``page.py``, used on re-render.
-7. Publishes ``form`` inside the block body (see `The form Variable`_ below).
+5. Emits a hidden ``_next_form_origin`` input set to ``request.path``, used by ``redirect_to_origin`` on success and resolved through the URLconf on the error re-render.
+6. Publishes ``form`` inside the block body (see `The form Variable`_ below).
+
+On the validation-error re-render the request targets the dispatch endpoint, so the tag re-emits the posted origin of the original page instead of ``request.path``.
 
 A name that is not in the registry raises ``RuntimeError`` at render time.
 
@@ -81,7 +82,7 @@ Captured URL Parameters
 -----------------------
 
 The tag does not need any extra argument to forward URL parameters.
-At render time it reads ``request.resolver_match.kwargs`` and emits a hidden ``_url_param_<name>`` field for every captured kwarg, skipping ``uid`` and names reserved by the dependency resolver.
+The captured kwargs travel inside the origin path itself: the dispatcher resolves the posted ``_next_form_origin`` against the URLconf and recovers every kwarg through the real URL converters, skipping names reserved by the dependency resolver.
 
 .. code-block:: jinja
    :caption: page for /notes/<int:note_id>/
@@ -91,8 +92,8 @@ At render time it reads ``request.resolver_match.kwargs`` and emits a hidden ``_
      <button type="submit">Save</button>
    {% endform %}
 
-A page whose URL captures ``note_id`` posts a hidden ``_url_param_note_id`` field automatically.
-The handler receives the same value through ``DUrl["note_id", int]``.
+A form rendered under ``/notes/42/`` posts ``_next_form_origin`` set to that path, and resolving it yields ``note_id=42`` as an ``int``.
+The handler receives the value through ``DUrl["note_id", int]``, typed identically on the canonical GET and on the re-render.
 
 Multiple Forms on One Page
 --------------------------
@@ -156,18 +157,42 @@ Manual CSRF
 
 The tag emits ``csrfmiddlewaretoken`` automatically.
 Only add Django's ``{% csrf_token %}`` manually when you build the ``<form>`` element by hand and skip the tag entirely.
-A hand-crafted form must also include the ``_next_form_page`` hidden field or the dispatcher cannot re-render on failure.
-Set it to the BASE_DIR-relative path of the page module, the same token the tag emits.
-The validator resolves a relative value against ``BASE_DIR`` and also accepts an absolute path such as ``{{ current_page_module_path }}``, at the cost of exposing the server filesystem layout in the HTML.
+A hand-crafted form must also include the ``_next_form_origin`` hidden field or the dispatcher cannot re-render on failure.
+Set it to the URL path of the page, the same value the tag emits, with ``{{ request.path }}`` as the natural source.
 
 .. code-block:: jinja
    :caption: hand-crafted form
 
    <form action="/_next/form/{{ action_uid }}/" method="post">
      {% csrf_token %}
-     <input type="hidden" name="_next_form_page" value="notes/pages/page.py">
+     <input type="hidden" name="_next_form_origin" value="{{ request.path }}">
      <button type="submit">Send</button>
    </form>
+
+.. _topics-forms-templates-handwritten-views:
+
+Forms in Hand-Written Views
+---------------------------
+
+A ``{% form %}`` tag also works inside a template rendered by an ordinary Django view, outside the file router.
+The success path needs nothing extra, the handler runs and its response goes out.
+The error re-render is different: the dispatcher resolves the posted origin to a view and reads the page source location from its ``next_page_path`` attribute, which the file router sets on every routed view and a hand-written view lacks.
+Without it an invalid submission returns HTTP 400 instead of re-rendering.
+
+Opt in by setting the attribute on the view function yourself, as a ``Path`` or a string naming the ``page.py`` location whose body the dispatcher should compose on the error re-render.
+The file may be a real page module or a synthesised location next to a ``template.djx``, exactly as for virtual routes.
+
+.. code-block:: python
+   :caption: notes/views.py
+
+   from pathlib import Path
+
+   from django.shortcuts import render
+
+   def feedback(request):
+       return render(request, "feedback.html")
+
+   feedback.next_page_path = Path(__file__).parent / "feedback" / "page.py"
 
 Common Patterns
 ---------------
@@ -176,13 +201,13 @@ Form in a Component
 ~~~~~~~~~~~~~~~~~~~
 
 A component template hosts ``{% form %}`` exactly like a page template.
-The framework injects ``current_page_module_path`` from the surrounding page, so re-renders land on the correct page.
+The framework injects ``current_page_module_path`` from the surrounding page, so the action lookup scopes to the correct page.
 
 Form in a Layout
 ~~~~~~~~~~~~~~~~
 
 Layouts receive ``current_page_module_path`` from the page they wrap.
-A login form placed in the root layout re-renders the original page on validation failure.
+A login form placed in the root layout posts the wrapped page's path as its origin, so a validation failure re-renders the original page.
 
 Render-Time Failures
 --------------------

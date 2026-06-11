@@ -17,22 +17,24 @@ This page explains the validation and re-render flow end to end.
 The Origin Page
 ---------------
 
-Every rendered ``{% form %}`` tag emits a hidden ``_next_form_page`` field that carries the BASE_DIR-relative token for the current ``page.py``.
-The dispatcher reads that field on the re-render branch to locate the origin page.
-A relative value resolves against ``BASE_DIR``, and an absolute path is accepted as is.
+Every rendered ``{% form %}`` tag emits a hidden ``_next_form_origin`` field that carries the URL path of the page that rendered the form, such as ``/notes/42/``.
+On the re-render branch the dispatcher resolves that path against the URLconf with :func:`django.urls.resolve`.
+The file router stamps every routed view with a ``next_page_path`` attribute, so the match yields the origin page module, and the URL kwargs come through the real URL converters.
+An ``[int:id]`` capture therefore arrives as ``int`` on the re-render exactly as on the canonical GET, and a ``uuid`` capture arrives as ``UUID``.
 
-On a validation failure the dispatcher rejects the submission and returns ``HTTP 400 Missing or invalid _next_form_page`` when any of the following holds.
+On a validation failure the dispatcher rejects the submission and returns ``HTTP 400 Missing or invalid _next_form_origin`` when any of the following holds.
 
 - The field is missing or blank.
-- The basename is not ``page.py``.
-- Resolving the path raises ``OSError``.
-- ``BASE_DIR`` is unset, or the resolved path falls outside ``BASE_DIR``.
-- The ``page.py`` does not exist on disk and no sibling ``template.djx`` stands in for it.
+- The value is not a same-site path, one that starts with a single ``/``.
+- The path does not resolve against the URLconf.
+- The resolved view carries no ``next_page_path`` attribute, which is the case for a hand-written view that has not opted in (see :ref:`topics-forms-templates-handwritten-views`).
+
+The resolution respects the deployment context.
+A script prefix is stripped through :func:`django.urls.get_script_prefix` before the lookup, and a per-request URLconf set on ``request.urlconf`` is passed to ``resolve``, so projects mounted under a prefix and multi-tenant URLconfs both work.
 
 Virtual routes are fully supported as origin pages.
 A directory that has only a ``template.djx`` and no ``page.py`` is a virtual route (see :doc:`/content/topics/file-router` for the routing rules).
-The ``{% form %}`` tag on such a page emits ``_next_form_page`` pointing at a non-existent ``page.py`` path.
-The dispatcher accepts this: if ``page.py`` does not exist but a sibling ``template.djx`` does, the path is considered valid.
+The router stamps the synthesised ``page.py`` location on the virtual route's view as well, so its origin resolves like any other page.
 On validation failure the re-render composes the body from the template loader exactly as the initial render did, with no page module involved.
 
 The Render Pipeline
@@ -150,22 +152,18 @@ It accepts the value only when it is a string that starts with a single ``/``.
 A protocol-relative input beginning with ``//`` is rejected, which blocks open-redirect input.
 When the field is absent or fails validation the helper redirects to ``fallback`` instead.
 
-Origin Versus Page Fields
-~~~~~~~~~~~~~~~~~~~~~~~~~
+One Field, Two Roles
+~~~~~~~~~~~~~~~~~~~~
 
-Two hidden fields travel with every submission and serve different roles.
+The single hidden ``_next_form_origin`` field serves both directions of the round trip.
 
-``_next_form_page``.
-   The BASE_DIR-relative token for the ``page.py`` that rendered the form.
-   The dispatcher resolves it against ``BASE_DIR`` to locate the origin module for the re-render.
-   It is a filesystem token, never a URL.
+Re-render path.
+   The dispatcher resolves the field through the URLconf to recover the origin page module and the typed URL kwargs, as :ref:`topics-forms-validation-rerender-origin` describes.
 
-``_next_form_origin``.
-   The request path the form was rendered under, such as ``/notes/42/``.
-   It is consumed only by ``redirect_to_origin`` on the success path.
+Success-redirect path.
+   ``redirect_to_origin`` reads the same field as the redirect target, without resolving it.
 
-The re-render path uses ``_next_form_page``. The success-redirect path uses ``_next_form_origin``.
-A failing form ignores ``_next_form_origin`` because the re-render stays on the same URL without a redirect.
+A failing form never redirects, the re-render stays on the dispatch URL.
 
 Server Side Effects Before Validation
 -------------------------------------
@@ -197,8 +195,9 @@ See :doc:`signals` for the full list and payload shapes.
 Edge Cases
 ----------
 
-- Missing or stale ``_next_form_page`` field returns HTTP 400. Plain HTML forms must set the field to the BASE_DIR-relative path of the page module, the token the tag emits.
-- Origin ``page.py`` renamed or deleted returns HTTP 400 when the path no longer exists on disk.
+- A missing or unresolvable ``_next_form_origin`` field returns HTTP 400 on the invalid branch. A plain HTML form must set the field to the URL path of its page, the value the tag emits.
+- A route removed in a deploy between the render and the POST no longer resolves, so the invalid branch returns HTTP 400.
+- Under :func:`django.conf.urls.i18n.i18n_patterns` the origin resolves under the active language of the POST. A user who switches the language between the render and the submit posts an origin whose language prefix no longer resolves, and the invalid branch returns HTTP 400. The success path never resolves the origin and is unaffected.
 - The UID is hashed from the scope key and the action name, not the name alone. For a page-scoped form the scope key is the absolute ``page.py`` path, so moving the file or renaming the class changes the UID. For a shared form the scope key is the dotted module, so moving the module changes the UID. See :ref:`UID stability <topics-forms-actions-uid>` in :doc:`actions`.
 - A handler that returns ``HttpResponseRedirect`` skips the re-render path entirely. Use this on success only.
 - Virtual page origins backed by ``template.djx`` resolve through the template loader, as :ref:`topics-forms-validation-rerender-origin` explains above.
@@ -233,6 +232,6 @@ See Also
 .. seealso::
 
    :doc:`actions` for handler patterns.
-   :doc:`templates` for the ``{% form %}`` tag and ``_next_form_page``.
+   :doc:`templates` for the ``{% form %}`` tag and ``_next_form_origin``.
    :doc:`backends` for swapping the dispatch backend.
    :doc:`/content/internals/action-dispatch` for the full pipeline.

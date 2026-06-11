@@ -63,17 +63,29 @@ Write the test.
 Test the Failure Path
 ~~~~~~~~~~~~~~~~~~~~~
 
+A failing validation re-renders the origin page, so the test names the origin.
+The ``origin`` keyword fills the ``_next_form_origin`` field the ``{% form %}`` tag emits in the browser.
+
 .. code-block:: python
    :caption: tests/test_validation_failure.py
 
    from next.testing.client import NextClient
 
    def test_blank_title_rerenders(db) -> None:
-       response = NextClient().post_action("create_note", {"title": ""})
+       response = NextClient().post_action("create_note", {"title": ""}, origin="/")
        assert response.status_code == 200
        assert b"This field is required" in response.content
 
-The status code is ``200`` because the dispatcher re-renders the origin page with the bound form in scope.
+The status code is ``200`` because the dispatcher resolves the origin path and re-renders that page with the bound form in scope.
+
+A protocol-level test asserts the rejection instead: without a resolvable origin the invalid branch cannot re-render and answers HTTP 400.
+
+.. code-block:: python
+   :caption: tests/test_validation_failure.py
+
+   def test_blank_title_without_origin_is_rejected(db) -> None:
+       response = NextClient().post_action("create_note", {"title": ""})
+       assert response.status_code == 400
 
 Render the Page Without HTTP
 ----------------------------

@@ -103,7 +103,8 @@ Shaping the Response
 
 Every outcome of the dispatch pipeline leaves through the backend's ``shape_response(request, outcome)``.
 The ``outcome`` is an ``ActionOutcome``, a frozen keyword-only dataclass whose ``kind`` field is an ``ActionOutcomeKind`` member: ``RESULT`` for a handler return value, ``INVALID`` for a failed validation, and ``WIZARD_ADVANCE`` for a wizard step that moved forward.
-The other fields carry what each kind needs: the ``action_name`` and ``uid``, the raw handler return value, the bound failing ``form``, the parsed ``url_kwargs``, the wizard ``redirect_to`` target, and the live ``wizard`` instance.
+The other fields carry what each kind needs: the ``action_name`` and ``uid``, the raw handler return value, the bound failing ``form``, the resolved ``url_kwargs``, the wizard ``redirect_to`` target, and the live ``wizard`` instance.
+On ``INVALID`` outcomes the ``page_path`` and ``origin`` fields carry the identity of the origin page that the dispatcher resolved from the posted ``_next_form_origin`` field, and a ``page_path`` of ``None`` makes the default envelope answer HTTP 400.
 Fields may be added in future versions, so construct an ``ActionOutcome`` with keywords only.
 
 The base implementation delegates to ``FormActionDispatch.shape_response``, the default envelope.
@@ -195,9 +196,8 @@ The override calls ``super().dispatch`` to run the standard pipeline and records
 An unknown UID returns 404 from the parent dispatch, and the audit row still records that outcome.
 See :doc:`/content/howto/write-a-form-action-backend` for the guarded pattern that recovers the action name from the UID index.
 
-The ``validated_next_form_page_path(request)`` helper validates the hidden ``_next_form_page`` POST field and returns a trusted ``Path | None``.
-Call it inside a ``dispatch`` override when the custom backend needs to know which page initiated the form submission.
-A custom redirect target keyed off that page is one such case.
+A ``dispatch`` override that needs to know which page initiated the submission reads the validated origin from the pipeline rather than parsing POST fields.
+On the invalid branch the ``ActionOutcome`` passed to ``shape_response`` carries the resolved ``page_path`` and ``origin``, and a custom redirect target keyed off the origin page is one such use.
 
 Registering a Custom Backend
 ----------------------------
@@ -289,8 +289,8 @@ Custom Invalid-Page HTML
 
 Override ``render_invalid_page`` to return custom HTML for the validation error path.
 The override signature is ``render_invalid_page(request, action_name, form, page_file_path=None, url_kwargs=None)``.
-The dispatcher passes the URL kwargs it already parsed from the submission, and ``None`` tells the backend to parse them from the request.
-The abstract base returns an empty string.
+The dispatcher passes the page source path and the URL kwargs it resolved from the posted origin, so the hook never parses the request itself.
+The abstract base returns an empty string, and the bundled implementation does the same when ``page_file_path`` is ``None``.
 The bundled ``RegistryFormActionBackend`` re-renders the origin page through the page-template loader.
 When no action meta or template body is found, it falls back to rendering the form with its ``<p>`` layout template.
 Override ``render_invalid_page`` to replace this behaviour entirely.

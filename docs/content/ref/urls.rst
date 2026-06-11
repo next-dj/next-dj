@@ -18,6 +18,9 @@ Public API
 Backends
 ~~~~~~~~
 
+Every page view the file router generates carries a ``next_page_path`` attribute naming the page source, including the synthesised ``page.py`` location of a virtual ``template.djx`` route.
+The form dispatcher reads it when it resolves a posted origin URL back to the page that re-renders after a validation failure.
+
 .. automodule:: next.urls.backends
    :members:
 

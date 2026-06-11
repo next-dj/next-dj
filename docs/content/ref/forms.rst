@@ -29,7 +29,7 @@ Advanced.
    ``FormActionDispatch``, ``ActionOutcome``, ``ActionOutcomeKind``,
    ``ActionRegistration``, ``ActionMeta``, ``ComponentWidget``,
    ``FormWizardBackend``, ``CacheFormWizardBackend``, ``WizardBackendManager``, ``wizard_backend_manager``,
-   ``build_form_namespace_for_action``, ``validated_next_form_page_path``,
+   ``build_form_namespace_for_action``,
    the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``,
    ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``,
    ``formset_spec``), the formset helper ``cleanup_extra_initial``,
@@ -134,6 +134,7 @@ Dispatch
 
 ``FormActionDispatch``, ``ActionOutcome``, and ``ActionOutcomeKind`` are the public members of this module, in the Advanced tier described above.
 ``ActionOutcome`` is the frozen keyword-only dataclass a backend's ``shape_response`` hook receives, with ``ActionOutcomeKind`` as its ``kind`` discriminator.
+On ``INVALID`` outcomes the ``page_path`` and ``origin`` fields carry the resolved identity of the origin page: the source location of its ``page.py`` and the validated origin URL path.
 ``FormActionDispatch.shape_response`` builds the default envelope for one outcome, and the backend hook delegates to it unless overridden.
 ``ensure_http_response`` coerces a handler return value into an ``HttpResponse``, kept for custom backends that drive the pipeline by hand.
 The underscore-prefixed helpers are internal hooks per the ``Internal hooks`` tier described above.

@@ -63,7 +63,7 @@ Without it the browser submits only text values and ``form.file`` arrives empty.
      <button type="submit">Upload</button>
    {% endform %}
 
-The tag emits the CSRF token and the hidden ``_next_form_page`` field on its own, so the template adds nothing else.
+The tag emits the CSRF token and the hidden ``_next_form_origin`` field on its own, so the template adds nothing else.
 
 .. warning::
 

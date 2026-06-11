@@ -105,28 +105,17 @@ Fill the first step, advance through the rest, and confirm the final submission 
 Use the browser back button on an earlier step and confirm the values you entered reappear.
 
 A test asserts the same flow with ``NextClient``.
-The ``{% form %}`` tag emits three hidden fields the dispatcher reads back on POST.
-``_url_param_step`` carries the current step, ``_next_form_origin`` is the page path the next-step redirect is derived from, and ``_next_form_page`` is the page module that re-renders on a validation error.
-A test posts them alongside the step's own fields.
+The whole wire protocol of a wizard step is the ``origin`` path: the dispatcher resolves it against the URLconf, the ``[step]`` segment yields the current step, and the next-step redirect derives from the same path.
+``post_action(..., origin=...)`` fills the ``_next_form_origin`` field the ``{% form %}`` tag would emit.
 
 .. code-block:: python
    :caption: tests/test_wizard.py
 
-   from pathlib import Path
-
    from access.models import AccessRequest
    from next.testing.client import NextClient
 
-   STEP_PAGE = str(
-       Path(__file__).resolve().parent.parent / "access" / "views" / "request" / "[step]" / "page.py"
-   )
-
    def post_step(client, step, data):
-       payload = dict(data)
-       payload["_url_param_step"] = step
-       payload["_next_form_origin"] = f"/request/{step}/"
-       payload["_next_form_page"] = STEP_PAGE
-       return client.post_action("access_request_wizard", payload)
+       return client.post_action("access_request_wizard", data, origin=f"/request/{step}/")
 
    def test_wizard_flow(db) -> None:
        client = NextClient()
@@ -135,7 +124,7 @@ A test posts them alongside the step's own fields.
        post_step(client, "approval", {})
        assert AccessRequest.objects.filter(email="ada@example.com").exists()
 
-Each ``post_step`` targets one step through ``_url_param_step``.
+Each ``post_step`` targets one step through its ``origin`` path.
 The final step's submission triggers ``done`` and the row appears.
 
 See Also

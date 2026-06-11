@@ -61,9 +61,11 @@ Mass assignment.
    Use ``ModelForm.Meta.fields`` to whitelist editable fields.
    Avoid ``Meta.exclude`` because new fields default to editable.
 
-Path traversal.
-   The form dispatcher validates the posted ``_next_form_page`` path against ``BASE_DIR``.
-   A submission that points outside ``BASE_DIR`` returns HTTP 400.
+Origin spoofing.
+   The only page identity a form submission carries is the ``_next_form_origin`` URL path, which the dispatcher resolves through the URLconf with :func:`django.urls.resolve`.
+   The client never supplies a filesystem path, so an error re-render can target only pages that are reachable through the routing table anyway.
+   A value that does not resolve returns HTTP 400.
+   Substituting the origin of another routed page remains possible and is an authorization question, so guard mutating actions as described under `Access Control`_.
 
 Open redirect.
    ``HttpResponseRedirect`` accepts any URL.
@@ -72,7 +74,7 @@ Open redirect.
 Object-level authorization.
    A lookup keyed only on a URL value loads whatever row matches, regardless of who owns it.
    The ModelForm ``Meta.instance_from_url`` lookup is unscoped, so scope it to the user or tenant.
-   See :doc:`/content/topics/forms/modelforms` for the ownership-scoped pattern and :doc:`di-and-untrusted-input` for the hidden URL parameters that feed the lookup.
+   See :doc:`/content/topics/forms/modelforms` for the ownership-scoped pattern and :doc:`di-and-untrusted-input` for the posted origin path that feeds the lookup.
 
 Access Control
 --------------

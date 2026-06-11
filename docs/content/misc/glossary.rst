@@ -93,7 +93,7 @@ Terms used throughout the next.dj documentation.
 
    origin page
       The page that rendered a form.
-      Identified through the hidden ``_next_form_page`` field at dispatch time.
+      Identified at dispatch time by resolving the hidden ``_next_form_origin`` URL path against the URLconf.
 
    page
       A directory under the page root with a ``page.py``, or a virtual route with only a ``template.djx``.
@@ -148,7 +148,7 @@ Terms used throughout the next.dj documentation.
       A swappable algorithm such as ``DedupStrategy`` for static deduplication.
 
    UID
-      The 16 character hash of an action name that becomes part of the dispatch URL.
+      The 16 character hash of an action's scope key and name that becomes part of the dispatch URL.
 
    virtual route
       A directory with only ``template.djx`` and no ``page.py``.
