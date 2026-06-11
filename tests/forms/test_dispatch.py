@@ -1,7 +1,6 @@
-import inspect
 from pathlib import Path
 from typing import ClassVar
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from django import forms as django_forms
@@ -31,7 +30,6 @@ from next.forms.dispatch import (
     _bind_form_for_post,
     _form_action_context_callable,
     _form_from_initial_data,
-    _get_caller_path,
     _resolve_form_class,
 )
 from next.forms.manager import build_form_namespace_for_action
@@ -174,12 +172,7 @@ def _run_page_context(tmp_path: Path, request: object) -> object:
 
 
 class TestFormActionDispatch:
-    """FormActionDispatch: _get_caller_path, context_func, ensure_http_response."""
-
-    def test_get_caller_path_raises_when_no_frame(self) -> None:
-        """_get_caller_path raises when frame is missing."""
-        with pytest.raises(RuntimeError, match="Could not determine caller file path"):
-            _get_caller_path(999)
+    """FormActionDispatch.ensure_http_response coercion variants."""
 
     @pytest.mark.parametrize(
         ("response_val", "kwargs", "expected_status", "assert_extra"),
@@ -205,35 +198,6 @@ class TestFormActionDispatch:
         assert resp.status_code == expected_status
         if assert_extra is not None:
             assert assert_extra(resp)
-
-    def test_get_caller_path_raises_when_frame_becomes_none(self) -> None:
-        """_get_caller_path raises when frame chain ends early."""
-        frame = MagicMock()
-        frame.f_globals = {"__file__": "/some/path/forms.py"}
-        frame.f_back = None
-        with (
-            patch.object(inspect, "currentframe", return_value=frame),
-            pytest.raises(RuntimeError, match="Could not determine caller"),
-        ):
-            _get_caller_path(0)
-
-    def test_get_caller_path_raises_when_all_frames_are_forms_py(self) -> None:
-        """_get_caller_path raises when only forms.py frames exist."""
-
-        def make_frame(f_back: object = None) -> object:
-            f = MagicMock()
-            f.f_globals = {"__file__": "/some/path/forms.py"}
-            f.f_back = f_back
-            return f
-
-        chain = None
-        for _ in range(15):
-            chain = make_frame(chain)
-        with (
-            patch.object(inspect, "currentframe", return_value=chain),
-            pytest.raises(RuntimeError, match="Could not determine caller"),
-        ):
-            _get_caller_path(0)
 
 
 @pytest.mark.django_db()
@@ -290,8 +254,10 @@ class TestDispatchViaClient:
             },
             follow=False,
         )
-        # SimpleForm.on_valid returns None which triggers redirect_to_origin
-        assert resp.status_code in (200, 204, 302)
+        # SimpleForm.on_valid returns None, which ensure_http_response routes
+        # into form_response, so the page re-renders with 200.
+        assert resp.status_code == 200
+        assert "Location" not in resp.headers
 
     def test_redirect_action_returns_redirect(self, client_no_csrf) -> None:
         """Redirect action returns 302 redirect."""
@@ -1076,6 +1042,35 @@ class TestWizardDispatchViaClient:
         DispatchWizard.done_payloads.clear()
         self._post_step(client_no_csrf, "identity", {"name": "Ada"})
         resp = self._post_step(client_no_csrf, "scope", {"scope": "ops"})
+        assert resp.status_code == 302
+        assert resp.url == "/thanks/"
+        assert DispatchWizard.done_payloads == [{"name": "Ada", "scope": "ops"}]
+
+    def test_direct_last_step_post_never_finalises(self, client_no_csrf) -> None:
+        """A fresh-session POST to the last step redirects to the first gap."""
+        DispatchWizard.done_payloads.clear()
+        resp = self._post_step(
+            client_no_csrf,
+            "scope",
+            {"scope": "ops"},
+            origin="/request/scope/",
+        )
+        assert resp.status_code == 302
+        assert resp.url == "/request/identity/"
+        assert DispatchWizard.done_payloads == []
+
+    def test_rerouted_wizard_finalises_after_filling_the_gap(
+        self, client_no_csrf
+    ) -> None:
+        """A wizard bounced off the last step finalises once every step is stored."""
+        DispatchWizard.done_payloads.clear()
+        self._post_step(
+            client_no_csrf, "scope", {"scope": "ops"}, origin="/request/scope/"
+        )
+        self._post_step(client_no_csrf, "identity", {"name": "Ada"})
+        resp = self._post_step(
+            client_no_csrf, "scope", {"scope": "ops"}, origin="/request/scope/"
+        )
         assert resp.status_code == 302
         assert resp.url == "/thanks/"
         assert DispatchWizard.done_payloads == [{"name": "Ada", "scope": "ops"}]

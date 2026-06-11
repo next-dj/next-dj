@@ -259,6 +259,14 @@ class FormWizard:
         """Return the names of steps that already have stored data."""
         return list(self._stored_steps())
 
+    def first_incomplete_step(self) -> str | None:
+        """Return the first step without stored data, or None when all are stored."""
+        completed = set(self._stored_steps())
+        for name in self.step_names():
+            if name not in completed:
+                return name
+        return None
+
     def save_step(self, step: str, data: dict[str, Any]) -> None:
         """Persist cleaned data for one step through the backend."""
         self._backend.save_step(self.request, self.storage_id, step, data)

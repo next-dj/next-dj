@@ -39,7 +39,13 @@ def _url_kwargs_from_resolver_or_post(request: "HttpRequest") -> dict[str, objec
     """Return URL kwargs from the resolver match, otherwise from POST hidden fields."""
     resolver_match = getattr(request, "resolver_match", None)
     if resolver_match and getattr(resolver_match, "kwargs", None):
-        return _filter_reserved_url_kwargs(dict(resolver_match.kwargs))
+        kwargs = _filter_reserved_url_kwargs(dict(resolver_match.kwargs))
+        # On the validation re-render the resolver match belongs to the
+        # dispatch route, whose `uid` kwarg is not a page URL parameter.
+        # The posted `_url_param_*` fields carry the real page kwargs then.
+        kwargs.pop("uid", None)
+        if kwargs:
+            return kwargs
     if getattr(request, "method", None) == "POST" and hasattr(request, "POST"):
         return _url_kwargs_from_post(request)
     return {}

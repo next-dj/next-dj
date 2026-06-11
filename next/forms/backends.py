@@ -250,15 +250,25 @@ class RegistryFormActionBackend(FormActionBackend):
             handler=handler,
         )
 
+    def _fallback_meta(self, action_name: str, *, scoped: bool) -> ActionMeta | None:
+        """Return the name-index entry, shared-scope only for page-scoped lookups."""
+        fallback_key = self._name_index.get(action_name)
+        if fallback_key is None:
+            return None
+        meta = self._registry.get(fallback_key)
+        if meta is None:
+            return None
+        if scoped and meta.get("scope") != "shared":
+            return None
+        return meta
+
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
         """Return the reverse URL for a registered action name."""
         meta: ActionMeta | None = None
         if page_path is not None:
             meta = self._registry.get((_resolved_path_str(page_path), action_name))
         if meta is None:
-            fallback_key = self._name_index.get(action_name)
-            if fallback_key is not None:
-                meta = self._registry.get(fallback_key)
+            meta = self._fallback_meta(action_name, scoped=page_path is not None)
         if meta is not None:
             uid = meta.get("uid")
             if uid is not None:
@@ -303,11 +313,9 @@ class RegistryFormActionBackend(FormActionBackend):
             if meta is not None:
                 return cast("dict[str, Any]", meta)
 
-        fallback_key = self._name_index.get(action_name)
-        if fallback_key is not None:
-            fallback_meta = self._registry.get(fallback_key)
-            if fallback_meta is not None:
-                return cast("dict[str, Any]", fallback_meta)
+        fallback_meta = self._fallback_meta(action_name, scoped=page_path is not None)
+        if fallback_meta is not None:
+            return cast("dict[str, Any]", fallback_meta)
 
         return None
 

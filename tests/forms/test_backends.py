@@ -331,6 +331,65 @@ class TestRegistryFormActionBackend:
         assert backend._uid_to_name == {}
 
 
+class TestNameIndexScopeFilter:
+    """The name-index fallback honours registration scope for page lookups."""
+
+    @staticmethod
+    def _register(
+        backend: RegistryFormActionBackend, name: str, file_path: str, scope: str
+    ) -> None:
+        backend.register_action(
+            ActionRegistration(
+                name=name,
+                file_path=file_path,
+                scope=scope,
+                handler=lambda: None,
+            )
+        )
+
+    def test_page_scoped_action_invisible_from_another_page(self, tmp_path) -> None:
+        """A page-scoped name never resolves through another page's lookup."""
+        backend = RegistryFormActionBackend()
+        page_a = str(tmp_path / "a" / "page.py")
+        page_b = str(tmp_path / "b" / "page.py")
+        self._register(backend, "note_form", page_a, "page")
+        assert backend.get_meta("note_form", page_b) is None
+        with pytest.raises(KeyError, match="Unknown form action"):
+            backend.get_action_url("note_form", page_path=page_b)
+
+    def test_shared_action_resolves_from_any_page(self, tmp_path) -> None:
+        """A shared-scope name resolves through any page's lookup."""
+        backend = RegistryFormActionBackend()
+        page_b = str(tmp_path / "b" / "page.py")
+        self._register(backend, "shared_form", _FAKE_FILE, "shared")
+        meta = backend.get_meta("shared_form", page_b)
+        assert meta is not None
+        assert meta["scope"] == "shared"
+        url = backend.get_action_url("shared_form", page_path=page_b)
+        assert "_next/form/" in url
+
+    def test_bare_name_still_resolves_page_scoped_action(self, tmp_path) -> None:
+        """A lookup without page_path keeps the unfiltered name-index fallback."""
+        backend = RegistryFormActionBackend()
+        page_a = str(tmp_path / "a" / "page.py")
+        self._register(backend, "note_form", page_a, "page")
+        meta = backend.get_meta("note_form")
+        assert meta is not None
+        assert meta["scope"] == "page"
+        assert "_next/form/" in backend.get_action_url("note_form")
+
+    def test_declaring_page_resolves_its_own_action(self, tmp_path) -> None:
+        """The declaring page hits the exact registry key, no fallback needed."""
+        backend = RegistryFormActionBackend()
+        page_a = str(tmp_path / "a" / "page.py")
+        self._register(backend, "note_form", page_a, "page")
+        meta = backend.get_meta("note_form", page_a)
+        assert meta is not None
+        assert meta["scope"] == "page"
+        url = backend.get_action_url("note_form", page_path=page_a)
+        assert "_next/form/" in url
+
+
 class TestFormActionBackendAbstract:
     """FormActionBackend default implementations: get_meta, render_form_fragment."""
 

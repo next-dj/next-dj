@@ -16,7 +16,6 @@ from django.http import (
 
 from next.deps import REQUEST_DEP_CACHE_ATTR, resolver
 from next.deps.resolver import _cached_signature
-from next.utils import caller_source_path
 
 from ._request_utils import (
     _url_kwargs_from_post,
@@ -33,7 +32,6 @@ from .uid import _validated_origin_path, validated_next_form_page_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from django import forms as django_forms
     from django.http import HttpRequest
@@ -44,15 +42,6 @@ if TYPE_CHECKING:
 
 _FACTORY_TUPLE_LEN = 2
 _HTTP_ERROR_FLOOR = 400
-
-
-def _get_caller_path(back_count: int = 1) -> "Path":
-    """Return the path of the module that called into us, skipping frames here."""
-    return caller_source_path(
-        back_count=back_count,
-        max_walk=15,
-        skip_while_filename_endswith=("forms.py", "dispatch.py", "decorators.py"),
-    )
 
 
 def _is_model_instance(obj: object) -> bool:
@@ -488,6 +477,10 @@ class FormActionDispatch:
         )
 
         next_step = wizard.next_step(step_name)
+        if next_step is None:
+            # A direct POST to the last step must not finalise while an
+            # earlier step has no stored data, so reroute to the first gap.
+            next_step = wizard.first_incomplete_step()
         if next_step is None:
             merged = wizard.cleaned_data_so_far()
             start = time.perf_counter()
