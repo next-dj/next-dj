@@ -79,7 +79,7 @@ An empty or missing list triggers the ``next.E050`` system check and the wizard 
 ``Meta.url_param`` names the URL kwarg that carries the active step.
 It defaults to ``"step"``, so a route segment of ``[step]`` works with no further configuration.
 
-Per-step drafts persist through the configured ``DEFAULT_FORM_WIZARD_BACKEND``, which the project sets once for every wizard.
+Per-step drafts persist through the configured ``FORM_WIZARD_BACKEND``, which the project sets once for every wizard.
 See :doc:`wizard-backend` for the backend contract and its options.
 
 The done Method

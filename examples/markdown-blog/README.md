@@ -42,7 +42,7 @@ alongside the built-in djx loader:
 
 ```python
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_BACKENDS": [{
+    "PAGE_BACKENDS": [{
         "BACKEND": "next.urls.FileRouterBackend",
         "PAGES_DIR": "screens",
         "OPTIONS": {
@@ -52,7 +52,7 @@ NEXT_FRAMEWORK = {
             ],
         },
     }],
-    "DEFAULT_COMPONENT_BACKENDS": [{
+    "COMPONENT_BACKENDS": [{
         "BACKEND": "next.components.FileComponentsBackend",
         "COMPONENTS_DIR": "_parts",
     }],
@@ -271,7 +271,7 @@ def site_nav(request: HttpRequest) -> dict[str, object]:  # noqa: ARG001
     }
 ```
 
-Wired under `NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"][0]["OPTIONS"]["context_processors"]`.
+Wired under `NEXT_FRAMEWORK["PAGE_BACKENDS"][0]["OPTIONS"]["context_processors"]`.
 The framework's [`next.E040`](../../docs/content/reference/system-checks.rst)
 check fails at `manage.py check` time if the processor signature does not
 accept `request`.

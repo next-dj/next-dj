@@ -84,7 +84,7 @@ A blank field, an ``OSError`` while resolving, an unset ``BASE_DIR``, or a path 
 Backends
 --------
 
-The ``DEFAULT_FORM_ACTION_BACKENDS`` setting lists the active backends.
+The ``FORM_ACTION_BACKENDS`` setting lists the active backends.
 Each backend is a full implementation of the ``FormActionBackend`` contract, not a step in a middleware chain.
 A backend owns the registry, the URL generation, and the dispatch for every action it registers.
 
@@ -120,7 +120,7 @@ Extension Points
 ----------------
 
 - Subclass ``RegistryFormActionBackend`` and override ``dispatch`` to wrap the standard pipeline.
-- Register the custom backend through ``DEFAULT_FORM_ACTION_BACKENDS``.
+- Register the custom backend through ``FORM_ACTION_BACKENDS``.
 - Subscribe to ``action_dispatched`` for audit and cache invalidation.
 - Subscribe to ``form_validation_failed`` for alerting on failure rates.
 

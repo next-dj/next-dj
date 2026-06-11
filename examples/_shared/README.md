@@ -41,8 +41,8 @@ SHARED_DIR = BASE_DIR.parent / "_shared"
 STATICFILES_DIRS = [SHARED_DIR / "static"]
 
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_BACKENDS": [...],
-    "DEFAULT_COMPONENT_BACKENDS": [
+    "PAGE_BACKENDS": [...],
+    "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
@@ -56,7 +56,7 @@ The `DIRS` entry registers `_shared/_components` as a **global** root. Component
 
 `STATICFILES_DIRS` adds the shared static tree so `tokens.css` and `base.css` resolve under `/static/shared/...`.
 
-Each example houses the shared HTML envelope in a project-level page root listed under `DEFAULT_PAGE_BACKENDS["DIRS"]` — `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/` depending on the project. The dir contains a single `layout.djx` (and optionally `_<components-dir>/` for project-shared components) that wraps every page rendered by the per-app `PAGES_DIR` tree:
+Each example houses the shared HTML envelope in a project-level page root listed under `PAGE_BACKENDS["DIRS"]` — `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/` depending on the project. The dir contains a single `layout.djx` (and optionally `_<components-dir>/` for project-shared components) that wraps every page rendered by the per-app `PAGES_DIR` tree:
 
 ```django
 <!DOCTYPE html>
@@ -79,7 +79,7 @@ To register the project-level root, list it in both backends' `DIRS` when you al
 
 ```python
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_BACKENDS": [
+    "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
@@ -88,7 +88,7 @@ NEXT_FRAMEWORK = {
             ...
         },
     ],
-    "DEFAULT_COMPONENT_BACKENDS": [
+    "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [
@@ -228,7 +228,7 @@ The default-body path keeps the void call site short (`{% component "page_header
 
 When you move an existing project onto the shared kit:
 
-- Wire `SHARED_DIR`, `STATICFILES_DIRS`, and `DEFAULT_COMPONENT_BACKENDS["DIRS"]` once in `settings.py`.
+- Wire `SHARED_DIR`, `STATICFILES_DIRS`, and `COMPONENT_BACKENDS["DIRS"]` once in `settings.py`.
 - Remove any per-app `nav_link` / `stat_card` / `card` that now duplicates a shared component, otherwise `manage.py check` raises `next.E034` (root namespace collision).
 - Replace the `<head>` boilerplate (CDN script, two `{% use_style %}` lines, `{% collect_styles %}`) with `{% component "page_head" title="…" %}`.
 - Replace bespoke colour classes (`bg-slate-50`, `text-slate-900`, `bg-indigo-600`, …) with the short token aliases (`bg-background`, `text-foreground`, `bg-primary`, …) so per-tenant overrides cascade correctly.

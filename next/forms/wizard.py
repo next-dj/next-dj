@@ -91,7 +91,7 @@ class CacheFormWizardBackend(FormWizardBackend):
                 "CacheFormWizardBackend requires Django sessions to key stored "
                 "steps. Add django.contrib.sessions to INSTALLED_APPS and "
                 "SessionMiddleware to MIDDLEWARE, or configure a custom backend "
-                "in DEFAULT_FORM_WIZARD_BACKEND."
+                "in FORM_WIZARD_BACKEND."
             )
             raise ImproperlyConfigured(msg)
         key = self._key(session_key, wizard_id)
@@ -118,9 +118,9 @@ class WizardBackendManager:
         self._backend = None
 
     def get(self) -> FormWizardBackend:
-        """Return the backend configured by `DEFAULT_FORM_WIZARD_BACKEND`."""
+        """Return the backend configured by `FORM_WIZARD_BACKEND`."""
         if self._backend is None:
-            config = next_framework_settings.DEFAULT_FORM_WIZARD_BACKEND
+            config = next_framework_settings.FORM_WIZARD_BACKEND
             backend_class = import_class_cached(config["BACKEND"])
             self._backend = cast("FormWizardBackend", backend_class(config))
         return self._backend
@@ -212,9 +212,9 @@ class FormWizard:
         self.wizard_id = _to_snake_case(type(self).__name__)
         # Read the class's own namespace so an unregistered subclass never
         # borrows the storage bucket of a registered ancestor.
-        scope_key = type(self).__dict__.get("_storage_scope_key") or type(
-            self
-        ).__module__
+        scope_key = (
+            type(self).__dict__.get("_storage_scope_key") or type(self).__module__
+        )
         self.storage_id = f"{_storage_scope_hash(scope_key)}:{self.wizard_id}"
         self._backend = wizard_backend_manager.get()
         self._loaded: dict[str, Any] | None = None

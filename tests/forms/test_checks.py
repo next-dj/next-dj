@@ -138,27 +138,27 @@ class TestFormActionBackendsConfigurationCheck:
 
     def test_non_list_setting_is_e044(self, settings) -> None:
         """Top-level value must be a list."""
-        settings.NEXT_FRAMEWORK = {"DEFAULT_FORM_ACTION_BACKENDS": "x"}
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": "x"}
         errors = check_form_action_backends_configuration()
         assert len(errors) == 1
         assert errors[0].id == "next.E044"
 
     def test_non_dict_entry_is_e044(self, settings) -> None:
         """Each entry must be a dict."""
-        settings.NEXT_FRAMEWORK = {"DEFAULT_FORM_ACTION_BACKENDS": ["nope"]}
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": ["nope"]}
         errors = check_form_action_backends_configuration()
         assert any(e.id == "next.E044" for e in errors)
 
     def test_non_string_backend_is_e044(self, settings) -> None:
         """`BACKEND` must be a string."""
-        settings.NEXT_FRAMEWORK = {"DEFAULT_FORM_ACTION_BACKENDS": [{"BACKEND": 7}]}
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": [{"BACKEND": 7}]}
         errors = check_form_action_backends_configuration()
         assert any(e.id == "next.E044" for e in errors)
 
     def test_unimportable_backend_is_e044(self, settings) -> None:
         """A path that fails to import surfaces the original error."""
         settings.NEXT_FRAMEWORK = {
-            "DEFAULT_FORM_ACTION_BACKENDS": [{"BACKEND": "no.such.Module"}],
+            "FORM_ACTION_BACKENDS": [{"BACKEND": "no.such.Module"}],
         }
         errors = check_form_action_backends_configuration()
         assert any(
@@ -168,7 +168,7 @@ class TestFormActionBackendsConfigurationCheck:
     def test_wrong_type_backend_is_e045(self, settings) -> None:
         """A class that is not a `FormActionBackend` subclass triggers E045."""
         settings.NEXT_FRAMEWORK = {
-            "DEFAULT_FORM_ACTION_BACKENDS": [{"BACKEND": "django.http.HttpResponse"}],
+            "FORM_ACTION_BACKENDS": [{"BACKEND": "django.http.HttpResponse"}],
         }
         errors = check_form_action_backends_configuration()
         assert any(e.id == "next.E045" for e in errors)
@@ -176,7 +176,7 @@ class TestFormActionBackendsConfigurationCheck:
     def test_valid_default_backend_is_clean(self, settings) -> None:
         """Default backend path passes the check without errors."""
         settings.NEXT_FRAMEWORK = {
-            "DEFAULT_FORM_ACTION_BACKENDS": [
+            "FORM_ACTION_BACKENDS": [
                 {"BACKEND": "next.forms.RegistryFormActionBackend"},
             ],
         }
@@ -289,7 +289,7 @@ class TestCheckFormWizardSteps:
 
 
 class TestCheckFormWizardBackend:
-    """check_form_wizard_backend: E051 for a malformed DEFAULT_FORM_WIZARD_BACKEND."""
+    """check_form_wizard_backend: E051 for a malformed FORM_WIZARD_BACKEND."""
 
     def test_no_setting_yields_no_errors(self, settings) -> None:
         """An absent key returns an empty list."""
@@ -303,7 +303,7 @@ class TestCheckFormWizardBackend:
 
     @override_settings(
         NEXT_FRAMEWORK={
-            "DEFAULT_FORM_WIZARD_BACKEND": {
+            "FORM_WIZARD_BACKEND": {
                 "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
                 "OPTIONS": {},
             }
@@ -313,23 +313,21 @@ class TestCheckFormWizardBackend:
         """The default cache backend config passes the check."""
         assert check_form_wizard_backend() == []
 
-    @override_settings(
-        NEXT_FRAMEWORK={"DEFAULT_FORM_WIZARD_BACKEND": ["not", "a", "dict"]}
-    )
+    @override_settings(NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": ["not", "a", "dict"]})
     def test_non_dict_config_is_e051(self) -> None:
         """A non-dict config triggers E051."""
         errors = check_form_wizard_backend()
         assert len(errors) == 1
         assert errors[0].id == "next.E051"
 
-    @override_settings(NEXT_FRAMEWORK={"DEFAULT_FORM_WIZARD_BACKEND": {"BACKEND": 7}})
+    @override_settings(NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": {"BACKEND": 7}})
     def test_non_string_backend_is_e051(self) -> None:
         """`BACKEND` must be a string."""
         errors = check_form_wizard_backend()
         assert any(e.id == "next.E051" for e in errors)
 
     @override_settings(
-        NEXT_FRAMEWORK={"DEFAULT_FORM_WIZARD_BACKEND": {"BACKEND": "no.such.Module"}}
+        NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": {"BACKEND": "no.such.Module"}}
     )
     def test_unimportable_backend_is_e051(self) -> None:
         """A path that fails to import surfaces an E051 error."""
@@ -340,9 +338,7 @@ class TestCheckFormWizardBackend:
 
     @override_settings(
         NEXT_FRAMEWORK={
-            "DEFAULT_FORM_WIZARD_BACKEND": {
-                "BACKEND": "next.forms.RegistryFormActionBackend"
-            }
+            "FORM_WIZARD_BACKEND": {"BACKEND": "next.forms.RegistryFormActionBackend"}
         }
     )
     def test_non_wizard_backend_class_is_e051(self) -> None:
@@ -386,16 +382,14 @@ class TestCheckFormWizardSessions:
     def test_non_string_backend_is_clean(self, settings) -> None:
         """A malformed BACKEND value is E051 territory, not W056."""
         settings.INSTALLED_APPS = _without_sessions(settings.INSTALLED_APPS)
-        settings.NEXT_FRAMEWORK = {"DEFAULT_FORM_WIZARD_BACKEND": {"BACKEND": 7}}
+        settings.NEXT_FRAMEWORK = {"FORM_WIZARD_BACKEND": {"BACKEND": 7}}
         self._register_wizard()
         assert check_form_wizard_sessions() == []
 
     def test_unimportable_backend_is_clean(self, settings) -> None:
         """An unimportable BACKEND path is E051 territory, not W056."""
         settings.INSTALLED_APPS = _without_sessions(settings.INSTALLED_APPS)
-        settings.NEXT_FRAMEWORK = {
-            "DEFAULT_FORM_WIZARD_BACKEND": {"BACKEND": "no.such.Module"}
-        }
+        settings.NEXT_FRAMEWORK = {"FORM_WIZARD_BACKEND": {"BACKEND": "no.such.Module"}}
         self._register_wizard()
         assert check_form_wizard_sessions() == []
 
@@ -403,9 +397,7 @@ class TestCheckFormWizardSessions:
         """A custom backend not keyed by session passes without warning."""
         settings.INSTALLED_APPS = _without_sessions(settings.INSTALLED_APPS)
         settings.NEXT_FRAMEWORK = {
-            "DEFAULT_FORM_WIZARD_BACKEND": {
-                "BACKEND": "next.forms.RegistryFormActionBackend"
-            }
+            "FORM_WIZARD_BACKEND": {"BACKEND": "next.forms.RegistryFormActionBackend"}
         }
         self._register_wizard()
         assert check_form_wizard_sessions() == []

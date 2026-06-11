@@ -50,27 +50,27 @@ def inspect_parameter(
 def next_framework_settings_for_checks(*, backends: list) -> object:
     """Stand-in for ``next_framework_settings`` in checks tests."""
     return SimpleNamespace(
-        DEFAULT_COMPONENT_BACKENDS=backends,
-        DEFAULT_PAGE_BACKENDS=list(
-            NextFrameworkSettings.DEFAULTS["DEFAULT_PAGE_BACKENDS"],
+        COMPONENT_BACKENDS=backends,
+        PAGE_BACKENDS=list(
+            NextFrameworkSettings.DEFAULTS["PAGE_BACKENDS"],
         ),
         URL_NAME_TEMPLATE=NextFrameworkSettings.DEFAULTS["URL_NAME_TEMPLATE"],
     )
 
 
 def next_framework_settings_for_checks_backends_value(backends: object) -> object:
-    """Stand-in when ``DEFAULT_COMPONENT_BACKENDS`` is not a list (or None)."""
-    default_pages = list(NextFrameworkSettings.DEFAULTS["DEFAULT_PAGE_BACKENDS"])
+    """Stand-in when ``COMPONENT_BACKENDS`` is not a list (or None)."""
+    default_pages = list(NextFrameworkSettings.DEFAULTS["PAGE_BACKENDS"])
     return SimpleNamespace(
-        DEFAULT_COMPONENT_BACKENDS=backends,
-        DEFAULT_PAGE_BACKENDS=default_pages,
+        COMPONENT_BACKENDS=backends,
+        PAGE_BACKENDS=default_pages,
         URL_NAME_TEMPLATE=NextFrameworkSettings.DEFAULTS["URL_NAME_TEMPLATE"],
     )
 
 
 def next_framework_settings_component_backends_list(backends: object) -> object:
-    """Patch stand-in with only ``DEFAULT_COMPONENT_BACKENDS`` (may be wrong type)."""
-    return SimpleNamespace(DEFAULT_COMPONENT_BACKENDS=backends)
+    """Patch stand-in with only ``COMPONENT_BACKENDS`` (may be wrong type)."""
+    return SimpleNamespace(COMPONENT_BACKENDS=backends)
 
 
 def _ctx(
@@ -145,7 +145,7 @@ def file_router_config_entry(
     dirs: list[object] | None = None,
     options: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """One ``DEFAULT_PAGE_BACKENDS`` entry for ``FileRouterBackend`` in page/layout tests."""
+    """One ``PAGE_BACKENDS`` entry for ``FileRouterBackend`` in page/layout tests."""
     opts = dict(options or {})
     dirs_list: list[object] = list(dirs) if dirs is not None else []
     if pages_dir is not None and not app_dirs:

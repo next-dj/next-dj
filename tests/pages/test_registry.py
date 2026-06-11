@@ -288,7 +288,7 @@ class TestPageContextRegistry:
         """`inherit_context=True` works without a sibling ``layout.djx``.
 
         The shared HTML envelope can live in a project-level page root
-        registered via ``DEFAULT_PAGE_BACKENDS["DIRS"]``, in which case
+        registered via ``PAGE_BACKENDS["DIRS"]``, in which case
         intermediate ``page.py`` modules do not need a layout sibling
         for their inheritable context to surface on descendant routes.
         """

@@ -122,12 +122,12 @@ def override_form_action(
 
 @contextlib.contextmanager
 def override_component_backends(*configs: dict[str, Any]) -> Iterator[None]:
-    """Replace `DEFAULT_COMPONENT_BACKENDS` for the block.
+    """Replace `COMPONENT_BACKENDS` for the block.
 
     Uses `override_next_settings` so the `settings_reloaded` signal
     rebuilds `components_manager`'s backends automatically.
     """
-    with override_next_settings(DEFAULT_COMPONENT_BACKENDS=list(configs)):
+    with override_next_settings(COMPONENT_BACKENDS=list(configs)):
         components_manager._ensure_backends()
         yield
 

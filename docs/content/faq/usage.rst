@@ -45,7 +45,7 @@ See :doc:`/content/intro/tutorial04`.
 How Do I Customise the Static Output
 ------------------------------------
 
-Subclass a static backend, register its dotted path in ``DEFAULT_STATIC_BACKENDS``, and override how tags or asset URLs are produced.
+Subclass a static backend, register its dotted path in ``STATIC_BACKENDS``, and override how tags or asset URLs are produced.
 See :doc:`/content/howto/write-a-static-backend`.
 
 How Do I Test a Page
@@ -83,7 +83,7 @@ See :doc:`/content/topics/file-router`.
 How Do I Share Components Across Projects
 -----------------------------------------
 
-Place the shared components in one folder and reference it through ``DEFAULT_COMPONENT_BACKENDS["DIRS"]``.
+Place the shared components in one folder and reference it through ``COMPONENT_BACKENDS["DIRS"]``.
 See :doc:`/content/howto/share-components-across-projects`.
 
 How Do I Add Context Processors to Pages

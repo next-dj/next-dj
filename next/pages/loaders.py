@@ -231,7 +231,7 @@ class LayoutTemplateLoader(TemplateLoader):
         global _ADDITIONAL_LAYOUTS_CACHE  # noqa: PLW0603
         if _ADDITIONAL_LAYOUTS_CACHE is not None:
             return _ADDITIONAL_LAYOUTS_CACHE
-        configs = next_framework_settings.DEFAULT_PAGE_BACKENDS or []
+        configs = next_framework_settings.PAGE_BACKENDS or []
         if not isinstance(configs, list):
             configs = []
         candidates = (

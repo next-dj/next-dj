@@ -13,7 +13,7 @@ adding more named methods such as `render_babel_script_tag` and
 registering kinds that point to them.
 
 A small factory builds backend instances from
-`NEXT_FRAMEWORK['DEFAULT_STATIC_BACKENDS']` entries. The factory also
+`NEXT_FRAMEWORK['STATIC_BACKENDS']` entries. The factory also
 emits the `backend_loaded` signal so user code may react to backend
 construction.
 """
@@ -42,7 +42,7 @@ class StaticBackend(ABC):
     """Pluggable strategy for resolving asset files to URLs and rendering tags.
 
     The constructor accepts the full backend entry from
-    `DEFAULT_STATIC_BACKENDS`, which has the shape
+    `STATIC_BACKENDS`, which has the shape
     `{"BACKEND": "...", "OPTIONS": {...}}`. The base class stores the
     mapping on the `config` property. Subclasses are free to read any
     keys they expose to users.

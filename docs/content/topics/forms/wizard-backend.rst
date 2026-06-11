@@ -4,7 +4,7 @@ Wizard Backend
 ==============
 
 A wizard backend persists per-step draft data between requests.
-Every wizard in a project shares one backend, chosen once through ``NEXT_FRAMEWORK["DEFAULT_FORM_WIZARD_BACKEND"]``.
+Every wizard in a project shares one backend, chosen once through ``NEXT_FRAMEWORK["FORM_WIZARD_BACKEND"]``.
 The default backend stores drafts in the Django cache.
 This page covers the ``FormWizardBackend`` contract, the bundled ``CacheFormWizardBackend``, its configuration, and a custom-backend recipe.
 
@@ -97,7 +97,7 @@ The backend reads a missing entry as an empty mapping, so ``done`` can receive a
 Configuration
 -------------
 
-``NEXT_FRAMEWORK["DEFAULT_FORM_WIZARD_BACKEND"]`` is a single dict in the same shape as the other framework backends.
+``NEXT_FRAMEWORK["FORM_WIZARD_BACKEND"]`` is a single dict in the same shape as the other framework backends.
 It carries a ``BACKEND`` dotted path and an optional ``OPTIONS`` dict.
 The framework default points at the cache backend with empty options.
 
@@ -105,7 +105,7 @@ The framework default points at the cache backend with empty options.
    :caption: framework default
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_WIZARD_BACKEND": {
+       "FORM_WIZARD_BACKEND": {
            "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
            "OPTIONS": {},
        },
@@ -118,7 +118,7 @@ Point drafts at a dedicated cache alias and shorten their lifetime through ``OPT
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_WIZARD_BACKEND": {
+       "FORM_WIZARD_BACKEND": {
            "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
            "OPTIONS": {"CACHE_ALIAS": "wizards", "TIMEOUT": 3600},
        },
@@ -131,7 +131,7 @@ Writing a Custom Backend
 
 A custom backend subclasses ``FormWizardBackend`` and implements the three methods.
 The constructor receives the backend config dict, which lets a backend read its own options.
-Point ``DEFAULT_FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
+Point ``FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
 
 .. code-block:: python
    :caption: access/wizard_backend.py — a Redis-backed wizard store
@@ -171,7 +171,7 @@ Point ``DEFAULT_FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_WIZARD_BACKEND": {
+       "FORM_WIZARD_BACKEND": {
            "BACKEND": "access.wizard_backend.RedisFormWizardBackend",
            "OPTIONS": {"URL": "redis://localhost:6379/1"},
        },
@@ -181,7 +181,7 @@ The framework instantiates the backend lazily on first use and caches the instan
 A signed-cookie store or an external draft service follows the same shape, reading its own options from ``OPTIONS``.
 
 The lazy instance lives behind ``next.forms.wizard_backend_manager``, an instance of ``WizardBackendManager``.
-It reads ``DEFAULT_FORM_WIZARD_BACKEND`` on first ``get()`` and caches the result.
+It reads ``FORM_WIZARD_BACKEND`` on first ``get()`` and caches the result.
 Application code never touches it directly.
 The framework resets it when settings reload, and the test isolation helper :func:`next.forms.reset_form_registration_state` resets it between cases.
 

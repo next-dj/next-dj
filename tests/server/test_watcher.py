@@ -51,13 +51,13 @@ class TestServerAutoreloadWatchApi:
         assert len(specs) == 1
 
     def test_iter_default_includes_component_backend_dirs(self, tmp_path: Path) -> None:
-        """``DEFAULT_COMPONENT_BACKENDS`` ``DIRS`` add ``**/component.py`` (not ``.djx``)."""
+        """``COMPONENT_BACKENDS`` ``DIRS`` add ``**/component.py`` (not ``.djx``)."""
         comp_root = tmp_path / "shared_components"
         comp_root.mkdir()
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "PAGE_BACKENDS": [],
+                "COMPONENT_BACKENDS": [
                     "not-a-dict",
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
@@ -83,7 +83,7 @@ class TestServerAutoreloadWatchApi:
         pages_tree.mkdir()
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [
+                "PAGE_BACKENDS": [
                     {
                         "BACKEND": "next.urls.FileRouterBackend",
                         "PAGES_DIR": "pages",
@@ -95,7 +95,7 @@ class TestServerAutoreloadWatchApi:
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],

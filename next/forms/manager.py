@@ -63,7 +63,7 @@ class FormActionManager:
         self._backends = []
         configs = cast(
             "list[Any]",
-            getattr(next_framework_settings, "DEFAULT_FORM_ACTION_BACKENDS", []),
+            getattr(next_framework_settings, "FORM_ACTION_BACKENDS", []),
         )
         for config in configs:
             if not isinstance(config, dict):
@@ -86,7 +86,7 @@ class FormActionManager:
         if not self._backends:
             msg = (
                 "No form action backends configured. Add at least one entry to "
-                "NEXT_FRAMEWORK['DEFAULT_FORM_ACTION_BACKENDS']."
+                "NEXT_FRAMEWORK['FORM_ACTION_BACKENDS']."
             )
             raise ImproperlyConfigured(msg)
         return self._backends[0]

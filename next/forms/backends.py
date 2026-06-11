@@ -344,7 +344,7 @@ class RegistryFormActionBackend(FormActionBackend):
 
 
 class FormActionFactory:
-    """Instantiates backends from merged `DEFAULT_FORM_ACTION_BACKENDS` entries."""
+    """Instantiates backends from merged `FORM_ACTION_BACKENDS` entries."""
 
     @classmethod
     def create_backend(cls, config: dict[str, Any]) -> FormActionBackend:

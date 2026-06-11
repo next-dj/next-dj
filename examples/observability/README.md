@@ -125,7 +125,7 @@ class CountingComponentsBackend(FileComponentsBackend):
         return info
 ```
 
-Wired through `DEFAULT_COMPONENT_BACKENDS` in
+Wired through `COMPONENT_BACKENDS` in
 [config/settings.py](config/settings.py).
 
 ### 3. The custom static backend and JSX kind
@@ -146,11 +146,11 @@ default_kinds.register(
 `render_babel_script_tag` returns a `<script type="text/babel">` tag.
 Babel-standalone parses the tag in the browser and executes the JSX,
 no npm required. The custom backend installs through the same
-`DEFAULT_STATIC_BACKENDS` slot the framework's default backend uses,
+`STATIC_BACKENDS` slot the framework's default backend uses,
 and pairs with `InstrumentedDedup` through the `OPTIONS` block:
 
 ```python
-"DEFAULT_STATIC_BACKENDS": [
+"STATIC_BACKENDS": [
     {
         "BACKEND": "obs.backends.BabelJsxBackend",
         "OPTIONS": {

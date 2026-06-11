@@ -455,8 +455,8 @@ class TestRouterManagerNextPagesConfig:
     """``RouterManager._get_next_pages_config`` defensive branches."""
 
     def test_non_list_default_page_backends_returns_empty_cached(self) -> None:
-        """When ``DEFAULT_PAGE_BACKENDS`` is not a list, config is empty and cached."""
-        mock_nf = SimpleNamespace(DEFAULT_PAGE_BACKENDS="not-a-list")
+        """When ``PAGE_BACKENDS`` is not a list, config is empty and cached."""
+        mock_nf = SimpleNamespace(PAGE_BACKENDS="not-a-list")
         with patch("next.urls.manager.next_framework_settings", mock_nf):
             mgr = RouterManager()
             assert mgr._get_next_pages_config() == []

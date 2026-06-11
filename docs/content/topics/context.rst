@@ -178,7 +178,7 @@ The framework computes the template scope in this order.
 2. Inherited context functions from every ancestor ``page.py``, walked from the route root inward.
 3. Page level context functions declared in the current ``page.py``.
 4. Context processors run after every ``@context`` callable.
-   The first source is ``OPTIONS.context_processors`` on each page backend entry inside ``DEFAULT_PAGE_BACKENDS``.
+   The first source is ``OPTIONS.context_processors`` on each page backend entry inside ``PAGE_BACKENDS``.
    The second source is the ``context_processors`` list of the first ``TEMPLATES`` entry in Django settings.
    See :ref:`ref-settings` and :doc:`project-layout` for the backend layout.
    The two lists merge in that order with duplicate dotted paths dropped, so a processor listed twice runs once.

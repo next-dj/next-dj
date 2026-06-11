@@ -65,7 +65,7 @@ Terms used throughout the next.dj documentation.
 
    form wizard backend
       The draft-persistence contract for a ``FormWizard``, a ``FormWizardBackend`` subclass that stores each step's cleaned data between requests.
-      Selected through ``NEXT_FRAMEWORK["DEFAULT_FORM_WIZARD_BACKEND"]``, with the bundled ``CacheFormWizardBackend`` as the default.
+      Selected through ``NEXT_FRAMEWORK["FORM_WIZARD_BACKEND"]``, with the bundled ``CacheFormWizardBackend`` as the default.
 
    inherit_context
       The ``inherit_context=True`` flag on ``@context`` in ``page.py``.
@@ -100,10 +100,10 @@ Terms used throughout the next.dj documentation.
 
    page root
       A directory that the router walks for page discovery.
-      Comes from ``APP_DIRS`` and ``DIRS`` in ``DEFAULT_PAGE_BACKENDS``.
+      Comes from ``APP_DIRS`` and ``DIRS`` in ``PAGE_BACKENDS``.
 
    multi-project layout
-      Multiple Django applications or explicit ``DIRS`` entries each contributing page trees while optionally sharing component directories through ``DEFAULT_COMPONENT_BACKENDS``.
+      Multiple Django applications or explicit ``DIRS`` entries each contributing page trees while optionally sharing component directories through ``COMPONENT_BACKENDS``.
       See :doc:`/content/topics/multi-project`.
 
    provider

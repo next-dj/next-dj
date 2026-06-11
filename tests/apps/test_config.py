@@ -156,7 +156,7 @@ class TestComponentsInstall:
         config = _component_backend_config(tmp_path, "widget", marker)
         try:
             with override_settings(
-                NEXT_FRAMEWORK={"DEFAULT_COMPONENT_BACKENDS": [config]},
+                NEXT_FRAMEWORK={"COMPONENT_BACKENDS": [config]},
             ):
                 next_components.install()
                 backend = components_manager._backends[0]
@@ -173,7 +173,7 @@ class TestComponentsInstall:
         try:
             with override_settings(
                 NEXT_FRAMEWORK={
-                    "DEFAULT_COMPONENT_BACKENDS": [config],
+                    "COMPONENT_BACKENDS": [config],
                     "LAZY_COMPONENT_MODULES": True,
                 },
             ):

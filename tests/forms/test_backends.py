@@ -54,8 +54,8 @@ class TestFormActionManager:
     def test_no_backends_configured_raises_improperly_configured(
         self, settings
     ) -> None:
-        """Empty DEFAULT_FORM_ACTION_BACKENDS raises ImproperlyConfigured."""
-        settings.NEXT_FRAMEWORK = {"DEFAULT_FORM_ACTION_BACKENDS": []}
+        """Empty FORM_ACTION_BACKENDS raises ImproperlyConfigured."""
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": []}
         manager = FormActionManager()
         with pytest.raises(ImproperlyConfigured, match="No form action backends"):
             manager.register_action(
@@ -434,12 +434,12 @@ class TestFormActionBackendAbstract:
 
 
 class TestFormActionManagerReloadConfig:
-    """`_reload_config` reads `DEFAULT_FORM_ACTION_BACKENDS` defensively."""
+    """`_reload_config` reads `FORM_ACTION_BACKENDS` defensively."""
 
     def test_non_dict_entries_are_skipped(self, settings) -> None:
         """Non-dict entries inside the list are skipped without raising."""
         settings.NEXT_FRAMEWORK = {
-            "DEFAULT_FORM_ACTION_BACKENDS": [
+            "FORM_ACTION_BACKENDS": [
                 "not-a-dict",
                 {"BACKEND": "next.forms.RegistryFormActionBackend"},
             ],
@@ -452,7 +452,7 @@ class TestFormActionManagerReloadConfig:
     def test_factory_failure_is_logged_and_skipped(self, settings, caplog) -> None:
         """If a backend constructor raises ImproperlyConfigured, the entry is skipped and logged."""
         settings.NEXT_FRAMEWORK = {
-            "DEFAULT_FORM_ACTION_BACKENDS": [
+            "FORM_ACTION_BACKENDS": [
                 {"BACKEND": "next.forms.RegistryFormActionBackend"},
             ],
         }

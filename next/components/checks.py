@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-_COMPONENT_BACKEND_SETTINGS_KEY = "DEFAULT_COMPONENT_BACKENDS"
+_COMPONENT_BACKEND_SETTINGS_KEY = "COMPONENT_BACKENDS"
 
 _FILE_COMPONENT_BACKEND_CONFIG_KEYS = frozenset(
     {
@@ -86,16 +86,16 @@ def check_next_components_configuration(
     *_args: object,
     **_kwargs: object,
 ) -> list[CheckMessage]:
-    """Validate `DEFAULT_COMPONENT_BACKENDS` shape in merged `NEXT_FRAMEWORK`."""
+    """Validate `COMPONENT_BACKENDS` shape in merged `NEXT_FRAMEWORK`."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if raw is not None and not isinstance(raw, dict):
         return []
 
-    backends = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+    backends = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(backends, list):
         return [
             Error(
-                "NEXT_FRAMEWORK['DEFAULT_COMPONENT_BACKENDS'] must be a list of "
+                "NEXT_FRAMEWORK['COMPONENT_BACKENDS'] must be a list of "
                 "backend configuration dictionaries.",
                 obj=settings,
                 id="next.E023",
@@ -105,7 +105,7 @@ def check_next_components_configuration(
     if len(backends) == 0:
         return [
             Error(
-                "NEXT_FRAMEWORK['DEFAULT_COMPONENT_BACKENDS'] must contain at least "
+                "NEXT_FRAMEWORK['COMPONENT_BACKENDS'] must contain at least "
                 "one component backend entry.",
                 obj=settings,
                 id="next.E033",
@@ -136,7 +136,7 @@ def check_duplicate_component_names(
 ) -> list[CheckMessage]:
     """Check that no two components share the same name within the same scope."""
     errors: list[CheckMessage] = []
-    configs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+    configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return errors
     manager = ComponentsManager()
@@ -175,7 +175,7 @@ def check_cross_root_component_name_conflicts(
 ) -> list[CheckMessage]:
     """Reject one component name in the root route scope on more than one page tree."""
     errors: list[CheckMessage] = []
-    configs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+    configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return errors
     manager = ComponentsManager()
@@ -206,7 +206,7 @@ def check_cross_root_component_name_conflicts(
                 Error(
                     f'Component name "{name}" uses the shared root namespace on more '
                     f"than one page tree. Each distinct directory root in "
-                    f"NEXT_FRAMEWORK DEFAULT_PAGE_BACKENDS DIRS must expose unique "
+                    f"NEXT_FRAMEWORK PAGE_BACKENDS DIRS must expose unique "
                     f"names at the root route scope. Locations: {details}.",
                     obj=settings,
                     id="next.E034",
@@ -250,7 +250,7 @@ def check_component_py_no_pages_context(
 ) -> list[CheckMessage]:
     """Check that `component.py` files do not use `context` from `next.pages`."""
     errors: list[CheckMessage] = []
-    configs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+    configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return errors
     manager = ComponentsManager()

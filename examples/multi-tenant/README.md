@@ -106,7 +106,7 @@ class TenantPrefixStaticBackend(StaticFilesBackend):
 The settings entry is a single line:
 
 ```python
-"DEFAULT_STATIC_BACKENDS": [
+"STATIC_BACKENDS": [
     {"BACKEND": "notes.backends.TenantPrefixStaticBackend"},
 ]
 ```
@@ -124,7 +124,7 @@ components live under [`root_blocks/header/`](root_blocks/header/) and
 backends pick them up through the `DIRS` setting:
 
 ```python
-"DEFAULT_PAGE_BACKENDS": [
+"PAGE_BACKENDS": [
     {
         "BACKEND": "next.urls.FileRouterBackend",
         "APP_DIRS": True,
@@ -133,7 +133,7 @@ backends pick them up through the `DIRS` setting:
         ...
     },
 ],
-"DEFAULT_COMPONENT_BACKENDS": [
+"COMPONENT_BACKENDS": [
     {
         "BACKEND": "next.components.FileComponentsBackend",
         "DIRS": [BASE_DIR / "root_blocks"],

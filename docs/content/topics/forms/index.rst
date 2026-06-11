@@ -51,7 +51,7 @@ Read :doc:`overview` first, then jump to the page that matches the part you are 
    The frozen field, formset, and form specs for rendering a form in a custom template engine.
 
 :doc:`backends`
-   Swap the validation pipeline through ``DEFAULT_FORM_ACTION_BACKENDS``.
+   Swap the validation pipeline through ``FORM_ACTION_BACKENDS``.
 
 :doc:`signals`
    Every signal the forms subsystem emits, with payload details.

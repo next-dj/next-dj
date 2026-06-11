@@ -39,7 +39,7 @@ The **Primary docs** column points to the sections of this manual where the tech
      - ``HybridRouterBackend``, ``router_manager.reload()`` on signal, DI, forms with live Markdown preview
      - :doc:`/content/topics/file-router`, :doc:`/content/howto/write-a-router-backend`
    * - `multi-tenant <https://github.com/next-dj/next-dj/tree/main/examples/multi-tenant>`__
-     - Tenant middleware, request-scoped static URLs, shared blocks via ``DEFAULT_COMPONENT_BACKENDS`` ``DIRS``
+     - Tenant middleware, request-scoped static URLs, shared blocks via ``COMPONENT_BACKENDS`` ``DIRS``
      - :doc:`/content/howto/scope-requests-per-tenant`, :doc:`/content/topics/static-assets/backends`
    * - `kanban <https://github.com/next-dj/next-dj/tree/main/examples/kanban>`__
      - Custom ``StaticBackend``, ``.jsx`` kind, ``DeepMergePolicy``, ``HashContentDedup``, composite components
@@ -57,7 +57,7 @@ The **Primary docs** column points to the sections of this manual where the tech
 Shared assets
 -------------
 
-* `_shared <https://github.com/next-dj/next-dj/tree/main/examples/_shared>`__. A shared component palette consumed through ``DEFAULT_COMPONENT_BACKENDS`` ``DIRS``.
+* `_shared <https://github.com/next-dj/next-dj/tree/main/examples/_shared>`__. A shared component palette consumed through ``COMPONENT_BACKENDS`` ``DIRS``.
 * `_template <https://github.com/next-dj/next-dj/tree/main/examples/_template>`__. An empty scaffold to copy when starting a new example-shaped project.
 
 See Also

@@ -57,7 +57,7 @@ class StaticManager:
     """Coordinate static backends, asset discovery, and placeholder injection.
 
     Backends are loaded lazily from
-    `NEXT_FRAMEWORK['DEFAULT_STATIC_BACKENDS']` on first access. URL
+    `NEXT_FRAMEWORK['STATIC_BACKENDS']` on first access. URL
     resolution is handled by the built-in staticfiles backend by
     default, which delegates to Django staticfiles.
     """
@@ -241,7 +241,7 @@ class StaticManager:
         self._script_builder = None
         self._dedup_factory = None
         self._js_policy_factory = None
-        configs = next_framework_settings.DEFAULT_STATIC_BACKENDS
+        configs = next_framework_settings.STATIC_BACKENDS
         if not isinstance(configs, list):  # pragma: no cover
             configs = []
         for config in configs:

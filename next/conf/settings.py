@@ -58,10 +58,10 @@ class NextFrameworkSettings:
 
     _LIST_KEYS: ClassVar[frozenset[str]] = frozenset(
         {
-            "DEFAULT_PAGE_BACKENDS",
-            "DEFAULT_COMPONENT_BACKENDS",
-            "DEFAULT_STATIC_BACKENDS",
-            "DEFAULT_FORM_ACTION_BACKENDS",
+            "PAGE_BACKENDS",
+            "COMPONENT_BACKENDS",
+            "STATIC_BACKENDS",
+            "FORM_ACTION_BACKENDS",
             "TEMPLATE_LOADERS",
             "FORM_ANCHOR_FILES",
         }
@@ -85,7 +85,7 @@ class NextFrameworkSettings:
             raw = user[key]
             if key == "URL_NAME_TEMPLATE" and isinstance(raw, str):
                 out[key] = raw
-            elif key == "DEFAULT_FORM_WIZARD_BACKEND" and isinstance(raw, dict):
+            elif key == "FORM_WIZARD_BACKEND" and isinstance(raw, dict):
                 merged = copy.deepcopy(self.DEFAULTS[key])
                 merged.update(copy.deepcopy(raw))
                 out[key] = merged

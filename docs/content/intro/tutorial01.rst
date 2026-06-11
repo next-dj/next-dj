@@ -167,7 +167,7 @@ Common Pitfalls
 ---------------
 
 Page module is not discovered.
-   Confirm that ``NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"][0]["APP_DIRS"]`` is ``True``.
+   Confirm that ``NEXT_FRAMEWORK["PAGE_BACKENDS"][0]["APP_DIRS"]`` is ``True``.
 
 Template renders without the notes loop.
    Make sure ``notes/pages/template.djx`` sits next to ``notes/pages/page.py``.

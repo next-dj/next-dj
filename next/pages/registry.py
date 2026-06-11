@@ -195,7 +195,7 @@ class PageContextRegistry:
         Walks ancestor directories that contain a `page.py` and runs every
         `@context(..., inherit_context=True)` callable registered there.
         A sibling `layout.djx` is not required — the shared HTML envelope
-        can live one level up under ``DEFAULT_PAGE_BACKENDS["DIRS"]``,
+        can live one level up under ``PAGE_BACKENDS["DIRS"]``,
         and pages declaring inheritable context should still surface it
         on descendant routes.
         """

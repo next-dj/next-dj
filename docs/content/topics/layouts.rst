@@ -153,14 +153,14 @@ The static collector emits the file only when a request reaches a page below tha
 Multiple Backends and Layout Roots
 ----------------------------------
 
-Each entry in ``DEFAULT_PAGE_BACKENDS`` produces an independent layout tree.
+Each entry in ``PAGE_BACKENDS`` produces an independent layout tree.
 Two backends can have entirely different root layouts even when both scan the same applications.
 
 .. code-block:: python
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
+       "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],

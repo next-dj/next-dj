@@ -1,7 +1,7 @@
 <div class="space-y-8">
   {% component "page_header"
       title=greeting
-      description="Copy this folder, rename `myapp`, and start building. The shared UI kit lives in examples/_shared/_components/ and is wired into config/settings.py through DEFAULT_COMPONENT_BACKENDS DIRS." %}
+      description="Copy this folder, rename `myapp`, and start building. The shared UI kit lives in examples/_shared/_components/ and is wired into config/settings.py through COMPONENT_BACKENDS DIRS." %}
 
   <div class="grid gap-4 sm:grid-cols-2">
     {% #component "card" title="Pages" description="`routes/` holds your page tree. Each `page.py` adds context, each `template.djx` renders." %}

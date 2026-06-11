@@ -9,7 +9,7 @@ class TestExtendDefaultBackend:
 
     def test_replaces_single_top_level_key(self) -> None:
         patched = extend_default_backend(
-            "DEFAULT_COMPONENT_BACKENDS",
+            "COMPONENT_BACKENDS",
             COMPONENTS_DIR="_widgets",
         )
         assert patched[0]["COMPONENTS_DIR"] == "_widgets"
@@ -17,7 +17,7 @@ class TestExtendDefaultBackend:
 
     def test_merges_nested_options_instead_of_replacing(self) -> None:
         patched = extend_default_backend(
-            "DEFAULT_STATIC_BACKENDS",
+            "STATIC_BACKENDS",
             OPTIONS={"DEDUP_STRATEGY": "next.static.collector.HashContentDedup"},
         )
         assert patched[0]["OPTIONS"] == {
@@ -26,7 +26,7 @@ class TestExtendDefaultBackend:
 
     def test_preserves_unrelated_entries(self) -> None:
         patched = extend_default_backend(
-            "DEFAULT_PAGE_BACKENDS",
+            "PAGE_BACKENDS",
             PAGES_DIR="routes",
         )
         assert patched[0]["APP_DIRS"] is True
@@ -34,15 +34,15 @@ class TestExtendDefaultBackend:
         assert patched[0]["PAGES_DIR"] == "routes"
 
     def test_returns_deep_copy_not_references(self) -> None:
-        a = extend_default_backend("DEFAULT_PAGE_BACKENDS", PAGES_DIR="routes")
-        b = extend_default_backend("DEFAULT_PAGE_BACKENDS", PAGES_DIR="screens")
+        a = extend_default_backend("PAGE_BACKENDS", PAGES_DIR="routes")
+        b = extend_default_backend("PAGE_BACKENDS", PAGES_DIR="screens")
         assert a[0]["PAGES_DIR"] == "routes"
         assert b[0]["PAGES_DIR"] == "screens"
         assert a[0] is not b[0]
 
     def test_patches_form_action_backends(self) -> None:
         patched = extend_default_backend(
-            "DEFAULT_FORM_ACTION_BACKENDS",
+            "FORM_ACTION_BACKENDS",
             OPTIONS={"strict": True},
         )
         assert patched[0]["BACKEND"] == "next.forms.RegistryFormActionBackend"
@@ -54,8 +54,8 @@ class TestExtendDefaultBackend:
 
     def test_raises_for_out_of_range_index(self) -> None:
         with pytest.raises(IndexError, match="out of range"):
-            extend_default_backend("DEFAULT_PAGE_BACKENDS", index=7, PAGES_DIR="r")
+            extend_default_backend("PAGE_BACKENDS", index=7, PAGES_DIR="r")
 
     def test_raises_for_negative_index(self) -> None:
         with pytest.raises(IndexError, match="out of range"):
-            extend_default_backend("DEFAULT_PAGE_BACKENDS", index=-1, PAGES_DIR="r")
+            extend_default_backend("PAGE_BACKENDS", index=-1, PAGES_DIR="r")

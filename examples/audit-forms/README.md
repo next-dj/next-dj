@@ -8,7 +8,7 @@ The admin page interleaves rows from both channels so you can compare them
 side by side.
 
 The example focuses on the form-action subsystem of next-dj: a custom
-backend wired through `NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]`, a
+backend wired through `NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`, a
 declarative `FormWizard` that routes all three steps from one class, three
 composite components (`progress_bar` and `step_section` inside the form,
 `audit_row` shared between the admin and per-request audit pages),
@@ -47,7 +47,7 @@ uv run pytest
 Tailwind loads via the Play CDN in
 [`portal/layout.djx`](portal/layout.djx). No Node, no build step. The
 wizard threads step data across requests through the configured
-`DEFAULT_FORM_WIZARD_BACKEND`, which defaults to the Django cache and is
+`FORM_WIZARD_BACKEND`, which defaults to the Django cache and is
 namespaced per session, so keep `SessionMiddleware` in `MIDDLEWARE` (it
 is by default in [`config/settings.py`](config/settings.py)).
 
@@ -90,7 +90,7 @@ or run both, like this example does.
 # config/settings.py
 NEXT_FRAMEWORK = {
     ...
-    "DEFAULT_FORM_ACTION_BACKENDS": [
+    "FORM_ACTION_BACKENDS": [
         {"BACKEND": "access.backends.AuditedFormActionBackend"},
     ],
 }
@@ -210,10 +210,10 @@ signal ships, and `AccessRequest.id` is not among them.
 Each step posts only its visible fields plus the framework's hidden
 `_url_param_step`, `_next_form_origin`, and `_next_form_page` (all emitted
 by the `{% form %}` tag). The wizard saves the cleaned data through the
-configured `DEFAULT_FORM_WIZARD_BACKEND` (the Django cache by default),
+configured `FORM_WIZARD_BACKEND` (the Django cache by default),
 so on `GET` of step 2 you can see "Computing" already filled into the
 team summary — that is what `tests/test_e2e.py::TestSessionResume`
-asserts. Point `DEFAULT_FORM_WIZARD_BACKEND` at a Redis or custom backend
+asserts. Point `FORM_WIZARD_BACKEND` at a Redis or custom backend
 without touching any view code.
 
 ### 8. Admin filter by GET query

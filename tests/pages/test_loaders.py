@@ -284,9 +284,7 @@ class TestLayoutTemplateLoader:
         layout_file.write_text("layout content")
 
         with override_settings(
-            NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": default_page_router_config(tmp_path)
-            },
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)},
         ):
             next_framework_settings.reload()
             result = loader._get_additional_layout_files()
@@ -299,7 +297,7 @@ class TestLayoutTemplateLoader:
         loader = LayoutTemplateLoader()
 
         mock_nf = SimpleNamespace(
-            DEFAULT_PAGE_BACKENDS="not-a-list",
+            PAGE_BACKENDS="not-a-list",
             URL_NAME_TEMPLATE="page_{name}",
         )
         with patch("next.pages.loaders.next_framework_settings", mock_nf):
@@ -334,7 +332,7 @@ class TestLayoutTemplateLoader:
         """Test _get_additional_layout_files with different configuration scenarios."""
         loader = LayoutTemplateLoader()
 
-        with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": config}):
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
             next_framework_settings.reload()
             result = loader._get_additional_layout_files()
 
@@ -473,9 +471,7 @@ class TestLayoutTemplateLoader:
         page_file = tmp_path / "page.py"
 
         with override_settings(
-            NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": default_page_router_config(tmp_path)
-            },
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(tmp_path)},
         ):
             next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
@@ -495,7 +491,7 @@ class TestLayoutTemplateLoader:
             tmp_path
         )
 
-        with override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": config}):
+        with override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}):
             next_framework_settings.reload()
             result = loader._get_additional_layout_files()
 
@@ -521,9 +517,7 @@ class TestLayoutTemplateLoader:
         page_file = child_dir / "page.py"
 
         with override_settings(
-            NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": default_page_router_config(parent_dir)
-            },
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": default_page_router_config(parent_dir)},
         ):
             next_framework_settings.reload()
             result = loader._find_layout_files(page_file)
@@ -553,7 +547,7 @@ class TestLayoutTemplateLoader:
 
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": default_page_router_config(additional_dir),
+                "PAGE_BACKENDS": default_page_router_config(additional_dir),
             },
         ):
             next_framework_settings.reload()
@@ -705,7 +699,7 @@ class TestContextProcessors:
     def test_get_context_processors_empty_config(self, page_instance) -> None:
         """Test _get_context_processors with empty ``ROUTERS`` list."""
         with override_settings(
-            NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": []},
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": []},
             TEMPLATES=[],
         ):
             next_framework_settings.reload()
@@ -713,8 +707,8 @@ class TestContextProcessors:
             assert processors == []
 
     def test_get_context_processors_routers_not_list(self, page_instance) -> None:
-        """When ``DEFAULT_PAGE_BACKENDS`` is not a list, treat as no router config."""
-        mock_nf = SimpleNamespace(DEFAULT_PAGE_BACKENDS={})
+        """When ``PAGE_BACKENDS`` is not a list, treat as no router config."""
+        mock_nf = SimpleNamespace(PAGE_BACKENDS={})
         with (
             patch("next.pages.processors.next_framework_settings", mock_nf),
             override_settings(TEMPLATES=[]),
@@ -726,7 +720,7 @@ class TestContextProcessors:
         """Test _get_context_processors with routers but no context_processors."""
         config = [file_router_config_entry(app_dirs=True)]
         with override_settings(
-            NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": config},
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": config},
             TEMPLATES=[],
         ):
             next_framework_settings.reload()
@@ -763,7 +757,7 @@ class TestContextProcessors:
 
             with override_settings(
                 TEMPLATES=templates_config,
-                NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": next_pages_config},
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": next_pages_config},
             ):
                 next_framework_settings.reload()
                 processors = _get_context_processors()
@@ -807,7 +801,7 @@ class TestContextProcessors:
             mock_import.side_effect = [next_pages_processor, template_processor]
             with override_settings(
                 TEMPLATES=templates_config,
-                NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": next_pages_config},
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": next_pages_config},
             ):
                 next_framework_settings.reload()
                 processors = _get_context_processors()
@@ -838,7 +832,7 @@ class TestContextProcessors:
             patch("next.pages.processors.import_string", return_value=shared_processor),
             override_settings(
                 TEMPLATES=templates_config,
-                NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": next_pages_config},
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": next_pages_config},
             ),
         ):
             next_framework_settings.reload()
@@ -852,7 +846,7 @@ class TestContextProcessors:
         """With empty TEMPLATES and no router processors, result is empty."""
         with override_settings(
             TEMPLATES=[],
-            NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": []},
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": []},
         ):
             next_framework_settings.reload()
             result = _get_context_processors()
@@ -868,7 +862,7 @@ class TestContextProcessors:
         ]
         with override_settings(
             TEMPLATES=templates_config,
-            NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": []},
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": []},
         ):
             next_framework_settings.reload()
             result = _get_context_processors()
@@ -899,7 +893,7 @@ class TestContextProcessors:
             ]
 
             with override_settings(
-                NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": config},
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": config},
                 TEMPLATES=[],
             ):
                 next_framework_settings.reload()
@@ -923,7 +917,7 @@ class TestContextProcessors:
         ]
 
         with (
-            override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": config}),
+            override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": config}),
             patch("next.pages.processors.import_string") as mock_import,
             patch("next.pages.processors.logger.warning") as mock_warning,
         ):

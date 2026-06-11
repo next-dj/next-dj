@@ -38,7 +38,7 @@ Wizard Drafts
 
 Review these when the project ships a ``FormWizard``.
 
-- Point ``DEFAULT_FORM_WIZARD_BACKEND`` at a cache shared across workers, not local memory.
+- Point ``FORM_WIZARD_BACKEND`` at a cache shared across workers, not local memory.
 - Set a short ``TIMEOUT`` for drafts, especially when a step collects personal data.
 - Use a signed or encrypted backend for sensitive flows, and re-check invariants in ``done``.
 - Validate draft completeness in ``done`` so an expired draft fails with a friendly message, not an integrity error.

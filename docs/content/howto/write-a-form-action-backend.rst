@@ -11,7 +11,7 @@ You want every form dispatch to run an extra step such as audit logging or rate 
 Solution
 --------
 
-Subclass ``next.forms.RegistryFormActionBackend``, override ``dispatch``, and register the dotted path in ``NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]``.
+Subclass ``next.forms.RegistryFormActionBackend``, override ``dispatch``, and register the dotted path in ``NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]``.
 
 Walkthrough
 -----------
@@ -52,7 +52,7 @@ Register the backend.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_ACTION_BACKENDS": [
+       "FORM_ACTION_BACKENDS": [
            {"BACKEND": "notes.backends.AuditedFormActionBackend"},
        ]
    }
@@ -101,7 +101,7 @@ The factory passes the whole config entry to the constructor, so declare ``__ini
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_ACTION_BACKENDS": [
+       "FORM_ACTION_BACKENDS": [
            {
                "BACKEND": "notes.backends.RateLimitedBackend",
                "OPTIONS": {"RATE_PER_MINUTE": 30},
@@ -124,7 +124,7 @@ Run the system checks.
 
    uv run python manage.py check
 
-A misconfigured ``DEFAULT_FORM_ACTION_BACKENDS`` entry fires ``next.E044``.
+A misconfigured ``FORM_ACTION_BACKENDS`` entry fires ``next.E044``.
 A backend class that does not subclass ``FormActionBackend`` fires ``next.E045``.
 
 See Also

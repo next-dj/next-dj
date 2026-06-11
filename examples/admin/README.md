@@ -74,7 +74,7 @@ No Node, no build step. Sessions and CSRF use the Django defaults set in
 
 The router walks two roots, listed in
 [`config/settings.py`](config/settings.py) under
-`NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"]`:
+`NEXT_FRAMEWORK["PAGE_BACKENDS"]`:
 
 * `DIRS = ["chrome"]` — the project-level page root. It contains a
   single [`chrome/layout.djx`](chrome/layout.djx) with the outermost

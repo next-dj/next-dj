@@ -124,7 +124,7 @@ A ``ComponentWidget`` resolves its component the same way the ``{% component %}`
 The named component must be visible at the page's scope or at a level above it, such as a shared root.
 See :ref:`topics-components` for the scope rules and :ref:`components-folder-discovery` for how the backend finds a component.
 
-The recommended home for a reusable field component is a shared components root, the directory configured under ``DIRS`` in ``NEXT_FRAMEWORK["DEFAULT_COMPONENT_BACKENDS"]``.
+The recommended home for a reusable field component is a shared components root, the directory configured under ``DIRS`` in ``NEXT_FRAMEWORK["COMPONENT_BACKENDS"]``.
 Components in a ``DIRS`` root are visible from every template, so one ``input`` component serves every form in the project.
 The directory name is up to the project, conventionally something like ``_shared/_components``.
 A page-local component placed in the page's own component folder also works when the field is only used on that one page.
@@ -133,7 +133,7 @@ A page-local component placed in the page's own component folder also works when
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_COMPONENT_BACKENDS": [
+       "COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
                "DIRS": [str(BASE_DIR / "_shared" / "_components")],

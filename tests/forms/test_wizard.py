@@ -432,9 +432,7 @@ class TestWizardStorageScopeIsolation:
         assert second.cleaned_data_so_far() == {}
         assert second.completed_steps() == []
 
-    def test_clear_storage_does_not_wipe_other_wizard(
-        self, settings, tmp_path
-    ) -> None:
+    def test_clear_storage_does_not_wipe_other_wizard(self, settings, tmp_path) -> None:
         """`clear_storage` on one wizard leaves the same-named wizard's draft alone."""
         settings.BASE_DIR = tmp_path
         first_cls, second_cls = self._two_same_named_wizards(tmp_path)
@@ -815,7 +813,7 @@ class TestWizardBackendManager:
             "BACKEND": f"{__name__}._StubWizardBackend",
             "OPTIONS": {"flag": True},
         }
-        with override_settings(NEXT_FRAMEWORK={"DEFAULT_FORM_WIZARD_BACKEND": config}):
+        with override_settings(NEXT_FRAMEWORK={"FORM_WIZARD_BACKEND": config}):
             next_framework_settings.reload()
             manager = WizardBackendManager()
             backend = manager.get()
@@ -827,7 +825,7 @@ class TestWizardBackendManager:
         first = wizard_backend_manager.get()
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_FORM_WIZARD_BACKEND": {
+                "FORM_WIZARD_BACKEND": {
                     "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
                     "OPTIONS": {},
                 }

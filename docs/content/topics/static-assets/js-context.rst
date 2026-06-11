@@ -147,7 +147,7 @@ Configure the policy through the first static backend ``OPTIONS``.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {
                "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {

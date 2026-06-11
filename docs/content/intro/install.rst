@@ -80,7 +80,7 @@ The file router walk registers each ``_components/`` folder it encounters during
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
+       "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
@@ -89,7 +89,7 @@ The file router walk registers each ``_components/`` folder it encounters during
                "OPTIONS": {"context_processors": []},
            }
        ],
-       "DEFAULT_COMPONENT_BACKENDS": [
+       "COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
                "DIRS": [],

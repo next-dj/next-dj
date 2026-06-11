@@ -59,7 +59,7 @@ def _collect_component_paths_under_page_trees() -> set[Path]:
     from next.urls import RouterFactory  # noqa: PLC0415
 
     result: set[Path] = set()
-    page_configs = next_framework_settings.DEFAULT_PAGE_BACKENDS
+    page_configs = next_framework_settings.PAGE_BACKENDS
     if not isinstance(page_configs, list):
         return result
     for config in page_configs:
@@ -93,7 +93,7 @@ def _collect_component_paths_under_page_trees() -> set[Path]:
 def _collect_component_paths_from_backend_dirs() -> set[Path]:
     """Collect paths from component backend `DIRS` entries only."""
     result: set[Path] = set()
-    comp_configs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+    comp_configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(comp_configs, list):
         return result
     for config in comp_configs:

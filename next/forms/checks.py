@@ -22,8 +22,8 @@ from .widgets import ComponentWidget
 from .wizard import CacheFormWizardBackend, FormWizardBackend
 
 
-_FORM_ACTION_BACKEND_SETTINGS_KEY = "DEFAULT_FORM_ACTION_BACKENDS"
-_FORM_WIZARD_BACKEND_SETTINGS_KEY = "DEFAULT_FORM_WIZARD_BACKEND"
+_FORM_ACTION_BACKEND_SETTINGS_KEY = "FORM_ACTION_BACKENDS"
+_FORM_WIZARD_BACKEND_SETTINGS_KEY = "FORM_WIZARD_BACKEND"
 _FORM_ANCHOR_FILES_SETTINGS_KEY = "FORM_ANCHOR_FILES"
 
 
@@ -50,7 +50,7 @@ def check_form_action_backends_configuration(
     *_args: object,
     **_kwargs: object,
 ) -> list[CheckMessage]:
-    """Validate `DEFAULT_FORM_ACTION_BACKENDS` shape and import paths."""
+    """Validate `FORM_ACTION_BACKENDS` shape and import paths."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if not isinstance(raw, dict):
         return []
@@ -214,7 +214,7 @@ def check_form_wizard_backend(
     *_args: object,
     **_kwargs: object,
 ) -> list[CheckMessage]:
-    """Validate `DEFAULT_FORM_WIZARD_BACKEND` shape and import path."""
+    """Validate `FORM_WIZARD_BACKEND` shape and import path."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if not isinstance(raw, dict):
         return []
@@ -277,7 +277,7 @@ def check_form_wizard_sessions(
     registry = getattr(form_action_manager.default_backend, "_registry", {})
     if not any(meta.get("wizard_class") for meta in registry.values()):
         return []
-    config = next_framework_settings.DEFAULT_FORM_WIZARD_BACKEND
+    config = next_framework_settings.FORM_WIZARD_BACKEND
     backend_path = config.get("BACKEND") if isinstance(config, dict) else None
     if not isinstance(backend_path, str):
         return []

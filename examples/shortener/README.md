@@ -33,12 +33,12 @@ Tailwind loads via the Play CDN in [`routes/layout.djx`](shortener/routes/layout
 
 ```python
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_BACKENDS": [{
+    "PAGE_BACKENDS": [{
         "BACKEND": "next.urls.FileRouterBackend",
         "APP_DIRS": True,
         "PAGES_DIR": "routes",
     }],
-    "DEFAULT_COMPONENT_BACKENDS": [{
+    "COMPONENT_BACKENDS": [{
         "BACKEND": "next.components.FileComponentsBackend",
         "COMPONENTS_DIR": "_widgets",
     }],

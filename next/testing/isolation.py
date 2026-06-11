@@ -17,7 +17,7 @@ def reset_form_actions() -> None:
 
     Forms register imperatively at import time, so the manager does not
     auto-rebuild on `settings_reloaded`. Tests that swap
-    `NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]` call this helper to
+    `NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]` call this helper to
     discard the stale backend list and pick the new one up on next use.
     """
     form_action_manager._reload_config()

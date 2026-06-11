@@ -61,7 +61,7 @@ Define ``NEXT_FRAMEWORK`` here in full so the framework configuration has one so
    ROOT_URLCONF = "config.urls"
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
+       "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],

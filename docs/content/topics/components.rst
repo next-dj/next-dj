@@ -61,7 +61,7 @@ Composite components add Python logic when the template needs computed values th
 Component Folder Discovery
 --------------------------
 
-Each entry in ``DEFAULT_COMPONENT_BACKENDS`` carries its own ``COMPONENTS_DIR`` name, defaulting to ``_components``.
+Each entry in ``COMPONENT_BACKENDS`` carries its own ``COMPONENTS_DIR`` name, defaulting to ``_components``.
 The components backend treats every directory with that name as a component namespace.
 
 When the URL router walks the page trees it skips directories that match a configured ``COMPONENTS_DIR``, so component folders never become URL segments.
@@ -84,7 +84,7 @@ Project directories.
    The scanner only inspects the immediate children of each root, so place every component folder or ``.djx`` file directly under the ``DIRS`` entry rather than in nested sub-folders.
 
 Custom backends.
-   Additional entries in ``DEFAULT_COMPONENT_BACKENDS`` can serve components from any other source.
+   Additional entries in ``COMPONENT_BACKENDS`` can serve components from any other source.
    See :doc:`extending` for the contract.
 
 .. code-block:: python
@@ -95,7 +95,7 @@ Custom backends.
    BASE_DIR = Path(__file__).resolve().parent.parent
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_COMPONENT_BACKENDS": [
+       "COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
                "DIRS": [str(BASE_DIR / "shared_components")],

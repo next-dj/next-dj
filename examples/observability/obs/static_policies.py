@@ -3,7 +3,7 @@
 `InstrumentedDedup` reuses the URL-based dedup logic of the framework
 default and bumps a counter every time a key collides with one
 already in the collector. Plugged in through
-`DEFAULT_STATIC_BACKENDS[0]["OPTIONS"]["DEDUP_STRATEGY"]` in
+`STATIC_BACKENDS[0]["OPTIONS"]["DEDUP_STRATEGY"]` in
 `config/settings.py`.
 """
 

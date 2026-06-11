@@ -30,7 +30,7 @@ Bake the attributes into the tag format strings.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {
                "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {
@@ -74,7 +74,7 @@ Register the backend.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {"BACKEND": "notes.backends.CdnBackend", "OPTIONS": {}}
        ]
    }
@@ -131,7 +131,7 @@ Leave absolute URLs untouched.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {"BACKEND": "notes.backends.TenantPrefixStaticBackend"},
        ],
    }

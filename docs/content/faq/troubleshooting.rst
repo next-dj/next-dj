@@ -77,7 +77,7 @@ Rename one or move one to a different page tree.
 Component Does Not Render
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Confirm that ``COMPONENTS_DIR`` is set on ``DEFAULT_COMPONENT_BACKENDS``.
+Confirm that ``COMPONENTS_DIR`` is set on ``COMPONENT_BACKENDS``.
 Confirm that the component folder name matches the string argument to ``{% component %}``.
 
 Component Prop Does Not Resolve
@@ -105,13 +105,13 @@ The watcher picks up file content changes but a hash computed at startup can sta
 next.W030 Empty Static Backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``manage.py check`` warns when ``DEFAULT_STATIC_BACKENDS`` is empty.
+``manage.py check`` warns when ``STATIC_BACKENDS`` is empty.
 The framework falls back to the bundled ``StaticFilesBackend``, but you should either restore an explicit backend entry or accept that no custom chain is configured.
 
 next.E038 Duplicate BACKEND Entries
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Two identical ``BACKEND`` dotted paths appear in ``DEFAULT_STATIC_BACKENDS``.
+Two identical ``BACKEND`` dotted paths appear in ``STATIC_BACKENDS``.
 Remove or rename one entry so each backend class appears once.
 
 next.W042 Unusable JS_CONTEXT_SERIALIZER
@@ -205,7 +205,7 @@ URL Name Not Found
 ~~~~~~~~~~~~~~~~~~
 
 Run ``uv run python manage.py shell`` and print ``reverse("next:page_<name>")``.
-If it raises ``NoReverseMatch``, verify that the directory contains at least one of ``page.py``, ``template.djx``, or a child page, and that it sits under an active ``PAGES_DIR`` root configured in ``DEFAULT_PAGE_BACKENDS``.
+If it raises ``NoReverseMatch``, verify that the directory contains at least one of ``page.py``, ``template.djx``, or a child page, and that it sits under an active ``PAGES_DIR`` root configured in ``PAGE_BACKENDS``.
 
 Captured Parameter Name Differs From Directory Name
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -3,7 +3,7 @@
 `ComponentsBackend` is the ABC for alternative component sources.
 `FileComponentsBackend` is the default filesystem-based backend.
 `ComponentsFactory` creates backend instances from merged
-`DEFAULT_COMPONENT_BACKENDS` entries. `DummyBackend` and `BoomBackend`
+`COMPONENT_BACKENDS` entries. `DummyBackend` and `BoomBackend`
 are tiny doubles kept here so dotted-path resolution in tests works
 through `import_class_cached`.
 """
@@ -163,7 +163,7 @@ class BoomBackend(ComponentsBackend):
 
 
 class ComponentsFactory:
-    """Instantiates backends from merged `DEFAULT_COMPONENT_BACKENDS` entries."""
+    """Instantiates backends from merged `COMPONENT_BACKENDS` entries."""
 
     @classmethod
     def create_backend(cls, config: dict[str, Any]) -> ComponentsBackend:

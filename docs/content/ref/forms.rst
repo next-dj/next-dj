@@ -37,11 +37,11 @@ Advanced.
    ``FormProvider`` auto-registers through the ``__init_subclass__`` hook on
    ``RegisteredParameterProvider`` and resolves the bound ``form`` parameter, so application
    code never instantiates it.
-   ``FormActionFactory`` instantiates one backend per ``DEFAULT_FORM_ACTION_BACKENDS`` entry,
+   ``FormActionFactory`` instantiates one backend per ``FORM_ACTION_BACKENDS`` entry,
    passing the whole config dict to the backend constructor. ``FormActionManager`` calls it,
    so application code rarely does.
    ``WizardBackendManager`` is the analogous lazy holder for the single wizard backend, exposed
-   as the ``wizard_backend_manager`` instance. It reads ``DEFAULT_FORM_WIZARD_BACKEND`` on first
+   as the ``wizard_backend_manager`` instance. It reads ``FORM_WIZARD_BACKEND`` on first
    use and caches the result.
    ``build_form_namespace_for_action`` builds the ``{form, wizard}`` namespace the ``{% form %}``
    tag consumes. Call it only when rendering that namespace by hand outside the tag.

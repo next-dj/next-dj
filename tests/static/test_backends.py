@@ -268,12 +268,12 @@ class TestStaticBackendReexport:
 
 
 class TestStaticsFactoryWithSettingsOverride:
-    """Factory respects NEXT_FRAMEWORK['DEFAULT_STATIC_BACKENDS'] at construction."""
+    """Factory respects NEXT_FRAMEWORK['STATIC_BACKENDS'] at construction."""
 
     def test_build_from_settings_config(self) -> None:
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_STATIC_BACKENDS": [
+                "STATIC_BACKENDS": [
                     {
                         "BACKEND": "next.static.StaticFilesBackend",
                         "OPTIONS": {"css_tag": '<link integrity href="{url}">'},

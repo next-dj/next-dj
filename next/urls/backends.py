@@ -5,7 +5,7 @@ implementation must satisfy. `FileRouterBackend` is the built-in
 implementation that discovers `page.py` (and virtual `template.djx`)
 entries under app and optional root page trees. `RouterFactory` maps
 dotted backend paths to classes and instantiates them from
-`DEFAULT_PAGE_BACKENDS` config dicts.
+`PAGE_BACKENDS` config dicts.
 """
 
 from __future__ import annotations
@@ -97,9 +97,9 @@ class FileRouterBackend(RouterBackend):
     def _resolve_components_folder_name() -> str:
         """Folder name to skip in URL scans.
 
-        Taken from the first `DEFAULT_COMPONENT_BACKENDS` entry.
+        Taken from the first `COMPONENT_BACKENDS` entry.
         """
-        cbs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+        cbs = next_framework_settings.COMPONENT_BACKENDS
         _components_key = "COMPONENTS_DIR"
         if not isinstance(cbs, list) or not cbs:
             raise KeyError(_components_key)
@@ -246,7 +246,7 @@ class FileRouterBackend(RouterBackend):
 
 
 class RouterFactory:
-    """Build `RouterBackend` instances from `DEFAULT_PAGE_BACKENDS`-style dicts."""
+    """Build `RouterBackend` instances from `PAGE_BACKENDS`-style dicts."""
 
     _backends: ClassVar[dict[str, type[RouterBackend]]] = {
         "next.urls.FileRouterBackend": FileRouterBackend,

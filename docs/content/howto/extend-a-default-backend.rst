@@ -27,13 +27,13 @@ Pick the backend list.
 
    * - Setting key
      - Used by
-   * - ``DEFAULT_PAGE_BACKENDS``
+   * - ``PAGE_BACKENDS``
      - File router and layout chain.
-   * - ``DEFAULT_COMPONENT_BACKENDS``
+   * - ``COMPONENT_BACKENDS``
      - Component discovery and rendering.
-   * - ``DEFAULT_STATIC_BACKENDS``
+   * - ``STATIC_BACKENDS``
      - Static collector and asset rendering.
-   * - ``DEFAULT_FORM_ACTION_BACKENDS``
+   * - ``FORM_ACTION_BACKENDS``
      - Form action dispatch.
 
 The helper supports these four backend list settings.
@@ -46,13 +46,13 @@ Call the helper with the setting name and the keys to override.
    from next.conf import extend_default_backend
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": extend_default_backend(
-           "DEFAULT_PAGE_BACKENDS",
+       "PAGE_BACKENDS": extend_default_backend(
+           "PAGE_BACKENDS",
            PAGES_DIR="routes",
        )
    }
 
-The helper returns the default ``DEFAULT_PAGE_BACKENDS`` list with the first entry ``PAGES_DIR`` set to ``routes`` and every other key kept.
+The helper returns the default ``PAGE_BACKENDS`` list with the first entry ``PAGES_DIR`` set to ``routes`` and every other key kept.
 
 Override a Nested OPTIONS Key
 -----------------------------
@@ -66,8 +66,8 @@ Adjacent keys survive.
    from next.conf import extend_default_backend
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": extend_default_backend(
-           "DEFAULT_PAGE_BACKENDS",
+       "PAGE_BACKENDS": extend_default_backend(
+           "PAGE_BACKENDS",
            OPTIONS={"context_processors": ["notes.context_processors.tenant"]},
        )
    }
@@ -81,7 +81,7 @@ The default is ``0``, the first entry.
 .. code-block:: python
    :caption: config/settings.py
 
-   extend_default_backend("DEFAULT_PAGE_BACKENDS", index=0, APP_DIRS=False)
+   extend_default_backend("PAGE_BACKENDS", index=0, APP_DIRS=False)
 
 When to Write the List by Hand
 ------------------------------
@@ -94,7 +94,7 @@ To register a custom backend, write the full list yourself.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_ACTION_BACKENDS": [
+       "FORM_ACTION_BACKENDS": [
            {"BACKEND": "notes.backends.AuditedFormActionBackend"},
        ]
    }
@@ -112,7 +112,7 @@ Print the resolved setting from a Django shell.
 
    uv run python manage.py shell -c "
    from next.conf import next_framework_settings
-   print(next_framework_settings.DEFAULT_PAGE_BACKENDS)
+   print(next_framework_settings.PAGE_BACKENDS)
    "
 
 The list shows the default entry with your overrides applied.

@@ -60,7 +60,7 @@ same DI flow.
 public method that:
 
 1. Drops the cached backend list.
-2. Reinstantiates every backend from `DEFAULT_PAGE_BACKENDS`.
+2. Reinstantiates every backend from `PAGE_BACKENDS`.
 3. Clears Django's URL resolver caches.
 4. Sends the `router_reloaded` signal.
 

@@ -78,14 +78,14 @@ class TestReloadConfig:
     def test_invalid_backend_falls_back(self) -> None:
         manager = StaticManager()
         with override_settings(
-            NEXT_FRAMEWORK={"DEFAULT_STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
+            NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
         ):
             manager._reload_config()
         assert isinstance(manager.default_backend, StaticFilesBackend)
 
     def test_empty_backends_seeds_default(self) -> None:
         manager = StaticManager()
-        with override_settings(NEXT_FRAMEWORK={"DEFAULT_STATIC_BACKENDS": []}):
+        with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
             manager._reload_config()
         assert len(manager) == 1
 
@@ -370,9 +370,7 @@ class TestSettingChangedReload:
 
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_STATIC_BACKENDS": [
-                    {"BACKEND": "next.static.StaticFilesBackend"}
-                ]
+                "STATIC_BACKENDS": [{"BACKEND": "next.static.StaticFilesBackend"}]
             }
         ):
             # override_settings fires setting_changed, which calls reload.

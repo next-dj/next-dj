@@ -23,29 +23,29 @@ class TestBenchSettingsMerge:
     @pytest.mark.benchmark(group="conf.settings")
     def test_attribute_access_cached(self, benchmark) -> None:
         settings = NextFrameworkSettings()
-        _ = settings.DEFAULT_PAGE_BACKENDS
-        benchmark(lambda: settings.DEFAULT_PAGE_BACKENDS)
+        _ = settings.PAGE_BACKENDS
+        benchmark(lambda: settings.PAGE_BACKENDS)
 
     @pytest.mark.benchmark(group="conf.settings")
     def test_reload_cycle(self, benchmark) -> None:
         settings = NextFrameworkSettings()
-        _ = settings.DEFAULT_PAGE_BACKENDS
+        _ = settings.PAGE_BACKENDS
 
         def run() -> None:
             settings.reload()
-            _ = settings.DEFAULT_PAGE_BACKENDS
+            _ = settings.PAGE_BACKENDS
 
         benchmark(run)
 
     @pytest.mark.benchmark(group="conf.settings")
     def test_merge_with_user_form_action_backends(self, benchmark) -> None:
-        """Cost of merging a user-provided ``DEFAULT_FORM_ACTION_BACKENDS`` list.
+        """Cost of merging a user-provided ``FORM_ACTION_BACKENDS`` list.
 
         Mirrors the existing per-key benches and quantifies the merge
         overhead added by the new top-level setting.
         """
         user_dict = {
-            "DEFAULT_FORM_ACTION_BACKENDS": [
+            "FORM_ACTION_BACKENDS": [
                 {"BACKEND": "myapp.backends.AuditedBackend", "OPTIONS": {}},
                 {"BACKEND": "myapp.backends.MetricsBackend", "OPTIONS": {}},
             ],

@@ -12,10 +12,10 @@ from .defaults import DEFAULTS
 
 _BACKEND_LIST_KEYS = frozenset(
     {
-        "DEFAULT_PAGE_BACKENDS",
-        "DEFAULT_COMPONENT_BACKENDS",
-        "DEFAULT_STATIC_BACKENDS",
-        "DEFAULT_FORM_ACTION_BACKENDS",
+        "PAGE_BACKENDS",
+        "COMPONENT_BACKENDS",
+        "STATIC_BACKENDS",
+        "FORM_ACTION_BACKENDS",
     }
 )
 

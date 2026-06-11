@@ -56,11 +56,11 @@ through `NEXT_FRAMEWORK`:
 
 ```python
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_BACKENDS": [{
+    "PAGE_BACKENDS": [{
         "BACKEND": "next.urls.FileRouterBackend",
         "PAGES_DIR": "panels",
     }],
-    "DEFAULT_COMPONENT_BACKENDS": [{
+    "COMPONENT_BACKENDS": [{
         "BACKEND": "next.components.FileComponentsBackend",
         "COMPONENTS_DIR": "_chunks",
     }],

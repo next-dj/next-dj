@@ -98,10 +98,10 @@ Errors
      - Condition
      - Emitted by
    * - ``next.E001``
-     - ``NEXT_FRAMEWORK`` is not a dict, or ``DEFAULT_PAGE_BACKENDS`` is not a list.
+     - ``NEXT_FRAMEWORK`` is not a dict, or ``PAGE_BACKENDS`` is not a list.
      - ``next.urls.checks``
    * - ``next.E002``
-     - A ``DEFAULT_PAGE_BACKENDS`` or ``DEFAULT_COMPONENT_BACKENDS`` entry is not a dict.
+     - A ``PAGE_BACKENDS`` or ``COMPONENT_BACKENDS`` entry is not a dict.
      - ``next.urls.checks``, ``next.components.checks``
    * - ``next.E003``
      - A page backend entry does not specify ``BACKEND``.
@@ -155,10 +155,10 @@ Errors
      - A ``component.py`` imports ``context`` from ``next.pages`` instead of ``next.components``.
      - ``next.components.checks``
    * - ``next.E022``
-     - ``DEFAULT_PAGE_BACKENDS`` is empty.
+     - ``PAGE_BACKENDS`` is empty.
      - ``next.urls.checks``
    * - ``next.E023``
-     - ``DEFAULT_COMPONENT_BACKENDS`` is not a list.
+     - ``COMPONENT_BACKENDS`` is not a list.
      - ``next.components.checks``
    * - ``next.E024``
      - A file router entry is missing ``PAGES_DIR``.
@@ -188,7 +188,7 @@ Errors
      - A component backend ``BACKEND`` or ``DIRS`` value has the wrong type.
      - ``next.components.checks``
    * - ``next.E033``
-     - ``DEFAULT_COMPONENT_BACKENDS`` is empty.
+     - ``COMPONENT_BACKENDS`` is empty.
      - ``next.components.checks``
    * - ``next.E034``
      - A component name uses the shared root namespace on more than one page tree.
@@ -203,7 +203,7 @@ Errors
      - A static backend entry is not a dict, or the class is not a ``StaticBackend`` subclass.
      - ``next.static.checks``
    * - ``next.E038``
-     - ``DEFAULT_STATIC_BACKENDS`` contains a duplicate ``BACKEND`` entry.
+     - ``STATIC_BACKENDS`` contains a duplicate ``BACKEND`` entry.
      - ``next.static.checks``
    * - ``next.E040``
      - A configured context processor does not accept a ``request`` parameter.
@@ -236,7 +236,7 @@ Errors
      - A ``FormWizard`` declares no ``Meta.steps`` or an empty list.
      - ``next.forms.checks``
    * - ``next.E051``
-     - ``DEFAULT_FORM_WIZARD_BACKEND`` is malformed, non-importable, or names a class that does not subclass ``FormWizardBackend``.
+     - ``FORM_WIZARD_BACKEND`` is malformed, non-importable, or names a class that does not subclass ``FormWizardBackend``.
      - ``next.forms.checks``
    * - ``next.E052``
      - ``FORM_ANCHOR_FILES`` is not None or a list, tuple, or set of strings.
@@ -261,7 +261,7 @@ Warnings
      - A ``layout.djx`` is missing the required ``{% block template %}``.
      - ``next.pages.checks``
    * - ``next.W030``
-     - ``DEFAULT_STATIC_BACKENDS`` is empty, so the framework falls back to ``StaticFilesBackend``.
+     - ``STATIC_BACKENDS`` is empty, so the framework falls back to ``StaticFilesBackend``.
      - ``next.static.checks``
    * - ``next.W031``
      - An ``OPTIONS`` tag template is missing the ``{url}`` placeholder.

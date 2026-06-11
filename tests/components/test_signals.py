@@ -217,7 +217,7 @@ class TestComponentBackendLoadedSignal:
                 ComponentsFactory, "create_backend", _StubFactory.create_backend
             ),
         ):
-            fake_settings.DEFAULT_COMPONENT_BACKENDS = configs
+            fake_settings.COMPONENT_BACKENDS = configs
             manager._reload_config()
 
         assert len(capture_component_backend_loaded) == 2

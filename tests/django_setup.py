@@ -67,7 +67,7 @@ def _build_test_settings() -> dict[str, object]:
         "USE_TZ": True,
         "TIME_ZONE": "UTC",
         "NEXT_FRAMEWORK": {
-            "DEFAULT_PAGE_BACKENDS": [
+            "PAGE_BACKENDS": [
                 {
                     "BACKEND": "next.urls.FileRouterBackend",
                     "PAGES_DIR": "pages",

@@ -25,7 +25,7 @@ Manager
 ~~~~~~~
 
 ``urlpatterns`` is a ``list`` subclass that recollects router and form-action patterns from the active backends on each access.
-The backends themselves are cached by ``router_manager`` and are only rebuilt when ``router_manager.reload()`` runs or when ``DEFAULT_PAGE_BACKENDS`` changes.
+The backends themselves are cached by ``router_manager`` and are only rebuilt when ``router_manager.reload()`` runs or when ``PAGE_BACKENDS`` changes.
 A route added after import is therefore visible without a process restart, but each access still iterates the cached backend list rather than walking the page tree again.
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
 
@@ -145,7 +145,7 @@ Checks
 ``next.urls.checks`` registers Django system checks that validate the URL configuration at startup.
 
 ``check_next_pages_configuration``.
-   Validates the ``NEXT_FRAMEWORK['DEFAULT_PAGE_BACKENDS']`` structure, the ``BACKEND`` path, and per-backend ``DIRS``/``APP_DIRS``/``PAGES_DIR``/``OPTIONS`` keys.
+   Validates the ``NEXT_FRAMEWORK['PAGE_BACKENDS']`` structure, the ``BACKEND`` path, and per-backend ``DIRS``/``APP_DIRS``/``PAGES_DIR``/``OPTIONS`` keys.
 
 ``check_duplicate_url_parameters``.
    Fails with :ref:`next.E028 <ref-system-checks>` when one route repeats a captured parameter name.

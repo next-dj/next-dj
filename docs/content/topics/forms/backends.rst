@@ -5,7 +5,7 @@ Action Backends
 
 A form action backend stores registered actions, generates their URL patterns, and dispatches submissions to handlers.
 The framework ships ``RegistryFormActionBackend`` and lets a project subclass it.
-This page covers the backend contract, the ``DEFAULT_FORM_ACTION_BACKENDS`` setting, and the pattern for a custom backend.
+This page covers the backend contract, the ``FORM_ACTION_BACKENDS`` setting, and the pattern for a custom backend.
 
 .. contents::
    :local:
@@ -16,7 +16,7 @@ Overview
 
 A backend owns the full lifecycle of every action it registers.
 It is not a middleware step in a chain.
-The setting ``NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]`` lists the active backends, each as a dict with a ``BACKEND`` dotted path.
+The setting ``NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`` lists the active backends, each as a dict with a ``BACKEND`` dotted path.
 
 The default value registers one backend.
 
@@ -24,7 +24,7 @@ The default value registers one backend.
    :caption: framework default
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_ACTION_BACKENDS": [
+       "FORM_ACTION_BACKENDS": [
            {"BACKEND": "next.forms.RegistryFormActionBackend", "OPTIONS": {}},
        ]
    }
@@ -35,7 +35,7 @@ A custom backend is the right tool when every dispatch needs an extra step such 
 How Backends Are Instantiated
 -----------------------------
 
-``FormActionManager`` builds one backend instance per entry in ``DEFAULT_FORM_ACTION_BACKENDS`` through ``FormActionFactory``.
+``FormActionManager`` builds one backend instance per entry in ``FORM_ACTION_BACKENDS`` through ``FormActionFactory``.
 The factory imports the ``BACKEND`` dotted path and calls the class with the whole config dict, including ``BACKEND`` and any ``OPTIONS``.
 
 .. code-block:: python
@@ -183,13 +183,13 @@ A custom redirect target keyed off that page is one such case.
 Registering a Custom Backend
 ----------------------------
 
-List the dotted path in ``DEFAULT_FORM_ACTION_BACKENDS``.
+List the dotted path in ``FORM_ACTION_BACKENDS``.
 
 .. code-block:: python
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_ACTION_BACKENDS": [
+       "FORM_ACTION_BACKENDS": [
            {"BACKEND": "notes.backends.AuditedFormActionBackend"},
        ]
    }
@@ -241,7 +241,7 @@ Testing
 
 Tests that register actions through ``@action`` must drop the global registry between cases so action names from one test do not leak into the next.
 Call :func:`next.testing.reset_form_actions` from a pytest fixture or a ``setUp`` method.
-The helper invokes ``form_action_manager._reload_config()``, which rebuilds the backend list from the current ``NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]`` setting and discards any actions registered against the previous backend instances.
+The helper invokes ``form_action_manager._reload_config()``, which rebuilds the backend list from the current ``NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`` setting and discards any actions registered against the previous backend instances.
 
 See :doc:`/content/topics/testing` for the surrounding helpers and fixtures.
 
@@ -250,7 +250,7 @@ System Checks
 
 The framework validates the backend configuration at startup.
 
-- ``next.E044`` reports a malformed or non-importable ``DEFAULT_FORM_ACTION_BACKENDS`` entry, including a non-string ``BACKEND`` path.
+- ``next.E044`` reports a malformed or non-importable ``FORM_ACTION_BACKENDS`` entry, including a non-string ``BACKEND`` path.
 - ``next.E045`` reports a backend that does not subclass ``FormActionBackend``.
 
 Run ``uv run python manage.py check`` after editing the backend list.

@@ -114,7 +114,7 @@ class TestEagerLoadComponents:
         try:
             with override_settings(
                 NEXT_FRAMEWORK={
-                    "DEFAULT_COMPONENT_BACKENDS": [config],
+                    "COMPONENT_BACKENDS": [config],
                     "LAZY_COMPONENT_MODULES": True,
                 },
             ):

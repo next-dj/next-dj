@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 FILE_ROUTER_BACKEND = "next.urls.FileRouterBackend"
 
-_PAGE_BACKEND_SETTINGS_KEY = "DEFAULT_PAGE_BACKENDS"
+_PAGE_BACKEND_SETTINGS_KEY = "PAGE_BACKENDS"
 
 _FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset(
     {
@@ -56,7 +56,7 @@ def _validate_config_structure(
     config: object,
     index: int,
 ) -> list[CheckMessage]:
-    """Validate required keys and types for one `DEFAULT_PAGE_BACKENDS` entry."""
+    """Validate required keys and types for one `PAGE_BACKENDS` entry."""
     errors: list[CheckMessage] = []
 
     if not isinstance(config, dict):
@@ -251,7 +251,7 @@ def check_next_pages_configuration(
     *_args: object,
     **_kwargs: object,
 ) -> list[CheckMessage]:
-    """Validate `DEFAULT_PAGE_BACKENDS` inside merged `NEXT_FRAMEWORK`."""
+    """Validate `PAGE_BACKENDS` inside merged `NEXT_FRAMEWORK`."""
     raw = getattr(settings, "NEXT_FRAMEWORK", None)
     if raw is not None and not isinstance(raw, dict):
         return [
@@ -262,11 +262,11 @@ def check_next_pages_configuration(
             ),
         ]
 
-    next_pages = next_framework_settings.DEFAULT_PAGE_BACKENDS
+    next_pages = next_framework_settings.PAGE_BACKENDS
     if not isinstance(next_pages, list):
         return [
             Error(
-                "NEXT_FRAMEWORK['DEFAULT_PAGE_BACKENDS'] must be a list of "
+                "NEXT_FRAMEWORK['PAGE_BACKENDS'] must be a list of "
                 "configuration dictionaries.",
                 obj=settings,
                 id="next.E001",
@@ -276,7 +276,7 @@ def check_next_pages_configuration(
     if len(next_pages) == 0:
         return [
             Error(
-                "NEXT_FRAMEWORK['DEFAULT_PAGE_BACKENDS'] must contain at least one "
+                "NEXT_FRAMEWORK['PAGE_BACKENDS'] must contain at least one "
                 "router entry (configure the file router or another backend).",
                 obj=settings,
                 id="next.E022",
