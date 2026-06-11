@@ -1,8 +1,8 @@
 """Declarative multi-step form wizard with a pluggable cache-backed backend."""
 
+import hashlib
 import types
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from django.conf import settings
@@ -12,14 +12,8 @@ from django.core.exceptions import ImproperlyConfigured
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 
-from .backends import ActionRegistration, _resolved_path_str
-from .base import (
-    _compute_scope,
-    _find_definition_frame,
-    _is_framework_file,
-    _record_invalid_meta_scope,
-    _to_snake_case,
-)
+from .backends import ActionRegistration, _file_to_dotted_module
+from .base import _registration_gate, _to_snake_case
 from .manager import form_action_manager
 from .registration import registration_diagnostics
 
@@ -159,42 +153,27 @@ def _replace_step_segment(path: str, current: str, target: str) -> str:
     return path
 
 
-def _auto_register_wizard_class(cls: type) -> None:
+def _storage_scope_hash(scope_key: str) -> str:
+    """Return a short stable hash of the registration scope key."""
+    return hashlib.sha256(scope_key.encode()).hexdigest()[:16]
+
+
+def _auto_register_wizard_class(cls: "type[FormWizard]") -> None:
     """Register a FormWizard subclass with form_action_manager."""
-    if getattr(getattr(cls, "Meta", None), "abstract", False):
+    gate = _registration_gate(cls)
+    if gate is None:
         return
-
-    file_path = _find_definition_frame()
-    if not file_path or file_path.startswith("<"):
-        return
-    if _is_framework_file(file_path):
-        return
-
-    base = getattr(settings, "BASE_DIR", None)
-    if base is not None:
-        try:
-            Path(_resolved_path_str(file_path)).relative_to(
-                Path(_resolved_path_str(str(base)))
-            )
-        except ValueError:
-            registration_diagnostics.outside_base_dir.append(
-                (cls.__qualname__, file_path)
-            )
-            return
-
-    meta_scope = getattr(getattr(cls, "Meta", None), "scope", None)
-    if meta_scope is not None and meta_scope not in ("page", "shared"):
-        _record_invalid_meta_scope(cls, meta_scope)
-        return
-
-    scope = meta_scope if meta_scope is not None else _compute_scope(file_path)
-    name = _to_snake_case(cls.__name__)
+    scope, name, file_path = gate
     if not list(getattr(getattr(cls, "Meta", None), "steps", []) or []):
         registration_diagnostics.wizard_without_steps.append(cls.__qualname__)
+    # Mirror the registry scope key so storage partitions match registration.
+    cls._storage_scope_key = (
+        file_path if scope == "page" else _file_to_dotted_module(file_path)
+    )
     form_action_manager.register_action(
         ActionRegistration(
             name=name,
-            file_path=_resolved_path_str(file_path),
+            file_path=file_path,
             scope=scope,
             wizard_class=cls,
         )
@@ -203,6 +182,8 @@ def _auto_register_wizard_class(cls: type) -> None:
 
 class FormWizard:
     """Routes a sequence of forms across requests and finalises on the last step."""
+
+    _storage_scope_key: ClassVar[str]
 
     class Meta:
         """Default wizard options, overridden on subclasses."""
@@ -229,6 +210,12 @@ class FormWizard:
         else:
             self.base_path = getattr(request, "path", "") or ""
         self.wizard_id = _to_snake_case(type(self).__name__)
+        # Read the class's own namespace so an unregistered subclass never
+        # borrows the storage bucket of a registered ancestor.
+        scope_key = type(self).__dict__.get("_storage_scope_key") or type(
+            self
+        ).__module__
+        self.storage_id = f"{_storage_scope_hash(scope_key)}:{self.wizard_id}"
         self._backend = wizard_backend_manager.get()
         self._loaded: dict[str, Any] | None = None
         self._steps_cache: list[tuple[str, type]] | None = None
@@ -258,7 +245,7 @@ class FormWizard:
     def _stored_steps(self) -> dict[str, Any]:
         """Return the stored `{step: data}` mapping, loaded once per request."""
         if self._loaded is None:
-            self._loaded = self._backend.load(self.request, self.wizard_id)
+            self._loaded = self._backend.load(self.request, self.storage_id)
         return self._loaded
 
     def cleaned_data_so_far(self) -> dict[str, Any]:
@@ -274,13 +261,13 @@ class FormWizard:
 
     def save_step(self, step: str, data: dict[str, Any]) -> None:
         """Persist cleaned data for one step through the backend."""
-        self._backend.save_step(self.request, self.wizard_id, step, data)
+        self._backend.save_step(self.request, self.storage_id, step, data)
         self._loaded = None
         self._invalidate_step_caches()
 
     def clear_storage(self) -> None:
         """Drop every stored step for this wizard through the backend."""
-        self._backend.clear(self.request, self.wizard_id)
+        self._backend.clear(self.request, self.storage_id)
         self._loaded = None
         self._invalidate_step_caches()
 

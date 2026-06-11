@@ -23,12 +23,11 @@ def action(
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         if isinstance(func, type):
+            # Record for the next.E053 system check instead of raising, so the
+            # mistake surfaces through manage.py check rather than a bare
+            # TypeError aborting django.setup() mid-import.
             registration_diagnostics.action_applied_to_class.append(func.__qualname__)
-            msg = (
-                "@action is for form-less actions only. "
-                "Form classes register automatically through __init_subclass__."
-            )
-            raise TypeError(msg)
+            return func
         if isinstance(form_class, type):
             msg = (
                 "@action's form_class must be a factory callable, not a Form class. "

@@ -62,21 +62,23 @@ class TestActionDecorator:
         result = action_decorator("return_test_handler")(my_handler)
         assert result is my_handler
 
-    def test_raises_type_error_when_applied_to_class(self) -> None:
-        """Applying @action to a class raises TypeError immediately."""
-        with pytest.raises(TypeError, match="form-less actions only"):
+    def test_applied_to_class_returns_class_without_registering(self) -> None:
+        """Applying @action to a class is recorded and skips registration."""
 
-            @action_decorator("bad_class_action")
-            class SomeClass:
-                pass
+        @action_decorator("bad_class_action")
+        class SomeClass:
+            pass
+
+        assert isinstance(SomeClass, type)
+        meta = form_action_manager.default_backend.get_meta("bad_class_action")
+        assert meta is None
 
     def test_class_name_recorded_in_applied_to_class_list(self) -> None:
         """When @action is applied to a class, its qualname is recorded."""
-        with pytest.raises(TypeError):
 
-            @action_decorator("recorded_class")
-            class MyBadClass:
-                pass
+        @action_decorator("recorded_class")
+        class MyBadClass:
+            pass
 
         assert any(
             "MyBadClass" in entry

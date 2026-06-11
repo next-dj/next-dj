@@ -511,6 +511,54 @@ class TestAbstractForms:
 
         assert backend.get_meta("abstract_intermediate_form") is None
 
+    def test_concrete_subclass_of_abstract_base_registers(
+        self, settings, tmp_path
+    ) -> None:
+        """A subclass inheriting Meta.abstract from its base still registers."""
+        settings.BASE_DIR = tmp_path
+        app_dir = tmp_path / "myapp"
+        app_dir.mkdir()
+        (app_dir / "__init__.py").write_text("")
+        fake_path = str(app_dir / "forms.py")
+        Path(fake_path).write_text("")
+
+        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+
+            class AbstractTenantForm(Form):
+                class Meta:
+                    abstract = True
+
+            class ConcreteInviteForm(AbstractTenantForm):
+                email = django_forms.EmailField()
+
+        backend = form_action_manager.default_backend
+        assert backend.get_meta("abstract_tenant_form") is None
+        assert backend.get_meta("concrete_invite_form") is not None
+
+    def test_subclass_redeclaring_abstract_skips_registration(
+        self, settings, tmp_path
+    ) -> None:
+        """A subclass with its own Meta.abstract = True stays unregistered."""
+        settings.BASE_DIR = tmp_path
+        app_dir = tmp_path / "myapp"
+        app_dir.mkdir()
+        (app_dir / "__init__.py").write_text("")
+        fake_path = str(app_dir / "forms.py")
+        Path(fake_path).write_text("")
+
+        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+
+            class RegisteredBaseForm(Form):
+                title = django_forms.CharField()
+
+            class ReabstractedForm(RegisteredBaseForm):
+                class Meta:
+                    abstract = True
+
+        backend = form_action_manager.default_backend
+        assert backend.get_meta("registered_base_form") is not None
+        assert backend.get_meta("reabstracted_form") is None
+
 
 class TestResetFormRegistrationState:
     """reset_form_registration_state clears every registry and warning buffer."""

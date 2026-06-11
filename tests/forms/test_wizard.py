@@ -134,6 +134,36 @@ class TestWizardRegistration:
 
         assert form_action_manager.default_backend.get_meta("abstract_wizard") is None
 
+    def test_concrete_subclass_of_abstract_base_registers(self) -> None:
+        """A subclass inheriting Meta.abstract from its base still registers."""
+
+        class AbstractFlowWizard(FormWizard):
+            class Meta:
+                abstract = True
+                steps: ClassVar = [("identity", IdentityStep)]
+
+        class ConcreteFlowWizard(AbstractFlowWizard):
+            def done(self, request, cleaned_data) -> HttpResponse:
+                return HttpResponse("ok")
+
+        backend = form_action_manager.default_backend
+        assert backend.get_meta("abstract_flow_wizard") is None
+        meta = backend.get_meta("concrete_flow_wizard")
+        assert meta is not None
+        assert meta["wizard_class"] is ConcreteFlowWizard
+
+    def test_subclass_redeclaring_abstract_skips_registration(self) -> None:
+        """A subclass with its own Meta.abstract = True stays unregistered."""
+
+        class ReabstractedWizard(DemoWizard):
+            class Meta:
+                abstract = True
+                steps: ClassVar = [("identity", IdentityStep)]
+
+        assert (
+            form_action_manager.default_backend.get_meta("reabstracted_wizard") is None
+        )
+
     def test_empty_steps_records_wizard_without_steps(self) -> None:
         """A wizard with empty Meta.steps is flagged for the E050 check."""
 
@@ -176,7 +206,7 @@ class TestWizardRegistration:
 
     def test_virtual_path_skips_registration(self) -> None:
         """A wizard defined in a virtual frame is not registered."""
-        with patch("next.forms.wizard._find_definition_frame", return_value="<stdin>"):
+        with patch("next.forms.base._find_definition_frame", return_value="<stdin>"):
 
             class VirtualWizard(FormWizard):
                 class Meta:
@@ -186,7 +216,7 @@ class TestWizardRegistration:
 
     def test_empty_path_skips_registration(self) -> None:
         """A wizard whose definition frame is empty is not registered."""
-        with patch("next.forms.wizard._find_definition_frame", return_value=""):
+        with patch("next.forms.base._find_definition_frame", return_value=""):
 
             class EmptyPathWizard(FormWizard):
                 class Meta:
@@ -198,7 +228,7 @@ class TestWizardRegistration:
         """A wizard defined inside the framework package is not registered."""
         framework_path = str(_FRAMEWORK_ROOT / "forms" / "wizard.py")
         with patch(
-            "next.forms.wizard._find_definition_frame", return_value=framework_path
+            "next.forms.base._find_definition_frame", return_value=framework_path
         ):
 
             class FrameworkWizard(FormWizard):
@@ -215,7 +245,7 @@ class TestWizardRegistration:
         fake_path = str(outside / "wizards.py")
         Path(fake_path).write_text("")
 
-        with patch("next.forms.wizard._find_definition_frame", return_value=fake_path):
+        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
 
             class OutsideWizard(FormWizard):
                 class Meta:
@@ -355,6 +385,96 @@ class TestWizardStorageInteraction:
         wizard = DemoWizard(_request())
         assert wizard.url_param == "step"
         assert wizard.wizard_id == "demo_wizard"
+        assert wizard.storage_id.endswith(":demo_wizard")
+        assert wizard.storage_id != wizard.wizard_id
+
+
+class TestWizardStorageScopeIsolation:
+    """Same-named wizards from different modules use distinct storage buckets."""
+
+    def _make_wizard(self, fake_path: str) -> type[FormWizard]:
+        with patch("next.forms.base._find_definition_frame", return_value=fake_path):
+
+            class CheckoutWizard(FormWizard):
+                class Meta:
+                    steps: ClassVar = [("identity", IdentityStep)]
+
+                def done(self, request, cleaned_data) -> HttpResponse:
+                    return HttpResponse("ok")
+
+        return CheckoutWizard
+
+    def _two_same_named_wizards(
+        self, base_dir: Path
+    ) -> tuple[type[FormWizard], type[FormWizard]]:
+        paths = []
+        for app in ("appone", "apptwo"):
+            app_dir = base_dir / app
+            app_dir.mkdir()
+            (app_dir / "__init__.py").write_text("")
+            wizards_file = app_dir / "wizards.py"
+            wizards_file.write_text("")
+            paths.append(str(wizards_file))
+        return self._make_wizard(paths[0]), self._make_wizard(paths[1])
+
+    def test_same_named_wizards_do_not_share_drafts(self, settings, tmp_path) -> None:
+        """Equally named wizards in one session keep separate stored steps."""
+        settings.BASE_DIR = tmp_path
+        first_cls, second_cls = self._two_same_named_wizards(tmp_path)
+        request = _request()
+
+        first = first_cls(request)
+        first.save_step("identity", {"name": "Ada"})
+        second = second_cls(request)
+
+        assert first.wizard_id == second.wizard_id == "checkout_wizard"
+        assert first.storage_id != second.storage_id
+        assert second.cleaned_data_so_far() == {}
+        assert second.completed_steps() == []
+
+    def test_clear_storage_does_not_wipe_other_wizard(
+        self, settings, tmp_path
+    ) -> None:
+        """`clear_storage` on one wizard leaves the same-named wizard's draft alone."""
+        settings.BASE_DIR = tmp_path
+        first_cls, second_cls = self._two_same_named_wizards(tmp_path)
+        request = _request()
+
+        first_cls(request).save_step("identity", {"name": "Ada"})
+        second_cls(request).clear_storage()
+
+        assert first_cls(request).cleaned_data_so_far() == {"name": "Ada"}
+
+    def test_page_scope_wizard_storage_scope_is_page_path(
+        self, settings, tmp_path
+    ) -> None:
+        """A page-scoped wizard keys its storage by the resolved page path."""
+        settings.BASE_DIR = tmp_path
+        page_dir = tmp_path / "shop"
+        page_dir.mkdir()
+        page_file = page_dir / "page.py"
+        page_file.write_text("")
+
+        wizard_cls = self._make_wizard(str(page_file))
+        assert wizard_cls.__dict__["_storage_scope_key"] == str(page_file.resolve())
+
+    def test_unregistered_wizard_falls_back_to_module_scope(self) -> None:
+        """An unregistered wizard derives its storage scope from its module."""
+        with patch("next.forms.base._find_definition_frame", return_value="<stdin>"):
+
+            class GhostWizard(FormWizard):
+                class Meta:
+                    steps: ClassVar = [("identity", IdentityStep)]
+
+                def done(self, request, cleaned_data) -> HttpResponse:
+                    return HttpResponse("ok")
+
+        assert "_storage_scope_key" not in GhostWizard.__dict__
+        request = _request()
+        wizard = GhostWizard(request)
+        assert wizard.storage_id.endswith(":ghost_wizard")
+        wizard.save_step("identity", {"name": "Ada"})
+        assert GhostWizard(request).cleaned_data_so_far() == {"name": "Ada"}
 
 
 class TestWizardFormResolution:

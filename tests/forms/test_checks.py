@@ -253,18 +253,19 @@ class TestCheckActionAppliedToClass:
         assert "MyBadClass" in errors[0].msg
         registration_diagnostics.action_applied_to_class.clear()
 
-    def test_applying_action_to_class_raises_and_records(self) -> None:
-        """@action raises TypeError on a class and records the qualname in E053 list."""
+    def test_applying_action_to_class_surfaces_through_check(self) -> None:
+        """@action on a class returns it untouched and the E053 check fires."""
         registration_diagnostics.action_applied_to_class.clear()
-        with pytest.raises(TypeError, match="form-less actions only"):
 
-            @action("bad_class")
-            class BadTargetClass:
-                pass
+        @action("bad_class")
+        class BadTargetClass:
+            pass
 
+        assert isinstance(BadTargetClass, type)
         errors = check_action_applied_to_class()
         assert len(errors) == 1
         assert errors[0].id == "next.E053"
+        assert "BadTargetClass" in errors[0].msg
         registration_diagnostics.action_applied_to_class.clear()
 
 

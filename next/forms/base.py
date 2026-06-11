@@ -44,8 +44,9 @@ def _is_framework_file(file_path: str) -> bool:
 
 def _compute_scope(file_path: str) -> str:
     """Return 'page' if file_path names an anchor file, otherwise 'shared'."""
-    anchor_names = frozenset(
-        next_framework_settings.FORM_ANCHOR_FILES or _ANCHOR_FILE_NAMES
+    configured = next_framework_settings.FORM_ANCHOR_FILES
+    anchor_names = (
+        frozenset(configured) if configured is not None else _ANCHOR_FILE_NAMES
     )
     return (
         "page" if Path(_resolved_path_str(file_path)).name in anchor_names else "shared"
@@ -137,19 +138,21 @@ def _find_definition_frame() -> str:
         return filename
 
 
-def _auto_register_form_class(cls: type) -> None:
-    """Register a form subclass with form_action_manager."""
-    if getattr(getattr(cls, "Meta", None), "abstract", False):
-        return
+def _registration_gate(cls: type) -> tuple[str, str, str] | None:
+    """Run the shared registration policy, returning (scope, name, file_path)."""
+    # Like Django model Meta, abstract is never inherited, so only the class's
+    # own namespace opts it out of registration.
+    if getattr(cls.__dict__.get("Meta"), "abstract", False):
+        return None
 
     file_path = _find_definition_frame()
 
     # Skip virtual frames (importlib bootstrap, interactive shell, etc.)
     if not file_path or file_path.startswith("<"):
-        return
+        return None
 
     if _is_framework_file(file_path):
-        return
+        return None
 
     base = getattr(settings, "BASE_DIR", None)
     if base is not None:
@@ -161,19 +164,27 @@ def _auto_register_form_class(cls: type) -> None:
             registration_diagnostics.outside_base_dir.append(
                 (cls.__qualname__, file_path)
             )
-            return
+            return None
 
     meta_scope = getattr(getattr(cls, "Meta", None), "scope", None)
     if meta_scope is not None and meta_scope not in ("page", "shared"):
         _record_invalid_meta_scope(cls, meta_scope)
-        return
+        return None
 
     scope = meta_scope if meta_scope is not None else _compute_scope(file_path)
-    name = _to_snake_case(cls.__name__)
+    return scope, _to_snake_case(cls.__name__), _resolved_path_str(file_path)
+
+
+def _auto_register_form_class(cls: type) -> None:
+    """Register a form subclass with form_action_manager."""
+    gate = _registration_gate(cls)
+    if gate is None:
+        return
+    scope, name, file_path = gate
     form_action_manager.register_action(
         ActionRegistration(
             name=name,
-            file_path=_resolved_path_str(file_path),
+            file_path=file_path,
             scope=scope,
             form_class=cls,
         )
