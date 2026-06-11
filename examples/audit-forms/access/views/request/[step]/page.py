@@ -18,6 +18,7 @@ class IdentityStep(ModelForm):
             "email": ComponentWidget("input", type="email"),
             "team": ComponentWidget("input"),
         }
+        abstract = True
 
 
 class ScopeStep(ModelForm):
@@ -31,10 +32,14 @@ class ScopeStep(ModelForm):
             "reason": ComponentWidget("textarea", rows=4),
             "expires_in_days": ComponentWidget("input", type="number"),
         }
+        abstract = True
 
 
 class ApprovalStep(Form):
     """Final wizard step that only confirms the merged request."""
+
+    class Meta:
+        abstract = True
 
 
 class AccessRequestWizard(FormWizard):

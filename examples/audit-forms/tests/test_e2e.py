@@ -46,7 +46,7 @@ def _walk_three_steps(client) -> None:
 
 
 def _wizard_form_block(html: str) -> str:
-    match = re.search(r"<form[^>]*>.*?</form>", html, flags=re.S)
+    match = re.search(r"<form[^>]*>.*?</form>", html, flags=re.DOTALL)
     assert match is not None
     return match.group(0)
 

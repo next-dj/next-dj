@@ -54,7 +54,7 @@ def _next_init_payload(html: str) -> dict:
 
 
 def _rename_form_block(html: str) -> str:
-    blocks = re.findall(r"<form[^>]*>.*?</form>", html, flags=re.S)
+    blocks = re.findall(r"<form[^>]*>.*?</form>", html, flags=re.DOTALL)
     return next(b for b in blocks if 'name="title"' in b and "wip_limit" not in b)
 
 
