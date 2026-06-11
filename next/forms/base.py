@@ -269,6 +269,7 @@ TypedChoiceField = django_forms.TypedChoiceField
 MultipleChoiceField = django_forms.MultipleChoiceField
 DateField = django_forms.DateField
 DateTimeField = django_forms.DateTimeField
+TimeField = django_forms.TimeField
 DecimalField = django_forms.DecimalField
 FloatField = django_forms.FloatField
 URLField = django_forms.URLField
@@ -321,6 +322,7 @@ __all__ = [
     "SelectMultiple",
     "TextInput",
     "Textarea",
+    "TimeField",
     "TimeInput",
     "TypedChoiceField",
     "URLField",
