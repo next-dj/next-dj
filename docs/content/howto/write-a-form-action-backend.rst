@@ -111,6 +111,29 @@ The factory passes the whole config entry to the constructor, so declare ``__ini
 
 Forward ``config`` to ``super().__init__`` so the registry is set up before you read any option.
 
+Change the Invalid Envelope
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The default backend answers an invalid submission with HTTP 200, the re-rendered origin page, and the ``X-Next-Form``/``X-Next-Action`` headers.
+Override ``shape_response`` to change the envelope without touching the HTML, for example for a client that expects 422 on validation errors.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   from django.http import HttpRequest, HttpResponse
+   from next.forms import ActionOutcome, ActionOutcomeKind, RegistryFormActionBackend
+
+   class UnprocessableBackend(RegistryFormActionBackend):
+       def shape_response(self, request: HttpRequest, outcome: ActionOutcome) -> HttpResponse:
+           response = super().shape_response(request, outcome)
+           if outcome.kind is ActionOutcomeKind.INVALID:
+               response.status_code = 422
+           return response
+
+``outcome.kind`` discriminates the pipeline outcomes, so the handler-result and wizard-advance envelopes stay default.
+Override ``render_invalid_page`` instead when only the error HTML changes and the envelope stays as shipped.
+See :doc:`/content/topics/forms/backends` for the two customisation layers and the ``ActionOutcome`` fields.
+
 Verification
 ------------
 

@@ -82,7 +82,7 @@ A backend subclasses ``next.forms.FormActionBackend``, an abstract base class wi
 ``dispatch(request, uid)``.
    Runs the handler for the given action UID and returns an ``HttpResponse``.
 
-The base class also offers two optional override points, ``get_meta`` and ``render_form_fragment``.
+The base class also offers three optional override points: ``get_meta``, ``render_invalid_page``, and ``shape_response``.
 
 ``get_meta`` and Multi-Backend Routing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -98,6 +98,25 @@ The base implementation returns ``None``.
 A custom backend that owns its own actions must return a truthy meta for those names, or the manager skips it and the ``{% form %}`` tag cannot find the action.
 A backend that defers entirely to ``RegistryFormActionBackend`` need not override ``get_meta``.
 
+Shaping the Response
+~~~~~~~~~~~~~~~~~~~~
+
+Every outcome of the dispatch pipeline leaves through the backend's ``shape_response(request, outcome)``.
+The ``outcome`` is an ``ActionOutcome``, a frozen keyword-only dataclass whose ``kind`` field is an ``ActionOutcomeKind`` member: ``RESULT`` for a handler return value, ``INVALID`` for a failed validation, and ``WIZARD_ADVANCE`` for a wizard step that moved forward.
+The other fields carry what each kind needs: the ``action_name`` and ``uid``, the raw handler return value, the bound failing ``form``, the parsed ``url_kwargs``, the wizard ``redirect_to`` target, and the live ``wizard`` instance.
+Fields may be added in future versions, so construct an ``ActionOutcome`` with keywords only.
+
+The base implementation delegates to ``FormActionDispatch.shape_response``, the default envelope.
+An invalid submission re-renders the origin page with HTTP 200 and the ``X-Next-Form``/``X-Next-Action`` headers, and a wizard advance redirects with HTTP 302.
+Both are behaviour of the default backend, not a guarantee of the endpoint.
+A custom backend may answer with any envelope.
+The ``X-Next-*`` header namespace is reserved for the framework.
+
+Customisation splits into two layers.
+Override ``render_invalid_page`` when only the error HTML changes.
+The default envelope keeps calling it on the invalid branch.
+Override ``shape_response`` when the envelope itself changes, such as a different status code, extra headers, or a response other than a redirect on a wizard advance.
+
 Building a Backend From Scratch
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -111,8 +130,7 @@ The four abstract methods must all be present.
    from typing import Any
    from django.http import HttpRequest, HttpResponse, HttpResponseNotFound
    from django.urls import path
-   from next.forms import ActionRegistration, FormActionBackend
-   from next.forms.dispatch import FormActionDispatch
+   from next.forms import ActionRegistration, FormActionBackend, FormActionDispatch
 
    class CustomBackend(FormActionBackend):
        def __init__(self, config: dict[str, Any] | None = None) -> None:
@@ -128,14 +146,15 @@ The four abstract methods must all be present.
            return [path("_next/custom/<str:uid>/", self.dispatch)]
 
        def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
-           meta = self._meta_for_uid(uid)
-           if meta is None:
+           entry = self._entry_for_uid(uid)
+           if entry is None:
                return HttpResponseNotFound()
-           return FormActionDispatch.dispatch(self, request, meta["name"], meta)
+           action_name, meta = entry
+           return FormActionDispatch.dispatch(self, request, action_name, meta)
 
 ``dispatch`` must always return an ``HttpResponse``.
 Return ``HttpResponseNotFound`` for an unknown UID rather than raising, so a stale URL gets a clean 404.
-Delegate the validation pipeline to ``FormActionDispatch.dispatch`` to reuse form binding, handler invocation, and error re-render.
+Delegate the validation pipeline to ``FormActionDispatch.dispatch``, which takes the action name and its stored ``ActionMeta``, to reuse form binding, handler invocation, and error re-render.
 
 RegistryFormActionBackend
 -------------------------
@@ -205,18 +224,14 @@ A custom backend that overrides ``dispatch`` reuses this pipeline through ``supe
 
 Override the validation pipeline itself only when subclassing ``RegistryFormActionBackend`` is not enough, which is rare.
 
-A custom ``dispatch`` that drives the pipeline by hand reuses two static helpers on ``FormActionDispatch``.
-
-``form_response(backend, request, action_name, form)``.
-   Returns the full-page HTML for an invalid form by re-rendering the origin page with the bound failing form.
-   This is the error path a custom ``dispatch`` calls when ``form.is_valid()`` returns false.
+A custom ``dispatch`` that drives the pipeline by hand reuses one static helper on ``FormActionDispatch``.
 
 ``ensure_http_response(response, request=None, action_name=None, backend=None)``.
    Coerces a handler return value into an ``HttpResponse``.
-   A string becomes a body, an object with a ``url`` becomes a redirect, and ``None`` re-renders through ``form_response`` when ``request``, ``action_name``, and ``backend`` are passed, otherwise it returns a 204.
+   A string becomes a body, an object with a ``url`` becomes a redirect, and ``None`` re-renders the origin page when ``request``, ``action_name``, and ``backend`` are passed, otherwise it returns a 204.
 
-Both helpers funnel into ``shape_response(backend, request, outcome)``, the single method that turns every outcome of the standard pipeline into the final ``HttpResponse``.
-A layer that must reshape responses globally hooks that one method instead of patching each dispatch branch.
+Every outcome of the standard pipeline funnels into the backend hook ``shape_response(request, outcome)`` described under `Shaping the Response`_.
+A layer that must reshape responses globally overrides that one hook instead of patching each dispatch branch.
 
 Backend vs Signal
 -----------------
@@ -269,16 +284,16 @@ Rate Limiting
 
 Override ``dispatch`` to check a rate limit before calling ``super().dispatch`` and return an ``HttpResponse`` with status 429 when the limit is exceeded.
 
-Custom Error Fragment
-~~~~~~~~~~~~~~~~~~~~~
+Custom Invalid-Page HTML
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-Override ``render_form_fragment`` to return custom HTML for the validation error path.
-The override signature is ``render_form_fragment(request, action_name, form, page_file_path=None, url_kwargs=None)``.
+Override ``render_invalid_page`` to return custom HTML for the validation error path.
+The override signature is ``render_invalid_page(request, action_name, form, page_file_path=None, url_kwargs=None)``.
 The dispatcher passes the URL kwargs it already parsed from the submission, and ``None`` tells the backend to parse them from the request.
 The abstract base returns an empty string.
 The bundled ``RegistryFormActionBackend`` re-renders the origin page through the page-template loader.
 When no action meta or template body is found, it falls back to rendering the form with its ``<p>`` layout template.
-Override ``render_form_fragment`` to replace this behaviour entirely.
+Override ``render_invalid_page`` to replace this behaviour entirely.
 
 See Also
 --------

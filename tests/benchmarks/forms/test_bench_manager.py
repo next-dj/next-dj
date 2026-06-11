@@ -111,7 +111,7 @@ class TestBenchManagerLookups:
 
 
 class TestBenchClearRegistries:
-    """`clear_registries` runs in test setup; should stay sub-µs per backend."""
+    """`clear_registries` runs in test setup and should stay sub-µs per backend."""
 
     @pytest.mark.benchmark(group="forms.manager")
     def test_clear_registries(self, benchmark) -> None:

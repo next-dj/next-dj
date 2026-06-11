@@ -13,7 +13,7 @@ It traces a submission from the template ``{% form %}`` tag through the validati
 Overview
 --------
 
-The dispatcher runs at ``/_next/form/<uid>/`` where the UID is the first 16 hex characters of the SHA-256 digest of the action name.
+The dispatcher runs at ``/_next/form/<uid>/`` where the UID is the first 16 hex characters of a SHA-256 digest of the scope key and the action name.
 The dispatcher loads the action handler, builds the form, runs the validation chain, and either calls the handler or re-renders the origin page.
 Any non-POST method short-circuits before that work and returns HTTP 405.
 
@@ -120,6 +120,7 @@ Extension Points
 ----------------
 
 - Subclass ``RegistryFormActionBackend`` and override ``dispatch`` to wrap the standard pipeline.
+- Override ``render_invalid_page`` for custom validation-error HTML, or ``shape_response`` for a custom response envelope.
 - Register the custom backend through ``FORM_ACTION_BACKENDS``.
 - Subscribe to ``action_dispatched`` for audit and cache invalidation.
 - Subscribe to ``form_validation_failed`` for alerting on failure rates.

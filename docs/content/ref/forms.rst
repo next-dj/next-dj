@@ -26,7 +26,8 @@ Stable.
 
 Advanced.
    ``FormProvider``, ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``,
-   ``FormActionDispatch``, ``ActionRegistration``, ``ActionMeta``, ``ComponentWidget``,
+   ``FormActionDispatch``, ``ActionOutcome``, ``ActionOutcomeKind``,
+   ``ActionRegistration``, ``ActionMeta``, ``ComponentWidget``,
    ``FormWizardBackend``, ``CacheFormWizardBackend``, ``WizardBackendManager``, ``wizard_backend_manager``,
    ``build_form_namespace_for_action``, ``validated_next_form_page_path``,
    the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``,
@@ -131,9 +132,10 @@ Markers
 Dispatch
 ~~~~~~~~
 
-``FormActionDispatch`` is the only public member of this module, in the Advanced tier described above.
-Its ``shape_response`` static method is the single point that turns every pipeline outcome into the final ``HttpResponse``.
-``form_response`` and ``ensure_http_response`` are thin delegates into it, kept for custom backends that drive the pipeline by hand.
+``FormActionDispatch``, ``ActionOutcome``, and ``ActionOutcomeKind`` are the public members of this module, in the Advanced tier described above.
+``ActionOutcome`` is the frozen keyword-only dataclass a backend's ``shape_response`` hook receives, with ``ActionOutcomeKind`` as its ``kind`` discriminator.
+``FormActionDispatch.shape_response`` builds the default envelope for one outcome, and the backend hook delegates to it unless overridden.
+``ensure_http_response`` coerces a handler return value into an ``HttpResponse``, kept for custom backends that drive the pipeline by hand.
 The underscore-prefixed helpers are internal hooks per the ``Internal hooks`` tier described above.
 
 .. automodule:: next.forms.dispatch

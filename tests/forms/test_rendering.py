@@ -45,13 +45,13 @@ class RenderWizard(FormWizard):
         return HttpResponseRedirect("/thanks/")
 
 
-class TestRenderFormFragment:
-    """render_form_fragment: unknown action, page template, fallback, context."""
+class TestRenderInvalidPage:
+    """render_invalid_page: unknown action, page template, fallback, context."""
 
     def test_unknown_action_returns_empty(self, mock_http_request) -> None:
         """Unknown action renders empty string."""
         request = mock_http_request(method="GET")
-        html = form_action_manager.render_form_fragment(
+        html = form_action_manager.default_backend.render_invalid_page(
             request, "unknown_action_xyz", None
         )
         assert html == ""
@@ -60,7 +60,7 @@ class TestRenderFormFragment:
         """Render form using the page template for ``page_file_path``."""
         request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "test"})
-        html = form_action_manager.render_form_fragment(
+        html = form_action_manager.default_backend.render_invalid_page(
             request,
             "simple_form",
             form,
@@ -72,7 +72,7 @@ class TestRenderFormFragment:
         """Render form via registry template for ``page_file_path`` returns HTML."""
         request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "x"})
-        html = form_action_manager.render_form_fragment(
+        html = form_action_manager.default_backend.render_invalid_page(
             request,
             "simple_form",
             form,
@@ -84,7 +84,7 @@ class TestRenderFormFragment:
     def test_form_none_no_template_returns_string(self, mock_http_request) -> None:
         """Form None still returns a string when a page template exists."""
         request = mock_http_request(method="GET")
-        html = form_action_manager.render_form_fragment(
+        html = form_action_manager.default_backend.render_invalid_page(
             request,
             "simple_form",
             form=None,
@@ -136,7 +136,7 @@ class TestRenderFormFragment:
         template_body: str,
         output_mode: str,
     ) -> None:
-        """Render fragment reading the sibling template.djx of ``page_file_path``."""
+        """Render the page reading the sibling template.djx of ``page_file_path``."""
         request = mock_http_request(method="GET")
         form = SimpleForm(initial={"name": "a"})
         backend = form_action_manager.default_backend
@@ -147,7 +147,7 @@ class TestRenderFormFragment:
         template_djx = tmp_path / "template.djx"
         template_djx.write_text(template_body)
 
-        html = backend.render_form_fragment(
+        html = backend.render_invalid_page(
             request,
             "simple_form",
             form,

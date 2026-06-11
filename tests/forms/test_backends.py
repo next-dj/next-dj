@@ -8,6 +8,8 @@ from django.test import override_settings
 from django.urls import NoReverseMatch, clear_script_prefix, set_script_prefix
 
 from next.forms import (
+    ActionOutcome,
+    ActionOutcomeKind,
     ActionRegistration,
     FormActionBackend,
     FormActionFactory,
@@ -391,7 +393,7 @@ class TestNameIndexScopeFilter:
 
 
 class TestFormActionBackendAbstract:
-    """FormActionBackend default implementations: get_meta, render_form_fragment."""
+    """FormActionBackend defaults: get_meta, render_invalid_page, shape_response."""
 
     def test_get_meta_returns_none(self) -> None:
         """Abstract backend get_meta returns None."""
@@ -412,8 +414,8 @@ class TestFormActionBackendAbstract:
         stub = StubBackend()
         assert stub.get_meta("any") is None
 
-    def test_render_form_fragment_returns_empty(self) -> None:
-        """Abstract backend render_form_fragment returns empty string."""
+    def test_render_invalid_page_returns_empty(self) -> None:
+        """Abstract backend render_invalid_page returns empty string."""
 
         class StubBackend(FormActionBackend):
             def register_action(self, *args: object, **kwargs: object) -> None:
@@ -430,7 +432,32 @@ class TestFormActionBackendAbstract:
 
         stub = StubBackend()
         req = HttpRequest()
-        assert stub.render_form_fragment(req, "x", None, None) == ""
+        assert stub.render_invalid_page(req, "x", None, None) == ""
+
+    def test_shape_response_default_envelope(self) -> None:
+        """Abstract backend shape_response delegates to the default envelope."""
+
+        class StubBackend(FormActionBackend):
+            def register_action(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            def get_action_url(self, action_name: str, **kwargs: object) -> str:
+                return ""
+
+            def generate_urls(self) -> list:
+                return []
+
+            def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
+                return HttpResponse()
+
+        stub = StubBackend()
+        req = HttpRequest()
+        outcome = ActionOutcome(
+            kind=ActionOutcomeKind.RESULT, action_name="x", raw="hi"
+        )
+        resp = stub.shape_response(req, outcome)
+        assert resp.status_code == 200
+        assert resp.content == b"hi"
 
 
 class TestFormActionManagerReloadConfig:

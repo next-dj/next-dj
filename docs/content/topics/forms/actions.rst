@@ -133,8 +133,12 @@ Any additional parameter is resolved through the DI injector: ``DUrl[...]`` mark
 The default implementation on ``BaseForm`` returns ``redirect_to_origin(request)``.
 The default implementation on ``BaseModelForm`` calls ``self.save()`` then returns ``redirect_to_origin(request)``.
 
-The return value follows the same contract as a handler function: an ``HttpResponse`` subclass, a string, an object with a ``url`` attribute, or ``None``.
+The return value follows the same contract as a handler function, checked in a fixed order.
+An ``HttpResponse`` instance passes through unchanged, and this check runs first, so every rich response type the framework ships subclasses ``HttpResponse``.
+A string becomes the body of an HTTP 200 response, never a redirect target.
 ``None`` triggers a re-render of the origin page with HTTP 200.
+An object with a truthy ``url`` attribute redirects to that URL, a last-resort convenience for model-like objects.
+Any other return value emits a ``RuntimeWarning`` and is treated as ``None``.
 
 ``get_initial`` Pre-Populates the Form
 --------------------------------------
@@ -196,14 +200,16 @@ Annotate the parameter with ``DForm[FormClass]`` to type the form for editors an
 .. code-block:: python
    :caption: page.py
 
+   from django.shortcuts import redirect
    from next.forms import action
    from next.forms.markers import DForm
 
    @action("create_contact", form_class=ContactForm)
    def create_contact(form: DForm[ContactForm]):
        form.save()
-       return "/contacts/"
+       return redirect("/contacts/")
 
+A handler that returns a bare string sends it as the response body, so a redirect must come back as a response object.
 The marker only types the parameter.
 The framework still injects the same bound form a parameter named ``form`` would receive.
 See :doc:`/content/ref/decorators` for ``DForm`` and ``FormProvider``.
@@ -224,7 +230,7 @@ A ``(FormClass, init_kwargs)`` tuple.
 .. code-block:: python
    :caption: page.py — a factory returning the tuple form
 
-   from django.shortcuts import get_object_or_404
+   from django.shortcuts import get_object_or_404, redirect
    from next.forms import action
    from next.urls import DUrl
 
@@ -235,7 +241,7 @@ A ``(FormClass, init_kwargs)`` tuple.
    @action("edit_note", form_class=edit_form_factory)
    def edit_note(form: NoteForm):
        form.save()
-       return "/notes/"
+       return redirect("/notes/")
 
 The tuple path bypasses ``get_initial``, so do not rely on ``get_initial`` running when a factory returns the tuple form.
 See :doc:`formsets` for the same pattern applied to formset and inline-formset actions.

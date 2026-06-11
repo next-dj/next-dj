@@ -16,7 +16,7 @@ from django.views.decorators.http import require_http_methods
 from next.conf import import_class_cached
 
 from ._request_utils import _url_kwargs_from_post
-from .dispatch import FormActionDispatch
+from .dispatch import ActionOutcome, FormActionDispatch
 from .registration import registration_diagnostics
 from .rendering import _ErrorRenderParams, render_form_page_with_errors
 from .signals import action_registered
@@ -141,11 +141,11 @@ class FormActionBackend(ABC):
         self,
         _action_name: str,
         _page_path: str | None = None,
-    ) -> "dict[str, Any] | None":
+    ) -> "ActionMeta | None":
         """Return optional per-action metadata for subclasses."""
         return None
 
-    def render_form_fragment(
+    def render_invalid_page(
         self,
         _request: "HttpRequest",
         _action_name: str,
@@ -153,8 +153,16 @@ class FormActionBackend(ABC):
         _page_file_path: "Path | None" = None,
         _url_kwargs: dict[str, object] | None = None,
     ) -> str:
-        """Return custom HTML for validation errors (override in subclasses)."""
+        """Return the full origin-page HTML for a failed validation."""
         return ""
+
+    def shape_response(
+        self,
+        request: "HttpRequest",
+        outcome: ActionOutcome,
+    ) -> "HttpResponse":
+        """Turn one pipeline outcome into the HTTP response. Default envelope."""
+        return FormActionDispatch.shape_response(self, request, outcome)
 
 
 def _make_uid_for_action(scope_key: str, name: str) -> str:
@@ -297,29 +305,23 @@ class RegistryFormActionBackend(FormActionBackend):
         if key is None or key not in self._registry:
             return HttpResponseNotFound()
         meta = self._registry[key]
-        return FormActionDispatch.dispatch(
-            self, request, key[1], cast("dict[str, Any]", meta)
-        )
+        return FormActionDispatch.dispatch(self, request, key[1], meta)
 
     def get_meta(
         self,
         action_name: str,
         page_path: str | None = None,
-    ) -> "dict[str, Any] | None":
+    ) -> "ActionMeta | None":
         """Return stored `ActionMeta` for the name, if any."""
         if page_path is not None:
             key = (_resolved_path_str(page_path), action_name)
             meta = self._registry.get(key)
             if meta is not None:
-                return cast("dict[str, Any]", meta)
+                return meta
 
-        fallback_meta = self._fallback_meta(action_name, scoped=page_path is not None)
-        if fallback_meta is not None:
-            return cast("dict[str, Any]", fallback_meta)
+        return self._fallback_meta(action_name, scoped=page_path is not None)
 
-        return None
-
-    def render_form_fragment(
+    def render_invalid_page(
         self,
         request: "HttpRequest",
         action_name: str,

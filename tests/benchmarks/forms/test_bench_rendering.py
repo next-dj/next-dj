@@ -22,7 +22,7 @@ class _ErrorForm(Form):
     body = forms.CharField(widget=forms.Textarea)
 
 
-_FRAGMENT_ACTION = "bench_fragment_action"
+_INVALID_PAGE_ACTION = "bench_invalid_page_action"
 _TAG_ACTION = "bench_form_tag_action"
 
 
@@ -37,7 +37,7 @@ def error_render_setup(tmp_path: Path) -> tuple[RegistryFormActionBackend, Path]
     backend = RegistryFormActionBackend()
     backend.register_action(
         ActionRegistration(
-            name=_FRAGMENT_ACTION,
+            name=_INVALID_PAGE_ACTION,
             file_path=str(page_file),
             scope="page",
             form_class=_ErrorForm,
@@ -46,11 +46,11 @@ def error_render_setup(tmp_path: Path) -> tuple[RegistryFormActionBackend, Path]
     return backend, page_file
 
 
-class TestBenchRenderFormFragment:
+class TestBenchRenderInvalidPage:
     """Validation-failure re-render through ``render_form_page_with_errors``."""
 
     @pytest.mark.benchmark(group="forms.rendering")
-    def test_render_form_fragment_with_errors(
+    def test_render_invalid_page_with_errors(
         self,
         error_render_setup: tuple[RegistryFormActionBackend, Path],
         benchmark,
@@ -61,9 +61,9 @@ class TestBenchRenderFormFragment:
         form.is_valid()
 
         def run() -> str:
-            return backend.render_form_fragment(
+            return backend.render_invalid_page(
                 request,
-                _FRAGMENT_ACTION,
+                _INVALID_PAGE_ACTION,
                 form,
                 page_file_path=page_file,
             )

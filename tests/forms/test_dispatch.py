@@ -18,6 +18,8 @@ from next.components.info import ComponentInfo
 from next.components.renderers import _inject_component_context
 from next.deps import REQUEST_DEP_CACHE_ATTR, Depends, resolver
 from next.forms import (
+    ActionOutcome,
+    ActionOutcomeKind,
     ActionRegistration,
     Form,
     FormActionDispatch,
@@ -175,26 +177,31 @@ class TestFormActionDispatch:
     """FormActionDispatch.ensure_http_response coercion variants."""
 
     @pytest.mark.parametrize(
-        ("response_val", "kwargs", "expected_status", "assert_extra"),
+        ("response_val", "kwargs", "expected_status", "assert_extra", "warns"),
         [
-            (None, {}, 204, None),
-            ("hello", {}, 200, lambda r: r.content == b"hello"),
+            (None, {}, 204, None, False),
+            ("hello", {}, 200, lambda r: r.content == b"hello", False),
             (
                 type("R", (), {"url": "/target/"})(),
                 {"request": HttpRequest()},
                 302,
                 lambda r: r.url == "/target/",
+                False,
             ),
-            (object(), {}, 204, None),
-            (type("E", (), {"url": None})(), {}, 204, None),
+            (object(), {}, 204, None, True),
+            (type("E", (), {"url": None})(), {}, 204, None, True),
         ],
         ids=("none_val", "str_val", "redirect_val", "unknown_obj", "empty_url"),
     )
     def test_ensure_http_response_variants(
-        self, response_val, kwargs, expected_status, assert_extra
+        self, response_val, kwargs, expected_status, assert_extra, warns
     ) -> None:
         """ensure_http_response: None, str, redirect-like, unknown, empty url."""
-        resp = FormActionDispatch.ensure_http_response(response_val, **kwargs)
+        if warns:
+            with pytest.warns(RuntimeWarning, match="unsupported"):
+                resp = FormActionDispatch.ensure_http_response(response_val, **kwargs)
+        else:
+            resp = FormActionDispatch.ensure_http_response(response_val, **kwargs)
         assert resp.status_code == expected_status
         if assert_extra is not None:
             assert assert_extra(resp)
@@ -234,6 +241,9 @@ class TestDispatchViaClient:
         assert resp.status_code == 200
         c = resp.content
         assert b"error" in c.lower() or b"required" in c.lower() or b"name" in c
+        meta = form_action_manager.default_backend.get_meta("simple_form")
+        assert resp["X-Next-Form"] == "invalid"
+        assert resp["X-Next-Action"] == meta["uid"]
 
     def test_invalid_form_without_next_page_returns_400(self, client_no_csrf) -> None:
         """Invalid POST without _next_form_page returns 400."""
@@ -255,9 +265,11 @@ class TestDispatchViaClient:
             follow=False,
         )
         # SimpleForm.on_valid returns None, which ensure_http_response routes
-        # into form_response, so the page re-renders with 200.
+        # into _form_response, so the page re-renders with 200.
         assert resp.status_code == 200
         assert "Location" not in resp.headers
+        assert "X-Next-Form" not in resp.headers
+        assert "X-Next-Action" not in resp.headers
 
     def test_redirect_action_returns_redirect(self, client_no_csrf) -> None:
         """Redirect action returns 302 redirect."""
@@ -292,12 +304,12 @@ class TestDispatchViaClient:
             },
             follow=False,
         )
-        # None → ensure_http_response → form_response → 200
+        # None → ensure_http_response → _form_response → 200
         assert resp.status_code == 200
 
 
-class TestFormDispatchRenderFragmentBranches:
-    """``RegistryFormActionBackend.render_form_fragment`` fallbacks."""
+class TestFormDispatchRenderInvalidPageBranches:
+    """``RegistryFormActionBackend.render_invalid_page`` fallbacks."""
 
     def test_unknown_action_uses_form_fallback(self, mock_http_request) -> None:
         """Unknown action meta falls back to the version-safe bare-form render."""
@@ -319,7 +331,7 @@ class TestFormDispatchRenderFragmentBranches:
         )
         req = mock_http_request(method="GET")
         form = F()
-        html = backend.render_form_fragment(
+        html = backend.render_invalid_page(
             req,
             "missing_action",
             form,
@@ -352,7 +364,7 @@ class TestFormDispatchRenderFragmentBranches:
         blank_page = tmp_path / "page.py"
         blank_page.write_text("")
 
-        html = backend.render_form_fragment(
+        html = backend.render_invalid_page(
             req,
             "frag",
             form,
@@ -456,10 +468,10 @@ class TestFormDispatchRenderFragmentBranches:
         [["list", "value"], "not_a_number"],
         ids=["non_string", "string_not_int"],
     )
-    def test_render_form_fragment_survives_unusual_url_param_values(
+    def test_render_invalid_page_survives_unusual_url_param_values(
         self, mock_http_request, url_param_value
     ) -> None:
-        """`render_form_fragment` handles url_param values that aren't int-convertible strings."""
+        """`render_invalid_page` handles url_param values that aren't int-convertible strings."""
         backend = RegistryFormActionBackend()
 
         class TestForm(Form):
@@ -487,7 +499,7 @@ class TestFormDispatchRenderFragmentBranches:
         page._template_registry[file_path] = "{{ form.name }}"
         try:
             form = TestForm(initial={"name": "test"})
-            html = backend.render_form_fragment(
+            html = backend.render_invalid_page(
                 request,
                 "test_action",
                 form,
@@ -653,9 +665,78 @@ class TestDispatchOnValid:
         assert meta is not None
 
         # None → ensure_http_response(None, request, action_name, backend)
-        # → form_response → validated_next_form_page_path → None → 400
+        # → _form_response → validated_next_form_page_path → None → 400
         response = FormActionDispatch.dispatch(backend, request, "none_form", meta)
         assert response.status_code == 400
+
+
+class TestShapeResponseHook:
+    """Backend `shape_response` hook and the default invalid envelope."""
+
+    def test_custom_backend_controls_invalid_envelope(self, mock_http_request) -> None:
+        """An override changes the status of the invalid response."""
+        outcomes: list[ActionOutcome] = []
+
+        class TeapotBackend(RegistryFormActionBackend):
+            def shape_response(self, request, outcome) -> HttpResponse:
+                if outcome.kind == ActionOutcomeKind.INVALID:
+                    outcomes.append(outcome)
+                    return HttpResponse("rejected", status=422)
+                return super().shape_response(request, outcome)
+
+        class F(Form):
+            name = django_forms.CharField(max_length=10)
+
+        def handler(form: F) -> HttpResponse:
+            return HttpResponse("ok")
+
+        backend = TeapotBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="hook_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=F,
+            )
+        )
+        post = QueryDict(mutable=True)
+        post["name"] = ""
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+        meta = backend.get_meta("hook_action")
+        assert meta is not None
+
+        response = FormActionDispatch.dispatch(backend, request, "hook_action", meta)
+        assert response.status_code == 422
+        assert response.content == b"rejected"
+        assert outcomes[0].uid == meta["uid"]
+        assert outcomes[0].form is not None
+
+    def test_invalid_without_uid_omits_action_header(self, mock_http_request) -> None:
+        """The default envelope skips X-Next-Action when the outcome has no uid."""
+        backend = RegistryFormActionBackend()
+
+        class F(Form):
+            name = django_forms.CharField(max_length=10)
+
+        form = F(data={"name": ""})
+        assert not form.is_valid()
+
+        post = QueryDict(mutable=True)
+        post["_next_form_page"] = str(PAGE_MODULE_FOR_FORM_TESTS)
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+        response = FormActionDispatch.shape_response(
+            backend,
+            request,
+            ActionOutcome(
+                kind=ActionOutcomeKind.INVALID,
+                action_name="missing_action",
+                form=form,
+            ),
+        )
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        assert "X-Next-Action" not in response.headers
 
 
 class TestResolveFormClass:
@@ -1036,6 +1117,7 @@ class TestWizardDispatchViaClient:
         """An invalid step re-renders the page and stores nothing."""
         resp = self._post_step(client_no_csrf, "identity", {"name": ""})
         assert resp.status_code == 200
+        assert resp["X-Next-Form"] == "invalid"
 
     def test_last_step_calls_done_with_merged_data(self, client_no_csrf) -> None:
         """The final step finalises with the merged cleaned data and clears storage."""
@@ -1212,3 +1294,75 @@ class TestWizardDispatchViaClient:
         assert resp.status_code == 302
         assert resp.url == "/thanks/"
         assert KwargsDispatchWizard.seen_kwargs[0][0] == "identity"
+
+
+@pytest.mark.django_db()
+class TestWizardOutcomePayload:
+    """Wizard outcomes carry the live wizard instance and the action uid."""
+
+    @staticmethod
+    def _recording_backend(outcomes: list) -> RegistryFormActionBackend:
+        class RecordingBackend(RegistryFormActionBackend):
+            def shape_response(self, request, outcome) -> HttpResponse:
+                outcomes.append(outcome)
+                return super().shape_response(request, outcome)
+
+        backend = RecordingBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="recorded_wizard",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                wizard_class=DispatchWizard,
+            )
+        )
+        return backend
+
+    @staticmethod
+    def _wizard_post(mock_http_request, name: str) -> MagicMock:
+        post = QueryDict(mutable=True)
+        post["name"] = name
+        post["_url_param_step"] = "identity"
+        post["_next_form_origin"] = "/request/identity/"
+        post["_next_form_page"] = str(PAGE_MODULE_FOR_FORM_TESTS)
+        return mock_http_request(
+            method="POST", POST=post, FILES=None, session=SessionStore()
+        )
+
+    def test_wizard_advance_outcome_carries_wizard_and_uid(
+        self, mock_http_request
+    ) -> None:
+        """A valid non-final step produces a wizard_advance outcome with payload."""
+        outcomes: list[ActionOutcome] = []
+        backend = self._recording_backend(outcomes)
+        request = self._wizard_post(mock_http_request, "Ada")
+        meta = backend.get_meta("recorded_wizard")
+        assert meta is not None
+
+        response = FormActionDispatch.dispatch(
+            backend, request, "recorded_wizard", meta
+        )
+        assert response.status_code == 302
+        outcome = outcomes[-1]
+        assert outcome.kind == ActionOutcomeKind.WIZARD_ADVANCE
+        assert isinstance(outcome.wizard, DispatchWizard)
+        assert outcome.uid == meta["uid"]
+        assert outcome.redirect_to == "/request/scope/"
+
+    def test_wizard_invalid_outcome_carries_wizard(self, mock_http_request) -> None:
+        """An invalid step produces an invalid outcome holding the wizard."""
+        outcomes: list[ActionOutcome] = []
+        backend = self._recording_backend(outcomes)
+        request = self._wizard_post(mock_http_request, "")
+        meta = backend.get_meta("recorded_wizard")
+        assert meta is not None
+
+        response = FormActionDispatch.dispatch(
+            backend, request, "recorded_wizard", meta
+        )
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        assert response["X-Next-Action"] == meta["uid"]
+        outcome = outcomes[-1]
+        assert outcome.kind == ActionOutcomeKind.INVALID
+        assert isinstance(outcome.wizard, DispatchWizard)

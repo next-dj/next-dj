@@ -15,9 +15,7 @@ from .dispatch import _form_action_context_callable
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
-    from django import forms as django_forms
     from django.http import HttpRequest
     from django.urls import URLPattern
 
@@ -111,21 +109,6 @@ class FormActionManager:
                 return url
         msg = f"Unknown form action: {action_name}"
         raise KeyError(msg)
-
-    def render_form_fragment(
-        self,
-        request: "HttpRequest",
-        action_name: str,
-        form: "django_forms.Form | None",
-        page_file_path: "Path | None" = None,
-    ) -> str:
-        """Delegate rendering to the first backend."""
-        return self._first_backend().render_form_fragment(
-            request,
-            action_name,
-            form,
-            page_file_path,
-        )
 
     @property
     def default_backend(self) -> "FormActionBackend":

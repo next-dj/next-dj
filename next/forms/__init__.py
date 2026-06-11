@@ -57,7 +57,7 @@ from .base import (
     Widget,
 )
 from .decorators import action
-from .dispatch import FormActionDispatch
+from .dispatch import ActionOutcome, ActionOutcomeKind, FormActionDispatch
 from .formsets import cleanup_extra_initial
 from .manager import (
     FormActionManager,
@@ -105,6 +105,8 @@ __all__ = [
     "FORM_ACTION_REVERSE_NAME",
     "URL_NAME_FORM_ACTION",
     "ActionMeta",
+    "ActionOutcome",
+    "ActionOutcomeKind",
     "ActionRegistration",
     "BaseForm",
     "BaseModelForm",

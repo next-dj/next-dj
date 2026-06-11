@@ -37,7 +37,7 @@ class TestCleanupExtraInitial:
             assert f.initial == {}
 
     def test_form_without_instance_attribute(self) -> None:
-        # Plain BaseFormSet rows have no `.instance`; helper still runs.
+        # Plain BaseFormSet rows have no `.instance`, the helper still runs.
         formset = _RowFormset()
         cleanup_extra_initial(formset)
         assert all(f.initial == {} for f in formset.forms)
