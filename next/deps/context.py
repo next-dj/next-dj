@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 RESERVED_KEYS: Final[frozenset[str]] = frozenset(
-    {"request", "form", "_cache", "_stack", "_context_data"}
+    {"request", "form", "cleaned_data", "_cache", "_stack", "_context_data"}
 )
 
 
@@ -36,3 +36,4 @@ class ResolutionContext:
     context_data: Mapping[str, Any]
     cache: DependencyCache
     stack: list[str] = field(default_factory=list)
+    cleaned_data: Mapping[str, Any] | None = None

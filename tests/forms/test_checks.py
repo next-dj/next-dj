@@ -1,7 +1,10 @@
+from typing import ClassVar
+
 import pytest
+from django import forms as django_forms
 from django.test import override_settings
 
-from next.forms import ActionRegistration, RegistryFormActionBackend
+from next.forms import ActionRegistration, FormWizard, RegistryFormActionBackend
 from next.forms.backends import _handler_fingerprint, record_possible_collision
 from next.forms.checks import (
     check_action_applied_to_class,
@@ -13,6 +16,7 @@ from next.forms.checks import (
     check_form_wizard_steps,
     check_forms_outside_base_dir,
     check_invalid_form_meta_scope,
+    check_wizard_step_actions,
 )
 from next.forms.decorators import action
 from next.forms.manager import form_action_manager
@@ -368,7 +372,7 @@ def _without_sessions(installed_apps: list[str]) -> list[str]:
 
 
 class TestCheckFormWizardSessions:
-    """check_form_wizard_sessions: W056 for cache wizard storage without sessions."""
+    """check_form_wizard_sessions: W056 for session-bound storage without sessions."""
 
     def _register_wizard(self) -> None:
         form_action_manager.register_action(
@@ -416,13 +420,117 @@ class TestCheckFormWizardSessions:
         self._register_wizard()
         assert check_form_wizard_sessions() == []
 
-    def test_cache_backend_without_sessions_is_w056(self, settings) -> None:
-        """The default cache backend without sessions produces W056."""
+    def test_default_backend_without_sessions_is_w056(self, settings) -> None:
+        """The default session backend without sessions produces W056."""
         settings.INSTALLED_APPS = _without_sessions(settings.INSTALLED_APPS)
         self._register_wizard()
         warnings = check_form_wizard_sessions()
         assert len(warnings) == 1
         assert warnings[0].id == "next.W056"
+
+    def test_cache_backend_without_sessions_is_w056(self, settings) -> None:
+        """The cache backend keys by session and warns without sessions too."""
+        settings.INSTALLED_APPS = _without_sessions(settings.INSTALLED_APPS)
+        settings.NEXT_FRAMEWORK = {
+            "FORM_WIZARD_BACKEND": {
+                "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
+                "OPTIONS": {},
+            }
+        }
+        self._register_wizard()
+        warnings = check_form_wizard_sessions()
+        assert len(warnings) == 1
+        assert warnings[0].id == "next.W056"
+
+
+class _W057StepForm(django_forms.Form):
+    """Plain step form registered manually as a standalone action in tests."""
+
+    name = django_forms.CharField()
+
+
+class _W057Wizard(FormWizard):
+    """Wizard kept out of auto-registration and registered manually in tests."""
+
+    class Meta:
+        """One static step pointing at the shared test form."""
+
+        abstract = True
+        steps: ClassVar = [("identity", _W057StepForm)]
+
+
+class TestCheckWizardStepActions:
+    """check_wizard_step_actions: W057 when a step doubles as a standalone action."""
+
+    def _isolated_backend(self, monkeypatch) -> RegistryFormActionBackend:
+        backend = RegistryFormActionBackend()
+        monkeypatch.setattr(form_action_manager, "_backends", [backend])
+        return backend
+
+    def _register(
+        self, backend: RegistryFormActionBackend, *, with_step_action: bool
+    ) -> None:
+        if with_step_action:
+            backend.register_action(
+                ActionRegistration(
+                    name="w057_step_form",
+                    file_path=_FAKE_FILE,
+                    scope="shared",
+                    form_class=_W057StepForm,
+                )
+            )
+        backend.register_action(
+            ActionRegistration(
+                name="w057_wizard",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                wizard_class=_W057Wizard,
+            )
+        )
+
+    def test_step_registered_as_action_is_w057(self, monkeypatch) -> None:
+        """A step class living in the action registry produces W057."""
+        backend = self._isolated_backend(monkeypatch)
+        self._register(backend, with_step_action=True)
+        warnings = check_wizard_step_actions()
+        assert len(warnings) == 1
+        assert warnings[0].id == "next.W057"
+        assert "_W057StepForm" in warnings[0].msg
+        assert "w057_step_form" in warnings[0].msg
+
+    def test_unregistered_step_is_clean(self, monkeypatch) -> None:
+        """A step class absent from the action registry yields no warning."""
+        backend = self._isolated_backend(monkeypatch)
+        self._register(backend, with_step_action=False)
+        assert check_wizard_step_actions() == []
+
+    def test_wizard_class_without_static_steps_is_skipped(self, monkeypatch) -> None:
+        """A wizard stub without `_static_steps` is ignored by the check."""
+        backend = self._isolated_backend(monkeypatch)
+        backend.register_action(
+            ActionRegistration(
+                name="w057_stub_wizard",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                wizard_class=type("StubWizard", (), {}),
+            )
+        )
+        assert check_wizard_step_actions() == []
+
+    def test_factory_form_class_is_ignored(self, monkeypatch) -> None:
+        """A callable form factory never matches a step class."""
+        backend = self._isolated_backend(monkeypatch)
+        backend.register_action(
+            ActionRegistration(
+                name="w057_factory",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+                form_class=lambda: _W057StepForm,
+            )
+        )
+        self._register(backend, with_step_action=False)
+        assert check_wizard_step_actions() == []
 
 
 class TestCheckFormAnchorFiles:

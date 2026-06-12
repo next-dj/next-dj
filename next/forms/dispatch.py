@@ -529,7 +529,7 @@ class FormActionDispatch:
         if form_class is None:
             return HttpResponseBadRequest("Unknown wizard step")
 
-        form_kwargs = wizard.get_form_kwargs()
+        form_kwargs = wizard.get_form_kwargs(step_name)
         files = request.FILES if hasattr(request, "FILES") else None
         form = form_class(request.POST, files, **form_kwargs)
         if not form.is_valid():
@@ -565,9 +565,17 @@ class FormActionDispatch:
             # earlier step has no stored data, so reroute to the first gap.
             next_step = wizard.first_incomplete_step()
         if next_step is None:
-            merged = wizard.cleaned_data_so_far()
+            merged = wizard.get_all_cleaned_data()
+            resolved = resolver.resolve_dependencies(
+                wizard.done,
+                request=request,
+                cleaned_data=merged,
+                _cache=state.dep_cache,
+                _stack=state.dep_stack,
+                **state.url_kwargs,
+            )
             start = time.perf_counter()
-            raw = wizard.done(request, merged)
+            raw = wizard.done(**resolved)
             duration_ms = (time.perf_counter() - start) * 1000
             response = backend.shape_response(
                 request,

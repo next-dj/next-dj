@@ -88,7 +88,7 @@ class ConditionalDispatchWizard(FormWizard):
     """Wizard that inserts a step based on the first step's answer."""
 
     class Meta:
-        """Two declared steps that a steps_for override can expand."""
+        """Two declared steps that a get_steps override can expand."""
 
         steps: ClassVar = [
             ("identity", WizardIdentityStep),
@@ -97,10 +97,10 @@ class ConditionalDispatchWizard(FormWizard):
 
     done_payloads: ClassVar[list] = []
 
-    def steps_for(self) -> list:
+    def get_steps(self) -> list:
         """Insert an extra step when the name asks for it."""
         base = [("identity", WizardIdentityStep), ("scope", WizardScopeStep)]
-        if self.cleaned_data_so_far().get("name") == "needs-extra":
+        if self.get_all_cleaned_data().get("name") == "needs-extra":
             base.insert(1, ("extra", WizardExtraStep))
         return base
 
@@ -120,11 +120,9 @@ class KwargsDispatchWizard(FormWizard):
 
     seen_kwargs: ClassVar[list] = []
 
-    def get_form_kwargs(self) -> dict:
-        """Pass a prefix and record the cross-step inputs it was given."""
-        type(self).seen_kwargs.append(
-            (self.current_step(), dict(self.cleaned_data_so_far()))
-        )
+    def get_form_kwargs(self, step: str | None = None) -> dict:
+        """Pass a prefix and record the step it was asked about."""
+        type(self).seen_kwargs.append((step, dict(self.get_all_cleaned_data())))
         return {"prefix": "wiz"}
 
     def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
@@ -1218,7 +1216,7 @@ class TestWizardDispatchViaClient:
         assert namespace.form.initial == {"name": "Ada"}
 
     def test_conditional_step_routing(self, client_no_csrf) -> None:
-        """A steps_for override inserts a step the wizard then routes through."""
+        """A get_steps override inserts a step the wizard then routes through."""
         ConditionalDispatchWizard.done_payloads.clear()
         first = self._post_step(
             client_no_csrf,
@@ -1241,6 +1239,188 @@ class TestWizardDispatchViaClient:
         assert resp.status_code == 302
         assert resp.url == "/thanks/"
         assert KwargsDispatchWizard.seen_kwargs[0][0] == "identity"
+
+
+class PlainIdentityStep(django_forms.Form):
+    """First plain-Django step, never registered as an action."""
+
+    name = django_forms.CharField(max_length=100)
+
+
+class PlainScopeStep(django_forms.Form):
+    """Second plain-Django step, never registered as an action."""
+
+    scope = django_forms.CharField(max_length=100)
+
+
+class PlainStepsWizard(FormWizard):
+    """Wizard whose steps subclass django.forms.Form directly."""
+
+    class Meta:
+        """Two bare Django form steps."""
+
+        steps: ClassVar = [
+            ("identity", PlainIdentityStep),
+            ("scope", PlainScopeStep),
+        ]
+
+    done_payloads: ClassVar[list] = []
+
+    def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
+        """Record the merged cleaned data and redirect."""
+        type(self).done_payloads.append(cleaned_data)
+        return HttpResponseRedirect("/thanks/")
+
+
+def _post_wizard_step(client, action: str, step: str, data: dict):
+    url = form_action_manager.get_action_url(action)
+    payload = {"_next_form_origin": f"/request/{step}/", **data}
+    return client.post(url, data=payload, follow=False)
+
+
+@pytest.mark.django_db()
+class TestWizardWithPlainDjangoSteps:
+    """Bare django.forms classes work as wizard steps without registration."""
+
+    def test_plain_steps_are_not_registered_as_actions(self) -> None:
+        """A plain Django form step never lands in the action registry."""
+        backend = form_action_manager.default_backend
+        assert backend.get_meta("plain_identity_step") is None
+        assert backend.get_meta("plain_scope_step") is None
+
+    def test_plain_steps_route_and_finalise(self, client_no_csrf) -> None:
+        """Plain steps validate, advance, and finalise with merged data."""
+        PlainStepsWizard.done_payloads.clear()
+        first = _post_wizard_step(
+            client_no_csrf, "plain_steps_wizard", "identity", {"name": "Ada"}
+        )
+        assert first.status_code == 302
+        assert first.url == "/request/scope/"
+        resp = _post_wizard_step(
+            client_no_csrf, "plain_steps_wizard", "scope", {"scope": "ops"}
+        )
+        assert resp.status_code == 302
+        assert resp.url == "/thanks/"
+        assert PlainStepsWizard.done_payloads == [{"name": "Ada", "scope": "ops"}]
+
+    def test_plain_step_prefills_from_storage(
+        self, client_no_csrf, mock_http_request
+    ) -> None:
+        """A revisited plain step rebuilds its form prefilled from saved data."""
+        _post_wizard_step(
+            client_no_csrf, "plain_steps_wizard", "identity", {"name": "Ada"}
+        )
+        session_key = client_no_csrf.session.session_key
+        store = SessionStore(session_key=session_key)
+        req = mock_http_request(method="GET", session=store, resolver_match=None)
+        namespace = build_form_namespace_for_action("plain_steps_wizard", req)
+        assert isinstance(namespace.form, PlainIdentityStep)
+        assert namespace.form.initial == {"name": "Ada"}
+
+
+class InjectedDoneWizard(FormWizard):
+    """Wizard whose done pulls a named dependency through the resolver."""
+
+    class Meta:
+        """Two ordered steps routed through the wizard backend."""
+
+        steps: ClassVar = [
+            ("identity", WizardIdentityStep),
+            ("scope", WizardScopeStep),
+        ]
+
+    seen: ClassVar[list] = []
+
+    def done(
+        self,
+        request: HttpRequest,
+        cleaned_data: dict,
+        token: str = Depends("token"),
+    ) -> HttpResponseRedirect:
+        """Record the resolved arguments and redirect."""
+        type(self).seen.append((request is not None, dict(cleaned_data), token))
+        return HttpResponseRedirect("/thanks/")
+
+
+class _CleanedDataHijackProvider:
+    """Test provider that claims the `cleaned_data` parameter by name."""
+
+    def can_handle(self, param, _context) -> bool:
+        return param.name == "cleaned_data"
+
+    def resolve(self, _param, _context) -> object:
+        return {"hijacked": True}
+
+
+@pytest.mark.django_db()
+class TestWizardDoneInjection:
+    """`done` resolves through the dependency injector like other callbacks."""
+
+    def test_done_receives_request_and_cleaned_data_by_name(
+        self, client_no_csrf
+    ) -> None:
+        """The classic done(request, cleaned_data) signature keeps resolving."""
+        DispatchWizard.done_payloads.clear()
+        _post_wizard_step(client_no_csrf, "dispatch_wizard", "identity", {"name": "A"})
+        resp = _post_wizard_step(
+            client_no_csrf, "dispatch_wizard", "scope", {"scope": "ops"}
+        )
+        assert resp.status_code == 302
+        assert DispatchWizard.done_payloads == [{"name": "A", "scope": "ops"}]
+
+    def test_done_resolves_named_dependencies(self, client_no_csrf) -> None:
+        """A Depends default on done resolves through the shared dep cache."""
+
+        @resolver.dependency("token")
+        def make_token() -> str:
+            return "tkn"
+
+        InjectedDoneWizard.seen.clear()
+        try:
+            _post_wizard_step(
+                client_no_csrf, "injected_done_wizard", "identity", {"name": "Ada"}
+            )
+            resp = _post_wizard_step(
+                client_no_csrf, "injected_done_wizard", "scope", {"scope": "ops"}
+            )
+        finally:
+            resolver._dependency_callables.pop("token", None)
+        assert resp.status_code == 302
+        assert InjectedDoneWizard.seen == [
+            (True, {"name": "Ada", "scope": "ops"}, "tkn")
+        ]
+
+    def test_reserved_cleaned_data_beats_appended_provider(
+        self, client_no_csrf
+    ) -> None:
+        """The reserved cleaned_data context key wins over a same-named provider."""
+        provider = _CleanedDataHijackProvider()
+        resolver.add_provider(provider)
+        DispatchWizard.done_payloads.clear()
+        try:
+            _post_wizard_step(
+                client_no_csrf, "dispatch_wizard", "identity", {"name": "Ada"}
+            )
+            _post_wizard_step(
+                client_no_csrf, "dispatch_wizard", "scope", {"scope": "ops"}
+            )
+        finally:
+            resolver._providers.remove(provider)
+        assert DispatchWizard.done_payloads == [{"name": "Ada", "scope": "ops"}]
+
+    def test_cleaned_data_is_reserved_not_a_url_kwarg(self) -> None:
+        """`cleaned_data` flows through the context, never the URL kwargs."""
+
+        def func(cleaned_data: dict, slug: str) -> None:
+            del cleaned_data, slug
+
+        resolved = resolver.resolve_dependencies(
+            func,
+            request=None,
+            cleaned_data={"a": 1},
+            slug="x",
+        )
+        assert resolved == {"cleaned_data": {"a": 1}, "slug": "x"}
 
 
 @pytest.mark.django_db()

@@ -228,6 +228,7 @@ class DependencyResolver:
             context_data=cast("Any", context.get("_context_data") or {}),
             cache=cache,
             stack=cast("list[str]", context.get("_stack") or []),
+            cleaned_data=cast("Any", context.get("cleaned_data")),
         )
 
         return self.resolve(func, resolution_context)

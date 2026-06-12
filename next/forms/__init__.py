@@ -88,6 +88,7 @@ from .wizard import (
     CacheFormWizardBackend,
     FormWizard,
     FormWizardBackend,
+    SessionFormWizardBackend,
     WizardBackendManager,
     wizard_backend_manager,
 )
@@ -152,6 +153,7 @@ __all__ = [
     "RegistryFormActionBackend",
     "Select",
     "SelectMultiple",
+    "SessionFormWizardBackend",
     "TextInput",
     "Textarea",
     "TimeField",

@@ -1,13 +1,19 @@
-"""Declarative multi-step form wizard with a pluggable cache-backed backend."""
+"""Declarative multi-step form wizard with a pluggable draft-storage backend."""
 
+import datetime
 import hashlib
 import types
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from collections.abc import Callable
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
+from uuid import UUID
 
+from django.apps import apps
 from django.conf import settings
 from django.core.cache import caches
 from django.core.exceptions import ImproperlyConfigured
+from django.db.models import Model
 
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
@@ -104,6 +110,128 @@ class CacheFormWizardBackend(FormWizardBackend):
         session_key = _ensure_session_key(request, create=False)
         if session_key:
             self._cache().delete(self._key(session_key, wizard_id))
+
+
+_CODEC_KEY: Final[str] = "__next_wizard__"
+
+_SCALAR_ENCODERS: Final[tuple[tuple[type, str, Callable[[Any], str]], ...]] = (
+    (datetime.datetime, "datetime", datetime.datetime.isoformat),
+    (datetime.date, "date", datetime.date.isoformat),
+    (datetime.time, "time", datetime.time.isoformat),
+    (Decimal, "decimal", str),
+    (UUID, "uuid", str),
+)
+
+_SCALAR_DECODERS: Final[dict[str, Callable[[str], object]]] = {
+    "datetime": datetime.datetime.fromisoformat,
+    "date": datetime.date.fromisoformat,
+    "time": datetime.time.fromisoformat,
+    "decimal": Decimal,
+    "uuid": UUID,
+}
+
+
+def _codec_error(value: object) -> ImproperlyConfigured:
+    """Build the error raised for a value the session codec cannot store."""
+    msg = (
+        f"SessionFormWizardBackend cannot store {type(value).__name__} values. "
+        "Configure CacheFormWizardBackend or a custom FormWizardBackend in "
+        "FORM_WIZARD_BACKEND for cleaned_data that does not fit JSON."
+    )
+    return ImproperlyConfigured(msg)
+
+
+def _encode_value(value: object) -> object:
+    """Encode one cleaned-data value into a JSON-safe tagged form."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    for scalar_type, tag, encode in _SCALAR_ENCODERS:
+        if isinstance(value, scalar_type):
+            return {_CODEC_KEY: tag, "value": encode(value)}
+    if isinstance(value, Model):
+        if value.pk is None:
+            raise _codec_error(value)
+        return {_CODEC_KEY: "model", "value": [value._meta.label_lower, str(value.pk)]}
+    if isinstance(value, (list, tuple)):
+        return [_encode_value(item) for item in value]
+    if isinstance(value, dict):
+        return _encode_mapping(value)
+    raise _codec_error(value)
+
+
+def _encode_mapping(value: dict[Any, Any]) -> dict[str, Any]:
+    """Encode a mapping, escaping dicts that collide with the codec tag key."""
+    encoded: dict[str, Any] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise _codec_error(key)
+        encoded[key] = _encode_value(item)
+    if _CODEC_KEY in encoded:
+        return {_CODEC_KEY: "mapping", "value": encoded}
+    return encoded
+
+
+def _decode_value(value: object) -> object:
+    """Decode one stored session value back into its Python form."""
+    if isinstance(value, list):
+        return [_decode_value(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    tag = value.get(_CODEC_KEY)
+    if tag is None:
+        return {key: _decode_value(item) for key, item in value.items()}
+    payload = value["value"]
+    if tag == "mapping":
+        return {key: _decode_value(item) for key, item in payload.items()}
+    if tag == "model":
+        label, pk = payload
+        model = apps.get_model(label)
+        # A draft may outlive the row it points at, so a deleted instance
+        # decodes to None instead of raising mid-request.
+        return model._default_manager.filter(pk=pk).first()
+    return _SCALAR_DECODERS[tag](payload)
+
+
+class SessionFormWizardBackend(FormWizardBackend):
+    """Stores drafts in the request session with a typed value codec."""
+
+    def __init__(self, _config: dict[str, Any] | None = None) -> None:
+        """Accept the backend config mapping for factory parity."""
+
+    def _key(self, wizard_id: str) -> str:
+        return f"_next_wizard:{wizard_id}"
+
+    def load(self, request: "HttpRequest", wizard_id: str) -> dict[str, Any]:
+        """Return the decoded `{step: cleaned_data}` mapping for the visitor."""
+        session = getattr(request, "session", None)
+        if session is None:
+            return {}
+        raw = session.get(self._key(wizard_id), {})
+        return {step: _decode_value(data) for step, data in raw.items()}
+
+    def save_step(
+        self, request: "HttpRequest", wizard_id: str, step: str, data: dict[str, Any]
+    ) -> None:
+        """Persist encoded cleaned data for one step in the session."""
+        session = getattr(request, "session", None)
+        if session is None:
+            msg = (
+                "SessionFormWizardBackend requires Django sessions to store "
+                "wizard drafts. Add django.contrib.sessions to INSTALLED_APPS "
+                "and SessionMiddleware to MIDDLEWARE, or configure a custom "
+                "backend in FORM_WIZARD_BACKEND."
+            )
+            raise ImproperlyConfigured(msg)
+        key = self._key(wizard_id)
+        bucket = dict(session.get(key, {}))
+        bucket[step] = _encode_value(dict(data))
+        session[key] = bucket
+
+    def clear(self, request: "HttpRequest", wizard_id: str) -> None:
+        """Drop the stored drafts for the visitor."""
+        session = getattr(request, "session", None)
+        if session is not None:
+            session.pop(self._key(wizard_id), None)
 
 
 class WizardBackendManager:
@@ -234,12 +362,13 @@ class FormWizard:
         """Return the URL kwarg name that carries the current step."""
         return getattr(self._meta(), "url_param", "step")
 
-    def steps_for(self) -> list[tuple[str, type]]:
+    def get_steps(self) -> list[tuple[str, type]]:
         """Return the step list. Override for conditional steps."""
         return self._static_steps()
 
-    def get_form_kwargs(self) -> dict[str, Any]:
-        """Return extra kwargs for a step form. Override for cross-step inputs."""
+    def get_form_kwargs(self, step: str | None = None) -> dict[str, Any]:
+        """Return extra kwargs for the `step` form. Override for cross-step inputs."""
+        del step
         return {}
 
     def _stored_steps(self) -> dict[str, Any]:
@@ -248,12 +377,19 @@ class FormWizard:
             self._loaded = self._backend.load(self.request, self.storage_id)
         return self._loaded
 
-    def cleaned_data_so_far(self) -> dict[str, Any]:
+    def get_all_cleaned_data(self) -> dict[str, Any]:
         """Return the merged cleaned data of every stored step."""
         merged: dict[str, Any] = {}
         for data in self._stored_steps().values():
             merged.update(data)
         return merged
+
+    def get_cleaned_data_for_step(self, step: str) -> dict[str, Any] | None:
+        """Return the stored cleaned data for `step`, or None when not stored."""
+        data = self._stored_steps().get(step)
+        if data is None:
+            return None
+        return dict(data)
 
     def completed_steps(self) -> list[str]:
         """Return the names of steps that already have stored data."""
@@ -280,14 +416,14 @@ class FormWizard:
         self._invalidate_step_caches()
 
     def _invalidate_step_caches(self) -> None:
-        """Drop cached steps so `steps_for` re-evaluates against fresh stored data."""
+        """Drop cached steps so `get_steps` re-evaluates against fresh stored data."""
         self._steps_cache = None
         self._step_map_cache = None
 
     def _resolved_steps(self) -> list[tuple[str, type]]:
-        """Return the `steps_for` output, cached until stored data changes."""
+        """Return the `get_steps` output, cached until stored data changes."""
         if self._steps_cache is None:
-            self._steps_cache = list(self.steps_for())
+            self._steps_cache = list(self.get_steps())
         return self._steps_cache
 
     def step_names(self) -> list[str]:
@@ -338,7 +474,7 @@ class FormWizard:
         form_class = self.step_form_class(step)
         if form_class is None:
             return None
-        kwargs = dict(self.get_form_kwargs())
+        kwargs = dict(self.get_form_kwargs(step))
         stored = self._stored_steps().get(step)
         if stored is not None:
             kwargs.setdefault("initial", dict(stored))
@@ -362,6 +498,7 @@ __all__ = [
     "CacheFormWizardBackend",
     "FormWizard",
     "FormWizardBackend",
+    "SessionFormWizardBackend",
     "WizardBackendManager",
     "wizard_backend_manager",
 ]

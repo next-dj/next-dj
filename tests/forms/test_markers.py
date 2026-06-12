@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 from django import forms as django_forms
 
 from next.forms import Form
-from next.forms.markers import DForm, FormProvider
+from next.forms.markers import CleanedDataProvider, DForm, FormProvider
 
 
 class TestDFormAndFormProvider:
@@ -121,3 +121,45 @@ class TestDFormAndFormProvider:
             annotation=DForm[FormB],
         )
         assert provider.can_handle(param, context) is False
+
+
+class TestCleanedDataProvider:
+    """CleanedDataProvider claims only the `cleaned_data` parameter."""
+
+    def test_can_handle_named_param_with_data(self) -> None:
+        """can_handle returns True for `cleaned_data` when context carries data."""
+        provider = CleanedDataProvider()
+        context = MagicMock()
+        context.cleaned_data = {"name": "Ada"}
+        param = inspect.Parameter(
+            "cleaned_data", inspect.Parameter.POSITIONAL_OR_KEYWORD
+        )
+        assert provider.can_handle(param, context) is True
+
+    def test_can_handle_rejects_other_names(self) -> None:
+        """can_handle returns False for any other parameter name."""
+        provider = CleanedDataProvider()
+        context = MagicMock()
+        context.cleaned_data = {"name": "Ada"}
+        param = inspect.Parameter("payload", inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        assert provider.can_handle(param, context) is False
+
+    def test_can_handle_rejects_missing_data(self) -> None:
+        """can_handle returns False when the context carries no cleaned data."""
+        provider = CleanedDataProvider()
+        context = MagicMock()
+        context.cleaned_data = None
+        param = inspect.Parameter(
+            "cleaned_data", inspect.Parameter.POSITIONAL_OR_KEYWORD
+        )
+        assert provider.can_handle(param, context) is False
+
+    def test_resolve_returns_mapping_from_context(self) -> None:
+        """CleanedDataProvider.resolve returns the mapping stored on the context."""
+        provider = CleanedDataProvider()
+        context = MagicMock()
+        context.cleaned_data = {"name": "Ada"}
+        param = inspect.Parameter(
+            "cleaned_data", inspect.Parameter.POSITIONAL_OR_KEYWORD
+        )
+        assert provider.resolve(param, context) == {"name": "Ada"}

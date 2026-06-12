@@ -19,7 +19,11 @@ from .backends import FormActionBackend, record_possible_collision
 from .manager import form_action_manager
 from .registration import registration_diagnostics
 from .widgets import ComponentWidget
-from .wizard import CacheFormWizardBackend, FormWizardBackend
+from .wizard import (
+    CacheFormWizardBackend,
+    FormWizardBackend,
+    SessionFormWizardBackend,
+)
 
 
 _FORM_ACTION_BACKEND_SETTINGS_KEY = "FORM_ACTION_BACKENDS"
@@ -280,7 +284,7 @@ def check_form_wizard_sessions(
     *_args: object,
     **_kwargs: object,
 ) -> list[CheckMessage]:
-    """Warn when wizards rely on the cache backend without django.contrib.sessions."""
+    """Warn when wizard storage needs sessions without django.contrib.sessions."""
     if "django.contrib.sessions" in settings.INSTALLED_APPS:
         return []
     registry = getattr(form_action_manager.default_backend, "_registry", {})
@@ -294,18 +298,58 @@ def check_form_wizard_sessions(
         cls = import_class_cached(backend_path)
     except ImportError:
         return []
-    if not (isinstance(cls, type) and issubclass(cls, CacheFormWizardBackend)):
+    session_bound = isinstance(cls, type) and issubclass(
+        cls, (CacheFormWizardBackend, SessionFormWizardBackend)
+    )
+    if not session_bound:
         return []
     return [
         DjangoWarning(
             "FormWizard subclasses are registered and the configured wizard "
-            "backend keys stored steps by session, but django.contrib.sessions "
-            "is not in INSTALLED_APPS. Saving a step will raise "
-            "ImproperlyConfigured at request time.",
+            "backend needs Django sessions to store steps, but "
+            "django.contrib.sessions is not in INSTALLED_APPS. Saving a step "
+            "will raise ImproperlyConfigured at request time.",
             obj=settings,
             id="next.W056",
         ),
     ]
+
+
+@register(Tags.compatibility)
+def check_wizard_step_actions(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when a wizard step class is also a registered standalone action.
+
+    Only static Meta.steps are inspected, `get_steps` dynamics are not visible.
+    """
+    registry = getattr(form_action_manager.default_backend, "_registry", {})
+    action_names: dict[type, str] = {}
+    for (_scope_key, name), meta in registry.items():
+        form_class = meta.get("form_class")
+        if isinstance(form_class, type):
+            action_names.setdefault(form_class, name)
+    messages: list[CheckMessage] = []
+    for meta in registry.values():
+        wizard_class = meta.get("wizard_class")
+        static_steps = getattr(wizard_class, "_static_steps", None)
+        if static_steps is None:
+            continue
+        for step_name, step_class in static_steps():
+            action_name = action_names.get(step_class)
+            if action_name is None:
+                continue
+            messages.append(
+                DjangoWarning(
+                    f"Form {step_class.__name__!r} is registered as action "
+                    f"{action_name!r} and is also step {step_name!r} of wizard "
+                    f"{wizard_class.__name__!r}. Subclass django.forms "
+                    "directly or set Meta.abstract = True on the step form.",
+                    id="next.W057",
+                )
+            )
+    return messages
 
 
 @register(Tags.compatibility)
@@ -426,5 +470,6 @@ __all__ = [
     "check_instance_from_url_on_non_model_form",
     "check_instance_from_url_unknown_field",
     "check_invalid_form_meta_scope",
+    "check_wizard_step_actions",
     "record_possible_collision",
 ]

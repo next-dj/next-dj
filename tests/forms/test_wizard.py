@@ -1,9 +1,14 @@
+import datetime
+import json
+from decimal import Decimal
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
+from uuid import UUID, uuid4
 
 import pytest
 from django import forms as django_forms
+from django.contrib.auth.models import User
 from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import caches
 from django.core.exceptions import ImproperlyConfigured
@@ -19,6 +24,7 @@ from next.forms.wizard import (
     CacheFormWizardBackend,
     FormWizard,
     FormWizardBackend,
+    SessionFormWizardBackend,
     WizardBackendManager,
     _ensure_session_key,
     _replace_step_segment,
@@ -51,7 +57,7 @@ class OptionalStep(Form):
 
 
 class DemoWizard(FormWizard):
-    """Three-step wizard storing drafts through the cache backend."""
+    """Three-step wizard storing drafts through the default session backend."""
 
     class Meta:
         """Three ordered steps with the default URL parameter."""
@@ -72,7 +78,7 @@ class DemoWizard(FormWizard):
 
 
 class CountingStepsWizard(FormWizard):
-    """Two-step wizard counting `steps_for` evaluations per instance."""
+    """Two-step wizard counting `get_steps` evaluations per instance."""
 
     class Meta:
         """Two ordered steps with the default URL parameter."""
@@ -80,10 +86,10 @@ class CountingStepsWizard(FormWizard):
         steps: ClassVar = [("identity", IdentityStep), ("scope", ScopeStep)]
         url_param = "step"
 
-    def steps_for(self):
+    def get_steps(self):
         """Count each evaluation and delegate to the declared steps."""
-        self.steps_for_calls = getattr(self, "steps_for_calls", 0) + 1
-        return super().steps_for()
+        self.get_steps_calls = getattr(self, "get_steps_calls", 0) + 1
+        return super().get_steps()
 
 
 def _request(*, path: str = "/wizard/identity/"):
@@ -354,15 +360,38 @@ class TestWizardGoto:
 
 
 class TestWizardStorageInteraction:
-    """`save_step`, `cleaned_data_so_far`, `completed_steps`, `clear_storage`."""
+    """`save_step`, `get_all_cleaned_data`, `completed_steps`, `clear_storage`."""
 
-    def test_save_step_then_cleaned_data_so_far_merges(self) -> None:
-        """Saved steps merge into a single cleaned-data mapping read through cache."""
+    def test_save_step_then_get_all_cleaned_data_merges(self) -> None:
+        """Saved steps merge into a single cleaned-data mapping read from storage."""
         request = _request()
         wizard = DemoWizard(request)
         wizard.save_step("identity", {"name": "Ada"})
         wizard.save_step("scope", {"scope": "ops"})
-        assert wizard.cleaned_data_so_far() == {"name": "Ada", "scope": "ops"}
+        assert wizard.get_all_cleaned_data() == {"name": "Ada", "scope": "ops"}
+
+    def test_get_cleaned_data_for_step_returns_step_data(self) -> None:
+        """`get_cleaned_data_for_step` returns one step's stored mapping."""
+        request = _request()
+        wizard = DemoWizard(request)
+        wizard.save_step("identity", {"name": "Ada"})
+        wizard.save_step("scope", {"scope": "ops"})
+        assert wizard.get_cleaned_data_for_step("identity") == {"name": "Ada"}
+        assert wizard.get_cleaned_data_for_step("scope") == {"scope": "ops"}
+
+    def test_get_cleaned_data_for_step_missing_returns_none(self) -> None:
+        """`get_cleaned_data_for_step` returns None for an unstored step."""
+        wizard = DemoWizard(_request())
+        assert wizard.get_cleaned_data_for_step("identity") is None
+
+    def test_get_cleaned_data_for_step_returns_copy(self) -> None:
+        """Mutating the returned mapping never leaks into stored data."""
+        request = _request()
+        wizard = DemoWizard(request)
+        wizard.save_step("identity", {"name": "Ada"})
+        first = wizard.get_cleaned_data_for_step("identity")
+        first["name"] = "mutated"
+        assert wizard.get_cleaned_data_for_step("identity") == {"name": "Ada"}
 
     def test_completed_steps_lists_saved_steps(self) -> None:
         """`completed_steps` reports the saved step names in order."""
@@ -377,7 +406,7 @@ class TestWizardStorageInteraction:
         wizard = DemoWizard(request)
         wizard.save_step("identity", {"name": "Ada"})
         wizard.clear_storage()
-        assert wizard.cleaned_data_so_far() == {}
+        assert wizard.get_all_cleaned_data() == {}
         assert wizard.completed_steps() == []
 
     def test_wizard_id_and_url_param_defaults(self) -> None:
@@ -429,7 +458,7 @@ class TestWizardStorageScopeIsolation:
 
         assert first.wizard_id == second.wizard_id == "checkout_wizard"
         assert first.storage_id != second.storage_id
-        assert second.cleaned_data_so_far() == {}
+        assert second.get_all_cleaned_data() == {}
         assert second.completed_steps() == []
 
     def test_clear_storage_does_not_wipe_other_wizard(self, settings, tmp_path) -> None:
@@ -441,7 +470,7 @@ class TestWizardStorageScopeIsolation:
         first_cls(request).save_step("identity", {"name": "Ada"})
         second_cls(request).clear_storage()
 
-        assert first_cls(request).cleaned_data_so_far() == {"name": "Ada"}
+        assert first_cls(request).get_all_cleaned_data() == {"name": "Ada"}
 
     def test_page_scope_wizard_storage_scope_is_page_path(
         self, settings, tmp_path
@@ -472,7 +501,7 @@ class TestWizardStorageScopeIsolation:
         wizard = GhostWizard(request)
         assert wizard.storage_id.endswith(":ghost_wizard")
         wizard.save_step("identity", {"name": "Ada"})
-        assert GhostWizard(request).cleaned_data_so_far() == {"name": "Ada"}
+        assert GhostWizard(request).get_all_cleaned_data() == {"name": "Ada"}
 
 
 class TestWizardFormResolution:
@@ -524,16 +553,16 @@ class TestWizardFormResolution:
 
 
 class TestWizardStepCache:
-    """Step lookups reuse one `steps_for` evaluation until stored data changes."""
+    """Step lookups reuse one `get_steps` evaluation until stored data changes."""
 
-    def test_repeated_lookups_call_steps_for_once(self) -> None:
+    def test_repeated_lookups_call_get_steps_once(self) -> None:
         """`step_names`, `is_first`, `is_last`, and `step_form_class` share one evaluation."""
         wizard = CountingStepsWizard(_request())
         wizard.step_names()
         wizard.is_first()
         wizard.is_last()
         assert wizard.step_form_class("scope") is ScopeStep
-        assert wizard.steps_for_calls == 1
+        assert wizard.get_steps_calls == 1
 
     def test_save_step_invalidates_step_cache(self) -> None:
         """`save_step` drops the cache so conditional steps see fresh data."""
@@ -541,7 +570,7 @@ class TestWizardStepCache:
         wizard.step_names()
         wizard.save_step("identity", {"name": "x"})
         wizard.step_names()
-        assert wizard.steps_for_calls == 2
+        assert wizard.get_steps_calls == 2
 
     def test_clear_storage_invalidates_step_cache(self) -> None:
         """`clear_storage` drops the cache alongside the stored data."""
@@ -549,38 +578,38 @@ class TestWizardStepCache:
         wizard.step_names()
         wizard.clear_storage()
         wizard.step_names()
-        assert wizard.steps_for_calls == 2
+        assert wizard.get_steps_calls == 2
 
     def test_step_form_class_reuses_cached_mapping(self) -> None:
         """Repeated `step_form_class` lookups reuse one cached mapping."""
         wizard = CountingStepsWizard(_request())
         assert wizard.step_form_class("identity") is IdentityStep
         assert wizard.step_form_class("scope") is ScopeStep
-        assert wizard.steps_for_calls == 1
+        assert wizard.get_steps_calls == 1
 
 
 class TestWizardHooks:
-    """`steps_for` and `get_form_kwargs` override hooks."""
+    """`get_steps` and `get_form_kwargs` override hooks."""
 
-    def test_steps_for_default_returns_static_steps(self) -> None:
-        """The default `steps_for` returns the declared steps."""
+    def test_get_steps_default_returns_static_steps(self) -> None:
+        """The default `get_steps` returns the declared steps."""
         wizard = DemoWizard(_request())
-        assert [name for name, _ in wizard.steps_for()] == [
+        assert [name for name, _ in wizard.get_steps()] == [
             "identity",
             "scope",
             "approval",
         ]
 
-    def test_steps_for_override_adds_conditional_step(self) -> None:
-        """A `steps_for` override can insert a conditional step."""
+    def test_get_steps_override_adds_conditional_step(self) -> None:
+        """A `get_steps` override can insert a conditional step."""
 
         class ConditionalWizard(FormWizard):
             class Meta:
                 steps: ClassVar = [("identity", IdentityStep), ("scope", ScopeStep)]
 
-            def steps_for(self):
+            def get_steps(self):
                 base = [("identity", IdentityStep), ("scope", ScopeStep)]
-                if self.cleaned_data_so_far().get("name") == "needs-detail":
+                if self.get_all_cleaned_data().get("name") == "needs-detail":
                     base.insert(1, ("optional", OptionalStep))
                 return base
 
@@ -599,6 +628,7 @@ class TestWizardHooks:
         """The default `get_form_kwargs` returns an empty mapping."""
         wizard = DemoWizard(_request())
         assert wizard.get_form_kwargs() == {}
+        assert wizard.get_form_kwargs("identity") == {}
 
     def test_get_form_kwargs_override_feeds_current_form(self) -> None:
         """A `get_form_kwargs` override flows into the constructed step form."""
@@ -610,7 +640,7 @@ class TestWizardHooks:
             class Meta:
                 steps: ClassVar = [("only", PrefixField)]
 
-            def get_form_kwargs(self):
+            def get_form_kwargs(self, step=None):
                 return {"prefix": "wiz"}
 
             def done(self, request, cleaned_data) -> HttpResponse:
@@ -618,6 +648,26 @@ class TestWizardHooks:
 
         form = KwargsWizard(_request()).current_form()
         assert form.prefix == "wiz"
+
+    def test_current_form_passes_step_to_get_form_kwargs(self) -> None:
+        """`current_form` feeds the current step name into `get_form_kwargs`."""
+
+        class StepEchoWizard(FormWizard):
+            class Meta:
+                steps: ClassVar = [("identity", IdentityStep), ("scope", ScopeStep)]
+
+            seen_steps: ClassVar[list] = []
+
+            def get_form_kwargs(self, step=None):
+                type(self).seen_steps.append(step)
+                return {}
+
+            def done(self, request, cleaned_data) -> HttpResponse:
+                return HttpResponse("ok")
+
+        StepEchoWizard.seen_steps.clear()
+        StepEchoWizard(_request(), url_kwargs={"step": "scope"}).current_form()
+        assert StepEchoWizard.seen_steps == ["scope"]
 
 
 class TestWizardDoneContract:
@@ -770,6 +820,153 @@ class TestCacheFormWizardBackend:
         assert backend.cache_alias == "default"
 
 
+class TestSessionFormWizardBackend:
+    """`SessionFormWizardBackend`: round-trip, codec, and session requirements."""
+
+    def test_save_load_clear_round_trip(self) -> None:
+        """save_step stores per-step data that load returns and clear drops."""
+        backend = SessionFormWizardBackend()
+        request = _request()
+        backend.save_step(request, "wiz", "identity", {"name": "Ada"})
+        backend.save_step(request, "wiz", "scope", {"scope": "ops"})
+        assert backend.load(request, "wiz") == {
+            "identity": {"name": "Ada"},
+            "scope": {"scope": "ops"},
+        }
+        backend.clear(request, "wiz")
+        assert backend.load(request, "wiz") == {}
+
+    def test_distinct_wizard_ids_are_isolated(self) -> None:
+        """Two wizard ids in one session never see each other's drafts."""
+        backend = SessionFormWizardBackend()
+        request = _request()
+        backend.save_step(request, "first", "identity", {"name": "Ada"})
+        assert backend.load(request, "second") == {}
+
+    def test_stored_bucket_is_json_safe(self) -> None:
+        """The session bucket holds only JSON-serialisable encoded values."""
+        backend = SessionFormWizardBackend()
+        request = _request()
+        backend.save_step(
+            request,
+            "wiz",
+            "identity",
+            {"when": datetime.date(2026, 6, 11), "amount": Decimal("9.50")},
+        )
+        raw = request.session["_next_wizard:wiz"]
+        assert json.dumps(raw)
+
+    def test_scalar_codec_round_trips_tagged_types(self) -> None:
+        """date, datetime, time, Decimal, and UUID survive the session codec."""
+        backend = SessionFormWizardBackend()
+        request = _request()
+        token = uuid4()
+        data = {
+            "day": datetime.date(2026, 6, 11),
+            "at": datetime.datetime(2026, 6, 11, 12, 30, tzinfo=datetime.UTC),
+            "slot": datetime.time(9, 15),
+            "amount": Decimal("9.50"),
+            "token": token,
+        }
+        backend.save_step(request, "wiz", "identity", data)
+        loaded = backend.load(request, "wiz")["identity"]
+        assert loaded == data
+        assert isinstance(loaded["day"], datetime.date)
+        assert isinstance(loaded["at"], datetime.datetime)
+        assert isinstance(loaded["slot"], datetime.time)
+        assert isinstance(loaded["amount"], Decimal)
+        assert isinstance(loaded["token"], UUID)
+
+    def test_nested_containers_round_trip(self) -> None:
+        """Lists and nested dicts encode recursively, tuples come back as lists."""
+        backend = SessionFormWizardBackend()
+        request = _request()
+        data = {
+            "days": [datetime.date(2026, 6, 11), datetime.date(2026, 6, 12)],
+            "pair": ("a", "b"),
+            "nested": {"amount": Decimal("1.25")},
+        }
+        backend.save_step(request, "wiz", "identity", data)
+        loaded = backend.load(request, "wiz")["identity"]
+        assert loaded["days"] == [
+            datetime.date(2026, 6, 11),
+            datetime.date(2026, 6, 12),
+        ]
+        assert loaded["pair"] == ["a", "b"]
+        assert loaded["nested"] == {"amount": Decimal("1.25")}
+
+    def test_dict_colliding_with_codec_key_round_trips(self) -> None:
+        """A user dict carrying the codec tag key is escaped and restored."""
+        backend = SessionFormWizardBackend()
+        request = _request()
+        data = {"payload": {"__next_wizard__": "user-value", "other": 1}}
+        backend.save_step(request, "wiz", "identity", data)
+        loaded = backend.load(request, "wiz")["identity"]
+        assert loaded == data
+
+    @pytest.mark.django_db()
+    def test_model_instance_round_trips_by_pk(self) -> None:
+        """A model instance is stored as a pk reference and refetched on load."""
+        backend = SessionFormWizardBackend()
+        request = _request()
+        user = User.objects.create(username="ada")
+        backend.save_step(request, "wiz", "identity", {"owner": user})
+        loaded = backend.load(request, "wiz")["identity"]
+        assert isinstance(loaded["owner"], User)
+        assert loaded["owner"].pk == user.pk
+
+    @pytest.mark.django_db()
+    def test_deleted_model_instance_decodes_to_none(self) -> None:
+        """A draft outliving its row loads the missing instance as None."""
+        backend = SessionFormWizardBackend()
+        request = _request()
+        user = User.objects.create(username="ada")
+        backend.save_step(request, "wiz", "identity", {"owner": user})
+        user.delete()
+        loaded = backend.load(request, "wiz")["identity"]
+        assert loaded["owner"] is None
+
+    def test_unsaved_model_instance_raises(self) -> None:
+        """An instance without a pk cannot be stored as a reference."""
+        backend = SessionFormWizardBackend()
+        request = _request()
+        with pytest.raises(ImproperlyConfigured, match="cannot store User"):
+            backend.save_step(request, "wiz", "identity", {"owner": User()})
+
+    def test_unsupported_value_raises_with_backend_hint(self) -> None:
+        """A non-JSON value without a codec fails loudly and names the way out."""
+        backend = SessionFormWizardBackend()
+        request = _request()
+        with pytest.raises(ImproperlyConfigured, match="CacheFormWizardBackend"):
+            backend.save_step(request, "wiz", "identity", {"blob": object()})
+
+    def test_non_string_dict_key_raises(self) -> None:
+        """A mapping with non-string keys cannot survive JSON and fails loudly."""
+        backend = SessionFormWizardBackend()
+        request = _request()
+        with pytest.raises(ImproperlyConfigured, match="cannot store int"):
+            backend.save_step(request, "wiz", "identity", {"choices": {1: "a"}})
+
+    def test_save_step_without_session_support_raises(self) -> None:
+        """`save_step` on a request without session support fails loudly."""
+        backend = SessionFormWizardBackend()
+        request = RequestFactory().post("/wizard/identity/")
+        with pytest.raises(ImproperlyConfigured, match="requires Django sessions"):
+            backend.save_step(request, "wiz", "identity", {"name": "Ada"})
+
+    def test_load_without_session_returns_empty(self) -> None:
+        """`load` on a request without session support returns an empty mapping."""
+        backend = SessionFormWizardBackend()
+        request = RequestFactory().get("/")
+        assert backend.load(request, "wiz") == {}
+
+    def test_clear_without_session_is_a_noop(self) -> None:
+        """`clear` on a request without session support does nothing."""
+        backend = SessionFormWizardBackend()
+        request = RequestFactory().get("/")
+        backend.clear(request, "wiz")
+
+
 class _StubWizardBackend(FormWizardBackend):
     """Minimal backend recording the config it was constructed with."""
 
@@ -796,7 +993,7 @@ class TestWizardBackendManager:
         manager = WizardBackendManager()
         first = manager.get()
         second = manager.get()
-        assert isinstance(first, CacheFormWizardBackend)
+        assert isinstance(first, SessionFormWizardBackend)
         assert first is second
 
     def test_reset_forces_reinstantiation(self) -> None:
