@@ -1,4 +1,4 @@
-"""UID generation and redirect helpers for form actions."""
+"""Dispatch-URL reversing, origin-path validation, and origin redirects."""
 
 from django.http import HttpRequest, HttpResponseRedirect
 from django.urls import reverse
@@ -22,6 +22,9 @@ def reverse_form_action(uid: str) -> str:
         return reverse(URL_NAME_FORM_ACTION, kwargs={"uid": uid})
 
 
+ORIGIN_FIELD_NAME = "_next_form_origin"
+
+
 def validated_origin_path(raw: object) -> str | None:
     """Return `raw` as a same-site path or `None`."""
     if not isinstance(raw, str):
@@ -39,12 +42,13 @@ def redirect_to_origin(
     """Redirect back to the page that rendered the form."""
     origin: str | None = None
     if hasattr(request, "POST"):
-        origin = validated_origin_path(request.POST.get("_next_form_origin"))
+        origin = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
     return HttpResponseRedirect(origin or fallback)
 
 
 __all__ = [
     "FORM_ACTION_REVERSE_NAME",
+    "ORIGIN_FIELD_NAME",
     "URL_NAME_FORM_ACTION",
     "redirect_to_origin",
     "reverse_form_action",

@@ -7,15 +7,15 @@ from django import forms
 from django.http import HttpResponse, HttpResponseRedirect
 
 from next.forms import Form
-from next.forms._request_utils import (
-    _ORIGIN_MATCH_ATTR,
-    _filter_reserved_url_kwargs,
-    _resolve_origin,
-)
 from next.forms.backends import ActionRegistration, RegistryFormActionBackend
 from next.forms.dispatch import (
     FormActionDispatch,
     _normalize_handler_response,
+)
+from next.forms.origin import (
+    _ORIGIN_MATCH_ATTR,
+    _filter_reserved_url_kwargs,
+    _resolve_origin,
 )
 from tests.support.helpers import build_mock_http_request
 

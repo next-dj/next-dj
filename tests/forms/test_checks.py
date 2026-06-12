@@ -134,7 +134,7 @@ class TestFormActionCollisions:
 
 
 class TestSharedActionNameCollisions:
-    """check_shared_action_name_collisions: E046 when one shared name spans modules."""
+    """E046 fires when one shared action name is declared in several modules."""
 
     @staticmethod
     def _app_forms_file(tmp_path, app: str) -> str:

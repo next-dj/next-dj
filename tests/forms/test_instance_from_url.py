@@ -344,8 +344,7 @@ class TestCallGetInitial:
             GroupByNameForm,
             request,
             {"name": "reviewers"},
-            cache={},
-            stack=[],
+            deps=({}, []),
         )
         assert result == group
 
@@ -367,8 +366,7 @@ class TestCallGetInitial:
             NamedOnlyForm,
             request,
             {"name": "ignored"},
-            cache={},
-            stack=[],
+            deps=({}, []),
         )
         assert result == {}
         assert "request" in seen["received"]
@@ -382,8 +380,8 @@ class TestCallGetInitial:
             pass
 
         request = mock_http_request(method="POST")
-        with pytest.raises(TypeError, match="must have get_initial method"):
-            _call_get_initial(NoGetInitial, request, {}, cache={}, stack=[])
+        with pytest.raises(TypeError, match=r"^NoGetInitial has no get_initial method"):
+            _call_get_initial(NoGetInitial, request, {}, deps=({}, []))
 
 
 @pytest.mark.django_db()
@@ -398,8 +396,7 @@ class TestSaveUpdatesExistingRow:
             GroupByNameForm,
             request,
             {"name": "old-name"},
-            cache={},
-            stack=[],
+            deps=({}, []),
         )
         form = GroupByNameForm(data={"name": "new-name"}, instance=instance)
         assert form.is_valid()

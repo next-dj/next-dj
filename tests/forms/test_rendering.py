@@ -290,10 +290,10 @@ class TestFormTagRender:
             ' enctype="multipart/form-data">'
         ) in html
 
-    def test_renders_multiple_attributes_escaped(
+    def test_renders_multiple_attributes_in_order(
         self, form_engine, csrf_request
     ) -> None:
-        """Multiple attributes render in declaration order with escaped values."""
+        """Attributes render in declaration order, author literals verbatim."""
         t = form_engine.from_string(
             '{% form "simple_form" enctype="multipart/form-data"'
             ' class="stack wide" data-info="a&b" %}x{% endform %}'
@@ -307,9 +307,26 @@ class TestFormTagRender:
             )
         )
         assert (
-            'enctype="multipart/form-data" class="stack wide" data-info="a&amp;b">'
-            in html
+            'enctype="multipart/form-data" class="stack wide" data-info="a&b">' in html
         )
+
+    def test_attribute_value_from_context_is_escaped(
+        self, form_engine, csrf_request
+    ) -> None:
+        """A context-sourced attribute value is conditionally escaped."""
+        t = form_engine.from_string(
+            '{% form "simple_form" data-info=info %}x{% endform %}'
+        )
+        html = t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                    "info": 'a&b "quoted"',
+                }
+            )
+        )
+        assert 'data-info="a&amp;b &quot;quoted&quot;">' in html
 
     def test_attribute_value_resolves_from_context(
         self, form_engine, csrf_request
@@ -455,6 +472,23 @@ class TestFormTagRender:
                 )
             )
 
+    def test_unquoted_action_name_raises_with_quoting_hint(
+        self, form_engine, csrf_request
+    ) -> None:
+        """An unquoted action token names itself and suggests the quoted literal."""
+        t = form_engine.from_string("{% form simple_form %}x{% endform %}")
+        with pytest.raises(
+            FormActionNotFound, match=r'write \{% form "simple_form" %\}'
+        ):
+            t.render(
+                Context(
+                    {
+                        "request": csrf_request,
+                        "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                    }
+                )
+            )
+
     def test_without_request_in_context_raises(self, form_engine) -> None:
         """Form without request in context raises ImproperlyConfigured."""
         t = form_engine.from_string('{% form "simple_form" %}x{% endform %}')
@@ -584,6 +618,12 @@ class TestActionUrlTag:
         """An unknown name lets FormActionNotFound propagate."""
         t = form_engine.from_string('{% action_url "nonexistent_action_xyz" %}')
         with pytest.raises(FormActionNotFound, match="Unknown form action"):
+            t.render(Context({}))
+
+    def test_unquoted_action_name_raises_with_quoting_hint(self, form_engine) -> None:
+        """An empty resolved name points at the unresolved-variable cause."""
+        t = form_engine.from_string("{% action_url save_note %}")
+        with pytest.raises(FormActionNotFound, match="empty action name"):
             t.render(Context({}))
 
 

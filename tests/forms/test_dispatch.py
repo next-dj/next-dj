@@ -272,8 +272,8 @@ class TestDispatchViaClient:
             },
             follow=False,
         )
-        # SimpleForm.on_valid returns None, which ensure_http_response routes
-        # into _form_response, so the page re-renders with 200.
+        # SimpleForm.on_valid returns None, so the dispatcher re-renders the
+        # origin page with 200 and none of the invalid-submission headers.
         assert resp.status_code == 200
         assert "Location" not in resp.headers
         assert "X-Next-Form" not in resp.headers
@@ -296,21 +296,6 @@ class TestDispatchViaClient:
         resp = client_no_csrf.post(url, data={})
         assert resp.status_code == 200
         assert b"ok" in resp.content
-
-    def test_on_valid_returning_none_uses_form_response(self, client_no_csrf) -> None:
-        """on_valid returning None with a resolvable origin re-renders the page."""
-        url = form_action_manager.get_action_url("simple_form")
-        resp = client_no_csrf.post(
-            url,
-            data={
-                "name": "Alice",
-                "email": "",
-                "_next_form_origin": "/",
-            },
-            follow=False,
-        )
-        # None → ensure_http_response → _form_response → 200
-        assert resp.status_code == 200
 
 
 class TestFormDispatchRenderInvalidPageBranches:
@@ -502,7 +487,10 @@ class TestFormDispatchRenderInvalidPageBranches:
         meta = backend.get_meta("test_action")
         assert meta is not None
 
-        with pytest.raises(TypeError, match="must have get_initial method"):
+        with pytest.raises(
+            TypeError,
+            match=r"Action 'test_action': CustomDjangoForm has no get_initial",
+        ):
             FormActionDispatch.dispatch(backend, request, "test_action", meta)
 
     def test_dispatch_with_form_returning_instance_but_not_modelform(
@@ -541,7 +529,7 @@ class TestFormDispatchRenderInvalidPageBranches:
         assert meta is not None
 
         with pytest.raises(
-            TypeError, match="instance parameter only supported for ModelForm"
+            TypeError, match=r"CustomForm is not a ModelForm\. Subclass next\.forms"
         ):
             FormActionDispatch.dispatch(backend, request, "test_action", meta)
 
@@ -629,7 +617,7 @@ class TestDispatchOnValid:
         assert meta is not None
 
         # None → ensure_http_response(None, request, action_name, backend)
-        # → _form_response → no resolvable origin → 400
+        # → origin re-render → no resolvable origin → 400
         response = FormActionDispatch.dispatch(backend, request, "none_form", meta)
         assert response.status_code == 400
 
@@ -675,6 +663,49 @@ class TestShapeResponseHook:
         assert response.content == b"rejected"
         assert outcomes[0].uid == meta["uid"]
         assert outcomes[0].form is not None
+
+    def test_success_none_return_never_reenters_invalid_envelope(
+        self, mock_http_request
+    ) -> None:
+        """A valid submission whose on_valid returns None stays a 200."""
+        seen_kinds: list[ActionOutcomeKind] = []
+
+        class UnprocessableBackend(RegistryFormActionBackend):
+            def shape_response(self, request, outcome) -> HttpResponse:
+                seen_kinds.append(outcome.kind)
+                response = super().shape_response(request, outcome)
+                if outcome.kind is ActionOutcomeKind.INVALID:
+                    response.status_code = 422
+                return response
+
+        class NoneReturnForm(Form):
+            name = django_forms.CharField(max_length=10)
+
+            def on_valid(self, request: HttpRequest) -> None:
+                return None
+
+        backend = UnprocessableBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="unprocessable_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=NoneReturnForm,
+            )
+        )
+        post = QueryDict(mutable=True)
+        post["name"] = "ok"
+        post["_next_form_origin"] = "/"
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+        meta = backend.get_meta("unprocessable_action")
+        assert meta is not None
+
+        response = FormActionDispatch.dispatch(
+            backend, request, "unprocessable_action", meta
+        )
+        assert response.status_code == 200
+        assert seen_kinds == [ActionOutcomeKind.RESULT]
+        assert "X-Next-Form" not in response.headers
 
     def test_invalid_without_uid_omits_action_header(self, mock_http_request) -> None:
         """The default envelope skips X-Next-Action when the outcome has no uid."""
@@ -754,21 +785,41 @@ class TestResolveFormClass:
         assert cls is F
         assert init_kwargs == {"prefix": "x", "use_required_attribute": False}
 
-    def test_non_callable_raises_typeerror(self, mock_http_request) -> None:
+    @pytest.mark.parametrize(
+        ("action_name", "expected"),
+        [
+            (None, r"^form_class must be a Form subclass or a callable factory"),
+            ("cfg_action", r"^Action 'cfg_action': form_class must be a Form"),
+        ],
+        ids=("without_action_context", "with_action_context"),
+    )
+    def test_non_callable_raises_typeerror(
+        self, mock_http_request, action_name, expected
+    ) -> None:
         """An object that is neither a type nor callable is a configuration error."""
         request = mock_http_request(method="POST")
-        with pytest.raises(TypeError, match="Form subclass or callable"):
-            _resolve_form_class("not-a-form", request, {})
+        with pytest.raises(TypeError, match=expected):
+            _resolve_form_class("not-a-form", request, {}, action_name=action_name)
 
-    def test_factory_returning_non_type_raises(self, mock_http_request) -> None:
+    @pytest.mark.parametrize(
+        ("action_name", "expected"),
+        [
+            (None, r"^form_class factory must return a Form subclass"),
+            ("cfg_action", r"^Action 'cfg_action': form_class factory must return"),
+        ],
+        ids=("without_action_context", "with_action_context"),
+    )
+    def test_factory_returning_non_type_raises(
+        self, mock_http_request, action_name, expected
+    ) -> None:
         """A factory must return a class or `(cls, init_kwargs)`."""
 
         def bad_factory(request: HttpRequest) -> object:
             return "not-a-class"
 
         request = mock_http_request(method="POST")
-        with pytest.raises(TypeError, match="factory must return a Form subclass"):
-            _resolve_form_class(bad_factory, request, {})
+        with pytest.raises(TypeError, match=expected):
+            _resolve_form_class(bad_factory, request, {}, action_name=action_name)
 
 
 class _CustomInitForm(django_forms.Form):
@@ -967,7 +1018,7 @@ class TestDispatchSharedDepCache:
         dep_stack: list[str] = []
 
         try:
-            cls, _ = _resolve_form_class(factory, request, {}, dep_cache, dep_stack)
+            cls, _ = _resolve_form_class(factory, request, {}, (dep_cache, dep_stack))
             assert cls is WForm
             resolved = resolver.resolve_dependencies(
                 handler_like,

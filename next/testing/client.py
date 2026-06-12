@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from django.test import Client
 
+from next.forms.uid import ORIGIN_FIELD_NAME
+
 from .actions import resolve_action_url
 
 
@@ -37,7 +39,7 @@ class NextClient(Client):
         url = resolve_action_url(action_name)
         payload: dict[str, Any] = dict(data or {})
         if origin is not None:
-            payload.setdefault("_next_form_origin", origin)
+            payload.setdefault(ORIGIN_FIELD_NAME, origin)
         return cast("HttpResponse", self.post(url, data=payload, **extra))
 
     def get_action_url(self, action_name: str) -> str:

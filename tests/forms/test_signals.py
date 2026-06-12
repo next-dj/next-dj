@@ -11,7 +11,6 @@ from next.forms import (
     Form,
     RegistryFormActionBackend,
 )
-from next.forms.dispatch import FormActionDispatch
 from next.forms.manager import form_action_manager
 from next.forms.signals import (
     action_dispatched,
@@ -503,8 +502,8 @@ class TestWizardSignalsWiring:
         _post_wizard_step(client_no_csrf, "scope", {"scope": "ops"})
         assert len(capture_wizard_step_submitted) == 2
         first = capture_wizard_step_submitted[0]
-        assert first["sender"] is FormActionDispatch
-        assert first["wizard_class"] is SignalWizard
+        assert first["sender"] is SignalWizard
+        assert "wizard_class" not in first
         assert first["step"] == "identity"
         assert first["cleaned_data"] == {"name": "Ada"}
         meta = form_action_manager.get_action_meta("signal_wizard")
@@ -523,7 +522,8 @@ class TestWizardSignalsWiring:
         _post_wizard_step(client_no_csrf, "scope", {"scope": "ops"})
         assert len(capture_wizard_completed) == 1
         event = capture_wizard_completed[0]
-        assert event["wizard_class"] is SignalWizard
+        assert event["sender"] is SignalWizard
+        assert "wizard_class" not in event
         assert event["cleaned_data"] == {"name": "Ada", "scope": "ops"}
         meta = form_action_manager.get_action_meta("signal_wizard")
         assert event["uid"] == meta["uid"]
@@ -543,6 +543,28 @@ class TestWizardSignalsWiring:
             if e.get("action_name") == "signal_wizard"
         ]
         assert len(wizard_events) == 2
+
+    def test_receivers_can_filter_by_wizard_sender(self, client_no_csrf) -> None:
+        """`connect(sender=...)` scopes wizard signal receivers to one wizard."""
+        matched: list[dict[str, Any]] = []
+        unmatched: list[dict[str, Any]] = []
+
+        def on_matched(sender: object, **kwargs: object) -> None:
+            matched.append({"sender": sender, **kwargs})
+
+        def on_unmatched(sender: object, **kwargs: object) -> None:
+            unmatched.append({"sender": sender, **kwargs})
+
+        wizard_step_submitted.connect(on_matched, sender=SignalWizard)
+        wizard_step_submitted.connect(on_unmatched, sender=FormWizard)
+        try:
+            _post_wizard_step(client_no_csrf, "identity", {"name": "Ada"})
+        finally:
+            wizard_step_submitted.disconnect(on_matched, sender=SignalWizard)
+            wizard_step_submitted.disconnect(on_unmatched, sender=FormWizard)
+        assert len(matched) == 1
+        assert matched[0]["step"] == "identity"
+        assert unmatched == []
 
     def test_form_validation_failed_fires_on_invalid_step(
         self,

@@ -5,14 +5,14 @@ from typing import TYPE_CHECKING, cast
 from django import template
 from django.core.exceptions import ImproperlyConfigured
 from django.middleware.csrf import get_token
-from django.utils.html import escape, format_html
+from django.utils.html import format_html
 
+from next.forms.backends import FormActionNotFound
 from next.forms.manager import _build_form_namespace_from_meta, form_action_manager
-from next.forms.uid import validated_origin_path
+from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
 from next.forms.widgets import bind_component_widgets
 
 
-_NEXT_FORM_ORIGIN = "_next_form_origin"
 _MIN_FORM_TAG_BITS = 2
 _RESERVED_FORM_ATTRS = frozenset({"action", "method"})
 _RESERVED_FORM_ATTR_PREFIX = "data-next-"
@@ -50,8 +50,16 @@ def _page_path_from_context(context: template.Context) -> str | None:
 @register.simple_tag(takes_context=True)
 def action_url(context: template.Context, action_name: str) -> str:
     """Return the endpoint URL for an action, page-scoped like `{% form %}`."""
+    name = str(action_name)
+    if not name:
+        msg = (
+            "{% action_url %} resolved its argument to an empty action name. "
+            "An unquoted name is looked up as a template variable, quote the "
+            "action name to pass it as a literal."
+        )
+        raise FormActionNotFound(msg)
     return form_action_manager.get_action_url(
-        str(action_name), page_path=_page_path_from_context(context)
+        name, page_path=_page_path_from_context(context)
     )
 
 
@@ -115,8 +123,8 @@ class FormNode(template.Node):
             inputs.append(
                 format_html(
                     '<input type="hidden" name="{}" value="{}">',
-                    _NEXT_FORM_ORIGIN,
-                    escape(origin),
+                    ORIGIN_FIELD_NAME,
+                    origin,
                 )
             )
 
@@ -131,7 +139,7 @@ class FormNode(template.Node):
         `request.path`.
         """
         if getattr(request, "method", None) == "POST":
-            posted = validated_origin_path(request.POST.get(_NEXT_FORM_ORIGIN))
+            posted = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
             if posted is not None:
                 return posted
         return getattr(request, "path", None)
@@ -144,9 +152,9 @@ class FormNode(template.Node):
         form_instance: "django_forms.Form | None",
     ) -> str:
         """Build the opening form element with framework and extra attributes."""
-        bits = [f'<form action="{escape(action_url)}" method="post"']
+        bits: list[str] = [format_html('<form action="{}" method="post"', action_url)]
         if uid:
-            bits.append(f'data-next-action="{escape(uid)}"')
+            bits.append(format_html('data-next-action="{}"', uid))
         if (
             form_instance is not None
             and form_instance.is_multipart()
@@ -154,7 +162,7 @@ class FormNode(template.Node):
         ):
             bits.append('enctype="multipart/form-data"')
         bits.extend(
-            f'{escape(name)}="{escape(str(expr.resolve(context)))}"'
+            format_html('{}="{}"', name, str(expr.resolve(context)))
             for name, expr in self.attrs
         )
         return " ".join(bits) + ">"
@@ -164,15 +172,22 @@ class FormNode(template.Node):
         request = self._get_request(context)
 
         action_name = str(self.action_expr.resolve(context))
+        if not action_name:
+            token = self.action_expr.token
+            msg = (
+                f"{{% form {token} %}} resolved to an empty action name. "
+                f"An unquoted name is looked up as a template variable, "
+                f'write {{% form "{token}" %}} to pass the action name as '
+                "a literal."
+            )
+            raise FormActionNotFound(msg, name=token)
 
-        next_form_page = _page_path_from_context(context)
+        page_path = _page_path_from_context(context)
 
         resolved_action_url = form_action_manager.get_action_url(
-            action_name, page_path=next_form_page
+            action_name, page_path=page_path
         )
-        meta = form_action_manager.get_action_meta(
-            action_name, page_path=next_form_page
-        )
+        meta = form_action_manager.get_action_meta(action_name, page_path=page_path)
 
         form_obj = context.get(action_name)
         if form_obj and hasattr(form_obj, "form"):

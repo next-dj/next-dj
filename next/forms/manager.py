@@ -8,9 +8,9 @@ from django.core.exceptions import ImproperlyConfigured
 
 from next.conf import next_framework_settings
 
-from ._request_utils import _url_kwargs_for_request
 from .backends import FormActionFactory, FormActionNotFound
 from .dispatch import _form_action_context_callable
+from .origin import _url_kwargs_for_request
 
 
 if TYPE_CHECKING:

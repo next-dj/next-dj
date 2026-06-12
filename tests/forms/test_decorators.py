@@ -285,7 +285,9 @@ class TestBaseFormGetInitial:
         class CustomDjangoForm(django_forms.Form):
             name = django_forms.CharField(max_length=100)
 
-        with pytest.raises(TypeError, match="must have get_initial method"):
+        with pytest.raises(
+            TypeError, match=r"^CustomDjangoForm has no get_initial method"
+        ):
             _form_action_context_callable(CustomDjangoForm)(HttpRequest())
 
     def test_form_with_model_instance_but_not_modelform_raises_error(self) -> None:
@@ -303,7 +305,7 @@ class TestBaseFormGetInitial:
 
         request = HttpRequest()
         with pytest.raises(
-            TypeError, match="instance parameter only supported for ModelForm"
+            TypeError, match=r"CustomForm is not a ModelForm\. Subclass next\.forms"
         ):
             _form_action_context_callable(CustomForm)(request)
 

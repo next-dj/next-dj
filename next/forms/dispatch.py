@@ -26,7 +26,7 @@ from django.shortcuts import resolve_url
 from next.deps import REQUEST_DEP_CACHE_ATTR, resolver
 from next.deps.resolver import cached_signature
 
-from ._request_utils import (
+from .origin import (
     _resolve_origin,
     _url_kwargs_for_request,
 )
@@ -36,7 +36,7 @@ from .signals import (
     wizard_completed,
     wizard_step_submitted,
 )
-from .uid import validated_origin_path
+from .uid import ORIGIN_FIELD_NAME, validated_origin_path
 
 
 if TYPE_CHECKING:
@@ -46,14 +46,16 @@ if TYPE_CHECKING:
     from django import forms as django_forms
     from django.http import HttpRequest
 
-    from ._request_utils import _OriginMatch
     from .backends import ActionGuard, ActionMeta, FormActionBackend
     from .base import BaseForm as NextBaseForm
+    from .origin import _OriginMatch
     from .wizard import FormWizard
 
 
 _FACTORY_TUPLE_LEN = 2
 _HTTP_ERROR_FLOOR = 400
+
+type _DepsState = tuple[dict[str, Any], list[str]]
 
 
 def _is_model_instance(obj: object) -> bool:
@@ -88,7 +90,7 @@ def _check_access(
     """
     user = getattr(request, "user", None)
     if user is None or not user.is_authenticated:
-        origin = validated_origin_path(request.POST.get("_next_form_origin"))
+        origin = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
         return _redirect_to_login(origin or "/")
     if guard.permissions and not user.has_perms(guard.permissions):
         raise PermissionDenied
@@ -126,7 +128,12 @@ def _build_form(
         return form_class(**init_kwargs)
     if _is_model_instance(initial_data):
         if not issubclass(form_class, DjangoBaseModelForm):
-            msg = "instance parameter only supported for ModelForm"
+            msg = (
+                f"get_initial for {form_class.__name__} returned a "
+                f"{type(initial_data).__name__} instance, but "
+                f"{form_class.__name__} is not a ModelForm. Subclass "
+                "next.forms.ModelForm to bind model instances."
+            )
             raise TypeError(msg)
         if bound:
             return form_class(post_data, files, instance=initial_data)
@@ -161,13 +168,19 @@ def _call_get_initial(
     request: "HttpRequest",
     url_kwargs: dict[str, Any],
     *,
-    cache: dict[str, Any],
-    stack: list[str],
+    deps: _DepsState,
+    action_name: str | None = None,
 ) -> object:
     """Resolve `get_initial` dependencies and call it, feeding url_kwargs to kwargs."""
     if not hasattr(form_class, "get_initial"):
-        msg = f"Form class {form_class} must have get_initial method"
+        prefix = f"Action {action_name!r}: " if action_name else ""
+        msg = (
+            f"{prefix}{form_class.__name__} has no get_initial method. "
+            "Subclass next.forms.Form or next.forms.ModelForm, or define "
+            "a get_initial classmethod."
+        )
         raise TypeError(msg)
+    cache, stack = deps
     get_initial = form_class.get_initial
     resolved = resolver.resolve_dependencies(
         get_initial,
@@ -185,7 +198,7 @@ def _call_get_initial(
 def _form_action_context_callable(
     form_class: "type[django_forms.Form] | Callable[..., Any]",
 ) -> "Callable[[HttpRequest], types.SimpleNamespace]":
-    """Return a callable that builds a form instance for GET error rendering."""
+    """Return a callable building the unbound form namespace for page rendering."""
 
     def context_func(request: "HttpRequest") -> types.SimpleNamespace:
         url_kwargs = _url_kwargs_for_request(request)
@@ -195,8 +208,7 @@ def _form_action_context_callable(
             form_class,
             request,
             url_kwargs,
-            dep_cache,
-            dep_stack,
+            (dep_cache, dep_stack),
         )
         if init_kwargs:
             form_instance = _form_from_initial_data(
@@ -204,7 +216,7 @@ def _form_action_context_callable(
             )
             return types.SimpleNamespace(form=form_instance)
         initial_data = _call_get_initial(
-            resolved_form_class, request, url_kwargs, cache=dep_cache, stack=dep_stack
+            resolved_form_class, request, url_kwargs, deps=(dep_cache, dep_stack)
         )
         form_instance = _form_from_initial_data(resolved_form_class, initial_data)
         return types.SimpleNamespace(form=form_instance)
@@ -229,8 +241,8 @@ def _resolve_form_class(
     form_class: object,
     request: "HttpRequest",
     url_kwargs: dict[str, object],
-    dep_cache: dict[str, Any] | None = None,
-    dep_stack: list[str] | None = None,
+    deps: _DepsState | None = None,
+    action_name: str | None = None,
 ) -> "tuple[type[django_forms.Form], dict[str, Any]]":
     """Return `(form_class, init_kwargs)` for the dispatch.
 
@@ -241,10 +253,14 @@ def _resolve_form_class(
     if isinstance(form_class, type):
         return cast("type[django_forms.Form]", form_class), {}
     if not callable(form_class):
-        msg = f"form_class must be a Form subclass or callable, got {form_class!r}"
+        prefix = f"Action {action_name!r}: " if action_name else ""
+        msg = (
+            f"{prefix}form_class must be a Form subclass or a callable "
+            f"factory, got {form_class!r}. Pass the form class itself or "
+            "a factory that returns one."
+        )
         raise TypeError(msg)
-    cache = dep_cache if dep_cache is not None else {}
-    stack = dep_stack if dep_stack is not None else []
+    cache, stack = deps if deps is not None else ({}, [])
     resolved = resolver.resolve_dependencies(
         form_class,
         request=request,
@@ -261,7 +277,12 @@ def _resolve_form_class(
                 cast("dict[str, Any]", init_kwargs),
             )
     if not isinstance(produced, type):
-        msg = f"form_class factory must return a Form subclass, got {produced!r}"
+        prefix = f"Action {action_name!r}: " if action_name else ""
+        msg = (
+            f"{prefix}form_class factory must return a Form subclass or a "
+            f"(form_class, init_kwargs) tuple, got {produced!r}. Return the "
+            "class itself, not an instance."
+        )
         raise TypeError(msg)
     return cast("type[django_forms.Form]", produced), {}
 
@@ -390,8 +411,7 @@ class _DispatchState:
         """Send `wizard_step_submitted` when any receiver is connected."""
         if wizard_step_submitted.receivers:
             wizard_step_submitted.send(
-                sender=FormActionDispatch,
-                wizard_class=wizard_class,
+                sender=wizard_class,
                 step=step_name,
                 cleaned_data=cleaned,
                 uid=self.uid,
@@ -407,8 +427,7 @@ class _DispatchState:
         """Send `wizard_completed` when any receiver is connected."""
         if wizard_completed.receivers:
             wizard_completed.send(
-                sender=FormActionDispatch,
-                wizard_class=wizard_class,
+                sender=wizard_class,
                 cleaned_data=merged,
                 uid=self.uid,
                 request=request,
@@ -478,8 +497,8 @@ class FormActionDispatch:
                 form_class,
                 request,
                 state.url_kwargs,
-                state.dep_cache,
-                state.dep_stack,
+                (state.dep_cache, state.dep_stack),
+                action_name=action_name,
             )
             params = _FormDispatchParams(
                 action_name=action_name,
@@ -539,8 +558,8 @@ class FormActionDispatch:
                 params.form_class,
                 request,
                 state.url_kwargs,
-                cache=state.dep_cache,
-                stack=state.dep_stack,
+                deps=(state.dep_cache, state.dep_stack),
+                action_name=params.action_name,
             )
             form = _bind_form_for_post(params.form_class, request, initial_data)
         if not form.is_valid():
@@ -714,13 +733,9 @@ class FormActionDispatch:
                 outcome.url_kwargs,
             )
             response = HttpResponse(html)
-            if outcome.form is not None:
-                # A None-returning handler re-renders the origin through this
-                # same branch with form=None, and that success path must stay
-                # unmarked for clients branching on the headers.
-                response["X-Next-Form"] = "invalid"
-                if outcome.uid:
-                    response["X-Next-Action"] = outcome.uid
+            response["X-Next-Form"] = "invalid"
+            if outcome.uid:
+                response["X-Next-Action"] = outcome.uid
             return response
         if outcome.kind == ActionOutcomeKind.WIZARD_ADVANCE:
             return HttpResponseRedirect(cast("str", outcome.redirect_to))
@@ -734,25 +749,29 @@ class FormActionDispatch:
         )
 
     @staticmethod
-    def _form_response(
+    def _origin_rerender_response(
         backend: "FormActionBackend",
         request: "HttpRequest",
         action_name: str,
-        form: "django_forms.Form | None",
     ) -> HttpResponse:
-        """Return full-page HTML for an invalid form submission."""
+        """Re-render the origin page after a valid submission's handler returned None.
+
+        The success response carries no invalid-submission headers and never
+        re-enters `backend.shape_response`, so envelopes keyed off
+        `ActionOutcomeKind.INVALID` stay untouched. An unresolvable origin
+        yields 400.
+        """
         origin_match = _resolve_origin(request)
-        return backend.shape_response(
+        if origin_match is None or origin_match.page_path is None:
+            return HttpResponseBadRequest("Missing or invalid _next_form_origin")
+        html = backend.render_invalid_page(
             request,
-            ActionOutcome(
-                kind=ActionOutcomeKind.INVALID,
-                action_name=action_name,
-                form=form,
-                url_kwargs=dict(origin_match.url_kwargs) if origin_match else None,
-                page_path=origin_match.page_path if origin_match else None,
-                origin=origin_match.origin if origin_match else None,
-            ),
+            action_name,
+            None,
+            origin_match.page_path,
+            dict(origin_match.url_kwargs),
         )
+        return HttpResponse(html)
 
     @staticmethod
     def ensure_http_response(
@@ -766,8 +785,8 @@ class FormActionDispatch:
 
         if response is None:
             if request and action_name and backend:
-                return FormActionDispatch._form_response(
-                    backend, request, action_name, None
+                return FormActionDispatch._origin_rerender_response(
+                    backend, request, action_name
                 )
             return HttpResponse(status=204)
         if isinstance(response, HttpResponse):

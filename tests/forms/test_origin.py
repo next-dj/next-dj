@@ -6,15 +6,15 @@ from django import forms as django_forms
 from django.http import HttpRequest, QueryDict
 from django.urls import clear_script_prefix, set_script_prefix
 
-from next.forms import Form, _request_utils
-from next.forms._request_utils import (
+from next.forms import Form, origin
+from next.forms.dispatch import _form_action_context_callable
+from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
     _OriginMatch,
     _page_path_from_view,
     _resolve_origin,
     _url_kwargs_for_request,
 )
-from next.forms.dispatch import _form_action_context_callable
 
 
 SITE_PAGES = Path(__file__).resolve().parent.parent / "site_pages"
@@ -74,13 +74,13 @@ class TestResolveOrigin:
         self, mock_http_request, monkeypatch
     ) -> None:
         calls = {"n": 0}
-        original = _request_utils.resolve
+        original = origin.resolve
 
         def counting_resolve(path, urlconf=None):
             calls["n"] += 1
             return original(path, urlconf=urlconf)
 
-        monkeypatch.setattr(_request_utils, "resolve", counting_resolve)
+        monkeypatch.setattr(origin, "resolve", counting_resolve)
         req = mock_http_request(method="POST", POST=_origin_post("/"))
         first = _resolve_origin(req)
         second = _resolve_origin(req)

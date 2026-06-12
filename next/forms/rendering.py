@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from next.pages import page
 
-from ._request_utils import _resolve_origin
+from .origin import _resolve_origin
 
 
 if TYPE_CHECKING:

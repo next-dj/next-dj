@@ -86,7 +86,8 @@ def action(
     own name. `form_class` accepts a factory callable or a Form class that
     does not register its own endpoint. `scope` overrides the file-based
     scope with 'page' or 'shared'. `login_required` and `permission_required`
-    guard the endpoint before any POST data is read.
+    guard the endpoint before origin resolution, `get_initial`, and form
+    binding, so no application code runs for a denied request.
     """
     # The definition file must be captured here. The bare form invokes the
     # inner decorator from this module, so a frame lookup inside it would
