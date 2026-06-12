@@ -10,9 +10,7 @@ from next.forms import (
     ActionRegistration,
     Form,
     ModelForm,
-    reset_form_registration_state,
 )
-from next.forms.autodiscover import _discovered
 from next.forms.base import (
     _FRAMEWORK_ROOT,
     _auto_register_form_class,
@@ -593,30 +591,3 @@ class TestSelfRegisteredMarker:
 
         assert _is_self_registered(MarkedBaseForm)
         assert not _is_self_registered(OptedOutForm)
-
-
-class TestResetFormRegistrationState:
-    """reset_form_registration_state clears every registry and warning buffer."""
-
-    def test_reset_clears_all_buffers(self) -> None:
-        """The aggregate reset empties the registry and every tracking list."""
-        backend = form_action_manager.default_backend
-        backend.register_action(
-            ActionRegistration(
-                name="reset_probe",
-                file_path="/x/page.py",
-                scope="page",
-                handler=lambda _request: None,
-            )
-        )
-        registration_diagnostics.outside_base_dir.append(("Probe", "/x/forms.py"))
-        registration_diagnostics.action_applied_to_class.append("Probe")
-        _discovered.add("probe.forms")
-
-        reset_form_registration_state()
-
-        assert backend._registry == {}
-        assert backend._name_index == {}
-        assert registration_diagnostics.outside_base_dir == []
-        assert registration_diagnostics.action_applied_to_class == []
-        assert _discovered == set()

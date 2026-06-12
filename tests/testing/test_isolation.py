@@ -4,12 +4,15 @@ from next.components.manager import components_manager
 from next.forms import (
     ActionRegistration,
     RegistryFormActionBackend,
-    form_action_manager,
 )
+from next.forms.autodiscover import _discovered
+from next.forms.manager import form_action_manager
+from next.forms.registration import registration_diagnostics
 from next.pages.manager import page
 from next.testing import (
     reset_components,
     reset_form_actions,
+    reset_form_registration_state,
     reset_page_cache,
     reset_registries,
 )
@@ -107,6 +110,33 @@ class TestResetRegistries:
             original._registry.update(saved_registry)
             original._uid_to_name.update(saved_uids)
             components_manager._backends = saved_components
+
+
+class TestResetFormRegistrationState:
+    """reset_form_registration_state clears every registry and warning buffer."""
+
+    def test_reset_clears_all_buffers(self) -> None:
+        """The aggregate reset empties the registry and every tracking list."""
+        backend = form_action_manager.default_backend
+        backend.register_action(
+            ActionRegistration(
+                name="reset_probe",
+                file_path="/x/page.py",
+                scope="page",
+                handler=lambda _request: None,
+            )
+        )
+        registration_diagnostics.outside_base_dir.append(("Probe", "/x/forms.py"))
+        registration_diagnostics.action_applied_to_class.append("Probe")
+        _discovered.add("probe.forms")
+
+        reset_form_registration_state()
+
+        assert backend._registry == {}
+        assert backend._name_index == {}
+        assert registration_diagnostics.outside_base_dir == []
+        assert registration_diagnostics.action_applied_to_class == []
+        assert _discovered == set()
 
 
 class TestResetPageCache:

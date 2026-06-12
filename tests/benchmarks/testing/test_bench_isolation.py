@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from next.forms import form_action_manager
 from next.forms.backends import ActionRegistration
+from next.forms.manager import form_action_manager
 from next.testing.isolation import reset_form_actions
 from tests.benchmarks.factories import noop_form_handler
 

@@ -10,7 +10,6 @@ from django.http import Http404, HttpRequest, QueryDict
 from next.forms import (
     ActionRegistration,
     Form,
-    FormActionDispatch,
     ModelForm,
     RegistryFormActionBackend,
 )
@@ -23,6 +22,7 @@ from next.forms.checks import (
     check_instance_from_url_unknown_field,
 )
 from next.forms.dispatch import (
+    FormActionDispatch,
     _accepts_var_keyword,
     _call_get_initial,
     _form_action_context_callable,

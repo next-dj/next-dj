@@ -4,19 +4,18 @@ Register handlers with `@action`. Each action gets a stable UID
 endpoint. Valid submissions run the handler. Invalid forms re-render
 with errors. CSRF is applied for posted forms.
 
-Advanced integrations can import dispatch helpers from ``next.forms.dispatch`` when a
-submodule import clarifies intent.
+Any public `django.forms` name resolves through `next.forms` unless
+next.dj deliberately overrides it. Framework machinery lives in the
+submodules, for example `next.forms.dispatch` and `next.forms.manager`.
 """
 
-from next.pages import page
+from django import forms as _django_forms
 
-from . import checks, signals
-from .autodiscover import autodiscover_forms, clear_discovered
+from . import signals
+from .autodiscover import autodiscover_forms
 from .backends import (
-    ActionMeta,
     ActionRegistration,
     FormActionBackend,
-    FormActionFactory,
     RegistryFormActionBackend,
 )
 from .base import (
@@ -25,27 +24,36 @@ from .base import (
     BooleanField,
     CharField,
     CheckboxInput,
+    CheckboxSelectMultiple,
     ChoiceField,
+    ClearableFileInput,
     DateField,
     DateInput,
     DateTimeField,
     DateTimeInput,
     DecimalField,
+    DurationField,
     EmailField,
     EmailInput,
     FileField,
+    FileInput,
     FloatField,
     Form,
     HiddenInput,
     ImageField,
     IntegerField,
+    JSONField,
+    ModelChoiceField,
     ModelForm,
+    ModelMultipleChoiceField,
     MultipleChoiceField,
     NumberInput,
     PasswordInput,
+    RadioSelect,
     RegexField,
     Select,
     SelectMultiple,
+    SlugField,
     Textarea,
     TextInput,
     TimeField,
@@ -53,20 +61,15 @@ from .base import (
     TypedChoiceField,
     URLField,
     URLInput,
+    UUIDField,
     ValidationError,
     Widget,
 )
 from .decorators import action
-from .dispatch import ActionOutcome, ActionOutcomeKind, FormActionDispatch
+from .dispatch import ActionOutcome, ActionOutcomeKind
 from .exceptions import FormActionNotFound
 from .formsets import cleanup_extra_initial
-from .manager import (
-    FormActionManager,
-    build_form_namespace_for_action,
-    form_action_manager,
-)
-from .markers import DForm, FormProvider
-from .registration import registration_diagnostics
+from .markers import DForm
 from .serializers import (
     FieldKind,
     FieldSpec,
@@ -78,34 +81,36 @@ from .serializers import (
     form_spec,
     formset_spec,
 )
-from .uid import (
-    FORM_ACTION_REVERSE_NAME,
-    URL_NAME_FORM_ACTION,
-    redirect_to_origin,
-)
+from .uid import redirect_to_origin
 from .widgets import ComponentWidget
 from .wizard import (
     CacheFormWizardBackend,
     FormWizard,
     FormWizardBackend,
     SessionFormWizardBackend,
-    WizardBackendManager,
-    wizard_backend_manager,
 )
 
 
-def reset_form_registration_state() -> None:
-    """Clear every form registry and registration-warning buffer for test isolation."""
-    form_action_manager.clear_registries()
-    registration_diagnostics.clear()
-    clear_discovered()
-    wizard_backend_manager.reset()
+_MISSING = object()
+
+
+def __getattr__(name: str) -> object:
+    """Resolve public `django.forms` names that next.dj does not override."""
+    if not name.startswith("_"):
+        value = getattr(_django_forms, name, _MISSING)
+        if value is not _MISSING:
+            return value
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
+
+def __dir__() -> list[str]:
+    """List the curated surface plus the public `django.forms` namespace."""
+    django_public = {n for n in dir(_django_forms) if not n.startswith("_")}
+    return sorted(set(__all__) | django_public)
 
 
 __all__ = [
-    "FORM_ACTION_REVERSE_NAME",
-    "URL_NAME_FORM_ACTION",
-    "ActionMeta",
     "ActionOutcome",
     "ActionOutcomeKind",
     "ActionRegistration",
@@ -115,7 +120,9 @@ __all__ = [
     "CacheFormWizardBackend",
     "CharField",
     "CheckboxInput",
+    "CheckboxSelectMultiple",
     "ChoiceField",
+    "ClearableFileInput",
     "ComponentWidget",
     "DForm",
     "DateField",
@@ -123,19 +130,17 @@ __all__ = [
     "DateTimeField",
     "DateTimeInput",
     "DecimalField",
+    "DurationField",
     "EmailField",
     "EmailInput",
     "FieldKind",
     "FieldSpec",
     "FileField",
+    "FileInput",
     "FloatField",
     "Form",
     "FormActionBackend",
-    "FormActionDispatch",
-    "FormActionFactory",
-    "FormActionManager",
     "FormActionNotFound",
-    "FormProvider",
     "FormSectionSpec",
     "FormSpec",
     "FormWizard",
@@ -145,15 +150,20 @@ __all__ = [
     "HiddenInput",
     "ImageField",
     "IntegerField",
+    "JSONField",
+    "ModelChoiceField",
     "ModelForm",
+    "ModelMultipleChoiceField",
     "MultipleChoiceField",
     "NumberInput",
     "PasswordInput",
+    "RadioSelect",
     "RegexField",
     "RegistryFormActionBackend",
     "Select",
     "SelectMultiple",
     "SessionFormWizardBackend",
+    "SlugField",
     "TextInput",
     "Textarea",
     "TimeField",
@@ -161,21 +171,15 @@ __all__ = [
     "TypedChoiceField",
     "URLField",
     "URLInput",
+    "UUIDField",
     "ValidationError",
     "Widget",
-    "WizardBackendManager",
     "action",
     "autodiscover_forms",
-    "build_form_namespace_for_action",
-    "checks",
     "cleanup_extra_initial",
     "field_spec",
-    "form_action_manager",
     "form_spec",
     "formset_spec",
-    "page",
     "redirect_to_origin",
-    "reset_form_registration_state",
     "signals",
-    "wizard_backend_manager",
 ]

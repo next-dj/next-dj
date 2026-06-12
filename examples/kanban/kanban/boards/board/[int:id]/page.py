@@ -4,7 +4,7 @@ from django.middleware.csrf import get_token
 from kanban.models import Board, Card, Column
 from kanban.providers import DBoard
 
-from next.forms import form_action_manager
+from next.forms.manager import form_action_manager
 from next.pages import context
 
 

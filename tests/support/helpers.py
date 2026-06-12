@@ -12,7 +12,7 @@ from django.http import HttpRequest
 
 from next.conf import NextFrameworkSettings
 from next.deps import DependencyResolver
-from next.forms import FormProvider
+from next.forms.markers import FormProvider
 from next.urls import FileRouterBackend, HttpRequestProvider, UrlKwargsProvider
 
 

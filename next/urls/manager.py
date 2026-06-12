@@ -17,7 +17,7 @@ from django.urls import clear_url_caches
 
 from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
-from next.forms import form_action_manager
+from next.forms.manager import form_action_manager
 
 from .backends import RouterBackend, RouterFactory
 from .signals import router_reloaded

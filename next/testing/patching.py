@@ -15,7 +15,7 @@ from django.test import override_settings
 
 from next.components.manager import components_manager
 from next.deps.resolver import resolver
-from next.forms.backends import ActionRegistration, _file_to_dotted_module
+from next.forms.backends import ActionRegistration, file_to_dotted_module
 from next.forms.manager import form_action_manager
 from next.static.manager import default_manager
 
@@ -109,7 +109,7 @@ def override_form_action(
     )
     name_index = getattr(backend, "_name_index", None)
     if name_index is not None:
-        name_index[name] = (_file_to_dotted_module(__file__), name)
+        name_index[name] = (file_to_dotted_module(__file__), name)
     try:
         yield
     finally:

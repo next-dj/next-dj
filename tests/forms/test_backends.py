@@ -12,12 +12,11 @@ from next.forms import (
     ActionOutcomeKind,
     ActionRegistration,
     FormActionBackend,
-    FormActionFactory,
-    FormActionManager,
     FormActionNotFound,
     RegistryFormActionBackend,
-    form_action_manager,
 )
+from next.forms.backends import FormActionFactory
+from next.forms.manager import FormActionManager, form_action_manager
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"
@@ -45,6 +44,47 @@ class TestFormActionManager:
         assert excinfo.value.name == "nonexistent_action_xyz"
         assert excinfo.value.page_path is None
         assert excinfo.value.suggestions == ()
+
+    def test_get_action_meta_returns_meta_with_uid(self) -> None:
+        """Return the registry meta whose uid also keys the action URL."""
+        meta = form_action_manager.get_action_meta("simple_form")
+        assert meta is not None
+        assert meta["uid"]
+        assert meta["uid"] in form_action_manager.get_action_url("simple_form")
+
+    def test_get_action_meta_returns_none_for_unknown(self) -> None:
+        """Return None when no backend knows the action name."""
+        assert form_action_manager.get_action_meta("nonexistent_action_xyz") is None
+
+    def test_get_action_meta_skips_backend_without_meta(self) -> None:
+        """Skip backends whose get_meta yields None and ask the next one."""
+
+        class NoMetaBackend(FormActionBackend):
+            def register_action(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            def get_action_url(self, action_name: str, **kwargs: object) -> str:
+                return ""
+
+            def generate_urls(self) -> list:
+                return []
+
+            def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
+                return HttpResponse()
+
+        registry = RegistryFormActionBackend()
+        registry.register_action(
+            ActionRegistration(
+                name="meta_proxy_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+            )
+        )
+        manager = FormActionManager(backends=[NoMetaBackend(), registry])
+        meta = manager.get_action_meta("meta_proxy_action")
+        assert meta is not None
+        assert meta["uid"]
 
     def test_default_backend_is_first_backend(self) -> None:
         """Default backend is the first in the list."""

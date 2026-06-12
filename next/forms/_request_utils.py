@@ -8,7 +8,7 @@ from django.urls import Resolver404, get_script_prefix, resolve
 
 from next.deps import RESERVED_KEYS
 
-from .uid import URL_NAME_FORM_ACTION, _validated_origin_path
+from .uid import URL_NAME_FORM_ACTION, validated_origin_path
 
 
 if TYPE_CHECKING:
@@ -46,7 +46,7 @@ def _page_path_from_view(view: object) -> "Path | None":
 def _resolve_origin_match(request: "HttpRequest") -> "_OriginMatch | None":
     """Resolve the posted `_next_form_origin` against the URLconf."""
     raw = request.POST.get("_next_form_origin") if hasattr(request, "POST") else None
-    origin = _validated_origin_path(raw)
+    origin = validated_origin_path(raw)
     if origin is None:
         return None
     path = origin.partition("?")[0]

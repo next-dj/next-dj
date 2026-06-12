@@ -38,7 +38,7 @@ def _introspect_key(func: Callable[..., Any]) -> tuple[object, bool]:
     return (func, False)
 
 
-def _cached_signature(func: Callable[..., Any]) -> inspect.Signature:
+def cached_signature(func: Callable[..., Any]) -> inspect.Signature:
     """Return `inspect.signature(func)`, memoised per callable."""
     key = _introspect_key(func)
     cached = _signature_cache.get(key)
@@ -188,7 +188,7 @@ class DependencyResolver:
         self._resolve_call_stack.append(func)
         try:
             try:
-                sig = _cached_signature(func)
+                sig = cached_signature(func)
             except (ValueError, TypeError):
                 return {}
 

@@ -10,12 +10,11 @@ from next.forms import (
     BaseModelForm,
     Form,
     ModelForm,
-    build_form_namespace_for_action,
 )
 from next.forms.base import _is_self_registered
 from next.forms.decorators import action as action_decorator
 from next.forms.dispatch import _form_action_context_callable
-from next.forms.manager import form_action_manager
+from next.forms.manager import build_form_namespace_for_action, form_action_manager
 from next.forms.registration import registration_diagnostics
 
 

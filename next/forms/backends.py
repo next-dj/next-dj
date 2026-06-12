@@ -46,7 +46,7 @@ def _resolved_path_str(file_path: str) -> str:
     return resolved
 
 
-def _file_to_dotted_module(file_path: str) -> str:
+def file_to_dotted_module(file_path: str) -> str:
     """Return a dotted module name by walking up while __init__.py exists."""
     cached = _dotted_module_cache.get(file_path)
     if cached is not None:
@@ -210,7 +210,7 @@ class RegistryFormActionBackend(FormActionBackend):
         if scope == "page":
             scope_key = _resolved_path_str(file_path)
         else:
-            scope_key = _file_to_dotted_module(file_path)
+            scope_key = file_to_dotted_module(file_path)
 
         uid = _make_uid_for_action(scope_key, name)
         existing_key = self._uid_to_name.get(uid)
@@ -356,4 +356,5 @@ __all__ = [
     "FormActionBackend",
     "FormActionFactory",
     "RegistryFormActionBackend",
+    "file_to_dotted_module",
 ]

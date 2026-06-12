@@ -18,7 +18,7 @@ from django.db.models import Model
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 
-from .backends import ActionRegistration, _file_to_dotted_module
+from .backends import ActionRegistration, file_to_dotted_module
 from .base import _registration_gate, _to_snake_case
 from .manager import form_action_manager
 from .registration import registration_diagnostics
@@ -296,7 +296,7 @@ def _auto_register_wizard_class(cls: "type[FormWizard]") -> None:
         registration_diagnostics.wizard_without_steps.append(cls.__qualname__)
     # Mirror the registry scope key so storage partitions match registration.
     cls._storage_scope_key = (
-        file_path if scope == "page" else _file_to_dotted_module(file_path)
+        file_path if scope == "page" else file_to_dotted_module(file_path)
     )
     form_action_manager.register_action(
         ActionRegistration(

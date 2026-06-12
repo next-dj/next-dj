@@ -14,6 +14,7 @@ from .html import assert_has_class, assert_missing_class, find_anchor
 from .isolation import (
     reset_components,
     reset_form_actions,
+    reset_form_registration_state,
     reset_page_cache,
     reset_registries,
 )
@@ -61,6 +62,7 @@ __all__ = [
     "render_page",
     "reset_components",
     "reset_form_actions",
+    "reset_form_registration_state",
     "reset_page_cache",
     "reset_registries",
     "resolve_action_url",

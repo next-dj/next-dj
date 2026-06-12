@@ -276,12 +276,18 @@ BooleanField = django_forms.BooleanField
 ChoiceField = django_forms.ChoiceField
 TypedChoiceField = django_forms.TypedChoiceField
 MultipleChoiceField = django_forms.MultipleChoiceField
+ModelChoiceField = django_forms.ModelChoiceField
+ModelMultipleChoiceField = django_forms.ModelMultipleChoiceField
 DateField = django_forms.DateField
 DateTimeField = django_forms.DateTimeField
 TimeField = django_forms.TimeField
+DurationField = django_forms.DurationField
 DecimalField = django_forms.DecimalField
 FloatField = django_forms.FloatField
 URLField = django_forms.URLField
+SlugField = django_forms.SlugField
+UUIDField = django_forms.UUIDField
+JSONField = django_forms.JSONField
 RegexField = django_forms.RegexField
 FileField = django_forms.FileField
 ImageField = django_forms.ImageField
@@ -290,7 +296,9 @@ PasswordInput = django_forms.PasswordInput
 TextInput = django_forms.TextInput
 Textarea = django_forms.Textarea
 Select = django_forms.Select
+RadioSelect = django_forms.RadioSelect
 CheckboxInput = django_forms.CheckboxInput
+CheckboxSelectMultiple = django_forms.CheckboxSelectMultiple
 SelectMultiple = django_forms.SelectMultiple
 DateInput = django_forms.DateInput
 DateTimeInput = django_forms.DateTimeInput
@@ -299,6 +307,8 @@ NumberInput = django_forms.NumberInput
 EmailInput = django_forms.EmailInput
 URLInput = django_forms.URLInput
 HiddenInput = django_forms.HiddenInput
+FileInput = django_forms.FileInput
+ClearableFileInput = django_forms.ClearableFileInput
 Widget = django_forms.Widget
 
 
@@ -308,27 +318,36 @@ __all__ = [
     "BooleanField",
     "CharField",
     "CheckboxInput",
+    "CheckboxSelectMultiple",
     "ChoiceField",
+    "ClearableFileInput",
     "DateField",
     "DateInput",
     "DateTimeField",
     "DateTimeInput",
     "DecimalField",
+    "DurationField",
     "EmailField",
     "EmailInput",
     "FileField",
+    "FileInput",
     "FloatField",
     "Form",
     "HiddenInput",
     "ImageField",
     "IntegerField",
+    "JSONField",
+    "ModelChoiceField",
     "ModelForm",
+    "ModelMultipleChoiceField",
     "MultipleChoiceField",
     "NumberInput",
     "PasswordInput",
+    "RadioSelect",
     "RegexField",
     "Select",
     "SelectMultiple",
+    "SlugField",
     "TextInput",
     "Textarea",
     "TimeField",
@@ -336,6 +355,7 @@ __all__ = [
     "TypedChoiceField",
     "URLField",
     "URLInput",
+    "UUIDField",
     "ValidationError",
     "Widget",
 ]

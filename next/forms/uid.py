@@ -22,7 +22,7 @@ def reverse_form_action(uid: str) -> str:
         return reverse(URL_NAME_FORM_ACTION, kwargs={"uid": uid})
 
 
-def _validated_origin_path(raw: object) -> str | None:
+def validated_origin_path(raw: object) -> str | None:
     """Return `raw` as a same-site path or `None`."""
     if not isinstance(raw, str):
         return None
@@ -39,7 +39,7 @@ def redirect_to_origin(
     """Redirect back to the page that rendered the form."""
     origin: str | None = None
     if hasattr(request, "POST"):
-        origin = _validated_origin_path(request.POST.get("_next_form_origin"))
+        origin = validated_origin_path(request.POST.get("_next_form_origin"))
     return HttpResponseRedirect(origin or fallback)
 
 
@@ -48,4 +48,5 @@ __all__ = [
     "URL_NAME_FORM_ACTION",
     "redirect_to_origin",
     "reverse_form_action",
+    "validated_origin_path",
 ]

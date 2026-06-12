@@ -10,7 +10,8 @@ from django.http import HttpRequest
 from next.deps import DependencyResolver, resolver
 from next.deps.markers import DependsProvider
 from next.deps.providers import ProviderRegistry
-from next.forms import DForm, FormProvider
+from next.forms import DForm
+from next.forms.markers import FormProvider
 from next.pages.context import ContextByDefaultProvider, ContextByNameProvider
 from next.urls import (
     DUrl,

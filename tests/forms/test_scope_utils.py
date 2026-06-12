@@ -5,7 +5,7 @@ from next.conf import next_framework_settings
 from next.forms.backends import (
     ActionRegistration,
     RegistryFormActionBackend,
-    _file_to_dotted_module,
+    file_to_dotted_module,
 )
 from next.forms.base import (
     _FRAMEWORK_ROOT,
@@ -34,13 +34,13 @@ def test_to_snake_case(name: str, expected: str) -> None:
 
 
 class TestFileToDottedModule:
-    """_file_to_dotted_module returns dotted module path for files inside packages."""
+    """file_to_dotted_module returns dotted module path for files inside packages."""
 
     def test_standalone_file_returns_stem(self, tmp_path) -> None:
         """File not in a package returns just the file stem."""
         f = tmp_path / "mymodule.py"
         f.write_text("")
-        assert _file_to_dotted_module(str(f)) == "mymodule"
+        assert file_to_dotted_module(str(f)) == "mymodule"
 
     def test_file_in_package_returns_dotted_name(self, tmp_path) -> None:
         """File inside a package includes the top-level package in the dotted name."""
@@ -49,7 +49,7 @@ class TestFileToDottedModule:
         (pkg / "__init__.py").write_text("")
         f = pkg / "forms.py"
         f.write_text("")
-        result = _file_to_dotted_module(str(f))
+        result = file_to_dotted_module(str(f))
         assert result == "myapp.forms"
 
     def test_nested_package(self, tmp_path) -> None:
@@ -60,7 +60,7 @@ class TestFileToDottedModule:
         (deep / "__init__.py").write_text("")
         f = deep / "forms.py"
         f.write_text("")
-        result = _file_to_dotted_module(str(f))
+        result = file_to_dotted_module(str(f))
         assert result == "a.b.forms"
 
 
