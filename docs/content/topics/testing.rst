@@ -314,7 +314,7 @@ Action Helpers
 ``next.testing.actions`` exposes ``resolve_action_url`` and ``build_form_for``.
 ``resolve_action_url`` turns an action name into its dispatch URL.
 ``build_form_for`` builds a bound form for an action so a unit test can assert validation without HTTP.
-Both raise ``FormActionNotFound`` from ``next.forms`` for an unknown action name, and ``build_form_for`` raises ``LookupError`` for an action registered without a form class.
+Both raise ``FormActionNotFound`` from ``next.forms`` for an unknown action name, with the closest registered names rendered into the message, and ``build_form_for`` raises ``LookupError`` for an action registered without a form class.
 
 .. code-block:: python
    :caption: tests/test_action_helpers.py

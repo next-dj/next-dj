@@ -36,6 +36,19 @@ Forms
    It also uses ``current_page_module_path`` when present to scope the action lookup to the origin page, which is how the file router renders it.
    That context value is not strictly required: when it is absent the action lookup falls back to the name index.
 
+.. describe:: {% action_url "<name>" %}
+
+   Returns the dispatch endpoint URL for a registered action.
+   The first argument is the action name, a quoted string or a context variable that resolves to a string.
+   The lookup uses the same page scoping as ``{% form %}``: a page-scoped match for the rendering page wins over a shared one, read from ``current_page_module_path`` when present.
+
+   As a ``simple_tag`` it supports assignment, ``{% action_url "delete_note" as delete_url %}``.
+
+   Use it for hand-written forms and client-side requests that post outside the ``{% form %}`` tag.
+   Such a request supplies the CSRF token and the hidden ``_next_form_origin`` field itself, see the manual-form notes in :doc:`/content/topics/forms/templates`.
+
+   An unknown name raises ``FormActionNotFound`` at render time, with the closest registered names in the message.
+
 Components
 ----------
 

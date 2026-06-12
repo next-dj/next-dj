@@ -25,6 +25,10 @@ A wizard declared in ``page.py`` is page-scoped and keyed to its file.
 A wizard declared in any other module is shared and reachable project-wide.
 See :doc:`overview` for the full scope derivation.
 
+The access guards also match plain forms.
+``Meta.login_required`` and ``Meta.permission_required`` on the wizard class guard its endpoint, and the guard is enforced on every step submission, not only the final one.
+See :ref:`topics-forms-actions-guards` for the semantics.
+
 Declaring Steps
 ---------------
 
@@ -74,6 +78,10 @@ See :ref:`Preventing Registration <topics-forms-actions-abstract>` for the ``Met
 ``Meta.steps`` is required.
 An empty or missing list triggers the ``next.E050`` system check and the wizard is not usable.
 
+Keep ``FileField`` and ``ImageField`` out of step forms.
+Wizard storage persists each step's ``cleaned_data`` between requests, and an uploaded file does not survive that round trip.
+The ``next.W058`` check flags a file field in a static step, collect the upload in a standalone form action instead.
+
 ``Meta.url_param`` names the URL kwarg that carries the active step.
 It defaults to ``"step"``, so a route segment of ``[step]`` works with no further configuration.
 
@@ -99,6 +107,10 @@ Call ``self.get_cleaned_data_for_step(step)`` when the per-step value matters: i
 ``done`` is required.
 The base implementation raises ``NotImplementedError``, so every wizard subclass must override it.
 Return any ``HttpResponse``, most often a redirect away from the wizard.
+
+A field declared by two steps is statically flagged by the ``next.W059`` check, since the merge silently keeps the last value.
+``Meta.success_message`` works on a wizard too: the message is flashed once, after ``done`` succeeds, interpolated over the merged step data, with ``get_success_message`` as the dynamic override.
+See :ref:`topics-forms-actions-success` for the message contract.
 
 Keep ``done`` idempotent.
 A retried final submission can run it again, so guard against creating a duplicate row.
@@ -340,6 +352,9 @@ System Checks
 The ``next.E050`` and ``next.E051`` checks guard the steps declaration and the wizard backend configuration.
 ``next.W056`` warns when wizards are registered and the configured backend needs Django sessions while ``django.contrib.sessions`` is not installed.
 ``next.W057`` warns when a static ``Meta.steps`` form class is also registered as a standalone action, which the plain-Django-form step pattern avoids.
+``next.W058`` warns when a static step declares a ``FileField`` or ``ImageField``, whose uploads do not survive the draft round trip.
+``next.W059`` warns when two static steps declare the same field name, where ``get_all_cleaned_data()`` keeps the last value and ``get_cleaned_data_for_step`` gives per-step access.
+The static-step checks inspect ``Meta.steps`` only, a ``get_steps`` override is not visible to them.
 See :doc:`/content/ref/system-checks` for their conditions, and run ``uv run python manage.py check`` after editing a wizard or its backend.
 
 See Also

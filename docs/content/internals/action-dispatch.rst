@@ -14,7 +14,7 @@ Overview
 --------
 
 The dispatcher runs at ``/_next/form/<uid>/`` where the UID is the first 16 hex characters of a SHA-256 digest of the scope key and the action name.
-The dispatcher loads the action handler, builds the form, runs the validation chain, and either calls the handler or re-renders the origin page.
+The dispatcher loads the action handler, enforces the declared access guard, builds the form, runs the validation chain, and either calls the handler or re-renders the origin page.
 Any non-POST method short-circuits before that work and returns HTTP 405.
 
 Pipeline
@@ -27,8 +27,11 @@ Pipeline
        Endpoint -- "non-POST" --> NotAllowed["HTTP 405"]
        Endpoint -- POST --> Lookup["Resolve action by UID"]
        Lookup -- unknown UID --> NotFound["HTTP 404"]
-       Lookup -- "found, no form_class" --> HandlerOnly["Run handler only"]
-       Lookup -- "found, form_class" --> Build["Build form"]
+       Lookup -- found --> Guard{"Access guard"}
+       Guard -- anonymous --> LoginRedirect["HTTP 302 to LOGIN_URL"]
+       Guard -- "missing permission" --> Forbidden["HTTP 403"]
+       Guard -- "pass, no form_class" --> HandlerOnly["Run handler only"]
+       Guard -- "pass, form_class" --> Build["Build form"]
        HandlerOnly --> HandlerOnlyResponse["Handler response or HTTP 204"]
        HandlerOnly --> ActionDispatched["action_dispatched signal"]
        Build --> Validate{"Form valid"}
@@ -73,6 +76,14 @@ Modules
 ``next.forms.formsets``.
    ``cleanup_extra_initial`` helper for blank extra rows.
 
+Access Guard
+------------
+
+An action that declares ``login_required`` or ``permission_required`` carries an ``ActionGuard`` in its registry metadata under the ``guard`` key.
+The shared pipeline enforces it right after the method check, ahead of origin resolution, ``get_initial``, and form binding, so no application code or database access runs for a denied request.
+An anonymous user receives a redirect to ``LOGIN_URL`` whose ``next`` is the validated posted origin, and an authenticated user missing a permission raises ``PermissionDenied``.
+Every backend that delegates to ``FormActionDispatch.dispatch`` inherits the enforcement.
+
 Origin Resolution
 -----------------
 
@@ -110,6 +121,9 @@ Two consequences flow from this.
 
 The cache hangs on ``request`` under the attribute named ``REQUEST_DEP_CACHE_ATTR``.
 Read it through ``next.deps.get_request_dep_cache(request)`` rather than the raw attribute.
+
+The origin-page re-render also reuses the compiled page template.
+The page manager caches the composed template source and its compiled ``Template`` keyed by source mtime, so a warm re-render performs no file reads and no template parsing.
 
 Signals
 -------

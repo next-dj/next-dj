@@ -287,6 +287,18 @@ Warnings
    * - ``next.W057``
      - A static ``Meta.steps`` form class is also registered as a standalone form action.
      - ``next.forms.checks``
+   * - ``next.W058``
+     - A static ``Meta.steps`` form declares a ``FileField`` or ``ImageField``, whose uploads do not survive the wizard draft storage between requests.
+     - ``next.forms.checks``
+   * - ``next.W059``
+     - Two static wizard steps declare the same field name, so ``get_all_cleaned_data()`` keeps only the last value.
+     - ``next.forms.checks``
+   * - ``next.W060``
+     - A form action declares ``permission_required`` while ``django.contrib.auth`` is not in ``INSTALLED_APPS``.
+     - ``next.forms.checks``
+   * - ``next.W061``
+     - A form action declares ``Meta.success_message`` while the messages framework is not fully installed, so a valid submission raises ``MessageFailure``.
+     - ``next.forms.checks``
 
 .. note::
 

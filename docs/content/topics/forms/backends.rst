@@ -82,13 +82,14 @@ A backend subclasses ``next.forms.FormActionBackend``, an abstract base class wi
 ``dispatch(request, uid)``.
    Runs the handler for the given action UID and returns an ``HttpResponse``.
 
-The base class also offers three optional override points: ``get_meta``, ``render_invalid_page``, and ``shape_response``.
+The base class also offers four optional override points: ``get_meta``, ``iter_actions``, ``render_invalid_page``, and ``shape_response``.
 
 ``get_meta`` and Multi-Backend Routing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``get_meta(action_name, page_path=None)`` returns the stored ``ActionMeta`` for a name, or ``None`` when this backend does not own it.
-``ActionMeta`` is a ``TypedDict`` carrying the action target (``handler``, ``form_class``, ``wizard_class``), the derived ``uid``, the declaration ``file_path``, and the ``scope``.
+``ActionMeta`` is a ``TypedDict`` carrying the action ``name``, the action target (``handler``, ``form_class``, ``wizard_class``), the derived ``uid``, the declaration ``file_path``, the ``scope``, and the access ``guard``.
+The ``guard`` value is the ``ActionGuard`` built from the declared ``login_required`` and ``permission_required`` requirements, ``None`` when the action declares none, so a custom backend can inspect the access rules of any action it stores.
 
 The base implementation returns ``None``.
 ``RegistryFormActionBackend`` returns the meta from its in-memory registry.
@@ -99,6 +100,14 @@ The proxy method ``FormActionManager.get_action_meta`` exposes that resolution, 
 A backend whose meta omits ``uid`` therefore renders forms without that attribute, and the dispatch-time signals carry ``uid=None`` for its actions.
 A custom backend that owns its own actions must return a truthy meta for those names, or the manager skips it and the ``{% form %}`` tag cannot find the action.
 A backend that defers entirely to ``RegistryFormActionBackend`` need not override ``get_meta``.
+
+``iter_actions`` and the System Checks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``iter_actions()`` yields the ``ActionMeta`` of every action the backend owns.
+The base implementation yields nothing, and ``RegistryFormActionBackend`` yields its registry entries in registration order.
+The forms system checks, ``next.W054`` through ``next.W061``, walk every configured backend through this hook, so a backend that stores its own actions should implement it, or those actions stay invisible to ``manage.py check``.
+A subclass of ``RegistryFormActionBackend`` inherits a working implementation.
 
 Shaping the Response
 ~~~~~~~~~~~~~~~~~~~~
@@ -248,6 +257,8 @@ FormActionManager
 
 The module-level ``form_action_manager`` instance holds the active backends behind a thin facade.
 Application code reaches it through ``from next.forms.manager import form_action_manager``.
+The ``backends`` property returns the configured backends in consultation order, and ``default_backend`` returns the first one.
+The system checks iterate ``form_action_manager.backends`` when they collect action metadata, which is why every backend's ``iter_actions`` participates.
 See :doc:`/content/ref/forms` for the full member list of ``next.forms.manager``.
 
 The companion ``build_form_namespace_for_action(action_name, request, page_path=None)`` builds the ``{form, wizard}`` namespace the ``{% form %}`` tag normally publishes.

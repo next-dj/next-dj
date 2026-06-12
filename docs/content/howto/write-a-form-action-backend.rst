@@ -134,6 +134,25 @@ Override ``shape_response`` to change the envelope without touching the HTML, fo
 Override ``render_invalid_page`` instead when only the error HTML changes and the envelope stays as shipped.
 See :doc:`/content/topics/forms/backends` for the two customisation layers and the ``ActionOutcome`` fields.
 
+Surface Actions to the System Checks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The forms system checks collect action metadata from every configured backend through ``iter_actions()``, which yields one ``ActionMeta`` per stored action.
+A subclass of ``RegistryFormActionBackend`` inherits a working implementation.
+A from-scratch backend overrides the hook so its actions participate in checks such as ``next.W054`` and ``next.W060``.
+
+.. code-block:: python
+   :caption: notes/backends.py
+
+   from collections.abc import Iterable
+   from next.forms.backends import ActionMeta
+
+   class CustomBackend(FormActionBackend):
+       def iter_actions(self) -> Iterable[ActionMeta]:
+           yield from self._metas.values()
+
+The yielded dicts carry the action ``name``, the target, the ``uid``, and the access ``guard``, the same shape ``get_meta`` returns.
+
 Verification
 ------------
 

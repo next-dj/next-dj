@@ -61,6 +61,24 @@ CSRF token is missing or stale.
 The ``{% form %}`` tag injects the token automatically.
 Manual forms need ``{% csrf_token %}`` plus a fresh cookie.
 
+When the token is fine, the 403 can come from an access guard: an authenticated user missing a ``Meta.permission_required`` permission gets ``PermissionDenied``.
+See :ref:`topics-forms-actions-guards`.
+
+Form POST Redirects to the Login Page
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The action declares ``Meta.login_required`` or ``login_required=True`` on ``@action``, and the submission came from an anonymous session.
+The dispatcher answers with a 302 to ``LOGIN_URL`` carrying ``next`` set to the origin page, before any POST data reaches the handler.
+This is the declared behaviour, not an error.
+Sign in, or hide the form from anonymous visitors in the template, since the guard protects the mutation and not the markup.
+
+``MessageFailure`` on a Valid Submission
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The form declares ``Meta.success_message`` but the messages framework is not fully installed.
+Add ``django.contrib.messages`` to ``INSTALLED_APPS`` and ``django.contrib.messages.middleware.MessageMiddleware`` to ``MIDDLEWARE``.
+The framework raises rather than dropping the requested message silently, and ``manage.py check`` reports the gap upfront as :ref:`next.W061 <ref-system-checks>`.
+
 next.E041 Collision
 ~~~~~~~~~~~~~~~~~~~
 
@@ -70,8 +88,9 @@ Rename one of them or move one to a different scope to avoid the collision.
 Unknown Form Action
 ~~~~~~~~~~~~~~~~~~~
 
-``{% form "name" %}``, ``NextClient.post_action``, and ``resolve_action_url`` raise ``next.forms.FormActionNotFound`` when no registered action matches the name.
-Check the name for typos, confirm the declaring module was imported before the lookup, and remember that a page-scoped action resolves only from its own page.
+``{% form "name" %}``, ``{% action_url "name" %}``, ``NextClient.post_action``, ``resolve_action_url``, and ``build_form_for`` raise ``next.forms.FormActionNotFound`` when no registered action matches the name.
+The message ends with ``Closest matches: ...`` listing the nearest registered names, so a typo is usually visible in the error itself.
+Check the name against the suggestions, confirm the declaring module was imported before the lookup, and remember that a page-scoped action resolves only from its own page.
 
 Wizard Draft Disappears Between Steps
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

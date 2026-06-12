@@ -9,7 +9,7 @@ Module Summary
 ``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``.
 It also exposes the ``RouterFactory`` and ``RouterManager`` that build and own them.
 The ``URLPatternParser`` for bracket-segment parsing is part of the public surface.
-It also exposes the ``page_reverse`` and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, and the Django integration name ``app_name``.
+It also exposes the ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, and the Django integration name ``app_name``.
 The parameter providers and the dependency markers ``DUrl`` (captured path segments) and ``DQuery`` (query string parameters) round out the public surface.
 
 Public API
@@ -56,6 +56,11 @@ Reverse Helpers
 ~~~~~~~~~~~~~~~
 
 .. autofunction:: next.urls.reverse.page_reverse
+
+.. py:function:: next.urls.reverse.page_reverse_lazy(path_template="", *, namespace=app_name, **kwargs)
+
+   Lazy variant of ``page_reverse`` built with :func:`django.utils.functional.lazy`.
+   The URL resolves when the value is first coerced to ``str``, which makes it safe in positions evaluated at class-definition time, before the URLconf is ready, such as ``Meta.success_url`` on a form class.
 
 .. autofunction:: next.urls.reverse.with_query
 

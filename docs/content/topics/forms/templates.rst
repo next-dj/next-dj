@@ -168,14 +168,19 @@ Only add Django's ``{% csrf_token %}`` manually when you build the ``<form>`` el
 A hand-crafted form must also include the ``_next_form_origin`` hidden field or the dispatcher cannot re-render on failure.
 Set it to the URL path of the page, the same value the tag emits, with ``{{ request.path }}`` as the natural source.
 
+The ``{% action_url %}`` tag resolves the dispatch URL by action name with the same page scoping as ``{% form %}``, so a hand-crafted form never hard-codes a UID.
+It also supports ``as`` assignment for reuse, see :doc:`/content/ref/template-tags`.
+
 .. code-block:: jinja
    :caption: hand-crafted form
 
-   <form action="/_next/form/{{ action_uid }}/" method="post">
+   <form action="{% action_url 'contact_form' %}" method="post">
      {% csrf_token %}
      <input type="hidden" name="_next_form_origin" value="{{ request.path }}">
      <button type="submit">Send</button>
    </form>
+
+An unknown action name raises ``FormActionNotFound`` at render time, the same error the ``{% form %}`` tag raises.
 
 .. _topics-forms-templates-handwritten-views:
 

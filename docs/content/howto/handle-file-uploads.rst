@@ -34,22 +34,21 @@ Define the form.
 .. code-block:: python
    :caption: notes/forms.py
 
-   from django.http import HttpRequest, HttpResponseRedirect
-   from django.urls import reverse
    from next.forms import ModelForm
+   from next.urls import page_reverse_lazy
    from notes.models import Attachment
 
    class AttachmentForm(ModelForm):
        class Meta:
            model = Attachment
            fields = ("title", "file")
-
-       def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
-           self.save()
-           return HttpResponseRedirect(reverse("next:page_attachments"))
+           success_url = page_reverse_lazy("attachments")
 
 ``AttachmentForm`` registers automatically as ``attachment_form`` via autodiscovery on startup.
 No manual import is needed in the page module.
+No ``on_valid`` override is needed either: the default ``ModelForm`` implementation saves the instance and redirects to ``Meta.success_url``.
+Without ``success_url`` the submission redirects back to the origin page.
+See :ref:`topics-forms-actions-success` for the redirect contract.
 
 Render the form.
 
@@ -71,6 +70,12 @@ The tag also emits the CSRF token and the hidden ``_next_form_origin`` field on 
    Render the file input through the plain Django widget, ``{{ form.file }}``, or a hand-written ``<input type="file" name="file">``.
    ``ComponentWidget`` does not support ``FileField``, and the ``next.W055`` system check warns about that pairing at startup.
    See :doc:`/content/topics/forms/field-components` for the widget limitations.
+
+.. note::
+
+   Keep file fields out of ``FormWizard`` steps.
+   Wizard storage persists each step's ``cleaned_data`` between requests, and an uploaded file does not survive that round trip.
+   The ``next.W058`` check flags a ``FileField`` or ``ImageField`` in a static wizard step, so collect the upload in a standalone form action like the one on this page.
 
 Configure media storage.
 

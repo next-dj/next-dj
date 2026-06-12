@@ -92,6 +92,24 @@ When to Use page_reverse Instead of reverse
 ``django.urls.reverse("next:page_posts_slug", kwargs={"slug": "hello"})`` and ``page_reverse("posts/[slug]", slug="hello")`` are equivalent.
 Use ``page_reverse`` when the call site references the directory tree, ``reverse`` when the call site already has the URL name in a variable.
 
+The Lazy Variant
+~~~~~~~~~~~~~~~~
+
+``page_reverse_lazy`` takes the same arguments and defers the resolution until the value is first coerced to ``str``.
+Use it in positions evaluated at class-definition time, before the URLconf is ready, such as ``Meta.success_url`` on a form class.
+It pairs with ``page_reverse`` the way Django pairs :func:`~django.urls.reverse` with :func:`~django.urls.reverse_lazy`.
+
+.. code-block:: python
+   :caption: class-level URL
+
+   from next.urls import page_reverse_lazy
+
+   class AttachmentForm(ModelForm):
+       class Meta:
+           model = Attachment
+           fields = ("title", "file")
+           success_url = page_reverse_lazy("attachments")
+
 with_query
 ----------
 

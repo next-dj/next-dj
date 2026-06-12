@@ -27,7 +27,7 @@ Stable.
 Advanced.
    ``FormActionBackend``, ``RegistryFormActionBackend``,
    ``ActionOutcome``, ``ActionOutcomeKind``,
-   ``ActionRegistration``, ``ComponentWidget``,
+   ``ActionRegistration``, ``ActionGuard``, ``ComponentWidget``,
    ``FormWizardBackend``, ``SessionFormWizardBackend``, ``CacheFormWizardBackend``,
    the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``,
    ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``,
@@ -77,8 +77,9 @@ Exceptions
 ~~~~~~~~~~
 
 ``FormActionNotFound`` is raised when no registered action matches a requested name.
-``FormActionManager.get_action_url``, the ``{% form %}`` tag, and the testing helper ``resolve_action_url`` all raise it.
-It subclasses ``LookupError`` and carries the failing ``name``, the ``page_path`` that was searched, and optional name ``suggestions``.
+``FormActionManager.get_action_url``, the ``{% form %}`` and ``{% action_url %}`` tags, and the testing helpers ``resolve_action_url`` and ``build_form_for`` all raise it.
+It subclasses ``LookupError`` and carries the failing ``name``, the ``page_path`` that was searched, and the close-match ``suggestions`` tuple.
+Every raising surface renders the suggestions into the message as ``Closest matches: 'x', 'y'``, computed by close-match comparison against the registered names.
 
 .. autoexception:: next.forms.FormActionNotFound
    :members:
@@ -93,10 +94,10 @@ Form Base Classes
    :members:
 
 .. autoclass:: next.forms.BaseForm
-   :members: get_initial, on_valid
+   :members: get_initial, get_success_message, on_valid
 
 .. autoclass:: next.forms.BaseModelForm
-   :members: get_initial, on_valid
+   :members: get_initial, get_success_message, on_valid
 
 Form Wizard
 ~~~~~~~~~~~
@@ -181,8 +182,11 @@ Backends
 ~~~~~~~~
 
 ``ActionRegistration`` is the value object passed to ``register_action``.
-It carries the action ``name``, the declaration-site ``file_path``, the ``scope``, and the action target.
+It carries the action ``name``, the declaration-site ``file_path``, the ``scope``, the optional access ``guard``, and the action target.
 The target is one of ``handler``, ``form_class``, or ``wizard_class``, which lets a single ``register_action`` call serve the ``@action`` decorator, a class-bound form, and a ``FormWizard``.
+``ActionGuard`` is the frozen access-requirement record built from ``Meta.login_required`` and ``Meta.permission_required`` or the matching ``@action`` keywords.
+It is stored under the ``guard`` key of ``ActionMeta`` and enforced by the dispatch pipeline before the form is built, so custom backends see the declared requirements without extra wiring.
+``iter_actions`` yields every stored ``ActionMeta``, including its ``name`` key, which is how the forms system checks inspect any configured backend.
 ``ActionMeta``, ``FormActionFactory``, and ``file_to_dotted_module`` import from ``next.forms.backends`` directly.
 ``FormActionFactory`` instantiates one backend per ``FORM_ACTION_BACKENDS`` entry, passing the whole config dict to the backend constructor.
 ``FormActionManager`` calls it, so application code rarely does.

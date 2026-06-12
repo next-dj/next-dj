@@ -61,6 +61,7 @@ The conversion collapses consecutive uppercase runs, so an acronym stays a singl
 
    Renaming a form class changes its action name.
    Any ``{% form "old_name" %}`` tag or reverse URL that used the old name will fail at render time with ``FormActionNotFound``.
+   The exception message lists the closest registered names, so a rename typo is usually visible in the error itself.
    Update every template and reverse call when renaming a class.
 
 Anchor Files and Scope
@@ -130,14 +131,16 @@ The method signature uses the same dependency-injection rules as any other DI-re
 ``request`` is the current ``HttpRequest``.
 Any additional parameter is resolved through the DI injector: ``DUrl[...]`` markers, ``Depends`` providers, and so on.
 
-The default implementation on ``BaseForm`` returns ``redirect_to_origin(request)``.
-The default implementation on ``BaseModelForm`` calls ``self.save()`` then returns ``redirect_to_origin(request)``.
+The default implementation on ``BaseForm`` redirects to ``Meta.success_url`` when declared, otherwise it returns ``redirect_to_origin(request)``.
+The default implementation on ``BaseModelForm`` calls ``self.save()`` then follows the same redirect rule.
+See `Success Feedback`_ for the ``success_url`` contract.
 
 The return value follows the same contract as a handler function, checked in a fixed order.
 An ``HttpResponse`` instance passes through unchanged, and this check runs first, so every rich response type the framework ships subclasses ``HttpResponse``.
 A string becomes the body of an HTTP 200 response, never a redirect target.
 ``None`` triggers a re-render of the origin page with HTTP 200.
-An object with a truthy ``url`` attribute redirects to that URL, a last-resort convenience for model-like objects.
+A model instance with a ``get_absolute_url`` method redirects to that URL, the ``CreateView``-style idiom for a handler that saves and shows the result.
+Any other object with a truthy ``url`` attribute redirects to that URL, a last-resort convenience for model-like objects.
 Any other return value emits a ``RuntimeWarning`` and is treated as ``None``.
 
 ``get_initial`` Pre-Populates the Form
@@ -190,6 +193,7 @@ The scope of a form-less action follows the same anchor-file rule: ``page.py`` a
 All other files produce shared actions.
 Pass ``scope="page"`` or ``scope="shared"`` to override the file-derived scope, the same override ``Meta.scope`` provides for a form class.
 Any other value triggers ``next.E047`` and the action is not registered.
+The ``login_required`` and ``permission_required`` keywords guard the endpoint, see `Access Guards`_.
 
 Applying ``@action`` to a class registers no action: the decorator records the misuse, returns the class unchanged, and ``manage.py check`` reports it as ``next.E053``.
 Form classes register through ``__init_subclass__`` and must not use ``@action``.
@@ -287,6 +291,121 @@ Set ``Meta.abstract = True`` to skip auto-registration.
 ``InviteForm`` registers normally as ``invite_form`` and inherits the base behaviour.
 The same ``Meta.abstract`` flag works on a ``FormWizard`` base class.
 
+.. _topics-forms-actions-guards:
+
+Access Guards
+-------------
+
+The dispatch endpoint of an action lives at ``/_next/form/<uid>/``, outside the page URL space, so page-level protection does not cover it.
+Declare the access requirements on the action itself.
+``Meta.login_required`` and ``Meta.permission_required`` guard a class-bound form, and the same names are keyword arguments on ``@action``.
+
+.. code-block:: python
+   :caption: page.py
+
+   import next.forms
+   from django.http import HttpRequest
+   from next.forms import action, redirect_to_origin
+   from next.urls import DUrl
+
+   class NoteDeleteForm(next.forms.Form):
+       class Meta:
+           login_required = True
+           permission_required = "notes.delete_note"
+
+   @action("purge_note", login_required=True)
+   def purge_note(note_id: DUrl["id", int], request: HttpRequest):
+       Note.objects.filter(pk=note_id).delete()
+       return redirect_to_origin(request)
+
+The semantics mirror Django's :class:`~django.contrib.auth.mixins.PermissionRequiredMixin`.
+``permission_required`` accepts a single permission string or an iterable of them, the user must hold every listed permission, and declaring a permission implicitly requires authentication.
+The guard runs before the form is built, ahead of ``get_initial``, form binding, and any database access.
+An anonymous user is redirected to ``LOGIN_URL`` with ``next`` set to the posted origin page.
+An authenticated user missing a permission gets :exc:`~django.core.exceptions.PermissionDenied`, which Django renders as HTTP 403.
+
+Unlike ``Meta.abstract``, which is own-class-only, the guard keys are inherited: a base class with ``login_required = True`` protects every concrete subclass, the same way Django's auth mixins protect CBV subclasses.
+The same ``Meta`` keys work on a ``FormWizard``, where the guard is enforced on every step submission.
+
+Rendering a guarded form on a public page is not blocked.
+The guard protects the mutation, not the markup, exactly as a rendered Django form knows nothing about authorisation.
+Hide the form in the template when the page should not show it to anonymous visitors.
+
+The guard is stored as an ``ActionGuard`` on the action's registry metadata, so a custom backend that delegates to the standard pipeline inherits the enforcement.
+The ``next.W060`` check warns when ``permission_required`` is declared while ``django.contrib.auth`` is not installed.
+
+.. _topics-forms-actions-success:
+
+Success Feedback
+----------------
+
+Two ``Meta`` keys describe what a valid submission tells the user: a flash message and a redirect target.
+
+Success Messages
+~~~~~~~~~~~~~~~~
+
+``Meta.success_message`` flashes a message through :doc:`django.contrib.messages <django:ref/contrib/messages>` after a valid submission.
+The template is interpolated with ``%`` formatting over ``cleaned_data``, the exact contract of Django's ``SuccessMessageMixin``.
+
+.. code-block:: python
+
+   class NoteForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title", "body"]
+           success_message = "Note %(title)s saved."
+
+Override ``get_success_message(cleaned_data)`` for a dynamic message, for example to name attributes of the saved instance on a ``ModelForm``.
+An empty return value sends nothing.
+
+The message is sent only when the action outcome shapes into a response with a status below 400, so a failed validation flashes nothing.
+On a ``FormWizard`` the message is sent once, after ``done`` succeeds, interpolated over the merged step data.
+
+The messages framework must be fully installed: ``django.contrib.messages`` in ``INSTALLED_APPS`` and ``MessageMiddleware`` in ``MIDDLEWARE``.
+Without it a valid submission raises ``MessageFailure`` rather than silently dropping the message, and the ``next.W061`` check reports the gap at ``manage.py check`` time.
+
+A handler-only action has no ``cleaned_data`` to interpolate, so ``@action`` takes no ``success_message`` keyword.
+Call ``messages.success`` in the handler body instead.
+
+.. code-block:: python
+
+   from django.contrib import messages
+   from django.http import HttpRequest
+   from next.forms import action, redirect_to_origin
+   from next.urls import DUrl
+
+   @action("archive_note")
+   def archive_note(note_id: DUrl["id", int], request: HttpRequest):
+       Note.objects.filter(pk=note_id).update(archived=True)
+       messages.success(request, "Note archived.")
+       return redirect_to_origin(request)
+
+Success Redirects
+~~~~~~~~~~~~~~~~~
+
+``Meta.success_url`` names where the default ``on_valid`` redirects after a valid submission.
+An explicit ``success_url`` wins over the ``redirect_to_origin`` default.
+The value is a path string, a lazy object, or a zero-argument callable returning the path, evaluated when the response is built.
+:func:`next.urls.page_reverse_lazy` is the lazy companion of ``page_reverse`` for exactly this position, because ``Meta`` evaluates at class definition, before the URLconf is ready.
+
+.. code-block:: python
+
+   from next.urls import page_reverse_lazy
+
+   class AttachmentForm(next.forms.ModelForm):
+       class Meta:
+           model = Attachment
+           fields = ("title", "file")
+           success_url = page_reverse_lazy("attachments")
+
+On a ``ModelForm`` the default ``on_valid`` saves first, then follows ``success_url``.
+A custom ``on_valid`` or handler that saves an instance can lean on the model itself: returning the instance redirects to its ``get_absolute_url()``, the ``CreateView`` idiom.
+
+.. code-block:: python
+
+   def on_valid(self, request: HttpRequest):
+       return self.save()
+
 System Checks
 -------------
 
@@ -316,6 +435,13 @@ The forms subsystem contributes Django system checks that run through ``python m
 ``next.E053``
    ``@action`` was applied to a class.
    Remove the decorator and let the class register through ``__init_subclass__``.
+
+``next.W060`` (Warning)
+   An action declares ``permission_required`` while ``django.contrib.auth`` is not in ``INSTALLED_APPS``, so the permission check cannot resolve users or permissions.
+
+``next.W061`` (Warning)
+   An action declares ``Meta.success_message`` while the messages framework is not fully installed.
+   A valid submission raises ``MessageFailure`` until ``django.contrib.messages`` and ``MessageMiddleware`` are both configured.
 
 A UID hash collision between two distinct registrations is not reported as a system check.
 It raises ``ImproperlyConfigured`` at import time when two different ``(scope_key, name)`` pairs hash to the same UID.

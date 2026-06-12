@@ -119,6 +119,30 @@ A branded 403 page needs a ``403.html`` template or a ``handler403`` in the root
            raise PermissionDenied
        return list(request.user.note_set.all())
 
+Guard Form Actions
+~~~~~~~~~~~~~~~~~~
+
+Form actions dispatch at ``/_next/form/<uid>/``, outside the page URL space.
+The global middleware above still covers them because it gates every request path.
+A project that protects pages selectively instead declares the requirement on the action itself, with ``Meta.login_required`` and ``Meta.permission_required`` on the form class or the same keywords on ``@action``.
+
+.. code-block:: python
+   :caption: notes/pages/admin-notes/page.py
+
+   import next.forms
+   from notes.models import Note
+
+   class AdminNoteForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title"]
+           login_required = True
+           permission_required = "notes.change_note"
+
+An anonymous POST redirects to ``LOGIN_URL`` with ``next`` set to the origin page, and an authenticated user missing the permission gets HTTP 403.
+The guard protects the mutation, not the markup: a GET still renders the page and its form, so hide the form in the template when anonymous visitors should not see it.
+See :ref:`topics-forms-actions-guards` for the full semantics, including guard inheritance.
+
 Verification
 ------------
 

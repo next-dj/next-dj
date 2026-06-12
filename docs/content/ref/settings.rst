@@ -127,7 +127,8 @@ A form class declared in a file whose basename appears in this list is keyed to 
 All other files produce ``shared`` scope.
 
 Default value ``None``, which uses the built-in set ``["page.py", "component.py"]``.
-Set to a list of strings to extend or replace the default set.
+Set to a list of strings to replace the default set.
+The configured list is used as is, so include ``"page.py"`` and ``"component.py"`` explicitly when they should stay anchors.
 
 FORM_WIZARD_BACKEND
 ~~~~~~~~~~~~~~~~~~~
