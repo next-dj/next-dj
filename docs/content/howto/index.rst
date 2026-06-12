@@ -78,7 +78,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`use-formsets`
    Render and validate a Django formset.
 
-:doc:`build-multi-step-wizard`
+:doc:`build-a-multi-step-wizard`
    Gather data across several steps and finalise one row at the end.
 
 :doc:`move-from-django-formtools`
@@ -149,7 +149,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    handle-file-uploads
    use-modelform-for-crud
    use-formsets
-   build-multi-step-wizard
+   build-a-multi-step-wizard
    move-from-django-formtools
    style-forms-with-crispy-and-widget-tweaks
    drive-form-actions-with-htmx

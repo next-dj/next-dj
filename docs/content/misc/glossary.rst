@@ -67,6 +67,11 @@ Terms used throughout the next.dj documentation.
       The draft-persistence contract for a ``FormWizard``, a ``FormWizardBackend`` subclass that stores each step's cleaned data between requests.
       Selected through ``NEXT_FRAMEWORK["FORM_WIZARD_BACKEND"]``, with the bundled ``SessionFormWizardBackend`` as the default and ``CacheFormWizardBackend`` as the cache-backed alternative.
 
+   guard
+      The access requirement declared on an action through ``Meta.login_required`` and ``Meta.permission_required``, or the matching ``@action`` keywords.
+      Stored as an ``ActionGuard`` on the registry metadata and enforced before the form is built.
+      See :ref:`topics-forms-actions-guards`.
+
    inherit_context
       The ``inherit_context=True`` flag on ``@context`` in ``page.py``.
       Publishes the context value to every descendant page under that directory, not only to the page that declares it.
@@ -94,6 +99,10 @@ Terms used throughout the next.dj documentation.
    origin page
       The page that rendered a form.
       Identified at dispatch time by resolving the hidden ``_next_form_origin`` URL path against the URLconf.
+
+   outcome
+      The ``ActionOutcome`` dataclass a form action backend produces from a dispatch, shaped into the HTTP response by ``shape_response``.
+      See :doc:`/content/topics/forms/backends`.
 
    page
       A directory under the page root with a ``page.py``, or a virtual route with only a ``template.djx``.
@@ -123,6 +132,12 @@ Terms used throughout the next.dj documentation.
       The Django URL name string inside the ``next`` namespace (``app_name`` on ``next.urls``).
       Values come from ``NEXT_FRAMEWORK["URL_NAME_TEMPLATE"]``, default ``"page_{name}"``, where ``{name}`` is derived from the normalized filesystem path.
       Reverse from templates as ``{% url 'next:page_notes_id' id=note.id %}`` or from Python through :doc:`/content/topics/url-reversing`.
+
+   scope
+      The keying rule for an action name, ``page`` or ``shared``.
+      A page-scoped action is keyed to the absolute path of its declaring ``page.py`` or ``component.py``, while a shared action is keyed to its dotted module name and is reachable project-wide.
+      The resulting key is the scope key that the UID hashes together with the action name.
+      See :doc:`/content/topics/forms/actions`.
 
    signal
       A Django signal emitted by one subsystem.

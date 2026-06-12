@@ -27,7 +27,8 @@ See :doc:`overview` for the full scope derivation.
 
 The access guards also match plain forms.
 ``Meta.login_required`` and ``Meta.permission_required`` on the wizard class guard its endpoint, and the guard is enforced on every step submission, not only the final one.
-See :ref:`topics-forms-actions-guards` for the semantics.
+The keys are read through plain class-attribute lookup, so a wizard subclassing a guarded base while declaring its own ``Meta`` must extend the base ``Meta`` or re-declare the guard keys.
+See :ref:`topics-forms-actions-guards` for the semantics and the inheritance rule.
 
 Declaring Steps
 ---------------
@@ -68,6 +69,9 @@ Each form class is a plain ``django.forms.Form`` or ``django.forms.ModelForm``.
        def done(self, request, cleaned_data):
            AccessRequest.objects.create(**cleaned_data)
            return redirect_to_origin(request)
+
+The captions on this page mirror the repository's ``audit-forms`` example, which configures ``PAGES_DIR`` as ``views`` and ``COMPONENTS_DIR`` as ``_blocks``.
+Under the default settings the same files live in ``access/pages/request/[step]/`` and a ``_components/`` folder, see :doc:`/content/ref/settings`.
 
 Every step form subclasses ``django.forms`` directly.
 A step is not a standalone action, so a plain Django form has nothing to register and nothing to suppress.
@@ -366,5 +370,5 @@ See Also
    :doc:`overview` for auto-registration and scope.
    :doc:`modelforms` for standalone ModelForm actions and the hooks a wizard step bypasses.
    :doc:`signals` for the wizard signals.
-   :doc:`/content/howto/build-multi-step-wizard` for a step-by-step recipe.
+   :doc:`/content/howto/build-a-multi-step-wizard` for a step-by-step recipe.
    :doc:`/content/topics/file-router` for the ``[step]`` route segment.

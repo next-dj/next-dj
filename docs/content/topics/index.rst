@@ -31,7 +31,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
 .. rubric:: Forms and Static Assets
 
 :doc:`forms/index`
-   Actions, templates, modelforms, formsets, dispatch internals, signals.
+   Actions, templates, modelforms, field components, formsets, multi-step wizards, dispatch internals, signals.
 
 :doc:`static-assets/index`
    Co-located files, deduplication, asset kinds, backends, JS context.

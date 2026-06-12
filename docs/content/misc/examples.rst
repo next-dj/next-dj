@@ -30,8 +30,8 @@ The **Primary docs** column points to the sections of this manual where the tech
      - Composite ``feature_guard``, signal receivers, cache invalidation
      - :doc:`/content/topics/components`, :doc:`/content/topics/signals`
    * - `audit-forms <https://github.com/next-dj/next-dj/tree/main/examples/audit-forms>`__
-     - Compliance audit trail. Custom ``FormActionBackend``, ``action_dispatched`` / ``form_validation_failed``, dual audit channels
-     - :doc:`/content/topics/forms/backends`, :doc:`/content/topics/forms/signals`
+     - Compliance audit trail. ``FormWizard`` access-request flow, custom ``FormActionBackend``, ``action_dispatched`` / ``form_validation_failed``, dual audit channels
+     - :doc:`/content/topics/forms/wizard`, :doc:`/content/topics/forms/backends`, :doc:`/content/topics/forms/signals`
    * - `search-catalog <https://github.com/next-dj/next-dj/tree/main/examples/search-catalog>`__
      - Faceted site search. ``DQuery[T]``, faceted filters, nested layouts, ``inherit_context=True``, cached search
      - :doc:`/content/topics/dependency-injection`, :doc:`/content/topics/context`

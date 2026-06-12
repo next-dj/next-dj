@@ -42,7 +42,7 @@ The framework also records which file the class was declared in and uses that to
 Why a Stable URL
 ----------------
 
-The framework hashes the action name into a single POST endpoint at ``/_next/form/<uid>/``.
+The framework hashes the action's scope key and name into a single POST endpoint at ``/_next/form/<uid>/``.
 The URL is derived deterministically from the class, so a form needs no URL wiring and no per-page route.
 The same form can be embedded on any page that renders its tag and every copy submits to the same endpoint.
 
@@ -155,7 +155,7 @@ The name is optional — a bare ``@action`` registers the function under its own
        Article.objects.filter(pk=article_id).delete()
        return redirect_to_origin(request)
 
-The template tag works the same way, but ``form`` is not defined inside the block because there is no form class.
+The template tag works the same way, but ``form`` is ``None`` inside the block because there is no form class.
 
 Template Usage
 --------------

@@ -66,7 +66,9 @@ Without the flag, ``__init_subclass__`` registers ``NoteRowForm`` as a standalon
 
 Passing a formset class directly to ``form_class`` is accepted at decoration time but fails at request time, because the dispatcher calls ``get_initial`` on a directly passed class and Django formset classes have none.
 Register a factory callable that returns a ``(FormSetClass, init_kwargs)`` tuple instead.
-The ``init_kwargs`` reach the formset constructor and the dispatcher skips the ``get_initial`` step.
+The ``init_kwargs`` reach the formset constructor, and a non-empty dict makes the dispatcher skip the ``get_initial`` step.
+An empty dict routes back into ``get_initial``, so keep ``init_kwargs`` non-empty, even when the only entry is a ``prefix`` or the neutral ``{"initial": {}}``.
+See :doc:`/content/howto/use-formsets` for the recipe built on this rule.
 
 The ``page_{path}`` URL name follows the file-router naming convention, see :doc:`/content/topics/file-router`.
 

@@ -34,6 +34,7 @@ Form actions.
    Subclassing ``next.forms.Form`` or ``next.forms.ModelForm`` automatically registers the form under a ``snake_case`` name derived from the class name.
    The ``{% form "name" %}`` template tag renders that form by name.
    The framework validates the submitted data and calls the ``on_valid`` method, injecting only the parameters the method signature asks for.
+   ``Meta`` keys declare access guards (``login_required``, ``permission_required``) and success feedback (``success_url``, ``success_message``).
    Plain functions with no form can also register as actions with ``@action("name")`` — useful for logout buttons and simple confirmations.
 
 .. _intro-overview-django-unchanged:

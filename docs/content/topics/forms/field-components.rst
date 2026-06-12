@@ -149,8 +149,8 @@ A reference that still fails to resolve at render time raises ``RuntimeError``.
 Before and After
 ----------------
 
-The wiki create page carried a per-file ``INPUT_CLASS`` string and wrapped it in Django widgets.
-Every form that wanted the same look copied the constant.
+Without ``ComponentWidget``, a form file carries a per-file ``INPUT_CLASS`` string and wraps it in Django widgets.
+Every form that wants the same look copies the constant.
 
 .. code-block:: python
    :caption: before — the class string lives in the form file
@@ -176,7 +176,7 @@ Every form that wanted the same look copied the constant.
        title = next.forms.CharField(widget=ComponentWidget("input", placeholder="Title"))
 
 The Tailwind classes now live once in the shared ``component.djx``.
-The ``INPUT_CLASS`` and ``TEXTAREA_CLASS`` constants disappear from the form file, and a styling change happens in one place.
+The ``INPUT_CLASS`` constant disappears from the form file, and a styling change happens in one place.
 
 When Not To Use It
 ------------------

@@ -57,6 +57,9 @@ The wizard lists them in order.
            AccessRequest.objects.create(**cleaned_data)
            return redirect_to_origin(request)
 
+The captions mirror the repository's ``audit-forms`` example, which configures ``PAGES_DIR`` as ``views``.
+Under the default settings the same files live in ``access/pages/request/[step]/``, see :doc:`/content/ref/settings`.
+
 Subclassing registers the wizard as the ``access_request_wizard`` action, and the default ``Meta.url_param`` of ``"step"`` matches the ``[step]`` route segment with no extra configuration.
 Every step form subclasses ``django.forms`` directly because a step is not a standalone action and has nothing to register.
 A step built on a ``next.forms`` base would register as its own form action, whose default ``on_valid`` saves a partial row outside the wizard flow, unless it sets ``Meta.abstract = True``.

@@ -232,5 +232,5 @@ See Also
 
    :doc:`wizard` for the wizard class that consumes the backend.
    :doc:`backends` for the analogous form action backend contract.
-   :doc:`/content/howto/build-multi-step-wizard` for a step-by-step recipe.
+   :doc:`/content/howto/build-a-multi-step-wizard` for a step-by-step recipe.
    :doc:`/content/ref/forms` for the public backend API.

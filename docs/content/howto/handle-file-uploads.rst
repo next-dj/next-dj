@@ -114,7 +114,10 @@ Submit the form with a file and confirm that the model row is created.
 Inspect ``MEDIA_ROOT`` and verify the file appears under ``attachments/``.
 
 A test feeds a fake file into ``NextClient`` with ``SimpleUploadedFile``.
-A valid submission redirects, and a submission missing the ``file`` key re-renders the origin page with the missing-file error.
+A valid submission redirects.
+The failing test names the origin with ``origin="/attachments/"`` so the dispatcher can resolve that path and re-render the page with the missing-file error.
+The path must belong to a routed page, here the attachments page from the walkthrough.
+Without a resolvable origin the invalid submission is rejected with HTTP 400, see :doc:`test-a-page-with-actions` for both branches.
 
 .. code-block:: python
    :caption: tests/test_upload.py
@@ -134,6 +137,7 @@ A valid submission redirects, and a submission missing the ``file`` key re-rende
        response = NextClient().post_action(
            "attachment_form",
            {"title": "First"},
+           origin="/attachments/",
        )
        assert response.status_code == 200
        assert b"This field is required" in response.content

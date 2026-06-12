@@ -42,7 +42,7 @@ Loading an Instance From the URL
 --------------------------------
 
 ``Meta.instance_from_url`` tells the default ``get_initial`` how to find the model instance an edit page operates on.
-It is the primary CRUD path and replaces the hand-written instance lookup that older code carried in both ``get_initial`` and the handler.
+It is the primary CRUD path and replaces a hand-written instance lookup otherwise duplicated across ``get_initial`` and the handler.
 
 String Form
 ~~~~~~~~~~~
@@ -120,7 +120,7 @@ Security: the lookup is not ownership-scoped
 Before and After
 ----------------
 
-The wiki example carried an ``ArticleEditForm`` that loaded the article twice and mapped each field by hand.
+Without ``Meta.instance_from_url``, an edit form loads the article twice and maps each field by hand.
 
 .. code-block:: python
    :caption: before — manual lookup duplicated across get_initial and on_valid
@@ -196,9 +196,9 @@ Declare the class outside ``page.py`` and ``component.py`` as above, or set ``Me
 A page-scoped class works differently: declaring a copy in each ``page.py`` keeps the shared action name, but every per-file registration gets its own action URL.
 See :doc:`actions` for the scope derivation and the UID rules.
 
-Separate create and edit forms are an option, and the examples take that route.
-The wiki create page declares a plain ``ArticleCreateForm`` while the edit page keeps the ``ArticleEditForm`` ModelForm.
-The multi-tenant create page likewise declares its own ``NoteCreateForm`` apart from the edit form.
+Separate create and edit forms are an option, and the repository examples take that route, see :doc:`/content/misc/examples`.
+The wiki example's create page declares a plain ``ArticleCreateForm`` while its edit page keeps the ``ArticleEditForm`` ModelForm.
+The multi-tenant example's create page likewise declares its own ``NoteCreateForm`` apart from the edit form.
 Split the two when the create and edit fields diverge, when validation differs, or when the rows must be scoped to something the URL does not carry.
 
 Handling Submissions

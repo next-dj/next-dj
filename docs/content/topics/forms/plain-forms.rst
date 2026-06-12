@@ -50,7 +50,8 @@ See :doc:`actions` for the full scope rules.
 Handling Submissions
 --------------------
 
-The default ``on_valid`` on a plain ``Form`` calls ``redirect_to_origin(request)`` and returns.
+The default ``on_valid`` on a plain ``Form`` redirects to ``Meta.success_url`` when declared, otherwise back to the origin page through ``redirect_to_origin(request)``.
+See :ref:`topics-forms-actions-success` for the redirect contract.
 
 Override ``on_valid`` when the submission needs a different redirect or its own logic.
 A filter form, for example, redirects with the picked value on the query string.

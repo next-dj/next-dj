@@ -38,7 +38,7 @@ The framework derives the action name from the class name and infers the scope f
 Name Derivation
 ---------------
 
-The action name is the ``CamelCase`` class name converted to ``snake_case`` by inserting underscores before each uppercase letter that is preceded by a lowercase letter.
+The action name is the ``CamelCase`` class name converted to ``snake_case`` by inserting underscores before each uppercase letter that is preceded by a lowercase letter or a digit.
 
 .. list-table::
    :header-rows: 1
@@ -51,6 +51,8 @@ The action name is the ``CamelCase`` class name converted to ``snake_case`` by i
      - ``article_edit_form``
    * - ``ContactForm``
      - ``contact_form``
+   * - ``Note2Form``
+     - ``note2_form``
    * - ``Form``
      - ``form``
 
@@ -244,8 +246,9 @@ A plain form class.
    The dispatcher then calls ``get_initial`` on it and binds the form as usual.
 
 A ``(FormClass, init_kwargs)`` tuple.
-   The dispatcher passes ``**init_kwargs`` straight to the form constructor and skips ``get_initial`` entirely.
-   Use this when the constructor needs arguments that ``get_initial`` cannot supply, such as a preloaded model ``instance`` or a formset ``queryset``.
+   When ``init_kwargs`` is non-empty, the dispatcher passes ``**init_kwargs`` straight to the form constructor and skips ``get_initial``.
+   An empty dict behaves like returning the bare class, so a class with no ``get_initial`` needs at least the neutral ``{"initial": {}}``.
+   Use the tuple when the constructor needs arguments that ``get_initial`` cannot supply, such as a preloaded model ``instance`` or a formset ``queryset``.
 
 .. code-block:: python
    :caption: page.py — a factory returning the tuple form
@@ -263,8 +266,9 @@ A ``(FormClass, init_kwargs)`` tuple.
        form.save()
        return redirect("/notes/")
 
-The tuple path bypasses ``get_initial``, so do not rely on ``get_initial`` running when a factory returns the tuple form.
+The tuple path bypasses ``get_initial`` only while ``init_kwargs`` stays non-empty, so do not rely on the skip when a factory may return an empty dict.
 See :doc:`formsets` for the same pattern applied to formset and inline-formset actions.
+:doc:`/content/howto/integrate-django-allauth-forms` shows the ``{"initial": {}}`` idiom on a class without ``get_initial``.
 
 .. _topics-forms-actions-abstract:
 
@@ -324,7 +328,11 @@ The guard runs before the form is built, ahead of ``get_initial``, form binding,
 An anonymous user is redirected to ``LOGIN_URL`` with ``next`` set to the posted origin page.
 An authenticated user missing a permission gets :exc:`~django.core.exceptions.PermissionDenied`, which Django renders as HTTP 403.
 
-Unlike ``Meta.abstract``, which is own-class-only, the guard keys are inherited: a base class with ``login_required = True`` protects every concrete subclass, the same way Django's auth mixins protect CBV subclasses.
+Unlike ``Meta.abstract``, which is own-class-only, the guard keys survive subclassing through plain class-attribute lookup.
+A subclass that declares no ``Meta`` of its own inherits the base ``Meta`` and stays guarded.
+A subclass that declares its own ``Meta`` shadows the base one entirely and registers unguarded.
+A concrete ``ModelForm`` subclass is the usual trap, because its ``Meta`` must carry ``model`` and ``fields``.
+Extend the inherited ``Meta`` there, ``class Meta(Base.Meta):``, or re-declare the guard keys in the new ``Meta``.
 The same ``Meta`` keys work on a ``FormWizard``, where the guard is enforced on every step submission.
 
 Rendering a guarded form on a public page is not blocked.

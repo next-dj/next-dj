@@ -43,7 +43,7 @@ Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 @action
 ~~~~~~~
 
-.. py:decorator:: @action(name=None, *, form_class=None, scope=None)
+.. py:decorator:: @action(name=None, *, form_class=None, scope=None, login_required=False, permission_required=None)
 
 Registers a plain callable as a named form action.
 The name is optional: a bare ``@action`` or an empty ``@action()`` registers the function under its own name, and ``@action("custom_name")`` overrides it.
@@ -55,6 +55,7 @@ It accepts a form class that does not register its own endpoint, such as a base 
 Passing a ``Form`` subclass that already registered itself raises ``TypeError`` at decoration time.
 Pass ``scope="page"`` or ``scope="shared"`` to override the scope derived from the declaring file.
 Any other value is reported as the ``next.E047`` system check and the action is not registered.
+Pass ``login_required=True`` or ``permission_required=`` to guard the dispatch endpoint, see :ref:`topics-forms-actions-guards` for the semantics.
 Applying ``@action`` to a class registers no action and returns the class unchanged.
 The misuse is recorded and reported as the ``next.E053`` system check by ``manage.py check``.
 

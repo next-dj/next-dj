@@ -14,7 +14,7 @@ Solution
 Port the flow to a ``next.forms.FormWizard``.
 The step forms move unchanged, the wizard hooks keep the formtools vocabulary, and the URL wiring disappears.
 Declare the ordered steps under ``Meta.steps``, place the wizard on a route with a ``[step]`` segment, and move the finalising code into ``done``.
-:doc:`build-multi-step-wizard` walks through a complete wizard from scratch.
+:doc:`build-a-multi-step-wizard` walks through a complete wizard from scratch.
 
 Method Map
 ----------
@@ -108,5 +108,5 @@ See Also
 
    :doc:`/content/topics/forms/wizard` for the full wizard topic guide.
    :doc:`/content/topics/forms/wizard-backend` for the storage backends.
-   :doc:`build-multi-step-wizard` for the step-by-step recipe.
+   :doc:`build-a-multi-step-wizard` for the step-by-step recipe.
    :doc:`/content/ref/system-checks` for the check conditions.
