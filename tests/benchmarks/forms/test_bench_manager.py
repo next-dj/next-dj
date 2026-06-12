@@ -86,8 +86,8 @@ class TestBenchManagerLookups:
         benchmark(run)
 
     @pytest.mark.benchmark(group="forms.manager")
-    def test_get_action_url_miss(self, benchmark) -> None:
-        """Manager raises ``FormActionNotFound`` after walking every backend."""
+    def test_get_action_url_miss_raise(self, benchmark) -> None:
+        """A caught miss pays only the raise, with diagnostics deferred."""
         manager = _make_populated_manager()
 
         def run() -> None:
@@ -95,6 +95,20 @@ class TestBenchManagerLookups:
                 manager.get_action_url("nonexistent")
             except FormActionNotFound:
                 return
+
+        benchmark(run)
+
+    @pytest.mark.benchmark(group="forms.manager")
+    def test_get_action_url_miss_rendered(self, benchmark) -> None:
+        """A rendered miss pays the close-match search and the message."""
+        manager = _make_populated_manager()
+
+        def run() -> str:
+            try:
+                manager.get_action_url("nonexistent")
+            except FormActionNotFound as exc:
+                return str(exc)
+            return ""
 
         benchmark(run)
 

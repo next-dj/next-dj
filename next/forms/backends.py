@@ -330,7 +330,6 @@ class RegistryFormActionBackend(FormActionBackend):
         self._uid_to_name: dict[str, tuple[str, str]] = {}
         self._name_index: dict[str, tuple[str, str]] = {}
         self._url_cache: dict[tuple[str, str], str] = {}
-        _url_caching_backends.add(self)
 
     def clear_registry(self) -> None:
         """Drop every registered action and reset the UID index. For test isolation.
@@ -442,6 +441,11 @@ class RegistryFormActionBackend(FormActionBackend):
                 url = self._url_cache.get(cache_key)
                 if url is None:
                     url = reverse_form_action(uid)
+                    if not self._url_cache:
+                        # Lazy invalidation hookup keeps backend creation
+                        # cheap: only a backend that cached a URL needs the
+                        # ROOT_URLCONF signal.
+                        _url_caching_backends.add(self)
                     self._url_cache[cache_key] = url
                 return url
 
