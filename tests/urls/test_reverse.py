@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 from django.urls import NoReverseMatch
 
-from next.urls import page_reverse, with_query
+from next.urls import page_reverse, page_reverse_lazy, with_query
 
 
 class TestPageReverse:
@@ -70,3 +70,12 @@ class TestWithQuery:
     )
     def test_query_string_composition(self, base, overrides, expected) -> None:
         assert with_query(base, **overrides) == expected
+
+
+class TestPageReverseLazy:
+    def test_defers_reverse_until_str(self) -> None:
+        with patch("next.urls.reverse.reverse", return_value="/lazy/") as mock_reverse:
+            value = page_reverse_lazy("login")
+            mock_reverse.assert_not_called()
+            assert str(value) == "/lazy/"
+            mock_reverse.assert_called_once_with("next:page_login", kwargs=None)

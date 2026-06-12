@@ -14,6 +14,7 @@ from django import forms as _django_forms
 from . import signals
 from .autodiscover import autodiscover_forms
 from .backends import (
+    ActionGuard,
     ActionRegistration,
     FormActionBackend,
     RegistryFormActionBackend,
@@ -111,6 +112,7 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "ActionGuard",
     "ActionOutcome",
     "ActionOutcomeKind",
     "ActionRegistration",

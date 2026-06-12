@@ -7,14 +7,21 @@ import warnings
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlsplit, urlunsplit
 
+from django.conf import settings
+from django.contrib import messages
+from django.contrib.auth import REDIRECT_FIELD_NAME
+from django.core.exceptions import PermissionDenied
 from django.forms.models import BaseModelForm as DjangoBaseModelForm
 from django.http import (
     HttpResponse,
     HttpResponseBadRequest,
     HttpResponseNotAllowed,
     HttpResponseRedirect,
+    QueryDict,
 )
+from django.shortcuts import resolve_url
 
 from next.deps import REQUEST_DEP_CACHE_ATTR, resolver
 from next.deps.resolver import cached_signature
@@ -29,6 +36,7 @@ from .signals import (
     wizard_completed,
     wizard_step_submitted,
 )
+from .uid import validated_origin_path
 
 
 if TYPE_CHECKING:
@@ -39,7 +47,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
     from ._request_utils import _OriginMatch
-    from .backends import ActionMeta, FormActionBackend
+    from .backends import ActionGuard, ActionMeta, FormActionBackend
     from .base import BaseForm as NextBaseForm
     from .wizard import FormWizard
 
@@ -52,6 +60,53 @@ def _is_model_instance(obj: object) -> bool:
     """Return True when `obj` quacks like a Django model instance."""
     meta = getattr(obj, "_meta", None)
     return meta is not None and hasattr(meta, "model")
+
+
+def _redirect_to_login(next_url: str) -> HttpResponseRedirect:
+    """Build the LOGIN_URL redirect carrying `next_url`.
+
+    Mirrors `django.contrib.auth.views.redirect_to_login` without importing
+    contrib.auth.views, whose module-level `get_user_model()` call requires
+    django.contrib.auth in INSTALLED_APPS.
+    """
+    scheme, netloc, path, query, fragment = urlsplit(resolve_url(settings.LOGIN_URL))
+    querystring = QueryDict(query, mutable=True)
+    querystring[REDIRECT_FIELD_NAME] = next_url
+    return HttpResponseRedirect(
+        urlunsplit((scheme, netloc, path, querystring.urlencode(safe="/"), fragment))
+    )
+
+
+def _check_access(
+    request: "HttpRequest",
+    guard: "ActionGuard",
+) -> HttpResponseRedirect | None:
+    """Enforce the action guard with `AccessMixin` semantics.
+
+    Anonymous users get a login redirect whose `next` is the validated posted
+    origin, authenticated users missing a permission raise PermissionDenied.
+    """
+    user = getattr(request, "user", None)
+    if user is None or not user.is_authenticated:
+        origin = validated_origin_path(request.POST.get("_next_form_origin"))
+        return _redirect_to_login(origin or "/")
+    if guard.permissions and not user.has_perms(guard.permissions):
+        raise PermissionDenied
+    return None
+
+
+def _send_success_message(
+    request: "HttpRequest",
+    source: object,
+    cleaned_data: dict[str, Any],
+) -> None:
+    """Flash the declared success message through django.contrib.messages."""
+    get_message = getattr(source, "get_success_message", None)
+    if get_message is None:
+        return
+    message = get_message(cleaned_data)
+    if message:
+        messages.success(request, message)
 
 
 def _build_form(
@@ -217,6 +272,12 @@ def _normalize_handler_response(
     """Coerce handler output to a string, response, redirect, or `None`."""
     if raw is None or isinstance(raw, (HttpResponse, str)):
         return raw
+    if _is_model_instance(raw):
+        get_absolute_url = getattr(raw, "get_absolute_url", None)
+        if get_absolute_url is not None:
+            # CreateView-style idiom: a returned model instance redirects
+            # to its canonical URL.
+            return HttpResponseRedirect(str(get_absolute_url()))
     # The isinstance check above runs first by contract: every rich return
     # type the framework ships must subclass HttpResponse. The `.url` sniff
     # below is last-resort sugar for model-like objects, never a primary
@@ -382,6 +443,12 @@ class FormActionDispatch:
         if request.method != "POST":
             return HttpResponseNotAllowed(["POST"])
 
+        guard = meta.get("guard")
+        if guard is not None:
+            denial = _check_access(request, guard)
+            if denial is not None:
+                return denial
+
         origin_match = _resolve_origin(request)
         state = _DispatchState(
             url_kwargs=dict(origin_match.url_kwargs) if origin_match else {},
@@ -525,6 +592,8 @@ class FormActionDispatch:
                 form=form,
             ),
         )
+        if response.status_code < _HTTP_ERROR_FLOOR:
+            _send_success_message(request, form, form.cleaned_data)
         state.emit_action_dispatched(
             request, params.action_name, form, duration_ms, response
         )
@@ -604,6 +673,7 @@ class FormActionDispatch:
                 ),
             )
             if response.status_code < _HTTP_ERROR_FLOOR:
+                _send_success_message(request, wizard, merged)
                 wizard.clear_storage()
                 state.emit_wizard_completed(request, wizard_class, merged)
         else:

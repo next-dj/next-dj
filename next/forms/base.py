@@ -17,7 +17,12 @@ from django.shortcuts import get_object_or_404
 
 from next.conf import next_framework_settings
 
-from .backends import ActionRegistration, _resolved_path_str
+from .backends import (
+    ActionGuard,
+    ActionRegistration,
+    _resolved_path_str,
+    build_action_guard,
+)
 from .manager import form_action_manager
 from .registration import registration_diagnostics
 from .uid import redirect_to_origin
@@ -176,6 +181,33 @@ def _registration_gate(cls: type) -> tuple[str, str, str] | None:
     return scope, _to_snake_case(cls.__name__), _resolved_path_str(file_path)
 
 
+def _meta_guard(cls: type) -> ActionGuard | None:
+    """Build the access guard declared by Meta, inherited unlike Meta.abstract."""
+    meta = getattr(cls, "Meta", None)
+    return build_action_guard(
+        login_required=bool(getattr(meta, "login_required", False)),
+        permission_required=getattr(meta, "permission_required", None),
+    )
+
+
+def _declared_success_url(cls: type) -> str | None:
+    """Return the evaluated Meta.success_url, or None when undeclared."""
+    value = getattr(getattr(cls, "Meta", None), "success_url", None)
+    if value is None:
+        return None
+    if callable(value):
+        value = value()
+    return str(value)
+
+
+def _format_success_message(cls: type, cleaned_data: dict[str, Any]) -> str:
+    """Interpolate Meta.success_message over cleaned_data, empty when undeclared."""
+    template = getattr(getattr(cls, "Meta", None), "success_message", "")
+    if not template:
+        return ""
+    return str(template) % cleaned_data
+
+
 def _is_self_registered(cls: type) -> bool:
     """Return True when auto-registration stamped this exact class."""
     # Own-dict lookup on purpose: a concrete subclass of a registered base
@@ -196,6 +228,7 @@ def _auto_register_form_class(cls: type) -> None:
             file_path=file_path,
             scope=scope,
             form_class=cls,
+            guard=_meta_guard(cls),
         )
     )
 
@@ -228,8 +261,15 @@ class BaseForm(DjangoBaseForm):
         """Return initial data for this form."""
         return {}
 
+    def get_success_message(self, cleaned_data: dict[str, Any]) -> str:
+        """Return the flash message for a valid submission, empty string for none."""
+        return _format_success_message(type(self), cleaned_data)
+
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
-        """Handle a valid form submission."""
+        """Redirect to Meta.success_url when declared, otherwise back to origin."""
+        url = _declared_success_url(type(self))
+        if url is not None:
+            return HttpResponseRedirect(url)
         return redirect_to_origin(request)
 
 
@@ -255,9 +295,16 @@ class BaseModelForm(DjangoBaseModelForm):
             return {}
         return get_object_or_404(cls._meta.model, **lookup)
 
+    def get_success_message(self, cleaned_data: dict[str, Any]) -> str:
+        """Return the flash message for a valid submission, empty string for none."""
+        return _format_success_message(type(self), cleaned_data)
+
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
-        """Save this model form and redirect to origin."""
+        """Save this model form, then follow Meta.success_url or the origin."""
         self.save()
+        url = _declared_success_url(type(self))
+        if url is not None:
+            return HttpResponseRedirect(url)
         return redirect_to_origin(request)
 
 
