@@ -19,11 +19,16 @@ Forms
    Injects two hidden inputs: the ``csrfmiddlewaretoken`` CSRF field and the ``_next_form_origin`` field carrying the URL path of the rendering page.
    The block body has access to the bound or unbound form through ``{{ form }}``.
 
-   Optional ``key="value"`` arguments after the action name render as HTML attributes on the ``<form>`` element, for example ``{% form "upload_form" enctype="multipart/form-data" class="stack" %}``.
+   Optional ``key="value"`` arguments after the action name render as HTML attributes on the ``<form>`` element, for example ``{% form "upload_form" class="stack" %}``.
    Attribute values are escaped, and an unquoted value resolves as a context variable.
 
+   The opening tag emits its attributes in a fixed order: ``action`` with the dispatch URL, ``method="post"``, ``data-next-action`` with the action UID when the registry meta is available, ``enctype="multipart/form-data"`` when the form is multipart, then the attributes passed to the tag.
+   The ``enctype`` attribute is automatic for any form whose widgets need multipart encoding, so a file-upload form needs no extra argument.
+   An explicit ``enctype="..."`` argument on the tag suppresses the automatic value and renders in the user-attribute position, for example ``{% form "upload_form" enctype="text/plain" %}``.
+
    The HTTP method is always ``post``.
-   The tag owns the ``action`` and ``method`` attributes, and passing either raises ``TemplateSyntaxError`` at parse time.
+   The tag owns the ``action`` and ``method`` attributes plus every attribute starting with ``data-next-``, and passing any of them raises ``TemplateSyntaxError`` at parse time.
+   ``data-next-*`` is the single framework namespace in rendered markup.
 
    Captured URL parameters travel inside the origin path, the dispatcher recovers them by resolving ``_next_form_origin`` against the URLconf.
 

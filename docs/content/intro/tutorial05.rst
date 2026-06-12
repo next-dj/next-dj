@@ -166,7 +166,7 @@ A validation failure fires ``form_validation_failed`` instead and never reaches 
 ``SignalRecorder`` is a context manager that subscribes to the signal on entry and unsubscribes on exit.
 It accepts several signals at once and exposes ``first_for``, ``last_for``, and ``events_for`` to query the captured events per signal.
 Each captured event is a ``SignalEvent`` with ``signal``, ``sender``, and ``kwargs`` attributes.
-The ``action_dispatched`` payload carries ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
+The ``action_dispatched`` payload carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
 
 Test Validation Failure
 ~~~~~~~~~~~~~~~~~~~~~~~

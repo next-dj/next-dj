@@ -29,31 +29,39 @@ The tag does the following.
 
 1. Looks up the action name in the registry, preferring a page-scoped match for the current page, then falling back to shared scope.
 2. Resolves the stable dispatch URL for that action.
-3. Emits ``<form action="..." method="post">`` plus any attributes passed to the tag.
+3. Emits ``<form action="..." method="post" data-next-action="...">`` plus an automatic ``enctype="multipart/form-data"`` for a multipart form, then any attributes passed to the tag.
 4. Emits a hidden ``csrfmiddlewaretoken`` input.
 5. Emits a hidden ``_next_form_origin`` input set to ``request.path``, used by ``redirect_to_origin`` on success and resolved through the URLconf on the error re-render.
 6. Publishes ``form`` inside the block body (see `The form Variable`_ below).
 
 On the validation-error re-render the request targets the dispatch endpoint, so the tag re-emits the posted origin of the original page instead of ``request.path``.
 
+The ``data-next-action`` attribute carries the action UID, the registry identity that also names the dispatch URL.
+The tag emits it when the action meta is available, which makes the form addressable from client-side scripts without parsing the ``action`` URL.
+A backend whose meta stores no ``uid`` renders the form without the attribute.
+
+A multipart form gets ``enctype="multipart/form-data"`` automatically.
+The tag asks the form instance through ``is_multipart()``, so a ``FileField`` rendered with a stock widget needs no extra argument.
+
 A name that is not in the registry raises ``FormActionNotFound`` at render time.
 
 HTML Attributes
 ---------------
 
-Every ``key="value"`` argument after the action name lands on the ``<form>`` element.
-A file-upload form sets the encoding type directly on the tag.
+Every ``key="value"`` argument after the action name lands on the ``<form>`` element, after the framework attributes.
 
 .. code-block:: jinja
    :caption: extra attributes
 
-   {% form "attachment_form" enctype="multipart/form-data" class="stack" %}
+   {% form "attachment_form" class="stack" id="upload" %}
      {{ form.file }}
      <button type="submit">Upload</button>
    {% endform %}
 
 Attribute values are escaped, and an unquoted value resolves as a context variable.
-The ``action`` and ``method`` attributes belong to the tag, and passing either raises ``TemplateSyntaxError`` at parse time.
+An explicit ``enctype="..."`` argument suppresses the automatic multipart value, for the rare form that needs a different encoding.
+The ``action`` and ``method`` attributes belong to the tag, as does every attribute starting with ``data-next-``, and passing any of them raises ``TemplateSyntaxError`` at parse time.
+``data-next-*`` is the single framework namespace in rendered markup, so user attributes never collide with framework ones.
 
 Scope Resolution
 ----------------

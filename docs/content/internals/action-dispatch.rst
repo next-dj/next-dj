@@ -118,7 +118,11 @@ One signal fires at import time, the other two fire per request.
 
 - ``action_registered`` fires at import time, once per ``@action`` when the registry receives it.
 - ``form_validation_failed`` fires at request time, once per failing submission.
-- ``action_dispatched`` fires at request time, once per successful handler invocation, with the action name, the bound form (``None`` for form-less actions), the URL kwargs, the handler duration, the response status, and the dispatch dependency cache in the payload.
+- ``action_dispatched`` fires at request time, once per successful handler invocation, with the action name, the action uid, the live request, the bound form (``None`` for form-less actions), the URL kwargs, the handler duration, the response status, and the dispatch dependency cache in the payload.
+
+Both request-time signals carry ``uid`` and ``request``.
+``uid`` is the registry identity also stamped on the ``data-next-action`` markup attribute, ``None`` for a backend whose meta stores no uid.
+``request`` is the live ``HttpRequest`` and receivers must not retain it past the call.
 
 Extension Points
 ----------------

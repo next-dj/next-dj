@@ -11,7 +11,8 @@ You want a form that accepts a file upload and saves the file alongside a model 
 Solution
 --------
 
-Add a ``FileField`` or ``ImageField`` to the form, render the form with ``enctype="multipart/form-data"``, and call ``form.save()`` from the handler.
+Add a ``FileField`` or ``ImageField`` to the form, render it with the ``{% form %}`` tag, and call ``form.save()`` from the handler.
+The tag emits ``enctype="multipart/form-data"`` on its own for any multipart form.
 See Django's :doc:`file uploads <django:topics/http/file-uploads>` and :doc:`managing files <django:topics/files>` for how Django stores the uploaded data.
 
 Walkthrough
@@ -50,20 +51,20 @@ Define the form.
 ``AttachmentForm`` registers automatically as ``attachment_form`` via autodiscovery on startup.
 No manual import is needed in the page module.
 
-Render the form with the right encoding type.
-Pass ``enctype="multipart/form-data"`` to the ``{% form %}`` tag and it renders the attribute on the ``<form>`` element it emits.
-Without it the browser submits only text values and ``form.file`` arrives empty.
+Render the form.
 
 .. code-block:: jinja
    :caption: notes/pages/attachments/template.djx
 
-   {% form "attachment_form" enctype="multipart/form-data" %}
+   {% form "attachment_form" %}
      {{ form.title }}
      {{ form.file }}
      <button type="submit">Upload</button>
    {% endform %}
 
-The tag emits the CSRF token and the hidden ``_next_form_origin`` field on its own, so the template adds nothing else.
+The ``{% form %}`` tag detects that ``form.file`` makes the form multipart and emits ``enctype="multipart/form-data"`` on the ``<form>`` element automatically.
+An explicit ``enctype="..."`` argument on the tag overrides the automatic value, and no upload form needs that.
+The tag also emits the CSRF token and the hidden ``_next_form_origin`` field on its own, so the template adds nothing else.
 
 .. warning::
 

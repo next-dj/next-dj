@@ -220,10 +220,10 @@ Point ``FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
 The framework instantiates the backend lazily on first use and caches the instance, so the constructor runs once per process.
 A signed-cookie store or an external draft service follows the same shape, reading its own options from ``OPTIONS``.
 
-The lazy instance lives behind ``next.forms.wizard_backend_manager``, an instance of ``WizardBackendManager``.
+The lazy instance lives behind ``next.forms.wizard.wizard_backend_manager``, an instance of ``WizardBackendManager``.
 It reads ``FORM_WIZARD_BACKEND`` on first ``get()`` and caches the result.
 Application code never touches it directly.
-The framework resets it when settings reload, and the test isolation helper :func:`next.forms.reset_form_registration_state` resets it between cases.
+The framework resets it when settings reload, and the test isolation helper :func:`next.testing.reset_form_registration_state` resets it between cases.
 
 See Also
 --------

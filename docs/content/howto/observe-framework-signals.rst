@@ -65,8 +65,9 @@ The framework emits these signals on hot rendering paths, so receivers stay sync
 
 The keyword names are fixed by the framework.
 ``page_rendered`` carries ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``, and ``context_keys``.
-``action_dispatched`` carries ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
-``form_validation_failed`` carries ``action_name``, ``error_count``, and ``field_names``.
+``action_dispatched`` carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
+``form_validation_failed`` carries ``action_name``, ``uid``, ``request``, ``error_count``, and ``field_names``.
+The ``request`` value is the live ``HttpRequest`` of the dispatch, so a receiver reads it synchronously and never stores it past the call.
 
 Cover the Static Pipeline
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -16,6 +16,13 @@ Every signal below is a Django ``Signal``. The ``sender`` column lists the value
 passed to ``Signal.send``. Receivers connected with a matching ``sender`` only
 fire for that sender.
 
+The dispatch-time form signals (``action_dispatched``, ``form_validation_failed``,
+``wizard_step_submitted``, ``wizard_completed``) share two keyword arguments.
+``uid`` is the registry identity of the action, the value the dispatch URL and the
+``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores
+no uid in its meta. ``request`` is the live ``HttpRequest`` being dispatched and must
+not be retained past the receiver call.
+
 .. list-table::
    :header-rows: 1
    :widths: 18 18 34 30
@@ -26,7 +33,7 @@ fire for that sender.
      - When it fires
    * - ``action_dispatched``
      - ``FormActionDispatch``
-     - ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, ``dep_cache``
+     - ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, ``dep_cache``
      - After an action handler runs and the response is coerced.
        ``form`` is the bound form, or ``None`` for handler-only actions.
        ``duration_ms`` times the handler call.
@@ -69,7 +76,7 @@ fire for that sender.
      - After a context callable is attached to a page module.
    * - ``form_validation_failed``
      - ``FormActionDispatch``
-     - ``action_name``, ``error_count``, ``field_names``
+     - ``action_name``, ``uid``, ``request``, ``error_count``, ``field_names``
      - When the bound form fails validation during dispatch.
    * - ``html_injected``
      - A ``StaticManager`` instance
@@ -105,11 +112,11 @@ fire for that sender.
      - After the reloader resolves the full list of watch specs.
    * - ``wizard_completed``
      - ``FormActionDispatch``
-     - ``wizard_class``, ``cleaned_data``
+     - ``wizard_class``, ``cleaned_data``, ``uid``, ``request``
      - After the wizard ``done`` method runs for the final step. ``cleaned_data`` is the merged mapping passed to ``done``.
    * - ``wizard_step_submitted``
      - ``FormActionDispatch``
-     - ``wizard_class``, ``step``, ``cleaned_data``
+     - ``wizard_class``, ``step``, ``cleaned_data``, ``uid``, ``request``
      - After a ``FormWizard`` step validates during dispatch. ``cleaned_data`` is a copy of that step's validated data.
 
 Subpackage Signals

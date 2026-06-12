@@ -95,6 +95,8 @@ The base implementation returns ``None``.
 
 ``get_meta`` is the routing key when more than one backend is configured.
 ``FormActionManager`` asks each backend's ``get_meta`` in order and routes the URL reverse and the namespace build to the first backend that answers with a non-``None`` meta.
+The proxy method ``FormActionManager.get_action_meta`` exposes that resolution, and the ``{% form %}`` tag calls it to stamp the meta's ``uid`` key onto the ``data-next-action`` attribute of the rendered ``<form>`` element.
+A backend whose meta omits ``uid`` therefore renders forms without that attribute, and the dispatch-time signals carry ``uid=None`` for its actions.
 A custom backend that owns its own actions must return a truthy meta for those names, or the manager skips it and the ``{% form %}`` tag cannot find the action.
 A backend that defers entirely to ``RegistryFormActionBackend`` need not override ``get_meta``.
 
@@ -131,7 +133,8 @@ The four abstract methods must all be present.
    from typing import Any
    from django.http import HttpRequest, HttpResponse, HttpResponseNotFound
    from django.urls import path
-   from next.forms import ActionRegistration, FormActionBackend, FormActionDispatch
+   from next.forms import ActionRegistration, FormActionBackend
+   from next.forms.dispatch import FormActionDispatch
 
    class CustomBackend(FormActionBackend):
        def __init__(self, config: dict[str, Any] | None = None) -> None:
@@ -244,7 +247,7 @@ FormActionManager
 -----------------
 
 The module-level ``form_action_manager`` instance holds the active backends behind a thin facade.
-Application code reaches it through ``from next.forms import form_action_manager``.
+Application code reaches it through ``from next.forms.manager import form_action_manager``.
 See :doc:`/content/ref/forms` for the full member list of ``next.forms.manager``.
 
 The companion ``build_form_namespace_for_action(action_name, request, page_path=None)`` builds the ``{form, wizard}`` namespace the ``{% form %}`` tag normally publishes.

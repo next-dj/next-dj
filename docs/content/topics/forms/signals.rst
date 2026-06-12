@@ -8,6 +8,11 @@ Import the three core signals from the owning module or from the aggregator ``ne
 The two wizard signals are exported from ``next.forms.signals`` only, so import them from there directly.
 Register receiver imports from ``AppConfig.ready`` so receivers exist before the first request.
 
+Every dispatch-time signal (``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``) carries two shared keyword arguments.
+``uid`` is the registry identity of the action, the same value the dispatch URL and the ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores no uid in its meta.
+``request`` is the live ``HttpRequest`` being dispatched.
+Read what you need from it inside the receiver and do not retain the object past the receiver call.
+
 .. contents::
    :local:
    :depth: 2
@@ -75,7 +80,13 @@ action_dispatched
 Fires after a handler runs and the response has been coerced.
 The sender is ``FormActionDispatch``.
 
-The payload carries ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
+The payload carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
+
+``uid``.
+   The registry identity of the action, matching the dispatch URL and the ``data-next-action`` attribute, or ``None`` for a backend without meta.
+
+``request``.
+   The live ``HttpRequest``. Do not retain it past the receiver call.
 
 ``form``.
    The bound form after the handler returns normally and the response has been coerced, or ``None`` for a handler-only action registered without a ``form_class``.
@@ -91,7 +102,7 @@ The payload carries ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, 
    A snapshot of the dispatch dependency cache. Receivers can read named ``Depends("name")`` values resolved during the dispatch without re-running their providers.
    The dict is a shallow copy taken when the signal fires, so mutating it does not change the live dispatch cache.
 
-The signal does not pass ``request``. Read what you need from ``dep_cache`` or have the handler attach audit data.
+A receiver that needs request data reads it from ``request`` directly or from ``dep_cache``, without keeping a reference after it returns.
 
 .. code-block:: python
    :caption: notes/receivers.py
@@ -131,7 +142,7 @@ form_validation_failed
 Fires when the bound form fails validation during dispatch.
 The sender is ``FormActionDispatch``.
 
-The payload carries ``action_name``, ``error_count``, and ``field_names``.
+The payload carries ``action_name``, ``uid``, ``request``, ``error_count``, and ``field_names``.
 ``error_count`` is the total number of error messages, including non-field errors raised from ``clean``.
 ``field_names`` is a tuple of the keys that failed, with non-field errors appearing under ``__all__``.
 
@@ -162,7 +173,7 @@ wizard_step_submitted
 Fires after a ``FormWizard`` step validates during dispatch.
 The sender is ``FormActionDispatch``.
 
-The payload carries ``wizard_class``, ``step``, and ``cleaned_data``.
+The payload carries ``wizard_class``, ``step``, ``cleaned_data``, ``uid``, and ``request``.
 ``wizard_class`` is the wizard subclass that owns the step.
 ``step`` is the step name from ``Meta.steps``.
 ``cleaned_data`` is a copy of the validated cleaned data for that step.
@@ -190,7 +201,7 @@ wizard_completed
 Fires after the wizard ``done`` method runs for the final step.
 The sender is ``FormActionDispatch``.
 
-The payload carries ``wizard_class`` and ``cleaned_data``.
+The payload carries ``wizard_class``, ``cleaned_data``, ``uid``, and ``request``.
 ``cleaned_data`` is the merged mapping passed to ``done``, flattening the keys of every step form.
 
 .. code-block:: python
