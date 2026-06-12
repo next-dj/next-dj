@@ -139,8 +139,9 @@ See :doc:`validation-rerender` for the cache mechanics and the access path.
 Form-Less Actions
 -----------------
 
-Use ``@action("name")`` to register a plain function when no form fields are needed.
+Use ``@action`` to register a plain function when no form fields are needed.
 A logout button or a delete confirmation is a typical case.
+The name is optional — a bare ``@action`` registers the function under its own name.
 
 .. code-block:: python
    :caption: page.py

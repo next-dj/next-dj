@@ -60,7 +60,7 @@ Register the action.
                row.save()
        return HttpResponseRedirect(reverse("next:page_"))
 
-Passing a formset class directly to ``@action``'s ``form_class`` raises ``TypeError`` at decoration time, because the ``@action`` type-guard rejects any class.
+Passing a formset class directly to ``@action``'s ``form_class`` is accepted at decoration time but fails at request time, because the dispatcher calls ``get_initial`` on a directly passed class and Django formset classes have none.
 Register a factory callable that returns a ``(FormSetClass, init_kwargs)`` tuple instead.
 The ``init_kwargs`` reach the formset constructor, and a non-empty dict makes the dispatcher skip the ``get_initial`` step.
 A formset has no ``get_initial``, so the ``init_kwargs`` must be non-empty even if they only set the ``prefix``.

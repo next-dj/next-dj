@@ -224,7 +224,7 @@ Errors
      - A form action backend class does not subclass ``FormActionBackend``.
      - ``next.forms.checks``
    * - ``next.E047``
-     - A form class has ``Meta.scope`` set to a value other than ``"page"`` or ``"shared"``.
+     - A form class ``Meta.scope`` or an ``@action`` ``scope`` keyword is set to a value other than ``"page"`` or ``"shared"``.
      - ``next.forms.checks``
    * - ``next.E048``
      - ``Meta.instance_from_url`` references a field name that does not exist on the model.

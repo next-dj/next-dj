@@ -3,6 +3,7 @@ import re
 import pytest
 from access.models import AccessRequest, AuditEntry
 
+from next.forms import FormActionNotFound
 from next.forms.signals import action_dispatched, form_validation_failed
 from next.testing import SignalRecorder, resolve_action_url
 
@@ -187,7 +188,7 @@ class TestNamespacedAction:
         assert url.startswith("/_next/form/")
 
     def test_namespaced_name_does_not_resolve(self) -> None:
-        with pytest.raises(KeyError):
+        with pytest.raises(FormActionNotFound):
             resolve_action_url("access:access_request_wizard")
 
 

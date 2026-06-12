@@ -73,7 +73,7 @@ Database access uses the standard ``db`` fixture from pytest-django, no extra fi
 
    Do not call ``reset_registries()`` in an autouse fixture for this project.
    It rebuilds the form-action backend from settings and drops every form registered at import.
-   Re-importing ``notes/forms.py`` will not re-register them because Python caches the module, so the next ``post_action`` raises an unknown-action error.
+   Re-importing ``notes/forms.py`` will not re-register them because Python caches the module, so the next ``post_action`` raises ``FormActionNotFound``.
    Reach for ``reset_registries()`` only in a test that deliberately swaps ``NEXT_FRAMEWORK`` backends, and re-register the affected forms inside that test.
 
 Write the First End-to-End Test
@@ -251,7 +251,7 @@ The development server reloads page and component changes without a manual resta
 Common Pitfalls
 ---------------
 
-``post_action`` raises an unknown action error.
+``post_action`` raises ``FormActionNotFound``.
    A form class registers only when its module is imported.
    Call ``eager_load_pages`` in the test setup so every form and handler registers before the first dispatch.
    For forms in ``forms.py``, also import that module explicitly or rely on ``autodiscover_forms()``.

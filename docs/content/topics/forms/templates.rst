@@ -36,7 +36,7 @@ The tag does the following.
 
 On the validation-error re-render the request targets the dispatch endpoint, so the tag re-emits the posted origin of the original page instead of ``request.path``.
 
-A name that is not in the registry raises ``RuntimeError`` at render time.
+A name that is not in the registry raises ``FormActionNotFound`` at render time.
 
 HTML Attributes
 ---------------

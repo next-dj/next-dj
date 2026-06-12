@@ -6,7 +6,7 @@ Forms Reference
 Module Summary
 --------------
 
-``next.forms`` exposes form base classes, a form-less action decorator, dispatch infrastructure,
+``next.forms`` exposes form base classes, the ``@action`` decorator, dispatch infrastructure,
 formset helpers, frozen field and form specs,
 and a curated set of commonly used Django form fields and widgets.
 
@@ -19,7 +19,7 @@ The autodoc blocks under `Public API`_ are the exhaustive surface.
 
 Stable.
    ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``@action``, ``redirect_to_origin``,
-   ``FormWizard``, ``FormActionManager``, ``form_action_manager``, ``DForm``,
+   ``FormWizard``, ``FormActionManager``, ``form_action_manager``, ``DForm``, ``FormActionNotFound``,
    the UID helpers (``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``),
    ``autodiscover_forms``, and ``reset_form_registration_state``.
    Use these in application code.
@@ -71,6 +71,16 @@ Decorator
 ~~~~~~~~~
 
 .. autofunction:: next.forms.action
+
+Exceptions
+~~~~~~~~~~
+
+``FormActionNotFound`` is raised when no registered action matches a requested name.
+``FormActionManager.get_action_url``, the ``{% form %}`` tag, and the testing helper ``resolve_action_url`` all raise it.
+It subclasses ``LookupError`` and carries the failing ``name``, the ``page_path`` that was searched, and optional name ``suggestions``.
+
+.. autoexception:: next.forms.FormActionNotFound
+   :members:
 
 Form Base Classes
 ~~~~~~~~~~~~~~~~~

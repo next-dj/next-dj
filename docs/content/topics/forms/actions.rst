@@ -60,7 +60,7 @@ The conversion collapses consecutive uppercase runs, so an acronym stays a singl
 .. warning::
 
    Renaming a form class changes its action name.
-   Any ``{% form "old_name" %}`` tag or reverse URL that used the old name will fail at render time with an unknown-action error.
+   Any ``{% form "old_name" %}`` tag or reverse URL that used the old name will fail at render time with ``FormActionNotFound``.
    Update every template and reverse call when renaming a class.
 
 Anchor Files and Scope
@@ -169,8 +169,10 @@ Declare only the parameters an override actually reads.
 Form-Less Actions
 -----------------
 
-Use ``@action("name")`` to register a plain callable when no form fields are needed.
+Use ``@action`` to register a plain callable when no form fields are needed.
 Typical use cases include logout buttons, delete confirmations, and any simple POST with no user input.
+The name is optional.
+A bare ``@action`` or an empty ``@action()`` registers the function under its own name, and ``@action("custom_name")`` overrides it.
 
 .. code-block:: python
    :caption: page.py
@@ -186,6 +188,8 @@ Typical use cases include logout buttons, delete confirmations, and any simple P
 
 The scope of a form-less action follows the same anchor-file rule: ``page.py`` and ``component.py`` produce page-scoped actions.
 All other files produce shared actions.
+Pass ``scope="page"`` or ``scope="shared"`` to override the file-derived scope, the same override ``Meta.scope`` provides for a form class.
+Any other value triggers ``next.E047`` and the action is not registered.
 
 Applying ``@action`` to a class registers no action: the decorator records the misuse, returns the class unchanged, and ``manage.py check`` reports it as ``next.E053``.
 Form classes register through ``__init_subclass__`` and must not use ``@action``.
@@ -197,12 +201,24 @@ A handler registered with ``@action("name", form_class=...)`` receives the bound
 A parameter named ``form`` resolves to it, untyped.
 Annotate the parameter with ``DForm[FormClass]`` to type the form for editors and type checkers.
 
+``form_class=`` accepts the form class directly when that class does not register an endpoint of its own.
+A ``next.forms`` base marked ``Meta.abstract = True`` is the canonical case: it skips auto-registration yet keeps the ``get_initial`` classmethod the dispatcher calls.
+Passing a class that already registered itself raises ``TypeError`` at decoration time.
+Mark such a class abstract, or move the handler logic into its ``on_valid``.
+
 .. code-block:: python
    :caption: page.py
 
+   import next.forms
    from django.shortcuts import redirect
    from next.forms import action
    from next.forms.markers import DForm
+
+   class ContactForm(next.forms.ModelForm):
+       class Meta:
+           model = Contact
+           fields = ["name", "email"]
+           abstract = True
 
    @action("create_contact", form_class=ContactForm)
    def create_contact(form: DForm[ContactForm]):
@@ -285,8 +301,8 @@ The forms subsystem contributes Django system checks that run through ``python m
    The class is not registered automatically.
 
 ``next.E047``
-   A form class has ``Meta.scope`` set to a value other than ``"page"`` or ``"shared"``.
-   The class is not registered.
+   A form class ``Meta.scope`` or an ``@action`` ``scope`` keyword is set to a value other than ``"page"`` or ``"shared"``.
+   The class or action is not registered.
 
 ``next.E048``
    ``Meta.instance_from_url`` references a field name that does not exist on the model.

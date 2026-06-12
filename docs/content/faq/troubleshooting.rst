@@ -65,7 +65,13 @@ next.E041 Collision
 ~~~~~~~~~~~~~~~~~~~
 
 Two actions are registered under the same name by different handlers.
-Rename one of them or change its namespace to avoid the collision.
+Rename one of them or move one to a different scope to avoid the collision.
+
+Unknown Form Action
+~~~~~~~~~~~~~~~~~~~
+
+``{% form "name" %}``, ``NextClient.post_action``, and ``resolve_action_url`` raise ``next.forms.FormActionNotFound`` when no registered action matches the name.
+Check the name for typos, confirm the declaring module was imported before the lookup, and remember that a page-scoped action resolves only from its own page.
 
 Components
 ----------
