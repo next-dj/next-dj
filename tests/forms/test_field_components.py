@@ -6,11 +6,11 @@ from unittest import mock
 import pytest
 from django import forms as django_forms
 from django.core.checks import Warning as DjangoWarning
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from django.utils.safestring import SafeString
 
 from next.components.facade import get_component
-from next.forms.backends import ActionRegistration
+from next.forms.backends import ActionRegistration, FormActionBackend
 from next.forms.checks import (
     check_component_widget_components,
     check_component_widget_field_types,
@@ -438,11 +438,21 @@ class TestCheckComponentWidgetComponents:
         )
         assert check_component_widget_components() == []
 
-    def test_backend_without_registry_falls_back(self, monkeypatch) -> None:
-        # A backend object exposing no _registry must not raise: the check reads
-        # an empty mapping through getattr and reports nothing.
-        class _BareBackend:
-            pass
+    def test_backend_without_iter_actions_override_is_clean(self, monkeypatch) -> None:
+        # A from-scratch backend keeping the iter_actions default must not
+        # raise: the check sees an empty iterator and reports nothing.
+        class _BareBackend(FormActionBackend):
+            def register_action(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            def get_action_url(self, action_name: str, **kwargs: object) -> str:
+                return ""
+
+            def generate_urls(self) -> list:
+                return []
+
+            def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
+                return HttpResponse()
 
         monkeypatch.setattr(form_action_manager, "_backends", [_BareBackend()])
         assert check_component_widget_components() == []

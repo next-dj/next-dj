@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import difflib
 from typing import TYPE_CHECKING, Any, cast
 
-from next.forms.exceptions import FormActionNotFound
+from next.forms.exceptions import FormActionNotFound, _unknown_action_message
 from next.forms.manager import form_action_manager
 
 
@@ -30,13 +31,24 @@ def build_form_for(
     """Instantiate the form class registered for `action_name`.
 
     Useful for unit-testing form validation without dispatching an HTTP
-    request. Raises `FormActionNotFound` when the action is unknown and
-    `LookupError` when the action is registered without a form class.
+    request. Raises `FormActionNotFound` with close-match suggestions when
+    the action is unknown and `LookupError` when the action is registered
+    without a form class.
     """
-    meta = form_action_manager.default_backend.get_meta(action_name)
+    meta = form_action_manager.get_action_meta(action_name)
     if meta is None:
-        msg = f"Unknown form action: {action_name}"
-        raise FormActionNotFound(msg, name=action_name)
+        known = {
+            registered_name
+            for backend in form_action_manager.backends
+            for registered in backend.iter_actions()
+            if (registered_name := registered.get("name")) is not None
+        }
+        suggestions = tuple(difflib.get_close_matches(action_name, sorted(known)))
+        raise FormActionNotFound(
+            _unknown_action_message(action_name, None, suggestions),
+            name=action_name,
+            suggestions=suggestions,
+        )
     form_class = meta.get("form_class")
     if form_class is None:
         msg = f"Action {action_name!r} has no form_class"

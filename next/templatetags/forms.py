@@ -41,6 +41,20 @@ def do_form(parser: template.base.Parser, token: template.base.Token) -> "FormNo
     return FormNode(action_expr=action_expr, nodelist=nodelist, attrs=attrs)
 
 
+def _page_path_from_context(context: template.Context) -> str | None:
+    """Return the current page module path stored in the render context."""
+    raw_page = context.get("current_page_module_path")
+    return str(raw_page) if raw_page else None
+
+
+@register.simple_tag(takes_context=True)
+def action_url(context: template.Context, action_name: str) -> str:
+    """Return the endpoint URL for an action, page-scoped like `{% form %}`."""
+    return form_action_manager.get_action_url(
+        str(action_name), page_path=_page_path_from_context(context)
+    )
+
+
 def _parse_form_attr(
     parser: template.base.Parser,
     tag_name: str,
@@ -151,10 +165,9 @@ class FormNode(template.Node):
 
         action_name = str(self.action_expr.resolve(context))
 
-        raw_page = context.get("current_page_module_path")
-        next_form_page = str(raw_page) if raw_page else None
+        next_form_page = _page_path_from_context(context)
 
-        action_url = form_action_manager.get_action_url(
+        resolved_action_url = form_action_manager.get_action_url(
             action_name, page_path=next_form_page
         )
         meta = form_action_manager.get_action_meta(
@@ -185,7 +198,7 @@ class FormNode(template.Node):
 
         opening_tag = self._opening_tag(
             context,
-            action_url,
+            resolved_action_url,
             meta.get("uid") if meta is not None else None,
             form_instance,
         )

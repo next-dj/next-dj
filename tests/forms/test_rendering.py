@@ -11,6 +11,7 @@ from django.middleware.csrf import get_token
 from django.template import Context, TemplateSyntaxError
 
 from next.forms import (
+    ActionRegistration,
     Form,
     FormActionBackend,
     FormActionNotFound,
@@ -180,6 +181,42 @@ class TestRenderInvalidPage:
             assert str(template_djx) in html
         else:
             assert "name" in html
+
+    def test_rerender_picks_up_template_and_layout_edits(
+        self, mock_http_request, tmp_path
+    ) -> None:
+        """Editing template.djx or an ancestor layout.djx invalidates the cache."""
+        request = mock_http_request(method="GET")
+        form = SimpleForm(initial={"name": "a"})
+        backend = form_action_manager.default_backend
+
+        layout = tmp_path / "layout.djx"
+        layout.write_text("<html>{% block template %}{% endblock template %}</html>")
+        leaf = tmp_path / "leaf"
+        leaf.mkdir()
+        page_file = leaf / "page.py"
+        page_file.write_text("")
+        template_djx = leaf / "template.djx"
+        template_djx.write_text("<p>v1</p>")
+
+        first = backend.render_invalid_page(
+            request, "simple_form", form, page_file_path=page_file
+        )
+        assert "<p>v1</p>" in first
+        assert "<html>" in first
+
+        template_djx.write_text("<p>v2</p>")
+        second = backend.render_invalid_page(
+            request, "simple_form", form, page_file_path=page_file
+        )
+        assert "<p>v2</p>" in second
+
+        layout.write_text("<main>{% block template %}{% endblock template %}</main>")
+        third = backend.render_invalid_page(
+            request, "simple_form", form, page_file_path=page_file
+        )
+        assert "<main>" in third
+        assert "<p>v2</p>" in third
 
 
 class TestFormTagSyntax:
@@ -488,6 +525,66 @@ class TestFormTagRender:
 
         assert "_url_param_" not in html
         assert 'name="_next_form_origin" value="/items/123/"' in html
+
+
+class TestActionUrlTag:
+    """{% action_url %}: page and shared scoping, as-var, unknown action."""
+
+    @staticmethod
+    def _register_page_action(name: str, page_path: str) -> None:
+        form_action_manager.default_backend.register_action(
+            ActionRegistration(
+                name=name,
+                file_path=page_path,
+                scope="page",
+                handler=lambda: None,
+            )
+        )
+
+    def test_resolves_page_scoped_action(self, form_engine, tmp_path) -> None:
+        """The tag resolves a page-scoped action through the context page path."""
+        page_path = str(tmp_path / "page.py")
+        self._register_page_action("tag_page_action", page_path)
+        out = form_engine.from_string('{% action_url "tag_page_action" %}').render(
+            Context({"current_page_module_path": page_path})
+        )
+        assert out == form_action_manager.get_action_url(
+            "tag_page_action", page_path=page_path
+        )
+        assert "/_next/form/" in out
+
+    def test_page_scoped_action_invisible_from_other_page(
+        self, form_engine, tmp_path
+    ) -> None:
+        """The tag honours the same scope filter as {% form %}."""
+        page_a = str(tmp_path / "a" / "page.py")
+        page_b = str(tmp_path / "b" / "page.py")
+        self._register_page_action("tag_scoped_action", page_a)
+        t = form_engine.from_string('{% action_url "tag_scoped_action" %}')
+        with pytest.raises(FormActionNotFound, match="Unknown form action"):
+            t.render(Context({"current_page_module_path": page_b}))
+
+    def test_resolves_shared_action_without_page_path(self, form_engine) -> None:
+        """A shared action resolves when the context carries no page path."""
+        out = form_engine.from_string('{% action_url "test_no_form" %}').render(
+            Context({})
+        )
+        assert out == form_action_manager.get_action_url("test_no_form")
+
+    def test_as_variable(self, form_engine) -> None:
+        """The as-form stores the URL in a context variable."""
+        t = form_engine.from_string(
+            '{% action_url "test_no_form" as target %}[{{ target }}]'
+        )
+        out = t.render(Context({}))
+        expected = form_action_manager.get_action_url("test_no_form")
+        assert out == f"[{expected}]"
+
+    def test_unknown_action_raises_form_action_not_found(self, form_engine) -> None:
+        """An unknown name lets FormActionNotFound propagate."""
+        t = form_engine.from_string('{% action_url "nonexistent_action_xyz" %}')
+        with pytest.raises(FormActionNotFound, match="Unknown form action"):
+            t.render(Context({}))
 
 
 class TestFormTagMarkupIdentity:

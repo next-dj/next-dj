@@ -1,6 +1,7 @@
 import pytest
 
 from next.forms import FormActionNotFound
+from next.forms.exceptions import _unknown_action_message
 
 
 class TestFormActionNotFound:
@@ -41,3 +42,25 @@ class TestFormActionNotFound:
         msg = "missing"
         with pytest.raises(FormActionNotFound):
             raise FormActionNotFound(msg, name="missing_action")
+
+
+class TestUnknownActionMessage:
+    """_unknown_action_message renders the lookup context and hints."""
+
+    def test_without_suggestions(self) -> None:
+        """No suggestions means no closest-matches sentence."""
+        message = _unknown_action_message("vote", "/app/page.py")
+        assert message == (
+            "Unknown form action 'vote'. Searched page scope for "
+            "/app/page.py and the shared registry."
+        )
+
+    def test_without_page_path(self) -> None:
+        """A missing page path renders as 'no page'."""
+        message = _unknown_action_message("vote", None)
+        assert "Searched page scope for no page" in message
+
+    def test_with_suggestions(self) -> None:
+        """Suggestions append a closest-matches sentence."""
+        message = _unknown_action_message("vot", None, ("vote", "veto"))
+        assert message.endswith("Closest matches: 'vote', 'veto'.")

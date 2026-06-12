@@ -1,5 +1,6 @@
 """Backend abstractions and in-memory registry for form actions."""
 
+import difflib
 import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from django.views.decorators.http import require_http_methods
 from next.conf import import_class_cached
 
 from .dispatch import ActionOutcome, FormActionDispatch
-from .exceptions import FormActionNotFound
+from .exceptions import FormActionNotFound, _unknown_action_message
 from .registration import registration_diagnostics
 from .rendering import _ErrorRenderParams, render_form_page_with_errors
 from .signals import action_registered
@@ -24,7 +25,7 @@ from .uid import URL_NAME_FORM_ACTION, reverse_form_action
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from django import forms as django_forms
     from django.http import HttpRequest, HttpResponse
@@ -86,15 +87,42 @@ def record_possible_collision(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ActionGuard:
+    """Access requirements enforced before a form action dispatches."""
+
+    login_required: bool = False
+    permissions: tuple[str, ...] = ()
+
+
+def build_action_guard(
+    *,
+    login_required: bool = False,
+    permission_required: "str | Iterable[str] | None" = None,
+) -> ActionGuard | None:
+    """Return an `ActionGuard` for the declared requirements, or None when unset."""
+    if permission_required is None:
+        permissions: tuple[str, ...] = ()
+    elif isinstance(permission_required, str):
+        permissions = (permission_required,)
+    else:
+        permissions = tuple(permission_required)
+    if not login_required and not permissions:
+        return None
+    return ActionGuard(login_required=bool(login_required), permissions=permissions)
+
+
 class ActionMeta(TypedDict, total=False):
     """Per-action data stored in the registry backend."""
 
+    name: str
     handler: "Callable[..., Any] | None"
     form_class: "type[django_forms.Form] | Callable[..., Any] | None"
     wizard_class: "type | None"
     uid: str
     file_path: str
     scope: str
+    guard: ActionGuard | None
 
 
 @dataclass(frozen=True)
@@ -112,6 +140,7 @@ class ActionRegistration:
     handler: "Callable[..., Any] | None" = None
     form_class: "type[django_forms.Form] | Callable[..., Any] | None" = None
     wizard_class: "type | None" = None
+    guard: ActionGuard | None = None
 
 
 class FormActionBackend(ABC):
@@ -140,6 +169,10 @@ class FormActionBackend(ABC):
     ) -> "ActionMeta | None":
         """Return optional per-action metadata for subclasses."""
         return None
+
+    def iter_actions(self) -> "Iterable[ActionMeta]":
+        """Yield the metadata of every action this backend owns."""
+        return ()
 
     def render_invalid_page(
         self,
@@ -236,12 +269,14 @@ class RegistryFormActionBackend(FormActionBackend):
                 record_possible_collision(f"{scope_key}:{name}", old_obj, new_obj)
 
         self._registry[key] = {
+            "name": name,
             "handler": handler,
             "form_class": form_class,
             "wizard_class": wizard_class,
             "uid": uid,
             "file_path": file_path,
             "scope": scope,
+            "guard": registration.guard,
         }
         self._name_index.setdefault(name, key)
         action_registered.send(
@@ -285,11 +320,18 @@ class RegistryFormActionBackend(FormActionBackend):
                     self._url_cache[cache_key] = url
                 return url
 
-        msg = (
-            f"Unknown form action {action_name!r}. Searched page scope for "
-            f"{page_path or 'no page'} and the shared registry."
+        suggestions = tuple(
+            difflib.get_close_matches(
+                action_name,
+                sorted({name for _scope_key, name in self._registry}),
+            )
         )
-        raise FormActionNotFound(msg, name=action_name, page_path=page_path)
+        raise FormActionNotFound(
+            _unknown_action_message(action_name, page_path, suggestions),
+            name=action_name,
+            page_path=page_path,
+            suggestions=suggestions,
+        )
 
     def generate_urls(self) -> "list[URLPattern]":
         """Return one catch-all route when at least one action is registered."""
@@ -319,6 +361,10 @@ class RegistryFormActionBackend(FormActionBackend):
                 return meta
 
         return self._fallback_meta(action_name, scoped=page_path is not None)
+
+    def iter_actions(self) -> "Iterable[ActionMeta]":
+        """Yield every stored `ActionMeta` in registration order."""
+        yield from self._registry.values()
 
     def render_invalid_page(
         self,
@@ -351,10 +397,12 @@ class FormActionFactory:
 
 
 __all__ = [
+    "ActionGuard",
     "ActionMeta",
     "ActionRegistration",
     "FormActionBackend",
     "FormActionFactory",
     "RegistryFormActionBackend",
+    "build_action_guard",
     "file_to_dotted_module",
 ]

@@ -17,6 +17,8 @@ from next.forms.checks import (
     check_forms_outside_base_dir,
     check_invalid_form_meta_scope,
     check_wizard_step_actions,
+    check_wizard_step_field_collisions,
+    check_wizard_step_file_fields,
 )
 from next.forms.decorators import action
 from next.forms.manager import form_action_manager
@@ -442,6 +444,23 @@ class TestCheckFormWizardSessions:
         assert len(warnings) == 1
         assert warnings[0].id == "next.W056"
 
+    def test_second_backend_wizard_is_visible(self, settings, monkeypatch) -> None:
+        """A wizard owned by a non-default backend still triggers W056."""
+        settings.INSTALLED_APPS = _without_sessions(settings.INSTALLED_APPS)
+        first = RegistryFormActionBackend()
+        second = RegistryFormActionBackend()
+        second.register_action(
+            ActionRegistration(
+                name="second_backend_wizard",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                wizard_class=type("DemoWizardStub", (), {}),
+            )
+        )
+        monkeypatch.setattr(form_action_manager, "_backends", [first, second])
+        warnings = check_form_wizard_sessions()
+        assert [w.id for w in warnings] == ["next.W056"]
+
 
 class _W057StepForm(django_forms.Form):
     """Plain step form registered manually as a standalone action in tests."""
@@ -531,6 +550,196 @@ class TestCheckWizardStepActions:
         )
         self._register(backend, with_step_action=False)
         assert check_wizard_step_actions() == []
+
+
+class _FileStep(django_forms.Form):
+    """Step form carrying a FileField."""
+
+    doc = django_forms.FileField()
+
+
+class _ImageStep(django_forms.Form):
+    """Step form carrying an ImageField."""
+
+    photo = django_forms.ImageField()
+
+
+class _PlainStep(django_forms.Form):
+    """Step form without file fields."""
+
+    name = django_forms.CharField()
+
+
+class _FileStepsWizard(FormWizard):
+    """Wizard mixing file-carrying and plain static steps."""
+
+    class Meta:
+        """Two file-carrying steps and one clean step."""
+
+        abstract = True
+        steps: ClassVar = [
+            ("docs", _FileStep),
+            ("photo", _ImageStep),
+            ("name", _PlainStep),
+        ]
+
+
+class _CleanStepsWizard(FormWizard):
+    """Wizard whose static steps carry no file fields."""
+
+    class Meta:
+        """One clean step."""
+
+        abstract = True
+        steps: ClassVar = [("name", _PlainStep)]
+
+
+def _isolated_backend_with(
+    monkeypatch, *registrations: ActionRegistration
+) -> RegistryFormActionBackend:
+    backend = RegistryFormActionBackend()
+    for registration in registrations:
+        backend.register_action(registration)
+    monkeypatch.setattr(form_action_manager, "_backends", [backend])
+    return backend
+
+
+def _wizard_registration(name: str, wizard_class: type) -> ActionRegistration:
+    return ActionRegistration(
+        name=name,
+        file_path=_FAKE_FILE,
+        scope="shared",
+        wizard_class=wizard_class,
+    )
+
+
+class _StepLessWizardStub:
+    """Wizard stand-in without the `_static_steps` hook."""
+
+
+class TestCheckWizardStepFileFields:
+    """check_wizard_step_file_fields: W058 for FileField inside static steps."""
+
+    def test_file_and_image_steps_each_warn(self, monkeypatch) -> None:
+        """FileField and ImageField steps each produce one W058 warning."""
+        _isolated_backend_with(
+            monkeypatch, _wizard_registration("file_wizard", _FileStepsWizard)
+        )
+        warnings = check_wizard_step_file_fields()
+        assert [w.id for w in warnings] == ["next.W058", "next.W058"]
+        assert "'docs'" in warnings[0].msg
+        assert "'photo'" in warnings[1].msg
+        assert "_FileStepsWizard" in warnings[0].msg
+        assert "do not survive" in warnings[0].msg
+
+    @pytest.mark.parametrize(
+        "registration",
+        [
+            pytest.param(
+                _wizard_registration("clean_wizard", _CleanStepsWizard),
+                id="steps-without-file-fields",
+            ),
+            pytest.param(
+                _wizard_registration("stub_wizard", _StepLessWizardStub),
+                id="wizard-stub-without-static-steps",
+            ),
+            pytest.param(
+                ActionRegistration(
+                    name="plain_action",
+                    file_path=_FAKE_FILE,
+                    scope="shared",
+                    form_class=_PlainStep,
+                ),
+                id="non-wizard-action",
+            ),
+        ],
+    )
+    def test_silent_registrations(
+        self, monkeypatch, registration: ActionRegistration
+    ) -> None:
+        """Clean steps, step-less stubs, and plain actions yield no warnings."""
+        _isolated_backend_with(monkeypatch, registration)
+        assert check_wizard_step_file_fields() == []
+
+
+class _EmailStepA(django_forms.Form):
+    """First step declaring the shared `email` field."""
+
+    email = django_forms.EmailField()
+    full_name = django_forms.CharField()
+
+
+class _EmailStepB(django_forms.Form):
+    """Second step re-declaring the shared `email` field."""
+
+    email = django_forms.EmailField()
+    team = django_forms.CharField()
+
+
+class _CollidingWizard(FormWizard):
+    """Wizard whose static steps both declare `email`."""
+
+    class Meta:
+        """Two steps sharing one field name."""
+
+        abstract = True
+        steps: ClassVar = [("identity", _EmailStepA), ("scope", _EmailStepB)]
+
+
+class _DisjointWizard(FormWizard):
+    """Wizard whose static steps declare disjoint fields."""
+
+    class Meta:
+        """Two steps without shared field names."""
+
+        abstract = True
+        steps: ClassVar = [("identity", _PlainStep), ("contact", _EmailStepB)]
+
+
+class TestCheckWizardStepFieldCollisions:
+    """check_wizard_step_field_collisions: W059 for shared step field names."""
+
+    def test_colliding_field_warns_with_step_names(self, monkeypatch) -> None:
+        """A field declared by two steps produces one W059 naming both."""
+        _isolated_backend_with(
+            monkeypatch, _wizard_registration("colliding_wizard", _CollidingWizard)
+        )
+        warnings = check_wizard_step_field_collisions()
+        assert len(warnings) == 1
+        assert warnings[0].id == "next.W059"
+        assert "_CollidingWizard" in warnings[0].msg
+        assert "'email'" in warnings[0].msg
+        assert "'identity', 'scope'" in warnings[0].msg
+        assert "get_cleaned_data_for_step()" in warnings[0].msg
+
+    @pytest.mark.parametrize(
+        "registration",
+        [
+            pytest.param(
+                _wizard_registration("disjoint_wizard", _DisjointWizard),
+                id="steps-with-disjoint-fields",
+            ),
+            pytest.param(
+                _wizard_registration("stub_wizard", _StepLessWizardStub),
+                id="wizard-stub-without-static-steps",
+            ),
+            pytest.param(
+                ActionRegistration(
+                    name="plain_action",
+                    file_path=_FAKE_FILE,
+                    scope="shared",
+                    form_class=_PlainStep,
+                ),
+                id="non-wizard-action",
+            ),
+        ],
+    )
+    def test_silent_registrations(
+        self, monkeypatch, registration: ActionRegistration
+    ) -> None:
+        """Disjoint steps, step-less stubs, and plain actions yield no warnings."""
+        _isolated_backend_with(monkeypatch, registration)
+        assert check_wizard_step_field_collisions() == []
 
 
 class TestCheckFormAnchorFiles:

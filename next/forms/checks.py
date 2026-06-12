@@ -1,6 +1,7 @@
 """System checks for the forms subsystem."""
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.core.checks import (
@@ -26,9 +27,21 @@ from .wizard import (
 )
 
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from .backends import ActionMeta
+
+
 _FORM_ACTION_BACKEND_SETTINGS_KEY = "FORM_ACTION_BACKENDS"
 _FORM_WIZARD_BACKEND_SETTINGS_KEY = "FORM_WIZARD_BACKEND"
 _FORM_ANCHOR_FILES_SETTINGS_KEY = "FORM_ANCHOR_FILES"
+
+
+def _iter_registered_actions() -> "Iterator[ActionMeta]":
+    """Yield every action meta from every configured form-action backend."""
+    for backend in form_action_manager.backends:
+        yield from backend.iter_actions()
 
 
 @register(Tags.compatibility)
@@ -287,8 +300,7 @@ def check_form_wizard_sessions(
     """Warn when wizard storage needs sessions without django.contrib.sessions."""
     if "django.contrib.sessions" in settings.INSTALLED_APPS:
         return []
-    registry = getattr(form_action_manager.default_backend, "_registry", {})
-    if not any(meta.get("wizard_class") for meta in registry.values()):
+    if not any(meta.get("wizard_class") for meta in _iter_registered_actions()):
         return []
     config = next_framework_settings.FORM_WIZARD_BACKEND
     backend_path = config.get("BACKEND") if isinstance(config, dict) else None
@@ -324,15 +336,18 @@ def check_wizard_step_actions(
 
     Only static Meta.steps are inspected, `get_steps` dynamics are not visible.
     """
-    registry = getattr(form_action_manager.default_backend, "_registry", {})
+    metas = list(_iter_registered_actions())
     action_names: dict[type, str] = {}
-    for (_scope_key, name), meta in registry.items():
+    for meta in metas:
         form_class = meta.get("form_class")
-        if isinstance(form_class, type):
+        name = meta.get("name")
+        if isinstance(form_class, type) and name is not None:
             action_names.setdefault(form_class, name)
     messages: list[CheckMessage] = []
-    for meta in registry.values():
+    for meta in metas:
         wizard_class = meta.get("wizard_class")
+        if wizard_class is None:
+            continue
         static_steps = getattr(wizard_class, "_static_steps", None)
         if static_steps is None:
             continue
@@ -347,6 +362,77 @@ def check_wizard_step_actions(
                     f"{wizard_class.__name__!r}. Subclass django.forms "
                     "directly or set Meta.abstract = True on the step form.",
                     id="next.W057",
+                )
+            )
+    return messages
+
+
+@register(Tags.compatibility)
+def check_wizard_step_file_fields(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when a static wizard step declares a FileField or ImageField.
+
+    Only static Meta.steps are inspected, `get_steps` dynamics are not visible.
+    """
+    messages: list[CheckMessage] = []
+    for meta in _iter_registered_actions():
+        wizard_class = meta.get("wizard_class")
+        if wizard_class is None:
+            continue
+        static_steps = getattr(wizard_class, "_static_steps", None)
+        if static_steps is None:
+            continue
+        for step_name, step_class in static_steps():
+            base_fields = getattr(step_class, "base_fields", {})
+            if not any(isinstance(field, FileField) for field in base_fields.values()):
+                continue
+            messages.append(
+                DjangoWarning(
+                    f"FormWizard {wizard_class.__name__!r} step {step_name!r} "
+                    "declares a FileField. Wizard storage persists "
+                    "cleaned_data between requests and uploaded files do not "
+                    "survive that round-trip. Collect the upload in a "
+                    "standalone form action instead.",
+                    id="next.W058",
+                )
+            )
+    return messages
+
+
+@register(Tags.compatibility)
+def check_wizard_step_field_collisions(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when two static wizard steps declare the same field name.
+
+    Only static Meta.steps are inspected, `get_steps` dynamics are not visible.
+    """
+    messages: list[CheckMessage] = []
+    for meta in _iter_registered_actions():
+        wizard_class = meta.get("wizard_class")
+        if wizard_class is None:
+            continue
+        static_steps = getattr(wizard_class, "_static_steps", None)
+        if static_steps is None:
+            continue
+        owners: dict[str, list[str]] = {}
+        for step_name, step_class in static_steps():
+            for field_name in getattr(step_class, "base_fields", {}):
+                owners.setdefault(field_name, []).append(step_name)
+        for field_name, step_names in owners.items():
+            if len(step_names) == 1:
+                continue
+            rendered = ", ".join(repr(step_name) for step_name in step_names)
+            messages.append(
+                DjangoWarning(
+                    f"Wizard {wizard_class.__name__!r}: field {field_name!r} "
+                    f"is declared by steps {rendered}. get_all_cleaned_data() "
+                    "keeps the last value, use get_cleaned_data_for_step() "
+                    "for per-step access.",
+                    id="next.W059",
                 )
             )
     return messages
@@ -388,6 +474,62 @@ def check_form_anchor_files(
 
 
 @register(Tags.compatibility)
+def check_action_guard_permissions(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when permission_required is declared without django.contrib.auth."""
+    if "django.contrib.auth" in settings.INSTALLED_APPS:
+        return []
+    return [
+        DjangoWarning(
+            f"Form action {meta.get('name')!r} declares permission_required "
+            "but django.contrib.auth is not in INSTALLED_APPS, so the "
+            "permission check cannot resolve users or permissions.",
+            obj=settings,
+            id="next.W060",
+        )
+        for meta in _iter_registered_actions()
+        if (guard := meta.get("guard")) is not None and guard.permissions
+    ]
+
+
+_MESSAGE_MIDDLEWARE = "django.contrib.messages.middleware.MessageMiddleware"
+
+
+def _declares_success_message(target: object) -> bool:
+    """Return True when the class declares a non-empty Meta.success_message."""
+    return bool(getattr(getattr(target, "Meta", None), "success_message", ""))
+
+
+@register(Tags.compatibility)
+def check_success_message_framework(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when Meta.success_message is declared without the messages framework."""
+    has_app = "django.contrib.messages" in settings.INSTALLED_APPS
+    has_middleware = _MESSAGE_MIDDLEWARE in tuple(
+        getattr(settings, "MIDDLEWARE", None) or ()
+    )
+    if has_app and has_middleware:
+        return []
+    return [
+        DjangoWarning(
+            f"Form action {meta.get('name')!r} declares Meta.success_message "
+            "but the messages framework is not fully installed. Add "
+            "django.contrib.messages to INSTALLED_APPS and MessageMiddleware "
+            "to MIDDLEWARE, or the submission will raise MessageFailure.",
+            obj=settings,
+            id="next.W061",
+        )
+        for meta in _iter_registered_actions()
+        if _declares_success_message(meta.get("form_class"))
+        or _declares_success_message(meta.get("wizard_class"))
+    ]
+
+
+@register(Tags.compatibility)
 def check_component_widget_components(
     *_args: object,
     **_kwargs: object,
@@ -396,8 +538,7 @@ def check_component_widget_components(
     base = getattr(settings, "BASE_DIR", None)
     seen: set[str] = set()
     messages: list[CheckMessage] = []
-    registry = getattr(form_action_manager.default_backend, "_registry", {})
-    for meta in registry.values():
+    for meta in _iter_registered_actions():
         form_class = meta.get("form_class")
         base_fields = getattr(form_class, "base_fields", None)
         if base_fields is None:
@@ -431,9 +572,10 @@ def check_component_widget_field_types(
 ) -> list[CheckMessage]:
     """Warn when a ComponentWidget is attached to an unsupported field type."""
     messages: list[CheckMessage] = []
-    registry = getattr(form_action_manager.default_backend, "_registry", {})
-    for meta in registry.values():
+    for meta in _iter_registered_actions():
         form_class = meta.get("form_class")
+        if not isinstance(form_class, type):
+            continue
         base_fields = getattr(form_class, "base_fields", None)
         if base_fields is None:
             continue
@@ -458,6 +600,7 @@ def check_component_widget_field_types(
 
 __all__ = [
     "check_action_applied_to_class",
+    "check_action_guard_permissions",
     "check_component_widget_components",
     "check_component_widget_field_types",
     "check_form_action_backends_configuration",
@@ -470,6 +613,9 @@ __all__ = [
     "check_instance_from_url_on_non_model_form",
     "check_instance_from_url_unknown_field",
     "check_invalid_form_meta_scope",
+    "check_success_message_framework",
     "check_wizard_step_actions",
+    "check_wizard_step_field_collisions",
+    "check_wizard_step_file_fields",
     "record_possible_collision",
 ]

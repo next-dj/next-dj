@@ -5,7 +5,12 @@ from django import forms as django_forms
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse
 from django.test import override_settings
-from django.urls import NoReverseMatch, clear_script_prefix, set_script_prefix
+from django.urls import (
+    NoReverseMatch,
+    URLPattern,
+    clear_script_prefix,
+    set_script_prefix,
+)
 
 from next.forms import (
     ActionOutcome,
@@ -438,6 +443,65 @@ class TestNameIndexScopeFilter:
         assert "_next/form/" in url
 
 
+class TestUnknownActionSuggestions:
+    """Lookup failures carry close-match suggestions from the registry."""
+
+    @staticmethod
+    def _register(backend: RegistryFormActionBackend, name: str) -> None:
+        backend.register_action(
+            ActionRegistration(
+                name=name,
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+            )
+        )
+
+    @pytest.mark.parametrize(
+        ("lookup_name", "expected_suggestions", "message_tail"),
+        [
+            pytest.param(
+                "delete_not",
+                ("delete_note",),
+                "Closest matches: 'delete_note'.",
+                id="near-miss-suggests-neighbour",
+            ),
+            pytest.param(
+                "zzzzzz",
+                (),
+                "the shared registry.",
+                id="unrelated-name-stays-bare",
+            ),
+        ],
+    )
+    def test_backend_suggestions(
+        self,
+        lookup_name: str,
+        expected_suggestions: tuple[str, ...],
+        message_tail: str,
+    ) -> None:
+        """The lookup error carries close matches and renders them last."""
+        backend = RegistryFormActionBackend()
+        self._register(backend, "delete_note")
+        with pytest.raises(FormActionNotFound) as excinfo:
+            backend.get_action_url(lookup_name)
+        assert excinfo.value.suggestions == expected_suggestions
+        assert str(excinfo.value).endswith(message_tail)
+
+    def test_manager_aggregates_and_dedupes_across_backends(self) -> None:
+        """The manager merges backend suggestions without duplicates."""
+        first = RegistryFormActionBackend()
+        second = RegistryFormActionBackend()
+        self._register(first, "delete_note")
+        self._register(second, "delete_note")
+        self._register(second, "delete_card")
+        manager = FormActionManager(backends=[first, second])
+        with pytest.raises(FormActionNotFound) as excinfo:
+            manager.get_action_url("delete_not")
+        assert excinfo.value.suggestions == ("delete_note", "delete_card")
+        assert "Closest matches: 'delete_note', 'delete_card'." in str(excinfo.value)
+
+
 class TestFormActionBackendAbstract:
     """FormActionBackend defaults: get_meta, render_invalid_page, shape_response."""
 
@@ -504,6 +568,82 @@ class TestFormActionBackendAbstract:
         resp = stub.shape_response(req, outcome)
         assert resp.status_code == 200
         assert resp.content == b"hi"
+
+
+class _MinimalBackend(FormActionBackend):
+    """Concrete backend that keeps every FormActionBackend default."""
+
+    def register_action(self, registration: ActionRegistration) -> None:
+        pass
+
+    def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
+        return ""
+
+    def generate_urls(self) -> list[URLPattern]:
+        return []
+
+    def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
+        return HttpResponse()
+
+
+class TestIterActions:
+    """iter_actions exposes every owned action across backend kinds."""
+
+    def test_abstract_default_is_empty(self) -> None:
+        """A backend that never overrides iter_actions yields nothing."""
+        assert list(_MinimalBackend().iter_actions()) == []
+
+    def test_registry_backend_yields_metas_with_names(self) -> None:
+        """The registry backend yields stored metas carrying action names."""
+        backend = RegistryFormActionBackend()
+        for name in ("first_action", "second_action"):
+            backend.register_action(
+                ActionRegistration(
+                    name=name,
+                    file_path=_FAKE_FILE,
+                    scope="shared",
+                    handler=lambda: None,
+                )
+            )
+        metas = list(backend.iter_actions())
+        assert [meta.get("name") for meta in metas] == [
+            "first_action",
+            "second_action",
+        ]
+        assert all(meta.get("uid") for meta in metas)
+
+    def test_empty_registry_backend_yields_nothing(self) -> None:
+        """A registry backend without registrations yields no metas."""
+        assert list(RegistryFormActionBackend().iter_actions()) == []
+
+
+class TestManagerBackendsAccessor:
+    """FormActionManager.backends exposes backends in consultation order."""
+
+    def test_returns_explicit_backends_in_order(self) -> None:
+        """Explicitly supplied backends come back as an ordered tuple."""
+        first = RegistryFormActionBackend()
+        second = _MinimalBackend()
+        manager = FormActionManager(backends=[first, second])
+        assert manager.backends == (first, second)
+
+    def test_loads_configuration_lazily(self, settings) -> None:
+        """An unprimed manager builds its backends from settings."""
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [
+                {"BACKEND": "next.forms.RegistryFormActionBackend"},
+            ],
+        }
+        manager = FormActionManager()
+        backends = manager.backends
+        assert len(backends) == 1
+        assert isinstance(backends[0], RegistryFormActionBackend)
+
+    def test_empty_configuration_yields_empty_tuple(self, settings) -> None:
+        """No configured backends produce an empty tuple, not an error."""
+        settings.NEXT_FRAMEWORK = {"FORM_ACTION_BACKENDS": []}
+        manager = FormActionManager()
+        assert manager.backends == ()
 
 
 class TestFormActionManagerReloadConfig:

@@ -11,7 +11,7 @@ from next.conf import next_framework_settings
 from ._request_utils import _url_kwargs_for_request
 from .backends import FormActionFactory
 from .dispatch import _form_action_context_callable
-from .exceptions import FormActionNotFound
+from .exceptions import FormActionNotFound, _unknown_action_message
 
 
 if TYPE_CHECKING:
@@ -24,18 +24,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-def _action_url_or_none(
-    backend: "FormActionBackend",
-    action_name: str,
-    page_path: str | None,
-) -> str | None:
-    """Return the backend URL for the action, or `None` when it is unknown."""
-    try:
-        return backend.get_action_url(action_name, page_path=page_path)
-    except FormActionNotFound:
-        return None
 
 
 class FormActionManager:
@@ -104,15 +92,20 @@ class FormActionManager:
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
         """Return the reverse URL from the first backend that knows `action_name`."""
         self._ensure_backends()
+        suggestions: list[str] = []
         for backend in self._backends:
-            url = _action_url_or_none(backend, action_name, page_path)
-            if url is not None:
-                return url
-        msg = (
-            f"Unknown form action {action_name!r}. Searched page scope for "
-            f"{page_path or 'no page'} and the shared registry."
+            try:
+                return backend.get_action_url(action_name, page_path=page_path)
+            except FormActionNotFound as exc:
+                suggestions.extend(
+                    name for name in exc.suggestions if name not in suggestions
+                )
+        raise FormActionNotFound(
+            _unknown_action_message(action_name, page_path, tuple(suggestions)),
+            name=action_name,
+            page_path=page_path,
+            suggestions=suggestions,
         )
-        raise FormActionNotFound(msg, name=action_name, page_path=page_path)
 
     def get_action_meta(
         self,
@@ -127,6 +120,12 @@ class FormActionManager:
             if meta is not None:
                 return meta
         return None
+
+    @property
+    def backends(self) -> "tuple[FormActionBackend, ...]":
+        """Return the configured backends in consultation order."""
+        self._ensure_backends()
+        return tuple(self._backends)
 
     @property
     def default_backend(self) -> "FormActionBackend":
