@@ -17,7 +17,7 @@ from django.http import (
 )
 
 from next.deps import REQUEST_DEP_CACHE_ATTR, resolver
-from next.deps.resolver import _cached_signature
+from next.deps.resolver import cached_signature
 
 from ._request_utils import (
     _resolve_origin,
@@ -95,7 +95,7 @@ def _form_from_initial_data(
 def _accepts_var_keyword(func: "Callable[..., Any]") -> bool:
     """Return True when `func` declares a `**kwargs` parameter."""
     try:
-        sig = _cached_signature(func)
+        sig = cached_signature(func)
     except (TypeError, ValueError):
         return False
     return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
@@ -232,51 +232,6 @@ def _normalize_handler_response(
     return None
 
 
-def _emit_action_dispatched(
-    action_name: str,
-    form: "django_forms.Form | None",
-    state: "_DispatchState",
-    duration_ms: float,
-    response: HttpResponse,
-) -> None:
-    """Send `action_dispatched` when any receiver is connected."""
-    if action_dispatched.receivers:
-        action_dispatched.send(
-            sender=FormActionDispatch,
-            action_name=action_name,
-            form=form,
-            url_kwargs=dict(state.url_kwargs),
-            duration_ms=duration_ms,
-            response_status=response.status_code,
-            dep_cache=dict(state.dep_cache),
-        )
-
-
-def _emit_wizard_step_submitted(
-    wizard_class: type,
-    step_name: str,
-    cleaned: dict[str, Any],
-) -> None:
-    """Send `wizard_step_submitted` when any receiver is connected."""
-    if wizard_step_submitted.receivers:
-        wizard_step_submitted.send(
-            sender=FormActionDispatch,
-            wizard_class=wizard_class,
-            step=step_name,
-            cleaned_data=cleaned,
-        )
-
-
-def _emit_wizard_completed(wizard_class: type, merged: dict[str, Any]) -> None:
-    """Send `wizard_completed` when any receiver is connected."""
-    if wizard_completed.receivers:
-        wizard_completed.send(
-            sender=FormActionDispatch,
-            wizard_class=wizard_class,
-            cleaned_data=merged,
-        )
-
-
 class ActionOutcomeKind(StrEnum):
     """Discriminator for the pipeline outcomes a backend shapes into responses."""
 
@@ -323,6 +278,80 @@ class _DispatchState:
     def origin(self) -> str | None:
         """Return the validated origin URL path, if the origin resolved."""
         return self.origin_match.origin if self.origin_match else None
+
+    def emit_action_dispatched(
+        self,
+        request: "HttpRequest",
+        action_name: str,
+        form: "django_forms.Form | None",
+        duration_ms: float,
+        response: HttpResponse,
+    ) -> None:
+        """Send `action_dispatched` when any receiver is connected."""
+        if action_dispatched.receivers:
+            action_dispatched.send(
+                sender=FormActionDispatch,
+                action_name=action_name,
+                uid=self.uid,
+                request=request,
+                form=form,
+                url_kwargs=dict(self.url_kwargs),
+                duration_ms=duration_ms,
+                response_status=response.status_code,
+                dep_cache=dict(self.dep_cache),
+            )
+
+    def emit_form_validation_failed(
+        self,
+        request: "HttpRequest",
+        action_name: str,
+        form: "django_forms.Form",
+    ) -> None:
+        """Send `form_validation_failed` when any receiver is connected."""
+        if form_validation_failed.receivers:
+            error_count = sum(len(errors) for errors in form.errors.values())
+            form_validation_failed.send(
+                sender=FormActionDispatch,
+                action_name=action_name,
+                uid=self.uid,
+                request=request,
+                error_count=error_count,
+                field_names=tuple(form.errors.keys()),
+            )
+
+    def emit_wizard_step_submitted(
+        self,
+        request: "HttpRequest",
+        wizard_class: type,
+        step_name: str,
+        cleaned: dict[str, Any],
+    ) -> None:
+        """Send `wizard_step_submitted` when any receiver is connected."""
+        if wizard_step_submitted.receivers:
+            wizard_step_submitted.send(
+                sender=FormActionDispatch,
+                wizard_class=wizard_class,
+                step=step_name,
+                cleaned_data=cleaned,
+                uid=self.uid,
+                request=request,
+            )
+
+    def emit_wizard_completed(
+        self,
+        request: "HttpRequest",
+        wizard_class: type,
+        merged: dict[str, Any],
+    ) -> None:
+        """Send `wizard_completed` when any receiver is connected."""
+        if wizard_completed.receivers:
+            wizard_completed.send(
+                sender=FormActionDispatch,
+                wizard_class=wizard_class,
+                cleaned_data=merged,
+                uid=self.uid,
+                request=request,
+            )
 
 
 @dataclass
@@ -424,7 +453,7 @@ class FormActionDispatch:
                 raw=raw,
             ),
         )
-        _emit_action_dispatched(action_name, None, state, duration_ms, response)
+        state.emit_action_dispatched(request, action_name, None, duration_ms, response)
         return response
 
     @staticmethod
@@ -448,14 +477,7 @@ class FormActionDispatch:
             )
             form = _bind_form_for_post(params.form_class, request, initial_data)
         if not form.is_valid():
-            if form_validation_failed.receivers:
-                error_count = sum(len(errors) for errors in form.errors.values())
-                form_validation_failed.send(
-                    sender=FormActionDispatch,
-                    action_name=params.action_name,
-                    error_count=error_count,
-                    field_names=tuple(form.errors.keys()),
-                )
+            state.emit_form_validation_failed(request, params.action_name, form)
             return backend.shape_response(
                 request,
                 ActionOutcome(
@@ -503,8 +525,8 @@ class FormActionDispatch:
                 form=form,
             ),
         )
-        _emit_action_dispatched(
-            params.action_name, form, state, duration_ms, response
+        state.emit_action_dispatched(
+            request, params.action_name, form, duration_ms, response
         )
         return response
 
@@ -533,14 +555,7 @@ class FormActionDispatch:
         files = request.FILES if hasattr(request, "FILES") else None
         form = form_class(request.POST, files, **form_kwargs)
         if not form.is_valid():
-            if form_validation_failed.receivers:
-                error_count = sum(len(errors) for errors in form.errors.values())
-                form_validation_failed.send(
-                    sender=FormActionDispatch,
-                    action_name=action_name,
-                    error_count=error_count,
-                    field_names=tuple(form.errors.keys()),
-                )
+            state.emit_form_validation_failed(request, action_name, form)
             return backend.shape_response(
                 request,
                 ActionOutcome(
@@ -557,7 +572,7 @@ class FormActionDispatch:
 
         cleaned = dict(form.cleaned_data)
         wizard.save_step(step_name, cleaned)
-        _emit_wizard_step_submitted(wizard_class, step_name, cleaned)
+        state.emit_wizard_step_submitted(request, wizard_class, step_name, cleaned)
 
         next_step = wizard.next_step(step_name)
         if next_step is None:
@@ -590,7 +605,7 @@ class FormActionDispatch:
             )
             if response.status_code < _HTTP_ERROR_FLOOR:
                 wizard.clear_storage()
-                _emit_wizard_completed(wizard_class, merged)
+                state.emit_wizard_completed(request, wizard_class, merged)
         else:
             response = backend.shape_response(
                 request,
@@ -604,7 +619,7 @@ class FormActionDispatch:
             )
             duration_ms = 0.0
 
-        _emit_action_dispatched(action_name, form, state, duration_ms, response)
+        state.emit_action_dispatched(request, action_name, form, duration_ms, response)
         return response
 
     @staticmethod

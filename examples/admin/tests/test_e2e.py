@@ -15,7 +15,7 @@ def _action_form_body(body: str, *, action_substring: str = "/_next/form/") -> s
     but with no formset) by picking the last matching form.
     """
     forms = re.findall(
-        r'<form[^>]*action="([^"]+)"[^>]*>(.+?)</form>',
+        r'<form[^>]*?(?<!-)action="([^"]+)"[^>]*>(.+?)</form>',
         body,
         re.DOTALL,
     )

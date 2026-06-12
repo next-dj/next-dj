@@ -10,9 +10,9 @@ from next.forms import (
     ActionRegistration,
     Form,
     RegistryFormActionBackend,
-    form_action_manager,
 )
 from next.forms.dispatch import FormActionDispatch
+from next.forms.manager import form_action_manager
 from next.forms.signals import (
     action_dispatched,
     action_registered,
@@ -364,6 +364,9 @@ class TestActionDispatchedWiring:
         assert event["duration_ms"] >= 0
         assert event["form"] is None
         assert event["url_kwargs"] == {}
+        meta = form_action_manager.get_action_meta("test_no_form")
+        assert event["uid"] == meta["uid"]
+        assert event["request"].path == url
 
     def test_fires_on_successful_dispatch_with_form(
         self,
@@ -385,6 +388,9 @@ class TestActionDispatchedWiring:
         assert isinstance(event["form"], Form)
         assert event["form"].cleaned_data["name"] == "Alice"
         assert event["url_kwargs"] == {}
+        meta = form_action_manager.get_action_meta("simple_form_redirect")
+        assert event["uid"] == meta["uid"]
+        assert event["request"].method == "POST"
 
     def test_payload_includes_url_kwargs_from_resolved_origin(
         self,
@@ -440,6 +446,9 @@ class TestFormValidationFailedWiring:
         assert event["action_name"] == "simple_form"
         assert event["error_count"] >= 1
         assert "name" in event["field_names"]
+        meta = form_action_manager.get_action_meta("simple_form")
+        assert event["uid"] == meta["uid"]
+        assert event["request"].path == url
 
 
 class TestWizardSignalsImportable:
@@ -473,6 +482,9 @@ class TestWizardSignalsWiring:
         assert first["wizard_class"] is SignalWizard
         assert first["step"] == "identity"
         assert first["cleaned_data"] == {"name": "Ada"}
+        meta = form_action_manager.get_action_meta("signal_wizard")
+        assert first["uid"] == meta["uid"]
+        assert first["request"].method == "POST"
         assert capture_wizard_step_submitted[1]["step"] == "scope"
 
     def test_completed_fires_once_with_merged_data(
@@ -488,6 +500,9 @@ class TestWizardSignalsWiring:
         event = capture_wizard_completed[0]
         assert event["wizard_class"] is SignalWizard
         assert event["cleaned_data"] == {"name": "Ada", "scope": "ops"}
+        meta = form_action_manager.get_action_meta("signal_wizard")
+        assert event["uid"] == meta["uid"]
+        assert event["request"].method == "POST"
 
     def test_action_dispatched_fires_per_step(
         self,

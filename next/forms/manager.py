@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
     from django.urls import URLPattern
 
-    from .backends import ActionRegistration, FormActionBackend
+    from .backends import ActionMeta, ActionRegistration, FormActionBackend
 
 
 logger = logging.getLogger(__name__)
@@ -114,6 +114,20 @@ class FormActionManager:
         )
         raise FormActionNotFound(msg, name=action_name, page_path=page_path)
 
+    def get_action_meta(
+        self,
+        action_name: str,
+        *,
+        page_path: str | None = None,
+    ) -> "ActionMeta | None":
+        """Return the action meta from the first backend that knows the name."""
+        self._ensure_backends()
+        for backend in self._backends:
+            meta = backend.get_meta(action_name, page_path)
+            if meta is not None:
+                return meta
+        return None
+
     @property
     def default_backend(self) -> "FormActionBackend":
         """Return the first configured backend."""
@@ -129,21 +143,26 @@ def build_form_namespace_for_action(
     page_path: str | None = None,
 ) -> types.SimpleNamespace | None:
     """Build the form namespace used by the form template tag."""
-    form_action_manager._ensure_backends()
-    for backend in form_action_manager._backends:
-        meta = backend.get_meta(action_name, page_path)
-        if meta is None:
-            continue
-        wizard_class = meta.get("wizard_class")
-        if wizard_class is not None:
-            url_kwargs = _url_kwargs_for_request(request)
-            wizard = wizard_class(request=request, url_kwargs=url_kwargs)
-            return cast("types.SimpleNamespace", wizard.template_namespace())
-        fc = meta.get("form_class")
-        if fc is None:
-            return None
-        return _form_action_context_callable(fc)(request)
-    return None
+    meta = form_action_manager.get_action_meta(action_name, page_path=page_path)
+    if meta is None:
+        return None
+    return _build_form_namespace_from_meta(meta, request)
+
+
+def _build_form_namespace_from_meta(
+    meta: "ActionMeta",
+    request: "HttpRequest",
+) -> types.SimpleNamespace | None:
+    """Build the form namespace for already-resolved action meta."""
+    wizard_class = meta.get("wizard_class")
+    if wizard_class is not None:
+        url_kwargs = _url_kwargs_for_request(request)
+        wizard = wizard_class(request=request, url_kwargs=url_kwargs)
+        return cast("types.SimpleNamespace", wizard.template_namespace())
+    fc = meta.get("form_class")
+    if fc is None:
+        return None
+    return _form_action_context_callable(fc)(request)
 
 
 __all__ = [

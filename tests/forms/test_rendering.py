@@ -6,16 +6,17 @@ from unittest.mock import MagicMock
 import pytest
 from django import forms as django_forms
 from django.core.exceptions import ImproperlyConfigured
-from django.http import HttpRequest, HttpResponseRedirect, QueryDict
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDict
 from django.middleware.csrf import get_token
 from django.template import Context, TemplateSyntaxError
 
 from next.forms import (
     Form,
+    FormActionBackend,
     FormActionNotFound,
     RegistryFormActionBackend,
-    form_action_manager,
 )
+from next.forms.manager import form_action_manager
 from next.forms.rendering import _ErrorRenderParams, render_form_page_with_errors
 from next.forms.wizard import FormWizard
 from tests.forms.actions import SimpleForm
@@ -43,6 +44,12 @@ class RenderWizard(FormWizard):
     def done(self, request, cleaned_data) -> HttpResponseRedirect:
         """Redirect once the wizard finishes."""
         return HttpResponseRedirect("/thanks/")
+
+
+class UploadEnctypeForm(Form):
+    """File-upload form used by the auto-enctype tests."""
+
+    doc = django_forms.FileField()
 
 
 class TestRenderInvalidPage:
@@ -188,10 +195,16 @@ class TestFormTagSyntax:
         with pytest.raises(TemplateSyntaxError, match=r'key="value"'):
             form_engine.from_string('{% form "foo" "bar" %}x{% endform %}')
 
-    @pytest.mark.parametrize("attr", ["action", "method"])
+    @pytest.mark.parametrize(
+        "attr",
+        ["action", "method", "data-next-action", "data-next-target"],
+    )
     def test_reserved_attribute_raises(self, form_engine, attr: str) -> None:
-        """{% form %} rejects the attributes the tag itself owns."""
-        with pytest.raises(TemplateSyntaxError, match=attr):
+        """{% form %} rejects exact reserved names and the data-next- prefix."""
+        with pytest.raises(
+            TemplateSyntaxError,
+            match=f"reserves the '{attr}' attribute for the framework",
+        ):
             form_engine.from_string(
                 f'{{% form "simple_form" {attr}="/x/" %}}x{{% endform %}}'
             )
@@ -215,7 +228,7 @@ class TestFormTagRender:
         )
         assert "<form" in html
         assert "action=" in html
-        assert 'method="post">' in html
+        assert 'method="post"' in html
         assert "</form>" in html
 
     def test_renders_enctype_attribute(self, form_engine, csrf_request) -> None:
@@ -231,7 +244,14 @@ class TestFormTagRender:
                 }
             )
         )
-        assert 'method="post" enctype="multipart/form-data">' in html
+        meta = form_action_manager.get_action_meta(
+            "simple_form", page_path=str(PAGE_MODULE_FOR_FORM_TESTS)
+        )
+        assert meta is not None
+        assert (
+            f'method="post" data-next-action="{meta["uid"]}"'
+            ' enctype="multipart/form-data">'
+        ) in html
 
     def test_renders_multiple_attributes_escaped(
         self, form_engine, csrf_request
@@ -270,7 +290,7 @@ class TestFormTagRender:
                 }
             )
         )
-        assert 'method="post" class="from-ctx">' in html
+        assert 'class="from-ctx">' in html
 
     def test_wizard_action_pushes_wizard_into_context(
         self, form_engine, csrf_request
@@ -468,3 +488,89 @@ class TestFormTagRender:
 
         assert "_url_param_" not in html
         assert 'name="_next_form_origin" value="/items/123/"' in html
+
+
+class TestFormTagMarkupIdentity:
+    """{% form %} framework attributes: data-next-action and auto-enctype."""
+
+    @staticmethod
+    def _render(form_engine, csrf_request, source: str) -> str:
+        t = form_engine.from_string(source)
+        return t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+
+    def test_emits_data_next_action_uid(self, form_engine, csrf_request) -> None:
+        """The opening tag carries the registry uid as data-next-action."""
+        html = self._render(
+            form_engine, csrf_request, '{% form "simple_form" %}x{% endform %}'
+        )
+        meta = form_action_manager.get_action_meta(
+            "simple_form", page_path=str(PAGE_MODULE_FOR_FORM_TESTS)
+        )
+        assert meta is not None
+        uid = meta["uid"]
+        assert (
+            f'<form action="/_next/form/{uid}/" method="post" data-next-action="{uid}">'
+        ) in html
+
+    def test_handler_only_action_emits_data_next_action(
+        self, form_engine, csrf_request
+    ) -> None:
+        """A handler-only action still carries the uid marker and no enctype."""
+        html = self._render(
+            form_engine, csrf_request, '{% form "test_no_form" %}x{% endform %}'
+        )
+        meta = form_action_manager.get_action_meta("test_no_form")
+        assert meta is not None
+        assert f'data-next-action="{meta["uid"]}">' in html
+        assert "enctype" not in html
+
+    def test_omits_data_next_action_without_meta(
+        self, form_engine, csrf_request, monkeypatch
+    ) -> None:
+        """A backend exposing no meta renders the tag without the marker."""
+
+        class NoMetaBackend(FormActionBackend):
+            def register_action(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            def get_action_url(self, action_name: str, **kwargs: object) -> str:
+                return "/custom/submit/"
+
+            def generate_urls(self) -> list:
+                return []
+
+            def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
+                return HttpResponse()
+
+        monkeypatch.setattr(form_action_manager, "_backends", [NoMetaBackend()])
+        html = self._render(
+            form_engine, csrf_request, '{% form "custom_action" %}x{% endform %}'
+        )
+        assert '<form action="/custom/submit/" method="post">' in html
+        assert "data-next-action" not in html
+
+    def test_auto_enctype_for_multipart_form(self, form_engine, csrf_request) -> None:
+        """A multipart form gains enctype="multipart/form-data" automatically."""
+        html = self._render(
+            form_engine,
+            csrf_request,
+            '{% form "upload_enctype_form" %}x{% endform %}',
+        )
+        assert 'enctype="multipart/form-data">' in html
+
+    def test_explicit_enctype_wins_over_auto(self, form_engine, csrf_request) -> None:
+        """An author-passed enctype suppresses the multipart auto-attribute."""
+        html = self._render(
+            form_engine,
+            csrf_request,
+            '{% form "upload_enctype_form" enctype="text/plain" %}x{% endform %}',
+        )
+        assert 'enctype="text/plain">' in html
+        assert "multipart/form-data" not in html

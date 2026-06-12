@@ -5,20 +5,21 @@ from typing import TYPE_CHECKING, cast
 from django import template
 from django.core.exceptions import ImproperlyConfigured
 from django.middleware.csrf import get_token
-from django.utils.html import escape, format_html, format_html_join
+from django.utils.html import escape, format_html
 
-from next.forms import form_action_manager
-from next.forms.manager import build_form_namespace_for_action
-from next.forms.uid import _validated_origin_path
+from next.forms.manager import _build_form_namespace_from_meta, form_action_manager
+from next.forms.uid import validated_origin_path
 from next.forms.widgets import bind_component_widgets
 
 
 _NEXT_FORM_ORIGIN = "_next_form_origin"
 _MIN_FORM_TAG_BITS = 2
 _RESERVED_FORM_ATTRS = frozenset({"action", "method"})
+_RESERVED_FORM_ATTR_PREFIX = "data-next-"
 
 
 if TYPE_CHECKING:
+    from django import forms as django_forms
     from django.http import HttpRequest
     from django.template.base import FilterExpression
 
@@ -53,8 +54,8 @@ def _parse_form_attr(
             f'the key="value" form, got {bit!r}'
         )
         raise template.TemplateSyntaxError(msg)
-    if name in _RESERVED_FORM_ATTRS:
-        msg = f"{tag_name!r} tag sets the {name!r} attribute itself"
+    if name in _RESERVED_FORM_ATTRS or name.startswith(_RESERVED_FORM_ATTR_PREFIX):
+        msg = f"{tag_name!r} tag reserves the {name!r} attribute for the framework"
         raise template.TemplateSyntaxError(msg)
     return name, parser.compile_filter(value)
 
@@ -116,25 +117,33 @@ class FormNode(template.Node):
         `request.path`.
         """
         if getattr(request, "method", None) == "POST":
-            posted = _validated_origin_path(request.POST.get(_NEXT_FORM_ORIGIN))
+            posted = validated_origin_path(request.POST.get(_NEXT_FORM_ORIGIN))
             if posted is not None:
                 return posted
         return getattr(request, "path", None)
 
-    def _opening_tag(self, context: template.Context, action_url: str) -> str:
-        """Build the opening form element with any extra HTML attributes."""
-        if not self.attrs:
-            return format_html('<form action="{}" method="post">', escape(action_url))
-        rendered_attrs = format_html_join(
-            " ",
-            '{}="{}"',
-            ((name, escape(str(expr.resolve(context)))) for name, expr in self.attrs),
+    def _opening_tag(
+        self,
+        context: template.Context,
+        action_url: str,
+        uid: str | None,
+        form_instance: "django_forms.Form | None",
+    ) -> str:
+        """Build the opening form element with framework and extra attributes."""
+        bits = [f'<form action="{escape(action_url)}" method="post"']
+        if uid:
+            bits.append(f'data-next-action="{escape(uid)}"')
+        if (
+            form_instance is not None
+            and form_instance.is_multipart()
+            and all(name != "enctype" for name, _expr in self.attrs)
+        ):
+            bits.append('enctype="multipart/form-data"')
+        bits.extend(
+            f'{escape(name)}="{escape(str(expr.resolve(context)))}"'
+            for name, expr in self.attrs
         )
-        return format_html(
-            '<form action="{}" method="post" {}>',
-            escape(action_url),
-            rendered_attrs,
-        )
+        return " ".join(bits) + ">"
 
     def render(self, context: template.Context) -> str:
         """Render form tag with action URL, method=post, CSRF, and content."""
@@ -148,17 +157,19 @@ class FormNode(template.Node):
         action_url = form_action_manager.get_action_url(
             action_name, page_path=next_form_page
         )
-
-        opening_tag = self._opening_tag(context, action_url)
-        hidden_inputs = self._build_hidden_inputs(request)
+        meta = form_action_manager.get_action_meta(
+            action_name, page_path=next_form_page
+        )
 
         form_obj = context.get(action_name)
         if form_obj and hasattr(form_obj, "form"):
             form_instance = form_obj.form
             wizard_instance = getattr(form_obj, "wizard", None)
         else:
-            built = build_form_namespace_for_action(
-                action_name, request, page_path=next_form_page
+            built = (
+                _build_form_namespace_from_meta(meta, request)
+                if meta is not None
+                else None
             )
             form_instance = built.form if built is not None else None
             wizard_instance = getattr(built, "wizard", None) if built else None
@@ -171,6 +182,14 @@ class FormNode(template.Node):
                 collector=context.get("_static_collector"),
                 with_errors=form_instance.is_bound,
             )
+
+        opening_tag = self._opening_tag(
+            context,
+            action_url,
+            meta.get("uid") if meta is not None else None,
+            form_instance,
+        )
+        hidden_inputs = self._build_hidden_inputs(request)
 
         push_kwargs: dict[str, object] = {"form": form_instance}
         if wizard_instance is not None:
