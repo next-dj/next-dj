@@ -20,6 +20,12 @@ from next.forms.origin import (
 from tests.support.helpers import build_mock_http_request
 
 
+class _RedirectDuck:
+    """Plain `.url` carrier so the bench measures the duck path, not MagicMock."""
+
+    url = "/redirect-target/"
+
+
 class TestBenchDispatchHelpers:
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_normalize_none(self, benchmark) -> None:
@@ -36,7 +42,7 @@ class TestBenchDispatchHelpers:
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_normalize_redirect_duck(self, benchmark) -> None:
-        raw = MagicMock(url="/redirect-target/")
+        raw = _RedirectDuck()
         benchmark(_normalize_handler_response, raw)
         assert isinstance(_normalize_handler_response(raw), HttpResponseRedirect)
 

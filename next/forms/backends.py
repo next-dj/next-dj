@@ -36,21 +36,78 @@ if TYPE_CHECKING:
 class FormActionNotFound(LookupError):  # noqa: N818
     """No registered form action matches the requested name."""
 
+    _suggestions: "tuple[str, ...] | None" = None
+
     def __init__(
         self,
         message: str | None = None,
         *,
         name: str = "",
         page_path: str | None = None,
-        suggestions: "Iterable[str]" = (),
+        candidates: "Callable[[], Iterable[str]] | Iterable[str]" = (),
         registry_empty: bool = False,
     ) -> None:
-        """Store the lookup context and compose a message when none is given."""
-        self.name = name
-        self.page_path = page_path
-        self.suggestions = tuple(suggestions)
-        self.registry_empty = registry_empty
-        super().__init__(self._compose() if message is None else message)
+        """Store the lookup context, deferring close-match work until rendered."""
+        # Raising must stay cheap: the manager probes backends by catching
+        # this exception, so the context rides one packed attribute and
+        # difflib plus the message run only when something renders the
+        # failure.
+        self._context: tuple[
+            str, str | None, Callable[[], Iterable[str]] | Iterable[str], bool
+        ] = (
+            name,
+            page_path,
+            candidates,
+            registry_empty,
+        )
+        if message is None:
+            super().__init__()
+        else:
+            super().__init__(message)
+
+    @property
+    def name(self) -> str:
+        """Return the action name the failed lookup asked for."""
+        return self._context[0]
+
+    @property
+    def page_path(self) -> str | None:
+        """Return the page scope the lookup searched, when any."""
+        return self._context[1]
+
+    @property
+    def registry_empty(self) -> bool:
+        """Return True when no actions were registered at raise time."""
+        return self._context[3]
+
+    @property
+    def candidates(self) -> tuple[str, ...]:
+        """Return the registered action names the close matches draw from."""
+        raw = self._context[2]
+        return tuple(raw() if callable(raw) else raw)
+
+    @property
+    def suggestions(self) -> tuple[str, ...]:
+        """Return close matches for the name, computed on first access."""
+        if self._suggestions is None:
+            self._suggestions = tuple(
+                difflib.get_close_matches(self.name, sorted(set(self.candidates)))
+            )
+        return self._suggestions
+
+    def __str__(self) -> str:
+        """Render the message, composing and caching it on first access."""
+        if not self.args:
+            self.args = (self._compose(),)
+        return str(self.args[0])
+
+    def __reduce__(self) -> "tuple[Any, ...]":
+        """Pickle the rendered message and drop the live candidates source."""
+        state = {
+            "_context": (self.name, self.page_path, (), self.registry_empty),
+            "_suggestions": self.suggestions,
+        }
+        return (self.__class__, (str(self),), state)
 
     def _compose(self) -> str:
         """Render the failure with scope, close matches, and registry state."""
@@ -276,11 +333,15 @@ class RegistryFormActionBackend(FormActionBackend):
         _url_caching_backends.add(self)
 
     def clear_registry(self) -> None:
-        """Drop every registered action and reset the UID index. For test isolation."""
-        self._registry.clear()
-        self._uid_to_name.clear()
-        self._name_index.clear()
-        self._url_cache.clear()
+        """Drop every registered action and reset the UID index. For test isolation.
+
+        Rebinding beats clearing four populated dicts, and an escaped
+        FormActionNotFound keeps its raise-time candidates view.
+        """
+        self._registry = {}
+        self._uid_to_name = {}
+        self._name_index = {}
+        self._url_cache = {}
 
     def register_action(self, registration: ActionRegistration) -> None:
         """Store handler, form_class, or wizard_class and a stable uid for the name."""
@@ -315,16 +376,24 @@ class RegistryFormActionBackend(FormActionBackend):
             if old_obj is not None and new_obj is not None:
                 record_possible_collision(f"{scope_key}:{name}", old_obj, new_obj)
 
-        self._registry[key] = {
+        # None-valued target and guard keys are omitted: every reader goes
+        # through .get(), and slim metas keep registration and registry
+        # teardown proportional to what an action actually declares.
+        meta: ActionMeta = {
             "name": name,
-            "handler": handler,
-            "form_class": form_class,
-            "wizard_class": wizard_class,
             "uid": uid,
             "file_path": file_path,
             "scope": scope,
-            "guard": registration.guard,
         }
+        if handler is not None:
+            meta["handler"] = handler
+        if form_class is not None:
+            meta["form_class"] = form_class
+        if wizard_class is not None:
+            meta["wizard_class"] = wizard_class
+        if registration.guard is not None:
+            meta["guard"] = registration.guard
+        self._registry[key] = meta
         first_key = self._name_index.setdefault(name, key)
         if (
             scope == "shared"
@@ -376,16 +445,10 @@ class RegistryFormActionBackend(FormActionBackend):
                     self._url_cache[cache_key] = url
                 return url
 
-        suggestions = tuple(
-            difflib.get_close_matches(
-                action_name,
-                sorted({name for _scope_key, name in self._registry}),
-            )
-        )
         raise FormActionNotFound(
             name=action_name,
             page_path=page_path,
-            suggestions=suggestions,
+            candidates=self._name_index.keys(),
             registry_empty=not self._registry,
         )
 

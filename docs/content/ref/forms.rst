@@ -85,6 +85,7 @@ Exceptions
 ``FormActionManager.get_action_url``, the ``{% form %}`` and ``{% action_url %}`` tags, and the testing helpers ``resolve_action_url`` and ``build_form_for`` all raise it.
 It subclasses ``LookupError`` and carries the failing ``name``, the ``page_path`` that was searched, the close-match ``suggestions`` tuple, and the ``registry_empty`` flag.
 Every raising surface renders the suggestions into the message as ``Closest matches: 'x', 'y'``, computed by close-match comparison against the registered names.
+The comparison and the message run on first render, so probing for an action by catching the exception costs no close-match work.
 When ``registry_empty`` is true the message also explains that no actions are registered at all and points at autodiscovery.
 
 .. autoexception:: next.forms.FormActionNotFound

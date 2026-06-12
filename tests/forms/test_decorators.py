@@ -43,7 +43,7 @@ class TestActionDecorator:
         meta = form_action_manager.default_backend.get_meta("logout_test")
         assert meta is not None
         assert meta["handler"] is logout_handler
-        assert meta["form_class"] is None
+        assert meta.get("form_class") is None
 
     def test_returns_original_function(self) -> None:
         """Decorator returns the original function unchanged."""

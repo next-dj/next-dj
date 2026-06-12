@@ -22,8 +22,8 @@ class RegistrationDiagnostics:
 
     def clear(self) -> None:
         """Empty every buffer in place."""
-        for spec in fields(self):
-            getattr(self, spec.name).clear()
+        for name in _BUFFER_NAMES:
+            getattr(self, name).clear()
 
     def snapshot(self) -> "RegistrationDiagnostics":
         """Return an independent deep copy of every buffer."""
@@ -32,13 +32,20 @@ class RegistrationDiagnostics:
     def restore(self, snapshot: "RegistrationDiagnostics") -> None:
         """Replace the buffer contents in place with deep copies of a snapshot."""
         self.clear()
-        for spec in fields(self):
-            buffer = getattr(self, spec.name)
-            value = copy.deepcopy(getattr(snapshot, spec.name))
+        for name in _BUFFER_NAMES:
+            buffer = getattr(self, name)
+            value = copy.deepcopy(getattr(snapshot, name))
             if isinstance(buffer, dict):
                 buffer.update(value)
             else:
                 buffer.extend(value)
+
+
+# Resolved once: dataclasses.fields() is too slow for the per-test clear()
+# the isolation helpers run.
+_BUFFER_NAMES: tuple[str, ...] = tuple(
+    spec.name for spec in fields(RegistrationDiagnostics)
+)
 
 
 registration_diagnostics = RegistrationDiagnostics()

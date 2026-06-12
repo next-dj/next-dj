@@ -1,6 +1,5 @@
 """Manager for form action backends and routing."""
 
-import difflib
 import logging
 import types
 from typing import TYPE_CHECKING, Any, cast
@@ -92,21 +91,19 @@ class FormActionManager:
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
         """Return the reverse URL from the first backend that knows `action_name`."""
         self._ensure_backends()
-        suggestions: list[str] = []
-        registry_empty = True
+        if len(self._backends) == 1:
+            return self._backends[0].get_action_url(action_name, page_path=page_path)
+        caught: list[FormActionNotFound] = []
         for backend in self._backends:
             try:
                 return backend.get_action_url(action_name, page_path=page_path)
             except FormActionNotFound as exc:
-                suggestions.extend(
-                    name for name in exc.suggestions if name not in suggestions
-                )
-                registry_empty = registry_empty and exc.registry_empty
+                caught.append(exc)
         raise FormActionNotFound(
             name=action_name,
             page_path=page_path,
-            suggestions=suggestions,
-            registry_empty=registry_empty,
+            candidates=tuple(name for exc in caught for name in exc.candidates),
+            registry_empty=all(exc.registry_empty for exc in caught),
         )
 
     def get_action_meta(
@@ -142,7 +139,7 @@ class FormActionManager:
         raise FormActionNotFound(
             name=action_name,
             page_path=page_path,
-            suggestions=tuple(difflib.get_close_matches(action_name, sorted(known))),
+            candidates=tuple(known),
             registry_empty=not known,
         )
 

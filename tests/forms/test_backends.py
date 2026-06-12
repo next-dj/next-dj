@@ -56,15 +56,34 @@ class TestFormActionNotFound:
         assert exc.registry_empty is False
 
     def test_context_fields_are_stored(self) -> None:
-        """name, page_path, and suggestions are exposed as attributes."""
+        """name, page_path, and close matches are exposed as attributes."""
         exc = FormActionNotFound(
             name="missing_action",
             page_path="/app/pages/page.py",
-            suggestions=["missing_actions"],
+            candidates=["missing_actions"],
         )
         assert exc.name == "missing_action"
         assert exc.page_path == "/app/pages/page.py"
         assert exc.suggestions == ("missing_actions",)
+
+    def test_candidates_callable_is_deferred(self) -> None:
+        """The candidates source runs on first render, never at raise time."""
+        calls: list[int] = []
+
+        def provider() -> list[str]:
+            calls.append(1)
+            return ["vote"]
+
+        exc = FormActionNotFound(name="vot", candidates=provider)
+        assert calls == []
+        assert "Closest matches: 'vote'." in str(exc)
+        assert exc.suggestions == ("vote",)
+        assert calls == [1]
+
+    def test_candidates_materialize_from_callable(self) -> None:
+        """The candidates property snapshots the callable source."""
+        exc = FormActionNotFound(name="vot", candidates=lambda: iter(["vote"]))
+        assert exc.candidates == ("vote",)
 
     def test_catchable_by_type(self) -> None:
         """The exception can be caught by its own type."""
@@ -72,15 +91,17 @@ class TestFormActionNotFound:
             raise FormActionNotFound(name="missing_action")
 
     def test_reduce_round_trip_keeps_message(self) -> None:
-        """Replaying args, as pickle and deepcopy do, keeps the message."""
+        """Pickle and deepcopy carry the rendered message and drop the source."""
         exc = FormActionNotFound(
             name="vote",
             page_path="/app/page.py",
-            suggestions=("veto",),
+            candidates=lambda: ["votes"],
         )
         revived = copy.deepcopy(exc)
         assert isinstance(revived, FormActionNotFound)
         assert str(revived) == str(exc)
+        assert revived.suggestions == ("votes",)
+        assert revived.candidates == ()
         assert str(FormActionNotFound(*exc.args)) == str(exc)
 
     @pytest.mark.parametrize(
@@ -103,11 +124,11 @@ class TestFormActionNotFound:
                 id="no-page-path",
             ),
             pytest.param(
-                {"name": "vot", "suggestions": ("vote", "veto")},
+                {"name": "vot", "candidates": ("vote", "voted")},
                 (
                     "Unknown form action 'vot'. "
                     "Searched the shared registry (no page scope). "
-                    "Closest matches: 'vote', 'veto'."
+                    "Closest matches: 'vote', 'voted'."
                 ),
                 id="suggestions-appended",
             ),
@@ -276,7 +297,7 @@ class TestRegistryFormActionBackend:
         meta = backend.get_meta("my_action")
         assert meta is not None
         assert meta["handler"] is my_handler
-        assert meta["form_class"] is None
+        assert meta.get("form_class") is None
 
     def test_register_action_stores_form_class(self) -> None:
         """form_class is stored and handler is None when only form_class given."""
@@ -296,7 +317,7 @@ class TestRegistryFormActionBackend:
         meta = backend.get_meta("my_form_action")
         assert meta is not None
         assert meta["form_class"] is MyForm
-        assert meta["handler"] is None
+        assert meta.get("handler") is None
 
     def test_register_action_stores_both_form_class_and_handler(self) -> None:
         """When both form_class and handler are given, both are stored in meta."""
