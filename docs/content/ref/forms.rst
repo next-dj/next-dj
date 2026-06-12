@@ -28,7 +28,8 @@ Advanced.
    ``FormProvider``, ``FormActionBackend``, ``FormActionFactory``, ``RegistryFormActionBackend``,
    ``FormActionDispatch``, ``ActionOutcome``, ``ActionOutcomeKind``,
    ``ActionRegistration``, ``ActionMeta``, ``ComponentWidget``,
-   ``FormWizardBackend``, ``CacheFormWizardBackend``, ``WizardBackendManager``, ``wizard_backend_manager``,
+   ``FormWizardBackend``, ``SessionFormWizardBackend``, ``CacheFormWizardBackend``,
+   ``WizardBackendManager``, ``wizard_backend_manager``,
    ``build_form_namespace_for_action``,
    the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``,
    ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``,
@@ -101,13 +102,16 @@ Form Wizard
 ~~~~~~~~~~~
 
 ``FormWizard`` routes a sequence of step forms across requests.
-``FormWizardBackend`` is the draft-persistence contract, and ``CacheFormWizardBackend`` is the bundled default.
+``FormWizardBackend`` is the draft-persistence contract, ``SessionFormWizardBackend`` is the bundled default, and ``CacheFormWizardBackend`` is the cache-backed alternative.
 See :doc:`/content/topics/forms/wizard` and :doc:`/content/topics/forms/wizard-backend` for the topic guides.
 
 .. autoclass:: next.forms.FormWizard
    :members:
 
 .. autoclass:: next.forms.FormWizardBackend
+   :members:
+
+.. autoclass:: next.forms.SessionFormWizardBackend
    :members:
 
 .. autoclass:: next.forms.CacheFormWizardBackend

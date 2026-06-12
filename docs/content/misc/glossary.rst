@@ -65,7 +65,7 @@ Terms used throughout the next.dj documentation.
 
    form wizard backend
       The draft-persistence contract for a ``FormWizard``, a ``FormWizardBackend`` subclass that stores each step's cleaned data between requests.
-      Selected through ``NEXT_FRAMEWORK["FORM_WIZARD_BACKEND"]``, with the bundled ``CacheFormWizardBackend`` as the default.
+      Selected through ``NEXT_FRAMEWORK["FORM_WIZARD_BACKEND"]``, with the bundled ``SessionFormWizardBackend`` as the default and ``CacheFormWizardBackend`` as the cache-backed alternative.
 
    inherit_context
       The ``inherit_context=True`` flag on ``@context`` in ``page.py``.

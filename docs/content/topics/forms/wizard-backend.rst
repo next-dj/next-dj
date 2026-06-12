@@ -5,8 +5,8 @@ Wizard Backend
 
 A wizard backend persists per-step draft data between requests.
 Every wizard in a project shares one backend, chosen once through ``NEXT_FRAMEWORK["FORM_WIZARD_BACKEND"]``.
-The default backend stores drafts in the Django cache.
-This page covers the ``FormWizardBackend`` contract, the bundled ``CacheFormWizardBackend``, its configuration, and a custom-backend recipe.
+The default backend stores drafts in the Django session.
+This page covers the ``FormWizardBackend`` contract, the bundled ``SessionFormWizardBackend`` and its value codec, the cache-backed alternative, the configuration, and a custom-backend recipe.
 
 .. contents::
    :local:
@@ -32,16 +32,52 @@ Backends treat the id as an opaque string.
 A backend subclasses ``FormWizardBackend`` and implements all three methods.
 The wizard reads and writes through this contract alone, so the backend choice is invisible to the wizard class.
 
+The Session Backend
+-------------------
+
+``next.forms.SessionFormWizardBackend`` is the default backend.
+It stores drafts in ``request.session`` under one key per wizard, so durability and worker sharing follow the project's session engine.
+Database-backed and cache-backed sessions share drafts across workers out of the box, which makes the default safe under a multi-worker server.
+Because it writes to the session, ``django.contrib.sessions`` must be installed and ``SessionMiddleware`` enabled.
+Saving a step on a request without session support raises ``ImproperlyConfigured`` instead of silently dropping the draft, and the ``next.W056`` system check flags the misconfiguration at startup.
+
+The backend reads no ``OPTIONS`` keys, and the draft lives as long as the session does.
+
+Drafts grow the session with each saved step.
+A database-backed or cache-backed session absorbs that growth, while the signed-cookie session engine carries the whole session in the cookie and runs into its size limit quickly.
+Prefer the cache backend for a wizard with large drafts when the project uses cookie-backed sessions.
+
+The Value Codec
+~~~~~~~~~~~~~~~
+
+Sessions serialise to JSON, and a step's ``cleaned_data`` routinely holds values JSON cannot carry.
+The backend encodes values through a typed codec instead of asking the step forms to avoid them.
+
+- ``date``, ``datetime``, ``time``, ``Decimal``, and ``UUID`` values encode to tagged strings and decode back to their original types.
+- A model instance, such as a ``ModelChoiceField`` value, encodes to its model label and primary key, and decodes by refetching the row.
+- Strings, numbers, booleans, and ``None`` pass through unchanged.
+- Lists, tuples, and string-keyed dicts encode recursively, and a tuple decodes as a list.
+
+The model round-trip has three consequences.
+The decoded instance is a fresh fetch, not a snapshot, so it reflects edits made to the row between steps.
+A row deleted between steps decodes to ``None``, so ``done`` must not assume the value survived the draft.
+An unsaved instance has no primary key to store, so encoding it raises ``ImproperlyConfigured`` at save time.
+
+A value the codec does not recognise raises ``ImproperlyConfigured`` naming the offending type.
+The error suggests the way out: configure ``CacheFormWizardBackend`` or a custom ``FormWizardBackend`` for cleaned data that does not fit JSON.
+
 The Cache Backend
 -----------------
 
-``next.forms.CacheFormWizardBackend`` is the default backend.
+``next.forms.CacheFormWizardBackend`` is the bundled alternative.
 It stores drafts in Django's configured cache, namespaced by the session key and the wizard storage id.
+Choose it when drafts need their own lifetime separate from the session, when they should live in a dedicated store such as a Redis alias, or when large or non-JSON draft values must stay out of the session.
+
 Because it keys drafts by session, ``SessionMiddleware`` must be enabled, and the backend creates a session on the first saved step.
-Saving a step on a request without session support raises ``ImproperlyConfigured`` instead of silently dropping the draft, and the ``next.W056`` system check flags the misconfiguration at startup.
+Saving a step on a request without session support raises ``ImproperlyConfigured`` instead of silently dropping the draft, and the same ``next.W056`` check applies.
 
 Durability and worker sharing follow whichever cache the project configures.
-A local-memory cache loses drafts on restart and does not share them between workers, which suits development and tests.
+A local-memory cache loses drafts on restart and does not share them between workers, which suits development and tests only.
 A Redis, Memcached, or database cache shares drafts across workers and survives a restart, which suits production.
 The wizard does not care which cache is in use.
 
@@ -66,8 +102,8 @@ Trust and Tamperability
 .. warning::
 
    Each step is validated once, in isolation, when it is submitted.
-   The stored draft then lives in an external store such as the cache or Redis, and ``done`` receives the merged ``cleaned_data`` without re-running any validation.
-   A cache that is shared, writable from another process, or otherwise reachable is part of the trust boundary.
+   The stored draft then lives in the configured store, the session for the default backend or the cache for the alternative, and ``done`` receives the merged ``cleaned_data`` without re-running any validation.
+   A store that is shared, writable from another process, or otherwise reachable is part of the trust boundary.
 
    For a sensitive flow, use a signed or encrypted backend so a tampered draft is rejected, and re-check cross-step invariants inside ``done`` rather than trusting the merged dict.
 
@@ -76,43 +112,47 @@ Sensitive Data in Drafts
 
 .. warning::
 
-   ``save_step`` writes each step's cleaned data into the store as-is and keeps it until ``TIMEOUT``, which defaults to ``SESSION_COOKIE_AGE``.
-   A wizard that collects personal data leaves that data in the cache for the full lifetime.
+   ``save_step`` writes each step's cleaned data into the store as-is.
+   The session backend keeps it for the session lifetime, and the cache backend keeps it until ``TIMEOUT``, which defaults to ``SESSION_COOKIE_AGE``.
+   A wizard that collects personal data leaves that data in the store for the full lifetime.
 
-   Set a short ``TIMEOUT`` for drafts that hold personal data, prefer an encrypted or signed backend over a plain shared cache, and rely on ``done`` clearing the draft after a successful finish.
+   Set a short ``TIMEOUT`` on the cache backend for drafts that hold personal data, prefer an encrypted or signed backend over a plain shared store, and rely on ``done`` clearing the draft after a successful finish.
    The wizard calls ``clear`` after a successful ``done``, so a draft that never completes is what lingers.
    See :doc:`/content/deployment/checklist` for the production review.
 
 Draft Expiry Mid-Wizard
 -----------------------
 
-A draft can expire between two steps when ``TIMEOUT`` is short or the cache evicts under pressure.
-The backend reads a missing entry as an empty mapping, so ``done`` can receive a partial or empty ``cleaned_data``.
+A draft can vanish between two steps when the session ends, when the cache backend's ``TIMEOUT`` is short, or when the cache evicts under pressure.
+The backend reads a missing entry as an empty mapping.
+The dispatcher does not finalise over the gap: a final-step submission while an earlier step has no stored data redirects to the first incomplete step, so the visitor re-enters the lost data instead of triggering ``done`` with a partial draft.
 
 .. warning::
 
-   A naive ``Model.objects.create(**cleaned_data)`` on a partial dict raises a database integrity error instead of a friendly message.
-   Validate completeness at the top of ``done``, for example by checking that every required step key is present, and redirect back to the first step when a draft has expired.
+   A stored step can still carry a hole.
+   With the session backend a model value whose row was deleted between steps decodes to ``None``, so the step counts as complete while the field is empty.
+   A naive ``Model.objects.create(**cleaned_data)`` then raises a database integrity error instead of a friendly message.
+   Validate cross-step invariants at the top of ``done`` rather than trusting every stored value.
 
 Configuration
 -------------
 
 ``NEXT_FRAMEWORK["FORM_WIZARD_BACKEND"]`` is a single dict in the same shape as the other framework backends.
 It carries a ``BACKEND`` dotted path and an optional ``OPTIONS`` dict.
-The framework default points at the cache backend with empty options.
+The framework default points at the session backend with empty options.
 
 .. code-block:: python
    :caption: framework default
 
    NEXT_FRAMEWORK = {
        "FORM_WIZARD_BACKEND": {
-           "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
+           "BACKEND": "next.forms.wizard.SessionFormWizardBackend",
            "OPTIONS": {},
        },
    }
 
 A project setting merges shallowly over the default.
-Point drafts at a dedicated cache alias and shorten their lifetime through ``OPTIONS``.
+Switch to the cache backend to point drafts at a dedicated cache alias and shorten their lifetime through ``OPTIONS``.
 
 .. code-block:: python
    :caption: config/settings.py

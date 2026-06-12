@@ -282,7 +282,10 @@ Warnings
      - A ``ComponentWidget`` is attached to a ``FileField`` or ``MultiValueField``, which it does not support.
      - ``next.forms.checks``
    * - ``next.W056``
-     - Wizards are registered and the configured wizard backend keys stored steps by session, but ``django.contrib.sessions`` is not installed.
+     - Wizards are registered and the configured wizard backend needs Django sessions to store steps, but ``django.contrib.sessions`` is not installed.
+     - ``next.forms.checks``
+   * - ``next.W057``
+     - A static ``Meta.steps`` form class is also registered as a standalone form action.
      - ``next.forms.checks``
 
 .. note::

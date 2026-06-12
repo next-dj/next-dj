@@ -140,14 +140,16 @@ Default value.
 .. code-block:: python
 
    {
-       "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
+       "BACKEND": "next.forms.wizard.SessionFormWizardBackend",
        "OPTIONS": {},
    }
 
-The bundled ``CacheFormWizardBackend`` stores each step's cleaned data in the Django cache.
+The bundled ``SessionFormWizardBackend`` stores each step's cleaned data in the Django session through a typed value codec, so drafts share the durability of the session engine.
+It reads no ``OPTIONS`` keys.
+The bundled ``CacheFormWizardBackend`` stores drafts in the Django cache instead.
 It reads two keys from ``OPTIONS``: ``CACHE_ALIAS`` names the cache to use, defaulting to ``"default"``, and ``TIMEOUT`` sets the draft expiry in seconds, defaulting to ``SESSION_COOKIE_AGE``.
 Set ``BACKEND`` to a dotted path that subclasses ``FormWizardBackend`` to swap the persistence layer.
-See :doc:`/content/topics/forms/wizard-backend` for the contract and a custom backend.
+See :doc:`/content/topics/forms/wizard-backend` for the contract, the codec, and a custom backend.
 
 Routing
 -------

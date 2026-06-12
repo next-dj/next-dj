@@ -38,10 +38,10 @@ Wizard Drafts
 
 Review these when the project ships a ``FormWizard``.
 
-- Point ``FORM_WIZARD_BACKEND`` at a cache shared across workers, not local memory.
-- Set a short ``TIMEOUT`` for drafts, especially when a step collects personal data.
+- The default ``SessionFormWizardBackend`` shares drafts wherever the session engine does, so confirm the session store is durable and shared across workers.
+- When using ``CacheFormWizardBackend``, point it at a cache shared across workers, not local memory, and set a short ``TIMEOUT`` for drafts, especially when a step collects personal data.
 - Use a signed or encrypted backend for sensitive flows, and re-check invariants in ``done``.
-- Validate draft completeness in ``done`` so an expired draft fails with a friendly message, not an integrity error.
+- Validate cross-step invariants in ``done`` so a stale draft value fails with a friendly message, not an integrity error.
 
 See :doc:`/content/topics/forms/wizard-backend` for the backend trade-offs.
 

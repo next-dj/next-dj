@@ -73,6 +73,23 @@ Unknown Form Action
 ``{% form "name" %}``, ``NextClient.post_action``, and ``resolve_action_url`` raise ``next.forms.FormActionNotFound`` when no registered action matches the name.
 Check the name for typos, confirm the declaring module was imported before the lookup, and remember that a page-scoped action resolves only from its own page.
 
+Wizard Draft Disappears Between Steps
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The default ``SessionFormWizardBackend`` stores drafts in the session, so a lost draft means the session itself did not survive.
+Confirm that ``django.contrib.sessions`` is in ``INSTALLED_APPS`` and ``SessionMiddleware`` is enabled.
+``manage.py check`` reports :ref:`next.W056 <ref-system-checks>` when sessions are missing while wizards are registered.
+With ``CacheFormWizardBackend`` the usual cause is a local-memory cache under a multi-worker server, where each worker holds its own copy of the draft.
+Point that backend at a shared cache such as Redis, and check that its ``TIMEOUT`` does not expire mid-flow.
+
+``ImproperlyConfigured`` From a Wizard Step Save
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Both bundled wizard backends raise ``ImproperlyConfigured`` when a step is saved on a request without session support, see the previous entry.
+``SessionFormWizardBackend`` also raises it when the step's ``cleaned_data`` holds a value its codec cannot encode, such as an unsaved model instance or a file object, and the error names the offending type.
+Switch to ``CacheFormWizardBackend`` or a custom backend for cleaned data that does not fit the codec.
+See :doc:`/content/topics/forms/wizard-backend` for the codec rules.
+
 Components
 ----------
 

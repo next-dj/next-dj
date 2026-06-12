@@ -29,25 +29,21 @@ The wizard lists them in order.
 
    import next.forms
    from access.models import AccessRequest
+   from django import forms
    from next.forms import redirect_to_origin
 
-   class IdentityStep(next.forms.ModelForm):
+   class IdentityStep(forms.ModelForm):
        class Meta:
            model = AccessRequest
            fields = ["full_name", "email", "team"]
-           abstract = True
 
-   class ScopeStep(next.forms.ModelForm):
+   class ScopeStep(forms.ModelForm):
        class Meta:
            model = AccessRequest
            fields = ["project_slug", "reason", "expires_in_days"]
-           abstract = True
 
-   class ApprovalStep(next.forms.Form):
+   class ApprovalStep(forms.Form):
        """Final step that only confirms the merged request."""
-
-       class Meta:
-           abstract = True
 
    class AccessRequestWizard(next.forms.FormWizard):
        class Meta:
@@ -62,8 +58,8 @@ The wizard lists them in order.
            return redirect_to_origin(request)
 
 Subclassing registers the wizard as the ``access_request_wizard`` action, and the default ``Meta.url_param`` of ``"step"`` matches the ``[step]`` route segment with no extra configuration.
-Every step form is ``abstract`` because a step is not a standalone action.
-Without the flag each step would register as its own form action whose default ``on_valid`` saves a partial row outside the wizard flow.
+Every step form subclasses ``django.forms`` directly because a step is not a standalone action and has nothing to register.
+A step built on a ``next.forms`` base would register as its own form action, whose default ``on_valid`` saves a partial row outside the wizard flow, unless it sets ``Meta.abstract = True``.
 :doc:`/content/topics/forms/wizard` covers the registration, scope, and ``Meta.steps`` semantics in depth.
 
 Route Through the Step Segment
