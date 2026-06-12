@@ -88,7 +88,7 @@ def render(
     """
     active = wizard.current_step()
     completed = set(wizard.completed_steps())
-    stored = wizard.cleaned_data_so_far()
+    stored = wizard.get_all_cleaned_data()
     fields_by_step = _fields_by_step(wizard)
     chunks = []
     for name in wizard.step_names():

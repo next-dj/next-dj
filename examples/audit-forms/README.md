@@ -47,9 +47,9 @@ uv run pytest
 Tailwind loads via the Play CDN in
 [`portal/layout.djx`](portal/layout.djx). No Node, no build step. The
 wizard threads step data across requests through the configured
-`FORM_WIZARD_BACKEND`, which defaults to the Django cache and is
-namespaced per session, so keep `SessionMiddleware` in `MIDDLEWARE` (it
-is by default in [`config/settings.py`](config/settings.py)).
+`FORM_WIZARD_BACKEND`, which defaults to the session-backed
+`SessionFormWizardBackend`, so keep `SessionMiddleware` in `MIDDLEWARE`
+(it is by default in [`config/settings.py`](config/settings.py)).
 
 ## Walking the code
 
@@ -142,7 +142,11 @@ edit to `Meta.steps`.
 
 ### 4. Three ordinary forms, one per step
 
-Each step is a plain `next.forms.ModelForm` (or `Form`):
+Each step is a bare `django.forms.ModelForm` (or `Form`) — the wizard
+owns dispatching, so step forms never register as standalone actions
+and need none of the `next.forms` base classes (a step that does
+subclass `next.forms` and ends up registered trips the `next.W057`
+check):
 
 - `IdentityStep` — a `ModelForm` on `["full_name", "email", "team"]`.
 - `ScopeStep` — a `ModelForm` on `["project_slug", "reason", "expires_in_days"]`.
@@ -211,11 +215,13 @@ Each step posts only its visible fields plus the framework's hidden
 resolves that origin URL against the URLconf to recover the typed
 `step` kwarg, and `_step_from_origin` in the audit backend does the
 same for the audit rows. The wizard saves the cleaned data through the
-configured `FORM_WIZARD_BACKEND` (the Django cache by default),
-so on `GET` of step 2 you can see "Computing" already filled into the
-team summary — that is what `tests/test_e2e.py::TestSessionResume`
-asserts. Point `FORM_WIZARD_BACKEND` at a Redis or custom backend
-without touching any view code.
+configured `FORM_WIZARD_BACKEND` (the session-backed
+`SessionFormWizardBackend` by default), so on `GET` of step 2 you can
+see "Computing" already filled into the team summary — that is what
+`tests/test_e2e.py::TestSessionResume` asserts. Point
+`FORM_WIZARD_BACKEND` at `CacheFormWizardBackend` when drafts need
+their own TTL or a Redis-backed cache, or at a custom backend, without
+touching any view code.
 
 ### 8. Admin filter by GET query
 
@@ -243,8 +249,9 @@ want decoupling and minimal coupling to the backend implementation.
 ## Further reading
 
 - [`next/forms/wizard.py`](../../next/forms/wizard.py) — the declarative
-  `FormWizard` base class, the `FormWizardBackend` contract, and the
-  default cache-backed `CacheFormWizardBackend` this example builds on.
+  `FormWizard` base class, the `FormWizardBackend` contract, the default
+  `SessionFormWizardBackend` this example builds on, and the optional
+  `CacheFormWizardBackend`.
 - [`next/forms/manager.py`](../../next/forms/manager.py) — the lazy,
   settings-driven `FormActionManager` used by every example.
 - [`next/forms/backends.py`](../../next/forms/backends.py) — the
