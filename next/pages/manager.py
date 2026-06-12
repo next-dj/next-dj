@@ -82,6 +82,7 @@ class Page:
         caches them and invalidates on `settings_reloaded`.
         """
         self._template_registry: dict[Path, str] = {}
+        self._compiled_registry: dict[Path, Template] = {}
         self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
         self._resolver: DependencyResolver | None = None
         self._context_manager = PageContextRegistry(None)
@@ -92,8 +93,13 @@ class Page:
         return resolver
 
     def register_template(self, file_path: Path, template_str: str) -> None:
-        """Store rendered template source for `file_path`."""
+        """Store rendered template source for `file_path`.
+
+        The compiled-template entry is dropped alongside so every write
+        to the source registry invalidates the compiled layer with it.
+        """
         self._template_registry[file_path] = template_str
+        self._compiled_registry.pop(file_path, None)
         template_loaded.send(sender=Page, file_path=file_path)
 
     def _get_caller_path(self, back_count: int = 1) -> Path:
@@ -277,12 +283,15 @@ class Page:
     def render_with_static_assets(
         self,
         file_path: Path,
-        template_str: str,
+        template: Template | str,
         context_data: dict[str, object],
         *,
         request: HttpRequest | None = None,
     ) -> tuple[str, StaticCollector]:
-        """Render `template_str` and inject collected static assets.
+        """Render `template` and inject collected static assets.
+
+        `template` is either a precompiled `Template` (reused as-is) or
+        raw template source, which is parsed before rendering.
 
         The method seeds a fresh `StaticCollector`, hydrates it with
         the JS context that `build_render_context` left under the
@@ -309,7 +318,8 @@ class Page:
         default_manager.discover_page_assets(file_path, collector)
         context_data["_static_collector"] = collector
 
-        html = Template(template_str).render(DjangoTemplateContext(context_data))
+        compiled = template if isinstance(template, Template) else Template(template)
+        html = compiled.render(DjangoTemplateContext(context_data))
         result = cast(
             "str",
             default_manager.inject(
@@ -321,16 +331,16 @@ class Page:
     def _render_template_str(
         self,
         file_path: Path,
-        template_str: str,
+        template: Template | str,
         start: float,
         request: HttpRequest | None = None,
         **kwargs: object,
     ) -> str:
-        """Build context, render `template_str`, inject static assets, emit signal."""
+        """Build context, render `template`, inject static assets, emit signal."""
         context_data = self.build_render_context(file_path, request, **kwargs)
         result, collector = self.render_with_static_assets(
             file_path,
-            template_str,
+            template,
             context_data,
             request=request,
         )
@@ -362,22 +372,14 @@ class Page:
         composed = self._layout_manager._layout_loader.compose_body(body, file_path)
         return self._render_template_str(file_path, composed, start, request, **kwargs)
 
-    def render(
-        self,
-        file_path: Path,
-        request: HttpRequest | None = None,
-        **kwargs: object,
-    ) -> str:
-        """Render the page with Django `Template` and the static collector.
+    def composed_template_for(self, file_path: Path) -> Template:
+        """Return the compiled composed template for the static body.
 
-        The static body source is the `template` attribute or any
-        registered file-based `TemplateLoader`. The result is composed
-        through the ancestor layout chain and cached in
-        `_template_registry`. Direct callers of `Page.render` do not
-        invoke `render()`. The unified view handles that path so
-        dynamic bodies skip the registry cache.
+        The composed source is cached in `_template_registry` and
+        invalidated by source-mtime staleness. The compiled `Template`
+        layer keys off the same registry, so both caches go stale
+        together and a warm hit performs no file reads and no parsing.
         """
-        start = time.perf_counter()
         if file_path not in self._template_registry or self._is_template_stale(
             file_path
         ):
@@ -388,10 +390,30 @@ class Page:
             composed = self._layout_manager._layout_loader.compose_body(body, file_path)
             self.register_template(file_path, composed)
             self._record_template_source_mtimes(file_path)
-        template_str = self._template_registry[file_path]
-        return self._render_template_str(
-            file_path, template_str, start, request, **kwargs
-        )
+        compiled = self._compiled_registry.get(file_path)
+        if compiled is None:
+            compiled = Template(self._template_registry[file_path])
+            self._compiled_registry[file_path] = compiled
+        return compiled
+
+    def render(
+        self,
+        file_path: Path,
+        request: HttpRequest | None = None,
+        **kwargs: object,
+    ) -> str:
+        """Render the page with Django `Template` and the static collector.
+
+        The static body source is the `template` attribute or any
+        registered file-based `TemplateLoader`. The result is composed
+        through the ancestor layout chain and cached compiled through
+        `composed_template_for`. Direct callers of `Page.render` do not
+        invoke `render()`. The unified view handles that path so
+        dynamic bodies skip the registry cache.
+        """
+        start = time.perf_counter()
+        template = self.composed_template_for(file_path)
+        return self._render_template_str(file_path, template, start, request, **kwargs)
 
     def _create_unified_view(
         self,

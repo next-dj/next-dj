@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from django.template import Template
+
 from next.components.manager import components_manager
 from next.forms import (
     ActionRegistration,
@@ -140,14 +142,16 @@ class TestResetFormRegistrationState:
 
 
 class TestResetPageCache:
-    """reset_page_cache drops the template registry and mtime bookkeeping."""
+    """reset_page_cache drops the template caches and mtime bookkeeping."""
 
-    def test_clears_both_dicts(self) -> None:
+    def test_clears_all_dicts(self) -> None:
         fp = Path("/tmp/synthetic_page.py")
         page._template_registry[fp] = "<p>x</p>"
+        page._compiled_registry[fp] = Template("<p>x</p>")
         page._template_source_mtimes[fp] = {}
         reset_page_cache()
         assert fp not in page._template_registry
+        assert fp not in page._compiled_registry
         assert fp not in page._template_source_mtimes
 
 

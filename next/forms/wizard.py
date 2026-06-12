@@ -19,7 +19,12 @@ from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 
 from .backends import ActionRegistration, file_to_dotted_module
-from .base import _registration_gate, _to_snake_case
+from .base import (
+    _format_success_message,
+    _meta_guard,
+    _registration_gate,
+    _to_snake_case,
+)
 from .manager import form_action_manager
 from .registration import registration_diagnostics
 
@@ -28,6 +33,18 @@ if TYPE_CHECKING:
     from django.core.cache.backends.base import BaseCache
     from django.forms import Form as DjangoForm
     from django.http import HttpRequest, HttpResponse
+
+
+WIZARD_LOAD_CACHE_ATTR: Final[str] = "_next_wizard_load_cache"
+
+
+def _request_load_memo(request: "HttpRequest") -> dict[str, dict[str, Any]]:
+    """Return the request-scoped `{storage_id: loaded steps}` memo, creating it."""
+    memo = getattr(request, WIZARD_LOAD_CACHE_ATTR, None)
+    if memo is None:
+        memo = {}
+        setattr(request, WIZARD_LOAD_CACHE_ATTR, memo)
+    return cast("dict[str, dict[str, Any]]", memo)
 
 
 def _ensure_session_key(request: "HttpRequest", *, create: bool) -> str:
@@ -53,7 +70,12 @@ class FormWizardBackend(ABC):
     def save_step(
         self, request: "HttpRequest", wizard_id: str, step: str, data: dict[str, Any]
     ) -> None:
-        """Persist cleaned data for a single step."""
+        """Persist cleaned data for a single step.
+
+        Implementations must persist `data` so a later `load` returns an
+        equivalent mapping for the step. The wizard write-through cache
+        assumes saved data round-trips verbatim.
+        """
 
     @abstractmethod
     def clear(self, request: "HttpRequest", wizard_id: str) -> None:
@@ -304,6 +326,7 @@ def _auto_register_wizard_class(cls: "type[FormWizard]") -> None:
             file_path=file_path,
             scope=scope,
             wizard_class=cls,
+            guard=_meta_guard(cls),
         )
     )
 
@@ -372,9 +395,18 @@ class FormWizard:
         return {}
 
     def _stored_steps(self) -> dict[str, Any]:
-        """Return the stored `{step: data}` mapping, loaded once per request."""
+        """Return the stored `{step: data}` mapping, loaded once per request.
+
+        The loaded mapping is memoised on the request so sibling wizard
+        instances built for the same request share one backend load.
+        """
         if self._loaded is None:
-            self._loaded = self._backend.load(self.request, self.storage_id)
+            memo = _request_load_memo(self.request)
+            loaded = memo.get(self.storage_id)
+            if loaded is None:
+                loaded = self._backend.load(self.request, self.storage_id)
+                memo[self.storage_id] = loaded
+            self._loaded = loaded
         return self._loaded
 
     def get_all_cleaned_data(self) -> dict[str, Any]:
@@ -404,14 +436,25 @@ class FormWizard:
         return None
 
     def save_step(self, step: str, data: dict[str, Any]) -> None:
-        """Persist cleaned data for one step through the backend."""
+        """Persist cleaned data for one step through the backend.
+
+        Any already-loaded mapping is updated in place instead of being
+        invalidated, so the request avoids a reload round-trip after a
+        save and sibling instances sharing the request memo see the save.
+        """
         self._backend.save_step(self.request, self.storage_id, step, data)
-        self._loaded = None
+        stored = self._loaded
+        if stored is None:
+            stored = _request_load_memo(self.request).get(self.storage_id)
+        if stored is not None:
+            stored[step] = dict(data)
+            self._loaded = stored
         self._invalidate_step_caches()
 
     def clear_storage(self) -> None:
         """Drop every stored step for this wizard through the backend."""
         self._backend.clear(self.request, self.storage_id)
+        _request_load_memo(self.request).pop(self.storage_id, None)
         self._loaded = None
         self._invalidate_step_caches()
 
@@ -483,6 +526,10 @@ class FormWizard:
     def template_namespace(self) -> types.SimpleNamespace:
         """Return the `{form, wizard}` namespace consumed by the form tag."""
         return types.SimpleNamespace(form=self.current_form(), wizard=self)
+
+    def get_success_message(self, cleaned_data: dict[str, Any]) -> str:
+        """Return the flash message sent after `done`, empty string for none."""
+        return _format_success_message(type(self), cleaned_data)
 
     def done(
         self,

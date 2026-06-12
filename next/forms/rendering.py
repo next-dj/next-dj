@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from next.pages import page
-from next.pages.loaders import _load_python_module_memo
 
 from ._request_utils import _resolve_origin
 
@@ -55,10 +54,8 @@ def render_form_page_with_errors(
     if not meta:
         return _form_fallback_html(form)
 
-    module = _load_python_module_memo(file_path)
-    body = page._load_static_body(file_path, module)
-    template_str = page._layout_manager._layout_loader.compose_body(body, file_path)
-    if not template_str:
+    template = page.composed_template_for(file_path)
+    if not template.source:
         return _form_fallback_html(form)
 
     url_kwargs = params.url_kwargs
@@ -80,7 +77,7 @@ def render_form_page_with_errors(
 
     rendered, _collector = page.render_with_static_assets(
         file_path,
-        template_str,
+        template,
         context_data,
         request=request,
     )

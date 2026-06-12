@@ -57,6 +57,7 @@ def reset_page_cache() -> None:
     composed template strings per file path.
     """
     page._template_registry.clear()
+    page._compiled_registry.clear()
     page._template_source_mtimes.clear()
 
 

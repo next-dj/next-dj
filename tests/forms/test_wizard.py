@@ -418,6 +418,54 @@ class TestWizardStorageInteraction:
         assert wizard.storage_id != wizard.wizard_id
 
 
+class TestWizardRequestLoadMemo:
+    """Per-request load memo and the in-place write-through after save."""
+
+    def test_sibling_instances_share_one_backend_load(self) -> None:
+        """Two instances bound to one request pay a single backend load."""
+        request = _request()
+        first = DemoWizard(request)
+        second = DemoWizard(request)
+        with patch.object(
+            first._backend, "load", wraps=first._backend.load
+        ) as load_mock:
+            first.completed_steps()
+            second.completed_steps()
+        assert load_mock.call_count == 1
+
+    def test_save_after_load_skips_the_reload(self) -> None:
+        """A save after a load updates the mapping in place without a reload."""
+        request = _request()
+        wizard = DemoWizard(request)
+        wizard.completed_steps()
+        with patch.object(
+            wizard._backend, "load", wraps=wizard._backend.load
+        ) as load_mock:
+            wizard.save_step("identity", {"name": "Ada"})
+            assert wizard.get_cleaned_data_for_step("identity") == {"name": "Ada"}
+        assert load_mock.call_count == 0
+
+    def test_save_from_unloaded_instance_updates_sibling_memo(self) -> None:
+        """A save from a fresh instance is visible to an already-loaded sibling."""
+        request = _request()
+        reader = DemoWizard(request)
+        reader.completed_steps()
+        writer = DemoWizard(request)
+        writer.save_step("identity", {"name": "Ada"})
+        assert writer._loaded is reader._loaded
+        assert reader.get_cleaned_data_for_step("identity") == {"name": "Ada"}
+
+    def test_clear_storage_drops_request_memo(self) -> None:
+        """`clear_storage` evicts the memo so a sibling reads fresh storage."""
+        request = _request()
+        wizard = DemoWizard(request)
+        wizard.save_step("identity", {"name": "Ada"})
+        wizard.completed_steps()
+        wizard.clear_storage()
+        fresh = DemoWizard(request)
+        assert fresh.completed_steps() == []
+
+
 class TestWizardStorageScopeIsolation:
     """Same-named wizards from different modules use distinct storage buckets."""
 

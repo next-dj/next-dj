@@ -7,7 +7,12 @@ from typing import ClassVar
 
 import pytest
 from django import forms
+from django.contrib.sessions.backends.cache import SessionStore
+from django.http import HttpResponseRedirect
+from django.test import RequestFactory
 
+from next.forms.dispatch import FormActionDispatch
+from next.forms.manager import form_action_manager
 from next.forms.wizard import (
     CacheFormWizardBackend,
     FormWizard,
@@ -31,6 +36,18 @@ class _BenchWizard(FormWizard):
     class Meta:
         steps: ClassVar = [("one", _StepOne), ("two", _StepTwo), ("three", _StepThree)]
         url_param = "step"
+
+
+class BenchDispatchWizard(FormWizard):
+    class Meta:
+        """Three ordered steps with the default URL parameter."""
+
+        steps: ClassVar = [("one", _StepOne), ("two", _StepTwo), ("three", _StepThree)]
+        url_param = "step"
+
+    def done(self, request, cleaned_data) -> HttpResponseRedirect:
+        """Redirect once the last step validates."""
+        return HttpResponseRedirect("/done/")
 
 
 class _FakeSession:
@@ -70,6 +87,31 @@ class TestBenchWizardNavigation:
     def test_current_form(self, benchmark) -> None:
         """Build an unbound step form. Sessionless storage returns no prefill."""
         benchmark(_wizard().current_form)
+
+
+class TestBenchWizardDispatch:
+    """End-to-end wizard step submit through `FormActionDispatch.dispatch`."""
+
+    @pytest.mark.benchmark(group="forms.wizard.dispatch")
+    def test_dispatch_wizard_step_submit(self, benchmark) -> None:
+        backend = form_action_manager.default_backend
+        meta = backend.get_meta("bench_dispatch_wizard")
+        assert meta is not None
+        request = RequestFactory().post(
+            "/form/action/",
+            {"_next_form_origin": "/request/one/", "name": "Ada"},
+        )
+        request.session = SessionStore()
+
+        def run():
+            return FormActionDispatch.dispatch(
+                backend, request, "bench_dispatch_wizard", meta
+            )
+
+        response = run()
+        assert response.status_code == 302
+        assert response.url == "/request/two/"
+        benchmark(run)
 
 
 class TestBenchCacheWizardBackend:

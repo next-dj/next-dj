@@ -486,6 +486,77 @@ class TestPageHasTemplateAndLazyRender:
         assert page_instance._is_template_stale(page_file) is False
 
 
+class TestComposedTemplateCache:
+    """`composed_template_for` caches the compiled composed template by mtime."""
+
+    def test_render_twice_reuses_compiled_template(
+        self, page_instance, tmp_path
+    ) -> None:
+        """A warm render reuses the compiled Template object as-is."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1")
+        (tmp_path / "template.djx").write_text("<h1>{{ title }}</h1>")
+        page_instance.render(page_file, title="One")
+        compiled = page_instance._compiled_registry[page_file]
+        result = page_instance.render(page_file, title="Two")
+        assert page_instance._compiled_registry[page_file] is compiled
+        assert "<h1>Two</h1>" in result
+
+    def test_stale_source_recompiles(self, page_instance, tmp_path) -> None:
+        """An edited template.djx invalidates both the source and compiled caches."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1")
+        djx = tmp_path / "template.djx"
+        djx.write_text("<h1>{{ title }}</h1>")
+        page_instance.render(page_file, title="One")
+        compiled = page_instance._compiled_registry[page_file]
+        djx.write_text("<h2>{{ title }}</h2>")
+        result = page_instance.render(page_file, title="Two")
+        assert page_instance._compiled_registry[page_file] is not compiled
+        assert "<h2>Two</h2>" in result
+
+    def test_stale_layout_recompiles(self, page_instance, tmp_path) -> None:
+        """An edited ancestor layout.djx invalidates the compiled cache too."""
+        layout = tmp_path / "layout.djx"
+        layout.write_text("<html>{% block template %}{% endblock template %}</html>")
+        page_dir = tmp_path / "sub"
+        page_dir.mkdir()
+        page_file = page_dir / "page.py"
+        page_file.write_text("x = 1")
+        (page_dir / "template.djx").write_text("<p>body</p>")
+        assert "<html>" in page_instance.render(page_file)
+        layout.write_text("<main>{% block template %}{% endblock template %}</main>")
+        assert "<main>" in page_instance.render(page_file)
+
+    def test_register_template_drops_compiled_entry(
+        self, page_instance, tmp_path
+    ) -> None:
+        """Every source-registry write evicts the compiled entry alongside."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1")
+        (tmp_path / "template.djx").write_text("<h1>old</h1>")
+        page_instance.render(page_file)
+        assert page_file in page_instance._compiled_registry
+        page_instance.register_template(page_file, "<p>replaced</p>")
+        assert page_file not in page_instance._compiled_registry
+        template = page_instance.composed_template_for(page_file)
+        assert template.source == "<p>replaced</p>"
+
+    def test_render_function_pages_bypass_compiled_cache(
+        self, page_instance, tmp_path
+    ) -> None:
+        """Dynamic `render()` bodies never populate the compiled cache."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text(
+            "def render(request, **kwargs):\n    return '<p>dynamic</p>'\n"
+        )
+        module = _load_python_module_memo(page_file)
+        view = page_instance._create_unified_view(page_file, {}, module)
+        response = view(_make_real_request())
+        assert b"dynamic" in response.content
+        assert page_file not in page_instance._compiled_registry
+
+
 class TestGlobalPageInstance:
     """Test cases for global page instance."""
 
