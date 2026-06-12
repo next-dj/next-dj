@@ -11,6 +11,7 @@ from next.conf import next_framework_settings
 from ._request_utils import _url_kwargs_for_request
 from .backends import FormActionFactory
 from .dispatch import _form_action_context_callable
+from .exceptions import FormActionNotFound
 
 
 if TYPE_CHECKING:
@@ -33,7 +34,7 @@ def _action_url_or_none(
     """Return the backend URL for the action, or `None` when it is unknown."""
     try:
         return backend.get_action_url(action_name, page_path=page_path)
-    except KeyError:
+    except FormActionNotFound:
         return None
 
 
@@ -107,8 +108,11 @@ class FormActionManager:
             url = _action_url_or_none(backend, action_name, page_path)
             if url is not None:
                 return url
-        msg = f"Unknown form action: {action_name}"
-        raise KeyError(msg)
+        msg = (
+            f"Unknown form action {action_name!r}. Searched page scope for "
+            f"{page_path or 'no page'} and the shared registry."
+        )
+        raise FormActionNotFound(msg, name=action_name, page_path=page_path)
 
     @property
     def default_backend(self) -> "FormActionBackend":

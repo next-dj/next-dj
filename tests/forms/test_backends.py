@@ -14,6 +14,7 @@ from next.forms import (
     FormActionBackend,
     FormActionFactory,
     FormActionManager,
+    FormActionNotFound,
     RegistryFormActionBackend,
     form_action_manager,
 )
@@ -38,9 +39,12 @@ class TestFormActionManager:
         assert "_next/form/" in url
 
     def test_get_action_url_raises_for_unknown_action(self) -> None:
-        """Raise KeyError for unknown action name."""
-        with pytest.raises(KeyError, match="Unknown form action"):
+        """Raise FormActionNotFound for unknown action name."""
+        with pytest.raises(FormActionNotFound, match="Unknown form action") as excinfo:
             form_action_manager.get_action_url("nonexistent_action_xyz")
+        assert excinfo.value.name == "nonexistent_action_xyz"
+        assert excinfo.value.page_path is None
+        assert excinfo.value.suggestions == ()
 
     def test_default_backend_is_first_backend(self) -> None:
         """Default backend is the first in the list."""
@@ -76,10 +80,10 @@ class TestRegistryFormActionBackend:
     """RegistryFormActionBackend: register_action, get_meta, generate_urls."""
 
     def test_get_action_url_raises_for_unknown(self) -> None:
-        """Backend raises KeyError for unknown action."""
+        """Backend raises FormActionNotFound for unknown action."""
         backend = form_action_manager.default_backend
         assert isinstance(backend, RegistryFormActionBackend)
-        with pytest.raises(KeyError, match="Unknown form action"):
+        with pytest.raises(FormActionNotFound, match="Unknown form action"):
             backend.get_action_url("nonexistent_xyz")
 
     def test_generate_urls_empty_when_no_actions(self) -> None:
@@ -303,10 +307,10 @@ class TestRegistryFormActionBackend:
         assert backend.get_meta("ghost") is None
 
     def test_get_action_url_tolerates_dangling_name_index_entry(self) -> None:
-        """A name index entry without a registry record raises the not-found KeyError."""
+        """A name index entry without a registry record raises FormActionNotFound."""
         backend = RegistryFormActionBackend()
         backend._name_index["ghost"] = ("ghost_scope", "ghost")
-        with pytest.raises(KeyError, match="Unknown form action"):
+        with pytest.raises(FormActionNotFound, match="Unknown form action"):
             backend.get_action_url("ghost")
 
     def test_dispatch_unknown_uid_returns_404(self) -> None:
@@ -356,8 +360,10 @@ class TestNameIndexScopeFilter:
         page_b = str(tmp_path / "b" / "page.py")
         self._register(backend, "note_form", page_a, "page")
         assert backend.get_meta("note_form", page_b) is None
-        with pytest.raises(KeyError, match="Unknown form action"):
+        with pytest.raises(FormActionNotFound, match="Unknown form action") as excinfo:
             backend.get_action_url("note_form", page_path=page_b)
+        assert excinfo.value.name == "note_form"
+        assert excinfo.value.page_path == page_b
 
     def test_shared_action_resolves_from_any_page(self, tmp_path) -> None:
         """A shared-scope name resolves through any page's lookup."""

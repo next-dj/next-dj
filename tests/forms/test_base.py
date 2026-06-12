@@ -18,6 +18,7 @@ from next.forms.base import (
     _auto_register_form_class,
     _find_definition_frame,
     _is_framework_file,
+    _is_self_registered,
     _record_invalid_meta_scope,
 )
 from next.forms.manager import form_action_manager
@@ -558,6 +559,40 @@ class TestAbstractForms:
         backend = form_action_manager.default_backend
         assert backend.get_meta("registered_base_form") is not None
         assert backend.get_meta("reabstracted_form") is None
+
+
+class TestSelfRegisteredMarker:
+    """_is_self_registered reflects the own-dict auto-registration marker."""
+
+    def test_registered_class_is_marked(self) -> None:
+        """A class that auto-registered carries the marker."""
+
+        class MarkedForm(Form):
+            name = django_forms.CharField()
+
+        assert _is_self_registered(MarkedForm)
+
+    def test_abstract_class_is_not_marked(self) -> None:
+        """A Meta.abstract class skips registration and carries no marker."""
+
+        class UnmarkedAbstractForm(Form):
+            class Meta:
+                abstract = True
+
+        assert not _is_self_registered(UnmarkedAbstractForm)
+
+    def test_marker_is_not_inherited_by_unregistered_subclass(self) -> None:
+        """A subclass that opted out via Meta.abstract does not inherit the marker."""
+
+        class MarkedBaseForm(Form):
+            title = django_forms.CharField()
+
+        class OptedOutForm(MarkedBaseForm):
+            class Meta:
+                abstract = True
+
+        assert _is_self_registered(MarkedBaseForm)
+        assert not _is_self_registered(OptedOutForm)
 
 
 class TestResetFormRegistrationState:

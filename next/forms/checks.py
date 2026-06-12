@@ -36,8 +36,8 @@ def check_form_action_collisions(
     return [
         Error(
             f"Form action {name!r} is registered by {len(fps)} different "
-            "handlers. Rename one of them or change the namespace to avoid "
-            "the collision.",
+            "handlers. Rename one of them or move one to a different scope "
+            "to avoid the collision.",
             obj=settings,
             id="next.E041",
         )
@@ -130,8 +130,8 @@ def check_invalid_form_meta_scope(
     *_args: object,
     **_kwargs: object,
 ) -> list[CheckMessage]:
-    """Error when form class has invalid Meta.scope value."""
-    return [
+    """Error when a form class Meta.scope or an @action scope is invalid."""
+    class_errors: list[CheckMessage] = [
         Error(
             f"Form class {cls_name!r} has Meta.scope = {bad_value!r}. "
             "Valid values are 'page' and 'shared'.",
@@ -139,6 +139,15 @@ def check_invalid_form_meta_scope(
         )
         for cls_name, bad_value in registration_diagnostics.invalid_meta_scope
     ]
+    action_errors: list[CheckMessage] = [
+        Error(
+            f"Action {qualname!r} declares scope={bad_value!r}. "
+            "Valid values are 'page' and 'shared'.",
+            id="next.E047",
+        )
+        for qualname, bad_value in registration_diagnostics.invalid_action_scope
+    ]
+    return class_errors + action_errors
 
 
 @register(Tags.compatibility)

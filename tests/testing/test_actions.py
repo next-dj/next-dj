@@ -1,5 +1,6 @@
 import pytest
 
+from next.forms import FormActionNotFound
 from next.testing import build_form_for, resolve_action_url
 from tests.forms.actions import SimpleForm
 
@@ -12,7 +13,7 @@ class TestResolveActionUrl:
         assert "_next/form/" in url
 
     def test_raises_for_unknown_action(self) -> None:
-        with pytest.raises(KeyError, match="Unknown form action"):
+        with pytest.raises(FormActionNotFound, match="Unknown form action"):
             resolve_action_url("nonexistent_zz")
 
 
@@ -26,7 +27,7 @@ class TestBuildFormFor:
         assert form.is_valid()
 
     def test_raises_for_unknown_action(self) -> None:
-        with pytest.raises(KeyError, match="Unknown form action"):
+        with pytest.raises(FormActionNotFound, match="Unknown form action"):
             build_form_for("nonexistent_zz")
 
     def test_raises_when_action_has_no_form_class(self) -> None:

@@ -24,6 +24,7 @@ from .uid import redirect_to_origin
 
 
 _ANCHOR_FILE_NAMES: frozenset[str] = frozenset({"page.py", "component.py"})
+_SELF_REGISTERED_ATTR: Final[str] = "__next_registered__"
 _FRAMEWORK_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 _DJANGO_FORMS_ROOT: Final[Path] = Path(inspect.getfile(django_forms)).resolve().parent
 
@@ -175,11 +176,19 @@ def _registration_gate(cls: type) -> tuple[str, str, str] | None:
     return scope, _to_snake_case(cls.__name__), _resolved_path_str(file_path)
 
 
+def _is_self_registered(cls: type) -> bool:
+    """Return True when auto-registration stamped this exact class."""
+    # Own-dict lookup on purpose: a concrete subclass of a registered base
+    # must not inherit the marker.
+    return _SELF_REGISTERED_ATTR in cls.__dict__
+
+
 def _auto_register_form_class(cls: type) -> None:
     """Register a form subclass with form_action_manager."""
     gate = _registration_gate(cls)
     if gate is None:
         return
+    setattr(cls, _SELF_REGISTERED_ATTR, True)
     scope, name, file_path = gate
     form_action_manager.register_action(
         ActionRegistration(

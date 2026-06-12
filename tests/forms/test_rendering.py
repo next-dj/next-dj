@@ -12,6 +12,7 @@ from django.template import Context, TemplateSyntaxError
 
 from next.forms import (
     Form,
+    FormActionNotFound,
     RegistryFormActionBackend,
     form_action_manager,
 )
@@ -382,12 +383,12 @@ class TestFormTagRender:
         assert 'name="_next_form_origin" value="/board/4/settings/"' in html
         assert 'value="/_next/form/abc123/"' not in html
 
-    def test_unknown_action_raises_runtime_error(
+    def test_unknown_action_raises_form_action_not_found(
         self, form_engine, csrf_request
     ) -> None:
-        """Unknown action raises RuntimeError at render time."""
+        """Unknown action lets FormActionNotFound propagate at render time."""
         t = form_engine.from_string('{% form "nonexistent_action_xyz" %}z{% endform %}')
-        with pytest.raises(RuntimeError, match="Unknown form action"):
+        with pytest.raises(FormActionNotFound, match="Unknown form action"):
             t.render(
                 Context(
                     {

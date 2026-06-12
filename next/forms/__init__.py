@@ -58,6 +58,7 @@ from .base import (
 )
 from .decorators import action
 from .dispatch import ActionOutcome, ActionOutcomeKind, FormActionDispatch
+from .exceptions import FormActionNotFound
 from .formsets import cleanup_extra_initial
 from .manager import (
     FormActionManager,
@@ -132,6 +133,7 @@ __all__ = [
     "FormActionDispatch",
     "FormActionFactory",
     "FormActionManager",
+    "FormActionNotFound",
     "FormProvider",
     "FormSectionSpec",
     "FormSpec",

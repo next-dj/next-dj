@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from next.forms import RegistryFormActionBackend
+from next.forms import FormActionNotFound, RegistryFormActionBackend
 from next.forms.backends import ActionRegistration
 from next.forms.manager import FormActionManager
 from tests.benchmarks.factories import noop_form_handler
@@ -87,13 +87,13 @@ class TestBenchManagerLookups:
 
     @pytest.mark.benchmark(group="forms.manager")
     def test_get_action_url_miss(self, benchmark) -> None:
-        """Manager raises ``KeyError`` after walking every backend."""
+        """Manager raises ``FormActionNotFound`` after walking every backend."""
         manager = _make_populated_manager()
 
         def run() -> None:
             try:
                 manager.get_action_url("nonexistent")
-            except KeyError:
+            except FormActionNotFound:
                 return
 
         benchmark(run)

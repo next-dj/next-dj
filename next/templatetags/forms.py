@@ -145,13 +145,9 @@ class FormNode(template.Node):
         raw_page = context.get("current_page_module_path")
         next_form_page = str(raw_page) if raw_page else None
 
-        try:
-            action_url = form_action_manager.get_action_url(
-                action_name, page_path=next_form_page
-            )
-        except KeyError:
-            msg = f"Unknown form action: {action_name!r}"
-            raise RuntimeError(msg) from None
+        action_url = form_action_manager.get_action_url(
+            action_name, page_path=next_form_page
+        )
 
         opening_tag = self._opening_tag(context, action_url)
         hidden_inputs = self._build_hidden_inputs(request)

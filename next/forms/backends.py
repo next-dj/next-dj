@@ -16,6 +16,7 @@ from django.views.decorators.http import require_http_methods
 from next.conf import import_class_cached
 
 from .dispatch import ActionOutcome, FormActionDispatch
+from .exceptions import FormActionNotFound
 from .registration import registration_diagnostics
 from .rendering import _ErrorRenderParams, render_form_page_with_errors
 from .signals import action_registered
@@ -284,8 +285,11 @@ class RegistryFormActionBackend(FormActionBackend):
                     self._url_cache[cache_key] = url
                 return url
 
-        msg = f"Unknown form action: {action_name}"
-        raise KeyError(msg)
+        msg = (
+            f"Unknown form action {action_name!r}. Searched page scope for "
+            f"{page_path or 'no page'} and the shared registry."
+        )
+        raise FormActionNotFound(msg, name=action_name, page_path=page_path)
 
     def generate_urls(self) -> "list[URLPattern]":
         """Return one catch-all route when at least one action is registered."""

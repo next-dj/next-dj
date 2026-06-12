@@ -9,6 +9,7 @@ class RegistrationDiagnostics:
 
     outside_base_dir: list[tuple[str, str]] = field(default_factory=list)
     invalid_meta_scope: list[tuple[str, str]] = field(default_factory=list)
+    invalid_action_scope: list[tuple[str, str]] = field(default_factory=list)
     instance_from_url_unknown_field: list[tuple[str, str, str]] = field(
         default_factory=list
     )
@@ -21,6 +22,7 @@ class RegistrationDiagnostics:
         """Empty every buffer in place."""
         self.outside_base_dir.clear()
         self.invalid_meta_scope.clear()
+        self.invalid_action_scope.clear()
         self.instance_from_url_unknown_field.clear()
         self.instance_from_url_on_non_model_form.clear()
         self.action_collisions.clear()
@@ -32,6 +34,7 @@ class RegistrationDiagnostics:
         return RegistrationDiagnostics(
             outside_base_dir=list(self.outside_base_dir),
             invalid_meta_scope=list(self.invalid_meta_scope),
+            invalid_action_scope=list(self.invalid_action_scope),
             instance_from_url_unknown_field=list(self.instance_from_url_unknown_field),
             instance_from_url_on_non_model_form=list(
                 self.instance_from_url_on_non_model_form
@@ -49,6 +52,7 @@ class RegistrationDiagnostics:
         self.clear()
         self.outside_base_dir.extend(snapshot.outside_base_dir)
         self.invalid_meta_scope.extend(snapshot.invalid_meta_scope)
+        self.invalid_action_scope.extend(snapshot.invalid_action_scope)
         self.instance_from_url_unknown_field.extend(
             snapshot.instance_from_url_unknown_field
         )

@@ -5,6 +5,7 @@ def _populated() -> RegistrationDiagnostics:
     diagnostics = RegistrationDiagnostics()
     diagnostics.outside_base_dir.append(("OuterForm", "/outside/forms.py"))
     diagnostics.invalid_meta_scope.append(("BadScopeForm", "global"))
+    diagnostics.invalid_action_scope.append(("bad_handler", "global"))
     diagnostics.instance_from_url_unknown_field.append(
         ("SomeForm", "auth.Group", "missing")
     )
@@ -19,11 +20,12 @@ class TestClear:
     """clear empties every buffer in place."""
 
     def test_clear_empties_every_buffer(self) -> None:
-        """All seven buffers are empty after clear."""
+        """All eight buffers are empty after clear."""
         diagnostics = _populated()
         diagnostics.clear()
         assert diagnostics.outside_base_dir == []
         assert diagnostics.invalid_meta_scope == []
+        assert diagnostics.invalid_action_scope == []
         assert diagnostics.instance_from_url_unknown_field == []
         assert diagnostics.instance_from_url_on_non_model_form == []
         assert diagnostics.action_collisions == {}
@@ -76,6 +78,7 @@ class TestRestore:
         diagnostics.restore(snapshot)
         assert diagnostics.outside_base_dir == [("OuterForm", "/outside/forms.py")]
         assert diagnostics.invalid_meta_scope == [("BadScopeForm", "global")]
+        assert diagnostics.invalid_action_scope == [("bad_handler", "global")]
         assert diagnostics.instance_from_url_unknown_field == [
             ("SomeForm", "auth.Group", "missing")
         ]

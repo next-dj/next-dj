@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock
 
@@ -11,6 +12,7 @@ from next.forms import (
     ModelForm,
     build_form_namespace_for_action,
 )
+from next.forms.base import _is_self_registered
 from next.forms.decorators import action as action_decorator
 from next.forms.dispatch import _form_action_context_callable
 from next.forms.manager import form_action_manager
@@ -76,15 +78,6 @@ class TestActionDecorator:
             for entry in registration_diagnostics.action_applied_to_class
         )
 
-    def test_raises_type_error_when_form_class_is_a_type(self) -> None:
-        """Passing a class as form_class raises TypeError."""
-
-        class MyForm(django_forms.Form):
-            name = django_forms.CharField()
-
-        with pytest.raises(TypeError, match="must be a factory callable"):
-            action_decorator("bad_form_class", form_class=MyForm)(lambda: None)
-
     def test_scope_is_shared_for_non_anchor_file(self) -> None:
         """Handler registered from a non-anchor file gets scope='shared'."""
 
@@ -96,6 +89,151 @@ class TestActionDecorator:
         meta = form_action_manager.default_backend.get_meta("shared_scope_handler")
         assert meta is not None
         assert meta["scope"] == "shared"
+
+
+class TestActionDecoratorBareForm:
+    """``@action`` without arguments derives the name from the function."""
+
+    def test_bare_form_registers_under_function_name(self) -> None:
+        """A bare @action registers the function under its own name."""
+
+        @action_decorator
+        def bare_form_handler(request: HttpRequest) -> None:
+            pass
+
+        meta = form_action_manager.default_backend.get_meta("bare_form_handler")
+        assert meta is not None
+        assert meta["handler"] is bare_form_handler
+        assert meta["scope"] == "shared"
+
+    def test_empty_parentheses_register_under_function_name(self) -> None:
+        """@action() with no name registers the function under its own name."""
+
+        @action_decorator()
+        def empty_parens_handler(request: HttpRequest) -> None:
+            pass
+
+        meta = form_action_manager.default_backend.get_meta("empty_parens_handler")
+        assert meta is not None
+        assert meta["handler"] is empty_parens_handler
+
+    def test_bare_form_on_class_records_e053_without_registering(self) -> None:
+        """A bare @action on a class is buffered for E053 and returned unchanged."""
+
+        @action_decorator
+        class BareDecoratedClass:
+            pass
+
+        assert isinstance(BareDecoratedClass, type)
+        assert any(
+            "BareDecoratedClass" in entry
+            for entry in registration_diagnostics.action_applied_to_class
+        )
+        assert (
+            form_action_manager.default_backend.get_meta("bare_decorated_class") is None
+        )
+
+
+class TestActionDecoratorScope:
+    """The scope keyword overrides the file-derived scope."""
+
+    def test_scope_page_overrides_file_derived_scope(self) -> None:
+        """scope='page' wins over the 'shared' default of a non-anchor file."""
+
+        @action_decorator(scope="page")
+        def page_scoped_handler(request: HttpRequest) -> None:
+            pass
+
+        page_path = str(Path(__file__).resolve())
+        meta = form_action_manager.default_backend.get_meta(
+            "page_scoped_handler", page_path
+        )
+        assert meta is not None
+        assert meta["scope"] == "page"
+
+    def test_invalid_scope_skips_registration_and_buffers_e047(self) -> None:
+        """An invalid scope value skips registration and feeds the E047 buffer."""
+
+        @action_decorator(scope="global")
+        def bad_scope_handler(request: HttpRequest) -> None:
+            pass
+
+        assert form_action_manager.default_backend.get_meta("bad_scope_handler") is None
+        assert any(
+            "bad_scope_handler" in qualname and bad == "global"
+            for qualname, bad in registration_diagnostics.invalid_action_scope
+        )
+
+    def test_invalid_scope_returns_function_untouched(self) -> None:
+        """The decorated function survives an invalid scope unchanged."""
+
+        def untouched_handler(request: HttpRequest) -> None:
+            pass
+
+        result = action_decorator(scope="nope")(untouched_handler)
+        assert result is untouched_handler
+
+
+class TestActionDecoratorFormClass:
+    """form_class accepts factories and non-self-registering Form classes."""
+
+    def test_self_registered_form_class_raises_type_error(self) -> None:
+        """A Form class that registered its own endpoint is rejected."""
+
+        class SelfRegisteredContactForm(Form):
+            name = forms.CharField(max_length=100)
+
+        with pytest.raises(TypeError, match="already registers"):
+            action_decorator("send_contact", form_class=SelfRegisteredContactForm)
+
+    def test_abstract_form_class_is_accepted(self) -> None:
+        """A Meta.abstract Form class passes through and is stored as-is."""
+
+        class AbstractContactForm(Form):
+            name = forms.CharField(max_length=100)
+
+            class Meta:
+                abstract = True
+
+        @action_decorator("send_abstract_contact", form_class=AbstractContactForm)
+        def send_abstract_contact(request: HttpRequest) -> None:
+            pass
+
+        meta = form_action_manager.default_backend.get_meta("send_abstract_contact")
+        assert meta is not None
+        assert meta["form_class"] is AbstractContactForm
+        assert meta["handler"] is send_abstract_contact
+
+    def test_plain_django_form_class_is_accepted(self) -> None:
+        """A vanilla django.forms class never self-registers and passes through."""
+
+        class PlainDjangoForm(django_forms.Form):
+            name = django_forms.CharField()
+
+        @action_decorator("send_plain_django", form_class=PlainDjangoForm)
+        def send_plain_django(request: HttpRequest) -> None:
+            pass
+
+        meta = form_action_manager.default_backend.get_meta("send_plain_django")
+        assert meta is not None
+        assert meta["form_class"] is PlainDjangoForm
+
+    def test_form_class_outside_base_dir_is_accepted(self, settings) -> None:
+        """A Form class skipped by the BASE_DIR gate carries no marker."""
+        settings.BASE_DIR = "/nonexistent-base-dir"
+
+        class OutsideBaseDirForm(Form):
+            name = forms.CharField(max_length=100)
+
+        assert not _is_self_registered(OutsideBaseDirForm)
+
+        @action_decorator("send_outside", form_class=OutsideBaseDirForm)
+        def send_outside(request: HttpRequest) -> None:
+            pass
+
+        meta = form_action_manager.default_backend.get_meta("send_outside")
+        assert meta is not None
+        assert meta["form_class"] is OutsideBaseDirForm
 
 
 class TestBaseFormGetInitial:

@@ -75,6 +75,7 @@ class TestFormActionCollisions:
         assert len(errors) == 1
         assert errors[0].id == "next.E041"
         assert "dup" in errors[0].msg
+        assert "move one to a different scope" in errors[0].msg
 
     def test_reregistration_of_same_handler_is_safe(self) -> None:
         backend = RegistryFormActionBackend()
@@ -233,6 +234,19 @@ class TestCheckInvalidFormMetaScope:
         assert "BadScopeForm" in errors[0].msg
         assert "global" in errors[0].msg
         registration_diagnostics.invalid_meta_scope.clear()
+
+    def test_invalid_action_scope_triggers_error(self) -> None:
+        """An @action with an invalid scope produces an E047 error."""
+        registration_diagnostics.invalid_action_scope.clear()
+        registration_diagnostics.invalid_action_scope.append(
+            ("bad_scope_handler", "global")
+        )
+        errors = check_invalid_form_meta_scope()
+        assert len(errors) == 1
+        assert errors[0].id == "next.E047"
+        assert "Action 'bad_scope_handler'" in errors[0].msg
+        assert "global" in errors[0].msg
+        registration_diagnostics.invalid_action_scope.clear()
 
 
 class TestCheckActionAppliedToClass:
