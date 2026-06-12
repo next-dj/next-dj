@@ -8,9 +8,8 @@ registry behaviour or need to reload backends after swapping settings.
 from __future__ import annotations
 
 from next.components.manager import components_manager
-from next.forms.autodiscover import clear_discovered
+from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
-from next.forms.registration import registration_diagnostics
 from next.forms.wizard import wizard_backend_manager
 from next.pages.manager import page
 
@@ -35,7 +34,6 @@ def reset_form_registration_state() -> None:
     """Clear every form registry and registration-warning buffer for test isolation."""
     form_action_manager.clear_registries()
     registration_diagnostics.clear()
-    clear_discovered()
     wizard_backend_manager.reset()
 
 

@@ -16,9 +16,9 @@ from django.forms import FileField, MultiValueField
 from next.components.facade import get_component
 from next.conf import import_class_cached, next_framework_settings
 
-from .backends import FormActionBackend, record_possible_collision
+from .backends import FormActionBackend
+from .diagnostics import registration_diagnostics
 from .manager import form_action_manager
-from .registration import registration_diagnostics
 from .widgets import ComponentWidget
 from .wizard import (
     CacheFormWizardBackend,
@@ -59,6 +59,27 @@ def check_form_action_collisions(
             id="next.E041",
         )
         for name, fps in registration_diagnostics.action_collisions.items()
+    ]
+
+
+@register(Tags.compatibility)
+def check_shared_action_name_collisions(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Error when one shared action name is declared by two different modules."""
+    return [
+        Error(
+            f"Shared form action {name!r} is declared in "
+            f"{len(scope_keys)} modules: "
+            f"{', '.join(repr(key) for key in sorted(scope_keys))}. "
+            "Lookups by bare name resolve to whichever module imported "
+            "first. Rename one class or set Meta.scope = 'page' on one "
+            "of them.",
+            obj=settings,
+            id="next.E046",
+        )
+        for name, scope_keys in registration_diagnostics.shared_name_collisions.items()
     ]
 
 
@@ -451,13 +472,12 @@ def check_form_anchor_files(
     if value is None:
         return []
     key = _FORM_ANCHOR_FILES_SETTINGS_KEY
-    # A bare string is iterable but would split into single characters, so it
-    # must be rejected rather than silently treated as a one-element collection.
-    if isinstance(value, str) or not isinstance(value, (list, tuple, set)):
+    # Only a list round-trips through the settings merge, so tuples and sets
+    # are rejected here instead of silently falling back to the defaults.
+    if not isinstance(value, list):
         return [
             Error(
-                f"NEXT_FRAMEWORK[{key!r}] must be None or a list, tuple, or set "
-                "of strings.",
+                f"NEXT_FRAMEWORK[{key!r}] must be None or a list of strings.",
                 obj=settings,
                 id="next.E052",
             ),
@@ -613,9 +633,9 @@ __all__ = [
     "check_instance_from_url_on_non_model_form",
     "check_instance_from_url_unknown_field",
     "check_invalid_form_meta_scope",
+    "check_shared_action_name_collisions",
     "check_success_message_framework",
     "check_wizard_step_actions",
     "check_wizard_step_field_collisions",
     "check_wizard_step_file_fields",
-    "record_possible_collision",
 ]

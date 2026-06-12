@@ -9,9 +9,8 @@ from django.core.exceptions import ImproperlyConfigured
 from next.conf import next_framework_settings
 
 from ._request_utils import _url_kwargs_for_request
-from .backends import FormActionFactory
+from .backends import FormActionFactory, FormActionNotFound
 from .dispatch import _form_action_context_callable
-from .exceptions import FormActionNotFound, _unknown_action_message
 
 
 if TYPE_CHECKING:
@@ -93,6 +92,7 @@ class FormActionManager:
         """Return the reverse URL from the first backend that knows `action_name`."""
         self._ensure_backends()
         suggestions: list[str] = []
+        registry_empty = True
         for backend in self._backends:
             try:
                 return backend.get_action_url(action_name, page_path=page_path)
@@ -100,11 +100,12 @@ class FormActionManager:
                 suggestions.extend(
                     name for name in exc.suggestions if name not in suggestions
                 )
+                registry_empty = registry_empty and exc.registry_empty
         raise FormActionNotFound(
-            _unknown_action_message(action_name, page_path, tuple(suggestions)),
             name=action_name,
             page_path=page_path,
             suggestions=suggestions,
+            registry_empty=registry_empty,
         )
 
     def get_action_meta(
@@ -157,7 +158,7 @@ def _build_form_namespace_from_meta(
     if wizard_class is not None:
         url_kwargs = _url_kwargs_for_request(request)
         wizard = wizard_class(request=request, url_kwargs=url_kwargs)
-        return cast("types.SimpleNamespace", wizard.template_namespace())
+        return wizard.template_namespace()
     fc = meta.get("form_class")
     if fc is None:
         return None

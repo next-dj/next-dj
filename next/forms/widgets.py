@@ -10,10 +10,12 @@ from django.http import HttpRequest
 from django.utils.safestring import SafeString
 
 from next.components.facade import get_component, render_component
-from next.static import default_manager
+from next.static import StaticCollector, default_manager
 
 
 if TYPE_CHECKING:
+    from django.forms.utils import ErrorList
+
     from next.components.info import ComponentInfo
 
 
@@ -27,8 +29,8 @@ class ComponentWidget(django_forms.Widget):
 
     _template_path: str | Path | None
     _request: HttpRequest | None
-    _errors: object
-    _static_collector: object
+    _errors: "ErrorList"
+    _static_collector: StaticCollector | None
 
     def __init__(
         self,
@@ -118,7 +120,7 @@ def bind_component_widgets(
     *,
     template_path: str | Path | None,
     request: HttpRequest | None = None,
-    collector: object | None = None,
+    collector: StaticCollector | None = None,
     with_errors: bool = False,
 ) -> None:
     """Inject scope path, request, collector, and field errors onto ComponentWidgets."""

@@ -17,6 +17,7 @@ from .backends import (
     ActionGuard,
     ActionRegistration,
     FormActionBackend,
+    FormActionNotFound,
     RegistryFormActionBackend,
 )
 from .base import (
@@ -68,7 +69,6 @@ from .base import (
 )
 from .decorators import action
 from .dispatch import ActionOutcome, ActionOutcomeKind
-from .exceptions import FormActionNotFound
 from .formsets import cleanup_extra_initial
 from .markers import DForm
 from .serializers import (

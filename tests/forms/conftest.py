@@ -4,9 +4,8 @@ import pytest
 from django.core.cache import cache
 from django.test import Client
 
-from next.forms.autodiscover import _discovered
+from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
-from next.forms.registration import registration_diagnostics
 from next.forms.wizard import wizard_backend_manager
 from tests.forms import actions
 
@@ -33,7 +32,6 @@ def _isolate_form_registries():
     registry_snapshot = copy.deepcopy(backend._registry)
     uid_snapshot = copy.deepcopy(backend._uid_to_name)
     name_index_snapshot = copy.deepcopy(backend._name_index)
-    discovered_snapshot = set(_discovered)
     diagnostics_snapshot = registration_diagnostics.snapshot()
 
     wizard_backend_manager.reset()
@@ -47,9 +45,6 @@ def _isolate_form_registries():
     backend._uid_to_name.update(uid_snapshot)
     backend._name_index.clear()
     backend._name_index.update(name_index_snapshot)
-
-    _discovered.clear()
-    _discovered.update(discovered_snapshot)
 
     registration_diagnostics.restore(diagnostics_snapshot)
 

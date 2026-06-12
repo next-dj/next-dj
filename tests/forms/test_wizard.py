@@ -18,8 +18,8 @@ from django.test import RequestFactory, override_settings
 from next.conf import next_framework_settings
 from next.forms import Form
 from next.forms.base import _FRAMEWORK_ROOT
+from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
-from next.forms.registration import registration_diagnostics
 from next.forms.wizard import (
     CacheFormWizardBackend,
     FormWizard,

@@ -1,9 +1,10 @@
+import copy
 from unittest.mock import MagicMock, patch
 
 import pytest
 from django import forms as django_forms
 from django.core.exceptions import ImproperlyConfigured
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.test import override_settings
 from django.urls import (
     NoReverseMatch,
@@ -26,6 +27,102 @@ from next.forms.manager import FormActionManager, form_action_manager
 
 _FAKE_FILE = "/fake/myapp/forms.py"
 _FAKE_FILE_PAGE = "/fake/myapp/page.py"
+
+
+class TestFormActionNotFound:
+    """FormActionNotFound carries the failing name and lookup context."""
+
+    def test_is_a_lookup_error(self) -> None:
+        """The exception subclasses LookupError, not KeyError."""
+        exc = FormActionNotFound("Unknown form action 'x'.", name="x")
+        assert isinstance(exc, LookupError)
+        assert not isinstance(exc, KeyError)
+
+    def test_explicit_message_is_kept_verbatim(self) -> None:
+        """str() returns an explicitly passed message unchanged."""
+        exc = FormActionNotFound("Unknown form action 'x'.", name="x")
+        assert str(exc) == "Unknown form action 'x'."
+
+    def test_default_context_fields(self) -> None:
+        """page_path defaults to None and suggestions to an empty tuple."""
+        exc = FormActionNotFound(name="missing_action")
+        assert exc.name == "missing_action"
+        assert exc.page_path is None
+        assert exc.suggestions == ()
+        assert exc.registry_empty is False
+
+    def test_context_fields_are_stored(self) -> None:
+        """name, page_path, and suggestions are exposed as attributes."""
+        exc = FormActionNotFound(
+            name="missing_action",
+            page_path="/app/pages/page.py",
+            suggestions=["missing_actions"],
+        )
+        assert exc.name == "missing_action"
+        assert exc.page_path == "/app/pages/page.py"
+        assert exc.suggestions == ("missing_actions",)
+
+    def test_catchable_by_type(self) -> None:
+        """The exception can be caught by its own type."""
+        with pytest.raises(FormActionNotFound):
+            raise FormActionNotFound(name="missing_action")
+
+    def test_reduce_round_trip_keeps_message(self) -> None:
+        """Replaying args, as pickle and deepcopy do, keeps the message."""
+        exc = FormActionNotFound(
+            name="vote",
+            page_path="/app/page.py",
+            suggestions=("veto",),
+        )
+        revived = copy.deepcopy(exc)
+        assert isinstance(revived, FormActionNotFound)
+        assert str(revived) == str(exc)
+        assert str(FormActionNotFound(*exc.args)) == str(exc)
+
+    @pytest.mark.parametrize(
+        ("kwargs", "expected"),
+        [
+            pytest.param(
+                {"name": "vote", "page_path": "/app/page.py"},
+                (
+                    "Unknown form action 'vote'. Searched page scope for "
+                    "/app/page.py and the shared registry."
+                ),
+                id="page-path-without-suggestions",
+            ),
+            pytest.param(
+                {"name": "vote"},
+                (
+                    "Unknown form action 'vote'. "
+                    "Searched the shared registry (no page scope)."
+                ),
+                id="no-page-path",
+            ),
+            pytest.param(
+                {"name": "vot", "suggestions": ("vote", "veto")},
+                (
+                    "Unknown form action 'vot'. "
+                    "Searched the shared registry (no page scope). "
+                    "Closest matches: 'vote', 'veto'."
+                ),
+                id="suggestions-appended",
+            ),
+            pytest.param(
+                {"name": "vote", "registry_empty": True},
+                (
+                    "Unknown form action 'vote'. "
+                    "Searched the shared registry (no page scope). "
+                    "No form actions are registered. Check that the "
+                    "declaring module is imported. Autodiscover imports "
+                    "each app's forms.py when FORM_AUTODISCOVER is enabled."
+                ),
+                id="empty-registry-diagnosis",
+            ),
+        ],
+    )
+    def test_composed_message(self, kwargs: dict[str, object], expected: str) -> None:
+        """The message renders the lookup context, hints, and registry state."""
+        assert str(FormActionNotFound(**kwargs)) == expected
 
 
 class TestFormActionManager:
@@ -358,13 +455,14 @@ class TestRegistryFormActionBackend:
         with pytest.raises(FormActionNotFound, match="Unknown form action"):
             backend.get_action_url("ghost")
 
-    def test_dispatch_unknown_uid_returns_404(self) -> None:
-        """Dispatch with unknown UID returns 404 response."""
+    def test_dispatch_unknown_uid_raises_http404(self) -> None:
+        """Dispatch with an unknown UID raises a diagnosable Http404."""
         backend = RegistryFormActionBackend()
         req = HttpRequest()
         req.method = "POST"
-        resp = backend.dispatch(req, "nonexistent_uid_xyz")
-        assert resp.status_code == 404
+        with pytest.raises(Http404, match="may be stale") as excinfo:
+            backend.dispatch(req, "nonexistent_uid_xyz")
+        assert "nonexistent_uid_xyz" in str(excinfo.value)
 
     def test_clear_registry_empties_all_state(self) -> None:
         """clear_registry drops all registrations and UID mapping."""
@@ -469,7 +567,7 @@ class TestUnknownActionSuggestions:
             pytest.param(
                 "zzzzzz",
                 (),
-                "the shared registry.",
+                "the shared registry (no page scope).",
                 id="unrelated-name-stays-bare",
             ),
         ],
@@ -500,6 +598,58 @@ class TestUnknownActionSuggestions:
             manager.get_action_url("delete_not")
         assert excinfo.value.suggestions == ("delete_note", "delete_card")
         assert "Closest matches: 'delete_note', 'delete_card'." in str(excinfo.value)
+
+
+class TestEmptyRegistryDiagnosis:
+    """Lookup failures on an empty registry explain the autodiscover miss."""
+
+    @staticmethod
+    def _register(backend: RegistryFormActionBackend, name: str) -> None:
+        backend.register_action(
+            ActionRegistration(
+                name=name,
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+            )
+        )
+
+    def test_backend_empty_registry_mentions_autodiscover(self) -> None:
+        """An empty backend names the import miss instead of a bare typo message."""
+        backend = RegistryFormActionBackend()
+        with pytest.raises(FormActionNotFound) as excinfo:
+            backend.get_action_url("save_note")
+        assert excinfo.value.registry_empty is True
+        assert "No form actions are registered" in str(excinfo.value)
+        assert "FORM_AUTODISCOVER" in str(excinfo.value)
+
+    def test_backend_with_actions_skips_the_diagnosis(self) -> None:
+        """A populated backend reports a plain unknown-action failure."""
+        backend = RegistryFormActionBackend()
+        self._register(backend, "delete_note")
+        with pytest.raises(FormActionNotFound) as excinfo:
+            backend.get_action_url("zzzzzz")
+        assert excinfo.value.registry_empty is False
+        assert "No form actions are registered" not in str(excinfo.value)
+
+    def test_manager_empty_backends_mention_autodiscover(self) -> None:
+        """The manager keeps the diagnosis when every backend is empty."""
+        manager = FormActionManager(backends=[RegistryFormActionBackend()])
+        with pytest.raises(FormActionNotFound) as excinfo:
+            manager.get_action_url("save_note")
+        assert excinfo.value.registry_empty is True
+        assert "No form actions are registered" in str(excinfo.value)
+
+    def test_manager_with_any_registered_action_skips_the_diagnosis(self) -> None:
+        """One populated backend is enough to drop the empty-registry hint."""
+        first = RegistryFormActionBackend()
+        second = RegistryFormActionBackend()
+        self._register(second, "delete_note")
+        manager = FormActionManager(backends=[first, second])
+        with pytest.raises(FormActionNotFound) as excinfo:
+            manager.get_action_url("zzzzzz")
+        assert excinfo.value.registry_empty is False
+        assert "No form actions are registered" not in str(excinfo.value)
 
 
 class TestFormActionBackendAbstract:
@@ -543,6 +693,34 @@ class TestFormActionBackendAbstract:
         stub = StubBackend()
         req = HttpRequest()
         assert stub.render_invalid_page(req, "x", None, None) == ""
+
+    def test_hooks_accept_documented_keyword_names(self) -> None:
+        """The base hooks keep the plain parameter names subclasses override."""
+
+        class StubBackend(FormActionBackend):
+            def register_action(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            def get_action_url(self, action_name: str, **kwargs: object) -> str:
+                return ""
+
+            def generate_urls(self) -> list:
+                return []
+
+            def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
+                return HttpResponse()
+
+        stub = StubBackend()
+        req = HttpRequest()
+        assert stub.get_meta(action_name="x", page_path="/p") is None
+        rendered = stub.render_invalid_page(
+            request=req,
+            action_name="x",
+            form=None,
+            page_file_path=None,
+            url_kwargs=None,
+        )
+        assert rendered == ""
 
     def test_shape_response_default_envelope(self) -> None:
         """Abstract backend shape_response delegates to the default envelope."""

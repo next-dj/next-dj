@@ -16,13 +16,14 @@ from next.forms.checks import (
     check_form_wizard_steps,
     check_forms_outside_base_dir,
     check_invalid_form_meta_scope,
+    check_shared_action_name_collisions,
     check_wizard_step_actions,
     check_wizard_step_field_collisions,
     check_wizard_step_file_fields,
 )
 from next.forms.decorators import action
+from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
-from next.forms.registration import registration_diagnostics
 from next.forms.signals import action_registered
 
 
@@ -32,8 +33,10 @@ _FAKE_FILE = "/fake/myapp/forms.py"
 @pytest.fixture(autouse=True)
 def _reset_collision_cache():
     registration_diagnostics.action_collisions.clear()
+    registration_diagnostics.shared_name_collisions.clear()
     yield
     registration_diagnostics.action_collisions.clear()
+    registration_diagnostics.shared_name_collisions.clear()
 
 
 def _distinct_handler(tag: str):
@@ -128,6 +131,88 @@ class TestFormActionCollisions:
             )
         )
         assert registration_diagnostics.action_collisions == {}
+
+
+class TestSharedActionNameCollisions:
+    """check_shared_action_name_collisions: E046 when one shared name spans modules."""
+
+    @staticmethod
+    def _app_forms_file(tmp_path, app: str) -> str:
+        app_dir = tmp_path / app
+        app_dir.mkdir()
+        (app_dir / "__init__.py").write_text("")
+        forms_file = app_dir / "forms.py"
+        forms_file.write_text("")
+        return str(forms_file)
+
+    @staticmethod
+    def _register(
+        backend: RegistryFormActionBackend, name: str, file_path: str, scope: str
+    ) -> None:
+        backend.register_action(
+            ActionRegistration(
+                name=name,
+                file_path=file_path,
+                scope=scope,
+                handler=lambda: None,
+            )
+        )
+
+    def test_same_shared_name_in_two_modules_is_e046(self, tmp_path) -> None:
+        """Two shared-scope declarations of one name produce a single E046."""
+        backend = RegistryFormActionBackend()
+        self._register(
+            backend, "contact_form", self._app_forms_file(tmp_path, "app_a"), "shared"
+        )
+        self._register(
+            backend, "contact_form", self._app_forms_file(tmp_path, "app_b"), "shared"
+        )
+        errors = check_shared_action_name_collisions()
+        assert len(errors) == 1
+        assert errors[0].id == "next.E046"
+        assert "'contact_form'" in errors[0].msg
+        assert "app_a.forms" in errors[0].msg
+        assert "app_b.forms" in errors[0].msg
+        assert "Meta.scope" in errors[0].msg
+
+    def test_third_module_joins_the_same_error(self, tmp_path) -> None:
+        """A third declaring module folds into the existing E046 entry."""
+        backend = RegistryFormActionBackend()
+        for app in ("app_a", "app_b", "app_c"):
+            self._register(
+                backend, "contact_form", self._app_forms_file(tmp_path, app), "shared"
+            )
+        errors = check_shared_action_name_collisions()
+        assert len(errors) == 1
+        assert "3 modules" in errors[0].msg
+        assert "app_c.forms" in errors[0].msg
+
+    @pytest.mark.parametrize(
+        ("first_scope", "second_scope", "second_app"),
+        [
+            pytest.param("shared", "shared", None, id="same-module-reregistration"),
+            pytest.param(
+                "shared", "page", "app_b", id="second-registration-page-scoped"
+            ),
+            pytest.param(
+                "page", "shared", "app_b", id="first-registration-page-scoped"
+            ),
+            pytest.param("page", "page", "app_b", id="two-page-scopes"),
+        ],
+    )
+    def test_silent_registrations(
+        self, tmp_path, first_scope: str, second_scope: str, second_app: str | None
+    ) -> None:
+        """Re-registration and page-scoped overlaps never reach the buffer."""
+        backend = RegistryFormActionBackend()
+        first = self._app_forms_file(tmp_path, "app_a")
+        second = (
+            first if second_app is None else self._app_forms_file(tmp_path, second_app)
+        )
+        self._register(backend, "contact_form", first, first_scope)
+        self._register(backend, "contact_form", second, second_scope)
+        assert registration_diagnostics.shared_name_collisions == {}
+        assert check_shared_action_name_collisions() == []
 
 
 class TestFormActionBackendsConfigurationCheck:
@@ -765,24 +850,22 @@ class TestCheckFormAnchorFiles:
         """A list of strings is valid and yields no errors."""
         assert check_form_anchor_files() == []
 
-    @override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": ("page.py",)})
-    def test_tuple_of_strings_is_clean(self) -> None:
-        """A tuple of strings is valid and yields no errors."""
-        assert check_form_anchor_files() == []
-
-    @override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": "page.py"})
-    def test_bare_string_is_e052(self) -> None:
-        """A bare string is rejected so it never iterates into characters."""
-        errors = check_form_anchor_files()
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("page.py", id="bare-string"),
+            pytest.param(("page.py",), id="tuple-not-merged"),
+            pytest.param({"page.py"}, id="set-not-merged"),
+            pytest.param(7, id="non-collection"),
+        ],
+    )
+    def test_non_list_value_is_e052(self, value: object) -> None:
+        """Only a list round-trips the settings merge, anything else is rejected."""
+        with override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": value}):
+            errors = check_form_anchor_files()
         assert len(errors) == 1
         assert errors[0].id == "next.E052"
-
-    @override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": 7})
-    def test_non_collection_is_e052(self) -> None:
-        """A non-collection value is rejected."""
-        errors = check_form_anchor_files()
-        assert len(errors) == 1
-        assert errors[0].id == "next.E052"
+        assert "list of strings" in errors[0].msg
 
     @override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": ["page.py", 7]})
     def test_non_string_member_is_e052(self) -> None:

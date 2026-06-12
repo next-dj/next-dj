@@ -383,7 +383,7 @@ class _DispatchState:
     def emit_wizard_step_submitted(
         self,
         request: "HttpRequest",
-        wizard_class: type,
+        wizard_class: "type[FormWizard]",
         step_name: str,
         cleaned: dict[str, Any],
     ) -> None:
@@ -401,7 +401,7 @@ class _DispatchState:
     def emit_wizard_completed(
         self,
         request: "HttpRequest",
-        wizard_class: type,
+        wizard_class: "type[FormWizard]",
         merged: dict[str, Any],
     ) -> None:
         """Send `wizard_completed` when any receiver is connected."""
@@ -604,7 +604,7 @@ class FormActionDispatch:
         backend: "FormActionBackend",
         request: "HttpRequest",
         action_name: str,
-        wizard_class: type,
+        wizard_class: "type[FormWizard]",
         state: _DispatchState,
     ) -> HttpResponse:
         """Validate the current wizard step, then route forward or finalise."""

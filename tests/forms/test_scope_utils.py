@@ -6,6 +6,7 @@ from next.forms.backends import (
     ActionRegistration,
     RegistryFormActionBackend,
     file_to_dotted_module,
+    scope_key_for,
 )
 from next.forms.base import (
     _FRAMEWORK_ROOT,
@@ -62,6 +63,25 @@ class TestFileToDottedModule:
         f.write_text("")
         result = file_to_dotted_module(str(f))
         assert result == "a.b.forms"
+
+
+class TestScopeKeyFor:
+    """scope_key_for partitions page scope by path and shared scope by module."""
+
+    def test_page_scope_uses_resolved_path(self, tmp_path) -> None:
+        """Page scope keys are the resolved file path."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        assert scope_key_for(str(page_file), "page") == str(page_file.resolve())
+
+    def test_shared_scope_uses_dotted_module(self, tmp_path) -> None:
+        """Shared scope keys are the dotted module of the declaring file."""
+        pkg = tmp_path / "myapp"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("")
+        forms_file = pkg / "forms.py"
+        forms_file.write_text("")
+        assert scope_key_for(str(forms_file), "shared") == "myapp.forms"
 
 
 class TestSharedScopeKeysAcrossApps:

@@ -9,6 +9,7 @@ from typing import Any, Final
 from django import forms as django_forms
 from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist
+from django.db.models import Model
 from django.forms.forms import BaseForm as DjangoBaseForm, DeclarativeFieldsMetaclass
 from django.forms.models import BaseModelForm as DjangoBaseModelForm, ModelFormMetaclass
 from django.forms.renderers import DjangoTemplates
@@ -23,8 +24,8 @@ from .backends import (
     _resolved_path_str,
     build_action_guard,
 )
+from .diagnostics import registration_diagnostics
 from .manager import form_action_manager
-from .registration import registration_diagnostics
 from .uid import redirect_to_origin
 
 
@@ -285,7 +286,7 @@ class BaseModelForm(DjangoBaseModelForm):
         _validate_instance_from_url(cls, is_model_form=True)
 
     @classmethod
-    def get_initial(cls, **url_kwargs: object) -> object:
+    def get_initial(cls, **url_kwargs: object) -> dict[str, Any] | Model:
         """Return a model instance loaded from the URL, or an empty dict."""
         spec = getattr(getattr(cls, "Meta", None), "instance_from_url", None)
         if not spec:
@@ -293,7 +294,8 @@ class BaseModelForm(DjangoBaseModelForm):
         lookup = _instance_lookup_from_spec(spec, url_kwargs)
         if lookup is None:
             return {}
-        return get_object_or_404(cls._meta.model, **lookup)
+        model: type[Model] = cls._meta.model
+        return get_object_or_404(model, **lookup)
 
     def get_success_message(self, cleaned_data: dict[str, Any]) -> str:
         """Return the flash message for a valid submission, empty string for none."""

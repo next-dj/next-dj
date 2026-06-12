@@ -18,15 +18,15 @@ from django.db.models import Model
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 
-from .backends import ActionRegistration, file_to_dotted_module
+from .backends import ActionRegistration, scope_key_for
 from .base import (
     _format_success_message,
     _meta_guard,
     _registration_gate,
     _to_snake_case,
 )
+from .diagnostics import registration_diagnostics
 from .manager import form_action_manager
-from .registration import registration_diagnostics
 
 
 if TYPE_CHECKING:
@@ -316,10 +316,7 @@ def _auto_register_wizard_class(cls: "type[FormWizard]") -> None:
     scope, name, file_path = gate
     if not list(getattr(getattr(cls, "Meta", None), "steps", []) or []):
         registration_diagnostics.wizard_without_steps.append(cls.__qualname__)
-    # Mirror the registry scope key so storage partitions match registration.
-    cls._storage_scope_key = (
-        file_path if scope == "page" else file_to_dotted_module(file_path)
-    )
+    cls._storage_scope_key = scope_key_for(file_path, scope)
     form_action_manager.register_action(
         ActionRegistration(
             name=name,
@@ -339,7 +336,7 @@ class FormWizard:
     class Meta:
         """Default wizard options, overridden on subclasses."""
 
-        steps: ClassVar[list[tuple[str, type]]] = []
+        steps: ClassVar[list[tuple[str, "type[DjangoForm]"]]] = []
         url_param: str = "step"
 
     def __init_subclass__(cls, **kwargs: object) -> None:
@@ -369,15 +366,15 @@ class FormWizard:
         self.storage_id = f"{_storage_scope_hash(scope_key)}:{self.wizard_id}"
         self._backend = wizard_backend_manager.get()
         self._loaded: dict[str, Any] | None = None
-        self._steps_cache: list[tuple[str, type]] | None = None
-        self._step_map_cache: dict[str, type] | None = None
+        self._steps_cache: list[tuple[str, type[DjangoForm]]] | None = None
+        self._step_map_cache: dict[str, type[DjangoForm]] | None = None
 
     @classmethod
     def _meta(cls) -> object:
         return getattr(cls, "Meta", None)
 
     @classmethod
-    def _static_steps(cls) -> list[tuple[str, type]]:
+    def _static_steps(cls) -> "list[tuple[str, type[DjangoForm]]]":
         return list(getattr(cls._meta(), "steps", []) or [])
 
     @property
@@ -385,7 +382,7 @@ class FormWizard:
         """Return the URL kwarg name that carries the current step."""
         return getattr(self._meta(), "url_param", "step")
 
-    def get_steps(self) -> list[tuple[str, type]]:
+    def get_steps(self) -> "list[tuple[str, type[DjangoForm]]]":
         """Return the step list. Override for conditional steps."""
         return self._static_steps()
 
@@ -463,7 +460,7 @@ class FormWizard:
         self._steps_cache = None
         self._step_map_cache = None
 
-    def _resolved_steps(self) -> list[tuple[str, type]]:
+    def _resolved_steps(self) -> "list[tuple[str, type[DjangoForm]]]":
         """Return the `get_steps` output, cached until stored data changes."""
         if self._steps_cache is None:
             self._steps_cache = list(self.get_steps())
@@ -504,7 +501,7 @@ class FormWizard:
         """Return the page URL for `step`, derived from the wizard page path."""
         return _replace_step_segment(self.base_path, self.current_step(), step)
 
-    def step_form_class(self, step: str | None = None) -> type | None:
+    def step_form_class(self, step: str | None = None) -> "type[DjangoForm] | None":
         """Return the form class registered for `step` (or the current step)."""
         target = step or self.current_step()
         if self._step_map_cache is None:
@@ -521,7 +518,7 @@ class FormWizard:
         stored = self._stored_steps().get(step)
         if stored is not None:
             kwargs.setdefault("initial", dict(stored))
-        return cast("DjangoForm", form_class(**kwargs))
+        return form_class(**kwargs)
 
     def template_namespace(self) -> types.SimpleNamespace:
         """Return the `{form, wizard}` namespace consumed by the form tag."""

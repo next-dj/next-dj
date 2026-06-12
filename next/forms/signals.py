@@ -1,11 +1,14 @@
 """Django signals emitted by the forms subsystem.
 
-The `action_registered` signal fires after the backend stores a handler
-for a name. The sender is the backend class. The keyword arguments are
-`action_name`, `uid`, `form_class`, `file_path`, `scope`, and `handler`.
-`file_path` is the module the form or handler was declared in and `scope`
-is `"page"` or `"shared"`. Together they give receivers a real grouping
-key under the file-scoped model.
+The `action_registered` signal fires after the backend stores an action
+target for a name. The sender is the backend class. The keyword
+arguments are `action_name`, `uid`, `form_class`, `wizard_class`,
+`file_path`, `scope`, and `handler`. Exactly one of `handler`,
+`form_class`, or `wizard_class` identifies the registered target,
+except the `@action(form_class=...)` path which supplies a handler and
+a form factory together. `file_path` is the module the form, wizard, or
+handler was declared in and `scope` is `"page"` or `"shared"`. Together
+they give receivers a real grouping key under the file-scoped model.
 
 Every dispatch-time signal (`action_dispatched`, `form_validation_failed`,
 `wizard_step_submitted`, `wizard_completed`) carries `uid` and `request`.

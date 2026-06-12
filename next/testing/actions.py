@@ -5,7 +5,7 @@ from __future__ import annotations
 import difflib
 from typing import TYPE_CHECKING, Any, cast
 
-from next.forms.exceptions import FormActionNotFound, _unknown_action_message
+from next.forms.backends import FormActionNotFound
 from next.forms.manager import form_action_manager
 
 
@@ -45,9 +45,9 @@ def build_form_for(
         }
         suggestions = tuple(difflib.get_close_matches(action_name, sorted(known)))
         raise FormActionNotFound(
-            _unknown_action_message(action_name, None, suggestions),
             name=action_name,
             suggestions=suggestions,
+            registry_empty=not known,
         )
     form_class = meta.get("form_class")
     if form_class is None:

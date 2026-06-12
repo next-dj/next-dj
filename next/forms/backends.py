@@ -10,15 +10,14 @@ from weakref import WeakSet
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.signals import setting_changed
-from django.http import HttpResponseNotFound
+from django.http import Http404
 from django.urls import get_script_prefix, path
 from django.views.decorators.http import require_http_methods
 
 from next.conf import import_class_cached
 
+from .diagnostics import registration_diagnostics
 from .dispatch import ActionOutcome, FormActionDispatch
-from .exceptions import FormActionNotFound, _unknown_action_message
-from .registration import registration_diagnostics
 from .rendering import _ErrorRenderParams, render_form_page_with_errors
 from .signals import action_registered
 from .uid import URL_NAME_FORM_ACTION, reverse_form_action
@@ -30,6 +29,48 @@ if TYPE_CHECKING:
     from django import forms as django_forms
     from django.http import HttpRequest, HttpResponse
     from django.urls import URLPattern
+
+    from .wizard import FormWizard
+
+
+class FormActionNotFound(LookupError):  # noqa: N818
+    """No registered form action matches the requested name."""
+
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        name: str = "",
+        page_path: str | None = None,
+        suggestions: "Iterable[str]" = (),
+        registry_empty: bool = False,
+    ) -> None:
+        """Store the lookup context and compose a message when none is given."""
+        self.name = name
+        self.page_path = page_path
+        self.suggestions = tuple(suggestions)
+        self.registry_empty = registry_empty
+        super().__init__(self._compose() if message is None else message)
+
+    def _compose(self) -> str:
+        """Render the failure with scope, close matches, and registry state."""
+        if self.page_path is None:
+            searched = "Searched the shared registry (no page scope)."
+        else:
+            searched = (
+                f"Searched page scope for {self.page_path} and the shared registry."
+            )
+        message = f"Unknown form action {self.name!r}. {searched}"
+        if self.suggestions:
+            rendered = ", ".join(repr(suggestion) for suggestion in self.suggestions)
+            message = f"{message} Closest matches: {rendered}."
+        if self.registry_empty:
+            message = (
+                f"{message} No form actions are registered. Check that the "
+                "declaring module is imported. Autodiscover imports each "
+                "app's forms.py when FORM_AUTODISCOVER is enabled."
+            )
+        return message
 
 
 # Memoised by raw path: both hit a filesystem syscall on every registration and
@@ -62,6 +103,13 @@ def file_to_dotted_module(file_path: str) -> str:
     dotted = ".".join(parts)
     _dotted_module_cache[file_path] = dotted
     return dotted
+
+
+def scope_key_for(file_path: str, scope: str) -> str:
+    """Return the registry scope key partitioning actions and wizard storage."""
+    if scope == "page":
+        return _resolved_path_str(file_path)
+    return file_to_dotted_module(file_path)
 
 
 def _handler_fingerprint(handler: "Callable[..., Any]") -> tuple[str, str]:
@@ -118,7 +166,7 @@ class ActionMeta(TypedDict, total=False):
     name: str
     handler: "Callable[..., Any] | None"
     form_class: "type[django_forms.Form] | Callable[..., Any] | None"
-    wizard_class: "type | None"
+    wizard_class: "type[FormWizard] | None"
     uid: str
     file_path: str
     scope: str
@@ -139,7 +187,7 @@ class ActionRegistration:
     scope: str
     handler: "Callable[..., Any] | None" = None
     form_class: "type[django_forms.Form] | Callable[..., Any] | None" = None
-    wizard_class: "type | None" = None
+    wizard_class: "type[FormWizard] | None" = None
     guard: ActionGuard | None = None
 
 
@@ -164,10 +212,11 @@ class FormActionBackend(ABC):
 
     def get_meta(
         self,
-        _action_name: str,
-        _page_path: str | None = None,
+        action_name: str,
+        page_path: str | None = None,
     ) -> "ActionMeta | None":
         """Return optional per-action metadata for subclasses."""
+        del action_name, page_path
         return None
 
     def iter_actions(self) -> "Iterable[ActionMeta]":
@@ -176,13 +225,14 @@ class FormActionBackend(ABC):
 
     def render_invalid_page(
         self,
-        _request: "HttpRequest",
-        _action_name: str,
-        _form: "django_forms.Form | None",
-        _page_file_path: "Path | None" = None,
-        _url_kwargs: dict[str, object] | None = None,
+        request: "HttpRequest",
+        action_name: str,
+        form: "django_forms.Form | None",
+        page_file_path: "Path | None" = None,
+        url_kwargs: dict[str, object] | None = None,
     ) -> str:
         """Return the full origin-page HTML for a failed validation."""
+        del request, action_name, form, page_file_path, url_kwargs
         return ""
 
     def shape_response(
@@ -240,10 +290,7 @@ class RegistryFormActionBackend(FormActionBackend):
         handler = registration.handler
         form_class = registration.form_class
         wizard_class = registration.wizard_class
-        if scope == "page":
-            scope_key = _resolved_path_str(file_path)
-        else:
-            scope_key = file_to_dotted_module(file_path)
+        scope_key = scope_key_for(file_path, scope)
 
         uid = _make_uid_for_action(scope_key, name)
         existing_key = self._uid_to_name.get(uid)
@@ -278,12 +325,21 @@ class RegistryFormActionBackend(FormActionBackend):
             "scope": scope,
             "guard": registration.guard,
         }
-        self._name_index.setdefault(name, key)
+        first_key = self._name_index.setdefault(name, key)
+        if (
+            scope == "shared"
+            and first_key != key
+            and self._registry.get(first_key, {}).get("scope") == "shared"
+        ):
+            registration_diagnostics.shared_name_collisions.setdefault(
+                name, {first_key[0]}
+            ).add(scope_key)
         action_registered.send(
             sender=self.__class__,
             action_name=name,
             uid=uid,
             form_class=form_class,
+            wizard_class=wizard_class,
             file_path=file_path,
             scope=scope,
             handler=handler,
@@ -327,10 +383,10 @@ class RegistryFormActionBackend(FormActionBackend):
             )
         )
         raise FormActionNotFound(
-            _unknown_action_message(action_name, page_path, suggestions),
             name=action_name,
             page_path=page_path,
             suggestions=suggestions,
+            registry_empty=not self._registry,
         )
 
     def generate_urls(self) -> "list[URLPattern]":
@@ -344,7 +400,11 @@ class RegistryFormActionBackend(FormActionBackend):
         """Forward a POST request to `FormActionDispatch.dispatch`."""
         key = self._uid_to_name.get(uid)
         if key is None or key not in self._registry:
-            return HttpResponseNotFound()
+            msg = (
+                f"No form action is registered for uid {uid!r}. The page that "
+                "rendered this form may be stale after a rename or restart."
+            )
+            raise Http404(msg)
         meta = self._registry[key]
         return FormActionDispatch.dispatch(self, request, key[1], meta)
 
@@ -402,7 +462,10 @@ __all__ = [
     "ActionRegistration",
     "FormActionBackend",
     "FormActionFactory",
+    "FormActionNotFound",
     "RegistryFormActionBackend",
     "build_action_guard",
     "file_to_dotted_module",
+    "record_possible_collision",
+    "scope_key_for",
 ]

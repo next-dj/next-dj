@@ -21,13 +21,13 @@ from next.forms.checks import (
     check_instance_from_url_on_non_model_form,
     check_instance_from_url_unknown_field,
 )
+from next.forms.diagnostics import registration_diagnostics
 from next.forms.dispatch import (
     FormActionDispatch,
     _accepts_var_keyword,
     _call_get_initial,
     _form_action_context_callable,
 )
-from next.forms.registration import registration_diagnostics
 
 
 _FAKE_FILE = "/fake/myapp/forms.py"

@@ -19,8 +19,8 @@ from next.forms.base import (
     _is_self_registered,
     _record_invalid_meta_scope,
 )
+from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
-from next.forms.registration import registration_diagnostics
 
 
 class TestAutoRegistration:
@@ -478,7 +478,7 @@ class TestBaseFormOnValid:
 
             class Meta:
                 model = mock_model
-                fields = ["name"]  # noqa: RUF012
+                fields = ("name",)
 
         instance = MagicMock()
         instance._meta = MagicMock()

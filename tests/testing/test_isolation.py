@@ -7,9 +7,8 @@ from next.forms import (
     ActionRegistration,
     RegistryFormActionBackend,
 )
-from next.forms.autodiscover import _discovered
+from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
-from next.forms.registration import registration_diagnostics
 from next.pages.manager import page
 from next.testing import (
     reset_components,
@@ -130,7 +129,6 @@ class TestResetFormRegistrationState:
         )
         registration_diagnostics.outside_base_dir.append(("Probe", "/x/forms.py"))
         registration_diagnostics.action_applied_to_class.append("Probe")
-        _discovered.add("probe.forms")
 
         reset_form_registration_state()
 
@@ -138,7 +136,6 @@ class TestResetFormRegistrationState:
         assert backend._name_index == {}
         assert registration_diagnostics.outside_base_dir == []
         assert registration_diagnostics.action_applied_to_class == []
-        assert _discovered == set()
 
 
 class TestResetPageCache:

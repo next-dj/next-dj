@@ -13,8 +13,8 @@ from .backends import (
     build_action_guard,
 )
 from .base import Form, _compute_scope, _is_self_registered
+from .diagnostics import registration_diagnostics
 from .manager import form_action_manager
-from .registration import registration_diagnostics
 
 
 _VALID_SCOPES = ("page", "shared")

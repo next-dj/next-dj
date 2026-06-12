@@ -313,6 +313,7 @@ class TestActionRegisteredWiring:
         assert event["sender"] is RegistryFormActionBackend
         assert "uid" in event
         assert event["form_class"] is None
+        assert event["wizard_class"] is None
         assert "namespace" not in event
         assert event["file_path"] == _FAKE_FILE
         assert event["scope"] == "shared"
@@ -341,6 +342,30 @@ class TestActionRegisteredWiring:
         ]
         assert len(events) == 1
         assert events[0]["form_class"] is MySignalForm
+        assert events[0]["wizard_class"] is None
+
+    def test_fires_with_wizard_class(
+        self, capture_action_registered: list[dict[str, Any]]
+    ) -> None:
+        """Registering a wizard action fires the signal with wizard_class set."""
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="wizard_signal_test",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                wizard_class=SignalWizard,
+            )
+        )
+        events = [
+            e
+            for e in capture_action_registered
+            if e.get("action_name") == "wizard_signal_test"
+        ]
+        assert len(events) == 1
+        assert events[0]["wizard_class"] is SignalWizard
+        assert events[0]["form_class"] is None
+        assert events[0]["handler"] is None
 
 
 @pytest.mark.django_db()
