@@ -2,8 +2,7 @@ from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 from wiki.models import RESERVED_SLUGS, Article
 
-from next.forms import Form
-from next.forms.widgets import ComponentWidget
+from next.forms import ComponentWidget, Form
 from next.pages import context
 
 

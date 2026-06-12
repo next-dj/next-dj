@@ -4,8 +4,7 @@ from access.models import AccessRequest
 from django import forms
 from django.http import HttpRequest, HttpResponseRedirect
 
-from next.forms import FormWizard
-from next.forms.widgets import ComponentWidget
+from next.forms import ComponentWidget, FormWizard
 
 
 class IdentityStep(forms.ModelForm):

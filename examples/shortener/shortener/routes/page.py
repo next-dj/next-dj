@@ -1,12 +1,12 @@
 import secrets
 
 from django import forms
+from django.contrib.messages import get_messages
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponseRedirect
 from shortener.models import Link
 
-from next.forms import Form
-from next.forms.widgets import ComponentWidget
+from next.forms import ComponentWidget, Form
 from next.pages import context
 
 
@@ -26,10 +26,14 @@ class CreateLinkForm(Form):
         ),
     )
 
+    class Meta:
+        success_url = "/"
+        success_message = "Short link created for %(url)s."
+
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
-        """Create a shortened link and redirect home."""
+        """Create a shortened link, then follow the declared success contract."""
         _create_link_with_unique_slug(self.cleaned_data["url"])
-        return HttpResponseRedirect("/")
+        return super().on_valid(request)
 
 
 def _random_slug(length: int) -> str:
@@ -54,3 +58,9 @@ def _create_link_with_unique_slug(url: str, length: int = 6) -> Link:
 @context("recent_links")
 def recent_links() -> list[Link]:
     return list(Link.objects.all()[:5])
+
+
+@context("flash_messages")
+def flash_messages(request: HttpRequest) -> list[str]:
+    """Drain the pending Meta.success_message flashes for the page banner."""
+    return [str(m) for m in get_messages(request)]

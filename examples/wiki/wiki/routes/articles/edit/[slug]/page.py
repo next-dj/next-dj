@@ -5,8 +5,7 @@ from django.http import HttpRequest, HttpResponseRedirect
 from wiki.models import RESERVED_SLUGS, Article
 from wiki.providers import DArticle
 
-from next.forms import ModelForm
-from next.forms.widgets import ComponentWidget
+from next.forms import ComponentWidget, ModelForm
 from next.pages import context
 
 

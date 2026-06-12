@@ -7,8 +7,7 @@ from notes.access import get_active_tenant
 from notes.models import Note
 from notes.providers import DTenant
 
-from next.forms import ModelForm
-from next.forms.widgets import ComponentWidget
+from next.forms import ComponentWidget, ModelForm
 from next.pages import context
 
 

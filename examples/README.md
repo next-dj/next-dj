@@ -16,7 +16,7 @@ Each example is a complete mini-product with e2e tests and a dedicated README.
 
 | Folder | Focus |
 |--------|-------|
-| [`shortener/`](shortener/) | File router + DI providers + LocMemCache + management command |
+| [`shortener/`](shortener/) | File router + DI providers + LocMemCache + management command + declarative `Meta.success_url` / `Meta.success_message` form contract |
 | [`markdown-blog/`](markdown-blog/) | Markdown posts, nested layouts, `@context(serialize=True)`, context processor, co-located `component.js` |
 | [`feature-flags/`](feature-flags/) | Composite `feature_guard`, signal receivers, cache invalidation |
 | [`audit-forms/`](audit-forms/) | Custom `FormActionBackend`, `action_dispatched` and `form_validation_failed` signals, dual audit channels |
@@ -26,7 +26,7 @@ Each example is a complete mini-product with e2e tests and a dedicated README.
 | [`kanban/`](kanban/) | Custom `StaticBackend` that registers a `.jsx` kind through the public `KindRegistry`, multi-level `@context(serialize=True)` with `DeepMergePolicy`, `HashContentDedup` on co-located CSS, composite components with React JSX |
 | [`live-polls/`](live-polls/) | Server-Sent Events stream from a `threading.Condition` broker with per-poll monotonic revisions, signal-driven fan-out using the bound form on `action_dispatched`, locally bundled Vue 3 SFC subscribing through `EventSource`, custom `.vue` asset kind, three-level nested layouts with `inherit_context=True` |
 | [`observability/`](observability/) | Every signal group wired through one receiver each, custom `ComponentsBackend` and `DedupStrategy`, `JsContextSerializer` swapped both globally and per-decorator on `live_stats`, React sparkline via CDN-loaded Babel-standalone, nested layout with filter form action |
-| [`admin/`](admin/) | Full Django admin UI on next.dj: shadcn-style templates over `ModelAdmin.get_changelist_instance()`/`get_form()`/`get_inline_instances()`/`get_actions()`, request-aware form factories via `@action(form_class=callable)`, two page roots (admin shell + auth shell), middleware guard for `/admin/`, LogEntry history |
+| [`admin/`](admin/) | Full Django admin UI on next.dj: shadcn-style templates over `ModelAdmin.get_changelist_instance()`/`get_form()`/`get_inline_instances()`/`get_actions()`, request-aware form factories via `@action(form_class=callable)`, declarative `login_required=True` guards plus `ModelAdmin` permission checks on every mutating action, `{% action_url %}` in a hand-crafted form, two page roots (admin shell + auth shell), middleware guard for `/admin/` pages, LogEntry history |
 
 ## Running any example
 
@@ -45,4 +45,4 @@ Tailwind is loaded via the Play CDN (`https://cdn.tailwindcss.com`) from the roo
 * One project-level page root listed in `PAGE_BACKENDS["DIRS"]` (e.g. `host/`, `frame/`, `shell/`, `studio/`). The file router walks it alongside the per-app `PAGES_DIR`, and its `layout.djx` becomes the outermost wrapper around every page. The [`multi-tenant`](multi-tenant/) example goes one step further and also drops project-shared components inside this root (`root_blocks/header`, `root_blocks/footer`). The [`markdown-blog`](markdown-blog/) example shows the same trick with a `site/_parts/site_footer` registered through `COMPONENT_BACKENDS["DIRS"]`.
 * Co-located CSS/JS next to the `page.py`, `component.py`, or `layout.djx` they belong to. The `{% collect_styles %}` / `{% collect_scripts %}` tags place them in the rendered HTML, with deduplication.
 * E2E tests driven by `next.testing`: `eager_load_pages`, `reset_registries`, `NextClient`.
-* Forms return `HttpResponseRedirect` on success.
+* Forms redirect on success — either declaratively through `Meta.success_url` (plus an optional `Meta.success_message` flash, see [`shortener`](shortener/)) or by returning `HttpResponseRedirect` from `on_valid` when the target depends on the submission. The [`admin`](admin/) example shows the access side of the same surface: declarative `login_required=True` guards on every mutating action.

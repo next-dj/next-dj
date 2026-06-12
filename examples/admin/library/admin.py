@@ -38,7 +38,10 @@ class BookAdmin(admin.ModelAdmin):
     date_hierarchy = "published_at"
     actions: ClassVar = ["mark_as_published"]
 
-    @admin.action(description="Mark selected %(verbose_name_plural)s as published")
+    @admin.action(
+        description="Mark selected %(verbose_name_plural)s as published",
+        permissions=["change"],
+    )
     def mark_as_published(
         self,
         request: HttpRequest,

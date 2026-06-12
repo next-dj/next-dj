@@ -4,8 +4,7 @@ from django.urls import reverse
 from notes.models import Note
 from notes.providers import DTenant
 
-from next.forms import Form
-from next.forms.widgets import ComponentWidget
+from next.forms import ComponentWidget, Form
 from next.pages import context
 
 

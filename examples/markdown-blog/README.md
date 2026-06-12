@@ -367,5 +367,5 @@ sanitising — this example trusts the files on disk.
   `@context(serialize=True)` values reach `window.Next.context`.
 - [next/components/context.py](../../next/components/context.py) —
   `@component.context` and prop/parent flattening rules.
-- [docs/content/guide/pages-and-templates.rst](../../docs/content/guide/pages-and-templates.rst)
-  — "Custom template formats" section with a more detailed loader walkthrough.
+- [docs/content/topics/pages.rst](../../docs/content/topics/pages.rst)
+  — "Custom Template Loaders" section with a more detailed loader walkthrough.

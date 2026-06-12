@@ -205,6 +205,11 @@ class TestJsxAssetPipeline:
 class TestFilterFormDispatch:
     """Submitting the filter form fires `action_dispatched` and redirects."""
 
+    def test_select_renders_with_seeded_window(self, client) -> None:
+        body = client.get("/stats/?window=1h").content.decode()
+        assert '<select name="window"' in body
+        assert 'value="1h" selected' in body
+
     def test_post_redirects_with_window_querystring(self, client) -> None:
         with SignalRecorder(action_dispatched) as recorder:
             response = client.post_action("window_filter_form", {"window": "1m"})

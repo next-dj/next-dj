@@ -96,7 +96,7 @@ NEXT_FRAMEWORK = {
 ```
 
 The framework loads each entry lazily on first access via
-`next.forms.FormActionFactory`. `AuditedFormActionBackend` subclasses
+`next.forms.backends.FormActionFactory`. `AuditedFormActionBackend` subclasses
 `RegistryFormActionBackend`, so all `@action` registrations are still
 honoured — the override only wraps `dispatch` to add the audit rows.
 
@@ -264,5 +264,5 @@ want decoupling and minimal coupling to the backend implementation.
   (wrong backend type).
 - [`next/testing/signals.py`](../../next/testing/signals.py) —
   `SignalRecorder` and `capture_signals` helpers used in the tests.
-- [`docs/content/guide/testing.rst`](../../docs/content/guide/testing.rst)
+- [`docs/content/topics/testing.rst`](../../docs/content/topics/testing.rst)
   — canonical conftest scaffold mirrored in this example.

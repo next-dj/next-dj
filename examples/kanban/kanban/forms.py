@@ -1,5 +1,6 @@
 from typing import ClassVar
 
+from django import forms as django_forms
 from django.db import transaction
 from django.http import (
     HttpRequest,
@@ -10,25 +11,17 @@ from django.http import (
 
 from kanban.models import Board, Card, Column
 from kanban.providers import DBoard
-from next.forms import (
-    CharField,
-    ComponentWidget,
-    Form,
-    HiddenInput,
-    IntegerField,
-    ModelForm,
-    ValidationError,
-)
+from next.forms import ComponentWidget, Form, ModelForm
 
 
 class MoveCardForm(Form):
     """Move a card to a target column at a chosen position."""
 
-    card_id = IntegerField(widget=HiddenInput)
-    target_column_id = IntegerField(widget=HiddenInput)
-    target_position = IntegerField(
+    card_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
+    target_column_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
+    target_position = django_forms.IntegerField(
         min_value=0,
-        widget=HiddenInput,
+        widget=django_forms.HiddenInput,
     )
 
     def clean(self) -> dict[str, object]:
@@ -43,10 +36,10 @@ class MoveCardForm(Form):
             column = Column.objects.select_related("board").get(pk=target_column_id)
         except (Card.DoesNotExist, Column.DoesNotExist) as exc:
             msg = "Unknown card or target column."
-            raise ValidationError(msg) from exc
+            raise django_forms.ValidationError(msg) from exc
         if card.column.board_id != column.board_id:
             msg = "Cards cannot move across boards."
-            raise ValidationError(msg)
+            raise django_forms.ValidationError(msg)
         cleaned["_card"] = card
         cleaned["_target_column"] = column
         return cleaned
@@ -84,12 +77,12 @@ class MoveCardForm(Form):
 class CreateCardForm(Form):
     """Create a card at the tail of a column subject to its WIP limit."""
 
-    column_id = IntegerField(widget=HiddenInput)
-    title = CharField(
+    column_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
+    title = django_forms.CharField(
         max_length=200,
         widget=ComponentWidget("input"),
     )
-    body = CharField(
+    body = django_forms.CharField(
         required=False,
         widget=ComponentWidget("textarea", rows=4),
     )
@@ -108,10 +101,10 @@ class CreateCardForm(Form):
             column = Column.objects.get(pk=column_id)
         except Column.DoesNotExist as exc:
             msg = "Unknown column."
-            raise ValidationError(msg) from exc
+            raise django_forms.ValidationError(msg) from exc
         if column.wip_limit is not None and column.cards.count() >= column.wip_limit:
             msg = "Column has reached its WIP limit."
-            raise ValidationError(msg)
+            raise django_forms.ValidationError(msg)
         cleaned["_column"] = column
         return cleaned
 
@@ -138,12 +131,12 @@ class CreateColumnForm(Form):
     # This form creates a new column under a board rather than editing an
     # existing instance, so it carries the parent board_id as a hidden field
     # instead of resolving one row through instance_from_url.
-    board_id = IntegerField(widget=HiddenInput)
-    title = CharField(
+    board_id = django_forms.IntegerField(widget=django_forms.HiddenInput)
+    title = django_forms.CharField(
         max_length=120,
         widget=ComponentWidget("input"),
     )
-    wip_limit = IntegerField(
+    wip_limit = django_forms.IntegerField(
         required=False,
         min_value=1,
         widget=ComponentWidget("input", type="number"),

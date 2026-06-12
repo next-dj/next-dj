@@ -91,9 +91,16 @@ class TestAuth:
     def test_logout_clears_session(self, admin_client):
         r = admin_client.post_action("admin:logout", {})
         assert r.status_code == 302
+        assert r["Location"] == "/admin/logout/"
         r2 = admin_client.get("/admin/")
         assert r2.status_code == 302
         assert r2["Location"].startswith("/admin/login/")
+
+    def test_logout_lands_on_farewell_page(self, admin_client):
+        r = admin_client.post_action("admin:logout", {}, follow=True)
+        body = r.content.decode()
+        assert "You have been signed out." in body
+        assert "Sign in again" in body
 
     def test_bad_credentials_renders_form_error(self, client, admin_user):
         rendered = _extract_form_inputs(client.get("/admin/login/").content.decode())
@@ -104,6 +111,88 @@ class TestAuth:
         assert r.status_code == 200
         body = r.content.decode()
         assert "Please enter a correct" in body or "correct username" in body
+
+
+class TestActionGuards:
+    """Mutating actions reject anonymous POSTs and unauthorized users."""
+
+    def test_anonymous_add_post_redirects_to_login(self, client):
+        r = client.post_action(
+            "admin:add",
+            {"name": "Sneaky", "slug": "sneaky"},
+            origin="/admin/library/tag/add/",
+        )
+        assert r.status_code == 302
+        assert r["Location"].startswith("/admin/login/")
+        assert not Tag.objects.exists()
+
+    def test_anonymous_change_post_redirects_to_login(self, client):
+        tag = Tag.objects.create(name="Old", slug="old")
+        r = client.post_action(
+            "admin:change",
+            {"name": "Hacked", "slug": "hacked"},
+            origin=f"/admin/library/tag/{tag.pk}/change/",
+        )
+        assert r.status_code == 302
+        assert r["Location"].startswith("/admin/login/")
+        tag.refresh_from_db()
+        assert tag.name == "Old"
+
+    def test_anonymous_delete_post_redirects_to_login(self, client):
+        tag = Tag.objects.create(name="Keep", slug="keep")
+        r = client.post_action(
+            "admin:delete",
+            origin=f"/admin/library/tag/{tag.pk}/delete/",
+        )
+        assert r.status_code == 302
+        assert r["Location"].startswith("/admin/login/")
+        assert Tag.objects.filter(pk=tag.pk).exists()
+
+    def test_anonymous_bulk_action_post_redirects_to_login(self, client):
+        author = Author.objects.create(full_name="A")
+        book = Book.objects.create(title="B", author=author, status=Book.DRAFT)
+        r = client.post_action(
+            "admin:bulk_action",
+            {"action": "mark_as_published", "_selected_action": [str(book.pk)]},
+            origin="/admin/library/book/",
+        )
+        assert r.status_code == 302
+        assert r["Location"].startswith("/admin/login/")
+        book.refresh_from_db()
+        assert book.status == Book.DRAFT
+
+    def test_non_staff_add_post_is_forbidden(self, client, django_user_model):
+        client.force_login(django_user_model.objects.create_user("intruder"))
+        r = client.post_action(
+            "admin:add",
+            {"name": "Sneaky", "slug": "sneaky"},
+            origin="/admin/library/tag/add/",
+        )
+        assert r.status_code == 403
+        assert not Tag.objects.exists()
+
+    def test_non_staff_delete_post_is_forbidden(self, client, django_user_model):
+        client.force_login(django_user_model.objects.create_user("intruder"))
+        tag = Tag.objects.create(name="Keep", slug="keep")
+        r = client.post_action(
+            "admin:delete",
+            origin=f"/admin/library/tag/{tag.pk}/delete/",
+        )
+        assert r.status_code == 403
+        assert Tag.objects.filter(pk=tag.pk).exists()
+
+    def test_non_staff_bulk_action_post_is_forbidden(self, client, django_user_model):
+        client.force_login(django_user_model.objects.create_user("intruder"))
+        author = Author.objects.create(full_name="A")
+        book = Book.objects.create(title="B", author=author, status=Book.DRAFT)
+        r = client.post_action(
+            "admin:bulk_action",
+            {"action": "mark_as_published", "_selected_action": [str(book.pk)]},
+            origin="/admin/library/book/",
+        )
+        assert r.status_code == 403
+        book.refresh_from_db()
+        assert book.status == Book.DRAFT
 
 
 class TestChangelist:

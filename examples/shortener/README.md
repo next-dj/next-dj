@@ -121,18 +121,22 @@ Declared once in [`admin/page.py`](shortener/routes/admin/page.py), available in
 
 ### 5. Forms — class-bound `Form` + `{% form %}`
 
-[`routes/page.py`](shortener/routes/page.py) declares the form class. A `next.forms.Form` subclass registers itself by file path through `__init_subclass__`, so its auto-name is `create_link_form` (snake_case of the class). The submit logic lives in `on_valid`, no separate handler:
+[`routes/page.py`](shortener/routes/page.py) declares the form class. A `next.forms.Form` subclass registers itself by file path through `__init_subclass__`, so its auto-name is `create_link_form` (snake_case of the class). The submit logic lives in `on_valid`, no separate handler. The redirect target and the flash message are declared on `Meta`:
 
 ```python
 class CreateLinkForm(Form):
     url = forms.URLField(max_length=2000, assume_scheme="https")
 
+    class Meta:
+        success_url = "/"
+        success_message = "Short link created for %(url)s."
+
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
         _create_link_with_unique_slug(self.cleaned_data["url"])
-        return HttpResponseRedirect("/")
+        return super().on_valid(request)
 ```
 
-`on_valid` receives only the parameters it declares — the DI resolver fills what the signature asks for. In the real `page.py` the `url` field uses a `ComponentWidget("input", type="url", ...)`, so `{{ form.url }}` renders through the next `input` component rather than Django's default widget.
+`on_valid` receives only the parameters it declares — the DI resolver fills what the signature asks for. Delegating to `super().on_valid(request)` follows `Meta.success_url`, and the dispatcher flashes `Meta.success_message` (interpolated over `cleaned_data` with `%` formatting) through `django.contrib.messages`. The home page drains the queue in a `flash_messages` context callable and renders each entry through the shared `alert` component. In the real `page.py` the `url` field uses a `ComponentWidget("input", type="url", ...)`, so `{{ form.url }}` renders through the next `input` component rather than Django's default widget.
 
 [`routes/template.djx`](shortener/routes/template.djx) renders the form by its auto-name:
 

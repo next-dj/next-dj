@@ -5,7 +5,7 @@ from django import forms as django_forms
 from django.contrib import messages
 from django.contrib.admin.options import ModelAdmin
 from django.contrib.auth import logout
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Model
 from django.forms.models import BaseInlineFormSet
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
@@ -202,26 +202,30 @@ def _redirect_after_save(spec: AdminFormSpec, obj: Model) -> HttpResponseRedirec
     return HttpResponseRedirect(spec.changelist_url)
 
 
-@action("admin:add", form_class=admin_add_form_factory)
+@action("admin:add", form_class=admin_add_form_factory, login_required=True)
 def handle_add(
     form: django_forms.ModelForm,
     spec: AdminFormSpec = Depends("admin_spec"),
 ) -> HttpResponse:
     """Save a new object and its inline formsets, then redirect."""
+    if not spec.model_admin.has_add_permission(spec.request):
+        raise PermissionDenied
     return _persist(form, spec, change=False)
 
 
-@action("admin:change", form_class=admin_change_form_factory)
+@action("admin:change", form_class=admin_change_form_factory, login_required=True)
 def handle_change(
     form: django_forms.ModelForm,
     spec: AdminFormSpec = Depends("admin_spec"),
 ) -> HttpResponse:
     """Persist main form and inline formsets via `ModelAdmin.save_model`."""
+    if not spec.model_admin.has_change_permission(spec.request, spec.instance):
+        raise PermissionDenied
     return _persist(form, spec, change=True)
 
 
 @action("admin:logout")
 def admin_logout(request: HttpRequest) -> HttpResponse:
-    """Log the user out and redirect to the login page."""
+    """Log the user out and land on the signed-out page."""
     logout(request)
-    return HttpResponseRedirect(utils.login_url())
+    return HttpResponseRedirect(utils.logout_url())

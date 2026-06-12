@@ -8,6 +8,7 @@ from django.contrib.admin.utils import (
     lookup_field,
 )
 from django.contrib.admin.views.main import ChangeList
+from django.core.exceptions import PermissionDenied
 from django.db.models import Field, Model
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.safestring import SafeString, mark_safe
@@ -171,7 +172,7 @@ def changelist_state(
     }
 
 
-@action("admin:bulk_action")
+@action("admin:bulk_action", login_required=True)
 def bulk_action(
     request: HttpRequest,
     app_label: str,
@@ -179,6 +180,8 @@ def bulk_action(
 ) -> HttpResponse:
     """Run a Django admin bulk action and redirect to the origin changelist."""
     _, model_admin = utils.resolve_model_admin(app_label, model_name)
+    if not model_admin.has_view_or_change_permission(request):
+        raise PermissionDenied
     response = model_admin.response_action(
         request,
         queryset=model_admin.get_queryset(request),

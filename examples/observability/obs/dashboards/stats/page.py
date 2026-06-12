@@ -2,13 +2,13 @@ from typing import Any
 
 from django.http import HttpRequest
 from obs import metrics
+from obs.forms import DEFAULT_WINDOW
 from obs.serializers import WrappedJsContextSerializer
 
 from next.pages import context
 
 
 WINDOW_TO_MINUTES = {"1m": 1, "5m": 5, "1h": 60}
-DEFAULT_WINDOW = "5m"
 
 
 def _minutes_for(window: str) -> int:

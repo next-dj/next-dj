@@ -9,7 +9,7 @@ from shadcn_admin import utils
 from next.pages import context
 
 
-_AUTH_PREFIXES = (utils.LOGIN_URL, "/admin/logout/")
+_AUTH_PREFIXES = (utils.LOGIN_URL, utils.LOGOUT_URL)
 
 
 @context("app_list", inherit_context=True)

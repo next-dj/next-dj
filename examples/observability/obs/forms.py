@@ -9,6 +9,7 @@ WINDOW_CHOICES = (
     ("5m", "Last 5 minutes"),
     ("1h", "Last hour"),
 )
+DEFAULT_WINDOW = "5m"
 
 
 class WindowFilterForm(Form):
@@ -25,6 +26,11 @@ class WindowFilterForm(Form):
             },
         ),
     )
+
+    @classmethod
+    def get_initial(cls, request: HttpRequest) -> dict[str, str]:
+        """Seed the select with the window the dashboard currently shows."""
+        return {"window": request.GET.get("window", DEFAULT_WINDOW)}
 
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
         """Persist the picked window via the querystring and redirect back."""

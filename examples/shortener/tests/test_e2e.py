@@ -21,6 +21,15 @@ class TestShorten:
         assert response["Location"] == "/"
         assert Link.objects.count() == 1
 
+    def test_success_message_flashes_on_home(self, client) -> None:
+        response = client.post_action(
+            "create_link_form",
+            {"url": "https://example.com/a"},
+            follow=True,
+        )
+        body = response.content.decode()
+        assert "Short link created for https://example.com/a." in body
+
     def test_invalid_url_renders_form_with_errors(self, client) -> None:
         response = client.post_action(
             "create_link_form",

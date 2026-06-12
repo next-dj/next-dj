@@ -3,6 +3,10 @@
       title="Shrink a link"
       description="Paste a URL, get a short slug, and every visit to /s/<slug>/ is counted in LocMemCache. Run `manage.py flush_clicks` to persist the counters." %}
 
+  {% for message in flash_messages %}
+    {% component "alert" variant="success" text=message %}
+  {% endfor %}
+
   <div class="rounded-lg border border-border bg-card p-4 shadow-sm">
   {% form "create_link_form" %}
     <div class="space-y-3">

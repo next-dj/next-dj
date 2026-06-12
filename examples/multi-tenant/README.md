@@ -143,7 +143,7 @@ backends pick them up through the `DIRS` setting:
 ```
 
 This is the canonical way to share chrome across multiple Django apps. See
-[`docs/content/guide/project-layout.rst`](../../docs/content/guide/project-layout.rst)
+[`docs/content/topics/project-layout.rst`](../../docs/content/topics/project-layout.rst)
 for the broader pattern.
 
 ### 4. Inherit context for the active tenant
@@ -164,16 +164,18 @@ def recent_notes(active_tenant: DTenant) -> list[Note]:
 
 Every descendant page (`/notes/`, `/notes/<id>/edit/`) sees `tenant` in its
 template context. The `notes/template.djx` and the `note_card` component
-read it without re-resolving the tenant, and the URL kwargs handler in
-`note_edit` form action gets it as a typed parameter through DI.
+read it without re-resolving the tenant, and `NoteCreateForm.on_valid` in
+[`notes/new/page.py`](notes/workspaces/notes/new/page.py) receives it as a
+typed `active_tenant: DTenant` parameter through DI.
 
 ### 5. The note edit form with a composite preview
 
 [`notes/workspaces/notes/[int:id]/edit/page.py`](notes/workspaces/notes/[int:id]/edit/page.py)
 defines `NoteEditForm`, a `ModelForm` whose `Meta.fields` lists only
 `title` and `body`. There is no `note_id` field. The form binds to an
-instance through `get_initial`, which reads the URL kwarg `id` and routes
-the lookup through `get_object_or_404(Note, pk=id, tenant=active_tenant)`,
+instance through `get_initial`, which reads the URL kwarg `id`, derives the
+tenant from the request via `get_active_tenant(request)`, and routes the
+lookup through `get_object_or_404(Note, pk=id, tenant=tenant)`,
 so a tenant requesting another tenant's note id receives a `404`. On a
 valid submission `on_valid` calls `self.save()` and redirects back to the
 editor.
@@ -197,7 +199,7 @@ The composite imports the `markdown` package and renders the body through
   `RegisteredParameterProvider` ABC used by `TenantProvider`.
 - [`next/pages/registry.py`](../../next/pages/registry.py) — the
   `inherit_context` walk that lifts `tenant` to every descendant page.
-- [`docs/content/guide/static-assets.rst`](../../docs/content/guide/static-assets.rst#request-aware-backends)
-  — the request-aware backend section that this example anchors.
-- [`docs/content/guide/dependency-injection.rst`](../../docs/content/guide/dependency-injection.rst)
+- [`docs/content/topics/static-assets/backends.rst`](../../docs/content/topics/static-assets/backends.rst)
+  — the request-aware output section that this example anchors.
+- [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst)
   — the request-scoped provider pattern.

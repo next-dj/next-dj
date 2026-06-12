@@ -88,7 +88,7 @@ obs/
     │   ├── stat_card/        <- card composite reused on every page
     │   ├── counter_list/     <- list/table widget shared by every stats subpage
     │   ├── stats_nav/        <- nav tabs rendered from a Python list
-    │   ├── filter_window/    <- form composite
+    │   ├── filter_window/    <- window filter form (template-only component)
     │   ├── render_chart/     <- Chart.js bar chart, scripts=[chart.js cdn]
     │   └── sparkline/        <- React + JSX sparkline, scripts=[react, babel cdn]
     └── stats/
@@ -251,11 +251,15 @@ window narrows the aggregation in real time. The four cumulative
 sub-pages (`/stats/pages/`, `/stats/components/`, `/stats/forms/`,
 `/stats/static/`) keep using `read_kind` for the lifetime totals.
 
-The form composite lives under
+The form component lives under
 [`_widgets/filter_window/`](obs/dashboards/_widgets/filter_window/).
 It uses `{% form "window_filter_form" %}` so submission goes through
 the framework dispatcher and `forms.action_dispatched` fires end to
-end, not only in tests.
+end, not only in tests. Inside the block the template renders the
+bound field as `{{ form.window }}` — the styled `Select` widget
+declared on the form — and `WindowFilterForm.get_initial(request)`
+seeds it with the window currently on the query string, so the select
+always shows the active choice.
 
 ### 7. The flush command
 

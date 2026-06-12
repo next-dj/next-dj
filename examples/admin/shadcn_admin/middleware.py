@@ -7,9 +7,12 @@ from shadcn_admin import utils
 
 
 # Literal path prefixes for `startswith` checks. `_next` is the URL
-# segment under which next.dj mounts its form-action endpoints, and
-# `/static/` covers asset URLs that should never bounce to the login.
-_EXEMPT_PREFIXES = (utils.LOGIN_URL, "/admin/_next/", "/static/")
+# segment under which next.dj mounts its form-action endpoints — the
+# mutating actions behind it carry their own declarative guards plus
+# in-handler `ModelAdmin` permission checks. The logout farewell page
+# renders for the (just signed out) anonymous user, and `/static/`
+# covers asset URLs that should never bounce to the login.
+_EXEMPT_PREFIXES = (utils.LOGIN_URL, utils.LOGOUT_URL, "/admin/_next/", "/static/")
 
 
 class AdminPermissionMiddleware:
