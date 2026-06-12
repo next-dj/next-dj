@@ -44,7 +44,7 @@ The override calls ``super().dispatch`` to run the standard validation and handl
 The ``self._uid_to_name`` mapping is a private UID index.
 It maps each UID to a ``(scope_key, name)`` tuple.
 Unpack the tuple to extract the bare action name.
-An unknown UID returns 404 from the parent dispatch, so the override skips it.
+An unknown UID raises ``Http404`` from the parent dispatch, so the override skips the audit row for it.
 
 Register the backend.
 
@@ -131,6 +131,8 @@ Override ``shape_response`` to change the envelope without touching the HTML, fo
            return response
 
 ``outcome.kind`` discriminates the pipeline outcomes, so the handler-result and wizard-advance envelopes stay default.
+``ActionOutcomeKind.INVALID`` only ever represents a failed validation.
+A valid submission whose handler returns ``None`` leaves the pipeline as a ``RESULT`` outcome whose default envelope re-renders the origin without re-entering ``shape_response``, so the 422 override never touches successful submissions.
 Override ``render_invalid_page`` instead when only the error HTML changes and the envelope stays as shipped.
 See :doc:`/content/topics/forms/backends` for the two customisation layers and the ``ActionOutcome`` fields.
 

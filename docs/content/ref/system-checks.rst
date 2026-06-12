@@ -223,6 +223,9 @@ Errors
    * - ``next.E045``
      - A form action backend class does not subclass ``FormActionBackend``.
      - ``next.forms.checks``
+   * - ``next.E046``
+     - One shared action name is declared in two different modules, so bare-name lookups resolve to whichever module imported first. Rename one class or set ``Meta.scope``.
+     - ``next.forms.checks``
    * - ``next.E047``
      - A form class ``Meta.scope`` or an ``@action`` ``scope`` keyword is set to a value other than ``"page"`` or ``"shared"``.
      - ``next.forms.checks``
@@ -239,10 +242,13 @@ Errors
      - ``FORM_WIZARD_BACKEND`` is malformed, non-importable, or names a class that does not subclass ``FormWizardBackend``.
      - ``next.forms.checks``
    * - ``next.E052``
-     - ``FORM_ANCHOR_FILES`` is not None or a list, tuple, or set of strings.
+     - ``FORM_ANCHOR_FILES`` is not None or a list of strings.
      - ``next.forms.checks``
    * - ``next.E053``
      - ``@action`` was applied to a class instead of a function.
+     - ``next.forms.checks``
+   * - ``next.E054``
+     - A page-scoped ``FormWizard`` is declared on a page whose route lacks the ``[url_param]`` segment, so the wizard can never advance past its first step.
      - ``next.forms.checks``
 
 A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.

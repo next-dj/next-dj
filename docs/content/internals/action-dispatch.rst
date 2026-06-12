@@ -32,6 +32,7 @@ Pipeline
        Guard -- "missing permission" --> Forbidden["HTTP 403"]
        Guard -- "pass, no form_class" --> HandlerOnly["Run handler only"]
        Guard -- "pass, form_class" --> Build["Build form"]
+       Guard -- "pass, wizard_class" --> WizardStep["Validate current wizard step"]
        HandlerOnly --> HandlerOnlyResponse["Handler response or HTTP 204"]
        HandlerOnly --> ActionDispatched["action_dispatched signal"]
        Build --> Validate{"Form valid"}
@@ -44,6 +45,17 @@ Pipeline
        ShareCache --> RenderOrigin["Render origin page"]
        RenderOrigin --> RerenderHTML["HTTP 200 with bound form"]
        Validate -- no --> FormFailed["form_validation_failed signal"]
+       WizardStep -- invalid --> Origin
+       WizardStep -- invalid --> FormFailed
+       WizardStep -- valid --> SaveStep["Save step draft"]
+       SaveStep --> StepSubmitted["wizard_step_submitted signal"]
+       SaveStep --> StepsLeft{"Steps remaining"}
+       StepsLeft -- yes --> Advance["HTTP 302 to next step"]
+       StepsLeft -- no --> Done["Run done with merged data"]
+       Done -- "status < 400" --> Completed["Clear drafts, wizard_completed signal"]
+       Done -- "status >= 400" --> KeepDrafts["Drafts kept for retry"]
+       Advance --> ActionDispatched
+       Done --> ActionDispatched
 
 Modules
 -------
@@ -62,13 +74,25 @@ Modules
    Manages the bound form, the dependency cache reuse, and the response selection.
 
 ``next.forms.backends``.
-   ``FormActionBackend`` abstract contract, ``RegistryFormActionBackend`` default implementation, and ``FormActionFactory``.
+   ``FormActionBackend`` abstract contract, ``RegistryFormActionBackend`` default implementation, ``FormActionFactory``, and the ``FormActionNotFound`` exception.
 
 ``next.forms.uid``.
-   ``redirect_to_origin`` and ``reverse_form_action`` helpers for the origin page round trip.
+   ``redirect_to_origin``, ``reverse_form_action``, and ``validated_origin_path`` helpers for the origin page round trip, plus the ``ORIGIN_FIELD_NAME`` wire constant.
+
+``next.forms.origin``.
+   Resolution of the posted origin path into the page module and the typed URL kwargs, memoised per request.
+
+``next.forms.wizard``.
+   ``FormWizard`` base class, the ``FormWizardBackend`` contract with the session and cache implementations, and the ``WizardBackendManager`` holder.
+
+``next.forms.widgets``.
+   ``ComponentWidget`` and the ``bind_component_widgets`` binder the ``{% form %}`` tag calls before rendering.
 
 ``next.forms.markers``.
-   ``DForm`` annotation and ``FormProvider`` class.
+   ``DForm`` annotation plus the ``FormProvider`` and ``CleanedDataProvider`` classes.
+
+``next.forms.diagnostics``.
+   ``RegistrationDiagnostics`` buffers that the registration paths fill and the system checks read.
 
 ``next.forms.serializers``.
    ``FormSpec``, ``FormsetSpec``, ``FormsetRowSpec``, ``FormSectionSpec``, ``FieldSpec`` plus the builders ``form_spec``, ``formset_spec``, ``field_spec``.
@@ -128,13 +152,17 @@ The page manager caches the composed template source and its compiled ``Template
 Signals
 -------
 
-One signal fires at import time, the other two fire per request.
+One signal fires at import time, the other four fire per request.
 
-- ``action_registered`` fires at import time, once per ``@action`` when the registry receives it.
-- ``form_validation_failed`` fires at request time, once per failing submission.
-- ``action_dispatched`` fires at request time, once per successful handler invocation, with the action name, the action uid, the live request, the bound form (``None`` for form-less actions), the URL kwargs, the handler duration, the response status, and the dispatch dependency cache in the payload.
+- ``action_registered`` fires at import time, once per registration when the registry stores the action target: a handler, a form class, or a wizard class.
+- ``form_validation_failed`` fires at request time, once per failing submission, including a failing wizard step.
+- ``action_dispatched`` fires at request time, once per successful handler invocation and once per valid wizard step, with the action name, the action uid, the live request, the bound form (``None`` for form-less actions), the URL kwargs, the handler duration, the response status, and the dispatch dependency cache in the payload.
+  A wizard step advance runs no handler and reports ``duration_ms`` as ``0.0``.
+- ``wizard_step_submitted`` fires at request time after a wizard step validates, with the wizard class as the sender and the step name plus a copy of its cleaned data in the payload.
+- ``wizard_completed`` fires at request time after the wizard ``done`` method returns a response below HTTP 400, with the wizard class as the sender and the merged cleaned data in the payload.
+  An error response from ``done`` skips the signal and keeps the saved drafts.
 
-Both request-time signals carry ``uid`` and ``request``.
+All four request-time signals carry ``uid`` and ``request``.
 ``uid`` is the registry identity also stamped on the ``data-next-action`` markup attribute, ``None`` for a backend whose meta stores no uid.
 ``request`` is the live ``HttpRequest`` and receivers must not retain it past the call.
 

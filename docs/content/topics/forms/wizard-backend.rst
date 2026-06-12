@@ -20,13 +20,13 @@ Each method receives the ``HttpRequest`` and the wizard storage id.
 The storage id is the ``snake_case`` of the wizard class name prefixed with a short hash of the declaring scope, the same page path or dotted module the registration uses, so equally named wizards in different apps never share a draft.
 Backends treat the id as an opaque string.
 
-``load(request, wizard_id) -> dict``.
+``load(request, storage_id) -> dict``.
    Returns the ``{step: cleaned_data}`` mapping for the wizard, in step order.
 
-``save_step(request, wizard_id, step, data)``.
+``save_step(request, storage_id, step, data)``.
    Persists the cleaned data for a single step.
 
-``clear(request, wizard_id)``.
+``clear(request, storage_id)``.
    Drops every stored step for the wizard.
 
 A backend subclasses ``FormWizardBackend`` and implements all three methods.
@@ -146,7 +146,7 @@ The framework default points at the session backend with empty options.
 
    NEXT_FRAMEWORK = {
        "FORM_WIZARD_BACKEND": {
-           "BACKEND": "next.forms.wizard.SessionFormWizardBackend",
+           "BACKEND": "next.forms.SessionFormWizardBackend",
            "OPTIONS": {},
        },
    }
@@ -159,7 +159,7 @@ Switch to the cache backend to point drafts at a dedicated cache alias and short
 
    NEXT_FRAMEWORK = {
        "FORM_WIZARD_BACKEND": {
-           "BACKEND": "next.forms.wizard.CacheFormWizardBackend",
+           "BACKEND": "next.forms.CacheFormWizardBackend",
            "OPTIONS": {"CACHE_ALIAS": "wizards", "TIMEOUT": 3600},
        },
    }
@@ -192,20 +192,20 @@ Point ``FORM_WIZARD_BACKEND["BACKEND"]`` at the class to use it.
            url = options.get("URL", "redis://localhost:6379/0")
            self._client = redis.Redis.from_url(url)
 
-       def _key(self, request: HttpRequest, wizard_id: str) -> str:
-           return f"next_wizard:{request.session.session_key}:{wizard_id}"
+       def _key(self, request: HttpRequest, storage_id: str) -> str:
+           return f"next_wizard:{request.session.session_key}:{storage_id}"
 
-       def load(self, request: HttpRequest, wizard_id: str) -> dict[str, Any]:
-           raw = self._client.hgetall(self._key(request, wizard_id))
+       def load(self, request: HttpRequest, storage_id: str) -> dict[str, Any]:
+           raw = self._client.hgetall(self._key(request, storage_id))
            return {step.decode(): json.loads(data) for step, data in raw.items()}
 
        def save_step(
-           self, request: HttpRequest, wizard_id: str, step: str, data: dict[str, Any]
+           self, request: HttpRequest, storage_id: str, step: str, data: dict[str, Any]
        ) -> None:
-           self._client.hset(self._key(request, wizard_id), step, json.dumps(data))
+           self._client.hset(self._key(request, storage_id), step, json.dumps(data))
 
-       def clear(self, request: HttpRequest, wizard_id: str) -> None:
-           self._client.delete(self._key(request, wizard_id))
+       def clear(self, request: HttpRequest, storage_id: str) -> None:
+           self._client.delete(self._key(request, storage_id))
 
 .. code-block:: python
    :caption: config/settings.py

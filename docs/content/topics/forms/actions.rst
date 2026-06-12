@@ -438,7 +438,8 @@ The forms subsystem contributes Django system checks that run through ``python m
    ``Meta.instance_from_url`` is set on a class that does not subclass ``next.forms.ModelForm``.
 
 ``next.E052``
-   ``FORM_ANCHOR_FILES`` is not None or a list, tuple, or set of strings.
+   ``FORM_ANCHOR_FILES`` is not None or a list of strings.
+   Only a list round-trips through the settings merge, so a tuple or set is rejected instead of silently falling back to the defaults.
 
 ``next.E053``
    ``@action`` was applied to a class.

@@ -40,13 +40,18 @@ Framework machinery.
    ``FormActionDispatch`` lives in ``next.forms.dispatch``.
    ``FormActionManager``, the ``form_action_manager`` instance, and
    ``build_form_namespace_for_action`` live in ``next.forms.manager``.
-   ``ActionMeta``, ``FormActionFactory``, and ``file_to_dotted_module`` live in
-   ``next.forms.backends``.
+   ``ActionMeta``, ``FormActionFactory``, ``file_to_dotted_module``, ``scope_key_for``,
+   ``build_action_guard``, and ``record_possible_collision`` live in ``next.forms.backends``.
    ``WizardBackendManager`` and the ``wizard_backend_manager`` instance live in
    ``next.forms.wizard``.
-   ``FormProvider`` lives in ``next.forms.markers``.
+   ``FormProvider`` and ``CleanedDataProvider`` live in ``next.forms.markers``.
+   ``bind_component_widgets`` lives in ``next.forms.widgets``.
+   ``render_form_page_with_errors`` lives in ``next.forms.rendering``.
+   ``RegistrationDiagnostics`` and the ``registration_diagnostics`` instance live in
+   ``next.forms.diagnostics``.
    The UID helpers ``FORM_ACTION_REVERSE_NAME``, ``URL_NAME_FORM_ACTION``,
-   ``reverse_form_action``, and ``validated_origin_path`` live in ``next.forms.uid``.
+   ``ORIGIN_FIELD_NAME``, ``reverse_form_action``, and ``validated_origin_path``
+   live in ``next.forms.uid``.
    The test isolation helper ``reset_form_registration_state`` belongs to ``next.testing``,
    documented under :doc:`/content/ref/testing`.
 
@@ -65,8 +70,8 @@ Autodiscover
 
 .. autofunction:: next.forms.autodiscover_forms
 
-The test isolation helper :func:`next.testing.reset_form_registration_state` clears the
-discovery memo together with the registries, see :doc:`/content/ref/testing`.
+The helper wraps Django's :func:`~django.utils.module_loading.autodiscover_modules`, so re-runs are no-ops while Python caches the imported modules.
+The test isolation helper :func:`next.testing.reset_form_registration_state` clears the registries and the registration diagnostics, see :doc:`/content/ref/testing`.
 
 Decorator
 ~~~~~~~~~
@@ -78,8 +83,9 @@ Exceptions
 
 ``FormActionNotFound`` is raised when no registered action matches a requested name.
 ``FormActionManager.get_action_url``, the ``{% form %}`` and ``{% action_url %}`` tags, and the testing helpers ``resolve_action_url`` and ``build_form_for`` all raise it.
-It subclasses ``LookupError`` and carries the failing ``name``, the ``page_path`` that was searched, and the close-match ``suggestions`` tuple.
+It subclasses ``LookupError`` and carries the failing ``name``, the ``page_path`` that was searched, the close-match ``suggestions`` tuple, and the ``registry_empty`` flag.
 Every raising surface renders the suggestions into the message as ``Closest matches: 'x', 'y'``, computed by close-match comparison against the registered names.
+When ``registry_empty`` is true the message also explains that no actions are registered at all and points at autodiscovery.
 
 .. autoexception:: next.forms.FormActionNotFound
    :members:
@@ -133,6 +139,11 @@ The framework re-exports a curated set of commonly used Django form fields and w
 The package surface is a superset of ``django.forms`` by construction: any public ``django.forms``
 name resolves through ``next.forms``, with the framework versions winning where next.dj overrides
 a name such as ``Form`` or ``ModelForm``, and every other name resolving to the Django original.
+The factories ``formset_factory``, ``modelformset_factory``, ``inlineformset_factory``, and
+``modelform_factory`` plus ``BoundField`` are re-exported statically so type checkers see them,
+the rest of the passthrough resolves at runtime through the module ``__getattr__``.
+The submodules ``next.forms.widgets`` and ``next.forms.formsets`` carry the same passthrough for
+the public names of ``django.forms.widgets`` and ``django.forms.formsets`` respectively.
 
 .. automodule:: next.forms.base
    :members:
@@ -143,6 +154,16 @@ See :doc:`/content/topics/forms/field-components` for the topic guide.
 
 .. autoclass:: next.forms.ComponentWidget
    :members:
+
+``bind_component_widgets`` injects the page scope path, the live request, the static collector,
+and optionally the field errors onto every ``ComponentWidget`` of a form before rendering.
+The ``{% form %}`` tag calls it, so application code needs it only when rendering a component-widget
+form outside the tag.
+It accepts a form or a formset and binds every member form of a formset, which is how formset
+rendering through ``{% form %}`` carries component widgets.
+It imports from ``next.forms.widgets`` directly.
+
+.. autofunction:: next.forms.widgets.bind_component_widgets
 
 Markers
 ~~~~~~~
@@ -174,6 +195,7 @@ Manager
 ``FormActionManager`` holds the configured backends behind the module-level ``form_action_manager`` instance.
 ``build_form_namespace_for_action`` builds the ``{form, wizard}`` namespace the ``{% form %}`` tag consumes, for code rendering that namespace by hand outside the tag.
 All three import from ``next.forms.manager``.
+``FormActionManager.require_action_meta`` returns the resolved ``ActionMeta`` or raises ``FormActionNotFound`` with close-match suggestions, for callers that cannot proceed without the meta.
 
 .. automodule:: next.forms.manager
    :members:
@@ -190,8 +212,33 @@ It is stored under the ``guard`` key of ``ActionMeta`` and enforced by the dispa
 ``ActionMeta``, ``FormActionFactory``, and ``file_to_dotted_module`` import from ``next.forms.backends`` directly.
 ``FormActionFactory`` instantiates one backend per ``FORM_ACTION_BACKENDS`` entry, passing the whole config dict to the backend constructor.
 ``FormActionManager`` calls it, so application code rarely does.
+``scope_key_for`` derives the registry scope key from a declaration file path and a scope, the same key that partitions actions and wizard storage.
+``build_action_guard`` builds an ``ActionGuard`` from the declared ``login_required`` and ``permission_required`` values, or ``None`` when both are unset.
+``record_possible_collision`` files a name collision into the registration diagnostics when a name is re-registered with a distinct handler, feeding the ``next.E041`` check.
+All three import from ``next.forms.backends`` directly.
 
 .. automodule:: next.forms.backends
+   :members:
+
+Rendering
+~~~~~~~~~
+
+``render_form_page_with_errors`` re-renders the origin page template with a bound form in context.
+It is the body of ``FormActionBackend.render_invalid_page`` in the bundled backend and imports from ``next.forms.rendering`` directly.
+The rendered HTML flows through the static-assets pipeline, so co-located CSS and JS land in the response.
+
+.. automodule:: next.forms.rendering
+   :members: render_form_page_with_errors
+
+Registration Diagnostics
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+``RegistrationDiagnostics`` buffers registration problems for the forms system checks, exposed as the module-level ``registration_diagnostics`` instance.
+The registration paths write into it and ``next.forms.checks`` reads it when ``manage.py check`` runs.
+Both import from ``next.forms.diagnostics`` directly.
+The test isolation helper :func:`next.testing.reset_form_registration_state` clears the buffers between cases.
+
+.. automodule:: next.forms.diagnostics
    :members:
 
 Action URL Helpers
@@ -200,13 +247,17 @@ Action URL Helpers
 ``reverse_form_action`` resolves the dispatch URL for an action UID under either URL wiring,
 the namespaced ``next:form_action`` route or the bare ``form_action`` route.
 It lives in ``next.forms.uid`` and is not re-exported at the package level.
+``ORIGIN_FIELD_NAME`` is the wire name of the hidden origin field every rendered form carries, ``"_next_form_origin"``.
+``validated_origin_path`` accepts a posted origin value only as a same-site path.
 
 .. automodule:: next.forms.uid
    :members:
-   :exclude-members: _make_uid
 
 Formset Helpers
 ~~~~~~~~~~~~~~~
+
+The Django factories ``formset_factory``, ``modelformset_factory``, and ``inlineformset_factory`` re-export through ``next.forms`` unchanged.
+``cleanup_extra_initial`` is the framework addition, and the module forwards every other public ``django.forms.formsets`` name at runtime.
 
 .. automodule:: next.forms.formsets
    :members:

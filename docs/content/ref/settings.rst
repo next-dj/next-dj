@@ -141,7 +141,7 @@ Default value.
 .. code-block:: python
 
    {
-       "BACKEND": "next.forms.wizard.SessionFormWizardBackend",
+       "BACKEND": "next.forms.SessionFormWizardBackend",
        "OPTIONS": {},
    }
 

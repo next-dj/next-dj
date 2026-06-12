@@ -346,8 +346,9 @@ The default ``get_form_kwargs`` returns an empty dict, so steps that need nothin
 Signals
 -------
 
-The wizard emits ``wizard_step_submitted`` after each step validates and ``wizard_completed`` after ``done`` runs for the final step.
-Both are sent by ``FormActionDispatch``.
+The wizard emits ``wizard_step_submitted`` after each step validates and ``wizard_completed`` after ``done`` returns a success response for the final step.
+Both are sent with the wizard class as the sender, so a receiver connected with ``sender=MyWizard`` observes one wizard only.
+An error response from ``done``, status 400 or above, skips ``wizard_completed`` and keeps the saved drafts for retry.
 See :doc:`signals` for the payloads and the receiver-wiring pattern.
 
 System Checks

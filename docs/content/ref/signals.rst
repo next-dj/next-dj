@@ -6,8 +6,8 @@ Signals Reference
 Module Summary
 --------------
 
-``next.signals`` is an aggregator that re-exports the framework signals.
-Importing a signal from ``next.signals`` is equivalent to importing it from its subpackage, except for ``wizard_step_submitted`` and ``wizard_completed``, which import from ``next.forms.signals`` only.
+``next.signals`` is an aggregator that re-exports every framework signal.
+Importing a signal from ``next.signals`` is equivalent to importing it from its subpackage.
 
 Signal Catalog
 --------------
@@ -34,14 +34,16 @@ not be retained past the receiver call.
    * - ``action_dispatched``
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, ``dep_cache``
-     - After an action handler runs and the response is coerced.
+     - After an action handler runs and the response is coerced, and once per valid wizard step.
        ``form`` is the bound form, or ``None`` for handler-only actions.
-       ``duration_ms`` times the handler call.
+       ``duration_ms`` times the handler call and is ``0.0`` on a wizard step advance, which runs no handler.
        ``dep_cache`` is a copy of the dispatch dependency-injection cache.
    * - ``action_registered``
      - Form action backend class
-     - ``action_name``, ``uid``, ``form_class``, ``file_path``, ``scope``, ``handler``
-     - After the backend stores a handler for an action name.
+     - ``action_name``, ``uid``, ``form_class``, ``wizard_class``, ``file_path``, ``scope``, ``handler``
+     - After the backend stores an action target for a name.
+       Exactly one of ``handler``, ``form_class``, or ``wizard_class`` identifies the target,
+       except the ``@action(form_class=...)`` path which supplies a handler and a form factory together.
    * - ``asset_registered``
      - The ``StaticAsset`` instance
      - ``collector``, ``backend``
@@ -111,12 +113,14 @@ not be retained past the receiver call.
      - ``specs``
      - After the reloader resolves the full list of watch specs.
    * - ``wizard_completed``
-     - ``FormActionDispatch``
-     - ``wizard_class``, ``cleaned_data``, ``uid``, ``request``
-     - After the wizard ``done`` method runs for the final step. ``cleaned_data`` is the merged mapping passed to ``done``.
+     - The wizard class
+     - ``cleaned_data``, ``uid``, ``request``
+     - After the wizard ``done`` method runs for the final step and its response is below HTTP 400.
+       An error response from ``done`` skips the signal and keeps the saved drafts.
+       ``cleaned_data`` is the merged mapping passed to ``done``.
    * - ``wizard_step_submitted``
-     - ``FormActionDispatch``
-     - ``wizard_class``, ``step``, ``cleaned_data``, ``uid``, ``request``
+     - The wizard class
+     - ``step``, ``cleaned_data``, ``uid``, ``request``
      - After a ``FormWizard`` step validates during dispatch. ``cleaned_data`` is a copy of that step's validated data.
 
 Subpackage Signals

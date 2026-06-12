@@ -31,7 +31,7 @@ Isolation
 ~~~~~~~~~
 
 ``reset_registries`` and its narrower variants clear the framework registries between tests.
-``reset_form_registration_state`` additionally clears the registration diagnostics, the autodiscovery memo, and the cached wizard backend.
+``reset_form_registration_state`` additionally clears the registration diagnostics and the cached wizard backend.
 
 .. automodule:: next.testing.isolation
    :members:

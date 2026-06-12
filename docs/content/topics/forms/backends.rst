@@ -94,11 +94,14 @@ The ``guard`` value is the ``ActionGuard`` built from the declared ``login_requi
 The base implementation returns ``None``.
 ``RegistryFormActionBackend`` returns the meta from its in-memory registry.
 
-``get_meta`` is the routing key when more than one backend is configured.
-``FormActionManager`` asks each backend's ``get_meta`` in order and routes the URL reverse and the namespace build to the first backend that answers with a non-``None`` meta.
-The proxy method ``FormActionManager.get_action_meta`` exposes that resolution, and the ``{% form %}`` tag calls it to stamp the meta's ``uid`` key onto the ``data-next-action`` attribute of the rendered ``<form>`` element.
+``get_meta`` is the routing key for the namespace build and the uid stamping when more than one backend is configured.
+``FormActionManager`` asks each backend's ``get_meta`` in order and routes those two concerns to the first backend that answers with a non-``None`` meta.
+The URL reverse takes a different path: the manager calls each backend's ``get_action_url`` in order and returns the first answer, collecting ``FormActionNotFound`` suggestions along the way, so ``get_meta`` plays no part in it.
+The proxy method ``FormActionManager.get_action_meta`` exposes the meta resolution, and the ``{% form %}`` tag calls it to stamp the meta's ``uid`` key onto the ``data-next-action`` attribute of the rendered ``<form>`` element.
 A backend whose meta omits ``uid`` therefore renders forms without that attribute, and the dispatch-time signals carry ``uid=None`` for its actions.
-A custom backend that owns its own actions must return a truthy meta for those names, or the manager skips it and the ``{% form %}`` tag cannot find the action.
+A custom backend whose ``get_meta`` returns ``None`` for its own actions still resolves their URLs through ``get_action_url``, so the ``{% form %}`` tag renders the form element.
+That form just renders without ``data-next-action`` and without a bound form instance, and the dispatch-time signals carry ``uid=None``.
+Return a truthy meta for owned names to restore the attribute, the bound form, and the uid.
 A backend that defers entirely to ``RegistryFormActionBackend`` need not override ``get_meta``.
 
 ``iter_actions`` and the System Checks
@@ -112,21 +115,26 @@ A subclass of ``RegistryFormActionBackend`` inherits a working implementation.
 Shaping the Response
 ~~~~~~~~~~~~~~~~~~~~
 
-Every outcome of the dispatch pipeline leaves through the backend's ``shape_response(request, outcome)``.
+Every outcome of the dispatch pipeline leaves through exactly one call to the backend's ``shape_response(request, outcome)``.
 The ``outcome`` is an ``ActionOutcome``, a frozen keyword-only dataclass whose ``kind`` field is an ``ActionOutcomeKind`` member: ``RESULT`` for a handler return value, ``INVALID`` for a failed validation, and ``WIZARD_ADVANCE`` for a wizard step that moved forward.
+A successful submission is always a ``RESULT`` outcome, including a handler that returns ``None``, so a backend keying off ``INVALID`` only ever sees genuine validation failures.
 The other fields carry what each kind needs: the ``action_name`` and ``uid``, the raw handler return value, the bound failing ``form``, the resolved ``url_kwargs``, the wizard ``redirect_to`` target, and the live ``wizard`` instance.
 On ``INVALID`` outcomes the ``page_path`` and ``origin`` fields carry the identity of the origin page that the dispatcher resolved from the posted ``_next_form_origin`` field, and a ``page_path`` of ``None`` makes the default envelope answer HTTP 400.
 Fields may be added in future versions, so construct an ``ActionOutcome`` with keywords only.
 
 The base implementation delegates to ``FormActionDispatch.shape_response``, the default envelope.
-An invalid submission re-renders the origin page with HTTP 200 and the ``X-Next-Form``/``X-Next-Action`` headers, and a wizard advance redirects with HTTP 302.
+An invalid submission re-renders the origin page with HTTP 200, the ``X-Next-Form: invalid`` header, and the ``X-Next-Action`` header when the outcome carries a ``uid``.
+A wizard advance redirects with HTTP 302.
 Both are behaviour of the default backend, not a guarantee of the endpoint.
 A custom backend may answer with any envelope.
 The ``X-Next-*`` header namespace is reserved for the framework.
 
+A ``RESULT`` outcome whose ``raw`` value is ``None`` makes the default envelope re-render the origin page internally, through ``render_invalid_page`` with ``form=None``.
+That success re-render carries no ``X-Next-*`` headers and never re-enters ``shape_response``, so an envelope override observes it only as the original ``RESULT`` call.
+
 Customisation splits into two layers.
-Override ``render_invalid_page`` when only the error HTML changes.
-The default envelope keeps calling it on the invalid branch.
+Override ``render_invalid_page`` when only the page HTML changes.
+The default envelope calls it on the invalid branch with the bound failing form, and on the success re-render of a ``None`` handler result with ``form=None``.
 Override ``shape_response`` when the envelope itself changes, such as a different status code, extra headers, or a response other than a redirect on a wizard advance.
 
 Building a Backend From Scratch
@@ -165,8 +173,8 @@ The four abstract methods must all be present.
            action_name, meta = entry
            return FormActionDispatch.dispatch(self, request, action_name, meta)
 
-``dispatch`` must always return an ``HttpResponse``.
-Return ``HttpResponseNotFound`` for an unknown UID rather than raising, so a stale URL gets a clean 404.
+``dispatch`` answers an unknown UID with a 404, either by returning ``HttpResponseNotFound`` or by raising :exc:`~django.http.Http404` with a message.
+The bundled backend raises ``Http404`` explaining that the page which rendered the form may be stale after a rename or restart.
 Delegate the validation pipeline to ``FormActionDispatch.dispatch``, which takes the action name and its stored ``ActionMeta``, to reuse form binding, handler invocation, and error re-render.
 
 RegistryFormActionBackend
@@ -205,7 +213,7 @@ The most common customisation overrides ``dispatch`` to wrap the standard dispat
            return response
 
 The override calls ``super().dispatch`` to run the standard pipeline and records the dispatch UID against the response status.
-An unknown UID returns 404 from the parent dispatch, and the audit row still records that outcome.
+An unknown UID raises ``Http404`` from the parent dispatch, so no audit row is written for a stale URL.
 See :doc:`/content/howto/write-a-form-action-backend` for the guarded pattern that recovers the action name from the UID index.
 
 A ``dispatch`` override that needs to know which page initiated the submission reads the validated origin from the pipeline rather than parsing POST fields.
@@ -241,8 +249,9 @@ A custom ``dispatch`` that drives the pipeline by hand reuses one static helper 
 ``ensure_http_response(response, request=None, action_name=None, backend=None)``.
    Coerces a handler return value into an ``HttpResponse``.
    A string becomes a body, an object with a ``url`` becomes a redirect, and ``None`` re-renders the origin page when ``request``, ``action_name``, and ``backend`` are passed, otherwise it returns a 204.
+   The ``None`` re-render goes through ``backend.render_invalid_page`` directly, without the ``X-Next-*`` headers and without re-entering ``shape_response``.
 
-Every outcome of the standard pipeline funnels into the backend hook ``shape_response(request, outcome)`` described under `Shaping the Response`_.
+Every outcome of the standard pipeline funnels into exactly one call to the backend hook ``shape_response(request, outcome)`` described under `Shaping the Response`_.
 A layer that must reshape responses globally overrides that one hook instead of patching each dispatch branch.
 
 Backend vs Signal
@@ -304,6 +313,7 @@ Custom Invalid-Page HTML
 Override ``render_invalid_page`` to return custom HTML for the validation error path.
 The override signature is ``render_invalid_page(request, action_name, form, page_file_path=None, url_kwargs=None)``.
 The dispatcher passes the page source path and the URL kwargs it resolved from the posted origin, so the hook never parses the request itself.
+The same hook renders the success re-render of a handler that returns ``None``, where ``form`` is ``None``, so an override must tolerate the missing form.
 The abstract base returns an empty string, and the bundled implementation does the same when ``page_file_path`` is ``None``.
 The bundled ``RegistryFormActionBackend`` re-renders the origin page through the page-template loader.
 When no action meta or template body is found, it falls back to rendering the form with its ``<p>`` layout template.
