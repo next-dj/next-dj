@@ -34,5 +34,9 @@ class WindowFilterForm(Form):
 
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
         """Persist the picked window via the querystring and redirect back."""
-        chosen = self.cleaned_data["window"]
+        # Pick the literal out of WINDOW_CHOICES so the redirect target is
+        # built from trusted constants, with request data used only to compare.
+        chosen = next(
+            value for value, _ in WINDOW_CHOICES if value == self.cleaned_data["window"]
+        )
         return HttpResponseRedirect(f"/stats/?window={chosen}")

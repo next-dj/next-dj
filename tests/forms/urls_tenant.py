@@ -1,10 +1,11 @@
 from django.http import HttpRequest, HttpResponse
 from django.urls import path
+from django.utils.html import escape
 
 
 def _tenant_page(_request: HttpRequest, slug: str) -> HttpResponse:
     """Stand-in tenant page view carrying a string `next_page_path`."""
-    return HttpResponse(f"tenant {slug}")
+    return HttpResponse(f"tenant {escape(slug)}")
 
 
 _tenant_page.next_page_path = "/tenant/pages/page.py"
