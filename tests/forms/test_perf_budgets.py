@@ -87,19 +87,19 @@ class _CountingWizardBackend(FormWizardBackend):
         self.saves = 0
         self.clears = 0
 
-    def load(self, request: HttpRequest, wizard_id: str) -> dict[str, Any]:
+    def load(self, request: HttpRequest, storage_id: str) -> dict[str, Any]:
         self.loads += 1
-        return self.inner.load(request, wizard_id)
+        return self.inner.load(request, storage_id)
 
     def save_step(
-        self, request: HttpRequest, wizard_id: str, step: str, data: dict[str, Any]
+        self, request: HttpRequest, storage_id: str, step: str, data: dict[str, Any]
     ) -> None:
         self.saves += 1
-        self.inner.save_step(request, wizard_id, step, data)
+        self.inner.save_step(request, storage_id, step, data)
 
-    def clear(self, request: HttpRequest, wizard_id: str) -> None:
+    def clear(self, request: HttpRequest, storage_id: str) -> None:
         self.clears += 1
-        self.inner.clear(request, wizard_id)
+        self.inner.clear(request, storage_id)
 
 
 @pytest.fixture()

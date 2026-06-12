@@ -21,7 +21,11 @@ from next.forms import (
     FormActionNotFound,
     RegistryFormActionBackend,
 )
-from next.forms.backends import FormActionFactory
+from next.forms.backends import (
+    FormActionFactory,
+    file_to_dotted_module,
+    scope_key_for,
+)
 from next.forms.manager import FormActionManager, form_action_manager
 
 
@@ -188,6 +192,27 @@ class TestFormActionManager:
         assert meta is not None
         assert meta["uid"]
 
+    def test_require_action_meta_returns_meta(self) -> None:
+        """Return the same meta as get_action_meta for a known name."""
+        meta = form_action_manager.require_action_meta("simple_form")
+        assert meta["name"] == "simple_form"
+        assert meta["uid"]
+
+    def test_require_action_meta_raises_with_suggestions(self) -> None:
+        """Raise FormActionNotFound carrying close matches for a near miss."""
+        with pytest.raises(FormActionNotFound, match="Closest matches") as excinfo:
+            form_action_manager.require_action_meta("simple_frm")
+        assert "simple_form" in excinfo.value.suggestions
+        assert excinfo.value.registry_empty is False
+
+    def test_require_action_meta_reports_empty_registry(self) -> None:
+        """An empty backend list surfaces the registry-empty diagnosis."""
+        manager = FormActionManager(backends=[RegistryFormActionBackend()])
+        with pytest.raises(FormActionNotFound, match="No form actions") as excinfo:
+            manager.require_action_meta("anything")
+        assert excinfo.value.registry_empty is True
+        assert excinfo.value.suggestions == ()
+
     def test_default_backend_is_first_backend(self) -> None:
         """Default backend is the first in the list."""
         assert form_action_manager.default_backend is form_action_manager._backends[0]
@@ -219,7 +244,7 @@ class TestFormActionManager:
 
 
 class TestRegistryFormActionBackend:
-    """RegistryFormActionBackend: register_action, get_meta, generate_urls."""
+    """RegistryFormActionBackend registers, looks up, and routes actions."""
 
     def test_get_action_url_raises_for_unknown(self) -> None:
         """Backend raises FormActionNotFound for unknown action."""
@@ -653,7 +678,7 @@ class TestEmptyRegistryDiagnosis:
 
 
 class TestFormActionBackendAbstract:
-    """FormActionBackend defaults: get_meta, render_invalid_page, shape_response."""
+    """FormActionBackend base methods keep their documented defaults."""
 
     def test_get_meta_returns_none(self) -> None:
         """Abstract backend get_meta returns None."""
@@ -991,3 +1016,81 @@ class TestManagerClearRegistries:
 
         manager = FormActionManager(backends=[mock_backend])
         manager.clear_registries()
+
+
+class TestFileToDottedModule:
+    """file_to_dotted_module returns dotted module path for files inside packages."""
+
+    def test_standalone_file_returns_stem(self, tmp_path) -> None:
+        """File not in a package returns just the file stem."""
+        f = tmp_path / "mymodule.py"
+        f.write_text("")
+        assert file_to_dotted_module(str(f)) == "mymodule"
+
+    def test_file_in_package_returns_dotted_name(self, tmp_path) -> None:
+        """File inside a package includes the top-level package in the dotted name."""
+        pkg = tmp_path / "myapp"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("")
+        f = pkg / "forms.py"
+        f.write_text("")
+        result = file_to_dotted_module(str(f))
+        assert result == "myapp.forms"
+
+    def test_nested_package(self, tmp_path) -> None:
+        """Deeply nested package returns the full dotted path from the top package."""
+        deep = tmp_path / "a" / "b"
+        deep.mkdir(parents=True)
+        (tmp_path / "a" / "__init__.py").write_text("")
+        (deep / "__init__.py").write_text("")
+        f = deep / "forms.py"
+        f.write_text("")
+        result = file_to_dotted_module(str(f))
+        assert result == "a.b.forms"
+
+
+class TestScopeKeyFor:
+    """scope_key_for partitions page scope by path and shared scope by module."""
+
+    def test_page_scope_uses_resolved_path(self, tmp_path) -> None:
+        """Page scope keys are the resolved file path."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        assert scope_key_for(str(page_file), "page") == str(page_file.resolve())
+
+    def test_shared_scope_uses_dotted_module(self, tmp_path) -> None:
+        """Shared scope keys are the dotted module of the declaring file."""
+        pkg = tmp_path / "myapp"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("")
+        forms_file = pkg / "forms.py"
+        forms_file.write_text("")
+        assert scope_key_for(str(forms_file), "shared") == "myapp.forms"
+
+
+class TestSharedScopeKeysAcrossApps:
+    """Same-named shared forms in different app packages stay distinct."""
+
+    def test_same_named_forms_in_two_apps_register_separately(self, tmp_path) -> None:
+        """Two shared registrations from different packages get distinct keys and UIDs."""
+        backend = RegistryFormActionBackend()
+        for app in ("appone", "apptwo"):
+            app_dir = tmp_path / app
+            app_dir.mkdir()
+            (app_dir / "__init__.py").write_text("")
+            forms_file = app_dir / "forms.py"
+            forms_file.write_text("")
+            backend.register_action(
+                ActionRegistration(
+                    name="contact_form",
+                    file_path=str(forms_file),
+                    scope="shared",
+                    handler=lambda: None,
+                )
+            )
+        assert sorted(backend._registry) == [
+            ("appone.forms", "contact_form"),
+            ("apptwo.forms", "contact_form"),
+        ]
+        uids = {meta["uid"] for meta in backend._registry.values()}
+        assert len(uids) == 2

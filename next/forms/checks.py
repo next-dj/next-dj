@@ -388,6 +388,48 @@ def check_wizard_step_actions(
     return messages
 
 
+_PAGE_MODULE_NAME = "page.py"
+
+
+@register(Tags.compatibility)
+def check_wizard_url_param_route(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Error when a page-scoped wizard's page path lacks the url_param segment.
+
+    Only wizards declared in a page module are inspected. The page file
+    path maps one to one onto the route, so a missing segment is a
+    definite misconfiguration. Wizards declared in shared or component
+    modules have no statically known route and are skipped.
+    """
+    messages: list[CheckMessage] = []
+    for meta in _iter_registered_actions():
+        wizard_class = meta.get("wizard_class")
+        if wizard_class is None or meta.get("scope") != "page":
+            continue
+        file_path = meta.get("file_path")
+        if not file_path:
+            continue
+        path = Path(file_path)
+        if path.name != _PAGE_MODULE_NAME:
+            continue
+        url_param = getattr(getattr(wizard_class, "Meta", None), "url_param", "step")
+        if f"[{url_param}]" in path.parts:
+            continue
+        messages.append(
+            Error(
+                f"FormWizard {wizard_class.__name__!r} is declared in "
+                f"{file_path} but no [{url_param}] directory appears on that "
+                "page path, so the wizard can never advance past its first "
+                f"step. Add a [{url_param}] route segment or set "
+                "Meta.url_param to the captured kwarg name.",
+                id="next.E054",
+            )
+        )
+    return messages
+
+
 @register(Tags.compatibility)
 def check_wizard_step_file_fields(
     *_args: object,
@@ -529,9 +571,7 @@ def check_success_message_framework(
 ) -> list[CheckMessage]:
     """Warn when Meta.success_message is declared without the messages framework."""
     has_app = "django.contrib.messages" in settings.INSTALLED_APPS
-    has_middleware = _MESSAGE_MIDDLEWARE in tuple(
-        getattr(settings, "MIDDLEWARE", None) or ()
-    )
+    has_middleware = _MESSAGE_MIDDLEWARE in tuple(settings.MIDDLEWARE or ())
     if has_app and has_middleware:
         return []
     return [
@@ -638,4 +678,5 @@ __all__ = [
     "check_wizard_step_actions",
     "check_wizard_step_field_collisions",
     "check_wizard_step_file_fields",
+    "check_wizard_url_param_route",
 ]

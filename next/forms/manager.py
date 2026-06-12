@@ -1,5 +1,6 @@
 """Manager for form action backends and routing."""
 
+import difflib
 import logging
 import types
 from typing import TYPE_CHECKING, Any, cast
@@ -121,6 +122,29 @@ class FormActionManager:
             if meta is not None:
                 return meta
         return None
+
+    def require_action_meta(
+        self,
+        action_name: str,
+        *,
+        page_path: str | None = None,
+    ) -> "ActionMeta":
+        """Return the action meta or raise FormActionNotFound with close matches."""
+        meta = self.get_action_meta(action_name, page_path=page_path)
+        if meta is not None:
+            return meta
+        known = {
+            registered_name
+            for backend in self.backends
+            for registered in backend.iter_actions()
+            if (registered_name := registered.get("name")) is not None
+        }
+        raise FormActionNotFound(
+            name=action_name,
+            page_path=page_path,
+            suggestions=tuple(difflib.get_close_matches(action_name, sorted(known))),
+            registry_empty=not known,
+        )
 
     @property
     def backends(self) -> "tuple[FormActionBackend, ...]":

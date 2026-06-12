@@ -5,11 +5,21 @@ endpoint. Valid submissions run the handler. Invalid forms re-render
 with errors. CSRF is applied for posted forms.
 
 Any public `django.forms` name resolves through `next.forms` unless
-next.dj deliberately overrides it. Framework machinery lives in the
-submodules, for example `next.forms.dispatch` and `next.forms.manager`.
+next.dj deliberately overrides it. The formset and modelform factories
+plus `BoundField` are re-exported statically for type checkers, the
+rest of the `django.forms` passthrough resolves at runtime only.
+Framework machinery lives in the submodules, for example
+`next.forms.dispatch` and `next.forms.manager`.
 """
 
 from django import forms as _django_forms
+from django.forms import (
+    BoundField,
+    formset_factory,
+    inlineformset_factory,
+    modelform_factory,
+    modelformset_factory,
+)
 
 from . import signals
 from .autodiscover import autodiscover_forms
@@ -119,6 +129,7 @@ __all__ = [
     "BaseForm",
     "BaseModelForm",
     "BooleanField",
+    "BoundField",
     "CacheFormWizardBackend",
     "CharField",
     "CheckboxInput",
@@ -181,7 +192,11 @@ __all__ = [
     "cleanup_extra_initial",
     "field_spec",
     "form_spec",
+    "formset_factory",
     "formset_spec",
+    "inlineformset_factory",
+    "modelform_factory",
+    "modelformset_factory",
     "redirect_to_origin",
     "signals",
 ]

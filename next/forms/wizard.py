@@ -35,15 +35,15 @@ if TYPE_CHECKING:
     from django.http import HttpRequest, HttpResponse
 
 
-WIZARD_LOAD_CACHE_ATTR: Final[str] = "_next_wizard_load_cache"
+_WIZARD_LOAD_CACHE_ATTR: Final[str] = "_next_wizard_load_cache"
 
 
 def _request_load_memo(request: "HttpRequest") -> dict[str, dict[str, Any]]:
     """Return the request-scoped `{storage_id: loaded steps}` memo, creating it."""
-    memo = getattr(request, WIZARD_LOAD_CACHE_ATTR, None)
+    memo = getattr(request, _WIZARD_LOAD_CACHE_ATTR, None)
     if memo is None:
         memo = {}
-        setattr(request, WIZARD_LOAD_CACHE_ATTR, memo)
+        setattr(request, _WIZARD_LOAD_CACHE_ATTR, memo)
     return cast("dict[str, dict[str, Any]]", memo)
 
 
@@ -60,15 +60,15 @@ def _ensure_session_key(request: "HttpRequest", *, create: bool) -> str:
 
 
 class FormWizardBackend(ABC):
-    """Persists FormWizard step drafts between requests, keyed by wizard id."""
+    """Persists FormWizard step drafts between requests, keyed by storage id."""
 
     @abstractmethod
-    def load(self, request: "HttpRequest", wizard_id: str) -> dict[str, Any]:
+    def load(self, request: "HttpRequest", storage_id: str) -> dict[str, Any]:
         """Return the `{step: cleaned_data}` mapping for the wizard, in step order."""
 
     @abstractmethod
     def save_step(
-        self, request: "HttpRequest", wizard_id: str, step: str, data: dict[str, Any]
+        self, request: "HttpRequest", storage_id: str, step: str, data: dict[str, Any]
     ) -> None:
         """Persist cleaned data for a single step.
 
@@ -78,12 +78,12 @@ class FormWizardBackend(ABC):
         """
 
     @abstractmethod
-    def clear(self, request: "HttpRequest", wizard_id: str) -> None:
+    def clear(self, request: "HttpRequest", storage_id: str) -> None:
         """Drop every stored step for the wizard."""
 
 
 class CacheFormWizardBackend(FormWizardBackend):
-    """Stores drafts in the Django cache, namespaced by session and wizard id."""
+    """Stores drafts in the Django cache, namespaced by session and storage id."""
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         """Read `CACHE_ALIAS` and `TIMEOUT` from the backend `OPTIONS`."""
@@ -97,20 +97,20 @@ class CacheFormWizardBackend(FormWizardBackend):
     def _timeout(self) -> int | None:
         if "TIMEOUT" in self._options:
             return cast("int | None", self._options["TIMEOUT"])
-        return getattr(settings, "SESSION_COOKIE_AGE", None)
+        return settings.SESSION_COOKIE_AGE
 
-    def _key(self, session_key: str, wizard_id: str) -> str:
-        return f"next_wizard:{session_key}:{wizard_id}"
+    def _key(self, session_key: str, storage_id: str) -> str:
+        return f"next_wizard:{session_key}:{storage_id}"
 
-    def load(self, request: "HttpRequest", wizard_id: str) -> dict[str, Any]:
+    def load(self, request: "HttpRequest", storage_id: str) -> dict[str, Any]:
         """Return the cached `{step: cleaned_data}` mapping for the visitor."""
         session_key = _ensure_session_key(request, create=False)
         if not session_key:
             return {}
-        return dict(self._cache().get(self._key(session_key, wizard_id), {}))
+        return dict(self._cache().get(self._key(session_key, storage_id), {}))
 
     def save_step(
-        self, request: "HttpRequest", wizard_id: str, step: str, data: dict[str, Any]
+        self, request: "HttpRequest", storage_id: str, step: str, data: dict[str, Any]
     ) -> None:
         """Persist cleaned data for one step, creating a session when absent."""
         session_key = _ensure_session_key(request, create=True)
@@ -122,16 +122,16 @@ class CacheFormWizardBackend(FormWizardBackend):
                 "in FORM_WIZARD_BACKEND."
             )
             raise ImproperlyConfigured(msg)
-        key = self._key(session_key, wizard_id)
+        key = self._key(session_key, storage_id)
         bucket = dict(self._cache().get(key, {}))
         bucket[step] = dict(data)
         self._cache().set(key, bucket, self._timeout())
 
-    def clear(self, request: "HttpRequest", wizard_id: str) -> None:
+    def clear(self, request: "HttpRequest", storage_id: str) -> None:
         """Drop the cached drafts for the visitor."""
         session_key = _ensure_session_key(request, create=False)
         if session_key:
-            self._cache().delete(self._key(session_key, wizard_id))
+            self._cache().delete(self._key(session_key, storage_id))
 
 
 _CODEC_KEY: Final[str] = "__next_wizard__"
@@ -220,19 +220,19 @@ class SessionFormWizardBackend(FormWizardBackend):
     def __init__(self, _config: dict[str, Any] | None = None) -> None:
         """Accept the backend config mapping for factory parity."""
 
-    def _key(self, wizard_id: str) -> str:
-        return f"_next_wizard:{wizard_id}"
+    def _key(self, storage_id: str) -> str:
+        return f"_next_wizard:{storage_id}"
 
-    def load(self, request: "HttpRequest", wizard_id: str) -> dict[str, Any]:
+    def load(self, request: "HttpRequest", storage_id: str) -> dict[str, Any]:
         """Return the decoded `{step: cleaned_data}` mapping for the visitor."""
         session = getattr(request, "session", None)
         if session is None:
             return {}
-        raw = session.get(self._key(wizard_id), {})
+        raw = session.get(self._key(storage_id), {})
         return {step: _decode_value(data) for step, data in raw.items()}
 
     def save_step(
-        self, request: "HttpRequest", wizard_id: str, step: str, data: dict[str, Any]
+        self, request: "HttpRequest", storage_id: str, step: str, data: dict[str, Any]
     ) -> None:
         """Persist encoded cleaned data for one step in the session."""
         session = getattr(request, "session", None)
@@ -244,16 +244,16 @@ class SessionFormWizardBackend(FormWizardBackend):
                 "backend in FORM_WIZARD_BACKEND."
             )
             raise ImproperlyConfigured(msg)
-        key = self._key(wizard_id)
+        key = self._key(storage_id)
         bucket = dict(session.get(key, {}))
         bucket[step] = _encode_value(dict(data))
         session[key] = bucket
 
-    def clear(self, request: "HttpRequest", wizard_id: str) -> None:
+    def clear(self, request: "HttpRequest", storage_id: str) -> None:
         """Drop the stored drafts for the visitor."""
         session = getattr(request, "session", None)
         if session is not None:
-            session.pop(self._key(wizard_id), None)
+            session.pop(self._key(storage_id), None)
 
 
 class WizardBackendManager:
@@ -471,11 +471,27 @@ class FormWizard:
         return [name for name, _ in self._resolved_steps()]
 
     def current_step(self) -> str:
-        """Return the active step from the URL kwarg, defaulting to the first."""
+        """Return the active step from the URL kwarg, defaulting to the first.
+
+        URL kwargs that exist but lack the `Meta.url_param` key signal a
+        route whose step segment is named differently, which would pin the
+        wizard to its first step forever, so that misconfiguration raises
+        instead of falling back.
+        """
         names = self.step_names()
         raw = self.url_kwargs.get(self.url_param)
         if raw is not None and str(raw) in names:
             return str(raw)
+        if raw is None and self.url_kwargs:
+            captured = ", ".join(repr(key) for key in self.url_kwargs)
+            msg = (
+                f"{type(self).__name__} reads its current step from the "
+                f"{self.url_param!r} URL kwarg (Meta.url_param), but the "
+                f"request only captured {captured}. Name the route segment "
+                f"[{self.url_param}] or point Meta.url_param at the "
+                "captured kwarg."
+            )
+            raise ImproperlyConfigured(msg)
         return names[0] if names else ""
 
     def is_first(self) -> bool:

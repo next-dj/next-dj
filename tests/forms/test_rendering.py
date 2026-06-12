@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from django import forms as django_forms
 from django.core.exceptions import ImproperlyConfigured
+from django.forms import formset_factory
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, QueryDict
 from django.middleware.csrf import get_token
 from django.template import Context, TemplateSyntaxError
@@ -53,8 +54,17 @@ class UploadEnctypeForm(Form):
     doc = django_forms.FileField()
 
 
+class _BulkRowForm(django_forms.Form):
+    """Single row of the formset rendered through the form tag."""
+
+    title = django_forms.CharField(max_length=20)
+
+
+_BulkRowFormset = formset_factory(_BulkRowForm, extra=1)
+
+
 class TestRenderInvalidPage:
-    """render_invalid_page: unknown action, page template, fallback, context."""
+    """render_invalid_page covers unknown actions, page templates, and fallbacks."""
 
     def test_unknown_action_returns_empty(self, mock_http_request) -> None:
         """Unknown action renders empty string."""
@@ -220,7 +230,7 @@ class TestRenderInvalidPage:
 
 
 class TestFormTagSyntax:
-    """{% form %} tag: required action name, syntax errors."""
+    """The {% form %} tag requires an action name and rejects bad syntax."""
 
     def test_requires_at_least_one_arg(self, form_engine) -> None:
         """{% form %} without args raises TemplateSyntaxError."""
@@ -561,8 +571,104 @@ class TestFormTagRender:
         assert 'name="_next_form_origin" value="/items/123/"' in html
 
 
+_FORMSET_TAG_TEMPLATE = (
+    '{% form "bulk_rows" %}'
+    "{{ form.management_form }}"
+    "{% for row in form %}<div>{{ row.title }}</div>{% endfor %}"
+    "{% endform %}"
+)
+
+
+class TestFormTagFormsetRender:
+    """The {% form %} tag renders formset actions through both documented paths."""
+
+    @staticmethod
+    def _render(form_engine, csrf_request, extra_context: dict | None = None) -> str:
+        t = form_engine.from_string(_FORMSET_TAG_TEMPLATE)
+        return t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                    **(extra_context or {}),
+                }
+            )
+        )
+
+    def test_factory_built_namespace_renders_formset(
+        self, form_engine, csrf_request
+    ) -> None:
+        """A factory returning (FormSetClass, init_kwargs) renders rows and rails."""
+
+        def build_bulk_rows():
+            return _BulkRowFormset, {"initial": [{"title": "Draft"}]}
+
+        form_action_manager.default_backend.register_action(
+            ActionRegistration(
+                name="bulk_rows",
+                file_path=str(PAGE_MODULE_FOR_FORM_TESTS),
+                scope="page",
+                handler=lambda **_kwargs: None,
+                form_class=build_bulk_rows,
+            )
+        )
+        html = self._render(form_engine, csrf_request)
+        assert 'name="form-TOTAL_FORMS"' in html
+        assert 'value="Draft"' in html
+        assert html.count('name="form-') >= 4
+        assert "</form>" in html
+
+    def test_context_namespace_renders_formset(self, form_engine, csrf_request) -> None:
+        """A SimpleNamespace(form=formset) context entry renders rows and rails."""
+        form_action_manager.default_backend.register_action(
+            ActionRegistration(
+                name="bulk_rows",
+                file_path=str(PAGE_MODULE_FOR_FORM_TESTS),
+                scope="page",
+                handler=lambda: None,
+            )
+        )
+        formset = _BulkRowFormset(initial=[{"title": "Draft"}])
+        html = self._render(
+            form_engine,
+            csrf_request,
+            {"bulk_rows": types.SimpleNamespace(form=formset)},
+        )
+        assert 'name="form-TOTAL_FORMS"' in html
+        assert 'value="Draft"' in html
+        assert "</form>" in html
+
+    def test_bound_invalid_formset_re_renders_through_tag(
+        self, form_engine, csrf_request
+    ) -> None:
+        """A bound formset with errors still renders, mirroring the error re-render."""
+        form_action_manager.default_backend.register_action(
+            ActionRegistration(
+                name="bulk_rows",
+                file_path=str(PAGE_MODULE_FOR_FORM_TESTS),
+                scope="page",
+                handler=lambda: None,
+            )
+        )
+        formset = _BulkRowFormset(
+            data={
+                "form-TOTAL_FORMS": "1",
+                "form-INITIAL_FORMS": "1",
+                "form-0-title": "",
+            }
+        )
+        assert not formset.is_valid()
+        html = self._render(
+            form_engine,
+            csrf_request,
+            {"bulk_rows": types.SimpleNamespace(form=formset)},
+        )
+        assert 'name="form-TOTAL_FORMS"' in html
+        assert "</form>" in html
+
+
 class TestActionUrlTag:
-    """{% action_url %}: page and shared scoping, as-var, unknown action."""
+    """{% action_url %} resolves page and shared scopes and rejects unknown names."""
 
     @staticmethod
     def _register_page_action(name: str, page_path: str) -> None:
@@ -628,7 +734,7 @@ class TestActionUrlTag:
 
 
 class TestFormTagMarkupIdentity:
-    """{% form %} framework attributes: data-next-action and auto-enctype."""
+    """The {% form %} tag emits data-next-action and the automatic enctype."""
 
     @staticmethod
     def _render(form_engine, csrf_request, source: str) -> str:

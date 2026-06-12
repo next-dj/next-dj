@@ -67,7 +67,7 @@ _STEP_LABELS = {
 
 @dataclass(frozen=True, slots=True)
 class _Section:
-    """One wizard step's render inputs: its owner step and stored truth."""
+    """One wizard step's render inputs, pairing the owner step with stored truth."""
 
     name: str
     active: str

@@ -43,14 +43,14 @@ def widget_anchor(tmp_path: Path) -> Iterator[Path]:
 class TestBenchComponentWidgetRender:
     @pytest.mark.benchmark(group="forms.widgets")
     def test_render_cold_lookup(self, widget_anchor: Path, benchmark) -> None:
-        """Standalone render without a request: registry lookup on every call."""
+        """Standalone render without a request hits the registry on every call."""
         widget = ComponentWidget("field", placeholder="slug")
         widget._template_path = widget_anchor
         benchmark(widget.render, "slug", "value", {"id": "id_slug"})
 
     @pytest.mark.benchmark(group="forms.widgets")
     def test_render_warm_request_cache(self, widget_anchor: Path, benchmark) -> None:
-        """Bound render with a request: lookups served from the per-request cache."""
+        """Bound render with a request serves lookups from the per-request cache."""
         widget = ComponentWidget("field", placeholder="slug")
         widget._template_path = widget_anchor
         widget._request = HttpRequest()

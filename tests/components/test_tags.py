@@ -169,7 +169,7 @@ class TestComponentTag:
         with (
             patch.object(components_manager, "get_component", return_value=info),
             patch(
-                "next.templatetags.components.default_manager.discover_component_assets"
+                "next.static.manager.default_manager.discover_component_assets"
             ) as spy,
         ):
             t = Template('{% load components %}{% component "card" %}')

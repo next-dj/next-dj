@@ -86,5 +86,23 @@ class TestBuildFormFor:
         assert excinfo.value.suggestions == ("delete_note",)
 
     def test_raises_when_action_has_no_form_class(self) -> None:
-        with pytest.raises(LookupError, match="no form_class"):
+        with pytest.raises(LookupError, match="without a form_class") as excinfo:
             build_form_for("test_no_form")  # form-less action
+        message = str(excinfo.value)
+        assert "handler-only" in message
+        assert "resolve_action_url" in message
+        assert "test client" in message
+
+    def test_raises_for_wizard_action(self, monkeypatch) -> None:
+        registry = RegistryFormActionBackend()
+        registry.register_action(
+            ActionRegistration(
+                name="signup_wizard",
+                file_path="/fake/myapp/page.py",
+                scope="page",
+                wizard_class=type("SignupWizardStub", (), {}),
+            )
+        )
+        monkeypatch.setattr(form_action_manager, "_backends", [registry])
+        with pytest.raises(LookupError, match="without a form_class"):
+            build_form_for("signup_wizard")

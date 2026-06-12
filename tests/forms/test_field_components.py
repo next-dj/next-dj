@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 from django import forms as django_forms
 from django.core.checks import Warning as DjangoWarning
+from django.forms import formset_factory
 from django.http import HttpRequest, HttpResponse
 from django.utils.safestring import SafeString
 
@@ -168,8 +169,21 @@ class TestComponentWidgetRender:
     ) -> None:
         widget = ComponentWidget("does_not_exist")
         widget._template_path = echo_component
-        with pytest.raises(RuntimeError, match="is not registered"):
+        with pytest.raises(RuntimeError, match="is not registered") as excinfo:
             widget.render("slug", "v", attrs=None)
+        message = str(excinfo.value)
+        assert f"Searched from {echo_component}" in message
+        assert "_components" in message
+        assert "Closest matches" not in message
+
+    def test_unregistered_component_error_suggests_close_matches(
+        self, echo_component: Path
+    ) -> None:
+        widget = ComponentWidget("eco")
+        widget._template_path = echo_component
+        with pytest.raises(RuntimeError, match="Closest matches") as excinfo:
+            widget.render("slug", "v", attrs=None)
+        assert "'echo'" in str(excinfo.value)
 
 
 class TestComponentWidgetRequestCache:
@@ -369,12 +383,12 @@ class TestBindComponentWidgets:
         assert bound_widget._errors == form["field"].errors
         assert list(bound_widget._errors)
 
-    def test_without_errors_leaves_errors_unset(self, echo_component: Path) -> None:
+    def test_without_errors_keeps_empty_default(self, echo_component: Path) -> None:
         widget = ComponentWidget("echo")
         form = _echo_form(widget)(data={"field": ""})
         bind_component_widgets(form, template_path=echo_component, with_errors=False)
         bound_widget = form.fields["field"].widget
-        assert not hasattr(bound_widget, "_errors")
+        assert bound_widget._errors == ()
 
     def test_skips_non_component_widgets(self, echo_component: Path) -> None:
         class _MixedForm(django_forms.Form):
@@ -387,6 +401,39 @@ class TestBindComponentWidgets:
         comp_widget = form.fields["comp"].widget
         assert not hasattr(plain_widget, "_template_path")
         assert comp_widget._template_path == echo_component
+
+    def test_formset_binds_each_member_form(self, echo_component: Path) -> None:
+        formset_class = formset_factory(_echo_form(ComponentWidget("echo")), extra=2)
+        formset = formset_class()
+        request = object()
+        collector = StaticCollector()
+        bind_component_widgets(
+            formset,
+            template_path=echo_component,
+            request=request,
+            collector=collector,
+        )
+        assert len(formset.forms) == 2
+        for member in formset.forms:
+            bound_widget = member.fields["field"].widget
+            assert bound_widget._template_path == echo_component
+            assert bound_widget._request is request
+            assert bound_widget._static_collector is collector
+
+    def test_formset_with_errors_binds_member_errors(
+        self, echo_component: Path
+    ) -> None:
+        formset_class = formset_factory(_echo_form(ComponentWidget("echo")), extra=0)
+        formset = formset_class(
+            data={
+                "form-TOTAL_FORMS": "1",
+                "form-INITIAL_FORMS": "1",
+                "form-0-field": "",
+            }
+        )
+        bind_component_widgets(formset, template_path=echo_component, with_errors=True)
+        bound_widget = formset.forms[0].fields["field"].widget
+        assert list(bound_widget._errors)
 
 
 class TestCheckComponentWidgetComponents:

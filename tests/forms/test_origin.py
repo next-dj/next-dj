@@ -109,7 +109,7 @@ class TestResolveOrigin:
         req = mock_http_request(
             method="POST",
             POST=_origin_post("/tenant/acme/"),
-            urlconf="tests.support.tenant_urls",
+            urlconf="tests.forms.urls_tenant",
         )
         match = _resolve_origin(req)
         assert match is not None
@@ -122,7 +122,7 @@ class TestResolveOrigin:
         req = mock_http_request(
             method="POST",
             POST=_origin_post("/en-us/docs/intro/"),
-            urlconf="tests.support.i18n_urls",
+            urlconf="tests.forms.urls_i18n",
         )
         match = _resolve_origin(req)
         assert match is not None
@@ -135,7 +135,7 @@ class TestResolveOrigin:
         req = mock_http_request(
             method="POST",
             POST=_origin_post("/fr/docs/intro/"),
-            urlconf="tests.support.i18n_urls",
+            urlconf="tests.forms.urls_i18n",
         )
         assert _resolve_origin(req) is None
 
@@ -145,7 +145,7 @@ class TestResolveOrigin:
         req = mock_http_request(
             method="POST",
             POST=_origin_post("/bare/"),
-            urlconf="tests.support.tenant_urls",
+            urlconf="tests.forms.urls_tenant",
         )
         match = _resolve_origin(req)
         assert match is not None

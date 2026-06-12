@@ -1,16 +1,19 @@
 """Form widgets that render through next-component runtime."""
 
+import difflib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from django import forms as django_forms
 from django.conf import settings
+from django.forms import widgets as _django_widgets
 from django.forms.renderers import BaseRenderer
 from django.http import HttpRequest
 from django.utils.safestring import SafeString
 
 from next.components.facade import get_component, render_component
-from next.static import StaticCollector, default_manager
+from next.components.manager import components_manager
+from next.static import StaticCollector, collect_component_assets
 
 
 if TYPE_CHECKING:
@@ -24,13 +27,29 @@ if TYPE_CHECKING:
 COMPONENT_LOOKUP_CACHE_ATTR: Final[str] = "_next_component_lookup_cache"
 
 
+def _unregistered_component_error(name: str, anchor: "str | Path") -> RuntimeError:
+    """Build the render-time error for a component name that resolves to nothing."""
+    visible = sorted(components_manager.collect_visible_components(Path(anchor)))
+    matches = difflib.get_close_matches(name, visible)
+    msg = (
+        f"ComponentWidget references component {name!r} that is not "
+        f"registered. Searched from {anchor}. Create {name}.djx in a "
+        "_components directory visible from that path, or register the "
+        "component through a components backend."
+    )
+    if matches:
+        rendered = ", ".join(repr(match) for match in matches)
+        msg = f"{msg} Closest matches: {rendered}."
+    return RuntimeError(msg)
+
+
 class ComponentWidget(django_forms.Widget):
     """A form widget that renders a registered next-component."""
 
-    _template_path: str | Path | None
-    _request: HttpRequest | None
-    _errors: "ErrorList"
-    _static_collector: StaticCollector | None
+    _template_path: "str | Path | None" = None
+    _request: HttpRequest | None = None
+    _errors: "ErrorList | tuple[()]" = ()
+    _static_collector: StaticCollector | None = None
 
     def __init__(
         self,
@@ -46,7 +65,7 @@ class ComponentWidget(django_forms.Widget):
 
     def _resolve_component(self, anchor: "str | Path") -> "ComponentInfo | None":
         """Resolve the named component, cached per request when one is bound."""
-        request = getattr(self, "_request", None)
+        request = self._request
         cache: dict[tuple[str, str], ComponentInfo] | None = None
         key = (self.component_name, str(anchor))
         if request is not None:
@@ -72,20 +91,12 @@ class ComponentWidget(django_forms.Widget):
         """Resolve the component within scope and render it to HTML."""
         del renderer
         anchor = (
-            getattr(self, "_template_path", None)
-            or getattr(settings, "BASE_DIR", None)
-            or Path.cwd()
+            self._template_path or getattr(settings, "BASE_DIR", None) or Path.cwd()
         )
         info = self._resolve_component(anchor)
         if info is None:
-            msg = (
-                f"ComponentWidget references component {self.component_name!r} "
-                "that is not registered"
-            )
-            raise RuntimeError(msg)
-        collector = getattr(self, "_static_collector", None)
-        if collector is not None and not info.is_simple:
-            default_manager.discover_component_assets(info, collector)
+            raise _unregistered_component_error(self.component_name, anchor)
+        collect_component_assets(info, self._static_collector)
         merged = self.build_attrs(self.attrs, attrs or {})
         # Hyphenated keys such as aria-invalid cannot be read as template vars, so
         # alias them to an underscore form (aria_invalid) unless that name already
@@ -107,23 +118,37 @@ class ComponentWidget(django_forms.Widget):
             "attrs": merged,
             "name": name,
             "value": self.format_value(value),
-            "errors": getattr(self, "_errors", []),
+            "errors": self._errors,
         }
         # render_component returns template-rendered, already-escaped HTML, so a
         # SafeString wrapper matches the Widget.render contract without re-escaping.
-        html = render_component(info, context, request=getattr(self, "_request", None))
+        html = render_component(info, context, request=self._request)
         return SafeString(html)
 
 
 def bind_component_widgets(
-    form: django_forms.BaseForm,
+    form: "django_forms.BaseForm | django_forms.BaseFormSet",
     *,
     template_path: str | Path | None,
     request: HttpRequest | None = None,
     collector: StaticCollector | None = None,
     with_errors: bool = False,
 ) -> None:
-    """Inject scope path, request, collector, and field errors onto ComponentWidgets."""
+    """Inject scope path, request, collector, and field errors onto ComponentWidgets.
+
+    A formset has no `fields` of its own, so each of its member forms is
+    bound instead.
+    """
+    if isinstance(form, django_forms.BaseFormSet):
+        for member in form.forms:
+            bind_component_widgets(
+                member,
+                template_path=template_path,
+                request=request,
+                collector=collector,
+                with_errors=with_errors,
+            )
+        return
     for field_name, field in form.fields.items():
         widget = getattr(field, "widget", None)
         if not isinstance(widget, ComponentWidget):
@@ -135,6 +160,25 @@ def bind_component_widgets(
         widget._static_collector = collector
         if with_errors:
             widget._errors = form[field_name].errors
+
+
+_MISSING = object()
+
+
+def __getattr__(name: str) -> object:
+    """Resolve public `django.forms.widgets` names that next.dj does not override."""
+    if not name.startswith("_"):
+        value = getattr(_django_widgets, name, _MISSING)
+        if value is not _MISSING:
+            return value
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
+
+def __dir__() -> list[str]:
+    """List the curated surface plus the public `django.forms.widgets` namespace."""
+    django_public = {n for n in dir(_django_widgets) if not n.startswith("_")}
+    return sorted(set(__all__) | django_public)
 
 
 __all__ = ["ComponentWidget", "bind_component_widgets"]

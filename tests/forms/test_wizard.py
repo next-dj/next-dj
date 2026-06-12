@@ -100,7 +100,7 @@ def _request(*, path: str = "/wizard/identity/"):
 
 
 class TestReplaceStepSegment:
-    """`_replace_step_segment`: empty path, found segment, and fallback."""
+    """`_replace_step_segment` covers empty paths, found segments, and fallback."""
 
     def test_empty_path_returns_path(self) -> None:
         """An empty path is returned unchanged."""
@@ -291,6 +291,14 @@ class TestWizardStepIntrospection:
         """A non-string step value falls back to the first step."""
         wizard = DemoWizard(_request(), url_kwargs={"step": 7})
         assert wizard.current_step() == "identity"
+
+    def test_current_step_mismatched_kwarg_name_raises(self) -> None:
+        """Captured kwargs without the url_param key name the misconfiguration."""
+        wizard = DemoWizard(_request(), url_kwargs={"stage": "scope"})
+        with pytest.raises(ImproperlyConfigured, match=r"'step'.*'stage'") as excinfo:
+            wizard.current_step()
+        assert "Meta.url_param" in str(excinfo.value)
+        assert "[step]" in str(excinfo.value)
 
     def test_current_step_matches_int_coerced_kwarg(self) -> None:
         """A url kwarg coerced to int still resolves to its string step name."""
@@ -740,7 +748,7 @@ class TestWizardDoneContract:
 
 
 class TestEnsureSessionKey:
-    """`_ensure_session_key`: missing session, lazy create, and bare request."""
+    """`_ensure_session_key` covers missing sessions, lazy create, bare requests."""
 
     def test_no_session_attribute_returns_empty(self) -> None:
         """A request without a `session` attribute yields an empty key."""
@@ -762,7 +770,7 @@ class TestEnsureSessionKey:
 
 
 class TestCacheFormWizardBackend:
-    """`CacheFormWizardBackend`: round-trip, namespacing, alias, timeout, laziness."""
+    """`CacheFormWizardBackend` round-trips drafts with namespacing and timeouts."""
 
     def test_save_load_clear_round_trip(self) -> None:
         """save_step stores per-step data that load returns and clear drops."""
@@ -869,7 +877,7 @@ class TestCacheFormWizardBackend:
 
 
 class TestSessionFormWizardBackend:
-    """`SessionFormWizardBackend`: round-trip, codec, and session requirements."""
+    """`SessionFormWizardBackend` round-trips drafts through the session codec."""
 
     def test_save_load_clear_round_trip(self) -> None:
         """save_step stores per-step data that load returns and clear drops."""
@@ -884,8 +892,8 @@ class TestSessionFormWizardBackend:
         backend.clear(request, "wiz")
         assert backend.load(request, "wiz") == {}
 
-    def test_distinct_wizard_ids_are_isolated(self) -> None:
-        """Two wizard ids in one session never see each other's drafts."""
+    def test_distinct_storage_ids_are_isolated(self) -> None:
+        """Two storage ids in one session never see each other's drafts."""
         backend = SessionFormWizardBackend()
         request = _request()
         backend.save_step(request, "first", "identity", {"name": "Ada"})
@@ -1023,18 +1031,18 @@ class _StubWizardBackend(FormWizardBackend):
     def __init__(self, config=None) -> None:
         type(self).instances.append(config)
 
-    def load(self, request, wizard_id):
+    def load(self, request, storage_id):
         return {}
 
-    def save_step(self, request, wizard_id, step, data) -> None:
+    def save_step(self, request, storage_id, step, data) -> None:
         return None
 
-    def clear(self, request, wizard_id) -> None:
+    def clear(self, request, storage_id) -> None:
         return None
 
 
 class TestWizardBackendManager:
-    """`WizardBackendManager`: caching, reset, custom backend, and reload hook."""
+    """`WizardBackendManager` caches, resets, and reloads the configured backend."""
 
     def test_get_returns_default_backend_and_caches(self) -> None:
         """`get` instantiates the configured backend once and caches it."""

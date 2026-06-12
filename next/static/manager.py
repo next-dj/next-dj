@@ -309,6 +309,21 @@ class DefaultStaticManager(LazyObject):
 default_manager: DefaultStaticManager = DefaultStaticManager()
 
 
+def collect_component_assets(
+    info: ComponentInfo,
+    collector: StaticCollector | None,
+) -> None:
+    """Discover a composite component's co-located assets into the collector.
+
+    Simple components never own co-located assets and a missing collector
+    means there is no sink, so both cases short-circuit before dispatching
+    through the lazy default manager.
+    """
+    if collector is None or info.is_simple:
+        return
+    default_manager.discover_component_assets(info, collector)
+
+
 def reset_default_manager() -> None:
     """Drop the wrapped static manager so the next access rebuilds it.
 

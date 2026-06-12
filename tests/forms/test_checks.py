@@ -20,6 +20,7 @@ from next.forms.checks import (
     check_wizard_step_actions,
     check_wizard_step_field_collisions,
     check_wizard_step_file_fields,
+    check_wizard_url_param_route,
 )
 from next.forms.decorators import action
 from next.forms.diagnostics import registration_diagnostics
@@ -276,7 +277,7 @@ class TestFormActionBackendsConfigurationCheck:
 
 
 class TestCheckFormsOutsideBaseDir:
-    """check_forms_outside_base_dir: W046 warning when form is declared outside BASE_DIR."""
+    """W046 warns when a form is declared outside BASE_DIR."""
 
     def test_no_outside_classes_returns_empty(self) -> None:
         """No warnings when no forms are outside BASE_DIR."""
@@ -308,7 +309,7 @@ class TestCheckFormsOutsideBaseDir:
 
 
 class TestCheckInvalidFormMetaScope:
-    """check_invalid_form_meta_scope: E047 error when Meta.scope has invalid value."""
+    """E047 fires when Meta.scope carries an invalid value."""
 
     def test_no_invalid_classes_returns_empty(self) -> None:
         """No errors when all forms have valid Meta.scope."""
@@ -341,7 +342,7 @@ class TestCheckInvalidFormMetaScope:
 
 
 class TestCheckActionAppliedToClass:
-    """check_action_applied_to_class: E053 error when @action was used on a class."""
+    """E053 fires when @action was applied to a class."""
 
     def test_no_class_applications_returns_empty(self) -> None:
         """No errors when @action was never applied to a class."""
@@ -375,7 +376,7 @@ class TestCheckActionAppliedToClass:
 
 
 class TestCheckFormWizardSteps:
-    """check_form_wizard_steps: E050 when a wizard declares no steps."""
+    """E050 fires when a wizard declares no steps."""
 
     def test_no_stepless_wizards_returns_empty(self) -> None:
         """No errors when every wizard declares steps."""
@@ -394,7 +395,7 @@ class TestCheckFormWizardSteps:
 
 
 class TestCheckFormWizardBackend:
-    """check_form_wizard_backend: E051 for a malformed FORM_WIZARD_BACKEND."""
+    """E051 fires for a malformed FORM_WIZARD_BACKEND."""
 
     def test_no_setting_yields_no_errors(self, settings) -> None:
         """An absent key returns an empty list."""
@@ -459,7 +460,7 @@ def _without_sessions(installed_apps: list[str]) -> list[str]:
 
 
 class TestCheckFormWizardSessions:
-    """check_form_wizard_sessions: W056 for session-bound storage without sessions."""
+    """W056 warns about session-bound storage without django.contrib.sessions."""
 
     def _register_wizard(self) -> None:
         form_action_manager.register_action(
@@ -564,7 +565,7 @@ class _W057Wizard(FormWizard):
 
 
 class TestCheckWizardStepActions:
-    """check_wizard_step_actions: W057 when a step doubles as a standalone action."""
+    """W057 warns when a step doubles as a standalone action."""
 
     def _isolated_backend(self, monkeypatch) -> RegistryFormActionBackend:
         backend = RegistryFormActionBackend()
@@ -703,7 +704,7 @@ class _StepLessWizardStub:
 
 
 class TestCheckWizardStepFileFields:
-    """check_wizard_step_file_fields: W058 for FileField inside static steps."""
+    """W058 warns about a FileField inside static steps."""
 
     def test_file_and_image_steps_each_warn(self, monkeypatch) -> None:
         """FileField and ImageField steps each produce one W058 warning."""
@@ -782,7 +783,7 @@ class _DisjointWizard(FormWizard):
 
 
 class TestCheckWizardStepFieldCollisions:
-    """check_wizard_step_field_collisions: W059 for shared step field names."""
+    """W059 warns about field names shared across steps."""
 
     def test_colliding_field_warns_with_step_names(self, monkeypatch) -> None:
         """A field declared by two steps produces one W059 naming both."""
@@ -827,8 +828,117 @@ class TestCheckWizardStepFieldCollisions:
         assert check_wizard_step_field_collisions() == []
 
 
+class _StagedWizard(FormWizard):
+    """Wizard reading its step from a custom `stage` URL kwarg."""
+
+    class Meta:
+        """One step routed through the `stage` kwarg."""
+
+        abstract = True
+        steps: ClassVar = [("identity", _PlainStep)]
+        url_param = "stage"
+
+
+def _page_wizard_registration(
+    name: str, wizard_class: type, file_path: str
+) -> ActionRegistration:
+    return ActionRegistration(
+        name=name,
+        file_path=file_path,
+        scope="page",
+        wizard_class=wizard_class,
+    )
+
+
+class TestCheckWizardUrlParamRoute:
+    """E054 fires when a page-scoped wizard page path lacks the url_param segment."""
+
+    def test_page_path_with_segment_is_clean(self, monkeypatch) -> None:
+        """A page path carrying the [step] directory passes the check."""
+        _isolated_backend_with(
+            monkeypatch,
+            _page_wizard_registration(
+                "routed_wizard", _CleanStepsWizard, "/app/pages/order/[step]/page.py"
+            ),
+        )
+        assert check_wizard_url_param_route() == []
+
+    def test_page_path_without_segment_is_e054(self, monkeypatch) -> None:
+        """A page path without the [step] directory produces E054."""
+        _isolated_backend_with(
+            monkeypatch,
+            _page_wizard_registration(
+                "stuck_wizard", _CleanStepsWizard, "/app/pages/order/page.py"
+            ),
+        )
+        errors = check_wizard_url_param_route()
+        assert len(errors) == 1
+        assert errors[0].id == "next.E054"
+        assert "_CleanStepsWizard" in errors[0].msg
+        assert "[step]" in errors[0].msg
+
+    def test_custom_url_param_segment_is_clean(self, monkeypatch) -> None:
+        """The check honours a custom Meta.url_param name."""
+        _isolated_backend_with(
+            monkeypatch,
+            _page_wizard_registration(
+                "staged_wizard", _StagedWizard, "/app/pages/order/[stage]/page.py"
+            ),
+        )
+        assert check_wizard_url_param_route() == []
+
+    def test_custom_url_param_mismatch_is_e054(self, monkeypatch) -> None:
+        """A [step] directory does not satisfy a wizard reading `stage`."""
+        _isolated_backend_with(
+            monkeypatch,
+            _page_wizard_registration(
+                "staged_wizard", _StagedWizard, "/app/pages/order/[step]/page.py"
+            ),
+        )
+        errors = check_wizard_url_param_route()
+        assert len(errors) == 1
+        assert "[stage]" in errors[0].msg
+
+    @pytest.mark.parametrize(
+        "registration",
+        [
+            pytest.param(
+                _wizard_registration("shared_wizard", _CleanStepsWizard),
+                id="shared-scope-has-no-static-route",
+            ),
+            pytest.param(
+                _page_wizard_registration(
+                    "component_wizard",
+                    _CleanStepsWizard,
+                    "/app/pages/order/component.py",
+                ),
+                id="component-module-has-no-static-route",
+            ),
+            pytest.param(
+                _page_wizard_registration("pathless_wizard", _CleanStepsWizard, ""),
+                id="empty-file-path",
+            ),
+            pytest.param(
+                ActionRegistration(
+                    name="plain_page_action",
+                    file_path="/app/pages/order/page.py",
+                    scope="page",
+                    form_class=_PlainStep,
+                ),
+                id="non-wizard-action",
+            ),
+        ],
+    )
+    def test_skipped_registrations(
+        self, monkeypatch, registration: ActionRegistration
+    ) -> None:
+        """Registrations without a statically known route are skipped."""
+        _isolated_backend_with(monkeypatch, registration)
+        assert check_wizard_url_param_route() == []
+
+
 class TestCheckFormAnchorFiles:
-    """check_form_anchor_files: E052 for a malformed FORM_ANCHOR_FILES setting."""
+    """E052 fires for a malformed FORM_ANCHOR_FILES setting."""
 
     def test_settings_not_dict_yields_no_errors(self, settings) -> None:
         """`NEXT_FRAMEWORK` not being a dict short-circuits cleanly."""

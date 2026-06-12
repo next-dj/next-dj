@@ -3,9 +3,12 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from django import forms as django_forms
 from django.http import HttpRequest
+from django.test import override_settings
 
+from next.conf import next_framework_settings
 from next.forms import (
     ActionRegistration,
     Form,
@@ -14,10 +17,12 @@ from next.forms import (
 from next.forms.base import (
     _FRAMEWORK_ROOT,
     _auto_register_form_class,
+    _compute_scope,
     _find_definition_frame,
     _is_framework_file,
     _is_self_registered,
     _record_invalid_meta_scope,
+    _to_snake_case,
 )
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
@@ -415,7 +420,7 @@ class TestModelFormAutoRegistration:
 
 
 class TestAutoRegisterFormClassDirectly:
-    """_auto_register_form_class: direct call covering edge-case branches."""
+    """Direct _auto_register_form_class calls cover the edge-case branches."""
 
     def test_skips_when_no_base_dir_and_no_package(self, settings, tmp_path) -> None:
         """Form at a standalone path (no __init__.py) registers with stem as scope_key."""
@@ -591,3 +596,60 @@ class TestSelfRegisteredMarker:
 
         assert _is_self_registered(MarkedBaseForm)
         assert not _is_self_registered(OptedOutForm)
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("ArticleEditForm", "article_edit_form"),
+        ("Form", "form"),
+        ("VoteForm", "vote_form"),
+        ("CreateLinkForm", "create_link_form"),
+        ("ContactUsForm", "contact_us_form"),
+        ("XMLForm", "xml_form"),
+        ("XMLParserForm", "xml_parser_form"),
+        ("myform", "myform"),
+    ],
+)
+def test_to_snake_case(name: str, expected: str) -> None:
+    """_to_snake_case converts CamelCase class names to snake_case."""
+    assert _to_snake_case(name) == expected
+
+
+class TestIsFrameworkFileUsed:
+    """_is_framework_file detects paths inside the framework root."""
+
+    def test_framework_file_detected(self) -> None:
+        """A path inside the framework root is recognised as a framework file."""
+        framework_path = str(_FRAMEWORK_ROOT / "forms" / "base.py")
+        assert _is_framework_file(framework_path) is True
+
+    def test_non_framework_file_not_detected(self, tmp_path) -> None:
+        """A path outside the framework root is not a framework file."""
+        assert _is_framework_file(str(tmp_path / "myapp" / "forms.py")) is False
+
+
+class TestComputeScope:
+    """_compute_scope maps anchor file names to page scope, others to shared."""
+
+    def test_default_anchor_names(self, tmp_path) -> None:
+        """Without FORM_ANCHOR_FILES, page.py and component.py are anchors."""
+        assert _compute_scope(str(tmp_path / "page.py")) == "page"
+        assert _compute_scope(str(tmp_path / "component.py")) == "page"
+        assert _compute_scope(str(tmp_path / "forms.py")) == "shared"
+
+    def test_form_anchor_files_setting_overrides_defaults(self, tmp_path) -> None:
+        """FORM_ANCHOR_FILES replaces which file names count as anchors."""
+        with override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": ["screen.py"]}):
+            next_framework_settings.reload()
+            assert _compute_scope(str(tmp_path / "screen.py")) == "page"
+            assert _compute_scope(str(tmp_path / "page.py")) == "shared"
+        next_framework_settings.reload()
+
+    def test_empty_form_anchor_files_disables_anchors(self, tmp_path) -> None:
+        """An explicit empty FORM_ANCHOR_FILES means no file name is an anchor."""
+        with override_settings(NEXT_FRAMEWORK={"FORM_ANCHOR_FILES": []}):
+            next_framework_settings.reload()
+            assert _compute_scope(str(tmp_path / "page.py")) == "shared"
+            assert _compute_scope(str(tmp_path / "component.py")) == "shared"
+        next_framework_settings.reload()

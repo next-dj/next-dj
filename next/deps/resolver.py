@@ -48,7 +48,7 @@ def cached_signature(func: Callable[..., Any]) -> inspect.Signature:
     return cached
 
 
-def _cached_type_hints(func: Callable[..., Any]) -> dict[str, Any]:
+def cached_type_hints(func: Callable[..., Any]) -> dict[str, Any]:
     """Return `get_type_hints(func)`, memoised per callable."""
     key = _introspect_key(func)
     cached = _type_hints_cache.get(key)

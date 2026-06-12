@@ -175,7 +175,7 @@ class TestBenchPageGetRender:
 
 
 class TestBenchFormTag:
-    """Full ``{% form %}`` block render: URL reverse, hidden inputs, namespace."""
+    """Full ``{% form %}`` block render with URL reverse and hidden inputs."""
 
     @pytest.fixture(autouse=True)
     def _register_tag_action(self) -> None:
