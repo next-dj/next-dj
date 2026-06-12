@@ -171,6 +171,18 @@ class TestActionGuards:
         assert r.status_code == 403
         assert not Tag.objects.exists()
 
+    def test_non_staff_change_post_is_forbidden(self, client, django_user_model):
+        client.force_login(django_user_model.objects.create_user("intruder"))
+        tag = Tag.objects.create(name="Old", slug="old")
+        r = client.post_action(
+            "admin:change",
+            {"name": "Hacked", "slug": "hacked"},
+            origin=f"/admin/library/tag/{tag.pk}/change/",
+        )
+        assert r.status_code == 403
+        tag.refresh_from_db()
+        assert tag.name == "Old"
+
     def test_non_staff_delete_post_is_forbidden(self, client, django_user_model):
         client.force_login(django_user_model.objects.create_user("intruder"))
         tag = Tag.objects.create(name="Keep", slug="keep")
