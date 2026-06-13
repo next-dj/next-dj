@@ -158,6 +158,29 @@ class TestNextStaticFilesFinderFind:
         assert isinstance(found, list)
         assert len(found) == 1
 
+    def test_find_honours_deprecated_all_keyword(self, pages_tree: Path) -> None:
+        finder = NextStaticFilesFinder()
+        with (
+            mock.patch(
+                "next.static.finders.get_pages_directories_for_watch",
+                return_value=[pages_tree],
+            ),
+            mock.patch(
+                "next.static.finders.get_template_djx_paths_for_watch",
+                return_value={pages_tree / "about" / "template.djx"},
+            ),
+            mock.patch(
+                "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
+            ),
+            mock.patch(
+                "next.components.get_component_paths_for_watch",
+                return_value=set(),
+            ),
+        ):
+            found = finder.find("next/about.css", all=True)
+        assert isinstance(found, list)
+        assert len(found) == 1
+
 
 class TestNextStaticFilesFinderList:
     def test_list_yields_all_discovered_assets(self, pages_tree: Path) -> None:
