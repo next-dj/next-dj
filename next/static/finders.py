@@ -160,12 +160,26 @@ class NextStaticFilesFinder(BaseFinder):
         self, path: str, find_all: Literal[True]
     ) -> list[str]: ...  # pragma: no cover
 
+    @overload
+    def find(
+        self, path: str, *, all: Literal[False]
+    ) -> str | None: ...  # pragma: no cover
+
+    @overload
+    def find(
+        self, path: str, *, all: Literal[True]
+    ) -> list[str]: ...  # pragma: no cover
+
     def find(
         self,
         path: str,
         find_all: bool = False,  # noqa: FBT001, FBT002
+        **kwargs: bool,
     ) -> str | list[str] | None:
         """Resolve the logical path to an absolute filesystem path or list."""
+        # django-stubs still models the deprecated `all` keyword on BaseFinder,
+        # so the override must accept it. Normalise it back to find_all.
+        find_all = kwargs.get("all", find_all)
         self._refresh()
         source = self._mapping.get(path)
         if source is None:
