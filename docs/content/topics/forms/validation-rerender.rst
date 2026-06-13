@@ -235,3 +235,4 @@ See Also
    :doc:`templates` for the ``{% form %}`` tag and ``_next_form_origin``.
    :doc:`backends` for swapping the dispatch backend.
    :doc:`/content/internals/action-dispatch` for the full pipeline.
+   :ref:`topics-forms-actions-dynamic-guards` for the object-level hook, whose denial returns a bare 403 instead of re-rendering.

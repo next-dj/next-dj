@@ -76,6 +76,11 @@ not be retained past the receiver call.
      - ``PageContextRegistry``
      - ``file_path``, ``key``
      - After a context callable is attached to a page module.
+   * - ``form_access_denied``
+     - ``FormActionDispatch``
+     - ``action_name``, ``uid``, ``request``, ``layer``, ``reason``
+     - When a dynamic permission hook denies a request, never on the static guard path.
+       ``layer`` is ``"view"`` or ``"object"``. ``reason`` is ``"raised"``, ``"denied"``, or ``"response"``.
    * - ``form_validation_failed``
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``error_count``, ``field_names``

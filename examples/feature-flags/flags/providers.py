@@ -1,10 +1,28 @@
 import inspect
 from typing import get_args, get_origin
 
-from next.deps import DDependencyBase, RegisteredParameterProvider
+from next.deps import DDependencyBase, RegisteredParameterProvider, resolver
 from next.deps.context import ResolutionContext
 
 from .cache import get_cached_flag
+
+
+WRITE_GATE_FLAG = "admin_writes"
+
+
+class FlagService:
+    """Read-only view over the flag cache used by permission hooks."""
+
+    def is_enabled(self, name: str) -> bool:
+        """Return True when the named flag exists and is enabled."""
+        flag = get_cached_flag(name)
+        return bool(flag and flag.enabled)
+
+
+@resolver.dependency("flag_service")
+def flag_service() -> FlagService:
+    """Resolve the shared `FlagService` for `Depends("flag_service")` parameters."""
+    return FlagService()
 
 
 class DFlag[T](DDependencyBase[T]):

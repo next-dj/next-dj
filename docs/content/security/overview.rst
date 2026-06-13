@@ -81,13 +81,16 @@ Access Control
 Form actions are unauthenticated by default.
 The ``/_next/form/<uid>/`` endpoint accepts a POST from any visitor, so a registered edit or delete action runs without an identity check unless the handler adds one.
 
-Enforce access at one of three layers.
+Enforce access at one of these layers.
 
+- Declare ``Meta.login_required`` and ``Meta.permission_required`` on the form class, or the same keywords on ``@action``, for a static guard checked before any application code, see :ref:`topics-forms-actions-guards`.
+- Override ``check_permissions`` or ``has_object_permission`` on the form class for a per-request decision against the database, the tenant, or the loaded row, see :ref:`topics-forms-actions-dynamic-guards`.
 - Check ``request.user.is_authenticated`` and ownership inside ``on_valid`` before ``self.save()``.
 - Apply a project-wide login requirement through middleware, see :doc:`/content/howto/require-login-on-pages`.
 - Enforce a policy in a custom form action backend that wraps every dispatch.
 
 An action that mutates data and an action that loads an instance through ``instance_from_url`` both need this guard.
+The :ref:`howto-enforce-object-level-permissions` recipe shows the owner-only edit on a ``ModelForm``.
 
 Production Hardening
 --------------------

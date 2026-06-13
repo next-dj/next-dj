@@ -1,7 +1,10 @@
 from django import forms
+from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponseRedirect
 from flags.models import Flag
+from flags.providers import WRITE_GATE_FLAG, FlagService
 
+from next.deps import Depends
 from next.forms import Form
 from next.pages import context
 
@@ -11,6 +14,12 @@ class BulkToggleForm(Form):
         required=False,
         widget=forms.CheckboxSelectMultiple(attrs={"class": "hidden"}),
     )
+
+    @classmethod
+    def check_permissions(cls, flags: FlagService = Depends("flag_service")) -> None:
+        """Deny the toggle action while the `admin_writes` gate flag is off."""
+        if not flags.is_enabled(WRITE_GATE_FLAG):
+            raise PermissionDenied
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         """Populate the choices from the current set of flag names."""

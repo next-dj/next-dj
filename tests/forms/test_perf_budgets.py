@@ -3,9 +3,16 @@ from typing import Any, ClassVar
 
 import pytest
 from django import forms as django_forms
-from django.http import HttpRequest, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponseRedirect, QueryDict
 
-from next.forms import ActionRegistration, Form
+from next.deps import Depends, resolver
+from next.forms import (
+    ActionRegistration,
+    Form,
+    PermissionOutcome,
+    RegistryFormActionBackend,
+)
+from next.forms.dispatch import FormActionDispatch
 from next.forms.manager import form_action_manager
 from next.forms.wizard import (
     FormWizard,
@@ -229,3 +236,117 @@ class TestErrorRerenderFileReadBudget:
             request, "budget_rerender_action", form, page_file_path=page_file
         )
         assert reads["count"] == 0
+
+
+class _UnguardedBudgetForm(Form):
+    """No permission hooks, so dispatch resolves only get_initial and on_valid."""
+
+    name = django_forms.CharField(max_length=50)
+
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        """Redirect on a valid submission."""
+        return HttpResponseRedirect("/")
+
+
+class _GuardedBudgetForm(Form):
+    """A view hook plus get_initial and on_valid share one Depends provider."""
+
+    name = django_forms.CharField(max_length=50)
+    resolutions: ClassVar[list[str]] = []
+
+    @classmethod
+    def get_initial(cls, tenant: str = Depends("tenant")) -> dict[str, Any]:
+        """Read the shared provider during initial resolution."""
+        assert tenant == "acme"
+        return {}
+
+    @classmethod
+    def check_permissions(
+        cls, request: HttpRequest, tenant: str = Depends("tenant")
+    ) -> PermissionOutcome:
+        """Read the shared provider during the view hook."""
+        assert tenant == "acme"
+        return None
+
+    def on_valid(
+        self, request: HttpRequest, tenant: str = Depends("tenant")
+    ) -> HttpResponseRedirect:
+        """Read the shared provider during finalisation."""
+        assert tenant == "acme"
+        return HttpResponseRedirect("/")
+
+
+def _budget_request(mock_http_request) -> HttpRequest:
+    post = QueryDict(mutable=True)
+    post["name"] = "Ada"
+    post["_next_form_origin"] = "/"
+    return mock_http_request(method="POST", POST=post, FILES=None)
+
+
+@pytest.mark.django_db()
+class TestPermissionHookResolveBudgets:
+    """Deterministic resolve-call budgets for the permission-hook dispatch path.
+
+    A failing assertion here means an absent hook started costing a resolver
+    call, or a shared provider stopped reusing the per-request cache.
+    """
+
+    def _dispatch_counting(self, form_class, mock_http_request, monkeypatch):
+        calls = {"n": 0}
+        original = resolver.resolve_dependencies
+
+        def counting(*args: object, **kwargs: object) -> object:
+            calls["n"] += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(resolver, "resolve_dependencies", counting)
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="budget_hook_action",
+                file_path="/fake/myapp/forms.py",
+                scope="shared",
+                form_class=form_class,
+            )
+        )
+        meta = backend.get_meta("budget_hook_action")
+        assert meta is not None
+        request = _budget_request(mock_http_request)
+        response = FormActionDispatch.dispatch(
+            backend, request, "budget_hook_action", meta
+        )
+        return response, calls["n"]
+
+    def test_unguarded_form_pays_only_get_initial_and_on_valid(
+        self, mock_http_request, monkeypatch
+    ) -> None:
+        """An absent hook adds no third resolve beyond get_initial and on_valid."""
+        response, count = self._dispatch_counting(
+            _UnguardedBudgetForm, mock_http_request, monkeypatch
+        )
+        assert response.status_code == 302
+        # Exact count today: 2, the get_initial and on_valid resolves only.
+        assert count == 2
+
+    def test_guarded_form_resolves_hook_with_shared_provider(
+        self, mock_http_request, monkeypatch
+    ) -> None:
+        """The view hook adds one resolve, the shared provider runs once."""
+        _GuardedBudgetForm.resolutions.clear()
+
+        def tenant_provider() -> str:
+            _GuardedBudgetForm.resolutions.append("tenant")
+            return "acme"
+
+        resolver.register_dependency("tenant", tenant_provider)
+        try:
+            response, count = self._dispatch_counting(
+                _GuardedBudgetForm, mock_http_request, monkeypatch
+            )
+        finally:
+            resolver._dependency_callables.pop("tenant", None)
+        assert response.status_code == 302
+        # Exact count today: 3, check_permissions plus get_initial plus on_valid.
+        assert count == 3
+        # The shared Depends provider resolved once across all three phases.
+        assert _GuardedBudgetForm.resolutions == ["tenant"]

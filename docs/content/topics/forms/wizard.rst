@@ -30,6 +30,11 @@ The access guards also match plain forms.
 The keys are read through plain class-attribute lookup, so a wizard subclassing a guarded base while declaring its own ``Meta`` must extend the base ``Meta`` or re-declare the guard keys.
 See :ref:`topics-forms-actions-guards` for the semantics and the inheritance rule.
 
+A wizard also accepts the dynamic ``check_permissions`` classmethod for a per-request decision.
+It is enforced per step POST, before the step form binds, so a denied step writes no storage.
+A wizard has no object-level hook.
+See :ref:`topics-forms-actions-dynamic-guards` for the hook contract.
+
 Declaring Steps
 ---------------
 

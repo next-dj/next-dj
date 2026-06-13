@@ -3,8 +3,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 from access.backends import _safe_form_payload, _step_from_origin
 from access.models import AccessRequest, AuditEntry
+from access.receivers import _on_form_access_denied
 from django.contrib.sessions.backends.db import SessionStore
 from django.http import HttpRequest, QueryDict
 
@@ -156,6 +158,52 @@ class TestWizardSteps:
         assert names == ["identity", "scope", "approval"]
 
 
+class TestWizardPermissionHook:
+    """`check_permissions` gates each step POST on the acknowledgement field."""
+
+    @staticmethod
+    def _request(*, acknowledged: bool) -> HttpRequest:
+        request = HttpRequest()
+        request.method = "POST"
+        query = "policy_acknowledged=on" if acknowledged else ""
+        request.POST = QueryDict(query)
+        return request
+
+    def test_unacknowledged_request_is_denied(self) -> None:
+        request = self._request(acknowledged=False)
+        assert _step_page.AccessRequestWizard.check_permissions(request) is False
+
+    def test_acknowledged_request_is_allowed(self) -> None:
+        request = self._request(acknowledged=True)
+        assert _step_page.AccessRequestWizard.check_permissions(request) is True
+
+
+@pytest.mark.django_db()
+class TestAccessDeniedReceiver:
+    """`_on_form_access_denied` records the denial layer and reason."""
+
+    def test_receiver_stores_layer_and_reason(self) -> None:
+        _on_form_access_denied(
+            action_name="access_request_wizard",
+            layer="view",
+            reason="denied",
+        )
+        row = AuditEntry.objects.get(kind=AuditEntry.KIND_ACCESS_DENIED)
+        assert row.source == AuditEntry.SOURCE_SIGNAL
+        assert row.access_layer == "view"
+        assert row.access_reason == "denied"
+        assert row.action_name == "access_request_wizard"
+
+    def test_access_denied_str_carries_source_and_kind(self) -> None:
+        entry = AuditEntry(
+            action_name="access_request_wizard",
+            kind=AuditEntry.KIND_ACCESS_DENIED,
+            source=AuditEntry.SOURCE_SIGNAL,
+        )
+        entry.created_at = datetime(2026, 4, 25, 12, 30, 0, tzinfo=UTC)
+        assert "signal/access_denied" in str(entry)
+
+
 class TestProgressBarSteps:
     """`progress_bar` synthesises step status from the wizard state."""
 
@@ -220,6 +268,24 @@ class TestAuditRowHelpers:
         assert "1 error" in rendered
         assert "errors" not in rendered
         assert "email" in rendered
+
+    def test_summary_surfaces_access_denial_layer_and_reason(self) -> None:
+        entry = AuditEntry(
+            action_name="x",
+            kind=AuditEntry.KIND_ACCESS_DENIED,
+            source=AuditEntry.SOURCE_SIGNAL,
+            access_layer="view",
+            access_reason="denied",
+        )
+        assert _audit_row.summary(entry) == "view/denied"
+
+    def test_kind_class_marks_access_denied_as_rose(self) -> None:
+        entry = AuditEntry(
+            action_name="x",
+            kind=AuditEntry.KIND_ACCESS_DENIED,
+            source=AuditEntry.SOURCE_SIGNAL,
+        )
+        assert _audit_row.kind_class(entry) == "bg-rose-100 text-rose-800"
 
 
 class TestStepFormValidation:

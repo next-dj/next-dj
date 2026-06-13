@@ -18,6 +18,7 @@ from next.deps.signals import provider_registered
 from next.forms.signals import (
     action_dispatched,
     action_registered,
+    form_access_denied,
     form_validation_failed,
     wizard_completed,
     wizard_step_submitted,
@@ -48,6 +49,7 @@ __all__ = [
     "component_rendered",
     "components_registered",
     "context_registered",
+    "form_access_denied",
     "form_validation_failed",
     "html_injected",
     "page_rendered",

@@ -12,11 +12,11 @@ from django.contrib.auth.models import User
 from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import caches
 from django.core.exceptions import ImproperlyConfigured
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import RequestFactory, override_settings
 
 from next.conf import next_framework_settings
-from next.forms import Form
+from next.forms import Form, PermissionOutcome
 from next.forms.base import _FRAMEWORK_ROOT
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
@@ -1086,3 +1086,76 @@ class TestWizardBackendManager:
         ):
             next_framework_settings.reload()
             assert wizard_backend_manager.get() is not first
+
+
+class PermStep(Form):
+    """Step form for the dynamically guarded wizard."""
+
+    name = django_forms.CharField(max_length=100)
+
+
+class PermGuardedWizard(FormWizard):
+    """Wizard whose check_permissions denies anonymous users per step POST."""
+
+    class Meta:
+        """One step routed through the wizard backend."""
+
+        steps: ClassVar = [("identity", PermStep)]
+
+    @classmethod
+    def check_permissions(cls, request: HttpRequest) -> PermissionOutcome:
+        """Deny anonymous users, allow authenticated ones."""
+        return not request.user.is_anonymous
+
+    def done(self, request, cleaned_data) -> HttpResponseRedirect:
+        """Finalise with a redirect once the only step validates."""
+        return HttpResponseRedirect("/thanks/")
+
+
+class RedirectGuardedWizard(FormWizard):
+    """Wizard whose check_permissions short-circuits with a redirect response."""
+
+    class Meta:
+        """One step routed through the wizard backend."""
+
+        steps: ClassVar = [("identity", PermStep)]
+
+    @classmethod
+    def check_permissions(cls, request: HttpRequest) -> PermissionOutcome:
+        """Send anonymous users to a paywall instead of denying outright."""
+        if request.user.is_anonymous:
+            return HttpResponseRedirect("/paywall/")
+        return None
+
+    def done(self, request, cleaned_data) -> HttpResponseRedirect:
+        """Finalise with a redirect once the only step validates."""
+        return HttpResponseRedirect("/thanks/")
+
+
+@pytest.mark.django_db()
+class TestWizardDynamicPermissionHook:
+    """A FormWizard check_permissions override gates every step POST."""
+
+    def _post(self, client, action: str = "perm_guarded_wizard") -> HttpResponse:
+        url = form_action_manager.get_action_url(action)
+        return client.post(
+            url,
+            data={"_next_form_origin": "/request/identity/", "name": "Ada"},
+            follow=False,
+        )
+
+    def test_anonymous_step_post_is_denied(self, client_no_csrf) -> None:
+        assert PermGuardedWizard._has_check_permissions is True
+        resp = self._post(client_no_csrf)
+        assert resp.status_code == 403
+
+    def test_authenticated_step_post_advances(self, client_no_csrf) -> None:
+        client_no_csrf.force_login(User.objects.create_user("eve", password="pw"))
+        resp = self._post(client_no_csrf)
+        assert resp.status_code == 302
+        assert resp.url == "/thanks/"
+
+    def test_redirect_outcome_short_circuits_the_step(self, client_no_csrf) -> None:
+        resp = self._post(client_no_csrf, "redirect_guarded_wizard")
+        assert resp.status_code == 302
+        assert resp.url == "/paywall/"

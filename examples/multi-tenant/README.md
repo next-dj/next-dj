@@ -37,6 +37,10 @@ uv run pytest
 
 The migration step seeds two tenants and three demo notes through
 [`notes/migrations/0002_demo_data.py`](notes/migrations/0002_demo_data.py).
+A later migration
+([`notes/migrations/0004_lock_demo_note.py`](notes/migrations/0004_lock_demo_note.py))
+locks the Acme `Status update` note so the editor's object-level guard has
+something to refuse.
 
 There are two ways to drive the app:
 
@@ -185,6 +189,65 @@ The body textarea is rendered side by side with the
 The composite imports the `markdown` package and renders the body through
 `mark_safe` after letting the renderer escape raw HTML.
 
+### 6. Dynamic permission hooks on the edit form
+
+The `get_object_or_404` in `get_initial` keeps one tenant from loading
+another tenant's note id. It does not cover two rules that are not about
+ownership. `NoteEditForm` layers those as the framework's two DI-resolved
+permission hooks.
+
+```python
+class NoteEditForm(ModelForm):
+    @classmethod
+    def check_permissions(cls, tenant: DTenant) -> PermissionOutcome:
+        return tenant.is_active
+
+    def has_object_permission(self) -> PermissionOutcome:
+        if self.instance.locked:
+            raise PermissionDenied
+        return None
+```
+
+`check_permissions` is the view-level gate. The dispatcher resolves its
+parameters the same way it resolves `get_initial`, so the hook receives the
+active `Tenant` through the `DTenant` provider and declares nothing else. It
+runs after the static `ActionGuard` and before `get_initial`, so a suspended
+tenant (`is_active=False`) is refused before any note is loaded. The
+middleware resolves a suspended tenant exactly like an active one, and the
+ownership `404` would still let a suspended tenant reach its own notes, so
+this rule exists only at the hook layer. Returning `False` denies with `403`.
+
+`has_object_permission` is the object-level gate. It runs after binding, so
+`self.instance` is the loaded note. A `locked` note belongs to its tenant and
+loads without a `404`, yet must stay read-only, so the hook raises
+`PermissionDenied` for a bare `403` with no re-render. Returning `None` or
+`True` allows the edit through to `is_valid`.
+
+Both hooks emit `next.signals.form_access_denied` on a denial, carrying the
+`action_name`, `uid`, `request`, the `layer` (`"view"` or `"object"`), and
+the `reason` (`"raised"`, `"denied"`, or `"response"`). The signal stays
+silent when both hooks allow the request.
+
+The `notes` app consumes that signal. [`notes/receivers.py`](notes/receivers.py)
+connects a receiver that logs each denial under the `notes.access` logger,
+reading the active tenant slug from `request.tenant` so the line names the
+tenant whose edit was refused. `NotesConfig.ready` imports the module so the
+connection is live at startup.
+
+```python
+@receiver(form_access_denied)
+def _on_form_access_denied(action_name, layer, reason, request=None, **_):
+    tenant = getattr(request, "tenant", None)
+    tenant_slug = getattr(tenant, "slug", "unknown")
+    logger.warning(
+        "form access denied action=%s layer=%s reason=%s tenant=%s",
+        action_name,
+        layer,
+        reason,
+        tenant_slug,
+    )
+```
+
 ## Further reading
 
 - [`next/static/backends.py`](../../next/static/backends.py) — the
@@ -203,3 +266,8 @@ The composite imports the `markdown` package and renders the body through
   — the request-aware output section that this example anchors.
 - [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst)
   — the request-scoped provider pattern.
+- [`docs/content/howto/enforce-object-level-permissions.rst`](../../docs/content/howto/enforce-object-level-permissions.rst)
+  — the `check_permissions` and `has_object_permission` hooks used in
+  section 6.
+- [`docs/content/topics/forms/signals.rst`](../../docs/content/topics/forms/signals.rst)
+  — the `form_access_denied` payload contract.

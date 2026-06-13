@@ -13,7 +13,7 @@ from django.db.models import Model
 from django.forms.forms import BaseForm as DjangoBaseForm, DeclarativeFieldsMetaclass
 from django.forms.models import BaseModelForm as DjangoBaseModelForm, ModelFormMetaclass
 from django.forms.renderers import DjangoTemplates
-from django.http import HttpRequest, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 
 from next.conf import next_framework_settings
@@ -33,6 +33,10 @@ _ANCHOR_FILE_NAMES: frozenset[str] = frozenset({"page.py", "component.py"})
 _SELF_REGISTERED_ATTR: Final[str] = "__next_registered__"
 _FRAMEWORK_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 _DJANGO_FORMS_ROOT: Final[Path] = Path(inspect.getfile(django_forms)).resolve().parent
+
+# HttpResponseRedirect is a subclass of HttpResponse, so the login-redirect
+# short-circuit needs no extra arm.
+type PermissionOutcome = bool | HttpResponse | None
 
 
 def _to_snake_case(name: str) -> str:
@@ -246,7 +250,42 @@ class _DivFormRenderer(DjangoTemplates):
 _div_form_renderer = _DivFormRenderer()
 
 
-class BaseForm(DjangoBaseForm):
+def _hook_func(method: object) -> object:
+    """Return a classmethod's underlying function, or the method itself."""
+    return getattr(method, "__func__", method)
+
+
+class _PermissionHooks:
+    """Opt-in DI-resolved permission gates layered over the static ActionGuard.
+
+    `__init_subclass__` stamps a presence flag per hook so an undeclared hook
+    costs the dispatcher no resolver call.
+    """
+
+    _has_check_permissions: bool = False
+    _has_object_permission: bool = False
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        """Stamp the per-subclass hook-presence flags via __func__ identity."""
+        super().__init_subclass__(**kwargs)
+        base_check = _hook_func(_PermissionHooks.check_permissions)
+        base_object = _hook_func(_PermissionHooks.has_object_permission)
+        cls._has_check_permissions = _hook_func(cls.check_permissions) is not base_check
+        cls._has_object_permission = (
+            _hook_func(cls.has_object_permission) is not base_object
+        )
+
+    @classmethod
+    def check_permissions(cls) -> PermissionOutcome:
+        """View-level gate, DI-resolved like get_initial. None or True allows."""
+        return None
+
+    def has_object_permission(self) -> PermissionOutcome:
+        """Object-level gate after binding, DI-resolved. None or True allows."""
+        return None
+
+
+class BaseForm(_PermissionHooks, DjangoBaseForm):
     """Custom `BaseForm` extended with `get_initial` and `on_valid`."""
 
     default_renderer = _div_form_renderer
@@ -274,7 +313,7 @@ class BaseForm(DjangoBaseForm):
         return redirect_to_origin(request)
 
 
-class BaseModelForm(DjangoBaseModelForm):
+class BaseModelForm(_PermissionHooks, DjangoBaseModelForm):
     """Custom `BaseModelForm` with `get_initial` and `on_valid` support."""
 
     default_renderer = _div_form_renderer
@@ -392,6 +431,7 @@ __all__ = [
     "MultipleChoiceField",
     "NumberInput",
     "PasswordInput",
+    "PermissionOutcome",
     "RadioSelect",
     "RegexField",
     "Select",

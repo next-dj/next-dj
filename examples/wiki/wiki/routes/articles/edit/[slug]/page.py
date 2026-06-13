@@ -20,6 +20,10 @@ class ArticleEditForm(ModelForm):
             "body_md": ComponentWidget("textarea", rows=12, markdown_source=True),
         }
 
+    def has_object_permission(self) -> bool:
+        """Deny edits to a locked article keyed off the bound ``self.instance``."""
+        return not self.instance.locked
+
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
         """Persist edits to an existing article and redirect to its public URL."""
         self.save()

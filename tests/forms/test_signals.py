@@ -15,6 +15,7 @@ from next.forms.manager import form_action_manager
 from next.forms.signals import (
     action_dispatched,
     action_registered,
+    form_access_denied,
     form_validation_failed,
     wizard_completed,
     wizard_step_submitted,
@@ -121,6 +122,20 @@ def capture_wizard_completed() -> Generator[list[dict[str, Any]], None, None]:
         yield events
     finally:
         wizard_completed.disconnect(_listener)
+
+
+@pytest.fixture()
+def capture_form_access_denied() -> Generator[list[dict[str, Any]], None, None]:
+    events: list[dict[str, Any]] = []
+
+    def _listener(sender: object, **kwargs: object) -> None:
+        events.append({"sender": sender, **kwargs})
+
+    form_access_denied.connect(_listener)
+    try:
+        yield events
+    finally:
+        form_access_denied.disconnect(_listener)
 
 
 def _post_wizard_step(client, step: str, data: dict):
@@ -283,6 +298,54 @@ class TestFormValidationFailedSignal:
         form_validation_failed.connect(_listener)
         form_validation_failed.disconnect(_listener)
         form_validation_failed.send(sender=object)
+        assert len(events) == 0
+
+
+class TestFormAccessDeniedSignal:
+    """``form_access_denied`` connects, receives kwargs, and emits lazily."""
+
+    def test_signal_is_importable(self) -> None:
+        """``form_access_denied`` is a Django Signal exported from the module."""
+        assert isinstance(form_access_denied, Signal)
+
+    def test_listener_receives_sent_event(
+        self, capture_form_access_denied: list[dict[str, Any]]
+    ) -> None:
+        """Sending ``form_access_denied`` notifies a connected listener."""
+        form_access_denied.send(sender=object)
+        assert len(capture_form_access_denied) == 1
+
+    def test_payload_carries_layer_and_reason(
+        self, capture_form_access_denied: list[dict[str, Any]]
+    ) -> None:
+        """The denial payload preserves layer and reason for receivers."""
+        form_access_denied.send(
+            sender=object,
+            action_name="edit",
+            uid="u1",
+            layer="object",
+            reason="denied",
+        )
+        event = capture_form_access_denied[0]
+        assert event["action_name"] == "edit"
+        assert event["uid"] == "u1"
+        assert event["layer"] == "object"
+        assert event["reason"] == "denied"
+
+    def test_lazy_emit_has_no_receivers_by_default(self) -> None:
+        """With no listener connected the signal reports an empty receiver list."""
+        assert form_access_denied.receivers == []
+
+    def test_disconnected_after_fixture_teardown(self) -> None:
+        """After disconnecting, the listener is no longer notified."""
+        events: list[dict[str, Any]] = []
+
+        def _listener(sender: object, **kwargs: object) -> None:
+            events.append({"sender": sender})
+
+        form_access_denied.connect(_listener)
+        form_access_denied.disconnect(_listener)
+        form_access_denied.send(sender=object)
         assert len(events) == 0
 
 

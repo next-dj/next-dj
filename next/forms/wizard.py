@@ -20,7 +20,9 @@ from next.conf.signals import settings_reloaded
 
 from .backends import ActionRegistration, scope_key_for
 from .base import (
+    PermissionOutcome,
     _format_success_message,
+    _hook_func,
     _meta_guard,
     _registration_gate,
     _to_snake_case,
@@ -332,6 +334,7 @@ class FormWizard:
     """Routes a sequence of forms across requests and finalises on the last step."""
 
     _storage_scope_key: ClassVar[str]
+    _has_check_permissions: ClassVar[bool] = False
 
     class Meta:
         """Default wizard options, overridden on subclasses."""
@@ -340,9 +343,16 @@ class FormWizard:
         url_param: str = "step"
 
     def __init_subclass__(cls, **kwargs: object) -> None:
-        """Register the wizard subclass automatically."""
+        """Register the wizard subclass automatically and stamp the hook flag."""
         super().__init_subclass__(**kwargs)
+        base_check = _hook_func(FormWizard.check_permissions)
+        cls._has_check_permissions = _hook_func(cls.check_permissions) is not base_check
         _auto_register_wizard_class(cls)
+
+    @classmethod
+    def check_permissions(cls) -> PermissionOutcome:
+        """View-level gate per step POST, DI-resolved. None or True allows."""
+        return None
 
     def __init__(
         self,

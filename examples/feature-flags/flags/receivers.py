@@ -9,6 +9,7 @@ from django.dispatch import receiver
 
 from next.components.signals import component_rendered
 from next.pages.signals import page_rendered
+from next.signals import form_access_denied
 
 from .cache import invalidate_flag
 from .metrics import record_render
@@ -21,7 +22,9 @@ if TYPE_CHECKING:
 
 PAGES_DIR_NAME = "panels"
 GUARD_COUNT_KEY = "flags:feature_guard:count"
+DENIED_COUNT_KEY = "flags:access_denied:count"
 _guard_lock = threading.Lock()
+_denied_lock = threading.Lock()
 
 
 def _page_key(file_path: Path) -> str:
@@ -63,6 +66,19 @@ def _count_feature_guard(sender: object, info: object, **_: object) -> None:  # 
         cache.incr(GUARD_COUNT_KEY)
 
 
+@receiver(form_access_denied)
+def _count_access_denied(**_: object) -> None:
+    """Bump a counter whenever a form permission hook denies a request."""
+    with _denied_lock:
+        cache.add(DENIED_COUNT_KEY, 0)
+        cache.incr(DENIED_COUNT_KEY)
+
+
 def feature_guard_count() -> int:
     """Return the number of `feature_guard` component renders this process."""
     return int(cache.get(GUARD_COUNT_KEY) or 0)
+
+
+def access_denied_count() -> int:
+    """Return the number of permission-hook denials this process."""
+    return int(cache.get(DENIED_COUNT_KEY) or 0)

@@ -4,7 +4,7 @@ from access.models import AccessRequest
 from django import forms
 from django.http import HttpRequest, HttpResponseRedirect
 
-from next.forms import ComponentWidget, FormWizard
+from next.forms import ComponentWidget, FormWizard, PermissionOutcome
 
 
 class IdentityStep(forms.ModelForm):
@@ -47,6 +47,18 @@ class AccessRequestWizard(FormWizard):
             ("approval", ApprovalStep),
         ]
         url_param = "step"
+
+    @classmethod
+    def check_permissions(cls, request: HttpRequest) -> PermissionOutcome:
+        """Deny every step POST that omits the retention-policy acknowledgement.
+
+        The form page renders the acknowledgement notice and carries the
+        `policy_acknowledged` field, so a normal submission passes while a
+        replayed or forged action URL that never rendered the form is
+        denied before any PII binds. A denied step writes no draft and
+        leaves only the `form_access_denied` audit row behind.
+        """
+        return request.POST.get("policy_acknowledged") == "on"
 
     def done(
         self,

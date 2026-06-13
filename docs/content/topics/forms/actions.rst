@@ -324,7 +324,7 @@ Declare the access requirements on the action itself.
 
 The semantics mirror Django's :class:`~django.contrib.auth.mixins.PermissionRequiredMixin`.
 ``permission_required`` accepts a single permission string or an iterable of them, the user must hold every listed permission, and declaring a permission implicitly requires authentication.
-The guard runs before the form is built, ahead of ``get_initial``, form binding, and any database access.
+The static guard runs before the form is built, ahead of ``get_initial``, form binding, and any database access, so a request denied by the static guard runs no application code.
 An anonymous user is redirected to ``LOGIN_URL`` with ``next`` set to the posted origin page.
 An authenticated user missing a permission gets :exc:`~django.core.exceptions.PermissionDenied`, which Django renders as HTTP 403.
 
@@ -341,6 +341,127 @@ Hide the form in the template when the page should not show it to anonymous visi
 
 The guard is stored as an ``ActionGuard`` on the action's registry metadata, so a custom backend that delegates to the standard pipeline inherits the enforcement.
 The ``next.W060`` check warns when ``permission_required`` is declared while ``django.contrib.auth`` is not installed.
+
+.. _topics-forms-actions-dynamic-guards:
+
+Dynamic Permission Hooks
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The static guard answers a fixed question frozen at import time: is the user authenticated and does the user hold a named permission.
+A permission that depends on the request, the database, the current tenant, or the target row needs a decision taken per request.
+Two opt-in hooks resolve such a decision, layered on top of the static guard rather than replacing it.
+
+``check_permissions`` is a view-level ``@classmethod``.
+``has_object_permission`` is an object-level instance method.
+Both are dependency-injected exactly like ``get_initial`` and ``on_valid``: the base signatures take no parameters of their own, and an override declares only what it reads.
+The signature is open, so an override pulls ``request``, captured URL kwargs, ``DUrl[...]`` markers, ``Depends(...)`` providers, or nothing at all, following the same rule as the other DI hooks.
+
+Unlike the static guard, the dynamic hooks intentionally run application code.
+``check_permissions`` runs after the origin and the dependency cache are set up and after the form class is resolved, before ``get_initial`` and form binding.
+``has_object_permission`` runs after the form is bound, so ``self.instance`` is the loaded target on a ``ModelForm``, and before ``is_valid`` and the handler.
+
+.. code-block:: python
+   :caption: page.py — view-level gate with no parameters
+
+   import next.forms
+   from notes.models import Note
+
+   class TenantNoteForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title", "body"]
+
+       @classmethod
+       def check_permissions(cls):
+           return None
+
+A parameterless override always allows.
+Declare ``request`` to read the user, and any further parameter the injector resolves.
+
+.. code-block:: python
+   :caption: page.py — view-level gate reading the request, a URL kwarg, and a provider
+
+   import next.forms
+   from django.http import HttpRequest
+   from next.deps import Depends
+   from next.urls import DUrl
+   from notes.models import Note
+
+   class WorkspaceNoteForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title", "body"]
+
+       @classmethod
+       def check_permissions(
+           cls,
+           request: HttpRequest,
+           workspace_id: DUrl["workspace_id", int],
+           flags=Depends("feature_flags"),
+       ):
+           if not flags.notes_enabled:
+               return False
+           return request.user.memberships.filter(workspace_id=workspace_id).exists()
+
+The object-level hook reads the bound instance.
+
+.. code-block:: python
+   :caption: page.py — object-level gate on the loaded row
+
+   import next.forms
+   from django.http import HttpRequest
+   from notes.models import Note
+
+   class NoteEditForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title", "body"]
+           instance_from_url = "slug"
+
+       def has_object_permission(self, request: HttpRequest):
+           return self.instance.owner_id == request.user.id
+
+Both hooks share one return contract.
+
+- ``None`` or ``True`` allows and the pipeline continues.
+- ``False`` denies with HTTP 403.
+- Raising :exc:`~django.core.exceptions.PermissionDenied` denies with HTTP 403.
+- Returning an ``HttpResponse``, including a redirect, short-circuits and that response is returned verbatim.
+- Any other return type raises ``TypeError``, so a misconfigured gate fails loudly.
+
+The ``HttpResponse`` return is how an anonymous visitor is sent to a login page or a paywall instead of receiving a bare 403, a decision the static ``login_required`` redirect cannot express per request.
+The hook return type alias is ``next.forms.PermissionOutcome``, equal to ``bool | HttpResponse | None``, for annotating an override.
+
+The two hooks combine with the static guard in a fixed order.
+The static guard runs first and pre-database.
+A request it denies never reaches a dynamic hook, so the static guard stays the cheap default for the authentication-and-named-permission case.
+``check_permissions`` runs next, then the form binds, then ``has_object_permission`` runs on the bound form.
+
+The view hook resolves on the resolved form class, so a factory ``form_class`` is covered as well, see `Dynamic Form Classes`_.
+A handler-only ``@action`` carries no class to host a method, so it has no dynamic hook.
+Such a handler runs its own check in the body and raises :exc:`~django.core.exceptions.PermissionDenied` or returns a redirect, the same pattern shown for ``messages.success`` under `Success Messages`_.
+
+An object-level denial returns a bare HTTP 403.
+It does not re-render the origin page.
+The hook runs on the bound form before validation, so the 403 is a deliberate authorization refusal independent of whether the submitted data is valid.
+This differs from a validation failure, which re-renders the origin with field errors, see :doc:`validation-rerender`.
+
+The hooks share the per-request dependency cache with ``get_initial`` and ``on_valid``.
+A provider resolved inside a hook is not resolved again downstream in the same dispatch, so a tenant or permission lookup runs once across the hook and the rest of the pipeline.
+
+The ``form_access_denied`` signal fires only on a dynamic-hook denial, never on the static guard path.
+Its sender is ``FormActionDispatch`` and its keyword arguments are ``action_name``, ``uid``, ``request``, ``layer``, and ``reason``.
+``layer`` is ``"view"`` for a ``check_permissions`` denial or ``"object"`` for a ``has_object_permission`` denial.
+``reason`` is ``"raised"``, ``"denied"``, or ``"response"``.
+See :doc:`signals` for the payload and the receiver rules.
+
+On a ``FormWizard`` the ``check_permissions`` classmethod runs per step POST, before the step form binds, so a denied step writes no storage.
+A wizard has no object-level hook.
+
+.. note::
+
+   The dynamic hooks are not statically inspectable, so the ``next.W060`` check covers only the static ``permission_required`` declaration.
+   A hook that calls ``request.user`` without an upstream login requirement is the author's responsibility, the same boundary the static guard draws.
 
 .. _topics-forms-actions-success:
 

@@ -9,6 +9,7 @@ _KIND_CLASS = {
     AuditEntry.KIND_DISPATCHED: "bg-emerald-100 text-emerald-800",
     AuditEntry.KIND_VALIDATION_FAILED: "bg-rose-100 text-rose-800",
     AuditEntry.KIND_REQUEST_STARTED: "bg-slate-100 text-slate-700",
+    AuditEntry.KIND_ACCESS_DENIED: "bg-rose-100 text-rose-800",
 }
 _SOURCE_CLASS = {
     AuditEntry.SOURCE_BACKEND: "bg-indigo-100 text-indigo-800",
@@ -39,6 +40,8 @@ def summary(entry: AuditEntry) -> str:
         parts.append(f"{entry.error_count} error{suffix}{joined}")
     if entry.step:
         parts.append(f"step={entry.step}")
+    if entry.access_layer:
+        parts.append(f"{entry.access_layer}/{entry.access_reason}")
     payload = entry.payload if isinstance(entry.payload, dict) else {}
     redirect = payload.get("redirect")
     if redirect:

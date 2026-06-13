@@ -1,4 +1,5 @@
 import importlib.util
+import logging
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import Mock
@@ -11,6 +12,7 @@ from notes.context_processors import tenant_theme
 from notes.middleware import TenantMiddleware
 from notes.models import Note, Tenant
 from notes.providers import DTenant, TenantProvider
+from notes.receivers import _on_form_access_denied
 
 
 EXAMPLE_ROOT = Path(__file__).resolve().parent.parent
@@ -239,6 +241,41 @@ class TestNoteCardComponent:
 
     def test_excerpt_returns_short_body_unchanged(self) -> None:
         assert _note_card.excerpt(Mock(body="hello")) == "hello"
+
+
+class TestFormAccessDeniedReceiver:
+    """`_on_form_access_denied` logs the denied action, layer, reason, and tenant."""
+
+    def test_receiver_logs_tenant_slug_from_request(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        request = HttpRequest()
+        request.tenant = Tenant(slug="acme", name="Acme")  # type: ignore[attr-defined]
+        with caplog.at_level(logging.WARNING, logger="notes.access"):
+            _on_form_access_denied(
+                action_name="note_edit_form",
+                layer="object",
+                reason="raised",
+                request=request,
+            )
+        record = caplog.records[0]
+        assert record.levelno == logging.WARNING
+        message = record.getMessage()
+        assert "action=note_edit_form" in message
+        assert "layer=object" in message
+        assert "reason=raised" in message
+        assert "tenant=acme" in message
+
+    def test_receiver_falls_back_when_request_has_no_tenant(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="notes.access"):
+            _on_form_access_denied(
+                action_name="note_edit_form",
+                layer="view",
+                reason="denied",
+            )
+        assert "tenant=unknown" in caplog.records[0].getMessage()
 
 
 class TestMarkdownPreviewComponent:

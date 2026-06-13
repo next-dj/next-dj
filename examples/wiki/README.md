@@ -101,7 +101,19 @@ pages. A `Q(title__icontains) | Q(body_md__icontains)` query against
 `Article` surfaces matching rows. The same template renders both lists
 side by side.
 
-### 7. No nested layout
+### 7. Object-level edit permission
+
+`Article` carries a `locked` boolean. The edit form in
+`wiki/routes/articles/edit/[slug]/page.py` declares
+`has_object_permission(self)`, an object-level hook that the framework
+resolves like `on_valid` and runs after the form binds, so
+`self.instance` is the loaded target row. The override reads only what it
+needs from `self.instance` and returns `not self.instance.locked`. A
+locked article short-circuits to a bare 403 before validation runs, so
+there is no form re-render. The create form has no such hook and stays
+open.
+
+### 8. No nested layout
 
 The example wires only one `layout.djx` at the routes root. A nested
 layout is not needed and would add noise. Examples that do need nested

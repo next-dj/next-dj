@@ -29,6 +29,10 @@ def _globex_note(globex: Tenant) -> Note:
     return Note.objects.get(tenant=globex, title="Globex roadmap")
 
 
+def _locked_acme_note(acme: Tenant) -> Note:
+    return Note.objects.get(tenant=acme, title="Status update")
+
+
 class TestTenantContract:
     """Production contract is the X-Tenant header."""
 
@@ -149,6 +153,72 @@ class TestNoteEditForm:
             HTTP_X_TENANT="globex",
         )
         assert response.status_code == 404
+        note.refresh_from_db()
+        assert note.title != "hijack"
+
+
+class TestNoteEditFormPermissionHooks:
+    """The dynamic view and object hooks gate the edit form beyond the 404."""
+
+    @override_settings(DEBUG=False)
+    def test_active_tenant_edits_unlocked_note(
+        self, client: NextClient, acme: Tenant
+    ) -> None:
+        note = _acme_note(acme)
+        response = client.post_action(
+            "note_edit_form",
+            {"title": note.title, "body": "passed both hooks"},
+            origin=f"/notes/{note.pk}/edit/",
+            HTTP_X_TENANT="acme",
+        )
+        assert response.status_code == 302
+        note.refresh_from_db()
+        assert note.body == "passed both hooks"
+
+    @override_settings(DEBUG=False)
+    def test_locked_note_is_denied_with_403(
+        self, client: NextClient, acme: Tenant
+    ) -> None:
+        note = _locked_acme_note(acme)
+        response = client.post_action(
+            "note_edit_form",
+            {"title": note.title, "body": "should not persist"},
+            origin=f"/notes/{note.pk}/edit/",
+            HTTP_X_TENANT="acme",
+        )
+        assert response.status_code == 403
+        note.refresh_from_db()
+        assert note.body != "should not persist"
+
+    @override_settings(DEBUG=False)
+    def test_suspended_tenant_is_denied_with_403(
+        self, client: NextClient, acme: Tenant
+    ) -> None:
+        Tenant.objects.filter(pk=acme.pk).update(is_active=False)
+        note = _acme_note(acme)
+        response = client.post_action(
+            "note_edit_form",
+            {"title": note.title, "body": "tenant is suspended"},
+            origin=f"/notes/{note.pk}/edit/",
+            HTTP_X_TENANT="acme",
+        )
+        assert response.status_code == 403
+        note.refresh_from_db()
+        assert note.body != "tenant is suspended"
+
+    @override_settings(DEBUG=False)
+    def test_view_hook_denies_before_get_initial_404(
+        self, client: NextClient, acme: Tenant, globex: Tenant
+    ) -> None:
+        Tenant.objects.filter(pk=globex.pk).update(is_active=False)
+        note = _acme_note(acme)
+        response = client.post_action(
+            "note_edit_form",
+            {"title": "hijack", "body": "cross tenant"},
+            origin=f"/notes/{note.pk}/edit/",
+            HTTP_X_TENANT="globex",
+        )
+        assert response.status_code == 403
         note.refresh_from_db()
         assert note.title != "hijack"
 

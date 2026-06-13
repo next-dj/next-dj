@@ -3,11 +3,11 @@
 Form Signals
 ============
 
-The forms subsystem emits ``action_registered``, ``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, and ``wizard_completed`` from ``next.forms.signals``.
-All five import equivalently from the owning module or from the aggregator ``next.signals``.
+The forms subsystem emits ``action_registered``, ``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, and ``form_access_denied`` from ``next.forms.signals``.
+All six import equivalently from the owning module or from the aggregator ``next.signals``.
 Register receiver imports from ``AppConfig.ready`` so receivers exist before the first request.
 
-Every dispatch-time signal (``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``) carries two shared keyword arguments.
+Every dispatch-time signal (``action_dispatched``, ``form_validation_failed``, ``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``) carries two shared keyword arguments.
 ``uid`` is the registry identity of the action, the same value the dispatch URL and the ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores no uid in its meta.
 ``request`` is the live ``HttpRequest`` being dispatched.
 Read what you need from it inside the receiver and do not retain the object past the receiver call.
@@ -220,6 +220,39 @@ The payload carries ``cleaned_data``, ``uid``, and ``request``.
 
 The signal fires once per completed wizard, after ``done`` returns a success response.
 An error response from ``done``, status 400 or above, skips the signal and keeps the saved drafts for retry.
+
+.. _topics-forms-signals-form-access-denied:
+
+form_access_denied
+------------------
+
+Fires only when a dynamic permission hook denies a request, never on the static ``ActionGuard`` path.
+The sender is ``FormActionDispatch``.
+See :ref:`topics-forms-actions-dynamic-guards` for the hooks themselves.
+
+The payload carries ``action_name``, ``uid``, ``request``, ``layer``, and ``reason``.
+``layer`` is ``"view"`` for a ``check_permissions`` denial or ``"object"`` for a ``has_object_permission`` denial.
+``reason`` is ``"raised"`` when the hook raised :exc:`~django.core.exceptions.PermissionDenied`, ``"denied"`` when it returned ``False``, or ``"response"`` when it returned an ``HttpResponse`` short-circuit.
+
+The dispatcher builds the payload and sends the signal only when at least one receiver is connected, so an audit receiver adds no cost to an allowed request.
+
+.. code-block:: python
+   :caption: notes/receivers.py
+
+   from django.dispatch import receiver
+   from next.forms.signals import form_access_denied
+
+   @receiver(form_access_denied)
+   def audit_denial(sender, *, action_name, layer, reason, request, **kwargs) -> None:
+       logger.warning(
+           "access denied for %s at %s layer (%s) for user %s",
+           action_name,
+           layer,
+           reason,
+           request.user,
+       )
+
+A receiver runs inside the dispatch, so keep it cheap and do not retain the request past the call.
 
 See Also
 --------

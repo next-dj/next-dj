@@ -3,8 +3,13 @@ from __future__ import annotations
 from django.core.cache import cache
 from flags.cache import FLAG_PREFIX, get_cached_flag
 from flags.models import Flag
+from flags.providers import WRITE_GATE_FLAG
 
 from next.testing import assert_has_class, assert_missing_class, find_anchor
+
+
+def _open_write_gate() -> None:
+    Flag.objects.create(name=WRITE_GATE_FLAG, label="Admin writes", enabled=True)
 
 
 class TestHome:
@@ -49,6 +54,7 @@ class TestAdminBulkToggle:
         assert "bg-slate-100" in body
 
     def test_posting_toggles_on_and_off(self, client) -> None:
+        _open_write_gate()
         Flag.objects.create(name="beta", label="Beta", enabled=False)
         Flag.objects.create(name="alpha", label="Alpha", enabled=True)
 
@@ -60,6 +66,7 @@ class TestAdminBulkToggle:
         assert Flag.objects.get(name="alpha").enabled is False
 
     def test_save_invalidates_cache(self, client) -> None:
+        _open_write_gate()
         Flag.objects.create(name="beta", label="Beta", enabled=True)
         assert get_cached_flag("beta").enabled is True
         assert cache.get(f"{FLAG_PREFIX}beta") is not None
@@ -75,6 +82,7 @@ class TestAdminBulkToggle:
         assert "No flags defined yet" in body
 
     def test_unchanged_flag_is_not_resaved(self, client) -> None:
+        _open_write_gate()
         flag = Flag.objects.create(name="beta", label="Beta", enabled=True)
         original_updated = flag.updated_at
 
@@ -82,6 +90,43 @@ class TestAdminBulkToggle:
 
         flag.refresh_from_db()
         assert flag.updated_at == original_updated
+
+
+class TestWriteGate:
+    """The check_permissions hook gates the toggle action on the admin_writes flag."""
+
+    def test_gate_off_denies_toggle(self, client) -> None:
+        Flag.objects.create(name="beta", label="Beta", enabled=False)
+
+        response = client.post_action("bulk_toggle_form", {"enabled_names": ["beta"]})
+
+        assert response.status_code == 403
+        assert Flag.objects.get(name="beta").enabled is False
+
+    def test_gate_absent_denies_toggle(self, client) -> None:
+        Flag.objects.create(name="beta", label="Beta", enabled=True)
+
+        response = client.post_action("bulk_toggle_form", {"enabled_names": []})
+
+        assert response.status_code == 403
+        assert Flag.objects.get(name="beta").enabled is True
+
+    def test_gate_on_allows_toggle(self, client) -> None:
+        _open_write_gate()
+        Flag.objects.create(name="beta", label="Beta", enabled=False)
+
+        response = client.post_action("bulk_toggle_form", {"enabled_names": ["beta"]})
+
+        assert response.status_code == 302
+        assert Flag.objects.get(name="beta").enabled is True
+
+    def test_denial_is_counted_on_metrics_page(self, client) -> None:
+        Flag.objects.create(name="beta", label="Beta", enabled=False)
+        client.post_action("bulk_toggle_form", {"enabled_names": ["beta"]})
+
+        body = client.get("/admin/metrics/").content.decode()
+        assert "form permission denials" in body
+        assert ">1<" in body
 
 
 class TestDemoPage:

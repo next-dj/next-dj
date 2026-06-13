@@ -211,6 +211,7 @@ Override it only when the redirect target differs or extra logic must run after 
 
    The action endpoint requires no authentication by default, so any visitor who can POST to it reaches ``on_valid`` and ``self.save()``.
    Check ``request.user.is_authenticated`` and the row's ownership in ``on_valid`` before saving, especially when ``instance_from_url`` loads the instance from a user-controlled value.
+   The ``has_object_permission`` hook is the first-class place for that check, since it runs after binding with ``self.instance`` set to the loaded row, see :ref:`topics-forms-actions-dynamic-guards` and the :ref:`howto-enforce-object-level-permissions` recipe.
    See :doc:`/content/security/overview` for access control and :doc:`/content/howto/require-login-on-pages` for a project-wide login requirement.
 
 .. code-block:: python

@@ -6,7 +6,7 @@ import types
 import warnings
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from django.conf import settings
@@ -32,6 +32,7 @@ from .origin import (
 )
 from .signals import (
     action_dispatched,
+    form_access_denied,
     form_validation_failed,
     wizard_completed,
     wizard_step_submitted,
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
     from .backends import ActionGuard, ActionMeta, FormActionBackend
-    from .base import BaseForm as NextBaseForm
+    from .base import BaseForm as NextBaseForm, _PermissionHooks
     from .origin import _OriginMatch
     from .wizard import FormWizard
 
@@ -163,6 +164,28 @@ def _accepts_var_keyword(func: "Callable[..., Any]") -> bool:
     return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
 
 
+def _resolve_and_call(
+    hook: "Callable[..., Any]",
+    request: "HttpRequest",
+    url_kwargs: dict[str, Any],
+    *,
+    deps: _DepsState,
+) -> object:
+    """Resolve a hook's dependencies and call it, feeding url_kwargs to kwargs."""
+    cache, stack = deps
+    resolved = resolver.resolve_dependencies(
+        hook,
+        request=request,
+        _cache=cache,
+        _stack=stack,
+        **url_kwargs,
+    )
+    if _accepts_var_keyword(hook):
+        for key, value in url_kwargs.items():
+            resolved.setdefault(key, value)
+    return hook(**resolved)
+
+
 def _call_get_initial(
     form_class: "type[django_forms.Form]",
     request: "HttpRequest",
@@ -180,19 +203,144 @@ def _call_get_initial(
             "a get_initial classmethod."
         )
         raise TypeError(msg)
-    cache, stack = deps
-    get_initial = form_class.get_initial
-    resolved = resolver.resolve_dependencies(
-        get_initial,
-        request=request,
-        _cache=cache,
-        _stack=stack,
-        **url_kwargs,
+    return _resolve_and_call(form_class.get_initial, request, url_kwargs, deps=deps)
+
+
+def _normalize_permission(raw: object) -> "HttpResponse | None":
+    """Map a permission-hook return to a denial response, or None to allow."""
+    if raw is None or raw is True:
+        return None
+    if raw is False:
+        raise PermissionDenied
+    if isinstance(raw, HttpResponse):
+        return raw
+    msg = (
+        f"permission hook returned unsupported {type(raw).__name__}, return "
+        "None or True to allow, False or raise PermissionDenied to deny, or an "
+        "HttpResponse to short-circuit."
     )
-    if _accepts_var_keyword(get_initial):
-        for key, value in url_kwargs.items():
-            resolved.setdefault(key, value)
-    return get_initial(**resolved)
+    raise TypeError(msg)
+
+
+def _call_check_permissions(
+    form_class: type,
+    request: "HttpRequest",
+    url_kwargs: dict[str, Any],
+    *,
+    deps: _DepsState,
+) -> object:
+    """Resolve `check_permissions` dependencies and call it, mirroring get_initial."""
+    hooks = cast("type[_PermissionHooks]", form_class)
+    return _resolve_and_call(hooks.check_permissions, request, url_kwargs, deps=deps)
+
+
+def _emit_form_access_denied(
+    request: "HttpRequest",
+    action_name: str,
+    uid: str | None,
+    *,
+    layer: Literal["view", "object"],
+    reason: Literal["raised", "denied", "response"],
+) -> None:
+    """Send `form_access_denied` when any receiver is connected."""
+    if form_access_denied.receivers:
+        form_access_denied.send(
+            sender=FormActionDispatch,
+            action_name=action_name,
+            uid=uid,
+            request=request,
+            layer=layer,
+            reason=reason,
+        )
+
+
+def _enforce_view_permissions(
+    form_class: type,
+    request: "HttpRequest",
+    action_name: str,
+    state: "_DispatchState",
+) -> "HttpResponse | None":
+    """Run the view-level check_permissions hook, emitting on a denial."""
+    if not getattr(form_class, "_has_check_permissions", False):
+        return None
+    try:
+        raw = _call_check_permissions(
+            form_class,
+            request,
+            state.url_kwargs,
+            deps=(state.dep_cache, state.dep_stack),
+        )
+    except PermissionDenied:
+        _emit_form_access_denied(
+            request, action_name, state.uid, layer="view", reason="raised"
+        )
+        raise
+    return _resolve_permission_outcome(
+        raw, request, action_name, state.uid, layer="view"
+    )
+
+
+def _resolve_permission_outcome(
+    raw: object,
+    request: "HttpRequest",
+    action_name: str,
+    uid: str | None,
+    *,
+    layer: Literal["view", "object"],
+) -> "HttpResponse | None":
+    """Normalise a hook return, emitting the audit signal on a denial."""
+    try:
+        denial = _normalize_permission(raw)
+    except PermissionDenied:
+        _emit_form_access_denied(
+            request, action_name, uid, layer=layer, reason="denied"
+        )
+        raise
+    if denial is not None:
+        _emit_form_access_denied(
+            request, action_name, uid, layer=layer, reason="response"
+        )
+    return denial
+
+
+def _call_has_object_permission(
+    form: "django_forms.Form",
+    request: "HttpRequest",
+    url_kwargs: dict[str, Any],
+    *,
+    deps: _DepsState,
+) -> object:
+    """Resolve `has_object_permission` dependencies and call the bound method."""
+    hooks = cast("_PermissionHooks", form)
+    return _resolve_and_call(
+        hooks.has_object_permission, request, url_kwargs, deps=deps
+    )
+
+
+def _enforce_object_permissions(
+    form: "django_forms.Form",
+    request: "HttpRequest",
+    action_name: str,
+    state: "_DispatchState",
+) -> "HttpResponse | None":
+    """Run the object-level has_object_permission hook, denying with a bare 403."""
+    if not getattr(type(form), "_has_object_permission", False):
+        return None
+    try:
+        raw = _call_has_object_permission(
+            form,
+            request,
+            state.url_kwargs,
+            deps=(state.dep_cache, state.dep_stack),
+        )
+    except PermissionDenied:
+        _emit_form_access_denied(
+            request, action_name, state.uid, layer="object", reason="raised"
+        )
+        raise
+    return _resolve_permission_outcome(
+        raw, request, action_name, state.uid, layer="object"
+    )
 
 
 def _form_action_context_callable(
@@ -493,24 +641,40 @@ class FormActionDispatch:
             )
 
         if form_class is not None:
-            resolved_form_class, init_kwargs = _resolve_form_class(
-                form_class,
-                request,
-                state.url_kwargs,
-                (state.dep_cache, state.dep_stack),
-                action_name=action_name,
-            )
-            params = _FormDispatchParams(
-                action_name=action_name,
-                handler=handler,
-                form_class=resolved_form_class,
-                init_kwargs=init_kwargs,
-            )
-            return FormActionDispatch._dispatch_with_form(
-                backend, request, params, state
+            return FormActionDispatch._dispatch_form_class(
+                backend, request, action_name, meta, state
             )
 
         return HttpResponseBadRequest("Invalid action configuration")
+
+    @staticmethod
+    def _dispatch_form_class(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        action_name: str,
+        meta: "ActionMeta",
+        state: _DispatchState,
+    ) -> HttpResponse:
+        """Resolve the form class, enforce the view hook, then bind and dispatch."""
+        resolved_form_class, init_kwargs = _resolve_form_class(
+            meta.get("form_class"),
+            request,
+            state.url_kwargs,
+            (state.dep_cache, state.dep_stack),
+            action_name=action_name,
+        )
+        denial = _enforce_view_permissions(
+            resolved_form_class, request, action_name, state
+        )
+        if denial is not None:
+            return denial
+        params = _FormDispatchParams(
+            action_name=action_name,
+            handler=meta.get("handler"),
+            form_class=resolved_form_class,
+            init_kwargs=init_kwargs,
+        )
+        return FormActionDispatch._dispatch_with_form(backend, request, params, state)
 
     @staticmethod
     def _dispatch_handler_only(
@@ -562,6 +726,9 @@ class FormActionDispatch:
                 action_name=params.action_name,
             )
             form = _bind_form_for_post(params.form_class, request, initial_data)
+        denial = _enforce_object_permissions(form, request, params.action_name, state)
+        if denial is not None:
+            return denial
         if not form.is_valid():
             state.emit_form_validation_failed(request, params.action_name, form)
             return backend.shape_response(
@@ -629,6 +796,9 @@ class FormActionDispatch:
         """Validate the current wizard step, then route forward or finalise."""
         if state.origin_match is None:
             return HttpResponseBadRequest("Missing or invalid _next_form_origin")
+        denial = _enforce_view_permissions(wizard_class, request, action_name, state)
+        if denial is not None:
+            return denial
         wizard = wizard_class(
             request=request,
             url_kwargs=state.url_kwargs,
