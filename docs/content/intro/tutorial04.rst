@@ -300,16 +300,16 @@ The Notes application is functionally complete.
      forms.py
      models.py
      migrations/
-     _components/
-       note_card/
-         component.djx
-         component.py
-         component.css
-         component.js
      pages/
        layout.djx
        page.py
        template.djx
+       _components/
+         note_card/
+           component.djx
+           component.py
+           component.css
+           component.js
        notes/
          layout.djx
          [id]/

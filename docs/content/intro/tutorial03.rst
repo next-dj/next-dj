@@ -22,13 +22,15 @@ Create the Component Folder
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The :doc:`component </content/topics/components>` backend looks for component folders under the configured root.
-:doc:`install` set ``COMPONENTS_DIR`` to ``_components``, so a component named ``note_card`` lives at ``notes/_components/note_card/``.
+:doc:`install` set ``COMPONENTS_DIR`` to ``_components``, so a component named ``note_card`` lives at ``notes/pages/_components/note_card/``.
+The folder sits inside the page tree because the file router registers each ``_components/`` folder it walks past during page discovery.
+A ``_components/`` folder placed beside ``pages/`` rather than inside it is never discovered, and the ``{% component %}`` tag then renders nothing.
 The framework treats the folder name as the component name.
 
 Create the directory and a starter template.
 
 .. code-block:: jinja
-   :caption: notes/_components/note_card/component.djx
+   :caption: notes/pages/_components/note_card/component.djx
 
    <article class="note-card">
      <header>
@@ -66,7 +68,7 @@ Add Co-located CSS
 Place a CSS file next to ``component.djx`` and the :doc:`static pipeline </content/topics/static-assets/index>` picks it up automatically.
 
 .. code-block:: css
-   :caption: notes/_components/note_card/component.css
+   :caption: notes/pages/_components/note_card/component.css
 
    .note-card {
      border: 1px solid #ddd;
@@ -135,7 +137,7 @@ Co-located scripts work the same way.
 Add a small enhancement that toggles a class when the note title is clicked.
 
 .. code-block:: javascript
-   :caption: notes/_components/note_card/component.js
+   :caption: notes/pages/_components/note_card/component.js
 
    document.addEventListener("DOMContentLoaded", () => {
      for (const card of document.querySelectorAll(".note-card")) {
@@ -162,7 +164,7 @@ The note card formats a short preview from the body when one is present.
 Add a ``component.py`` next to the template.
 
 .. code-block:: python
-   :caption: notes/_components/note_card/component.py
+   :caption: notes/pages/_components/note_card/component.py
 
    from notes.models import Note
    from next.components import component
@@ -176,7 +178,7 @@ The framework resolves the ``note`` parameter from the surrounding template cont
 Refer to the new value in the component template.
 
 .. code-block:: jinja
-   :caption: notes/_components/note_card/component.djx
+   :caption: notes/pages/_components/note_card/component.djx
 
    <article class="note-card">
      <header>
@@ -199,16 +201,16 @@ Your project tree now looks like this.
    notes/
      models.py
      migrations/
-     _components/
-       note_card/
-         component.djx
-         component.py
-         component.css
-         component.js
      pages/
        layout.djx
        page.py
        template.djx
+       _components/
+         note_card/
+           component.djx
+           component.py
+           component.css
+           component.js
        notes/
          layout.djx
          [id]/
@@ -222,9 +224,11 @@ The layout pulls both ``{% collect_styles %}`` and ``{% collect_scripts %}`` fro
 Common Pitfalls
 ---------------
 
-Component not found.
+Component renders nothing or is not found.
    Confirm that the folder name and the string argument to ``{% component %}`` match exactly.
    The component name comes from the directory, not from any Python identifier.
+   Confirm too that the ``_components/`` folder sits inside the ``pages/`` tree.
+   The file router only registers component folders it walks past during page discovery, so a ``_components/`` folder beside ``pages/`` is never found and the tag renders empty output without raising.
 
 CSS does not load.
    Make sure ``{% collect_styles %}`` sits inside ``<head>`` and that the file is named ``component.css`` next to ``component.djx``.
