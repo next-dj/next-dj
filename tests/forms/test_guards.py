@@ -1,4 +1,5 @@
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any, ClassVar
 
 import pytest
@@ -14,7 +15,7 @@ from django.http import (
     QueryDict,
 )
 
-from next.deps import Depends, resolver
+from next.deps import resolver
 from next.forms import (
     ActionGuard,
     ActionRegistration,
@@ -31,15 +32,15 @@ from next.forms.base import _hook_func
 from next.forms.checks import check_action_guard_permissions
 from next.forms.dispatch import (
     FormActionDispatch,
-    _call_check_permissions,
-    _call_has_object_permission,
     _check_access,
     _emit_form_access_denied,
     _normalize_permission,
     _redirect_to_login,
+    _resolve_and_call,
 )
 from next.forms.manager import form_action_manager
 from next.forms.signals import action_dispatched, form_access_denied
+from tests.support import GuardedTenantForm, build_post_request
 from tests.support.cases import (
     PERMISSION_HOOK_BAD_TYPE,
     PERMISSION_HOOK_RAISE,
@@ -412,13 +413,6 @@ def _register_matrix_form(backend: RegistryFormActionBackend, form_class: type) 
     )
 
 
-def _matrix_request(mock_http_request) -> HttpRequest:
-    post = QueryDict(mutable=True)
-    post["name"] = "Ada"
-    post["_next_form_origin"] = "/"
-    return mock_http_request(method="POST", POST=post, FILES=None)
-
-
 class _ViewHookForm(Form):
     """Bench-style form whose check_permissions is patched per matrix row."""
 
@@ -458,7 +452,7 @@ class TestNormalizePermission:
 
 
 class TestCallCheckPermissions:
-    """_call_check_permissions resolves and invokes the view-level classmethod."""
+    """_resolve_and_call drives the view-level classmethod hook."""
 
     def test_resolves_without_var_keyword(self, mock_http_request) -> None:
         """A hook taking only request resolves and returns its outcome."""
@@ -470,7 +464,9 @@ class TestCallCheckPermissions:
                 return False
 
         sentinel = mock_http_request(method="POST")
-        result = _call_check_permissions(_Form, sentinel, {"id": 5}, deps=({}, []))
+        result = _resolve_and_call(
+            _Form.check_permissions, sentinel, {"id": 5}, deps=({}, [])
+        )
         assert result is False
 
     def test_spreads_url_kwargs_into_var_keyword(self, mock_http_request) -> None:
@@ -484,13 +480,15 @@ class TestCallCheckPermissions:
                 return None
 
         request = mock_http_request(method="POST")
-        result = _call_check_permissions(_Form, request, {"board_id": 7}, deps=({}, []))
+        result = _resolve_and_call(
+            _Form.check_permissions, request, {"board_id": 7}, deps=({}, [])
+        )
         assert result is None
         assert seen == {"board_id": 7}
 
 
 class TestCallHasObjectPermission:
-    """_call_has_object_permission resolves and invokes the bound instance hook."""
+    """_resolve_and_call drives the bound object-level instance hook."""
 
     def test_resolves_without_var_keyword(self, mock_http_request) -> None:
         """A hook taking only request resolves and returns its outcome."""
@@ -504,7 +502,9 @@ class TestCallHasObjectPermission:
 
         sentinel = mock_http_request(method="POST")
         form = _Form()
-        result = _call_has_object_permission(form, sentinel, {"id": 5}, deps=({}, []))
+        result = _resolve_and_call(
+            form.has_object_permission, sentinel, {"id": 5}, deps=({}, [])
+        )
         assert result is False
 
     def test_spreads_url_kwargs_into_var_keyword(self, mock_http_request) -> None:
@@ -520,8 +520,8 @@ class TestCallHasObjectPermission:
 
         request = mock_http_request(method="POST")
         form = _Form()
-        result = _call_has_object_permission(
-            form, request, {"board_id": 7}, deps=({}, [])
+        result = _resolve_and_call(
+            form.has_object_permission, request, {"board_id": 7}, deps=({}, [])
         )
         assert result is None
         assert seen == {"board_id": 7}
@@ -656,80 +656,67 @@ class TestDetectionFlags:
         assert _Reset._has_check_permissions is True
 
 
-@pytest.mark.django_db()
-class TestViewHookReturnContract:
-    """The view-level check_permissions return contract, full dispatch."""
+@dataclass(frozen=True)
+class _HookLayer:
+    """One permission layer wired into the shared dispatch-matrix contract."""
 
+    id: str
+    form_class: type
+    hook_attr: str
+    flag_attr: str
+    wrap: Callable[[Callable[..., Any]], object]
+
+
+_HOOK_LAYERS = (
+    _HookLayer(
+        "view", _ViewHookForm, "check_permissions", "_has_check_permissions", classmethod
+    ),
+    _HookLayer(
+        "object",
+        _ObjectHookForm,
+        "has_object_permission",
+        "_has_object_permission",
+        lambda fn: fn,
+    ),
+)
+
+
+@pytest.mark.django_db()
+class TestPermissionHookReturnContract:
+    """Both permission layers honour one return contract through full dispatch."""
+
+    @pytest.mark.parametrize(
+        "layer", _HOOK_LAYERS, ids=[layer.id for layer in _HOOK_LAYERS]
+    )
     @pytest.mark.parametrize(
         "case",
         PERMISSION_OUTCOME_CASES,
         ids=[c.id for c in PERMISSION_OUTCOME_CASES],
     )
     def test_matrix_via_dispatch(
-        self, case: PermissionHookCase, mock_http_request, monkeypatch
+        self,
+        layer: _HookLayer,
+        case: PermissionHookCase,
+        mock_http_request,
+        monkeypatch,
     ) -> None:
         value = _hook_value(case)
 
-        def hook(cls, request=None):
+        def hook(receiver, request=None):
             if value is PERMISSION_HOOK_RAISE:
                 raise PermissionDenied
             if value is PERMISSION_HOOK_BAD_TYPE:
                 return ["bad"]
             return value
 
-        monkeypatch.setattr(_ViewHookForm, "check_permissions", classmethod(hook))
-        monkeypatch.setattr(_ViewHookForm, "_has_check_permissions", True)
+        monkeypatch.setattr(layer.form_class, layer.hook_attr, layer.wrap(hook))
+        monkeypatch.setattr(layer.form_class, layer.flag_attr, True)
 
         backend = RegistryFormActionBackend()
-        _register_matrix_form(backend, _ViewHookForm)
+        _register_matrix_form(backend, layer.form_class)
         meta = backend.get_meta("matrix_action")
         assert meta is not None
-        request = _matrix_request(mock_http_request)
-
-        if case.raises_type_error:
-            with pytest.raises(TypeError):
-                FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
-            return
-        if case.raises_permission_denied:
-            with pytest.raises(PermissionDenied):
-                FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
-            return
-
-        response = FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
-        assert response.status_code == case.expected_status
-        if case.expected_redirect is not None:
-            assert response.url == case.expected_redirect
-
-
-@pytest.mark.django_db()
-class TestObjectHookReturnContract:
-    """The object-level has_object_permission return contract, full dispatch."""
-
-    @pytest.mark.parametrize(
-        "case",
-        PERMISSION_OUTCOME_CASES,
-        ids=[c.id for c in PERMISSION_OUTCOME_CASES],
-    )
-    def test_matrix_via_dispatch(
-        self, case: PermissionHookCase, mock_http_request, monkeypatch
-    ) -> None:
-        value = _hook_value(case)
-
-        def hook(self, request=None):
-            if value is PERMISSION_HOOK_RAISE:
-                raise PermissionDenied
-            if value is PERMISSION_HOOK_BAD_TYPE:
-                return ["bad"]
-            return value
-
-        monkeypatch.setattr(_ObjectHookForm, "has_object_permission", hook)
-        monkeypatch.setattr(_ObjectHookForm, "_has_object_permission", True)
-
-        backend = RegistryFormActionBackend()
-        _register_matrix_form(backend, _ObjectHookForm)
-        meta = backend.get_meta("matrix_action")
-        assert meta is not None
-        request = _matrix_request(mock_http_request)
+        request = build_post_request(mock_http_request)
 
         if case.raises_type_error:
             with pytest.raises(TypeError):
@@ -776,7 +763,7 @@ class TestGuardedViewFormDispatch:
         _register_matrix_form(backend, form_class)
         meta = backend.get_meta("matrix_action")
         assert meta is not None
-        request = _matrix_request(mock_http_request)
+        request = build_post_request(mock_http_request)
         return FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
 
     def test_db_hook_denies_when_row_absent(self, mock_http_request) -> None:
@@ -894,7 +881,7 @@ class TestFactoryFormClassRunsHooks:
         )
         meta = backend.get_meta("factory_action")
         assert meta is not None
-        request = _matrix_request(mock_http_request)
+        request = build_post_request(mock_http_request)
         with pytest.raises(PermissionDenied):
             FormActionDispatch.dispatch(backend, request, "factory_action", meta)
         assert _SpyDBViewForm.calls == [True]
@@ -1006,31 +993,6 @@ class TestObjectLevelOwnerEdit:
         assert _AnonInspectingModelForm.saw_anonymous == [True]
 
 
-class _DepCacheReuseForm(Form):
-    """View and object hooks plus get_initial share one Depends provider."""
-
-    name = django_forms.CharField(max_length=50)
-    resolutions: ClassVar[list[str]] = []
-
-    @classmethod
-    def get_initial(cls, tenant: str = Depends("tenant")) -> dict[str, Any]:
-        assert tenant == "acme"
-        return {}
-
-    @classmethod
-    def check_permissions(
-        cls, request: HttpRequest, tenant: str = Depends("tenant")
-    ) -> PermissionOutcome:
-        assert tenant == "acme"
-        return None
-
-    def on_valid(
-        self, request: HttpRequest, tenant: str = Depends("tenant")
-    ) -> HttpResponseRedirect:
-        assert tenant == "acme"
-        return HttpResponseRedirect("/")
-
-
 @pytest.mark.django_db()
 class TestDepCacheReuse:
     """A Depends provider resolved in the hook is reused by later phases."""
@@ -1038,22 +1000,22 @@ class TestDepCacheReuse:
     def test_provider_resolves_once_across_hook_and_on_valid(
         self, mock_http_request
     ) -> None:
-        _DepCacheReuseForm.resolutions.clear()
+        GuardedTenantForm.resolutions.clear()
         seen: dict[str, object] = {}
 
         def receiver(**kwargs: object) -> None:
             seen.update(kwargs)
 
         def tenant_provider() -> str:
-            _DepCacheReuseForm.resolutions.append("tenant")
+            GuardedTenantForm.resolutions.append("tenant")
             return "acme"
 
         resolver.register_dependency("tenant", tenant_provider)
         backend = RegistryFormActionBackend()
-        _register_matrix_form(backend, _DepCacheReuseForm)
+        _register_matrix_form(backend, GuardedTenantForm)
         meta = backend.get_meta("matrix_action")
         assert meta is not None
-        request = _matrix_request(mock_http_request)
+        request = build_post_request(mock_http_request)
 
         action_dispatched.connect(receiver)
         try:
@@ -1066,7 +1028,7 @@ class TestDepCacheReuse:
 
         assert response.status_code == 302
         # The named provider ran exactly once for the whole dispatch.
-        assert _DepCacheReuseForm.resolutions == ["tenant"]
+        assert GuardedTenantForm.resolutions == ["tenant"]
         assert seen["dep_cache"]["tenant"] == "acme"
 
 
@@ -1139,7 +1101,7 @@ class TestFormAccessDeniedPayload:
         _register_matrix_form(backend, _DeniedForm)
         meta = backend.get_meta("matrix_action")
         assert meta is not None
-        request = _matrix_request(mock_http_request)
+        request = build_post_request(mock_http_request)
 
         if raises:
             with pytest.raises(PermissionDenied):
@@ -1163,7 +1125,7 @@ class TestFormAccessDeniedPayload:
         _register_matrix_form(backend, _DeniedForm)
         meta = backend.get_meta("matrix_action")
         assert meta is not None
-        request = _matrix_request(mock_http_request)
+        request = build_post_request(mock_http_request)
         with pytest.raises(TypeError):
             FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
         assert captured == []

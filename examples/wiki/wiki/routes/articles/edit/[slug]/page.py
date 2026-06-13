@@ -5,7 +5,7 @@ from django.http import HttpRequest, HttpResponseRedirect
 from wiki.models import RESERVED_SLUGS, Article
 from wiki.providers import DArticle
 
-from next.forms import ComponentWidget, ModelForm
+from next.forms import ComponentWidget, ModelForm, PermissionOutcome
 from next.pages import context
 
 
@@ -20,7 +20,7 @@ class ArticleEditForm(ModelForm):
             "body_md": ComponentWidget("textarea", rows=12, markdown_source=True),
         }
 
-    def has_object_permission(self) -> bool:
+    def has_object_permission(self) -> PermissionOutcome:
         """Deny edits to a locked article keyed off the bound ``self.instance``."""
         return not self.instance.locked
 

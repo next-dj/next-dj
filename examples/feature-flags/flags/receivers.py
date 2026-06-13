@@ -56,29 +56,37 @@ def _count_page_render(sender: object, file_path: Path, **_: object) -> None:  #
     record_render(_page_key(file_path))
 
 
+def _bump(key: str, lock: threading.Lock) -> None:
+    """Atomically increment a process-lifetime counter in the cache."""
+    with lock:
+        cache.add(key, 0)
+        cache.incr(key)
+
+
+def _read(key: str) -> int:
+    """Return the current value of a counter, treating a miss as zero."""
+    return int(cache.get(key) or 0)
+
+
 @receiver(component_rendered)
 def _count_feature_guard(sender: object, info: object, **_: object) -> None:  # noqa: ARG001
     """Bump a counter every time the `feature_guard` component is rendered."""
     if getattr(info, "name", None) != "feature_guard":
         return
-    with _guard_lock:
-        cache.add(GUARD_COUNT_KEY, 0)
-        cache.incr(GUARD_COUNT_KEY)
+    _bump(GUARD_COUNT_KEY, _guard_lock)
 
 
 @receiver(form_access_denied)
 def _count_access_denied(**_: object) -> None:
     """Bump a counter whenever a form permission hook denies a request."""
-    with _denied_lock:
-        cache.add(DENIED_COUNT_KEY, 0)
-        cache.incr(DENIED_COUNT_KEY)
+    _bump(DENIED_COUNT_KEY, _denied_lock)
 
 
 def feature_guard_count() -> int:
     """Return the number of `feature_guard` component renders this process."""
-    return int(cache.get(GUARD_COUNT_KEY) or 0)
+    return _read(GUARD_COUNT_KEY)
 
 
 def access_denied_count() -> int:
     """Return the number of permission-hook denials this process."""
-    return int(cache.get(DENIED_COUNT_KEY) or 0)
+    return _read(DENIED_COUNT_KEY)

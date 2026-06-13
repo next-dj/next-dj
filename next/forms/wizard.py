@@ -22,9 +22,9 @@ from .backends import ActionRegistration, scope_key_for
 from .base import (
     PermissionOutcome,
     _format_success_message,
-    _hook_func,
     _meta_guard,
     _registration_gate,
+    _stamp_hook_flag,
     _to_snake_case,
 )
 from .diagnostics import registration_diagnostics
@@ -345,8 +345,9 @@ class FormWizard:
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Register the wizard subclass automatically and stamp the hook flag."""
         super().__init_subclass__(**kwargs)
-        base_check = _hook_func(FormWizard.check_permissions)
-        cls._has_check_permissions = _hook_func(cls.check_permissions) is not base_check
+        cls._has_check_permissions = _stamp_hook_flag(
+            FormWizard.check_permissions, cls.check_permissions
+        )
         _auto_register_wizard_class(cls)
 
     @classmethod

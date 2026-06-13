@@ -28,7 +28,6 @@ APPROVAL: dict[str, str] = {}
 
 
 def _post_step(client, step: str, data: dict[str, str]):
-    client.get(f"/request/{step}/")
     payload = {**data, "policy_acknowledged": "on"}
     return client.post_action(WIZARD_ACTION, payload, origin=f"/request/{step}/")
 

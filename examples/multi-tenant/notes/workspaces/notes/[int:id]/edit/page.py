@@ -1,6 +1,5 @@
 from typing import ClassVar
 
-from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -38,9 +37,7 @@ class NoteEditForm(ModelForm):
 
     def has_object_permission(self) -> PermissionOutcome:
         """Object-level gate. A locked note is read-only even for its tenant."""
-        if self.instance.locked:
-            raise PermissionDenied
-        return None
+        return not self.instance.locked
 
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
         """Persist edits and redirect back to the note editor."""

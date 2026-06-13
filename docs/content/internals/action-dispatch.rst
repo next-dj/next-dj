@@ -32,16 +32,19 @@ Pipeline
        Guard -- "missing permission" --> Forbidden["HTTP 403"]
        Guard -- "pass, no form_class" --> HandlerOnly["Run handler only"]
        Guard -- "pass, form_class" --> ViewHook{"check_permissions hook"}
-       Guard -- "pass, wizard_class" --> WizardStep["Validate current wizard step"]
+       Guard -- "pass, wizard_class" --> ViewHook
        ViewHook -- "deny" --> HookDenied["HTTP 403 or response"]
        ViewHook -- "deny" --> AccessDenied["form_access_denied signal"]
-       ViewHook -- "allow" --> Build["Build form"]
+       ViewHook -- "allow, form_class" --> Build["Build form"]
+       ViewHook -- "allow, wizard_class" --> WizardStep["Bind current wizard step"]
        HandlerOnly --> HandlerOnlyResponse["Handler response or HTTP 204"]
        HandlerOnly --> ActionDispatched["action_dispatched signal"]
        Build --> ObjectHook{"has_object_permission hook"}
-       ObjectHook -- "deny" --> ObjectDenied["HTTP 403"]
+       WizardStep --> ObjectHook
+       ObjectHook -- "deny" --> ObjectDenied["HTTP 403 or response"]
        ObjectHook -- "deny" --> AccessDenied
-       ObjectHook -- "allow" --> Validate{"Form valid"}
+       ObjectHook -- "allow, form_class" --> Validate{"Form valid"}
+       ObjectHook -- "allow, wizard_class" --> WizardValid{"Step valid"}
        Validate -- yes --> Handler["Run handler"]
        Handler --> Response["Handler response"]
        Handler --> ActionDispatched
@@ -51,9 +54,9 @@ Pipeline
        ShareCache --> RenderOrigin["Render origin page"]
        RenderOrigin --> RerenderHTML["HTTP 200 with bound form"]
        Validate -- no --> FormFailed["form_validation_failed signal"]
-       WizardStep -- invalid --> Origin
-       WizardStep -- invalid --> FormFailed
-       WizardStep -- valid --> SaveStep["Save step draft"]
+       WizardValid -- no --> Origin
+       WizardValid -- no --> FormFailed
+       WizardValid -- yes --> SaveStep["Save step draft"]
        SaveStep --> StepSubmitted["wizard_step_submitted signal"]
        SaveStep --> StepsLeft{"Steps remaining"}
        StepsLeft -- yes --> Advance["HTTP 302 to next step"]
@@ -131,7 +134,7 @@ A denial here returns a bare HTTP 403 rather than re-rendering, because the form
 Both hooks are dependency-injected through ``resolver.resolve_dependencies`` with the per-request ``dep_cache`` and ``dep_stack`` the dispatcher publishes under ``REQUEST_DEP_CACHE_ATTR``, so a provider resolved in a hook is shared with ``get_initial`` and ``on_valid``.
 A return of ``None`` or ``True`` allows, ``False`` raises ``PermissionDenied``, an ``HttpResponse`` short-circuits, and any other type raises ``TypeError``.
 On a denial the dispatcher emits ``form_access_denied`` when a receiver is connected.
-A wizard enforces ``check_permissions`` once per step POST before the step binds, and has no object-level hook.
+A wizard enforces ``check_permissions`` once per step POST before the step binds, and the step form's ``has_object_permission`` is enforced per step after the step form binds and before ``is_valid``.
 The guide covers the authoring contract at :ref:`topics-forms-actions-dynamic-guards`.
 
 Origin Resolution

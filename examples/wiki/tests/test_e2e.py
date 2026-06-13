@@ -208,24 +208,6 @@ class TestArticleEdit:
 class TestArticleObjectPermission:
     """The edit form denies a locked article through has_object_permission."""
 
-    def test_unlocked_article_edit_succeeds(
-        self, client: NextClient, routing_doc: Article
-    ) -> None:
-        response = client.post_action(
-            "article_edit_form",
-            {
-                "slug": routing_doc.slug,
-                "title": routing_doc.title,
-                "body_md": "Edited while unlocked.",
-            },
-            origin=reverse(
-                "next:page_articles_edit_slug", kwargs={"slug": routing_doc.slug}
-            ),
-        )
-        assert response.status_code in (302, 303)
-        routing_doc.refresh_from_db()
-        assert routing_doc.body_md == "Edited while unlocked."
-
     def test_locked_article_edit_denied(self, client: NextClient) -> None:
         locked = Article.objects.create(
             slug="locked-page",

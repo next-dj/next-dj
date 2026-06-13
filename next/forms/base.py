@@ -255,6 +255,11 @@ def _hook_func(method: object) -> object:
     return getattr(method, "__func__", method)
 
 
+def _stamp_hook_flag(base_hook: object, override_hook: object) -> bool:
+    """Return True when a subclass overrides the base hook, by __func__ identity."""
+    return _hook_func(override_hook) is not _hook_func(base_hook)
+
+
 class _PermissionHooks:
     """Opt-in DI-resolved permission gates layered over the static ActionGuard.
 
@@ -268,11 +273,11 @@ class _PermissionHooks:
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Stamp the per-subclass hook-presence flags via __func__ identity."""
         super().__init_subclass__(**kwargs)
-        base_check = _hook_func(_PermissionHooks.check_permissions)
-        base_object = _hook_func(_PermissionHooks.has_object_permission)
-        cls._has_check_permissions = _hook_func(cls.check_permissions) is not base_check
-        cls._has_object_permission = (
-            _hook_func(cls.has_object_permission) is not base_object
+        cls._has_check_permissions = _stamp_hook_flag(
+            _PermissionHooks.check_permissions, cls.check_permissions
+        )
+        cls._has_object_permission = _stamp_hook_flag(
+            _PermissionHooks.has_object_permission, cls.has_object_permission
         )
 
     @classmethod

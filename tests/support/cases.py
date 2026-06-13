@@ -183,7 +183,7 @@ PERMISSION_OUTCOME_CASES: tuple[PermissionHookCase, ...] = (
     PermissionHookCase(
         "false_denies",
         False,
-        403,
+        None,
         raises_permission_denied=True,
     ),
     PermissionHookCase(
@@ -196,7 +196,7 @@ PERMISSION_OUTCOME_CASES: tuple[PermissionHookCase, ...] = (
     PermissionHookCase(
         "raised_propagates",
         PERMISSION_HOOK_RAISE,
-        403,
+        None,
         raises_permission_denied=True,
     ),
     PermissionHookCase(

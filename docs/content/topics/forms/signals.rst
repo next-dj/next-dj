@@ -239,8 +239,11 @@ The dispatcher builds the payload and sends the signal only when at least one re
 .. code-block:: python
    :caption: notes/receivers.py
 
+   import logging
    from django.dispatch import receiver
    from next.forms.signals import form_access_denied
+
+   logger = logging.getLogger("notes.access")
 
    @receiver(form_access_denied)
    def audit_denial(sender, *, action_name, layer, reason, request, **kwargs) -> None:

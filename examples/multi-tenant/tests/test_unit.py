@@ -274,6 +274,7 @@ class TestFormAccessDeniedReceiver:
                 action_name="note_edit_form",
                 layer="view",
                 reason="denied",
+                request=HttpRequest(),
             )
         assert "tenant=unknown" in caplog.records[0].getMessage()
 

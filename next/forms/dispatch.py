@@ -43,14 +43,26 @@ from .uid import ORIGIN_FIELD_NAME, validated_origin_path
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+    from typing import Protocol
 
     from django import forms as django_forms
     from django.http import HttpRequest
 
     from .backends import ActionGuard, ActionMeta, FormActionBackend
-    from .base import BaseForm as NextBaseForm, _PermissionHooks
+    from .base import BaseForm as NextBaseForm, PermissionOutcome
     from .origin import _OriginMatch
     from .wizard import FormWizard
+
+    class _ViewPermissionHook(Protocol):
+        """Anything exposing a DI-resolved view-level check_permissions classmethod."""
+
+        @classmethod
+        def check_permissions(cls) -> "PermissionOutcome": ...
+
+    class _ObjectPermissionHook(Protocol):
+        """A bound form exposing a DI-resolved object-level permission method."""
+
+        def has_object_permission(self) -> "PermissionOutcome": ...
 
 
 _FACTORY_TUPLE_LEN = 2
@@ -222,18 +234,6 @@ def _normalize_permission(raw: object) -> "HttpResponse | None":
     raise TypeError(msg)
 
 
-def _call_check_permissions(
-    form_class: type,
-    request: "HttpRequest",
-    url_kwargs: dict[str, Any],
-    *,
-    deps: _DepsState,
-) -> object:
-    """Resolve `check_permissions` dependencies and call it, mirroring get_initial."""
-    hooks = cast("type[_PermissionHooks]", form_class)
-    return _resolve_and_call(hooks.check_permissions, request, url_kwargs, deps=deps)
-
-
 def _emit_form_access_denied(
     request: "HttpRequest",
     action_name: str,
@@ -254,6 +254,37 @@ def _emit_form_access_denied(
         )
 
 
+def _enforce_permission_hook(
+    request: "HttpRequest",
+    action_name: str,
+    state: "_DispatchState",
+    *,
+    hook: "Callable[..., Any] | None",
+    layer: Literal["view", "object"],
+) -> "HttpResponse | None":
+    """Run a DI-resolved permission hook for one layer, emitting on a denial.
+
+    A `None` hook means the layer is undeclared, so dispatch continues.
+    """
+    if hook is None:
+        return None
+    try:
+        raw = _resolve_and_call(
+            hook,
+            request,
+            state.url_kwargs,
+            deps=(state.dep_cache, state.dep_stack),
+        )
+    except PermissionDenied:
+        _emit_form_access_denied(
+            request, action_name, state.uid, layer=layer, reason="raised"
+        )
+        raise
+    return _resolve_permission_outcome(
+        raw, request, action_name, state.uid, layer=layer
+    )
+
+
 def _enforce_view_permissions(
     form_class: type,
     request: "HttpRequest",
@@ -261,22 +292,18 @@ def _enforce_view_permissions(
     state: "_DispatchState",
 ) -> "HttpResponse | None":
     """Run the view-level check_permissions hook, emitting on a denial."""
-    if not getattr(form_class, "_has_check_permissions", False):
-        return None
-    try:
-        raw = _call_check_permissions(
-            form_class,
-            request,
-            state.url_kwargs,
-            deps=(state.dep_cache, state.dep_stack),
-        )
-    except PermissionDenied:
-        _emit_form_access_denied(
-            request, action_name, state.uid, layer="view", reason="raised"
-        )
-        raise
-    return _resolve_permission_outcome(
-        raw, request, action_name, state.uid, layer="view"
+    present = getattr(form_class, "_has_check_permissions", False)
+    hook = (
+        cast("type[_ViewPermissionHook]", form_class).check_permissions
+        if present
+        else None
+    )
+    return _enforce_permission_hook(
+        request,
+        action_name,
+        state,
+        hook=hook,
+        layer="view",
     )
 
 
@@ -303,43 +330,27 @@ def _resolve_permission_outcome(
     return denial
 
 
-def _call_has_object_permission(
-    form: "django_forms.Form",
-    request: "HttpRequest",
-    url_kwargs: dict[str, Any],
-    *,
-    deps: _DepsState,
-) -> object:
-    """Resolve `has_object_permission` dependencies and call the bound method."""
-    hooks = cast("_PermissionHooks", form)
-    return _resolve_and_call(
-        hooks.has_object_permission, request, url_kwargs, deps=deps
-    )
-
-
 def _enforce_object_permissions(
     form: "django_forms.Form",
     request: "HttpRequest",
     action_name: str,
     state: "_DispatchState",
 ) -> "HttpResponse | None":
-    """Run the object-level has_object_permission hook, denying with a bare 403."""
-    if not getattr(type(form), "_has_object_permission", False):
-        return None
-    try:
-        raw = _call_has_object_permission(
-            form,
-            request,
-            state.url_kwargs,
-            deps=(state.dep_cache, state.dep_stack),
-        )
-    except PermissionDenied:
-        _emit_form_access_denied(
-            request, action_name, state.uid, layer="object", reason="raised"
-        )
-        raise
-    return _resolve_permission_outcome(
-        raw, request, action_name, state.uid, layer="object"
+    """Run the object-level has_object_permission hook after the form binds.
+
+    Returns the hook's HttpResponse to short-circuit, re-raises
+    PermissionDenied, or returns None to let dispatch continue.
+    """
+    present = getattr(type(form), "_has_object_permission", False)
+    hook = (
+        cast("_ObjectPermissionHook", form).has_object_permission if present else None
+    )
+    return _enforce_permission_hook(
+        request,
+        action_name,
+        state,
+        hook=hook,
+        layer="object",
     )
 
 
@@ -812,6 +823,9 @@ class FormActionDispatch:
         form_kwargs = wizard.get_form_kwargs(step_name)
         files = request.FILES if hasattr(request, "FILES") else None
         form = form_class(request.POST, files, **form_kwargs)
+        denial = _enforce_object_permissions(form, request, action_name, state)
+        if denial is not None:
+            return denial
         if not form.is_valid():
             state.emit_form_validation_failed(request, action_name, form)
             return backend.shape_response(

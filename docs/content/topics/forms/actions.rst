@@ -456,7 +456,8 @@ Its sender is ``FormActionDispatch`` and its keyword arguments are ``action_name
 See :doc:`signals` for the payload and the receiver rules.
 
 On a ``FormWizard`` the ``check_permissions`` classmethod runs per step POST, before the step form binds, so a denied step writes no storage.
-A wizard has no object-level hook.
+The wizard class has no object-level hook of its own.
+A step form that declares ``has_object_permission`` has it enforced after the step binds, the same as a standalone form.
 
 .. note::
 

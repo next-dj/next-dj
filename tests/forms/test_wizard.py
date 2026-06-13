@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from django import forms as django_forms
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Group, User
 from django.contrib.sessions.backends.cache import SessionStore
 from django.core.cache import caches
 from django.core.exceptions import ImproperlyConfigured
@@ -16,7 +16,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import RequestFactory, override_settings
 
 from next.conf import next_framework_settings
-from next.forms import Form, PermissionOutcome
+from next.forms import Form, ModelForm, PermissionOutcome
 from next.forms.base import _FRAMEWORK_ROOT
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
@@ -1157,5 +1157,93 @@ class TestWizardDynamicPermissionHook:
 
     def test_redirect_outcome_short_circuits_the_step(self, client_no_csrf) -> None:
         resp = self._post(client_no_csrf, "redirect_guarded_wizard")
+        assert resp.status_code == 302
+        assert resp.url == "/paywall/"
+
+
+class ObjectGuardedStep(ModelForm):
+    """Step ModelForm whose object hook gates the bound instance by name."""
+
+    class Meta:
+        """Bind to Group, edit only its name."""
+
+        model = Group
+        fields: ClassVar[list[str]] = ["name"]
+
+    def has_object_permission(self, request: HttpRequest) -> PermissionOutcome:
+        """Allow only the owner's submission, deny everyone else."""
+        return self.data.get("name") == "owner"
+
+
+class ObjectGuardedStepWizard(FormWizard):
+    """One-step wizard whose step form carries an object-level permission hook."""
+
+    class Meta:
+        """A single step bound to the object-guarded ModelForm."""
+
+        steps: ClassVar = [("identity", ObjectGuardedStep)]
+
+    def done(self, request, cleaned_data) -> HttpResponseRedirect:
+        """Finalise with a redirect once the only step validates."""
+        return HttpResponseRedirect("/thanks/")
+
+
+class RedirectObjectGuardedStep(ModelForm):
+    """Step ModelForm whose object hook short-circuits with a redirect response."""
+
+    class Meta:
+        """Bind to Group, edit only its name."""
+
+        model = Group
+        fields: ClassVar[list[str]] = ["name"]
+
+    def has_object_permission(self, request: HttpRequest) -> PermissionOutcome:
+        """Send non-owner submissions to a paywall instead of denying outright."""
+        if self.data.get("name") == "owner":
+            return None
+        return HttpResponseRedirect("/paywall/")
+
+
+class RedirectObjectGuardedStepWizard(FormWizard):
+    """One-step wizard whose step form redirects through its object hook."""
+
+    class Meta:
+        """A single step bound to the redirect-guarded ModelForm."""
+
+        steps: ClassVar = [("identity", RedirectObjectGuardedStep)]
+
+    def done(self, request, cleaned_data) -> HttpResponseRedirect:
+        """Finalise with a redirect once the only step validates."""
+        return HttpResponseRedirect("/thanks/")
+
+
+@pytest.mark.django_db()
+class TestWizardStepObjectPermissionHook:
+    """A wizard step ModelForm has_object_permission gates the step POST."""
+
+    def _post(
+        self, client, name: str, action: str = "object_guarded_step_wizard"
+    ) -> HttpResponse:
+        url = form_action_manager.get_action_url(action)
+        return client.post(
+            url,
+            data={"_next_form_origin": "/request/identity/", "name": name},
+            follow=False,
+        )
+
+    def test_denying_step_object_hook_returns_403(self, client_no_csrf) -> None:
+        assert ObjectGuardedStep._has_object_permission is True
+        resp = self._post(client_no_csrf, "stranger")
+        assert resp.status_code == 403
+
+    def test_allowing_step_object_hook_proceeds(self, client_no_csrf) -> None:
+        resp = self._post(client_no_csrf, "owner")
+        assert resp.status_code == 302
+        assert resp.url == "/thanks/"
+
+    def test_redirect_outcome_short_circuits_the_step(self, client_no_csrf) -> None:
+        resp = self._post(
+            client_no_csrf, "stranger", "redirect_object_guarded_step_wizard"
+        )
         assert resp.status_code == 302
         assert resp.url == "/paywall/"

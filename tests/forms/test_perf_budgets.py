@@ -3,13 +3,12 @@ from typing import Any, ClassVar
 
 import pytest
 from django import forms as django_forms
-from django.http import HttpRequest, HttpResponseRedirect, QueryDict
+from django.http import HttpRequest, HttpResponseRedirect
 
-from next.deps import Depends, resolver
+from next.deps import resolver
 from next.forms import (
     ActionRegistration,
     Form,
-    PermissionOutcome,
     RegistryFormActionBackend,
 )
 from next.forms.dispatch import FormActionDispatch
@@ -21,6 +20,7 @@ from next.forms.wizard import (
     wizard_backend_manager,
 )
 from tests.forms.actions import SimpleForm
+from tests.support import GuardedTenantForm, build_post_request
 
 
 class BudgetIdentityStep(Form):
@@ -248,41 +248,6 @@ class _UnguardedBudgetForm(Form):
         return HttpResponseRedirect("/")
 
 
-class _GuardedBudgetForm(Form):
-    """A view hook plus get_initial and on_valid share one Depends provider."""
-
-    name = django_forms.CharField(max_length=50)
-    resolutions: ClassVar[list[str]] = []
-
-    @classmethod
-    def get_initial(cls, tenant: str = Depends("tenant")) -> dict[str, Any]:
-        """Read the shared provider during initial resolution."""
-        assert tenant == "acme"
-        return {}
-
-    @classmethod
-    def check_permissions(
-        cls, request: HttpRequest, tenant: str = Depends("tenant")
-    ) -> PermissionOutcome:
-        """Read the shared provider during the view hook."""
-        assert tenant == "acme"
-        return None
-
-    def on_valid(
-        self, request: HttpRequest, tenant: str = Depends("tenant")
-    ) -> HttpResponseRedirect:
-        """Read the shared provider during finalisation."""
-        assert tenant == "acme"
-        return HttpResponseRedirect("/")
-
-
-def _budget_request(mock_http_request) -> HttpRequest:
-    post = QueryDict(mutable=True)
-    post["name"] = "Ada"
-    post["_next_form_origin"] = "/"
-    return mock_http_request(method="POST", POST=post, FILES=None)
-
-
 @pytest.mark.django_db()
 class TestPermissionHookResolveBudgets:
     """Deterministic resolve-call budgets for the permission-hook dispatch path.
@@ -311,7 +276,7 @@ class TestPermissionHookResolveBudgets:
         )
         meta = backend.get_meta("budget_hook_action")
         assert meta is not None
-        request = _budget_request(mock_http_request)
+        request = build_post_request(mock_http_request)
         response = FormActionDispatch.dispatch(
             backend, request, "budget_hook_action", meta
         )
@@ -332,16 +297,16 @@ class TestPermissionHookResolveBudgets:
         self, mock_http_request, monkeypatch
     ) -> None:
         """The view hook adds one resolve, the shared provider runs once."""
-        _GuardedBudgetForm.resolutions.clear()
+        GuardedTenantForm.resolutions.clear()
 
         def tenant_provider() -> str:
-            _GuardedBudgetForm.resolutions.append("tenant")
+            GuardedTenantForm.resolutions.append("tenant")
             return "acme"
 
         resolver.register_dependency("tenant", tenant_provider)
         try:
             response, count = self._dispatch_counting(
-                _GuardedBudgetForm, mock_http_request, monkeypatch
+                GuardedTenantForm, mock_http_request, monkeypatch
             )
         finally:
             resolver._dependency_callables.pop("tenant", None)
@@ -349,4 +314,4 @@ class TestPermissionHookResolveBudgets:
         # Exact count today: 3, check_permissions plus get_initial plus on_valid.
         assert count == 3
         # The shared Depends provider resolved once across all three phases.
-        assert _GuardedBudgetForm.resolutions == ["tenant"]
+        assert GuardedTenantForm.resolutions == ["tenant"]
