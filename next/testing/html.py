@@ -5,8 +5,7 @@ assertions (`assertContains(html=True)`, `assertInHTML`, ...) do not
 cover cleanly: picking a specific anchor out of a rendered page and
 checking class-token membership without regex or BeautifulSoup.
 
-These helpers operate on HTML produced by Django template rendering;
-they do not try to be a general HTML parser.
+These helpers operate on HTML produced by Django template rendering.
 """
 
 from __future__ import annotations
