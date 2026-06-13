@@ -13,11 +13,12 @@ from __future__ import annotations
 import inspect
 import logging
 import types
-from typing import TYPE_CHECKING, TypeVar, get_args, get_origin, get_type_hints
+from typing import TYPE_CHECKING, TypeVar, get_args, get_origin
 
 from django.http import HttpRequest
 
 from next.deps import DDependencyBase, RegisteredParameterProvider
+from next.deps.resolver import cached_type_hints
 
 from .parser import _coerce_url_value
 
@@ -107,7 +108,7 @@ class HttpRequestProvider(RegisteredParameterProvider):
         if stack:
             func = stack[-1]
             try:
-                hints = get_type_hints(func)
+                hints = cached_type_hints(func)
                 if _is_http_request_annotation(hints.get(param.name)):
                     return True
             except (NameError, TypeError, AttributeError, ValueError):

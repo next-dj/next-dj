@@ -61,8 +61,7 @@ Namespace Override
 
 The default namespace is ``next``, configured through ``next.urls.manager.app_name``.
 ``page_reverse`` forwards ``namespace=`` straight to ``django.urls.reverse``, so the value must name a Django URL namespace that already exists.
-The ``next`` namespace exists because ``next.urls`` sets ``app_name = "next"``.
-A second namespace exists only when ``next.urls`` is mounted again under an explicit ``namespace`` argument.
+The ``next`` namespace exists because ``next.urls`` sets ``app_name = "next"``, and a second namespace exists only when ``next.urls`` is mounted again under an explicit ``namespace`` argument.
 
 .. code-block:: python
    :caption: config/urls.py
@@ -91,6 +90,24 @@ When to Use page_reverse Instead of reverse
 
 ``django.urls.reverse("next:page_posts_slug", kwargs={"slug": "hello"})`` and ``page_reverse("posts/[slug]", slug="hello")`` are equivalent.
 Use ``page_reverse`` when the call site references the directory tree, ``reverse`` when the call site already has the URL name in a variable.
+
+The Lazy Variant
+~~~~~~~~~~~~~~~~
+
+``page_reverse_lazy`` takes the same arguments and defers the resolution until the value is first coerced to ``str``.
+Use it in positions evaluated at class-definition time, before the URLconf is ready, such as ``Meta.success_url`` on a form class.
+It pairs with ``page_reverse`` the way Django pairs :func:`~django.urls.reverse` with :func:`~django.urls.reverse_lazy`.
+
+.. code-block:: python
+   :caption: class-level URL
+
+   from next.urls import page_reverse_lazy
+
+   class AttachmentForm(ModelForm):
+       class Meta:
+           model = Attachment
+           fields = ("title", "file")
+           success_url = page_reverse_lazy("attachments")
 
 with_query
 ----------
@@ -167,15 +184,19 @@ An action handler can return an ``HttpResponseRedirect`` to a reversed page URL.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from django.http import HttpResponseRedirect
-   from notes.forms import NoteForm
-   from next.forms import action
+   from django.http import HttpRequest, HttpResponseRedirect
+   from notes.models import Note
+   from next.forms import ModelForm
    from next.urls import page_reverse
 
-   @action("create_note", form_class=NoteForm)
-   def create_note(form: NoteForm) -> HttpResponseRedirect:
-       form.save()
-       return HttpResponseRedirect(page_reverse())
+   class CreateNoteForm(ModelForm):
+       class Meta:
+           model = Note
+           fields = ("title", "body")
+
+       def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+           self.save()
+           return HttpResponseRedirect(page_reverse())
 
 Building Links in Components
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -43,12 +43,22 @@ Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 @action
 ~~~~~~~
 
-.. py:decorator:: @action(name, *, form_class=None, namespace=None)
+.. py:decorator:: @action(name=None, *, form_class=None, scope=None, login_required=False, permission_required=None)
 
-Registers a form action handler under ``name``.
-``name`` is the first positional argument and must be unique across the project.
-Pass ``form_class=`` for forms that need validation.
-Pass ``namespace=`` to scope short names, which prefixes the stored key with ``"<namespace>:"``.
+Registers a plain callable as a named form action.
+The name is optional: a bare ``@action`` or an empty ``@action()`` registers the function under its own name, and ``@action("custom_name")`` overrides it.
+The name must be unique within its scope, see :doc:`/content/topics/forms/actions`.
+Used without ``form_class``, the handler runs with no form validation.
+Reach for it for delete confirmations or logout buttons.
+Form classes register automatically through ``__init_subclass__`` and must not use ``@action``.
+Pass ``form_class=`` to receive the bound, validated form in the handler.
+It accepts a form class that does not register its own endpoint, such as a base marked ``Meta.abstract = True``, or a factory callable that builds the form class per request.
+Passing a ``Form`` subclass that already registered itself raises ``TypeError`` at decoration time.
+Pass ``scope="page"`` or ``scope="shared"`` to override the scope derived from the declaring file.
+Any other value is reported as the ``next.E047`` system check and the action is not registered.
+Pass ``login_required=True`` or ``permission_required=`` to guard the dispatch endpoint, see :ref:`topics-forms-actions-guards` for the semantics.
+Applying ``@action`` to a class registers no action and returns the class unchanged.
+The misuse is recorded and reported as the ``next.E053`` system check by ``manage.py check``.
 
 Dependency Markers
 ------------------

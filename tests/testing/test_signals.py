@@ -2,7 +2,11 @@ import pytest
 from django.dispatch import Signal
 
 from next import signals as framework_signals
-from next.forms.signals import action_dispatched
+from next.forms.signals import (
+    action_dispatched,
+    wizard_completed,
+    wizard_step_submitted,
+)
 from next.testing import SignalEvent, SignalRecorder
 from next.testing.signals import capture_framework_signals, capture_signals
 
@@ -132,3 +136,10 @@ class TestCaptureFrameworkSignals:
         with capture_framework_signals() as rec:
             pass
         assert len(rec.signals) == len(framework_signals.__all__)
+
+    def test_covers_wizard_signals(self) -> None:
+        with capture_framework_signals() as rec:
+            wizard_step_submitted.send(sender=None, step="one", cleaned_data={})
+            wizard_completed.send(sender=None, cleaned_data={})
+        assert len(rec.events_for(wizard_step_submitted)) == 1
+        assert len(rec.events_for(wizard_completed)) == 1

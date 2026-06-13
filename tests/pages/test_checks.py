@@ -549,7 +549,7 @@ class TestContextProcessorSignature:
 
     @override_settings(
         NEXT_FRAMEWORK={
-            "DEFAULT_PAGE_BACKENDS": [
+            "PAGE_BACKENDS": [
                 {
                     "BACKEND": "next.urls.FileRouterBackend",
                     "APP_DIRS": True,
@@ -570,7 +570,7 @@ class TestContextProcessorSignature:
 
     @override_settings(
         NEXT_FRAMEWORK={
-            "DEFAULT_PAGE_BACKENDS": [
+            "PAGE_BACKENDS": [
                 {
                     "BACKEND": "next.urls.FileRouterBackend",
                     "APP_DIRS": True,
@@ -593,7 +593,7 @@ class TestContextProcessorSignature:
 
     @override_settings(
         NEXT_FRAMEWORK={
-            "DEFAULT_PAGE_BACKENDS": [
+            "PAGE_BACKENDS": [
                 {
                     "BACKEND": "next.urls.FileRouterBackend",
                     "APP_DIRS": True,
@@ -614,7 +614,7 @@ class TestContextProcessorSignature:
 
     @override_settings(
         NEXT_FRAMEWORK={
-            "DEFAULT_PAGE_BACKENDS": [
+            "PAGE_BACKENDS": [
                 {
                     "BACKEND": "next.urls.FileRouterBackend",
                     "APP_DIRS": True,
@@ -633,14 +633,14 @@ class TestContextProcessorSignature:
         errors = check_context_processor_signature()
         assert errors == []
 
-    @override_settings(NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": "not a list"})
+    @override_settings(NEXT_FRAMEWORK={"PAGE_BACKENDS": "not a list"})
     def test_bad_settings_shape_is_tolerated(self) -> None:
         errors = check_context_processor_signature()
         assert errors == []
 
     @override_settings(
         NEXT_FRAMEWORK={
-            "DEFAULT_PAGE_BACKENDS": [
+            "PAGE_BACKENDS": [
                 "not a dict",
                 {
                     "BACKEND": "next.urls.FileRouterBackend",

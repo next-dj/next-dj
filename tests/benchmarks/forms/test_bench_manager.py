@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from next.forms import RegistryFormActionBackend
-from next.forms.backends import FormActionOptions
+from next.forms import FormActionNotFound, RegistryFormActionBackend
+from next.forms.backends import ActionRegistration
 from next.forms.manager import FormActionManager
 from tests.benchmarks.factories import noop_form_handler
 
@@ -17,9 +17,12 @@ def _make_populated_manager() -> FormActionManager:
     backend = manager.default_backend
     for i in range(_BULK):
         backend.register_action(
-            f"act_{i}",
-            noop_form_handler,
-            options=FormActionOptions(),
+            ActionRegistration(
+                name=f"act_{i}",
+                file_path=__file__,
+                scope="shared",
+                handler=noop_form_handler,
+            )
         )
     return manager
 
@@ -55,9 +58,12 @@ class TestBenchRegisterThroughManager:
             manager = FormActionManager()
             for i in range(_BULK):
                 manager.register_action(
-                    f"act_{i}",
-                    noop_form_handler,
-                    options=FormActionOptions(),
+                    ActionRegistration(
+                        name=f"act_{i}",
+                        file_path=__file__,
+                        scope="shared",
+                        handler=noop_form_handler,
+                    )
                 )
 
         benchmark(run)
@@ -80,15 +86,29 @@ class TestBenchManagerLookups:
         benchmark(run)
 
     @pytest.mark.benchmark(group="forms.manager")
-    def test_get_action_url_miss(self, benchmark) -> None:
-        """Manager raises ``KeyError`` after walking every backend."""
+    def test_get_action_url_miss_raise(self, benchmark) -> None:
+        """A caught miss pays only the raise, with diagnostics deferred."""
         manager = _make_populated_manager()
 
         def run() -> None:
             try:
                 manager.get_action_url("nonexistent")
-            except KeyError:
+            except FormActionNotFound:
                 return
+
+        benchmark(run)
+
+    @pytest.mark.benchmark(group="forms.manager")
+    def test_get_action_url_miss_rendered(self, benchmark) -> None:
+        """A rendered miss pays the close-match search and the message."""
+        manager = _make_populated_manager()
+
+        def run() -> str:
+            try:
+                manager.get_action_url("nonexistent")
+            except FormActionNotFound as exc:
+                return str(exc)
+            return ""
 
         benchmark(run)
 
@@ -105,7 +125,7 @@ class TestBenchManagerLookups:
 
 
 class TestBenchClearRegistries:
-    """`clear_registries` runs in test setup; should stay sub-µs per backend."""
+    """`clear_registries` runs in test setup and should stay sub-µs per backend."""
 
     @pytest.mark.benchmark(group="forms.manager")
     def test_clear_registries(self, benchmark) -> None:
@@ -116,7 +136,14 @@ class TestBenchClearRegistries:
 
         def setup() -> tuple[tuple[object, ...], dict[str, object]]:
             for i in range(_BULK):
-                backend.register_action(f"act_{i}", noop_form_handler)
+                backend.register_action(
+                    ActionRegistration(
+                        name=f"act_{i}",
+                        file_path=__file__,
+                        scope="shared",
+                        handler=noop_form_handler,
+                    )
+                )
             return (), {}
 
         benchmark.pedantic(

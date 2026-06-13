@@ -8,6 +8,7 @@ from django.contrib.admin.utils import (
     lookup_field,
 )
 from django.contrib.admin.views.main import ChangeList
+from django.core.exceptions import PermissionDenied
 from django.db.models import Field, Model
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.safestring import SafeString, mark_safe
@@ -158,7 +159,6 @@ def changelist_state(
         "verbose_name": str(model._meta.verbose_name),
         "verbose_name_plural": str(model._meta.verbose_name_plural),
         "add_url": utils.add_url(app_label, model_name),
-        "post_url": utils.changelist_url(app_label, model_name),
         "columns": _columns(cl, visible, model, model_admin),
         "rows": _rows(cl, visible, model_admin, app_label, model_name),
         "pagination": _pagination(cl),
@@ -167,13 +167,12 @@ def changelist_state(
         "search_enabled": bool(cl.search_fields),
         "query": cl.query,
         "carried_params": [(k, v) for k, v in cl.params.items() if k not in ("q", "p")],
-        "url_params": [("app_label", app_label), ("model_name", model_name)],
         "has_change_permission": model_admin.has_change_permission(request),
         "has_add_permission": model_admin.has_add_permission(request),
     }
 
 
-@action("admin:bulk_action")
+@action("admin:bulk_action", login_required=True)
 def bulk_action(
     request: HttpRequest,
     app_label: str,
@@ -181,6 +180,8 @@ def bulk_action(
 ) -> HttpResponse:
     """Run a Django admin bulk action and redirect to the origin changelist."""
     _, model_admin = utils.resolve_model_admin(app_label, model_name)
+    if not model_admin.has_view_or_change_permission(request):
+        raise PermissionDenied
     response = model_admin.response_action(
         request,
         queryset=model_admin.get_queryset(request),

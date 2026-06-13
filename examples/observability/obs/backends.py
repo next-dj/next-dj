@@ -67,7 +67,7 @@ class BabelJsxBackend(StaticFilesBackend):
         self,
         url: str,
         *,
-        request: HttpRequest | None = None,  # noqa: ARG002
+        request: HttpRequest | None = None,
     ) -> str:
         """Return a `<script type="text/babel">` tag pointing at `url`."""
         return self._babel_tag.format(url=url)

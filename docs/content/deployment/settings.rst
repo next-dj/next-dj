@@ -42,7 +42,7 @@ Static Backend
 .. code-block:: python
    :caption: config/settings.py
 
-   NEXT_FRAMEWORK["DEFAULT_STATIC_BACKENDS"] = [
+   NEXT_FRAMEWORK["STATIC_BACKENDS"] = [
        {"BACKEND": "notes.backends.CdnBackend", "OPTIONS": {}},
    ]
 
@@ -74,8 +74,8 @@ Page Backends With Context Processors
 
    from next.conf import extend_default_backend
 
-   NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"] = extend_default_backend(
-       "DEFAULT_PAGE_BACKENDS",
+   NEXT_FRAMEWORK["PAGE_BACKENDS"] = extend_default_backend(
+       "PAGE_BACKENDS",
        OPTIONS={"context_processors": [
            "notes.context_processors.csp_nonce",
            "notes.context_processors.tenant",
@@ -91,7 +91,7 @@ Form Action Backend
 .. code-block:: python
    :caption: config/settings.py
 
-   NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"] = [
+   NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"] = [
        {"BACKEND": "notes.backends.RateLimitedFormActionBackend"},
    ]
 
@@ -113,18 +113,18 @@ When several recommendations apply at once, merge them into a single ``NEXT_FRAM
    NEXT_FRAMEWORK = {
        "STRICT_CONTEXT": True,
        "LAZY_COMPONENT_MODULES": False,
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {"BACKEND": "notes.backends.CdnBackend", "OPTIONS": {}},
        ],
        "JS_CONTEXT_SERIALIZER": "next.static.PydanticJsContextSerializer",
-       "DEFAULT_PAGE_BACKENDS": extend_default_backend(
-           "DEFAULT_PAGE_BACKENDS",
+       "PAGE_BACKENDS": extend_default_backend(
+           "PAGE_BACKENDS",
            OPTIONS={"context_processors": [
                "notes.context_processors.csp_nonce",
                "notes.context_processors.tenant",
            ]},
        ),
-       "DEFAULT_FORM_ACTION_BACKENDS": [
+       "FORM_ACTION_BACKENDS": [
            {"BACKEND": "notes.backends.RateLimitedFormActionBackend"},
        ],
    }

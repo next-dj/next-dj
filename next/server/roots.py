@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 def get_framework_filesystem_roots_for_linking() -> list[Path]:
     """Return sorted unique roots from page trees and component `DIRS`."""
     roots: set[Path] = {p.resolve() for p in get_pages_directories_for_watch()}
-    comp_cfgs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+    comp_cfgs = next_framework_settings.COMPONENT_BACKENDS
     if isinstance(comp_cfgs, list):
         for config in comp_cfgs:
             if isinstance(config, dict):

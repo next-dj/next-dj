@@ -11,11 +11,20 @@ Set ``NEXT_FRAMEWORK`` in ``settings.py`` to override any of these values.
 
 For production-specific recommendations (which values to change and why), see :doc:`/content/deployment/settings`.
 
+Key Naming
+----------
+
+Keys inside ``NEXT_FRAMEWORK`` carry no ``DEFAULT_`` prefix. The dict itself is the framework defaults namespace. A plural ``*_BACKENDS`` key
+holds an ordered list of sources the manager consults in order. A
+singular ``*_BACKEND`` key holds the one engine for a concern. A
+subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``,
+``URL_``, ``TEMPLATE_``, ``JS_``) groups related keys.
+
 Backends
 --------
 
-DEFAULT_PAGE_BACKENDS
-~~~~~~~~~~~~~~~~~~~~~
+PAGE_BACKENDS
+~~~~~~~~~~~~~
 
 List of page backend configurations.
 
@@ -43,8 +52,8 @@ The router will not enter any directory with that name during the file walk.
 
 See :doc:`/content/topics/file-router` for the full semantics including examples.
 
-DEFAULT_COMPONENT_BACKENDS
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+COMPONENT_BACKENDS
+~~~~~~~~~~~~~~~~~~
 
 List of component backend configurations.
 
@@ -60,8 +69,8 @@ Default value.
        }
    ]
 
-DEFAULT_STATIC_BACKENDS
-~~~~~~~~~~~~~~~~~~~~~~~
+STATIC_BACKENDS
+~~~~~~~~~~~~~~~
 
 List of static backend configurations.
 
@@ -83,8 +92,8 @@ See :doc:`/content/topics/static-assets/js-context` under *Key Conflict Policy* 
 The same ``OPTIONS`` dict accepts ``DEDUP_STRATEGY``, a dotted path to a dedup strategy class the collector instantiates once per request to drop assets several components register more than once.
 See :doc:`/content/topics/static-assets/deduplication` for the bundled strategies and the custom-strategy protocol.
 
-DEFAULT_FORM_ACTION_BACKENDS
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+FORM_ACTION_BACKENDS
+~~~~~~~~~~~~~~~~~~~~
 
 List of form action backend configurations.
 
@@ -98,6 +107,49 @@ Default value.
            "OPTIONS": {},
        }
    ]
+
+FORM_AUTODISCOVER
+~~~~~~~~~~~~~~~~~
+
+Boolean that controls whether ``NextFrameworkConfig.ready`` imports the ``forms`` submodule of every installed app on startup.
+
+Default value ``True``.
+
+When ``True``, shared forms declared in ``app/forms.py`` register before the first request arrives.
+Set to ``False`` to disable the automatic import and manage registration manually.
+
+FORM_ANCHOR_FILES
+~~~~~~~~~~~~~~~~~
+
+List of file basenames that receive ``page`` scope during auto-registration.
+A form class declared in a file whose basename appears in this list is keyed to the absolute path of that file.
+All other files produce ``shared`` scope.
+
+Default value ``None``, which uses the built-in set ``["page.py", "component.py"]``.
+Set to a list of strings to replace the default set.
+The configured list is used as is, so include ``"page.py"`` and ``"component.py"`` explicitly when they should stay anchors.
+
+FORM_WIZARD_BACKEND
+~~~~~~~~~~~~~~~~~~~
+
+Single form wizard backend configuration.
+The backend persists a wizard's per-step draft data between requests.
+
+Default value.
+
+.. code-block:: python
+
+   {
+       "BACKEND": "next.forms.SessionFormWizardBackend",
+       "OPTIONS": {},
+   }
+
+The bundled ``SessionFormWizardBackend`` stores each step's cleaned data in the Django session through a typed value codec, so drafts share the durability of the session engine.
+It reads no ``OPTIONS`` keys.
+The bundled ``CacheFormWizardBackend`` stores drafts in the Django cache instead.
+It reads two keys from ``OPTIONS``: ``CACHE_ALIAS`` names the cache to use, defaulting to ``"default"``, and ``TIMEOUT`` sets the draft expiry in seconds, defaulting to ``SESSION_COOKIE_AGE``.
+Set ``BACKEND`` to a dotted path that subclasses ``FormWizardBackend`` to swap the persistence layer.
+See :doc:`/content/topics/forms/wizard-backend` for the contract, the codec, and a custom backend.
 
 Routing
 -------
@@ -193,8 +245,8 @@ Use ``next.conf.extend_default_backend`` to patch one key of a default backend e
    from next.conf import extend_default_backend
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": extend_default_backend(
-           "DEFAULT_PAGE_BACKENDS",
+       "PAGE_BACKENDS": extend_default_backend(
+           "PAGE_BACKENDS",
            PAGES_DIR="routes",
        )
    }

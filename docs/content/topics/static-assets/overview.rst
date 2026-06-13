@@ -130,10 +130,8 @@ Where Assets Live
 Hot Reload
 ----------
 
-Co-located assets are not watched by the autoreloader.
-The collector re-runs discovery on every request, so a saved or added asset is picked up on the next page load without a process restart.
-A change to ``page.py`` or ``component.py`` does restart the process through the normal Python reloader.
-A ``.djx`` template change is likewise picked up on the next request without a restart.
+The collector re-runs discovery on every request, so a saved or added co-located asset is picked up on the next page load without a process restart.
+See the Hot Reload section of :doc:`/content/topics/components` for the full reload contract across ``page.py``, ``component.py``, and ``.djx`` changes.
 
 Production Build
 ----------------

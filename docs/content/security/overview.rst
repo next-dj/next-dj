@@ -58,16 +58,36 @@ SQL injection.
    See :doc:`di-and-untrusted-input` for the custom-provider validation pattern.
 
 Mass assignment.
-   Use ``ModelForm.Meta.fields`` to whitelist editable fields.
-   Avoid ``Meta.exclude`` because new fields default to editable.
+   Whitelist editable fields on ``ModelForm``, see :doc:`di-and-untrusted-input` for the rule.
 
-Path traversal.
-   The form dispatcher validates the posted ``_next_form_page`` path against ``BASE_DIR``.
-   A submission that points outside ``BASE_DIR`` returns HTTP 400.
+Origin spoofing.
+   The only page identity a form submission carries is the ``_next_form_origin`` URL path, which the dispatcher resolves through the URLconf with :func:`django.urls.resolve`.
+   The client never supplies a filesystem path, so an error re-render can target only pages that are reachable through the routing table anyway.
+   A value that does not resolve returns HTTP 400.
+   Substituting the origin of another routed page remains possible and is an authorization question, so guard mutating actions as described under `Access Control`_.
 
 Open redirect.
    ``HttpResponseRedirect`` accepts any URL.
    Validate destinations before passing user input into a redirect target.
+
+Object-level authorization.
+   A lookup keyed only on a URL value loads whatever row matches, regardless of who owns it.
+   The ModelForm ``Meta.instance_from_url`` lookup is unscoped, so scope it to the user or tenant.
+   See :doc:`/content/topics/forms/modelforms` for the ownership-scoped pattern and :doc:`di-and-untrusted-input` for the posted origin path that feeds the lookup.
+
+Access Control
+--------------
+
+Form actions are unauthenticated by default.
+The ``/_next/form/<uid>/`` endpoint accepts a POST from any visitor, so a registered edit or delete action runs without an identity check unless the handler adds one.
+
+Enforce access at one of three layers.
+
+- Check ``request.user.is_authenticated`` and ownership inside ``on_valid`` before ``self.save()``.
+- Apply a project-wide login requirement through middleware, see :doc:`/content/howto/require-login-on-pages`.
+- Enforce a policy in a custom form action backend that wraps every dispatch.
+
+An action that mutates data and an action that loads an instance through ``instance_from_url`` both need this guard.
 
 Production Hardening
 --------------------

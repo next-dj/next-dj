@@ -22,14 +22,14 @@ class TestGetPagesDirectoriesForWatch:
 
     def test_returns_empty_when_routers_not_list(self) -> None:
         """When ``ROUTERS`` is not a list, returns []."""
-        mock_nf = SimpleNamespace(DEFAULT_PAGE_BACKENDS={})
+        mock_nf = SimpleNamespace(PAGE_BACKENDS={})
         with patch("next.pages.watch.next_framework_settings", mock_nf):
             assert get_pages_directories_for_watch() == []
 
     def test_skips_non_dict_config(self) -> None:
         """List entries that are not dicts are skipped."""
         with override_settings(
-            NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": ["not a dict", None]},
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not a dict", None]},
         ):
             next_framework_settings.reload()
             assert get_pages_directories_for_watch() == []
@@ -38,7 +38,7 @@ class TestGetPagesDirectoriesForWatch:
         """Invalid backend entry is skipped, valid entries still contribute."""
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [
+                "PAGE_BACKENDS": [
                     {"BACKEND": "nonexistent.Backend"},
                     {
                         "BACKEND": "next.urls.FileRouterBackend",
@@ -65,9 +65,7 @@ class TestGetPagesDirectoriesForWatch:
             mock_backend._get_installed_apps = Mock(return_value=[])
             mock_create.return_value = mock_backend
             with override_settings(
-                NEXT_FRAMEWORK={
-                    "DEFAULT_PAGE_BACKENDS": [{"BACKEND": "other.Backend"}]
-                },
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "other.Backend"}]},
             ):
                 next_framework_settings.reload()
                 assert get_pages_directories_for_watch() == []
@@ -91,7 +89,7 @@ class TestGetPagesDirectoriesForWatch:
             mock_create.return_value = mock_backend
             with override_settings(
                 NEXT_FRAMEWORK={
-                    "DEFAULT_PAGE_BACKENDS": [
+                    "PAGE_BACKENDS": [
                         {
                             "BACKEND": "next.urls.FileRouterBackend",
                             "PAGES_DIR": "pages",
@@ -112,15 +110,15 @@ class TestIterPagesRootsWithComponentsFolderNames:
     """Pairs ``(pages root, COMPONENTS_DIR)`` for autoreload globs."""
 
     def test_returns_empty_when_backends_not_list(self) -> None:
-        """When ``DEFAULT_PAGE_BACKENDS`` is not a list, return []."""
-        mock_nf = SimpleNamespace(DEFAULT_PAGE_BACKENDS=None)
+        """When ``PAGE_BACKENDS`` is not a list, return []."""
+        mock_nf = SimpleNamespace(PAGE_BACKENDS=None)
         with patch("next.pages.watch.next_framework_settings", mock_nf):
             assert iter_pages_roots_with_components_folder_names() == []
 
     def test_skips_non_dict_config(self) -> None:
         """Non-dict entries are skipped."""
         with override_settings(
-            NEXT_FRAMEWORK={"DEFAULT_PAGE_BACKENDS": ["not a dict"]},
+            NEXT_FRAMEWORK={"PAGE_BACKENDS": ["not a dict"]},
         ):
             next_framework_settings.reload()
             assert iter_pages_roots_with_components_folder_names() == []
@@ -133,9 +131,7 @@ class TestIterPagesRootsWithComponentsFolderNames:
             mock_backend._get_installed_apps = Mock(return_value=[])
             mock_create.return_value = mock_backend
             with override_settings(
-                NEXT_FRAMEWORK={
-                    "DEFAULT_PAGE_BACKENDS": [{"BACKEND": "other.Backend"}]
-                },
+                NEXT_FRAMEWORK={"PAGE_BACKENDS": [{"BACKEND": "other.Backend"}]},
             ):
                 next_framework_settings.reload()
                 assert iter_pages_roots_with_components_folder_names() == []
@@ -144,7 +140,7 @@ class TestIterPagesRootsWithComponentsFolderNames:
         """Invalid backend is skipped. A valid entry still contributes pairs."""
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [
+                "PAGE_BACKENDS": [
                     {"BACKEND": "nonexistent.Backend"},
                     {
                         "BACKEND": "next.urls.FileRouterBackend",

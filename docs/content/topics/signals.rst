@@ -77,13 +77,19 @@ each signal.
      - After the router manager rebuilds its pattern set.
    * - ``action_registered``
      - Forms
-     - After the backend stores a handler for an action name.
+     - After the backend stores an action target for a name.
    * - ``action_dispatched``
      - Forms
-     - After an action handler runs and the response is coerced.
+     - After an action handler runs and the response is coerced, and once per valid wizard step.
    * - ``form_validation_failed``
      - Forms
      - When a bound form fails validation during dispatch.
+   * - ``wizard_step_submitted``
+     - Forms
+     - After a ``FormWizard`` step validates during dispatch.
+   * - ``wizard_completed``
+     - Forms
+     - After the wizard ``done`` method returns a response below HTTP 400 for the final step.
    * - ``asset_registered``
      - Static
      - After a file is registered with a backend and added to the collector.

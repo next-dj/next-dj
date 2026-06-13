@@ -14,7 +14,8 @@ The resolver answers all of those calls through the same pipeline.
 Overview
 --------
 
-The resolver runs at four call sites: page context functions, the page render function, component context functions, and ``@action`` form handlers.
+The resolver runs at several call sites: page context functions, the page render function, component context functions, and the form dispatch.
+The form dispatch resolves the form-class factory, ``get_initial``, ``@action`` handlers, ``on_valid``, and ``wizard.done``.
 Every call site shares one provider list and one set of markers.
 Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
 
@@ -32,13 +33,15 @@ Each one carries an explicit ``priority`` value, the resolver consults them from
    A parameter whose name matches a context key receives that context value.
 4. Form provider (priority 40).
    A parameter named ``form`` or annotated ``DForm[FormClass]`` receives the bound form during action dispatch.
-5. HttpRequest provider (priority 50).
+5. Cleaned data provider (priority 40).
+   A parameter named ``cleaned_data`` receives the merged wizard cleaned data on a wizard ``done()`` handler.
+6. HttpRequest provider (priority 50).
    A parameter annotated ``HttpRequest`` or ``HttpRequest | None`` receives the current request.
-6. URL annotation provider (priority 60).
+7. URL annotation provider (priority 60).
    A parameter annotated ``DUrl[T]`` reads the captured URL segment and coerces it to ``T``.
-7. URL kwargs provider (priority 70).
+8. URL kwargs provider (priority 70).
    A parameter whose name matches a captured URL segment resolves to that value.
-8. Query string provider (priority 80).
+9. Query string provider (priority 80).
    A parameter annotated ``DQuery[T]`` reads ``request.GET`` by parameter name and coerces to ``T``.
 
 The order makes the default-driven and marker-driven providers decisive.
@@ -330,7 +333,8 @@ Import before resolution.
    The natural place is ``AppConfig.ready`` of the application that owns the provider.
 
 A custom provider that does not declare ``priority`` inherits the ``RegisteredParameterProvider`` default of ``100``.
-The built-in providers occupy the range ``10`` (named dependency) through ``80`` (query string), so the default keeps a custom provider after every built-in.
+The nine built-in providers occupy the range ``10`` (named dependency) through ``80`` (query string), so the default keeps a custom provider after every built-in.
+``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``50`` for an annotation that should outrank ``DUrl``.
 
 Resolution Cache

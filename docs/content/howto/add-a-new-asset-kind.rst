@@ -83,7 +83,7 @@ Register the kind against the new method and register the backend.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {"BACKEND": "notes.backends.BabelBackend", "OPTIONS": {}}
        ]
    }

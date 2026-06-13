@@ -17,7 +17,7 @@ Solution
 
 Subclass ``StaticFilesBackend``.
 Override ``register_file`` to resolve the URL your own way and delegate every other kind to the parent.
-Register the kind through ``next.static.default_kinds`` against a bundled renderer and point ``DEFAULT_STATIC_BACKENDS`` at the subclass.
+Register the kind through ``next.static.default_kinds`` against a bundled renderer and point ``STATIC_BACKENDS`` at the subclass.
 
 Walkthrough
 -----------
@@ -152,14 +152,14 @@ A subclass that needs a tag shape the bundled methods do not produce can add its
 Register the Backend
 ~~~~~~~~~~~~~~~~~~~~
 
-List the subclass in ``DEFAULT_STATIC_BACKENDS``.
+List the subclass in ``STATIC_BACKENDS``.
 Every key under ``OPTIONS`` reaches the constructor through ``self._config``.
 
 .. code-block:: python
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {
                "BACKEND": "kanban.backends.ViteManifestBackend",
                "OPTIONS": {

@@ -83,7 +83,7 @@ The full sort key is ``(-score, component.name, registration_position)``.
 Equal scores break first by component name, then by registration order, so the component discovered first shadows a later same-named one.
 Registration order operates inside a single ``FileComponentsBackend``.
 The page-tree backend records its roots during the URL router walk before ``DIRS`` roots are scanned, so its components shadow same-name entries from ``DIRS``.
-Across backends, the order of entries in ``DEFAULT_COMPONENT_BACKENDS`` decides which backend is consulted first.
+Across backends, the order of entries in ``COMPONENT_BACKENDS`` decides which backend is consulted first.
 
 Two components in the same scope with the same name are reported by ``next.E020``.
 ``next.E034`` reports one component name used at the root route scope of more than one page tree.

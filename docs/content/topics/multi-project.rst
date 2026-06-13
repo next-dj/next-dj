@@ -81,7 +81,7 @@ Each project points at the shared directory through ``DIRS``.
    SHARED_DIR = REPO_DIR / "_shared"
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
+       "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [str(BASE_DIR / "chrome")],
@@ -90,7 +90,7 @@ Each project points at the shared directory through ``DIRS``.
                "OPTIONS": {"context_processors": []},
            }
        ],
-       "DEFAULT_COMPONENT_BACKENDS": [
+       "COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
                "DIRS": [str(SHARED_DIR / "_components")],
@@ -141,7 +141,7 @@ A project can ship project-specific components alongside the shared kit.
    :caption: projects/admin/config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_COMPONENT_BACKENDS": [
+       "COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
                "DIRS": [
@@ -176,7 +176,7 @@ Common Variations
 Repository Wide Layout
 ~~~~~~~~~~~~~~~~~~~~~~
 
-Put a single layout in ``_shared/chrome/`` and add the path to the ``DEFAULT_PAGE_BACKENDS`` ``DIRS`` of every project.
+Put a single layout in ``_shared/chrome/`` and add the path to the ``PAGE_BACKENDS`` ``DIRS`` of every project.
 Every project then renders inside the same shell.
 
 Per Tenant Project

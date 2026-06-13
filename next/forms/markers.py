@@ -1,7 +1,5 @@
 """Dependency injection markers and provider for form parameters."""
 
-from __future__ import annotations
-
 import inspect
 from typing import get_args, get_origin
 
@@ -47,4 +45,20 @@ class FormProvider(RegisteredParameterProvider):
         return getattr(context, "form", None)
 
 
-__all__ = ["DForm", "FormProvider"]
+class CleanedDataProvider(RegisteredParameterProvider):
+    """Inject merged wizard cleaned data for the parameter named `cleaned_data`."""
+
+    priority = 40
+
+    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+        """Return True when context carries cleaned data and the name matches."""
+        if param.name != "cleaned_data":
+            return False
+        return getattr(context, "cleaned_data", None) is not None
+
+    def resolve(self, _param: inspect.Parameter, context: object) -> object:
+        """Return the cleaned data mapping from context."""
+        return getattr(context, "cleaned_data", None)
+
+
+__all__ = ["CleanedDataProvider", "DForm", "FormProvider"]

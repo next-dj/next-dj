@@ -14,7 +14,7 @@ from next.static.collector import (
 
 CONFIG_HASH_DEEP = {
     "NEXT_FRAMEWORK": {
-        "DEFAULT_STATIC_BACKENDS": [
+        "STATIC_BACKENDS": [
             {
                 "BACKEND": "next.static.StaticFilesBackend",
                 "OPTIONS": {
@@ -28,7 +28,7 @@ CONFIG_HASH_DEEP = {
 
 CONFIG_LAST_WINS_ONLY = {
     "NEXT_FRAMEWORK": {
-        "DEFAULT_STATIC_BACKENDS": [
+        "STATIC_BACKENDS": [
             {
                 "BACKEND": "next.static.StaticFilesBackend",
                 "OPTIONS": {

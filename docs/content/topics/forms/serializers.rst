@@ -21,6 +21,7 @@ The module ``next.forms.serializers`` exposes five dataclasses.
 FieldSpec.
    Render-time descriptor for one ``BoundField``.
    Includes the field kind, the input type, the current value, the selected values for choice fields, and an ``is_extra`` flag.
+   The ``bound`` attribute is the underlying Django ``BoundField`` and is Django-only.
 
 FormsetRowSpec.
    One row inside a formset spec.
@@ -29,6 +30,7 @@ FormsetRowSpec.
 FormsetSpec.
    Template-friendly view of a Django formset.
    Includes the prefix, the model verbose name plural, the management form, every row, the non form errors, and a ``can_delete`` flag.
+   The ``management_form`` attribute is a Django form and is Django-only.
 
 FormSectionSpec.
    One labelled section in a ``FormSpec``, matching a Django admin fieldset.
@@ -95,6 +97,23 @@ Use them when the standard ``{% form %}`` tag does not match the layout you want
 A custom renderer can read the same fields from Python.
 The dataclass exposes a fixed set of attributes.
 
+Non-Django Engine Notes
+-----------------------
+
+Two spec members are Django objects, not plain data.
+A renderer running outside Django templates handles them explicitly.
+
+``FieldSpec.bound`` is a Django ``BoundField``.
+   Call ``str(spec.bound)`` to get the default widget HTML, or ``spec.bound.as_widget(...)`` to render with custom attributes.
+   The plain-data attributes (``kind``, ``input_type``, ``value``, ``selected``) cover most layouts without touching ``bound``, so a custom control can be built from those alone.
+
+``FormsetSpec.management_form`` is a Django form.
+   Its hidden inputs (``TOTAL_FORMS``, ``INITIAL_FORMS``, and the rest) must be rendered into the POSTed markup, or Django raises a ``ManagementForm`` error and the whole formset fails validation.
+   Render ``str(spec.management_form)`` inside the form, the same role ``{{ form.management_form }}`` plays in the bundled tag.
+
+Treat both members as opaque HTML producers in a non-Django engine.
+The rest of every spec is plain immutable data safe to project to JSON or pass to any template language.
+
 Field Kinds
 -----------
 
@@ -122,12 +141,6 @@ Admin ``RelatedFieldWidgetWrapper`` widgets are unwrapped to their inner widget 
 The framework classifies the widget once when constructing the spec.
 Custom renderers can branch on ``kind`` without re instantiating the widget.
 
-Shared Dependency Cache Across Re-render
-----------------------------------------
-
-The dispatcher reuses one dependency cache across the initial bind and the re-render, so providers run once and templates rebuild cheaply.
-See :ref:`topics-forms-validation-rerender` for the mechanics and the ``get_request_dep_cache`` access path.
-
 Spec vs Bound Form
 ------------------
 
@@ -148,7 +161,7 @@ Render a Form in a Different Engine
 
 Use the spec to ship form structure to a Jinja2 macro or a JSON consumer.
 Each spec is a frozen dataclass, so a custom renderer can read its fields directly or build its own plain-dict projection.
-A bare Django ``Form`` is not JSON-encodable, so a form destined for ``@context(..., serialize=True)`` must travel as a ``FormSpec`` (or a custom projection) rather than as the form instance itself.
+A bare Django ``Form`` is not JSON-encodable, so a form destined for ``@context(..., serialize=True)`` (see :doc:`/content/topics/static-assets/js-context`) must travel as a ``FormSpec`` (or a custom projection) rather than as the form instance itself.
 
 Snapshot Diffing
 ~~~~~~~~~~~~~~~~

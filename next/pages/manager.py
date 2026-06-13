@@ -13,7 +13,7 @@ import inspect
 import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from django.http import HttpRequest, HttpResponse
 from django.http.response import HttpResponseBase
@@ -47,23 +47,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _extract_request(
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-) -> HttpRequest | None:
-    """Return the `HttpRequest` from positional or keyword arguments.
+class _RoutedPageView(Protocol):
+    """A page view carrying the source path form dispatch resolves back to."""
 
-    Most call sites pass the active request as the first positional
-    argument, but programmatic callers of `Page.render` may also
-    supply it through the `request` keyword. The helper accepts both
-    forms and returns `None` when neither carries an `HttpRequest`.
-    """
-    if args and isinstance(args[0], HttpRequest):
-        return args[0]
-    candidate = kwargs.get("request")
-    if isinstance(candidate, HttpRequest):
-        return candidate
-    return None
+    next_page_path: Path
+
+    def __call__(self, request: HttpRequest, **kwargs: object) -> HttpResponseBase: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +82,7 @@ class Page:
         caches them and invalidates on `settings_reloaded`.
         """
         self._template_registry: dict[Path, str] = {}
+        self._compiled_registry: dict[Path, Template] = {}
         self._template_source_mtimes: dict[Path, dict[Path, float]] = {}
         self._resolver: DependencyResolver | None = None
         self._context_manager = PageContextRegistry(None)
@@ -103,8 +93,13 @@ class Page:
         return resolver
 
     def register_template(self, file_path: Path, template_str: str) -> None:
-        """Store rendered template source for `file_path`."""
+        """Store rendered template source for `file_path`.
+
+        The compiled-template entry is dropped alongside so every write
+        to the source registry invalidates the compiled layer with it.
+        """
         self._template_registry[file_path] = template_str
+        self._compiled_registry.pop(file_path, None)
         template_loaded.send(sender=Page, file_path=file_path)
 
     def _get_caller_path(self, back_count: int = 1) -> Path:
@@ -160,7 +155,7 @@ class Page:
     def build_render_context(
         self,
         file_path: Path,
-        *args: object,
+        request: HttpRequest | None = None,
         **kwargs: object,
     ) -> dict[str, object]:
         """Build the full render context dict used by `render`.
@@ -179,17 +174,13 @@ class Page:
         context_data.update(kwargs)
 
         context_result = self._context_manager.collect_context(
-            file_path, *args, **kwargs
+            file_path, request, **kwargs
         )
         context_data.update(context_result.context_data)
         context_data["_next_js_context"] = context_result.js_context
         context_data["_next_js_context_serializers"] = (
             context_result.js_context_serializers
         )
-
-        request: HttpRequest | None = None
-        if args and isinstance(args[0], HttpRequest):
-            request = args[0]
 
         if request is not None:
             context_data["request"] = request
@@ -241,7 +232,7 @@ class Page:
         self,
         file_path: Path,
         module: types.ModuleType | None,
-        *args: object,
+        request: HttpRequest | None = None,
         **kwargs: object,
     ) -> _BodyResolution:
         """Resolve the page body per-request.
@@ -257,7 +248,7 @@ class Page:
             render_func = getattr(module, "render", None)
             if callable(render_func):
                 return self._call_render_function(
-                    render_func, file_path, *args, **kwargs
+                    render_func, file_path, request, **kwargs
                 )
         return _BodyResolution(body=self._load_static_body(file_path, module))
 
@@ -265,11 +256,10 @@ class Page:
         self,
         render_func: Callable[..., object],
         file_path: Path,
-        *args: object,
+        request: HttpRequest | None = None,
         **kwargs: object,
     ) -> _BodyResolution:
         """Invoke `render_func` with DI-resolved arguments and classify the result."""
-        request = args[0] if args and isinstance(args[0], HttpRequest) else None
         dep_cache: dict[str, Any] = {}
         dep_stack: list[str] = []
         resolved = self._get_resolver().resolve_dependencies(
@@ -293,12 +283,15 @@ class Page:
     def render_with_static_assets(
         self,
         file_path: Path,
-        template_str: str,
+        template: Template | str,
         context_data: dict[str, object],
         *,
         request: HttpRequest | None = None,
     ) -> tuple[str, StaticCollector]:
-        """Render `template_str` and inject collected static assets.
+        """Render `template` and inject collected static assets.
+
+        `template` is either a precompiled `Template` (reused as-is) or
+        raw template source, which is parsed before rendering.
 
         The method seeds a fresh `StaticCollector`, hydrates it with
         the JS context that `build_render_context` left under the
@@ -325,7 +318,8 @@ class Page:
         default_manager.discover_page_assets(file_path, collector)
         context_data["_static_collector"] = collector
 
-        html = Template(template_str).render(DjangoTemplateContext(context_data))
+        compiled = template if isinstance(template, Template) else Template(template)
+        html = compiled.render(DjangoTemplateContext(context_data))
         result = cast(
             "str",
             default_manager.inject(
@@ -337,17 +331,16 @@ class Page:
     def _render_template_str(
         self,
         file_path: Path,
-        template_str: str,
+        template: Template | str,
         start: float,
-        *args: object,
+        request: HttpRequest | None = None,
         **kwargs: object,
     ) -> str:
-        """Build context, render `template_str`, inject static assets, emit signal."""
-        context_data = self.build_render_context(file_path, *args, **kwargs)
-        request = _extract_request(args, kwargs)
+        """Build context, render `template`, inject static assets, emit signal."""
+        context_data = self.build_render_context(file_path, request, **kwargs)
         result, collector = self.render_with_static_assets(
             file_path,
-            template_str,
+            template,
             context_data,
             request=request,
         )
@@ -367,7 +360,7 @@ class Page:
         self,
         file_path: Path,
         body: str,
-        *args: object,
+        request: HttpRequest | None = None,
         **kwargs: object,
     ) -> str:
         """Compose `body` through layouts and render.
@@ -377,19 +370,16 @@ class Page:
         """
         start = time.perf_counter()
         composed = self._layout_manager._layout_loader.compose_body(body, file_path)
-        return self._render_template_str(file_path, composed, start, *args, **kwargs)
+        return self._render_template_str(file_path, composed, start, request, **kwargs)
 
-    def render(self, file_path: Path, *args: object, **kwargs: object) -> str:
-        """Render the page with Django `Template` and the static collector.
+    def composed_template_for(self, file_path: Path) -> Template:
+        """Return the compiled composed template for the static body.
 
-        The static body source is the `template` attribute or any
-        registered file-based `TemplateLoader`. The result is composed
-        through the ancestor layout chain and cached in
-        `_template_registry`. Direct callers of `Page.render` do not
-        invoke `render()`. The unified view handles that path so
-        dynamic bodies skip the registry cache.
+        The composed source is cached in `_template_registry` and
+        invalidated by source-mtime staleness. The compiled `Template`
+        layer keys off the same registry, so both caches go stale
+        together and a warm hit performs no file reads and no parsing.
         """
-        start = time.perf_counter()
         if file_path not in self._template_registry or self._is_template_stale(
             file_path
         ):
@@ -400,10 +390,30 @@ class Page:
             composed = self._layout_manager._layout_loader.compose_body(body, file_path)
             self.register_template(file_path, composed)
             self._record_template_source_mtimes(file_path)
-        template_str = self._template_registry[file_path]
-        return self._render_template_str(
-            file_path, template_str, start, *args, **kwargs
-        )
+        compiled = self._compiled_registry.get(file_path)
+        if compiled is None:
+            compiled = Template(self._template_registry[file_path])
+            self._compiled_registry[file_path] = compiled
+        return compiled
+
+    def render(
+        self,
+        file_path: Path,
+        request: HttpRequest | None = None,
+        **kwargs: object,
+    ) -> str:
+        """Render the page with Django `Template` and the static collector.
+
+        The static body source is the `template` attribute or any
+        registered file-based `TemplateLoader`. The result is composed
+        through the ancestor layout chain and cached compiled through
+        `composed_template_for`. Direct callers of `Page.render` do not
+        invoke `render()`. The unified view handles that path so
+        dynamic bodies skip the registry cache.
+        """
+        start = time.perf_counter()
+        template = self.composed_template_for(file_path)
+        return self._render_template_str(file_path, template, start, request, **kwargs)
 
     def _create_unified_view(
         self,
@@ -411,7 +421,12 @@ class Page:
         _parameters: dict[str, str],
         module: types.ModuleType | None,
     ) -> Callable[..., HttpResponseBase]:
-        """Return a view that resolves the body, composes layouts, and renders."""
+        """Return a view that resolves the body, composes layouts, and renders.
+
+        The view carries `next_page_path` so the form dispatch can map a
+        resolved origin URL back to the page source, including the
+        synthesised `page.py` location of virtual `template.djx` pages.
+        """
 
         def view(request: HttpRequest, **kwargs: object) -> HttpResponseBase:
             resolution = self._resolve_page_body(file_path, module, request, **kwargs)
@@ -421,6 +436,7 @@ class Page:
             content = self._render_composed(file_path, body, request, **kwargs)
             return HttpResponse(content)
 
+        cast("_RoutedPageView", view).next_page_path = file_path
         return view
 
     def has_template(

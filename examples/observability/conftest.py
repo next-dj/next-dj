@@ -1,4 +1,4 @@
-# Canonical scaffold: see docs/content/guide/testing.rst for the rationale.
+# Canonical scaffold: see docs/content/topics/testing.rst for the rationale.
 import os
 import sys
 from collections.abc import Callable, Iterator

@@ -81,7 +81,7 @@ def _iter_default_autoreload_watch_specs() -> list[tuple[Path, str]]:
         (root, f"**/{comp_name}/**/component.py")
         for root, comp_name in iter_pages_roots_with_components_folder_names()
     )
-    comp_cfgs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+    comp_cfgs = next_framework_settings.COMPONENT_BACKENDS
     if isinstance(comp_cfgs, list):
         for config in comp_cfgs:
             if not isinstance(config, dict):

@@ -1,4 +1,4 @@
-"""System checks for `NEXT_FRAMEWORK['DEFAULT_STATIC_BACKENDS']`.
+"""System checks for `NEXT_FRAMEWORK['STATIC_BACKENDS']`.
 
 The checks are hooked into `manage.py check` via the `@register`
 decorator. All identifiers live in the `next.*` namespace to avoid
@@ -6,7 +6,7 @@ collisions with Django core checks.
 
 Registered identifiers.
 
-- `next.W030`. Warning raised when `DEFAULT_STATIC_BACKENDS` is empty.
+- `next.W030`. Warning raised when `STATIC_BACKENDS` is empty.
   The framework falls back to the built-in staticfiles backend.
 - `next.E036`. Error raised when a backend dotted path fails to import.
 - `next.E037`. Error raised when the resolved class is not a
@@ -52,7 +52,7 @@ def _validate_tag_template(
     if "{url}" not in value:
         return DjangoWarning(
             (
-                f"OPTIONS[{tag_name!r}] in DEFAULT_STATIC_BACKENDS[{backend_index}] "
+                f"OPTIONS[{tag_name!r}] in STATIC_BACKENDS[{backend_index}] "
                 "does not contain the '{url}' placeholder. Rendered tags will "
                 "not include the asset URL."
             ),
@@ -71,7 +71,7 @@ def _check_single_backend(
     if not isinstance(config, dict):
         messages.append(
             Error(
-                f"DEFAULT_STATIC_BACKENDS[{index}] must be a dict, got "
+                f"STATIC_BACKENDS[{index}] must be a dict, got "
                 f"{type(config).__name__!r}.",
                 obj=settings,
                 id="next.E037",
@@ -82,7 +82,7 @@ def _check_single_backend(
     if not isinstance(backend_path, str):
         messages.append(
             Error(
-                f"DEFAULT_STATIC_BACKENDS[{index}]['BACKEND'] must be a dotted "
+                f"STATIC_BACKENDS[{index}]['BACKEND'] must be a dotted "
                 f"string, got {type(backend_path).__name__!r}.",
                 obj=settings,
                 id="next.E037",
@@ -92,8 +92,7 @@ def _check_single_backend(
     if backend_path in seen:
         messages.append(
             Error(
-                f"DEFAULT_STATIC_BACKENDS has duplicate BACKEND entry "
-                f"{backend_path!r}.",
+                f"STATIC_BACKENDS has duplicate BACKEND entry {backend_path!r}.",
                 obj=settings,
                 id="next.E038",
             )
@@ -138,14 +137,14 @@ def check_static_backends(
     app_configs: object,  # noqa: ARG001
     **_kwargs: object,
 ) -> list[CheckMessage]:
-    """Validate the structure of `NEXT_FRAMEWORK['DEFAULT_STATIC_BACKENDS']`."""
+    """Validate the structure of `NEXT_FRAMEWORK['STATIC_BACKENDS']`."""
     messages: list[CheckMessage] = []
     try:
-        configs = next_framework_settings.DEFAULT_STATIC_BACKENDS
+        configs = next_framework_settings.STATIC_BACKENDS
     except (AttributeError, ImportError) as e:  # pragma: no cover
         return [
             Error(
-                f"Unable to read DEFAULT_STATIC_BACKENDS: {e}",
+                f"Unable to read STATIC_BACKENDS: {e}",
                 obj=settings,
                 id="next.E036",
             )
@@ -154,7 +153,7 @@ def check_static_backends(
     if not isinstance(configs, list) or len(configs) == 0:
         messages.append(
             DjangoWarning(
-                "NEXT_FRAMEWORK['DEFAULT_STATIC_BACKENDS'] is empty. The "
+                "NEXT_FRAMEWORK['STATIC_BACKENDS'] is empty. The "
                 "framework falls back to next.static.StaticFilesBackend.",
                 obj=settings,
                 id="next.W030",

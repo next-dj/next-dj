@@ -53,6 +53,23 @@ def _next_init_payload(html: str) -> dict:
     return json.loads(match.group(1))
 
 
+def _rename_form_block(html: str) -> str:
+    blocks = re.findall(r"<form[^>]*>.*?</form>", html, flags=re.DOTALL)
+    return next(b for b in blocks if 'name="title"' in b and "wip_limit" not in b)
+
+
+def _form_action_url(block: str) -> str:
+    match = re.search(r'<form action="([^"]+)"', block)
+    assert match is not None
+    return match.group(1)
+
+
+def _hidden_fields(block: str) -> dict[str, str]:
+    return dict(
+        re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', block)
+    )
+
+
 class TestBoardList:
     """The index page lists active boards and hides archived ones."""
 
@@ -137,8 +154,9 @@ class TestSettings:
         board: Board,
     ) -> None:
         response = client.post_action(
-            "kanban:rename_board",
-            {"board_id": board.pk, "title": "New title"},
+            "rename_board_form",
+            {"title": "New title"},
+            origin=f"/board/{board.pk}/settings/",
         )
         assert response.status_code == 302
         board.refresh_from_db()
@@ -150,8 +168,9 @@ class TestSettings:
         board: Board,
     ) -> None:
         response = client.post_action(
-            "kanban:archive_board",
-            {"board_id": board.pk, "archived": "1"},
+            "archive_board_form",
+            {"archived": "1"},
+            origin=f"/board/{board.pk}/settings/",
         )
         assert response.status_code == 302
         board.refresh_from_db()
@@ -162,12 +181,41 @@ class TestSettings:
         client: NextClient,
         board: Board,
     ) -> None:
+        board.archived = True
+        board.save(update_fields=["archived"])
         response = client.post_action(
-            "kanban:archive_board",
-            {"board_id": board.pk},
+            "archive_board_form",
+            origin=f"/board/{board.pk}/settings/",
         )
         assert response.status_code == 302
         assert response["Location"] == f"/board/{board.pk}/settings/"
+        board.refresh_from_db()
+        assert board.archived is False
+
+    def test_invalid_then_fixed_resubmit_renames_in_place(
+        self,
+        client: NextClient,
+        board: Board,
+    ) -> None:
+        rename = _rename_form_block(_settings_html(client, board))
+        invalid = client.post(
+            _form_action_url(rename),
+            {**_hidden_fields(rename), "title": ""},
+        )
+        assert invalid.status_code == 200
+        rerendered = _rename_form_block(invalid.content.decode())
+        refields = _hidden_fields(rerendered)
+        assert refields["_next_form_origin"] == f"/board/{board.pk}/settings/"
+        before = Board.objects.count()
+        fixed = client.post(
+            _form_action_url(rerendered),
+            {**refields, "title": "Fixed title"},
+        )
+        assert fixed.status_code == 302
+        assert fixed["Location"] == f"/board/{board.pk}/settings/"
+        assert Board.objects.count() == before
+        board.refresh_from_db()
+        assert board.title == "Fixed title"
 
     def test_add_column_form_post(
         self,
@@ -176,7 +224,7 @@ class TestSettings:
     ) -> None:
         before = board.columns.count()
         response = client.post_action(
-            "kanban:create_column",
+            "create_column_form",
             {"board_id": board.pk, "title": "New", "wip_limit": "5"},
         )
         assert response.status_code == 302
@@ -199,7 +247,7 @@ class TestMoveCard:
         done = board.columns.get(title="Done")
         card = backlog.cards.first()
         response = client.post_action(
-            "kanban:move_card",
+            "move_card_form",
             {
                 "card_id": card.pk,
                 "target_column_id": done.pk,
@@ -219,7 +267,7 @@ class TestMoveCard:
         done = board.columns.get(title="Done")
         card = backlog.cards.first()
         client.post_action(
-            "kanban:move_card",
+            "move_card_form",
             {
                 "card_id": card.pk,
                 "target_column_id": done.pk,
@@ -240,7 +288,7 @@ class TestMoveCard:
         other_col = Column.objects.create(board=other_board, title="X", position=0)
         card = board.columns.first().cards.first()
         response = client.post_action(
-            "kanban:move_card",
+            "move_card_form",
             {
                 "card_id": card.pk,
                 "target_column_id": other_col.pk,
@@ -260,7 +308,7 @@ class TestMoveCard:
         done = board.columns.get(title="Done")
         card = backlog.cards.first()
         response = client.post_action(
-            "kanban:move_card",
+            "move_card_form",
             {
                 "card_id": card.pk,
                 "target_column_id": done.pk,
@@ -282,7 +330,7 @@ class TestPreviewComponent:
         done = board.columns.get(title="Done")
         card = backlog.cards.first()
         client.post_action(
-            "kanban:move_card",
+            "move_card_form",
             {
                 "card_id": card.pk,
                 "target_column_id": done.pk,
@@ -323,7 +371,7 @@ class TestCreateCard:
         backlog = board.columns.get(title="Backlog")
         before = backlog.cards.count()
         response = client.post_action(
-            "kanban:create_card",
+            "create_card_form",
             {"column_id": backlog.pk, "title": "Extra"},
         )
         assert response.status_code == 302
@@ -341,7 +389,7 @@ class TestCreateCard:
         progress = board.columns.get(title="In Progress")
         Card.objects.create(column=progress, title="Second", position=1)
         response = client.post_action(
-            "kanban:create_card",
+            "create_card_form",
             {"column_id": progress.pk, "title": "Over the limit"},
         )
         assert response.status_code == 400
@@ -355,7 +403,7 @@ class TestCreateCard:
         backlog = board.columns.get(title="Backlog")
         for index in range(5):
             response = client.post_action(
-                "kanban:create_card",
+                "create_card_form",
                 {"column_id": backlog.pk, "title": f"Card {index}"},
             )
             assert response.status_code == 302

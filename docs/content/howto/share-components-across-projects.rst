@@ -12,12 +12,12 @@ Scope
 -----
 
 :doc:`/content/topics/multi-project` is the full guide and covers page ``DIRS``, shared static, autoreload, and naming conventions.
-This page is the shortest path and points ``DEFAULT_COMPONENT_BACKENDS`` at one shared folder.
+This page is the shortest path and points ``COMPONENT_BACKENDS`` at one shared folder.
 
 Solution
 --------
 
-Place the shared components in one folder at the repository level and reference it from each project through ``DEFAULT_COMPONENT_BACKENDS["DIRS"]``.
+Place the shared components in one folder at the repository level and reference it from each project through ``COMPONENT_BACKENDS["DIRS"]``.
 
 Walkthrough
 -----------
@@ -54,7 +54,7 @@ Add the shared directory to each project.
    SHARED_DIR = BASE_DIR.parent.parent / "_shared"
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_COMPONENT_BACKENDS": [
+       "COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
                "DIRS": [str(SHARED_DIR / "_components")],

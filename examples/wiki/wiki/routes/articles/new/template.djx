@@ -6,7 +6,7 @@
 
   {% component "page_header" title="Create an article" %}
 
-  {% form @action="wiki:article_create" class="grid gap-6 md:grid-cols-2" %}
+  {% form "article_create_form" %}
     <div class="space-y-4">
       {% #component "field" label="Slug" for_id="id_slug" error=form.slug.errors|join:" " %}
         {% #slot "control" %}{{ form.slug }}{% /slot %}

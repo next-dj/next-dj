@@ -66,6 +66,9 @@ The table below maps each testing goal to the helper and its import path.
    * - Clear registries between tests
      - ``reset_registries`` (call from an autouse fixture), or narrower ``reset_components`` / ``reset_form_actions`` / ``reset_page_cache``
      - ``next.testing`` or ``next.testing.isolation``
+   * - Clear the form registries, diagnostics, and wizard backend
+     - ``reset_form_registration_state``
+     - ``next.testing`` or ``next.testing.isolation``
 
 You can import everything above from the ``next.testing`` package. Submodule imports stay valid when you prefer explicit paths.
 See :doc:`/content/ref/testing` for generated signatures.
@@ -114,6 +117,8 @@ Two narrower helpers reset a single registry.
 
 A third helper, ``reset_page_cache()``, resets no registry.
 It drops the page template cache and is useful when a test rewrites template files on disk.
+
+For tests that probe registration itself, ``reset_form_registration_state()`` clears every form registry, the registration diagnostics buffer, and resets the wizard backend in one call.
 
 Tests that write ``template.djx`` or ``page.py`` files to ``tmp_path`` need both helpers:
 
@@ -194,8 +199,20 @@ Posting to Actions
        response = NextClient().post_action("create_note", {"title": "Test", "body": ""})
        assert response.status_code == 302
 
+The ``origin`` keyword fills the hidden ``_next_form_origin`` field the ``{% form %}`` tag emits in the browser, the page URL the dispatcher resolves to re-render on a validation failure.
+
+.. code-block:: python
+   :caption: failing submission re-renders the origin
+
+   def test_blank_title_rerenders(db) -> None:
+       response = NextClient().post_action("create_note", {"title": ""}, origin="/")
+       assert response.status_code == 200
+
+A value already present in ``data`` under ``_next_form_origin`` wins over the keyword, so protocol-level tests can drive the raw field directly, including posting without it to assert the HTTP 400 rejection.
+
 ``NextClient.get_action_url`` returns the dispatch URL without posting, for tests that need the URL itself.
 Both methods resolve the name through ``resolve_action_url`` from ``next.testing.actions``.
+An unknown name raises ``FormActionNotFound`` from ``next.forms``.
 
 Render a Page
 -------------
@@ -302,6 +319,7 @@ Action Helpers
 ``next.testing.actions`` exposes ``resolve_action_url`` and ``build_form_for``.
 ``resolve_action_url`` turns an action name into its dispatch URL.
 ``build_form_for`` builds a bound form for an action so a unit test can assert validation without HTTP.
+Both raise ``FormActionNotFound`` from ``next.forms`` for an unknown action name, with the closest registered names rendered into the message, and ``build_form_for`` raises ``LookupError`` for an action registered without a form class.
 
 .. code-block:: python
    :caption: tests/test_action_helpers.py

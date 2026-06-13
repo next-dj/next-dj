@@ -98,10 +98,10 @@ Errors
      - Condition
      - Emitted by
    * - ``next.E001``
-     - ``NEXT_FRAMEWORK`` is not a dict, or ``DEFAULT_PAGE_BACKENDS`` is not a list.
+     - ``NEXT_FRAMEWORK`` is not a dict, or ``PAGE_BACKENDS`` is not a list.
      - ``next.urls.checks``
    * - ``next.E002``
-     - A ``DEFAULT_PAGE_BACKENDS`` or ``DEFAULT_COMPONENT_BACKENDS`` entry is not a dict.
+     - A ``PAGE_BACKENDS`` or ``COMPONENT_BACKENDS`` entry is not a dict.
      - ``next.urls.checks``, ``next.components.checks``
    * - ``next.E003``
      - A page backend entry does not specify ``BACKEND``.
@@ -155,10 +155,10 @@ Errors
      - A ``component.py`` imports ``context`` from ``next.pages`` instead of ``next.components``.
      - ``next.components.checks``
    * - ``next.E022``
-     - ``DEFAULT_PAGE_BACKENDS`` is empty.
+     - ``PAGE_BACKENDS`` is empty.
      - ``next.urls.checks``
    * - ``next.E023``
-     - ``DEFAULT_COMPONENT_BACKENDS`` is not a list.
+     - ``COMPONENT_BACKENDS`` is not a list.
      - ``next.components.checks``
    * - ``next.E024``
      - A file router entry is missing ``PAGES_DIR``.
@@ -188,7 +188,7 @@ Errors
      - A component backend ``BACKEND`` or ``DIRS`` value has the wrong type.
      - ``next.components.checks``
    * - ``next.E033``
-     - ``DEFAULT_COMPONENT_BACKENDS`` is empty.
+     - ``COMPONENT_BACKENDS`` is empty.
      - ``next.components.checks``
    * - ``next.E034``
      - A component name uses the shared root namespace on more than one page tree.
@@ -203,7 +203,7 @@ Errors
      - A static backend entry is not a dict, or the class is not a ``StaticBackend`` subclass.
      - ``next.static.checks``
    * - ``next.E038``
-     - ``DEFAULT_STATIC_BACKENDS`` contains a duplicate ``BACKEND`` entry.
+     - ``STATIC_BACKENDS`` contains a duplicate ``BACKEND`` entry.
      - ``next.static.checks``
    * - ``next.E040``
      - A configured context processor does not accept a ``request`` parameter.
@@ -223,6 +223,33 @@ Errors
    * - ``next.E045``
      - A form action backend class does not subclass ``FormActionBackend``.
      - ``next.forms.checks``
+   * - ``next.E046``
+     - One shared action name is declared in two different modules, so bare-name lookups resolve to whichever module imported first. Rename one class or set ``Meta.scope``.
+     - ``next.forms.checks``
+   * - ``next.E047``
+     - A form class ``Meta.scope`` or an ``@action`` ``scope`` keyword is set to a value other than ``"page"`` or ``"shared"``.
+     - ``next.forms.checks``
+   * - ``next.E048``
+     - ``Meta.instance_from_url`` references a field name that does not exist on the model.
+     - ``next.forms.checks``
+   * - ``next.E049``
+     - ``Meta.instance_from_url`` is set on a class that is not a ``ModelForm`` subclass.
+     - ``next.forms.checks``
+   * - ``next.E050``
+     - A ``FormWizard`` declares no ``Meta.steps`` or an empty list.
+     - ``next.forms.checks``
+   * - ``next.E051``
+     - ``FORM_WIZARD_BACKEND`` is malformed, non-importable, or names a class that does not subclass ``FormWizardBackend``.
+     - ``next.forms.checks``
+   * - ``next.E052``
+     - ``FORM_ANCHOR_FILES`` is not None or a list of strings.
+     - ``next.forms.checks``
+   * - ``next.E053``
+     - ``@action`` was applied to a class instead of a function.
+     - ``next.forms.checks``
+   * - ``next.E054``
+     - A page-scoped ``FormWizard`` is declared on a page whose route lacks the ``[url_param]`` segment, so the wizard can never advance past its first step.
+     - ``next.forms.checks``
 
 A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -240,7 +267,7 @@ Warnings
      - A ``layout.djx`` is missing the required ``{% block template %}``.
      - ``next.pages.checks``
    * - ``next.W030``
-     - ``DEFAULT_STATIC_BACKENDS`` is empty, so the framework falls back to ``StaticFilesBackend``.
+     - ``STATIC_BACKENDS`` is empty, so the framework falls back to ``StaticFilesBackend``.
      - ``next.static.checks``
    * - ``next.W031``
      - An ``OPTIONS`` tag template is missing the ``{url}`` placeholder.
@@ -251,6 +278,33 @@ Warnings
    * - ``next.W043``
      - A ``page.py`` declares more than one body source and the lower-priority ones are ignored.
      - ``next.pages.checks``
+   * - ``next.W046``
+     - A form class is declared in a file outside ``BASE_DIR`` and will not be registered automatically.
+     - ``next.forms.checks``
+   * - ``next.W054``
+     - A ``ComponentWidget`` names a component that does not resolve.
+     - ``next.forms.checks``
+   * - ``next.W055``
+     - A ``ComponentWidget`` is attached to a ``FileField`` or ``MultiValueField``, which it does not support.
+     - ``next.forms.checks``
+   * - ``next.W056``
+     - Wizards are registered and the configured wizard backend needs Django sessions to store steps, but ``django.contrib.sessions`` is not installed.
+     - ``next.forms.checks``
+   * - ``next.W057``
+     - A static ``Meta.steps`` form class is also registered as a standalone form action.
+     - ``next.forms.checks``
+   * - ``next.W058``
+     - A static ``Meta.steps`` form declares a ``FileField`` or ``ImageField``, whose uploads do not survive the wizard draft storage between requests.
+     - ``next.forms.checks``
+   * - ``next.W059``
+     - Two static wizard steps declare the same field name, so ``get_all_cleaned_data()`` keeps only the last value.
+     - ``next.forms.checks``
+   * - ``next.W060``
+     - A form action declares ``permission_required`` while ``django.contrib.auth`` is not in ``INSTALLED_APPS``.
+     - ``next.forms.checks``
+   * - ``next.W061``
+     - A form action declares ``Meta.success_message`` while the messages framework is not fully installed, so a valid submission raises ``MessageFailure``.
+     - ``next.forms.checks``
 
 .. note::
 

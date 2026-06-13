@@ -50,16 +50,16 @@ Subclass an abstract base class and register the dotted path in ``NEXT_FRAMEWORK
      - Setting
      - Base class
    * - URL routing
-     - ``DEFAULT_PAGE_BACKENDS``
+     - ``PAGE_BACKENDS``
      - ``next.urls.backends.RouterBackend``
    * - Components
-     - ``DEFAULT_COMPONENT_BACKENDS``
+     - ``COMPONENT_BACKENDS``
      - ``next.components.backends.ComponentsBackend``
    * - Forms dispatch
-     - ``DEFAULT_FORM_ACTION_BACKENDS``
+     - ``FORM_ACTION_BACKENDS``
      - ``next.forms.backends.FormActionBackend``
    * - Static pipeline
-     - ``DEFAULT_STATIC_BACKENDS``
+     - ``STATIC_BACKENDS``
      - ``next.static.backends.StaticBackend``
 
 A backend always implements the full contract.
@@ -69,7 +69,7 @@ A custom backend usually subclasses the default so it inherits every default beh
    :caption: registering a custom backend
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_FORM_ACTION_BACKENDS": [
+       "FORM_ACTION_BACKENDS": [
            {"BACKEND": "notes.backends.AuditedFormActionBackend"},
        ]
    }
@@ -82,8 +82,8 @@ To patch one key of a default backend entry rather than replace it, use ``extend
    from next.conf import extend_default_backend
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": extend_default_backend(
-           "DEFAULT_PAGE_BACKENDS",
+       "PAGE_BACKENDS": extend_default_backend(
+           "PAGE_BACKENDS",
            PAGES_DIR="routes",
        )
    }
@@ -228,7 +228,7 @@ Choosing Between Mechanisms
 Picking the right mechanism saves work.
 Use the entries below as a quick map.
 
-- **Add a new URL pattern source.** Subclass ``RouterBackend`` and register it under ``DEFAULT_PAGE_BACKENDS``.
+- **Add a new URL pattern source.** Subclass ``RouterBackend`` and register it under ``PAGE_BACKENDS``.
 - **Recognise a new asset extension.** Register through the kind registry (``default_kinds``).
 - **Recognise a new asset filename next to a page, layout, or component.** Register a custom stem (``default_stems``).
 - **Validate every dispatch.** Implement a form action backend.

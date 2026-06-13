@@ -14,7 +14,7 @@ from typing import Any
 USER_SETTING: str = "NEXT_FRAMEWORK"
 
 DEFAULTS: dict[str, Any] = {
-    "DEFAULT_PAGE_BACKENDS": [
+    "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "DIRS": [],
@@ -26,20 +26,20 @@ DEFAULTS: dict[str, Any] = {
         },
     ],
     "URL_NAME_TEMPLATE": "page_{name}",
-    "DEFAULT_COMPONENT_BACKENDS": [
+    "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [],
             "COMPONENTS_DIR": "_components",
         },
     ],
-    "DEFAULT_STATIC_BACKENDS": [
+    "STATIC_BACKENDS": [
         {
             "BACKEND": "next.static.StaticFilesBackend",
             "OPTIONS": {},
         },
     ],
-    "DEFAULT_FORM_ACTION_BACKENDS": [
+    "FORM_ACTION_BACKENDS": [
         {
             "BACKEND": "next.forms.RegistryFormActionBackend",
             "OPTIONS": {},
@@ -51,5 +51,11 @@ DEFAULTS: dict[str, Any] = {
     "NEXT_JS_OPTIONS": {},
     "STRICT_CONTEXT": False,
     "LAZY_COMPONENT_MODULES": False,
+    "FORM_AUTODISCOVER": True,
+    "FORM_ANCHOR_FILES": None,
     "JS_CONTEXT_SERIALIZER": None,
+    "FORM_WIZARD_BACKEND": {
+        "BACKEND": "next.forms.SessionFormWizardBackend",
+        "OPTIONS": {},
+    },
 }

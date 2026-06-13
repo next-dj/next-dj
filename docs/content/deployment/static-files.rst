@@ -94,7 +94,7 @@ Use a CDN aware backend to point asset URLs at a CDN host.
        def render_module_tag(self, url, *, request=None) -> str:
            return f'<script type="module" src="{CDN}{url}"></script>'
 
-Register the backend in ``DEFAULT_STATIC_BACKENDS`` and configure the CDN to pull from the static origin.
+Register the backend in ``STATIC_BACKENDS`` and configure the CDN to pull from the static origin.
 
 Pre Compressed Files
 --------------------

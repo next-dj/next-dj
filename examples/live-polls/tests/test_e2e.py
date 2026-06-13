@@ -15,7 +15,12 @@ from polls.broker import (
 from polls.models import Choice, Poll
 
 from next.forms.signals import action_dispatched, form_validation_failed
-from next.testing import NextClient, SignalRecorder, resolve_action_url
+from next.testing import (
+    NextClient,
+    SignalRecorder,
+    build_form_for,
+    resolve_action_url,
+)
 
 
 pytestmark = pytest.mark.django_db
@@ -169,7 +174,7 @@ class TestVoteAction:
     def test_post_increments_choice_votes(self, client: NextClient, poll: Poll) -> None:
         choice = poll.choices.get(text="Tabs")
         response = client.post_action(
-            "polls:vote", {"poll": poll.pk, "choice": choice.pk}
+            "vote_form", {"poll": poll.pk, "choice": choice.pk}
         )
         assert response.status_code == 302
         choice.refresh_from_db()
@@ -186,7 +191,7 @@ class TestVoteAction:
         choice = poll.choices.get(text="Spaces")
         for _ in range(rounds):
             response = client.post_action(
-                "polls:vote", {"poll": poll.pk, "choice": choice.pk}
+                "vote_form", {"poll": poll.pk, "choice": choice.pk}
             )
             assert response.status_code == 302
         choice.refresh_from_db()
@@ -198,13 +203,13 @@ class TestVoteAction:
         choice = poll.choices.get(text="Tabs")
         with SignalRecorder(action_dispatched) as recorder:
             response = client.post_action(
-                "polls:vote", {"poll": poll.pk, "choice": choice.pk}
+                "vote_form", {"poll": poll.pk, "choice": choice.pk}
             )
         assert response.status_code == 302
         events = recorder.events_for(action_dispatched)
         assert len(events) == 1
         kwargs = events[0].kwargs
-        assert kwargs["action_name"] == "polls:vote"
+        assert kwargs["action_name"] == "vote_form"
         assert kwargs["response_status"] == 302
         assert kwargs["form"] is not None
         assert kwargs["form"].cleaned_data["poll"].pk == poll.pk
@@ -217,17 +222,17 @@ class TestVoteAction:
         foreign_choice = second_poll.choices.first()
         with SignalRecorder(form_validation_failed) as recorder:
             response = client.post_action(
-                "polls:vote", {"poll": poll.pk, "choice": foreign_choice.pk}
+                "vote_form", {"poll": poll.pk, "choice": foreign_choice.pk}
             )
         assert response.status_code in (200, 400)
         foreign_choice.refresh_from_db()
         assert foreign_choice.votes == 0
         events = recorder.events_for(form_validation_failed)
         assert len(events) == 1
-        assert events[0].kwargs["action_name"] == "polls:vote"
+        assert events[0].kwargs["action_name"] == "vote_form"
 
     def test_namespaced_action_url_resolves(self) -> None:
-        url = resolve_action_url("polls:vote")
+        url = resolve_action_url("vote_form")
         assert url.startswith("/_next/form/")
 
 
@@ -242,7 +247,7 @@ class TestBroadcastReceiver:
         executed and called `broker.publish`.
         """
         choice = poll.choices.get(text="Tabs")
-        client.post_action("polls:vote", {"poll": poll.pk, "choice": choice.pk})
+        client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
         snapshot = read_snapshot(poll.pk)
         assert snapshot is not None
         votes_by_text = {row["text"]: row["votes"] for row in snapshot["choices"]}
@@ -273,7 +278,7 @@ class TestBroadcastReceiver:
 
         monkeypatch.setattr(broker, "publish", spy)
         choice = poll.choices.get(text="Tabs")
-        client.post_action("polls:vote", {"poll": poll.pk, "choice": choice.pk})
+        client.post_action("vote_form", {"poll": poll.pk, "choice": choice.pk})
         assert len(captured) == 1
         assert captured[0].poll_id == poll.pk
         votes_by_text = {row.text: row.votes for row in captured[0].choices}
@@ -284,7 +289,7 @@ class TestBroadcastReceiver:
         self, client: NextClient, poll: Poll, second_poll: Poll
     ) -> None:
         foreign_choice = second_poll.choices.first()
-        client.post_action("polls:vote", {"poll": poll.pk, "choice": foreign_choice.pk})
+        client.post_action("vote_form", {"poll": poll.pk, "choice": foreign_choice.pk})
         assert read_snapshot(poll.pk) is None
 
 
@@ -398,3 +403,12 @@ class TestSnapshotFormat:
         cached = read_snapshot(poll.pk)
         assert cached is not None
         assert cached["poll_id"] == poll.pk
+
+
+class TestProductionStartup:
+    """App startup registers vote_form through autodiscover, not a test import."""
+
+    def test_vote_form_discovered_through_app_ready(self) -> None:
+        form = build_form_for("vote_form")
+        assert type(form).__name__ == "VoteForm"
+        assert type(form).__module__ == "polls.forms"

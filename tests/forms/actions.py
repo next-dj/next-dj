@@ -10,6 +10,20 @@ class SimpleForm(Form):
     name = forms.CharField(max_length=100)
     email = forms.EmailField(required=False)
 
+    def on_valid(self, request: HttpRequest) -> HttpResponse | None:
+        """Accept the submission and return None to trigger default redirect."""
+        return None
+
+
+class SimpleFormRedirect(Form):
+    """Form that redirects on submission."""
+
+    name = forms.CharField(max_length=100)
+
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        """Redirect to /done/ on valid submission."""
+        return HttpResponseRedirect("/done/")
+
 
 class SimpleFormNoEmail(Form):
     """Form without email field."""
@@ -24,18 +38,6 @@ class SimpleFormWithId(Form):
     id = forms.IntegerField()
 
 
-@action("test_submit", form_class=SimpleForm)
-def _test_handler(request: HttpRequest, form: SimpleForm) -> HttpResponse | None:
-    return None
-
-
-@action("test_redirect", form_class=SimpleForm)
-def _test_redirect_handler(
-    request: HttpRequest, form: SimpleForm
-) -> HttpResponseRedirect:
-    return HttpResponseRedirect("/done/")
-
-
 @action("test_no_form")
-def _test_no_form_handler(request: HttpRequest) -> HttpResponse:
+def test_no_form_handler(request: HttpRequest) -> HttpResponse:
     return HttpResponse("ok", status=200)

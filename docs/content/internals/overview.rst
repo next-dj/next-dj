@@ -61,7 +61,7 @@ Bootstrap
 ---------
 
 Django calls ``NextFrameworkConfig.ready()`` once per process after all applications load.
-The hook registers the framework system checks and runs four installers that wire the subsystems above into the Django runtime before the first request arrives.
+The hook registers the framework system checks, runs five installers that wire the subsystems into the Django runtime, and calls ``autodiscover_forms()`` so shared forms register before the first request arrives.
 See :doc:`/content/ref/apps` for the canonical ordering and the full API.
 
 How They Compose
@@ -141,7 +141,7 @@ Each subsystem keeps a flat module layout.
    * - ``next.urls``
      - ``manager``, ``backends``, ``dispatcher``, ``parser``, ``markers``, ``reverse``, ``checks``, ``signals``.
    * - ``next.forms``
-     - ``manager``, ``dispatch``, ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``checks``, ``signals``.
+     - ``manager``, ``dispatch``, ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``checks``, ``signals``.
    * - ``next.static``
      - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``scripts``, ``serializers``, ``defaults``, ``finders``, ``checks``, ``signals``.
    * - ``next.deps``

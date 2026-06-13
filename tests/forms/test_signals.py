@@ -1,21 +1,56 @@
 from collections.abc import Generator
-from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
+from django import forms as django_forms
 from django.dispatch import Signal
+from django.http import HttpRequest, HttpResponseRedirect
 
-from next.forms import Form, RegistryFormActionBackend, form_action_manager
+from next.forms import (
+    ActionRegistration,
+    Form,
+    RegistryFormActionBackend,
+)
+from next.forms.manager import form_action_manager
 from next.forms.signals import (
     action_dispatched,
     action_registered,
     form_validation_failed,
+    wizard_completed,
+    wizard_step_submitted,
 )
+from next.forms.wizard import FormWizard
 
 
-PAGE_MODULE_FOR_FORM_TESTS = (
-    Path(__file__).resolve().parent.parent / "site_pages" / "page.py"
-).resolve()
+_FAKE_FILE = "/fake/myapp/forms.py"
+
+
+class SignalIdentityStep(Form):
+    """First step of the signal wizard."""
+
+    name = django_forms.CharField(max_length=100)
+
+
+class SignalScopeStep(Form):
+    """Second step of the signal wizard."""
+
+    scope = django_forms.CharField(max_length=100)
+
+
+class SignalWizard(FormWizard):
+    """Two-step wizard used to assert wizard signals fire during dispatch."""
+
+    class Meta:
+        """Two ordered steps routed through the wizard backend."""
+
+        steps: ClassVar = [
+            ("identity", SignalIdentityStep),
+            ("scope", SignalScopeStep),
+        ]
+
+    def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
+        """Finalise the wizard with a redirect."""
+        return HttpResponseRedirect("/thanks/")
 
 
 @pytest.fixture()
@@ -58,6 +93,44 @@ def capture_form_validation_failed() -> Generator[list[dict[str, Any]], None, No
         yield events
     finally:
         form_validation_failed.disconnect(_listener)
+
+
+@pytest.fixture()
+def capture_wizard_step_submitted() -> Generator[list[dict[str, Any]], None, None]:
+    events: list[dict[str, Any]] = []
+
+    def _listener(sender: object, **kwargs: object) -> None:
+        events.append({"sender": sender, **kwargs})
+
+    wizard_step_submitted.connect(_listener)
+    try:
+        yield events
+    finally:
+        wizard_step_submitted.disconnect(_listener)
+
+
+@pytest.fixture()
+def capture_wizard_completed() -> Generator[list[dict[str, Any]], None, None]:
+    events: list[dict[str, Any]] = []
+
+    def _listener(sender: object, **kwargs: object) -> None:
+        events.append({"sender": sender, **kwargs})
+
+    wizard_completed.connect(_listener)
+    try:
+        yield events
+    finally:
+        wizard_completed.disconnect(_listener)
+
+
+def _post_wizard_step(client, step: str, data: dict):
+    """POST one wizard step through the dispatch client with the tag's hidden field."""
+    url = form_action_manager.get_action_url("signal_wizard")
+    payload = {
+        "_next_form_origin": f"/request/{step}/",
+        **data,
+    }
+    return client.post(url, data=payload, follow=False)
 
 
 class TestActionRegisteredSignal:
@@ -221,7 +294,14 @@ class TestActionRegisteredWiring:
     ) -> None:
         """Registering a new action via the backend emits the signal."""
         backend = RegistryFormActionBackend()
-        backend.register_action("wired_action", lambda: None)
+        backend.register_action(
+            ActionRegistration(
+                name="wired_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+            )
+        )
         events = [
             e
             for e in capture_action_registered
@@ -232,7 +312,59 @@ class TestActionRegisteredWiring:
         assert event["sender"] is RegistryFormActionBackend
         assert "uid" in event
         assert event["form_class"] is None
-        assert event["namespace"] is None
+        assert event["wizard_class"] is None
+        assert "namespace" not in event
+        assert event["file_path"] == _FAKE_FILE
+        assert event["scope"] == "shared"
+
+    def test_fires_with_form_class(
+        self, capture_action_registered: list[dict[str, Any]]
+    ) -> None:
+        """Registering a form_class action fires the signal with form_class set."""
+        backend = RegistryFormActionBackend()
+
+        class MySignalForm(django_forms.Form):
+            name = django_forms.CharField()
+
+        backend.register_action(
+            ActionRegistration(
+                name="form_signal_test",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=MySignalForm,
+            )
+        )
+        events = [
+            e
+            for e in capture_action_registered
+            if e.get("action_name") == "form_signal_test"
+        ]
+        assert len(events) == 1
+        assert events[0]["form_class"] is MySignalForm
+        assert events[0]["wizard_class"] is None
+
+    def test_fires_with_wizard_class(
+        self, capture_action_registered: list[dict[str, Any]]
+    ) -> None:
+        """Registering a wizard action fires the signal with wizard_class set."""
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="wizard_signal_test",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                wizard_class=SignalWizard,
+            )
+        )
+        events = [
+            e
+            for e in capture_action_registered
+            if e.get("action_name") == "wizard_signal_test"
+        ]
+        assert len(events) == 1
+        assert events[0]["wizard_class"] is SignalWizard
+        assert events[0]["form_class"] is None
+        assert events[0]["handler"] is None
 
 
 @pytest.mark.django_db()
@@ -256,40 +388,42 @@ class TestActionDispatchedWiring:
         assert event["duration_ms"] >= 0
         assert event["form"] is None
         assert event["url_kwargs"] == {}
+        meta = form_action_manager.get_action_meta("test_no_form")
+        assert event["uid"] == meta["uid"]
+        assert event["request"].path == url
 
     def test_fires_on_successful_dispatch_with_form(
         self,
         client_no_csrf,
         capture_action_dispatched: list[dict[str, Any]],
     ) -> None:
-        """A valid bound form fires the signal after the handler runs."""
-        url = form_action_manager.get_action_url("test_redirect")
+        """A valid bound form fires the signal after on_valid runs."""
+        url = form_action_manager.get_action_url("simple_form_redirect")
         resp = client_no_csrf.post(
             url,
-            data={
-                "name": "Alice",
-                "email": "",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
-            },
+            data={"name": "Alice"},
             follow=False,
         )
         assert resp.status_code == 302
         assert len(capture_action_dispatched) == 1
         event = capture_action_dispatched[0]
-        assert event["action_name"] == "test_redirect"
+        assert event["action_name"] == "simple_form_redirect"
         assert event["response_status"] == 302
         assert isinstance(event["form"], Form)
         assert event["form"].cleaned_data["name"] == "Alice"
         assert event["url_kwargs"] == {}
+        meta = form_action_manager.get_action_meta("simple_form_redirect")
+        assert event["uid"] == meta["uid"]
+        assert event["request"].method == "POST"
 
-    def test_payload_includes_url_kwargs_from_post_hidden_fields(
+    def test_payload_includes_url_kwargs_from_resolved_origin(
         self,
         client_no_csrf,
         capture_action_dispatched: list[dict[str, Any]],
     ) -> None:
-        """`_url_param_*` hidden fields surface as `url_kwargs` on the signal."""
+        """The resolved origin's typed URL kwargs surface as `url_kwargs`."""
         url = form_action_manager.get_action_url("test_no_form")
-        client_no_csrf.post(url, data={"_url_param_id": "42"})
+        client_no_csrf.post(url, data={"_next_form_origin": "/items/42/"})
         assert len(capture_action_dispatched) == 1
         assert capture_action_dispatched[0]["url_kwargs"] == {"id": 42}
 
@@ -299,12 +433,12 @@ class TestActionDispatchedWiring:
         capture_action_dispatched: list[dict[str, Any]],
     ) -> None:
         """An invalid form never reaches the handler, so no dispatched signal."""
-        url = form_action_manager.get_action_url("test_submit")
+        url = form_action_manager.get_action_url("simple_form")
         client_no_csrf.post(
             url,
             data={
                 "name": "",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+                "_next_form_origin": "/",
             },
             follow=False,
         )
@@ -321,18 +455,126 @@ class TestFormValidationFailedWiring:
         capture_form_validation_failed: list[dict[str, Any]],
     ) -> None:
         """An invalid POST fires the signal with action_name, errors, fields."""
-        url = form_action_manager.get_action_url("test_submit")
+        url = form_action_manager.get_action_url("simple_form")
         resp = client_no_csrf.post(
             url,
             data={
                 "name": "",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+                "_next_form_origin": "/",
             },
             follow=False,
         )
         assert resp.status_code == 200
         assert len(capture_form_validation_failed) == 1
         event = capture_form_validation_failed[0]
-        assert event["action_name"] == "test_submit"
+        assert event["action_name"] == "simple_form"
         assert event["error_count"] >= 1
         assert "name" in event["field_names"]
+        meta = form_action_manager.get_action_meta("simple_form")
+        assert event["uid"] == meta["uid"]
+        assert event["request"].path == url
+
+
+class TestWizardSignalsImportable:
+    """The wizard signals are exported Django Signals."""
+
+    @pytest.mark.parametrize(
+        "signal",
+        [wizard_step_submitted, wizard_completed],
+        ids=["step_submitted", "completed"],
+    )
+    def test_signal_is_importable(self, signal) -> None:
+        """Each wizard signal is a Django Signal."""
+        assert isinstance(signal, Signal)
+
+
+@pytest.mark.django_db()
+class TestWizardSignalsWiring:
+    """Wizard signals fire as steps validate and the wizard finalises."""
+
+    def test_step_submitted_fires_per_valid_step(
+        self,
+        client_no_csrf,
+        capture_wizard_step_submitted: list[dict[str, Any]],
+    ) -> None:
+        """`wizard_step_submitted` fires once per valid step with its cleaned data."""
+        _post_wizard_step(client_no_csrf, "identity", {"name": "Ada"})
+        _post_wizard_step(client_no_csrf, "scope", {"scope": "ops"})
+        assert len(capture_wizard_step_submitted) == 2
+        first = capture_wizard_step_submitted[0]
+        assert first["sender"] is SignalWizard
+        assert "wizard_class" not in first
+        assert first["step"] == "identity"
+        assert first["cleaned_data"] == {"name": "Ada"}
+        meta = form_action_manager.get_action_meta("signal_wizard")
+        assert first["uid"] == meta["uid"]
+        assert first["request"].method == "POST"
+        assert capture_wizard_step_submitted[1]["step"] == "scope"
+
+    def test_completed_fires_once_with_merged_data(
+        self,
+        client_no_csrf,
+        capture_wizard_completed: list[dict[str, Any]],
+    ) -> None:
+        """`wizard_completed` fires once after the last step's done with merged data."""
+        _post_wizard_step(client_no_csrf, "identity", {"name": "Ada"})
+        assert capture_wizard_completed == []
+        _post_wizard_step(client_no_csrf, "scope", {"scope": "ops"})
+        assert len(capture_wizard_completed) == 1
+        event = capture_wizard_completed[0]
+        assert event["sender"] is SignalWizard
+        assert "wizard_class" not in event
+        assert event["cleaned_data"] == {"name": "Ada", "scope": "ops"}
+        meta = form_action_manager.get_action_meta("signal_wizard")
+        assert event["uid"] == meta["uid"]
+        assert event["request"].method == "POST"
+
+    def test_action_dispatched_fires_per_step(
+        self,
+        client_no_csrf,
+        capture_action_dispatched: list[dict[str, Any]],
+    ) -> None:
+        """`action_dispatched` fires for each wizard step dispatch."""
+        _post_wizard_step(client_no_csrf, "identity", {"name": "Ada"})
+        _post_wizard_step(client_no_csrf, "scope", {"scope": "ops"})
+        wizard_events = [
+            e
+            for e in capture_action_dispatched
+            if e.get("action_name") == "signal_wizard"
+        ]
+        assert len(wizard_events) == 2
+
+    def test_receivers_can_filter_by_wizard_sender(self, client_no_csrf) -> None:
+        """`connect(sender=...)` scopes wizard signal receivers to one wizard."""
+        matched: list[dict[str, Any]] = []
+        unmatched: list[dict[str, Any]] = []
+
+        def on_matched(sender: object, **kwargs: object) -> None:
+            matched.append({"sender": sender, **kwargs})
+
+        def on_unmatched(sender: object, **kwargs: object) -> None:
+            unmatched.append({"sender": sender, **kwargs})
+
+        wizard_step_submitted.connect(on_matched, sender=SignalWizard)
+        wizard_step_submitted.connect(on_unmatched, sender=FormWizard)
+        try:
+            _post_wizard_step(client_no_csrf, "identity", {"name": "Ada"})
+        finally:
+            wizard_step_submitted.disconnect(on_matched, sender=SignalWizard)
+            wizard_step_submitted.disconnect(on_unmatched, sender=FormWizard)
+        assert len(matched) == 1
+        assert matched[0]["step"] == "identity"
+        assert unmatched == []
+
+    def test_form_validation_failed_fires_on_invalid_step(
+        self,
+        client_no_csrf,
+        capture_form_validation_failed: list[dict[str, Any]],
+        capture_wizard_step_submitted: list[dict[str, Any]],
+    ) -> None:
+        """An invalid step fires `form_validation_failed` and no step-submitted signal."""
+        resp = _post_wizard_step(client_no_csrf, "identity", {"name": ""})
+        assert resp.status_code == 200
+        assert len(capture_form_validation_failed) == 1
+        assert capture_form_validation_failed[0]["action_name"] == "signal_wizard"
+        assert capture_wizard_step_submitted == []

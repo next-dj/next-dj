@@ -16,7 +16,7 @@
     <div class="flex-1 space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-3">
         {% component "search_box" search_enabled=changelist_state.search_enabled query=changelist_state.query carried_params=changelist_state.carried_params %}
-        {% component "action_bar" actions=changelist_state.actions post_url=changelist_state.post_url action_name="admin:bulk_action" url_params=changelist_state.url_params %}
+        {% component "action_bar" actions=changelist_state.actions action_name="admin:bulk_action" %}
       </div>
 
       {% component "data_table" columns=changelist_state.columns rows=changelist_state.rows selectable=changelist_state.actions %}

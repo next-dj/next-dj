@@ -6,9 +6,8 @@
 
   {% component "page_header" title=article.title eyebrow="Edit" %}
 
-  {% form @action="wiki:article_edit" class="grid gap-6 md:grid-cols-2" %}
+  {% form "article_edit_form" %}
     <div class="space-y-4">
-      <input type="hidden" name="article_id" value="{{ article.pk }}">
       {% #component "field" label="Slug" for_id="id_slug" error=form.slug.errors|join:" " %}
         {% #slot "control" %}{{ form.slug }}{% /slot %}
       {% /component %}

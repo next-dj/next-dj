@@ -15,7 +15,7 @@ from django.test import override_settings
 
 from next.components.manager import components_manager
 from next.deps.resolver import resolver
-from next.forms.backends import FormActionOptions
+from next.forms.backends import ActionRegistration, file_to_dotted_module
 from next.forms.manager import form_action_manager
 from next.static.manager import default_manager
 
@@ -88,34 +88,46 @@ def override_form_action(
 ) -> Iterator[None]:
     """Register `handler` as the named form action for the block.
 
-    The full action registry is snapshotted on entry and restored on
-    exit, so previously registered actions with the same name survive.
+    The override wins name-based lookup for the block even when an
+    action with the same name already exists. The full registry state
+    is snapshotted on entry and restored on exit, so previously
+    registered actions with the same name survive.
     """
     backend = form_action_manager.default_backend
-    registry_snapshot = dict(getattr(backend, "_registry", {}))
-    uid_snapshot = dict(getattr(backend, "_uid_to_name", {}))
+    snapshots = {
+        attr: dict(getattr(backend, attr, {}))
+        for attr in ("_registry", "_uid_to_name", "_name_index", "_url_cache")
+    }
     form_action_manager.register_action(
-        name, handler, options=FormActionOptions(form_class=form_class)
+        ActionRegistration(
+            name=name,
+            file_path=__file__,
+            scope="shared",
+            handler=handler,
+            form_class=form_class,
+        )
     )
+    name_index = getattr(backend, "_name_index", None)
+    if name_index is not None:
+        name_index[name] = (file_to_dotted_module(__file__), name)
     try:
         yield
     finally:
-        if hasattr(backend, "_registry"):
-            backend._registry.clear()
-            backend._registry.update(registry_snapshot)
-        if hasattr(backend, "_uid_to_name"):
-            backend._uid_to_name.clear()
-            backend._uid_to_name.update(uid_snapshot)
+        for attr, snapshot in snapshots.items():
+            mapping = getattr(backend, attr, None)
+            if mapping is not None:
+                mapping.clear()
+                mapping.update(snapshot)
 
 
 @contextlib.contextmanager
 def override_component_backends(*configs: dict[str, Any]) -> Iterator[None]:
-    """Replace `DEFAULT_COMPONENT_BACKENDS` for the block.
+    """Replace `COMPONENT_BACKENDS` for the block.
 
     Uses `override_next_settings` so the `settings_reloaded` signal
     rebuilds `components_manager`'s backends automatically.
     """
-    with override_next_settings(DEFAULT_COMPONENT_BACKENDS=list(configs)):
+    with override_next_settings(COMPONENT_BACKENDS=list(configs)):
         components_manager._ensure_backends()
         yield
 

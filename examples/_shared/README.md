@@ -1,6 +1,6 @@
 # `examples/_shared` — UI kit for next.dj examples
 
-A shadcn-inspired component palette that every next.dj example pulls in through the regular component subsystem. **Not** part of the `next-dj` package — this is a worked example of how to set up a shared component root with the existing [components](../../docs/content/guide/components.rst) and [static-assets](../../docs/content/guide/static-assets.rst) systems. Copy it into your own project the same way the examples here do, or use it as a reference for building your own kit.
+A shadcn-inspired component palette that every next.dj example pulls in through the regular component subsystem. **Not** part of the `next-dj` package — this is a worked example of how to set up a shared component root with the existing [components](../../docs/content/topics/components.rst) and [static-assets](../../docs/content/topics/static-assets/) systems. Copy it into your own project the same way the examples here do, or use it as a reference for building your own kit.
 
 ## Why a shared kit
 
@@ -41,8 +41,8 @@ SHARED_DIR = BASE_DIR.parent / "_shared"
 STATICFILES_DIRS = [SHARED_DIR / "static"]
 
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_BACKENDS": [...],
-    "DEFAULT_COMPONENT_BACKENDS": [
+    "PAGE_BACKENDS": [...],
+    "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
@@ -52,11 +52,11 @@ NEXT_FRAMEWORK = {
 }
 ```
 
-The `DIRS` entry registers `_shared/_components` as a **global** root. Components inside resolve at the empty route scope and become callable from every template (see the [components guide](../../docs/content/guide/components.rst) `components-routing` section).
+The `DIRS` entry registers `_shared/_components` as a **global** root. Components inside resolve at the empty route scope and become callable from every template (see the [components topic](../../docs/content/topics/components.rst), "Component Scope" section).
 
 `STATICFILES_DIRS` adds the shared static tree so `tokens.css` and `base.css` resolve under `/static/shared/...`.
 
-Each example houses the shared HTML envelope in a project-level page root listed under `DEFAULT_PAGE_BACKENDS["DIRS"]` — `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/` depending on the project. The dir contains a single `layout.djx` (and optionally `_<components-dir>/` for project-shared components) that wraps every page rendered by the per-app `PAGES_DIR` tree:
+Each example houses the shared HTML envelope in a project-level page root listed under `PAGE_BACKENDS["DIRS"]` — `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/` depending on the project. The dir contains a single `layout.djx` (and optionally `_<components-dir>/` for project-shared components) that wraps every page rendered by the per-app `PAGES_DIR` tree:
 
 ```django
 <!DOCTYPE html>
@@ -79,7 +79,7 @@ To register the project-level root, list it in both backends' `DIRS` when you al
 
 ```python
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_BACKENDS": [
+    "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
@@ -88,7 +88,7 @@ NEXT_FRAMEWORK = {
             ...
         },
     ],
-    "DEFAULT_COMPONENT_BACKENDS": [
+    "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [
@@ -148,7 +148,7 @@ Every entry below is a void call (`{% component "name" prop=value %}`) or a bloc
 | `button` | `variant` (default/secondary/outline/ghost/destructive/link), `size` (sm/md/lg/icon), `type`, `href`, `target`, `name`/`value`, `disabled`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
 | `card` | `title`, `description`, `extra` | `content`, `footer` |
 | `badge` | `variant` (default/secondary/outline/destructive/success/warning/info/muted), `text`, `extra` | `content` (falls back to `{{ text }}`) |
-| `input` / `textarea` | `type`, `name`, `id`, `value`, `placeholder`, `autocomplete`, `required`, `disabled`, `autofocus`, `rows`, `extra` | — |
+| `input` / `textarea` | `type`, `name`, `id`, `value`, `placeholder`, `autocomplete`, `required`, `disabled`, `autofocus`, `rows` (textarea), `markdown_source` (textarea), `errors` (truthy list flips the border to destructive), `aria_invalid`, `aria_describedby`, `extra` | — |
 | `label` | `for_id`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
 | `field` | `label`, `for_id`, `required`, `help`, `error`, `extra` | `control` |
 | `alert` | `variant` (default/info/success/warning/destructive), `title`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
@@ -161,6 +161,8 @@ Every entry below is a void call (`{% component "name" prop=value %}`) or a bloc
 | `app_shell` | `brand`, `brand_href`, `brand_icon`, `main_extra`, `header_visible` | `brand` (falls back to brand text + icon + href chrome), `nav`, `actions`, `content`, `page_footer` |
 | `dropdown` | `label`, `extra` | `trigger`, `items` |
 | `dialog` | `id`, `title`, `description`, `extra` | `content`, `footer` |
+
+The `input` and `textarea` primitives double as `ComponentWidget` targets: `next.forms.ComponentWidget("input")` renders the bound field through the component, filling `name`, `id`, `value`, `errors`, `aria_invalid`, and `aria_describedby` from the field's state on every render and re-render. The forms examples (shortener, wiki, multi-tenant, kanban, audit-forms) all bind their fields this way. The contract is documented in [`docs/content/topics/forms/field-components.rst`](../../docs/content/topics/forms/field-components.rst).
 
 ## Quick recipes
 
@@ -212,7 +214,7 @@ Add a favicon or inline `<style>` to the page head:
 
 ## Prop / slot naming
 
-Slot and prop names live in separate namespaces — see the [components guide](../../docs/content/guide/components.rst) section "Slots and props share no namespace". The kit takes advantage of this and ships several composites where a slot intentionally shares a name with a prop so the prop drives the default while a slot still overrides it:
+Slot and prop names live in separate namespaces — caller slot content reaches the component scope under the `slot_<name>` key, separate from props (see the [components topic](../../docs/content/topics/components.rst), "Slots" section). The kit takes advantage of this and ships several composites where a slot intentionally shares a name with a prop so the prop drives the default while a slot still overrides it:
 
 - `app_shell` exposes a `brand` slot that defaults to the standard brand chrome driven by `brand`, `brand_href`, and `brand_icon` props. Override the slot to drop in a custom SVG logo while keeping the same surrounding layout.
 - `page_header` exposes a `description` slot whose default body is `<p>{{ description }}</p>`. Override it when the description needs richer markup than a plain paragraph allows.
@@ -228,7 +230,7 @@ The default-body path keeps the void call site short (`{% component "page_header
 
 When you move an existing project onto the shared kit:
 
-- Wire `SHARED_DIR`, `STATICFILES_DIRS`, and `DEFAULT_COMPONENT_BACKENDS["DIRS"]` once in `settings.py`.
+- Wire `SHARED_DIR`, `STATICFILES_DIRS`, and `COMPONENT_BACKENDS["DIRS"]` once in `settings.py`.
 - Remove any per-app `nav_link` / `stat_card` / `card` that now duplicates a shared component, otherwise `manage.py check` raises `next.E034` (root namespace collision).
 - Replace the `<head>` boilerplate (CDN script, two `{% use_style %}` lines, `{% collect_styles %}`) with `{% component "page_head" title="…" %}`.
 - Replace bespoke colour classes (`bg-slate-50`, `text-slate-900`, `bg-indigo-600`, …) with the short token aliases (`bg-background`, `text-foreground`, `bg-primary`, …) so per-tenant overrides cascade correctly.

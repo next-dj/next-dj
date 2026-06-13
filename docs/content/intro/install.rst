@@ -73,14 +73,14 @@ Configure NEXT_FRAMEWORK
 ------------------------
 
 Tell next.dj where to look for pages and components.
-With ``APP_DIRS`` set to ``True`` and ``DIRS`` left empty, each installed app carries its own ``pages/`` and ``_components/`` directories.
-The file router walk registers each ``_components/`` folder it encounters during page discovery, so the component backend needs no separate ``APP_DIRS`` flag.
+With ``APP_DIRS`` set to ``True`` and ``DIRS`` left empty, each installed app carries its own ``pages/`` tree, and a ``_components/`` folder placed inside that tree holds the app's components.
+The file router walk registers each ``_components/`` folder it encounters while walking the page tree, so the component backend needs no separate ``APP_DIRS`` flag.
 
 .. code-block:: python
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
+       "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
@@ -89,7 +89,7 @@ The file router walk registers each ``_components/`` folder it encounters during
                "OPTIONS": {"context_processors": []},
            }
        ],
-       "DEFAULT_COMPONENT_BACKENDS": [
+       "COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
                "DIRS": [],
@@ -99,7 +99,7 @@ The file router walk registers each ``_components/`` folder it encounters during
    }
 
 ``PAGES_DIR`` is set to ``pages``, the built-in default, so next.dj scans a ``pages/`` directory inside each app.
-``_components`` is the per-application folder the component backend scans, covered in :doc:`tutorial03`.
+``_components`` is the per-application folder the component backend scans, placed inside the page tree and covered in :doc:`tutorial03`.
 A ``FileRouterBackend`` entry must carry an ``OPTIONS`` key, and ``manage.py check`` reports ``next.E026`` if it is missing.
 
 Keep ``django.template.context_processors.request`` in the ``OPTIONS`` of your ``TEMPLATES`` setting.

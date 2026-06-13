@@ -1,39 +1,132 @@
-import inspect
 from pathlib import Path
 from typing import ClassVar
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from django import forms as django_forms
-from django.http import HttpRequest, HttpResponseRedirect, QueryDict
+from django.contrib.sessions.backends.db import SessionStore
+from django.http import (
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBadRequest,
+    HttpResponseRedirect,
+    QueryDict,
+)
 
 from next.components.context import component as component_ctx
 from next.components.info import ComponentInfo
 from next.components.renderers import _inject_component_context
 from next.deps import REQUEST_DEP_CACHE_ATTR, Depends, resolver
 from next.forms import (
+    ActionOutcome,
+    ActionOutcomeKind,
+    ActionRegistration,
     Form,
-    FormActionDispatch,
-    FormActionOptions,
     ModelForm,
     RegistryFormActionBackend,
-    _get_caller_path,
-    form_action_manager,
-    page,
 )
 from next.forms.dispatch import (
+    FormActionDispatch,
     _bind_form_for_post,
     _form_action_context_callable,
     _form_from_initial_data,
     _resolve_form_class,
 )
-from next.forms.signals import action_dispatched
+from next.forms.manager import build_form_namespace_for_action, form_action_manager
+from next.forms.signals import action_dispatched, wizard_completed
+from next.forms.wizard import FormWizard
+from next.pages import page
 from next.pages.registry import PageContextRegistry
 
 
 PAGE_MODULE_FOR_FORM_TESTS = (
     Path(__file__).resolve().parent.parent / "site_pages" / "page.py"
 ).resolve()
+
+_FAKE_FILE = "/fake/myapp/forms.py"
+
+
+class WizardIdentityStep(Form):
+    """First step of the dispatch wizard."""
+
+    name = django_forms.CharField(max_length=100)
+
+
+class WizardScopeStep(Form):
+    """Second step of the dispatch wizard."""
+
+    scope = django_forms.CharField(max_length=100)
+
+
+class WizardExtraStep(Form):
+    """Conditional step toggled by earlier answers."""
+
+    extra = django_forms.CharField(max_length=100)
+
+
+class DispatchWizard(FormWizard):
+    """Two-step wizard exercised through HTTP dispatch."""
+
+    class Meta:
+        """Two ordered steps routed through the wizard backend."""
+
+        steps: ClassVar = [
+            ("identity", WizardIdentityStep),
+            ("scope", WizardScopeStep),
+        ]
+
+    done_payloads: ClassVar[list] = []
+
+    def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
+        """Record the merged cleaned data and redirect to a thank-you page."""
+        type(self).done_payloads.append(cleaned_data)
+        return HttpResponseRedirect("/thanks/")
+
+
+class ConditionalDispatchWizard(FormWizard):
+    """Wizard that inserts a step based on the first step's answer."""
+
+    class Meta:
+        """Two declared steps that a get_steps override can expand."""
+
+        steps: ClassVar = [
+            ("identity", WizardIdentityStep),
+            ("scope", WizardScopeStep),
+        ]
+
+    done_payloads: ClassVar[list] = []
+
+    def get_steps(self) -> list:
+        """Insert an extra step when the name asks for it."""
+        base = [("identity", WizardIdentityStep), ("scope", WizardScopeStep)]
+        if self.get_all_cleaned_data().get("name") == "needs-extra":
+            base.insert(1, ("extra", WizardExtraStep))
+        return base
+
+    def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
+        """Record the merged cleaned data and redirect."""
+        type(self).done_payloads.append(cleaned_data)
+        return HttpResponseRedirect("/thanks/")
+
+
+class KwargsDispatchWizard(FormWizard):
+    """Wizard that feeds a prefix to its step form through get_form_kwargs."""
+
+    class Meta:
+        """One step routed through the wizard backend."""
+
+        steps: ClassVar = [("identity", WizardIdentityStep)]
+
+    seen_kwargs: ClassVar[list] = []
+
+    def get_form_kwargs(self, step: str | None = None) -> dict:
+        """Pass a prefix and record the step it was asked about."""
+        type(self).seen_kwargs.append((step, dict(self.get_all_cleaned_data())))
+        return {"prefix": "wiz"}
+
+    def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
+        """Redirect once the only step validates."""
+        return HttpResponseRedirect("/thanks/")
 
 
 def _run_component_context(tmp_path: Path, request: object) -> object:
@@ -78,66 +171,37 @@ def _run_page_context(tmp_path: Path, request: object) -> object:
 
 
 class TestFormActionDispatch:
-    """FormActionDispatch: _get_caller_path, context_func, ensure_http_response."""
-
-    def test_get_caller_path_raises_when_no_frame(self) -> None:
-        """_get_caller_path raises when frame is missing."""
-        with pytest.raises(RuntimeError, match="Could not determine caller file path"):
-            _get_caller_path(999)
+    """FormActionDispatch.ensure_http_response coercion variants."""
 
     @pytest.mark.parametrize(
-        ("response_val", "kwargs", "expected_status", "assert_extra"),
+        ("response_val", "kwargs", "expected_status", "assert_extra", "warns"),
         [
-            (None, {}, 204, None),
-            ("hello", {}, 200, lambda r: r.content == b"hello"),
+            (None, {}, 204, None, False),
+            ("hello", {}, 200, lambda r: r.content == b"hello", False),
             (
                 type("R", (), {"url": "/target/"})(),
                 {"request": HttpRequest()},
                 302,
                 lambda r: r.url == "/target/",
+                False,
             ),
-            (object(), {}, 204, None),
-            (type("E", (), {"url": None})(), {}, 204, None),
+            (object(), {}, 204, None, True),
+            (type("E", (), {"url": None})(), {}, 204, None, True),
         ],
         ids=("none_val", "str_val", "redirect_val", "unknown_obj", "empty_url"),
     )
     def test_ensure_http_response_variants(
-        self, response_val, kwargs, expected_status, assert_extra
+        self, response_val, kwargs, expected_status, assert_extra, warns
     ) -> None:
         """ensure_http_response: None, str, redirect-like, unknown, empty url."""
-        resp = FormActionDispatch.ensure_http_response(response_val, **kwargs)
+        if warns:
+            with pytest.warns(RuntimeWarning, match="unsupported"):
+                resp = FormActionDispatch.ensure_http_response(response_val, **kwargs)
+        else:
+            resp = FormActionDispatch.ensure_http_response(response_val, **kwargs)
         assert resp.status_code == expected_status
         if assert_extra is not None:
             assert assert_extra(resp)
-
-    def test_get_caller_path_raises_when_frame_becomes_none(self) -> None:
-        """_get_caller_path raises when frame chain ends early."""
-        frame = MagicMock()
-        frame.f_globals = {"__file__": "/some/path/forms.py"}
-        frame.f_back = None
-        with (
-            patch.object(inspect, "currentframe", return_value=frame),
-            pytest.raises(RuntimeError, match="Could not determine caller"),
-        ):
-            _get_caller_path(0)
-
-    def test_get_caller_path_raises_when_all_frames_are_forms_py(self) -> None:
-        """_get_caller_path raises when only forms.py frames exist."""
-
-        def make_frame(f_back: object = None) -> object:
-            f = MagicMock()
-            f.f_globals = {"__file__": "/some/path/forms.py"}
-            f.f_back = f_back
-            return f
-
-        chain = None
-        for _ in range(15):
-            chain = make_frame(chain)
-        with (
-            patch.object(inspect, "currentframe", return_value=chain),
-            pytest.raises(RuntimeError, match="Could not determine caller"),
-        ):
-            _get_caller_path(0)
 
 
 @pytest.mark.django_db()
@@ -151,7 +215,7 @@ class TestDispatchViaClient:
 
     @pytest.mark.parametrize(
         "action_name",
-        ["test_submit", "test_no_form"],
+        ["simple_form", "test_no_form"],
         ids=("with_form_class", "without_form_class"),
     )
     def test_get_returns_405(self, client_no_csrf, action_name: str) -> None:
@@ -161,50 +225,66 @@ class TestDispatchViaClient:
         assert resp.status_code == 405
 
     def test_invalid_form_returns_200_with_errors(self, client_no_csrf) -> None:
-        """Invalid POST returns 200 with validation errors when _next_form_page is valid."""
-        url = form_action_manager.get_action_url("test_submit")
+        """Invalid POST returns 200 with validation errors when the origin resolves."""
+        url = form_action_manager.get_action_url("simple_form")
         resp = client_no_csrf.post(
             url,
             data={
                 "name": "",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+                "_next_form_origin": "/",
             },
             follow=False,
         )
         assert resp.status_code == 200
         c = resp.content
         assert b"error" in c.lower() or b"required" in c.lower() or b"name" in c
+        meta = form_action_manager.default_backend.get_meta("simple_form")
+        assert resp["X-Next-Form"] == "invalid"
+        assert resp["X-Next-Action"] == meta["uid"]
 
-    def test_invalid_form_without_next_page_returns_400(self, client_no_csrf) -> None:
-        """Invalid POST without _next_form_page returns 400."""
-        url = form_action_manager.get_action_url("test_submit")
+    def test_invalid_form_without_origin_returns_400(self, client_no_csrf) -> None:
+        """Invalid POST without _next_form_origin returns 400."""
+        url = form_action_manager.get_action_url("simple_form")
         resp = client_no_csrf.post(url, data={"name": ""}, follow=False)
         assert resp.status_code == 400
 
-    def test_valid_form_calls_handler(self, client_no_csrf) -> None:
-        """Valid POST calls handler and returns 200/204."""
-        url = form_action_manager.get_action_url("test_submit")
+    def test_invalid_form_with_unresolvable_origin_returns_400(
+        self, client_no_csrf
+    ) -> None:
+        """Invalid POST whose origin matches no route returns 400."""
+        url = form_action_manager.get_action_url("simple_form")
+        resp = client_no_csrf.post(
+            url,
+            data={"name": "", "_next_form_origin": "/no/such/route/"},
+            follow=False,
+        )
+        assert resp.status_code == 400
+
+    def test_valid_form_calls_on_valid(self, client_no_csrf) -> None:
+        """Valid POST calls on_valid and returns appropriate response."""
+        url = form_action_manager.get_action_url("simple_form")
         resp = client_no_csrf.post(
             url,
             data={
                 "name": "Alice",
                 "email": "",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
+                "_next_form_origin": "/",
             },
             follow=False,
         )
-        assert resp.status_code in (200, 204)
+        # SimpleForm.on_valid returns None, so the dispatcher re-renders the
+        # origin page with 200 and none of the invalid-submission headers.
+        assert resp.status_code == 200
+        assert "Location" not in resp.headers
+        assert "X-Next-Form" not in resp.headers
+        assert "X-Next-Action" not in resp.headers
 
     def test_redirect_action_returns_redirect(self, client_no_csrf) -> None:
         """Redirect action returns 302 redirect."""
-        url = form_action_manager.get_action_url("test_redirect")
+        url = form_action_manager.get_action_url("simple_form_redirect")
         resp = client_no_csrf.post(
             url,
-            data={
-                "name": "Bob",
-                "email": "",
-                "_next_form_page": str(PAGE_MODULE_FOR_FORM_TESTS),
-            },
+            data={"name": "Bob"},
             follow=False,
         )
         assert resp.status_code == 302
@@ -218,11 +298,11 @@ class TestDispatchViaClient:
         assert b"ok" in resp.content
 
 
-class TestFormDispatchRenderFragmentBranches:
-    """``FormActionDispatch.render_form_fragment`` fallbacks."""
+class TestFormDispatchRenderInvalidPageBranches:
+    """``RegistryFormActionBackend.render_invalid_page`` fallbacks."""
 
-    def test_unknown_action_uses_form_as_p(self, mock_http_request) -> None:
-        """Unknown action meta falls back to ``form.as_p()``."""
+    def test_unknown_action_uses_form_fallback(self, mock_http_request) -> None:
+        """Unknown action meta falls back to the version-safe bare-form render."""
         backend = RegistryFormActionBackend()
 
         class F(Form):
@@ -232,24 +312,27 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "only", handler=h, options=FormActionOptions(form_class=F)
+            ActionRegistration(
+                name="only",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=h,
+            )
         )
         req = mock_http_request(method="GET")
         form = F()
-        html = FormActionDispatch.render_form_fragment(
-            backend,
+        html = backend.render_invalid_page(
             req,
             "missing_action",
             form,
-            None,
             PAGE_MODULE_FOR_FORM_TESTS,
         )
-        assert html == form.as_p()
+        assert html == form.render(form.template_name_p)
 
-    def test_empty_template_body_uses_form_as_p(
+    def test_empty_template_body_uses_form_fallback(
         self, mock_http_request, tmp_path
     ) -> None:
-        """A page.py with no body source and no ancestor layout falls back to ``form.as_p()``."""
+        """A page.py without body and no ancestor layout falls back to a bare render."""
         backend = RegistryFormActionBackend()
 
         class F(Form):
@@ -259,30 +342,32 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "frag", handler=h, options=FormActionOptions(form_class=F)
+            ActionRegistration(
+                name="frag",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=h,
+            )
         )
         req = mock_http_request(method="GET")
         form = F()
         blank_page = tmp_path / "page.py"
         blank_page.write_text("")
 
-        html = FormActionDispatch.render_form_fragment(
-            backend,
+        html = backend.render_invalid_page(
             req,
             "frag",
             form,
-            None,
             blank_page,
         )
-        assert html == form.as_p()
+        assert html == form.render(form.template_name_p)
 
     def test_dispatch_with_modelform_returning_instance(
         self, mock_http_request
     ) -> None:
-        """Test dispatch creates form with instance when ModelForm returns instance."""
+        """Dispatch creates form with instance when ModelForm returns instance."""
         backend = RegistryFormActionBackend()
 
-        # Create a simple mock model
         mock_model = MagicMock()
         mock_model._meta = MagicMock()
         mock_model._meta.get_fields.return_value = []
@@ -296,7 +381,6 @@ class TestFormDispatchRenderFragmentBranches:
 
             @classmethod
             def get_initial(cls, request: HttpRequest) -> object:
-                # Return a mock model instance
                 mock_instance = MagicMock()
                 mock_instance._meta = MagicMock()
                 mock_instance._meta.model = mock_model
@@ -308,50 +392,18 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "test_action", handler, options=FormActionOptions(form_class=TestModelForm)
+            ActionRegistration(
+                name="test_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=TestModelForm,
+            )
         )
 
-        mock_post = MagicMock()
-        mock_post.items.return_value = [("name", "test")]
-        request = mock_http_request(method="POST", POST=mock_post, FILES=None)
-
-        meta = backend.get_meta("test_action")
-        assert meta is not None
-
-        # Call dispatch - this will create form with instance (line 381)
-        response = FormActionDispatch.dispatch(backend, request, "test_action", meta)
-        # Should succeed
-        assert response.status_code == 302
-
-    @pytest.mark.parametrize(
-        "url_param_value",
-        [["list", "value"], "not_a_number"],
-        ids=["non_string", "string_not_int"],
-    )
-    def test_dispatch_survives_unusual_url_param_values(
-        self, mock_http_request, url_param_value
-    ) -> None:
-        """`dispatch` accepts url_param values that are not int-convertible strings."""
-        backend = RegistryFormActionBackend()
-
-        class TestForm(Form):
-            name = django_forms.CharField(max_length=100)
-
-        def handler(
-            request: HttpRequest, form: TestForm, **_kwargs: object
-        ) -> HttpResponseRedirect:
-            return HttpResponseRedirect("/")
-
-        backend.register_action(
-            "test_action", handler, options=FormActionOptions(form_class=TestForm)
-        )
-
-        mock_post = MagicMock()
-        mock_post.items.return_value = [
-            ("_url_param_test", url_param_value),
-            ("name", "test"),
-        ]
-        request = mock_http_request(method="POST", POST=mock_post, FILES=None)
+        post = QueryDict(mutable=True)
+        post["name"] = "test"
+        request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = backend.get_meta("test_action")
         assert meta is not None
@@ -359,15 +411,10 @@ class TestFormDispatchRenderFragmentBranches:
         response = FormActionDispatch.dispatch(backend, request, "test_action", meta)
         assert response.status_code == 302
 
-    @pytest.mark.parametrize(
-        "url_param_value",
-        [["list", "value"], "not_a_number"],
-        ids=["non_string", "string_not_int"],
-    )
-    def test_render_form_fragment_survives_unusual_url_param_values(
-        self, mock_http_request, url_param_value
+    def test_render_invalid_page_defaults_url_kwargs_to_empty(
+        self, mock_http_request
     ) -> None:
-        """`render_form_fragment` handles url_param values that aren't int-convertible strings."""
+        """`render_invalid_page` without explicit url_kwargs renders with none."""
         backend = RegistryFormActionBackend()
 
         class TestForm(Form):
@@ -377,25 +424,26 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "test_action",
-            handler,
-            options=FormActionOptions(form_class=TestForm),
+            ActionRegistration(
+                name="test_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=TestForm,
+            )
         )
 
-        mock_post = MagicMock()
-        mock_post.items.return_value = [("_url_param_test", url_param_value)]
-        request = mock_http_request(POST=mock_post)
+        request = mock_http_request(method="POST", POST=QueryDict())
 
         file_path = PAGE_MODULE_FOR_FORM_TESTS
         original_registry = page._template_registry.copy()
         page._template_registry[file_path] = "{{ form.name }}"
         try:
             form = TestForm(initial={"name": "test"})
-            html = backend.render_form_fragment(
+            html = backend.render_invalid_page(
                 request,
                 "test_action",
                 form,
-                template_fragment=None,
                 page_file_path=file_path,
             )
             assert isinstance(html, str)
@@ -403,11 +451,18 @@ class TestFormDispatchRenderFragmentBranches:
             page._template_registry.clear()
             page._template_registry.update(original_registry)
 
+    def test_render_invalid_page_without_page_path_returns_empty(
+        self, mock_http_request
+    ) -> None:
+        """A missing page path short-circuits to an empty string."""
+        backend = RegistryFormActionBackend()
+        request = mock_http_request(method="POST", POST=QueryDict())
+        assert backend.render_invalid_page(request, "anything", None) == ""
+
     def test_dispatch_with_form_without_get_initial(self, mock_http_request) -> None:
-        """Test that dispatch raises TypeError when form class doesn't have get_initial."""
+        """Dispatch raises TypeError when form class doesn't have get_initial."""
         backend = RegistryFormActionBackend()
 
-        # Create a form class that doesn't inherit from BaseForm
         class CustomDjangoForm(django_forms.Form):
             name = django_forms.CharField(max_length=100)
 
@@ -417,26 +472,31 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "test_action",
-            handler,
-            options=FormActionOptions(form_class=CustomDjangoForm),
+            ActionRegistration(
+                name="test_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=CustomDjangoForm,
+            )
         )
 
-        post = MagicMock()
-        post.items.return_value = []
+        post = QueryDict(mutable=True)
         request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = backend.get_meta("test_action")
         assert meta is not None
 
-        # Real call to dispatch - this will trigger the error
-        with pytest.raises(TypeError, match="must have get_initial method"):
+        with pytest.raises(
+            TypeError,
+            match=r"Action 'test_action': CustomDjangoForm has no get_initial",
+        ):
             FormActionDispatch.dispatch(backend, request, "test_action", meta)
 
     def test_dispatch_with_form_returning_instance_but_not_modelform(
         self, mock_http_request
     ) -> None:
-        """Test that dispatch raises TypeError when Form returns instance but isn't ModelForm."""
+        """Dispatch raises TypeError when Form returns instance but isn't ModelForm."""
         backend = RegistryFormActionBackend()
 
         class CustomForm(Form):
@@ -444,7 +504,6 @@ class TestFormDispatchRenderFragmentBranches:
 
             @classmethod
             def get_initial(cls, request: HttpRequest) -> object:
-                # Return a mock model instance
                 mock_instance = MagicMock()
                 mock_instance._meta = MagicMock()
                 mock_instance._meta.model = MagicMock()
@@ -454,21 +513,224 @@ class TestFormDispatchRenderFragmentBranches:
             return HttpResponseRedirect("/")
 
         backend.register_action(
-            "test_action", handler, options=FormActionOptions(form_class=CustomForm)
+            ActionRegistration(
+                name="test_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=CustomForm,
+            )
         )
 
-        post = MagicMock()
-        post.items.return_value = []
+        post = QueryDict(mutable=True)
         request = mock_http_request(method="POST", POST=post, FILES=None)
 
         meta = backend.get_meta("test_action")
         assert meta is not None
 
-        # Real call to dispatch - this will trigger the error
         with pytest.raises(
-            TypeError, match="instance parameter only supported for ModelForm"
+            TypeError, match=r"CustomForm is not a ModelForm\. Subclass next\.forms"
         ):
             FormActionDispatch.dispatch(backend, request, "test_action", meta)
+
+    def test_dispatch_no_form_class_no_handler_returns_400(
+        self, mock_http_request
+    ) -> None:
+        """Dispatch with no form_class and no handler returns 400."""
+        backend = RegistryFormActionBackend()
+        post = QueryDict(mutable=True)
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+
+        # Construct meta manually without form_class or handler.
+        meta = {
+            "handler": None,
+            "form_class": None,
+            "uid": "fake_uid",
+            "file_path": _FAKE_FILE,
+            "scope": "shared",
+        }
+        response = FormActionDispatch.dispatch(backend, request, "no_op", meta)
+        assert response.status_code == 400
+
+
+class TestDispatchOnValid:
+    """Dispatch calls on_valid when handler is None (class-based form)."""
+
+    def test_on_valid_returning_redirect_gives_redirect(
+        self, mock_http_request
+    ) -> None:
+        """on_valid returning HttpResponseRedirect is forwarded as 302."""
+        backend = RegistryFormActionBackend()
+
+        class RedirectForm(Form):
+            name = django_forms.CharField(max_length=100)
+
+            def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+                return HttpResponseRedirect("/redirected/")
+
+        backend.register_action(
+            ActionRegistration(
+                name="redirect_form",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=RedirectForm,
+            )
+        )
+
+        post = QueryDict(mutable=True)
+        post["name"] = "Alice"
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+
+        meta = backend.get_meta("redirect_form")
+        assert meta is not None
+
+        response = FormActionDispatch.dispatch(backend, request, "redirect_form", meta)
+        assert response.status_code == 302
+        assert response.url == "/redirected/"
+
+    def test_on_valid_returning_none_gives_400_without_origin(
+        self, mock_http_request
+    ) -> None:
+        """on_valid returning None without _next_form_origin gives 400 bad request."""
+        backend = RegistryFormActionBackend()
+
+        class NoneForm(Form):
+            name = django_forms.CharField(max_length=100)
+
+            def on_valid(self, request: HttpRequest) -> None:
+                return None
+
+        backend.register_action(
+            ActionRegistration(
+                name="none_form",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=NoneForm,
+            )
+        )
+
+        post = QueryDict(mutable=True)
+        post["name"] = "Alice"
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+
+        meta = backend.get_meta("none_form")
+        assert meta is not None
+
+        # None → ensure_http_response(None, request, action_name, backend)
+        # → origin re-render → no resolvable origin → 400
+        response = FormActionDispatch.dispatch(backend, request, "none_form", meta)
+        assert response.status_code == 400
+
+
+class TestShapeResponseHook:
+    """Backend `shape_response` hook and the default invalid envelope."""
+
+    def test_custom_backend_controls_invalid_envelope(self, mock_http_request) -> None:
+        """An override changes the status of the invalid response."""
+        outcomes: list[ActionOutcome] = []
+
+        class TeapotBackend(RegistryFormActionBackend):
+            def shape_response(self, request, outcome) -> HttpResponse:
+                if outcome.kind == ActionOutcomeKind.INVALID:
+                    outcomes.append(outcome)
+                    return HttpResponse("rejected", status=422)
+                return super().shape_response(request, outcome)
+
+        class F(Form):
+            name = django_forms.CharField(max_length=10)
+
+        def handler(form: F) -> HttpResponse:
+            return HttpResponse("ok")
+
+        backend = TeapotBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="hook_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=F,
+            )
+        )
+        post = QueryDict(mutable=True)
+        post["name"] = ""
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+        meta = backend.get_meta("hook_action")
+        assert meta is not None
+
+        response = FormActionDispatch.dispatch(backend, request, "hook_action", meta)
+        assert response.status_code == 422
+        assert response.content == b"rejected"
+        assert outcomes[0].uid == meta["uid"]
+        assert outcomes[0].form is not None
+
+    def test_success_none_return_never_reenters_invalid_envelope(
+        self, mock_http_request
+    ) -> None:
+        """A valid submission whose on_valid returns None stays a 200."""
+        seen_kinds: list[ActionOutcomeKind] = []
+
+        class UnprocessableBackend(RegistryFormActionBackend):
+            def shape_response(self, request, outcome) -> HttpResponse:
+                seen_kinds.append(outcome.kind)
+                response = super().shape_response(request, outcome)
+                if outcome.kind is ActionOutcomeKind.INVALID:
+                    response.status_code = 422
+                return response
+
+        class NoneReturnForm(Form):
+            name = django_forms.CharField(max_length=10)
+
+            def on_valid(self, request: HttpRequest) -> None:
+                return None
+
+        backend = UnprocessableBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="unprocessable_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                form_class=NoneReturnForm,
+            )
+        )
+        post = QueryDict(mutable=True)
+        post["name"] = "ok"
+        post["_next_form_origin"] = "/"
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+        meta = backend.get_meta("unprocessable_action")
+        assert meta is not None
+
+        response = FormActionDispatch.dispatch(
+            backend, request, "unprocessable_action", meta
+        )
+        assert response.status_code == 200
+        assert seen_kinds == [ActionOutcomeKind.RESULT]
+        assert "X-Next-Form" not in response.headers
+
+    def test_invalid_without_uid_omits_action_header(self, mock_http_request) -> None:
+        """The default envelope skips X-Next-Action when the outcome has no uid."""
+        backend = RegistryFormActionBackend()
+
+        class F(Form):
+            name = django_forms.CharField(max_length=10)
+
+        form = F(data={"name": ""})
+        assert not form.is_valid()
+
+        request = mock_http_request(method="POST", POST=QueryDict(), FILES=None)
+        response = FormActionDispatch.shape_response(
+            backend,
+            request,
+            ActionOutcome(
+                kind=ActionOutcomeKind.INVALID,
+                action_name="missing_action",
+                form=form,
+                page_path=PAGE_MODULE_FOR_FORM_TESTS,
+            ),
+        )
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        assert "X-Next-Action" not in response.headers
 
 
 class TestResolveFormClass:
@@ -523,21 +785,41 @@ class TestResolveFormClass:
         assert cls is F
         assert init_kwargs == {"prefix": "x", "use_required_attribute": False}
 
-    def test_non_callable_raises_typeerror(self, mock_http_request) -> None:
+    @pytest.mark.parametrize(
+        ("action_name", "expected"),
+        [
+            (None, r"^form_class must be a Form subclass or a callable factory"),
+            ("cfg_action", r"^Action 'cfg_action': form_class must be a Form"),
+        ],
+        ids=("without_action_context", "with_action_context"),
+    )
+    def test_non_callable_raises_typeerror(
+        self, mock_http_request, action_name, expected
+    ) -> None:
         """An object that is neither a type nor callable is a configuration error."""
         request = mock_http_request(method="POST")
-        with pytest.raises(TypeError, match="Form subclass or callable"):
-            _resolve_form_class("not-a-form", request, {})
+        with pytest.raises(TypeError, match=expected):
+            _resolve_form_class("not-a-form", request, {}, action_name=action_name)
 
-    def test_factory_returning_non_type_raises(self, mock_http_request) -> None:
+    @pytest.mark.parametrize(
+        ("action_name", "expected"),
+        [
+            (None, r"^form_class factory must return a Form subclass"),
+            ("cfg_action", r"^Action 'cfg_action': form_class factory must return"),
+        ],
+        ids=("without_action_context", "with_action_context"),
+    )
+    def test_factory_returning_non_type_raises(
+        self, mock_http_request, action_name, expected
+    ) -> None:
         """A factory must return a class or `(cls, init_kwargs)`."""
 
         def bad_factory(request: HttpRequest) -> object:
             return "not-a-class"
 
         request = mock_http_request(method="POST")
-        with pytest.raises(TypeError, match="factory must return a Form subclass"):
-            _resolve_form_class(bad_factory, request, {})
+        with pytest.raises(TypeError, match=expected):
+            _resolve_form_class(bad_factory, request, {}, action_name=action_name)
 
 
 class _CustomInitForm(django_forms.Form):
@@ -606,9 +888,13 @@ class TestFormClassInitKwargs:
 
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "init_kwargs_action",
-            handler,
-            options=FormActionOptions(form_class=factory),
+            ActionRegistration(
+                name="init_kwargs_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+                form_class=factory,
+            )
         )
 
         post = QueryDict(mutable=True)
@@ -639,11 +925,17 @@ class TestDispatchSharedDepCache:
         def handler() -> str:
             return "ok"
 
-        backend.register_action("only_handler", handler, options=FormActionOptions())
+        backend.register_action(
+            ActionRegistration(
+                name="only_handler",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+            )
+        )
 
-        mock_post = MagicMock()
-        mock_post.items.return_value = []
-        request = mock_http_request(method="POST", POST=mock_post)
+        post = QueryDict(mutable=True)
+        request = mock_http_request(method="POST", POST=post)
 
         meta = backend.get_meta("only_handler")
         assert meta is not None
@@ -665,7 +957,14 @@ class TestDispatchSharedDepCache:
         def handler(greeting: str = Depends("greeting")) -> str:
             return greeting
 
-        backend.register_action("dep_handler", handler, options=FormActionOptions())
+        backend.register_action(
+            ActionRegistration(
+                name="dep_handler",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=handler,
+            )
+        )
 
         seen: dict[str, object] = {}
 
@@ -674,9 +973,8 @@ class TestDispatchSharedDepCache:
 
         action_dispatched.connect(receiver)
         try:
-            mock_post = MagicMock()
-            mock_post.items.return_value = []
-            request = mock_http_request(method="POST", POST=mock_post)
+            post = QueryDict(mutable=True)
+            request = mock_http_request(method="POST", POST=post)
             meta = backend.get_meta("dep_handler")
             assert meta is not None
             FormActionDispatch.dispatch(backend, request, "dep_handler", meta)
@@ -694,10 +992,9 @@ class TestDispatchSharedDepCache:
         """A ``Depends("name")`` shared by factory and handler resolves exactly once.
 
         The dispatcher threads a single ``dep_cache`` through
-        ``_resolve_form_class``, ``form.get_initial``, and the handler
-        (see ``FormActionDispatch._dispatch_with_form``). The resolver's
-        named-dependency cache keys on the ``Depends`` name, so any
-        subsequent phase that asks for the same name hits the cache.
+        ``_resolve_form_class``, ``form.get_initial``, and the handler.
+        The resolver's named-dependency cache keys on the ``Depends`` name,
+        so any subsequent phase that asks for the same name hits the cache.
         """
         calls = {"n": 0}
 
@@ -721,7 +1018,7 @@ class TestDispatchSharedDepCache:
         dep_stack: list[str] = []
 
         try:
-            cls, _ = _resolve_form_class(factory, request, {}, dep_cache, dep_stack)
+            cls, _ = _resolve_form_class(factory, request, {}, (dep_cache, dep_stack))
             assert cls is WForm
             resolved = resolver.resolve_dependencies(
                 handler_like,
@@ -760,3 +1057,487 @@ class TestDispatchSharedDepCache:
 
         assert value == "preloaded"
         assert calls["n"] == 0
+
+
+class TestBuildFormNamespaceEdgeCases:
+    """build_form_namespace_for_action edge cases."""
+
+    def test_returns_none_when_no_backends_have_action(self, mock_http_request) -> None:
+        """Returns None when no backend has meta for the given action."""
+        req = mock_http_request(method="GET")
+        result = build_form_namespace_for_action("nonexistent_xyz", req)
+        assert result is None
+
+    def test_returns_none_when_action_has_no_form_class(
+        self, mock_http_request
+    ) -> None:
+        """Returns None for a form-less action (handler only, no form_class)."""
+        req = mock_http_request(method="GET")
+        result = build_form_namespace_for_action("test_no_form", req)
+        assert result is None
+
+    def test_returns_namespace_when_action_has_form_class(
+        self, mock_http_request
+    ) -> None:
+        """Returns a SimpleNamespace with form when action has form_class."""
+        req = mock_http_request(method="GET")
+        result = build_form_namespace_for_action("simple_form", req)
+        assert result is not None
+        assert hasattr(result, "form")
+
+
+@pytest.mark.django_db()
+class TestBuildWizardNamespace:
+    """build_form_namespace_for_action returns the wizard's form+wizard namespace."""
+
+    def test_wizard_action_yields_form_and_wizard(self, mock_http_request) -> None:
+        """A wizard action produces a namespace carrying the current step form."""
+        req = mock_http_request(method="GET", resolver_match=None)
+        result = build_form_namespace_for_action("dispatch_wizard", req)
+        assert result is not None
+        assert isinstance(result.form, WizardIdentityStep)
+        assert isinstance(result.wizard, DispatchWizard)
+
+
+@pytest.mark.django_db()
+class TestWizardDispatchViaClient:
+    """FormWizard step routing, finalisation, and re-render via the test client."""
+
+    def _post_step(
+        self,
+        client,
+        step: str,
+        data: dict,
+        *,
+        action: str = "dispatch_wizard",
+        origin: str | None = None,
+    ):
+        url = form_action_manager.get_action_url(action)
+        payload = {
+            "_next_form_origin": origin if origin is not None else f"/request/{step}/",
+            **data,
+        }
+        return client.post(url, data=payload, follow=False)
+
+    def test_valid_first_step_redirects_to_next(self, client_no_csrf) -> None:
+        """A valid first step advances to the next step via goto."""
+        resp = self._post_step(client_no_csrf, "identity", {"name": "Ada"})
+        assert resp.status_code == 302
+        assert resp.url == "/request/scope/"
+
+    def test_invalid_step_re_renders_page(self, client_no_csrf) -> None:
+        """An invalid step re-renders the page and stores nothing."""
+        resp = self._post_step(client_no_csrf, "identity", {"name": ""})
+        assert resp.status_code == 200
+        assert resp["X-Next-Form"] == "invalid"
+
+    def test_last_step_calls_done_with_merged_data(self, client_no_csrf) -> None:
+        """The final step finalises with the merged cleaned data and clears storage."""
+        DispatchWizard.done_payloads.clear()
+        self._post_step(client_no_csrf, "identity", {"name": "Ada"})
+        resp = self._post_step(client_no_csrf, "scope", {"scope": "ops"})
+        assert resp.status_code == 302
+        assert resp.url == "/thanks/"
+        assert DispatchWizard.done_payloads == [{"name": "Ada", "scope": "ops"}]
+
+    def test_direct_last_step_post_never_finalises(self, client_no_csrf) -> None:
+        """A fresh-session POST to the last step redirects to the first gap."""
+        DispatchWizard.done_payloads.clear()
+        resp = self._post_step(client_no_csrf, "scope", {"scope": "ops"})
+        assert resp.status_code == 302
+        assert resp.url == "/request/identity/"
+        assert DispatchWizard.done_payloads == []
+
+    def test_rerouted_wizard_finalises_after_filling_the_gap(
+        self, client_no_csrf
+    ) -> None:
+        """A wizard bounced off the last step finalises once every step is stored."""
+        DispatchWizard.done_payloads.clear()
+        self._post_step(client_no_csrf, "scope", {"scope": "ops"})
+        self._post_step(client_no_csrf, "identity", {"name": "Ada"})
+        resp = self._post_step(client_no_csrf, "scope", {"scope": "ops"})
+        assert resp.status_code == 302
+        assert resp.url == "/thanks/"
+        assert DispatchWizard.done_payloads == [{"name": "Ada", "scope": "ops"}]
+
+    def test_unknown_step_returns_bad_request(self, client_no_csrf) -> None:
+        """A wizard whose current step has no form class returns 400."""
+
+        class EmptyDispatchWizard(FormWizard):
+            class Meta:
+                steps: ClassVar = []
+
+            def done(self, request, cleaned_data) -> HttpResponseRedirect:
+                return HttpResponseRedirect("/thanks/")
+
+        url = form_action_manager.get_action_url("empty_dispatch_wizard")
+        resp = client_no_csrf.post(
+            url,
+            data={"_next_form_origin": "/request/ghost/"},
+            follow=False,
+        )
+        assert resp.status_code == 400
+
+    def test_missing_origin_returns_bad_request(self, client_no_csrf) -> None:
+        """A wizard POST without a valid _next_form_origin returns 400."""
+        url = form_action_manager.get_action_url("dispatch_wizard")
+        resp = client_no_csrf.post(
+            url,
+            data={"name": "Ada"},
+            follow=False,
+        )
+        assert resp.status_code == 400
+
+    def test_done_error_response_preserves_draft(
+        self, client_no_csrf, mock_http_request
+    ) -> None:
+        """A done() error response keeps the saved draft so the user can retry."""
+
+        class FailingDoneWizard(FormWizard):
+            class Meta:
+                steps: ClassVar = [
+                    ("identity", WizardIdentityStep),
+                    ("scope", WizardScopeStep),
+                ]
+
+            def done(self, request, cleaned_data) -> HttpResponse:
+                return HttpResponseBadRequest("downstream failed")
+
+        self._post_step(
+            client_no_csrf, "identity", {"name": "Ada"}, action="failing_done_wizard"
+        )
+        resp = self._post_step(
+            client_no_csrf, "scope", {"scope": "ops"}, action="failing_done_wizard"
+        )
+        assert resp.status_code == 400
+        session_key = client_no_csrf.session.session_key
+        store = SessionStore(session_key=session_key)
+        req = mock_http_request(method="GET", session=store, resolver_match=None)
+        namespace = build_form_namespace_for_action("failing_done_wizard", req)
+        assert namespace.form.initial == {"name": "Ada"}
+
+    def test_done_none_coerces_to_success_and_clears_draft(
+        self, client_no_csrf, mock_http_request
+    ) -> None:
+        """A done() None return re-renders, clears the drafts, fires completion."""
+
+        class NoneDoneWizard(FormWizard):
+            class Meta:
+                steps: ClassVar = [
+                    ("identity", WizardIdentityStep),
+                    ("scope", WizardScopeStep),
+                ]
+
+            def done(self, request, cleaned_data) -> None:
+                """Return None to exercise the success coercion."""
+
+        completed: list[dict] = []
+
+        def on_completed(sender, **kwargs: object) -> None:
+            completed.append(kwargs)
+
+        wizard_completed.connect(on_completed)
+        try:
+            self._post_step(
+                client_no_csrf, "identity", {"name": "Ada"}, action="none_done_wizard"
+            )
+            resp = self._post_step(
+                client_no_csrf, "scope", {"scope": "ops"}, action="none_done_wizard"
+            )
+        finally:
+            wizard_completed.disconnect(on_completed)
+        assert resp.status_code == 200
+        assert completed[0]["cleaned_data"] == {"name": "Ada", "scope": "ops"}
+        session_key = client_no_csrf.session.session_key
+        store = SessionStore(session_key=session_key)
+        req = mock_http_request(method="GET", session=store, resolver_match=None)
+        namespace = build_form_namespace_for_action("none_done_wizard", req)
+        assert namespace.form.initial == {}
+
+    def test_back_navigation_prefills_from_storage(
+        self, client_no_csrf, mock_http_request
+    ) -> None:
+        """A revisited step rebuilds its form prefilled from saved data."""
+        self._post_step(client_no_csrf, "identity", {"name": "Ada"})
+        session_key = client_no_csrf.session.session_key
+        store = SessionStore(session_key=session_key)
+        req = mock_http_request(method="GET", session=store, resolver_match=None)
+        namespace = build_form_namespace_for_action("dispatch_wizard", req)
+        assert namespace.form.initial == {"name": "Ada"}
+
+    def test_conditional_step_routing(self, client_no_csrf) -> None:
+        """A get_steps override inserts a step the wizard then routes through."""
+        ConditionalDispatchWizard.done_payloads.clear()
+        first = self._post_step(
+            client_no_csrf,
+            "identity",
+            {"name": "needs-extra"},
+            action="conditional_dispatch_wizard",
+        )
+        assert first.status_code == 302
+        assert first.url == "/request/extra/"
+
+    def test_get_form_kwargs_feeds_step_form(self, client_no_csrf) -> None:
+        """A get_form_kwargs override supplies the prefix the bound form expects."""
+        KwargsDispatchWizard.seen_kwargs.clear()
+        resp = self._post_step(
+            client_no_csrf,
+            "identity",
+            {"wiz-name": "Ada"},
+            action="kwargs_dispatch_wizard",
+        )
+        assert resp.status_code == 302
+        assert resp.url == "/thanks/"
+        assert KwargsDispatchWizard.seen_kwargs[0][0] == "identity"
+
+
+class PlainIdentityStep(django_forms.Form):
+    """First plain-Django step, never registered as an action."""
+
+    name = django_forms.CharField(max_length=100)
+
+
+class PlainScopeStep(django_forms.Form):
+    """Second plain-Django step, never registered as an action."""
+
+    scope = django_forms.CharField(max_length=100)
+
+
+class PlainStepsWizard(FormWizard):
+    """Wizard whose steps subclass django.forms.Form directly."""
+
+    class Meta:
+        """Two bare Django form steps."""
+
+        steps: ClassVar = [
+            ("identity", PlainIdentityStep),
+            ("scope", PlainScopeStep),
+        ]
+
+    done_payloads: ClassVar[list] = []
+
+    def done(self, request: HttpRequest, cleaned_data: dict) -> HttpResponseRedirect:
+        """Record the merged cleaned data and redirect."""
+        type(self).done_payloads.append(cleaned_data)
+        return HttpResponseRedirect("/thanks/")
+
+
+def _post_wizard_step(client, action: str, step: str, data: dict):
+    url = form_action_manager.get_action_url(action)
+    payload = {"_next_form_origin": f"/request/{step}/", **data}
+    return client.post(url, data=payload, follow=False)
+
+
+@pytest.mark.django_db()
+class TestWizardWithPlainDjangoSteps:
+    """Bare django.forms classes work as wizard steps without registration."""
+
+    def test_plain_steps_are_not_registered_as_actions(self) -> None:
+        """A plain Django form step never lands in the action registry."""
+        backend = form_action_manager.default_backend
+        assert backend.get_meta("plain_identity_step") is None
+        assert backend.get_meta("plain_scope_step") is None
+
+    def test_plain_steps_route_and_finalise(self, client_no_csrf) -> None:
+        """Plain steps validate, advance, and finalise with merged data."""
+        PlainStepsWizard.done_payloads.clear()
+        first = _post_wizard_step(
+            client_no_csrf, "plain_steps_wizard", "identity", {"name": "Ada"}
+        )
+        assert first.status_code == 302
+        assert first.url == "/request/scope/"
+        resp = _post_wizard_step(
+            client_no_csrf, "plain_steps_wizard", "scope", {"scope": "ops"}
+        )
+        assert resp.status_code == 302
+        assert resp.url == "/thanks/"
+        assert PlainStepsWizard.done_payloads == [{"name": "Ada", "scope": "ops"}]
+
+    def test_plain_step_prefills_from_storage(
+        self, client_no_csrf, mock_http_request
+    ) -> None:
+        """A revisited plain step rebuilds its form prefilled from saved data."""
+        _post_wizard_step(
+            client_no_csrf, "plain_steps_wizard", "identity", {"name": "Ada"}
+        )
+        session_key = client_no_csrf.session.session_key
+        store = SessionStore(session_key=session_key)
+        req = mock_http_request(method="GET", session=store, resolver_match=None)
+        namespace = build_form_namespace_for_action("plain_steps_wizard", req)
+        assert isinstance(namespace.form, PlainIdentityStep)
+        assert namespace.form.initial == {"name": "Ada"}
+
+
+class InjectedDoneWizard(FormWizard):
+    """Wizard whose done pulls a named dependency through the resolver."""
+
+    class Meta:
+        """Two ordered steps routed through the wizard backend."""
+
+        steps: ClassVar = [
+            ("identity", WizardIdentityStep),
+            ("scope", WizardScopeStep),
+        ]
+
+    seen: ClassVar[list] = []
+
+    def done(
+        self,
+        request: HttpRequest,
+        cleaned_data: dict,
+        token: str = Depends("token"),
+    ) -> HttpResponseRedirect:
+        """Record the resolved arguments and redirect."""
+        type(self).seen.append((request is not None, dict(cleaned_data), token))
+        return HttpResponseRedirect("/thanks/")
+
+
+class _CleanedDataHijackProvider:
+    """Test provider that claims the `cleaned_data` parameter by name."""
+
+    def can_handle(self, param, _context) -> bool:
+        return param.name == "cleaned_data"
+
+    def resolve(self, _param, _context) -> object:
+        return {"hijacked": True}
+
+
+@pytest.mark.django_db()
+class TestWizardDoneInjection:
+    """`done` resolves through the dependency injector like other callbacks."""
+
+    def test_done_receives_request_and_cleaned_data_by_name(
+        self, client_no_csrf
+    ) -> None:
+        """The classic done(request, cleaned_data) signature keeps resolving."""
+        DispatchWizard.done_payloads.clear()
+        _post_wizard_step(client_no_csrf, "dispatch_wizard", "identity", {"name": "A"})
+        resp = _post_wizard_step(
+            client_no_csrf, "dispatch_wizard", "scope", {"scope": "ops"}
+        )
+        assert resp.status_code == 302
+        assert DispatchWizard.done_payloads == [{"name": "A", "scope": "ops"}]
+
+    def test_done_resolves_named_dependencies(self, client_no_csrf) -> None:
+        """A Depends default on done resolves through the shared dep cache."""
+
+        @resolver.dependency("token")
+        def make_token() -> str:
+            return "tkn"
+
+        InjectedDoneWizard.seen.clear()
+        try:
+            _post_wizard_step(
+                client_no_csrf, "injected_done_wizard", "identity", {"name": "Ada"}
+            )
+            resp = _post_wizard_step(
+                client_no_csrf, "injected_done_wizard", "scope", {"scope": "ops"}
+            )
+        finally:
+            resolver._dependency_callables.pop("token", None)
+        assert resp.status_code == 302
+        assert InjectedDoneWizard.seen == [
+            (True, {"name": "Ada", "scope": "ops"}, "tkn")
+        ]
+
+    def test_reserved_cleaned_data_beats_appended_provider(
+        self, client_no_csrf
+    ) -> None:
+        """The reserved cleaned_data context key wins over a same-named provider."""
+        provider = _CleanedDataHijackProvider()
+        resolver.add_provider(provider)
+        DispatchWizard.done_payloads.clear()
+        try:
+            _post_wizard_step(
+                client_no_csrf, "dispatch_wizard", "identity", {"name": "Ada"}
+            )
+            _post_wizard_step(
+                client_no_csrf, "dispatch_wizard", "scope", {"scope": "ops"}
+            )
+        finally:
+            resolver._providers.remove(provider)
+        assert DispatchWizard.done_payloads == [{"name": "Ada", "scope": "ops"}]
+
+    def test_cleaned_data_is_reserved_not_a_url_kwarg(self) -> None:
+        """`cleaned_data` flows through the context, never the URL kwargs."""
+
+        def func(cleaned_data: dict, slug: str) -> None:
+            del cleaned_data, slug
+
+        resolved = resolver.resolve_dependencies(
+            func,
+            request=None,
+            cleaned_data={"a": 1},
+            slug="x",
+        )
+        assert resolved == {"cleaned_data": {"a": 1}, "slug": "x"}
+
+
+@pytest.mark.django_db()
+class TestWizardOutcomePayload:
+    """Wizard outcomes carry the live wizard instance and the action uid."""
+
+    @staticmethod
+    def _recording_backend(outcomes: list) -> RegistryFormActionBackend:
+        class RecordingBackend(RegistryFormActionBackend):
+            def shape_response(self, request, outcome) -> HttpResponse:
+                outcomes.append(outcome)
+                return super().shape_response(request, outcome)
+
+        backend = RecordingBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="recorded_wizard",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                wizard_class=DispatchWizard,
+            )
+        )
+        return backend
+
+    @staticmethod
+    def _wizard_post(mock_http_request, name: str) -> MagicMock:
+        post = QueryDict(mutable=True)
+        post["name"] = name
+        post["_next_form_origin"] = "/request/identity/"
+        return mock_http_request(
+            method="POST", POST=post, FILES=None, session=SessionStore()
+        )
+
+    def test_wizard_advance_outcome_carries_wizard_and_uid(
+        self, mock_http_request
+    ) -> None:
+        """A valid non-final step produces a wizard_advance outcome with payload."""
+        outcomes: list[ActionOutcome] = []
+        backend = self._recording_backend(outcomes)
+        request = self._wizard_post(mock_http_request, "Ada")
+        meta = backend.get_meta("recorded_wizard")
+        assert meta is not None
+
+        response = FormActionDispatch.dispatch(
+            backend, request, "recorded_wizard", meta
+        )
+        assert response.status_code == 302
+        outcome = outcomes[-1]
+        assert outcome.kind == ActionOutcomeKind.WIZARD_ADVANCE
+        assert isinstance(outcome.wizard, DispatchWizard)
+        assert outcome.uid == meta["uid"]
+        assert outcome.redirect_to == "/request/scope/"
+
+    def test_wizard_invalid_outcome_carries_wizard(self, mock_http_request) -> None:
+        """An invalid step produces an invalid outcome holding the wizard."""
+        outcomes: list[ActionOutcome] = []
+        backend = self._recording_backend(outcomes)
+        request = self._wizard_post(mock_http_request, "")
+        meta = backend.get_meta("recorded_wizard")
+        assert meta is not None
+
+        response = FormActionDispatch.dispatch(
+            backend, request, "recorded_wizard", meta
+        )
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        assert response["X-Next-Action"] == meta["uid"]
+        outcome = outcomes[-1]
+        assert outcome.kind == ActionOutcomeKind.INVALID
+        assert isinstance(outcome.wizard, DispatchWizard)

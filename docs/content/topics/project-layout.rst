@@ -79,7 +79,7 @@ Three settings keys point at the directories above.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
+       "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
@@ -88,7 +88,7 @@ Three settings keys point at the directories above.
                "OPTIONS": {"context_processors": []},
            }
        ],
-       "DEFAULT_COMPONENT_BACKENDS": [
+       "COMPONENT_BACKENDS": [
            {
                "BACKEND": "next.components.FileComponentsBackend",
                "COMPONENTS_DIR": "_components",
@@ -104,7 +104,7 @@ You can choose anything that fits your domain.
 Settings Helpers
 ----------------
 
-When you need to override a single key inside ``DEFAULT_PAGE_BACKENDS`` without rewriting the entire list, use ``extend_default_backend``.
+When you need to override a single key inside ``PAGE_BACKENDS`` without rewriting the entire list, use ``extend_default_backend``.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -112,8 +112,8 @@ When you need to override a single key inside ``DEFAULT_PAGE_BACKENDS`` without 
    from next.conf import extend_default_backend
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": extend_default_backend(
-           "DEFAULT_PAGE_BACKENDS",
+       "PAGE_BACKENDS": extend_default_backend(
+           "PAGE_BACKENDS",
            PAGES_DIR="screens",
        )
    }
@@ -136,7 +136,7 @@ A project that hosts a global layout or a project-wide page tree adds an entry t
    BASE_DIR = Path(__file__).resolve().parent.parent
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
+       "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [str(BASE_DIR / "chrome")],
@@ -196,7 +196,7 @@ The chrome holds a project-wide layout and possibly a few project-level pages su
 Per Domain Trees
 ~~~~~~~~~~~~~~~~
 
-Define two backends in ``DEFAULT_PAGE_BACKENDS``.
+Define two backends in ``PAGE_BACKENDS``.
 Each backend walks a different directory.
 The first matching URL pattern wins, so the order matters.
 

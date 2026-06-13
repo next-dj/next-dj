@@ -7,14 +7,23 @@ from django import forms
 from django.http import HttpResponse, HttpResponseRedirect
 
 from next.forms import Form
-from next.forms.backends import FormActionOptions, RegistryFormActionBackend
+from next.forms.backends import ActionRegistration, RegistryFormActionBackend
 from next.forms.dispatch import (
     FormActionDispatch,
-    _filter_reserved_url_kwargs,
     _normalize_handler_response,
-    _url_kwargs_from_post,
+)
+from next.forms.origin import (
+    _ORIGIN_MATCH_ATTR,
+    _filter_reserved_url_kwargs,
+    _resolve_origin,
 )
 from tests.support.helpers import build_mock_http_request
+
+
+class _RedirectDuck:
+    """Plain `.url` carrier so the bench measures the duck path, not MagicMock."""
+
+    url = "/redirect-target/"
 
 
 class TestBenchDispatchHelpers:
@@ -33,7 +42,7 @@ class TestBenchDispatchHelpers:
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_normalize_redirect_duck(self, benchmark) -> None:
-        raw = MagicMock(url="/redirect-target/")
+        raw = _RedirectDuck()
         benchmark(_normalize_handler_response, raw)
         assert isinstance(_normalize_handler_response(raw), HttpResponseRedirect)
 
@@ -44,13 +53,28 @@ class TestBenchDispatchHelpers:
         benchmark(_filter_reserved_url_kwargs, payload)
 
     @pytest.mark.benchmark(group="forms.dispatch")
-    def test_url_kwargs_from_post(self, benchmark) -> None:
-        request = MagicMock()
-        request.POST = {
-            **{f"_url_param_k_{i}": str(i) for i in range(20)},
-            "csrf": "x",
-        }
-        benchmark(_url_kwargs_from_post, request)
+    def test_resolve_origin_cold(self, benchmark) -> None:
+        request = build_mock_http_request(
+            method="POST", POST={"_next_form_origin": "/items/42/"}
+        )
+
+        def run() -> object:
+            if hasattr(request, _ORIGIN_MATCH_ATTR):
+                delattr(request, _ORIGIN_MATCH_ATTR)
+            return _resolve_origin(request)
+
+        match = benchmark(run)
+        assert match is not None
+        assert match.url_kwargs == {"id": 42}
+
+    @pytest.mark.benchmark(group="forms.dispatch")
+    def test_resolve_origin_memoised(self, benchmark) -> None:
+        request = build_mock_http_request(
+            method="POST", POST={"_next_form_origin": "/items/42/"}
+        )
+        first = _resolve_origin(request)
+        match = benchmark(_resolve_origin, request)
+        assert match is first
 
 
 class _BenchForm(Form):
@@ -69,9 +93,13 @@ class TestBenchDispatchEndToEnd:
         """Valid submission — handler runs, redirect emitted."""
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "bench_action",
-            _ok_handler,
-            options=FormActionOptions(form_class=_BenchForm),
+            ActionRegistration(
+                name="bench_action",
+                file_path=__file__,
+                scope="shared",
+                handler=_ok_handler,
+                form_class=_BenchForm,
+            )
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
@@ -91,9 +119,13 @@ class TestBenchDispatchEndToEnd:
         """Invalid submission — validation_failed signal + errors payload."""
         backend = RegistryFormActionBackend()
         backend.register_action(
-            "bench_action",
-            _ok_handler,
-            options=FormActionOptions(form_class=_BenchForm),
+            ActionRegistration(
+                name="bench_action",
+                file_path=__file__,
+                scope="shared",
+                handler=_ok_handler,
+                form_class=_BenchForm,
+            )
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None
@@ -125,9 +157,13 @@ class TestBenchDispatchEndToEnd:
 
         backend = _SubclassedBackend()
         backend.register_action(
-            "bench_action",
-            _ok_handler,
-            options=FormActionOptions(form_class=_BenchForm),
+            ActionRegistration(
+                name="bench_action",
+                file_path=__file__,
+                scope="shared",
+                handler=_ok_handler,
+                form_class=_BenchForm,
+            )
         )
         meta = backend.get_meta("bench_action")
         assert meta is not None

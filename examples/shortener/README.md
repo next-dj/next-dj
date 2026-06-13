@@ -33,12 +33,12 @@ Tailwind loads via the Play CDN in [`routes/layout.djx`](shortener/routes/layout
 
 ```python
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_BACKENDS": [{
+    "PAGE_BACKENDS": [{
         "BACKEND": "next.urls.FileRouterBackend",
         "APP_DIRS": True,
         "PAGES_DIR": "routes",
     }],
-    "DEFAULT_COMPONENT_BACKENDS": [{
+    "COMPONENT_BACKENDS": [{
         "BACKEND": "next.components.FileComponentsBackend",
         "COMPONENTS_DIR": "_widgets",
     }],
@@ -53,7 +53,7 @@ A directory under `routes/` with a `page.py` becomes a URL. The framework compos
 
 - **`layout.djx`** (any ancestor directory) — the outer shell. Must contain an empty placeholder `{% block template %}{% endblock template %}` where the child content is substituted.
 - **`template.djx`** (sibling of `page.py`) — the page body. Just HTML. No `{% block template %}` wrapping needed because the framework handles substitution.
-- **`page.py`** — Python side: context functions (`@context`), optional form actions (`@forms.action`), optional `template = "..."` module attribute, optional `render(request, ...) -> HttpResponse`.
+- **`page.py`** — Python side: context functions (`@context`), optional self-registering form classes (`next.forms.Form`/`ModelForm`), optional `template = "..."` module attribute, optional `render(request, ...) -> HttpResponse`.
 
 Ancestor layouts cascade: `routes/admin/stats/` inherits `routes/admin/layout.djx`, which itself is wrapped by `routes/layout.djx`. Look at the nested toolbar in [`admin/layout.djx`](shortener/routes/admin/layout.djx):
 
@@ -119,30 +119,36 @@ def recent_links() -> list[Link]:
 
 Declared once in [`admin/page.py`](shortener/routes/admin/page.py), available in `admin/stats/` and `admin/links/<slug>/` templates. Use it for toolbar-level data. Do not mark heavy queries `inherit_context=True` unless every sub-page actually needs them.
 
-### 5. Forms — `@forms.action` + `{% form %}`
+### 5. Forms — class-bound `Form` + `{% form %}`
 
-[`routes/page.py`](shortener/routes/page.py) declares the handler:
+[`routes/page.py`](shortener/routes/page.py) declares the form class. A `next.forms.Form` subclass registers itself by file path through `__init_subclass__`, so its auto-name is `create_link_form` (snake_case of the class). The submit logic lives in `on_valid`, no separate handler. The redirect target and the flash message are declared on `Meta`:
 
 ```python
-@action("create_link", form_class=CreateLinkForm)
-def create_link(form: CreateLinkForm) -> HttpResponseRedirect:
-    _create_link_with_unique_slug(form.cleaned_data["url"])
-    return HttpResponseRedirect("/")
+class CreateLinkForm(Form):
+    url = forms.URLField(max_length=2000, assume_scheme="https")
+
+    class Meta:
+        success_url = "/"
+        success_message = "Short link created for %(url)s."
+
+    def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
+        _create_link_with_unique_slug(self.cleaned_data["url"])
+        return super().on_valid(request)
 ```
 
-The handler receives only the parameters it declares. No unused `request` — the DI resolver only fills what the signature asks for.
+`on_valid` receives only the parameters it declares — the DI resolver fills what the signature asks for. Delegating to `super().on_valid(request)` follows `Meta.success_url`, and the dispatcher flashes `Meta.success_message` (interpolated over `cleaned_data` with `%` formatting) through `django.contrib.messages`. The home page drains the queue in a `flash_messages` context callable and renders each entry through the shared `alert` component. In the real `page.py` the `url` field uses a `ComponentWidget("input", type="url", ...)`, so `{{ form.url }}` renders through the next `input` component rather than Django's default widget.
 
-[`routes/template.djx`](shortener/routes/template.djx) renders the form:
+[`routes/template.djx`](shortener/routes/template.djx) renders the form by its auto-name:
 
 ```djx
-{% form @action="create_link" class="space-y-3 …" %}
+{% form "create_link_form" %}
   {{ form.url }}
   {% if form.errors %}<p class="text-rose-600">{{ form.url.errors|first }}</p>{% endif %}
   <button type="submit">Shorten</button>
 {% endform %}
 ```
 
-The `{% form @action="…" %}` tag resolves the action to its stable UID endpoint and injects a CSRF token.
+The `{% form "name" %}` tag resolves the form to its stable UID endpoint, injects a CSRF token, and exposes the bound `form` in the block.
 
 > `{% form %}`, `{% component %}`, `{% collect_styles %}`, `{% url %}` etc. are all globally loaded template tags. **Do not** write `{% load forms components next_static %}` — `next.apps.templates.install()` registers them as Django builtins at startup.
 
@@ -157,7 +163,7 @@ A component lives in `_widgets/<name>/`:
 
 ```python
 @component.context("short_url")
-def _short_url(link: Link) -> str:
+def short_url(link: Link) -> str:
     return reverse("slug_redirect", kwargs={"slug": link.slug})
 ```
 
@@ -169,7 +175,7 @@ Usage in a loop:
 {% endfor %}
 ```
 
-`{% component "name" %}` accepts only **literal string props**. To pass the loop variable, the framework automatically forwards the parent template's flattened context, so the `link` loop variable lands inside the component and `ContextByNameProvider` fills the `link: Link` parameter of `_short_url`.
+`{% component "name" %}` accepts only **literal string props**. To pass the loop variable, the framework automatically forwards the parent template's flattened context, so the `link` loop variable lands inside the component and `ContextByNameProvider` fills the `link: Link` parameter of `short_url`.
 
 ### 7. Shared `nav_link` — DRY the active-state logic
 

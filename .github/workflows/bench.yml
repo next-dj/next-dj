@@ -149,7 +149,9 @@ jobs:
       # `--benchmark-compare-fail` percentage parser enforces 0 < N < 100,
       # so 99% (≈ ×2 of base) is the strictest hard gate the tool will
       # accept. Anything tighter would noise-trip on shared CI runners
-      # anyway.
+      # anyway. The gate compares medians: the mean is swayed by single
+      # scheduling spikes on shared runners, while a real regression
+      # shifts the whole distribution and moves the median with it.
       - name: Bench HEAD and gate
         id: gate
         continue-on-error: true
@@ -159,8 +161,42 @@ jobs:
             --benchmark-save=head \
             --benchmark-json=bench-head.json \
             --benchmark-compare='*_base' \
-            --benchmark-compare-fail=mean:99% \
+            --benchmark-compare-fail=median:99% \
             2>&1 | tee bench-compare.txt
+
+      # Non-failing warning tier: surfaces sub-2x median drift the hard
+      # gate cannot express. It must never become a failing step, or the
+      # shared-runner noise the median gate avoids comes straight back.
+      - name: Warn on median drift over 30%
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -s bench-base.json ] || [ ! -s bench-head.json ]; then
+            echo "::notice::bench JSON missing, skipping the median drift tier."
+            exit 0
+          fi
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          with Path("bench-base.json").open() as fh:
+              base = {
+                  bench["fullname"]: bench["stats"]["median"]
+                  for bench in json.load(fh)["benchmarks"]
+              }
+          with Path("bench-head.json").open() as fh:
+              head = json.load(fh)["benchmarks"]
+          for bench in head:
+              ref = base.get(bench["fullname"])
+              if not ref:
+                  continue
+              ratio = bench["stats"]["median"] / ref
+              if ratio >= 1.3:
+                  print(
+                      "::warning title=bench median drift::"
+                      f"{bench['fullname']} median is x{ratio:.2f} of base"
+                  )
+          PY
 
       - name: Build comment body and pin PR number
         if: always()
@@ -171,7 +207,7 @@ jobs:
             echo
             echo "Same-runner paired comparison on \`ubuntu-latest\` (Python 3.13)."
             echo "Base \`${{ steps.shas.outputs.base_short }}\` → head \`${{ steps.shas.outputs.head_short }}\`."
-            echo "Hard-fail threshold: \`mean:99%\` (≈ ×2 of base, the parser's max)."
+            echo "Hard-fail threshold: \`median:99%\` (≈ ×2 of base, the parser's max)."
             echo
             case "${{ steps.gate.outcome }}" in
               failure) echo "**Result:** :red_circle: hard regression detected." ;;
@@ -215,7 +251,7 @@ jobs:
       - name: Fail job on hard regression
         if: ${{ steps.gate.outcome == 'failure' }}
         run: |
-          echo "::error::pytest-benchmark compare-fail tripped (mean ratio ≥ 2× of base)."
+          echo "::error::pytest-benchmark compare-fail tripped (median ratio ≥ 2× of base)."
           exit 1
 
   # Sticky PR comment. Runs after `bench` even on a hard regression so

@@ -2,7 +2,7 @@
   {% #component "page_header" title="Audit-trail forms" description="A three-step access-request workflow whose every dispatch and validation failure is recorded by two parallel channels: a custom FormActionBackend writing rows synchronously inside dispatch, and signal receivers reacting to action_dispatched and form_validation_failed from the framework." %}
     {% #slot "actions" %}
       <div class="flex gap-3">
-        {% component "button" href="/request/applicant/" text="Start a new request" variant="default" %}
+        {% component "button" href="/request/identity/" text="Start a new request" variant="default" %}
         {% component "button" href="/admin/audit/" text="Open the audit log" variant="outline" %}
       </div>
     {% /slot %}

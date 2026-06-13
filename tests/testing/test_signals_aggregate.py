@@ -25,6 +25,8 @@ class TestAggregateSignalsModule:
             "settings_reloaded",
             "template_loaded",
             "watch_specs_ready",
+            "wizard_completed",
+            "wizard_step_submitted",
         }
         exported = set(aggregate_signals.__all__)
         assert expected == exported

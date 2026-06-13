@@ -82,7 +82,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # decorator on the live stats page swaps this serializer for the same
 # class explicitly so the override path is exercised end to end.
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_BACKENDS": [
+    "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
             "APP_DIRS": True,
@@ -96,14 +96,14 @@ NEXT_FRAMEWORK = {
             },
         },
     ],
-    "DEFAULT_COMPONENT_BACKENDS": [
+    "COMPONENT_BACKENDS": [
         {
             "BACKEND": "obs.backends.CountingComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],
             "COMPONENTS_DIR": "_widgets",
         },
     ],
-    "DEFAULT_STATIC_BACKENDS": [
+    "STATIC_BACKENDS": [
         {
             "BACKEND": "obs.backends.BabelJsxBackend",
             "OPTIONS": {

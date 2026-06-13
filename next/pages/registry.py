@@ -12,8 +12,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from django.http import HttpRequest
-
 from next.deps import DependencyResolver, get_request_dep_cache, resolver
 
 from .context import ContextResult
@@ -24,6 +22,8 @@ from .watch import get_pages_directories_for_watch
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+    from django.http import HttpRequest
 
     from next.static.serializers import JsContextSerializer
 
@@ -118,7 +118,7 @@ class PageContextRegistry:
     def collect_context(
         self,
         file_path: Path,
-        *args: object,
+        request: HttpRequest | None = None,
         **kwargs: object,
     ) -> ContextResult:
         """Merge inherited ancestor page.py context with this file's context callables.
@@ -130,7 +130,6 @@ class PageContextRegistry:
         first-registration semantics so that page-level values always
         take priority over inherited ones.
         """
-        request = args[0] if args and isinstance(args[0], HttpRequest) else None
         context_data: dict[str, Any] = {}
         js_context: dict[str, Any] = {}
         js_context_serializers: dict[str, JsContextSerializer] = {}
@@ -196,7 +195,7 @@ class PageContextRegistry:
         Walks ancestor directories that contain a `page.py` and runs every
         `@context(..., inherit_context=True)` callable registered there.
         A sibling `layout.djx` is not required — the shared HTML envelope
-        can live one level up under ``DEFAULT_PAGE_BACKENDS["DIRS"]``,
+        can live one level up under ``PAGE_BACKENDS["DIRS"]``,
         and pages declaring inheritable context should still surface it
         on descendant routes.
         """

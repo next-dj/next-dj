@@ -275,7 +275,7 @@ permanent noise.
 - [`next/urls/markers.py`](../../next/urls/markers.py) ships both the
   `DUrl` provider for URL path segments and the new `DQuery` provider
   for query-string parameters. The narrative section lives in
-  [`docs/content/guide/dependency-injection.rst`](../../docs/content/guide/dependency-injection.rst#built-in-providers).
+  [`docs/content/topics/dependency-injection.rst`](../../docs/content/topics/dependency-injection.rst).
 - [`next/pages/registry.py`](../../next/pages/registry.py) hosts the
   `_collect_inherited_context` walk used by `inherit_context=True`.
 - [`next/pages/context.py`](../../next/pages/context.py) hosts the

@@ -52,7 +52,7 @@ class TestAdminBulkToggle:
         Flag.objects.create(name="beta", label="Beta", enabled=False)
         Flag.objects.create(name="alpha", label="Alpha", enabled=True)
 
-        response = client.post_action("bulk_toggle", {"enabled_names": ["beta"]})
+        response = client.post_action("bulk_toggle_form", {"enabled_names": ["beta"]})
 
         assert response.status_code == 302
         assert response["Location"] == "/admin/"
@@ -64,7 +64,7 @@ class TestAdminBulkToggle:
         assert get_cached_flag("beta").enabled is True
         assert cache.get(f"{FLAG_PREFIX}beta") is not None
 
-        client.post_action("bulk_toggle", {"enabled_names": []})
+        client.post_action("bulk_toggle_form", {"enabled_names": []})
 
         assert cache.get(f"{FLAG_PREFIX}beta") is None
         assert get_cached_flag("beta").enabled is False
@@ -78,7 +78,7 @@ class TestAdminBulkToggle:
         flag = Flag.objects.create(name="beta", label="Beta", enabled=True)
         original_updated = flag.updated_at
 
-        client.post_action("bulk_toggle", {"enabled_names": ["beta"]})
+        client.post_action("bulk_toggle_form", {"enabled_names": ["beta"]})
 
         flag.refresh_from_db()
         assert flag.updated_at == original_updated

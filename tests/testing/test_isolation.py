@@ -1,11 +1,19 @@
 from pathlib import Path
 
+from django.template import Template
+
 from next.components.manager import components_manager
-from next.forms import RegistryFormActionBackend, form_action_manager
+from next.forms import (
+    ActionRegistration,
+    RegistryFormActionBackend,
+)
+from next.forms.diagnostics import registration_diagnostics
+from next.forms.manager import form_action_manager
 from next.pages.manager import page
 from next.testing import (
     reset_components,
     reset_form_actions,
+    reset_form_registration_state,
     reset_page_cache,
     reset_registries,
 )
@@ -16,12 +24,26 @@ class TestResetFormActions:
 
     def test_clears_registry_and_can_be_repopulated(self) -> None:
         backend = RegistryFormActionBackend()
-        backend.register_action("alpha", lambda: None)
-        assert "alpha" in backend._registry
+        backend.register_action(
+            ActionRegistration(
+                name="alpha",
+                file_path="/fake/forms.py",
+                scope="shared",
+                handler=lambda: None,
+            )
+        )
+        assert any(name == "alpha" for _, name in backend._registry)
         backend.clear_registry()
         assert backend._registry == {}
-        backend.register_action("alpha", lambda: None)
-        assert "alpha" in backend._registry
+        backend.register_action(
+            ActionRegistration(
+                name="alpha",
+                file_path="/fake/forms.py",
+                scope="shared",
+                handler=lambda: None,
+            )
+        )
+        assert any(name == "alpha" for _, name in backend._registry)
 
     def test_reset_form_actions_clears_global_manager(self) -> None:
         saved_registry = dict(form_action_manager.default_backend._registry)
@@ -91,15 +113,42 @@ class TestResetRegistries:
             components_manager._backends = saved_components
 
 
-class TestResetPageCache:
-    """reset_page_cache drops the template registry and mtime bookkeeping."""
+class TestResetFormRegistrationState:
+    """reset_form_registration_state clears every registry and warning buffer."""
 
-    def test_clears_both_dicts(self) -> None:
+    def test_reset_clears_all_buffers(self) -> None:
+        """The aggregate reset empties the registry and every tracking list."""
+        backend = form_action_manager.default_backend
+        backend.register_action(
+            ActionRegistration(
+                name="reset_probe",
+                file_path="/x/page.py",
+                scope="page",
+                handler=lambda _request: None,
+            )
+        )
+        registration_diagnostics.outside_base_dir.append(("Probe", "/x/forms.py"))
+        registration_diagnostics.action_applied_to_class.append("Probe")
+
+        reset_form_registration_state()
+
+        assert backend._registry == {}
+        assert backend._name_index == {}
+        assert registration_diagnostics.outside_base_dir == []
+        assert registration_diagnostics.action_applied_to_class == []
+
+
+class TestResetPageCache:
+    """reset_page_cache drops the template caches and mtime bookkeeping."""
+
+    def test_clears_all_dicts(self) -> None:
         fp = Path("/tmp/synthetic_page.py")
         page._template_registry[fp] = "<p>x</p>"
+        page._compiled_registry[fp] = Template("<p>x</p>")
         page._template_source_mtimes[fp] = {}
         reset_page_cache()
         assert fp not in page._template_registry
+        assert fp not in page._compiled_registry
         assert fp not in page._template_source_mtimes
 
 

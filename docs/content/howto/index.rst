@@ -78,6 +78,21 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`use-formsets`
    Render and validate a Django formset.
 
+:doc:`build-a-multi-step-wizard`
+   Gather data across several steps and finalise one row at the end.
+
+:doc:`move-from-django-formtools`
+   Port a formtools ``WizardView`` flow to ``FormWizard``.
+
+:doc:`style-forms-with-crispy-and-widget-tweaks`
+   Render forms through crispy-forms and widget-tweaks inside ``{% form %}``.
+
+:doc:`drive-form-actions-with-htmx`
+   Submit forms over htmx and swap only the form region.
+
+:doc:`integrate-django-allauth-forms`
+   Drive the allauth login, signup, and reset forms through form actions.
+
 :doc:`write-a-form-action-backend`
    Plug a new validation pipeline into the dispatcher.
 
@@ -134,6 +149,11 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    handle-file-uploads
    use-modelform-for-crud
    use-formsets
+   build-a-multi-step-wizard
+   move-from-django-formtools
+   style-forms-with-crispy-and-widget-tweaks
+   drive-form-actions-with-htmx
+   integrate-django-allauth-forms
    write-a-form-action-backend
    extend-a-default-backend
    test-a-page-with-actions

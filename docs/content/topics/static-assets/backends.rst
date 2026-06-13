@@ -15,7 +15,7 @@ Backend Contract
 ----------------
 
 A backend subclasses ``next.static.StaticBackend``, an abstract base class.
-The constructor receives the full backend entry from ``DEFAULT_STATIC_BACKENDS``, a dict of the shape ``{"BACKEND": "...", "OPTIONS": {...}}``.
+The constructor receives the full backend entry from ``STATIC_BACKENDS``, a dict of the shape ``{"BACKEND": "...", "OPTIONS": {...}}``.
 
 The only abstract method is ``register_file``.
 
@@ -81,7 +81,7 @@ Configuring the Default Backend
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {
                "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {
@@ -99,7 +99,7 @@ This covers most customisation without a subclass.
 Dedup and JS Context Options
 ----------------------------
 
-The first entry of ``DEFAULT_STATIC_BACKENDS`` owns the pipeline-level options.
+The first entry of ``STATIC_BACKENDS`` owns the pipeline-level options.
 ``DEDUP_STRATEGY`` and ``JS_CONTEXT_POLICY`` are read from the first backend ``OPTIONS`` only.
 The same keys on a second or third backend are ignored, so place the configured values on the leading entry.
 
@@ -118,7 +118,7 @@ The same keys on a second or third backend are ignored, so place the configured 
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {
                "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {
@@ -144,13 +144,13 @@ Subclass the abstract ``StaticBackend`` directly only when the project resolves 
 Registering a Backend
 ---------------------
 
-List the dotted path of the backend in ``DEFAULT_STATIC_BACKENDS``.
+List the dotted path of the backend in ``STATIC_BACKENDS``.
 
 .. code-block:: python
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {
                "BACKEND": "notes.backends.SriBackend",
                "OPTIONS": {},

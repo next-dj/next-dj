@@ -27,7 +27,7 @@ from .markers import (
     get_multi_values,
 )
 from .parser import URLPatternParser
-from .reverse import page_reverse, with_query
+from .reverse import page_reverse, page_reverse_lazy, with_query
 
 
 __all__ = [
@@ -46,6 +46,7 @@ __all__ = [
     "checks",
     "get_multi_values",
     "page_reverse",
+    "page_reverse_lazy",
     "router_manager",
     "signals",
     "urlpatterns",

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from django.urls import Resolver404, resolve
+
 from access.models import AuditEntry
 from next.forms import RegistryFormActionBackend
 
@@ -13,8 +15,7 @@ if TYPE_CHECKING:
 _RESERVED_FORM_KEYS = frozenset(
     {
         "csrfmiddlewaretoken",
-        "_next_form_uid",
-        "_next_form_page",
+        "_next_form_origin",
     },
 )
 
@@ -30,8 +31,26 @@ def _safe_form_payload(request: HttpRequest) -> dict[str, list[str]]:
     return {
         key: values
         for key, values in request.POST.lists()
-        if key not in _RESERVED_FORM_KEYS and not key.startswith("_url_param_")
+        if key not in _RESERVED_FORM_KEYS
     }
+
+
+def _step_from_origin(request: HttpRequest) -> str:
+    """Derive the active wizard step from the posted origin URL.
+
+    The origin field carries the URL of the page that rendered the form,
+    so resolving it against the URLconf recovers the typed `step` kwarg
+    captured by the page's path converter.
+    """
+    origin = request.POST.get("_next_form_origin", "")
+    path = origin.partition("?")[0]
+    if not path.startswith("/"):
+        return ""
+    try:
+        match = resolve(path)
+    except Resolver404:
+        return ""
+    return str(match.kwargs.get("step", ""))
 
 
 class AuditedFormActionBackend(RegistryFormActionBackend):
@@ -56,10 +75,11 @@ class AuditedFormActionBackend(RegistryFormActionBackend):
         last step in the workflow). The session key is consumed so
         subsequent dispatches do not over-attach.
         """
-        action_name = self._uid_to_name.get(uid)
-        if action_name is None:
+        key = self._uid_to_name.get(uid)
+        if key is None:
             return super().dispatch(request, uid)
-        step = request.POST.get("step", "") if request.method == "POST" else ""
+        action_name = key[1]
+        step = _step_from_origin(request) if request.method == "POST" else ""
         payload: dict[str, Any] = (
             _safe_form_payload(request) if request.method == "POST" else {}
         )

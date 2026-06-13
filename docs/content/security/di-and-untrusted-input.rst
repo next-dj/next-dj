@@ -51,6 +51,22 @@ Always validate the string before passing it into ORM lookups or external servic
 
 The ``is_public`` filter prevents an attacker from reading a private note by guessing the slug.
 
+The same scoping rule applies to the ModelForm ``Meta.instance_from_url`` key.
+Its default ``get_initial`` runs an unscoped ``get_object_or_404(model, slug=<value>)``, so a form that edits a per-user row must override ``get_initial`` with a scoped query such as ``get_object_or_404(Note, slug=slug, owner=request.user)``.
+See :doc:`/content/topics/forms/modelforms` for the full pattern.
+
+URL Kwargs on a POST
+--------------------
+
+A form POST targets the dispatch endpoint, not the page URL, so the page's captured kwargs are not in the request path.
+The dispatcher recovers them by resolving the hidden ``_next_form_origin`` field against the URLconf, which runs the real URL converters and feeds the typed kwargs into ``get_initial`` and into DI-resolved ``on_valid`` parameters exactly like a live URL capture.
+
+The origin field is user-controlled.
+A client can replace it with the path of any other routed page before posting, so the recovered kwargs carry the same trust level as the path itself, not the higher trust of a server-set value.
+They are the mechanism behind the ``instance_from_url`` insecure direct object reference, because the value that selects the row to edit travels in the request body.
+
+Validate or scope every lookup that reads a URL kwarg, whether the value arrived in the live path or through the posted origin.
+
 Query Strings
 -------------
 
@@ -87,6 +103,9 @@ Do not bypass validation.
 Whitelist fields.
    Use ``Meta.fields`` to declare every editable field.
    Avoid ``Meta.exclude`` because new fields default to editable.
+
+The ``cleaned_data`` rule covers the form fields, not the extra parameters DI injects into ``on_valid``.
+A ``DUrl`` parameter or a URL kwarg argument on ``on_valid`` originates from the same untrusted path and posted origin described above, so validate or scope it the same way before using it in a lookup.
 
 Custom Validators
 -----------------
@@ -146,18 +165,21 @@ Validate destination URLs before passing them to ``HttpResponseRedirect``.
 .. code-block:: python
    :caption: notes/actions.py
 
-   from django.http import HttpResponseRedirect
+   from django.http import HttpRequest, HttpResponseRedirect
    from django.urls import resolve, Resolver404
-   from next.forms import action
+   from next.forms import Form, CharField
    from next.urls import DQuery
 
-   @action("login", form_class=LoginForm)
-   def login(form: LoginForm, next_url: DQuery[str] = "/"):
-       try:
-           resolve(next_url)
-       except Resolver404:
-           next_url = "/"
-       return HttpResponseRedirect(next_url)
+   class LoginForm(Form):
+       username = CharField()
+       password = CharField()
+
+       def on_valid(self, request: HttpRequest, next_url: DQuery[str] = "/") -> HttpResponseRedirect:
+           try:
+               resolve(next_url)
+           except Resolver404:
+               next_url = "/"
+           return HttpResponseRedirect(next_url)
 
 The ``resolve`` call rejects external URLs and unknown paths.
 

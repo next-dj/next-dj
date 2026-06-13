@@ -76,7 +76,7 @@ class ComponentsManager:
         self._reset_render_pipeline()
         self._backends.clear()
         self._walk_registered_folders.clear()
-        configs = next_framework_settings.DEFAULT_COMPONENT_BACKENDS
+        configs = next_framework_settings.COMPONENT_BACKENDS
         if not isinstance(configs, list):
             return
         for config in configs:

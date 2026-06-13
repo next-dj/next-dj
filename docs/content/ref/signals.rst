@@ -6,7 +6,7 @@ Signals Reference
 Module Summary
 --------------
 
-``next.signals`` is an aggregator that re-exports every signal emitted by the framework.
+``next.signals`` is an aggregator that re-exports every framework signal.
 Importing a signal from ``next.signals`` is equivalent to importing it from its subpackage.
 
 Signal Catalog
@@ -15,6 +15,13 @@ Signal Catalog
 Every signal below is a Django ``Signal``. The ``sender`` column lists the value
 passed to ``Signal.send``. Receivers connected with a matching ``sender`` only
 fire for that sender.
+
+The dispatch-time form signals (``action_dispatched``, ``form_validation_failed``,
+``wizard_step_submitted``, ``wizard_completed``) share two keyword arguments.
+``uid`` is the registry identity of the action, the value the dispatch URL and the
+``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores
+no uid in its meta. ``request`` is the live ``HttpRequest`` being dispatched and must
+not be retained past the receiver call.
 
 .. list-table::
    :header-rows: 1
@@ -26,15 +33,17 @@ fire for that sender.
      - When it fires
    * - ``action_dispatched``
      - ``FormActionDispatch``
-     - ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, ``dep_cache``
-     - After an action handler runs and the response is coerced.
+     - ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, ``dep_cache``
+     - After an action handler runs and the response is coerced, and once per valid wizard step.
        ``form`` is the bound form, or ``None`` for handler-only actions.
-       ``duration_ms`` times the handler call.
+       ``duration_ms`` times the handler call and is ``0.0`` on a wizard step advance, which runs no handler.
        ``dep_cache`` is a copy of the dispatch dependency-injection cache.
    * - ``action_registered``
      - Form action backend class
-     - ``action_name``, ``uid``, ``form_class``, ``namespace``, ``handler``
-     - After the backend stores a handler for an action name.
+     - ``action_name``, ``uid``, ``form_class``, ``wizard_class``, ``file_path``, ``scope``, ``handler``
+     - After the backend stores an action target for a name.
+       Exactly one of ``handler``, ``form_class``, or ``wizard_class`` identifies the target,
+       except the ``@action(form_class=...)`` path which supplies a handler and a form factory together.
    * - ``asset_registered``
      - The ``StaticAsset`` instance
      - ``collector``, ``backend``
@@ -69,7 +78,7 @@ fire for that sender.
      - After a context callable is attached to a page module.
    * - ``form_validation_failed``
      - ``FormActionDispatch``
-     - ``action_name``, ``error_count``, ``field_names``
+     - ``action_name``, ``uid``, ``request``, ``error_count``, ``field_names``
      - When the bound form fails validation during dispatch.
    * - ``html_injected``
      - A ``StaticManager`` instance
@@ -103,6 +112,16 @@ fire for that sender.
      - ``iter_all_autoreload_watch_specs``
      - ``specs``
      - After the reloader resolves the full list of watch specs.
+   * - ``wizard_completed``
+     - The wizard class
+     - ``cleaned_data``, ``uid``, ``request``
+     - After the wizard ``done`` method runs for the final step and its response is below HTTP 400.
+       An error response from ``done`` skips the signal and keeps the saved drafts.
+       ``cleaned_data`` is the merged mapping passed to ``done``.
+   * - ``wizard_step_submitted``
+     - The wizard class
+     - ``step``, ``cleaned_data``, ``uid``, ``request``
+     - After a ``FormWizard`` step validates during dispatch. ``cleaned_data`` is a copy of that step's validated data.
 
 Subpackage Signals
 ------------------

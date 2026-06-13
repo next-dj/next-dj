@@ -71,7 +71,7 @@ A repeated registration of the same stem is a no op.
 
 .. warning::
 
-   Only the three built-in roles — ``template``, ``layout``, and ``component`` — are probed by discovery.
+   Discovery probes only the three built-in roles, ``template``, ``layout``, and ``component``.
    Registering a stem under a new role name has no effect on asset collection.
 
 Stem and Kind Interaction

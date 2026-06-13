@@ -8,5 +8,7 @@
   {% if required %}required{% endif %}
   {% if disabled %}disabled{% endif %}
   {% if autofocus %}autofocus{% endif %}
-  class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 {{ extra }}"
+  {% if aria_invalid %}aria-invalid="{{ aria_invalid }}"{% endif %}
+  {% if aria_describedby %}aria-describedby="{{ aria_describedby }}"{% endif %}
+  class="flex h-10 w-full rounded-md border {% if errors %}border-destructive{% else %}border-input{% endif %} bg-background px-3 py-2 text-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 {{ extra }}"
 />

@@ -81,7 +81,7 @@ User code calls ``iter_all_autoreload_watch_specs`` instead, which wraps the bui
 
 - Each page root contributes a ``**/page.py`` spec.
 - Each page root paired with its components folder name contributes a ``**/_components/**/component.py`` spec.
-- Each extra component root from ``DEFAULT_COMPONENT_BACKENDS`` contributes a ``**/component.py`` spec.
+- Each extra component root from ``COMPONENT_BACKENDS`` contributes a ``**/component.py`` spec.
 
 Only Python entrypoints are watched.
 ``.djx`` templates and co-located assets are deliberately omitted from the specs.

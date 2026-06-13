@@ -7,18 +7,18 @@ from next.forms.checks import check_form_action_backends_configuration
 
 
 _VALID_TWO_ENTRY = {
-    "DEFAULT_FORM_ACTION_BACKENDS": [
+    "FORM_ACTION_BACKENDS": [
         {"BACKEND": "next.forms.RegistryFormActionBackend"},
         {"BACKEND": "next.forms.RegistryFormActionBackend", "OPTIONS": {}},
     ],
 }
 
 _INVALID_BACKEND_PATH = {
-    "DEFAULT_FORM_ACTION_BACKENDS": [{"BACKEND": "no.such.Module"}],
+    "FORM_ACTION_BACKENDS": [{"BACKEND": "no.such.Module"}],
 }
 
 _WRONG_SUBCLASS = {
-    "DEFAULT_FORM_ACTION_BACKENDS": [{"BACKEND": "django.http.HttpResponse"}],
+    "FORM_ACTION_BACKENDS": [{"BACKEND": "django.http.HttpResponse"}],
 }
 
 

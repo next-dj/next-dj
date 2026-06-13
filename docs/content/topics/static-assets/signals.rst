@@ -93,7 +93,7 @@ Register imports from ``AppConfig.ready`` so receivers exist before the first re
 .. note::
 
    ``backend_loaded`` re-fires whenever the static manager rebuilds its backend chain.
-   Tests that toggle ``DEFAULT_STATIC_BACKENDS`` through ``override_settings`` or call ``reset_default_manager`` trigger the signal again on the next access.
+   Tests that toggle ``STATIC_BACKENDS`` through ``override_settings`` or call ``reset_default_manager`` trigger the signal again on the next access.
    Make receivers idempotent.
 
 Pipeline placement

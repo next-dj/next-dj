@@ -26,15 +26,17 @@
     <p class="text-xs text-muted-foreground">
       Pick a choice and the bar above moves for everyone watching.
     </p>
-    {% form @action="polls:vote" class="mt-3 grid gap-2" %}
-      <input type="hidden" name="poll" value="{{ results.poll_id }}">
-      <div class="grid gap-2 sm:grid-cols-2">
-        {% for choice in results.choices %}
-          <button type="submit" name="choice" value="{{ choice.id }}"
-            class="rounded-md border border-input bg-background px-3 py-2 text-sm font-medium text-foreground hover:border-ring hover:bg-accent">
-            {{ choice.text }}
-          </button>
-        {% endfor %}
+    {% form "vote_form" %}
+      <div class="mt-3 grid gap-2">
+        <input type="hidden" name="poll" value="{{ results.poll_id }}">
+        <div class="grid gap-2 sm:grid-cols-2">
+          {% for choice in results.choices %}
+            <button type="submit" name="choice" value="{{ choice.id }}"
+              class="rounded-md border border-input bg-background px-3 py-2 text-sm font-medium text-foreground hover:border-ring hover:bg-accent">
+              {{ choice.text }}
+            </button>
+          {% endfor %}
+        </div>
       </div>
     {% endform %}
   </section>

@@ -629,15 +629,15 @@ class TestRouterFactory:
     def test_resolve_components_folder_name_from_first_component_backend(
         self,
     ) -> None:
-        """Skip-folder name comes from the first ``DEFAULT_COMPONENT_BACKENDS`` entry."""
+        """Skip-folder name comes from the first ``COMPONENT_BACKENDS`` entry."""
         with patch("next.urls.backends.next_framework_settings") as nfs:
-            nfs.DEFAULT_COMPONENT_BACKENDS = [{"COMPONENTS_DIR": "custom_comp"}]
+            nfs.COMPONENT_BACKENDS = [{"COMPONENTS_DIR": "custom_comp"}]
             assert FileRouterBackend._resolve_components_folder_name() == "custom_comp"
 
     def test_resolve_components_folder_name_raises_when_unavailable(self) -> None:
         """Missing COMPONENTS_DIR and no valid component backend entry raises KeyError."""
         with patch("next.urls.backends.next_framework_settings") as nfs:
-            nfs.DEFAULT_COMPONENT_BACKENDS = []
+            nfs.COMPONENT_BACKENDS = []
             with pytest.raises(KeyError, match="COMPONENTS_DIR"):
                 FileRouterBackend._resolve_components_folder_name()
 
@@ -646,7 +646,7 @@ class TestRouterFactory:
     ) -> None:
         """First component backend dict must contain COMPONENTS_DIR."""
         with patch("next.urls.backends.next_framework_settings") as nfs:
-            nfs.DEFAULT_COMPONENT_BACKENDS = [{}]
+            nfs.COMPONENT_BACKENDS = [{}]
             with pytest.raises(KeyError, match="COMPONENTS_DIR"):
                 FileRouterBackend._resolve_components_folder_name()
 

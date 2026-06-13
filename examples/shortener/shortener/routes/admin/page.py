@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from shortener.cache import pending_clicks
 from shortener.models import Link
 

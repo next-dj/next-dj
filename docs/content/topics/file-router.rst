@@ -137,6 +137,9 @@ The router renders the template directly without invoking a Python page module.
 Virtual routes are useful for marketing pages, static content, and quick mockups.
 A virtual route can still receive layout wrapping from any ancestor ``layout.djx``.
 
+Every view the router generates, virtual routes included, carries a ``next_page_path`` attribute naming the page source.
+The form dispatcher reads it when it resolves a posted origin back to the page that should re-render after a validation failure, see :doc:`/content/topics/forms/validation-rerender`.
+
 URL Names
 ---------
 
@@ -210,7 +213,7 @@ If two routes resolve to the same Django path the system check ``next.E015`` rep
    BASE_DIR = Path(__file__).resolve().parent.parent
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
+       "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "APP_DIRS": True,
@@ -240,13 +243,13 @@ Path entry.
 Segment entry.
    A plain string such as ``"api"`` or ``"_internal"`` that does not resolve to an existing directory.
    The router adds it to the set of directory names it skips during the file walk, preventing those directories from becoming URL segments.
-   This is an alternative to the automatic ``_components`` skip that comes from ``DEFAULT_COMPONENT_BACKENDS``.
+   This is an alternative to the automatic ``_components`` skip that comes from ``COMPONENT_BACKENDS``.
 
 .. code-block:: python
    :caption: skipping a directory by name
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
+       "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": ["_drafts"],
@@ -264,7 +267,7 @@ Components Folder Skipping
 --------------------------
 
 The router shares its file walk with the components backend.
-The name set in the first ``DEFAULT_COMPONENT_BACKENDS`` entry under ``COMPONENTS_DIR`` becomes a directory that the router does not enter.
+The name set in the first ``COMPONENT_BACKENDS`` entry under ``COMPONENTS_DIR`` becomes a directory that the router does not enter.
 The default is ``_components``.
 Only that exact name is skipped, not every directory that starts with an underscore.
 
@@ -278,7 +281,7 @@ Each backend can read from a different directory, register a different ``PAGES_D
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
+       "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
@@ -329,7 +332,8 @@ Hot Reload
 A backend that reads from a database or other dynamic source needs to rebuild its pattern list when the data changes.
 ``router_manager.reload()`` clears the resolver cache and rebuilds every backend, and the call is idempotent.
 Each invocation emits a ``router_reloaded`` signal with the manager class as sender, so long lived processes can listen for it to refresh cached URL references.
-The call walks every page tree configured in ``DEFAULT_PAGE_BACKENDS``, so a burst of model writes can dominate the request latency.
+Rebuilding drops the cached patterns, so the next request walks every page tree configured in ``PAGE_BACKENDS`` again.
+A burst of model writes that each triggers a reload can dominate that request.
 Receivers should debounce or batch invocations when one logical change triggers many model signals at once.
 See :doc:`/content/howto/reload-routes-from-code` for the model-signal receiver that triggers the reload.
 
@@ -365,7 +369,7 @@ Database Driven Routes
 
 A hybrid backend combines file routes with routes built from database rows.
 Subclass ``FileRouterBackend`` and override ``generate_urls`` to call ``super().generate_urls()`` for the file routes, then append one named pattern per row.
-Register the backend in ``DEFAULT_PAGE_BACKENDS`` and call ``router_manager.reload()`` from a model signal so the row-derived patterns rebuild when the data changes.
+Register the backend in ``PAGE_BACKENDS`` and call ``router_manager.reload()`` from a model signal so the row-derived patterns rebuild when the data changes.
 
 See :doc:`/content/howto/write-a-router-backend` for the full worked recipe.
 

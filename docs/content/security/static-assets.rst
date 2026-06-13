@@ -97,7 +97,7 @@ Register the backend by its dotted path.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {
                "BACKEND": "notes.backends.NonceBackend",
                "OPTIONS": {},

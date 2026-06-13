@@ -9,7 +9,7 @@ Module Summary
 ``next.urls`` exposes the router backends ``RouterBackend`` and ``FileRouterBackend``.
 It also exposes the ``RouterFactory`` and ``RouterManager`` that build and own them.
 The ``URLPatternParser`` for bracket-segment parsing is part of the public surface.
-It also exposes the ``page_reverse`` and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, and the Django integration name ``app_name``.
+It also exposes the ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, and the Django integration name ``app_name``.
 The parameter providers and the dependency markers ``DUrl`` (captured path segments) and ``DQuery`` (query string parameters) round out the public surface.
 
 Public API
@@ -18,6 +18,9 @@ Public API
 Backends
 ~~~~~~~~
 
+Every page view the file router generates carries a ``next_page_path`` attribute naming the page source, including the synthesised ``page.py`` location of a virtual ``template.djx`` route.
+The form dispatcher reads it when it resolves a posted origin URL back to the page that re-renders after a validation failure.
+
 .. automodule:: next.urls.backends
    :members:
 
@@ -25,7 +28,7 @@ Manager
 ~~~~~~~
 
 ``urlpatterns`` is a ``list`` subclass that recollects router and form-action patterns from the active backends on each access.
-The backends themselves are cached by ``router_manager`` and are only rebuilt when ``router_manager.reload()`` runs or when ``DEFAULT_PAGE_BACKENDS`` changes.
+The backends themselves are cached by ``router_manager`` and are only rebuilt when ``router_manager.reload()`` runs or when ``PAGE_BACKENDS`` changes.
 A route added after import is therefore visible without a process restart, but each access still iterates the cached backend list rather than walking the page tree again.
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
 
@@ -54,6 +57,14 @@ Reverse Helpers
 
 .. autofunction:: next.urls.reverse.page_reverse
 
+.. py:function:: next.urls.reverse.page_reverse_lazy(path_template="", *, namespace=app_name, **kwargs)
+
+   Lazy variant of ``page_reverse``, the way :func:`~django.urls.reverse_lazy` pairs with :func:`~django.urls.reverse`.
+   The URL resolves when the value is first coerced to ``str``,
+   which makes it safe in positions evaluated at class-definition time,
+   before the URLconf is ready,
+   such as ``Meta.success_url`` on a form class.
+
 .. autofunction:: next.urls.reverse.with_query
 
 Markers
@@ -79,7 +90,8 @@ They are exported from ``next.urls`` for introspection and for authors writing c
    * - ``UrlByAnnotationProvider``
      - Supplies a URL kwarg value for parameters annotated with ``DUrl[...]``.
    * - ``UrlKwargsProvider``
-     - Supplies raw URL kwargs by parameter name when no annotation is present.
+     - Supplies a URL kwarg value by parameter name, coercing the raw string to the parameter annotation when one is present.
+       ``DUrl``-annotated parameters are claimed by ``UrlByAnnotationProvider`` first.
    * - ``QueryParamProvider``
      - Supplies ``request.GET`` values for parameters annotated with ``DQuery[...]``.
 
@@ -145,7 +157,7 @@ Checks
 ``next.urls.checks`` registers Django system checks that validate the URL configuration at startup.
 
 ``check_next_pages_configuration``.
-   Validates the ``NEXT_FRAMEWORK['DEFAULT_PAGE_BACKENDS']`` structure, the ``BACKEND`` path, and per-backend ``DIRS``/``APP_DIRS``/``PAGES_DIR``/``OPTIONS`` keys.
+   Validates the ``NEXT_FRAMEWORK['PAGE_BACKENDS']`` structure, the ``BACKEND`` path, and per-backend ``DIRS``/``APP_DIRS``/``PAGES_DIR``/``OPTIONS`` keys.
 
 ``check_duplicate_url_parameters``.
    Fails with :ref:`next.E028 <ref-system-checks>` when one route repeats a captured parameter name.

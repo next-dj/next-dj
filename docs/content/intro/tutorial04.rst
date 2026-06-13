@@ -20,8 +20,8 @@ Action handlers resolve ``request``, the form, and URL segments through the same
 Walkthrough
 -----------
 
-Declare the Note Form
-~~~~~~~~~~~~~~~~~~~~~
+Declare the Note Forms
+~~~~~~~~~~~~~~~~~~~~~~
 
 Forms in next.dj are Django forms with one extra base class.
 Create ``notes/forms.py``.
@@ -29,39 +29,47 @@ Create ``notes/forms.py``.
 .. code-block:: python
    :caption: notes/forms.py
 
+   from django.http import HttpRequest
    from notes.models import Note
-   from next.forms import BooleanField, Form, ModelForm
+   from next.forms import BooleanField, Form, ModelForm, redirect_to_origin
 
-   class NoteForm(ModelForm):
+   class CreateNoteForm(ModelForm):
        class Meta:
            model = Note
            fields = ("title", "body")
 
+       # The inherited ModelForm.on_valid already saves and redirects to origin,
+       # so CreateNoteForm needs no override.
+
    class DeleteNoteForm(Form):
        confirm = BooleanField(required=True)
 
+       def on_valid(self, request: HttpRequest):
+           # Stub: redirect only, no delete yet. The Delete a Note section
+           # below replaces this with the real delete logic.
+           return redirect_to_origin(request)
+
 ``next.forms.ModelForm`` and ``next.forms.Form`` are the framework form base classes.
-They participate in :doc:`form dispatch </content/topics/forms/index>`.
-A plain Django ``Form`` or ``ModelForm`` cannot be passed to ``@action`` because the dispatch pipeline expects the framework base class.
+Subclassing either one auto-registers the form.
+The action name is derived from the class name in ``snake_case``: ``CreateNoteForm`` registers as ``create_note_form``, ``DeleteNoteForm`` registers as ``delete_note_form``.
+Override ``on_valid`` to run code after the form passes validation.
+The default ``on_valid`` on ``ModelForm`` calls ``self.save()`` then redirects back.
+``redirect_to_origin`` sends the visitor back to the page that rendered the form.
+See the :term:`origin page` glossary entry.
 ``next.forms`` re-exports the common Django form fields and widgets used in this tutorial, so ``BooleanField`` and the rest are importable from one place.
 Import other fields directly from :mod:`django.forms` when you need them.
 
-Register the Create Action
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Register Context for the Index Page
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-An ``@action`` action handler registers when its module is imported.
-Placing it in the page's ``page.py`` means the file router imports it on the first request, so the natural home is next to the page that exposes the form.
+The index page publishes context values.
 Update ``notes/pages/page.py``.
 The ``inherit_context=True`` flag on the three layout-scope callables stays from :doc:`tutorial02` so each value still reaches every descendant page.
 
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from django.http import HttpResponseRedirect
-   from django.urls import reverse
-   from notes.forms import NoteForm
    from notes.models import Note
-   from next.forms import action
    from next.pages import context
 
    @context("site_name", inherit_context=True)
@@ -80,26 +88,21 @@ The ``inherit_context=True`` flag on the three layout-scope callables stays from
    def recent_notes() -> list[Note]:
        return list(Note.objects.all())
 
-   @action("create_note", form_class=NoteForm)
-   def create_note(form: NoteForm) -> HttpResponseRedirect:
-       form.save()
-       return HttpResponseRedirect(reverse("next:page_"))
-
-The signature defines what the dispatcher injects.
-``form: NoteForm`` is the validated form instance, populated from the POST body.
-You can also ask for ``request``, captured URL parameters, query strings, or any DI marker the resolver knows about.
+``CreateNoteForm`` is declared in ``notes/forms.py`` and registers automatically at startup via autodiscovery.
+No manual import in ``page.py`` is needed.
+See :doc:`/content/topics/forms/overview` for scope rules and autodiscovery.
 
 Render the Create Form
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Add the form to the index template.
-The ``{% form %}`` tag points to the action by name.
+The ``{% form %}`` tag takes the auto-derived action name as a quoted string.
 
 .. code-block:: jinja
    :caption: notes/pages/template.djx
 
    <section class="note-create">
-     {% form @action="create_note" class="note-form" %}
+     {% form "create_note_form" %}
        <label>
          Title
          {{ form.title }}
@@ -135,7 +138,9 @@ Edit a Note
 ~~~~~~~~~~~
 
 Create a new page at ``notes/pages/notes/[id]/edit/``.
-The action binds ``NoteForm`` to the existing note through a ``form_class`` factory.
+The action binds ``CreateNoteForm`` to the existing note through a ``form_class`` factory callable.
+A factory callable is a plain function (not a form class) that returns a ``(FormClass, init_kwargs)`` tuple.
+It receives the same DI-resolved parameters as any other callable, including URL parameters.
 
 .. code-block:: python
    :caption: notes/pages/notes/[id]/edit/page.py
@@ -143,7 +148,7 @@ The action binds ``NoteForm`` to the existing note through a ``form_class`` fact
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
    from django.urls import reverse
-   from notes.forms import NoteForm
+   from notes.forms import CreateNoteForm
    from notes.models import Note
    from next.forms import action
    from next.pages import context
@@ -153,15 +158,17 @@ The action binds ``NoteForm`` to the existing note through a ``form_class`` fact
    def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
-   def note_edit_form(note_id: DUrl["id", int]) -> tuple[type[NoteForm], dict]:
+   def note_edit_form(note_id: DUrl["id", int]) -> tuple[type[CreateNoteForm], dict]:
        note = get_object_or_404(Note, pk=note_id)
-       return NoteForm, {"instance": note}
+       return CreateNoteForm, {"instance": note}
 
    @action("update_note", form_class=note_edit_form)
-   def update_note(form: NoteForm) -> HttpResponseRedirect:
+   def update_note(form: CreateNoteForm) -> HttpResponseRedirect:
        note = form.save()
        return HttpResponseRedirect(reverse("next:page_notes_id", kwargs={"id": note.id}))
 
+The reverse name ``next:page_notes_id`` assumes the untyped ``notes/[id]/`` directory used in this tutorial.
+A typed segment such as ``notes/[int:id]/`` produces ``page_notes_int_id`` instead.
 The factory passed to ``form_class`` is dependency-resolved at dispatch time, so it receives the captured URL ``id`` and returns the form class paired with the ``instance`` to bind.
 The dispatcher builds and validates that bound form before it calls ``update_note``, so the handler only saves it.
 An ``id`` that matches no note makes ``get_object_or_404`` return Django's standard 404 response.
@@ -171,7 +178,7 @@ See :doc:`/content/howto/customize-error-pages` for customising what the visitor
    :caption: notes/pages/notes/[id]/edit/template.djx
 
    <h2>Edit {{ note.title }}</h2>
-   {% form @action="update_note" %}
+   {% form "update_note" %}
      <label>Title {{ form.title }}</label>
      <label>Body {{ form.body }}</label>
      <button type="submit">Save</button>
@@ -210,7 +217,7 @@ Extend the detail template.
      <small>{{ note.created_at|date:"Y-m-d H:i" }}</small>
      <p>
        <a href="{% url 'next:page_notes_id_edit' id=note.id %}">Edit</a>
-       {% form @action="delete_note" %}
+       {% form "delete_note_form" %}
          <input type="hidden" name="confirm" value="on">
          <button type="submit" class="button-danger">Delete</button>
        {% endform %}
@@ -219,10 +226,11 @@ Extend the detail template.
 
 The rendered form carries several hidden inputs from different sources.
 ``confirm`` is a real field on ``DeleteNoteForm``, so the template posts it explicitly.
-The ``{% form %}`` tag emits the framework fields shown below.
-``csrfmiddlewaretoken`` carries the CSRF token, ``_next_form_page`` identifies the origin page, ``_next_form_origin`` records the request path, and ``_url_param_id`` echoes the captured URL ``id``.
-The ``_url_param_id`` field lets the action handler resolve ``DUrl["id", int]`` without any extra argument on the tag.
-Add the action handler to the detail page.
+The ``{% form %}`` tag emits the framework fields itself: ``csrfmiddlewaretoken`` carries the CSRF token and ``_next_form_origin`` records the page URL, such as ``/notes/7/``.
+The dispatcher resolves that path against the URLconf, which recovers the captured ``id`` through the URL converter, so the action handler resolves ``DUrl["id", int]`` without any extra argument on the tag.
+Add the delete handler to the detail page.
+``DeleteNoteForm`` is declared in ``notes/forms.py`` and registers automatically at startup via autodiscovery.
+The detail ``page.py`` only needs to add its own context.
 
 .. code-block:: python
    :caption: notes/pages/notes/[id]/page.py
@@ -230,9 +238,7 @@ Add the action handler to the detail page.
    from django.http import HttpResponseRedirect
    from django.shortcuts import get_object_or_404
    from django.urls import reverse
-   from notes.forms import DeleteNoteForm
    from notes.models import Note
-   from next.forms import action
    from next.pages import context
    from next.urls import DUrl
 
@@ -240,10 +246,33 @@ Add the action handler to the detail page.
    def fetch_note(note_id: DUrl["id", int]) -> Note:
        return get_object_or_404(Note, pk=note_id)
 
-   @action("delete_note", form_class=DeleteNoteForm)
-   def delete_note(note_id: DUrl["id", int], form: DeleteNoteForm) -> HttpResponseRedirect:
-       get_object_or_404(Note, pk=note_id).delete()
-       return HttpResponseRedirect(reverse("next:page_"))
+``DeleteNoteForm.on_valid`` handles the delete.
+Update ``notes/forms.py`` to add the full import block and the delete logic.
+The complete file now looks like this.
+
+.. code-block:: python
+   :caption: notes/forms.py, complete file
+
+   from django.http import HttpRequest, HttpResponseRedirect
+   from django.shortcuts import get_object_or_404
+   from django.urls import reverse
+   from notes.models import Note
+   from next.forms import BooleanField, Form, ModelForm
+   from next.urls import DUrl
+
+   class CreateNoteForm(ModelForm):
+       class Meta:
+           model = Note
+           fields = ("title", "body")
+
+       # ModelForm.on_valid saves and redirects to origin by default.
+
+   class DeleteNoteForm(Form):
+       confirm = BooleanField(required=True)
+
+       def on_valid(self, request: HttpRequest, note_id: DUrl["id", int]):
+           get_object_or_404(Note, pk=note_id).delete()
+           return HttpResponseRedirect(reverse("next:page_"))
 
 Submit the delete button on a note and the detail page redirects to the index, which no longer lists that note.
 
@@ -271,16 +300,16 @@ The Notes application is functionally complete.
      forms.py
      models.py
      migrations/
-     _components/
-       note_card/
-         component.djx
-         component.py
-         component.css
-         component.js
      pages/
        layout.djx
        page.py
        template.djx
+       _components/
+         note_card/
+           component.djx
+           component.py
+           component.css
+           component.js
        notes/
          layout.djx
          [id]/
@@ -301,12 +330,12 @@ Action fires but the page reloads with an empty form.
    A handler that returns ``None`` renders the page again from scratch.
 
 CSRF token missing.
-   ``{% form @action="..." %}`` injects the token automatically, but only on POST forms.
+   ``{% form "..." %}`` injects the token automatically, but only on POST forms.
    Plain ``<form method="post">`` markup without the tag still needs ``{% csrf_token %}``.
 
 Edit form does not show the existing data.
    The ``{% form %}`` tag builds the form for the named action, so a plain ``@context("form")`` value never reaches it.
-   Pass a ``form_class`` factory to ``@action`` that resolves the URL ``id`` and returns the form class with the bound ``instance``.
+   Pass a ``form_class`` factory callable to ``@action`` that resolves the URL ``id`` and returns the form class with the bound ``instance``.
 
 See :doc:`/content/faq/troubleshooting` for the full catalog of errors and fixes.
 

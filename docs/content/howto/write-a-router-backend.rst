@@ -14,7 +14,7 @@ Solution
 
 Subclass ``FileRouterBackend`` and override ``generate_urls``.
 Call ``super().generate_urls()`` for the file routes, then append one ``URLPattern`` per database row.
-Register the subclass through ``DEFAULT_PAGE_BACKENDS`` and reload it from a signal receiver when the table changes.
+Register the subclass through ``PAGE_BACKENDS`` and reload it from a signal receiver when the table changes.
 
 Walkthrough
 -----------
@@ -109,14 +109,14 @@ Names a custom backend registers land in the same ``next`` namespace.
 Register the Backend
 ~~~~~~~~~~~~~~~~~~~~~
 
-List the dotted path of the subclass under ``DEFAULT_PAGE_BACKENDS``.
+List the dotted path of the subclass under ``PAGE_BACKENDS``.
 ``RouterFactory`` imports the class and instantiates it with the same ``PAGES_DIR``, ``APP_DIRS``, ``DIRS``, and ``OPTIONS`` keys a plain ``FileRouterBackend`` accepts.
 
 .. code-block:: python
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
+       "PAGE_BACKENDS": [
            {
                "BACKEND": "wiki.backends.HybridRouterBackend",
                "APP_DIRS": True,
@@ -151,7 +151,7 @@ Connect a receiver to ``post_save`` and ``post_delete`` and call ``router_manage
        """Rebuild URL patterns whenever an article appears or disappears."""
        router_manager.reload()
 
-The reload drops the cached backends, rebuilds them from ``DEFAULT_PAGE_BACKENDS``, clears the Django URL resolver caches, and emits ``router_reloaded``.
+The reload drops the cached backends, rebuilds them from ``PAGE_BACKENDS``, clears the Django URL resolver caches, and emits ``router_reloaded``.
 
 Verification
 ------------

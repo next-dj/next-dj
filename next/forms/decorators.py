@@ -1,44 +1,131 @@
-"""The `@action` decorator used to register form handlers."""
+"""The @action decorator for named form actions."""
 
-from __future__ import annotations
+import sys
+import types
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from typing import Any, overload
 
-from typing import TYPE_CHECKING, Any
-
-from .backends import FormActionOptions
+from .backends import (
+    ActionGuard,
+    ActionRegistration,
+    _resolved_path_str,
+    build_action_guard,
+)
+from .base import Form, _compute_scope, _is_self_registered
+from .diagnostics import registration_diagnostics
 from .manager import form_action_manager
 
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from django import forms as django_forms
+_VALID_SCOPES = ("page", "shared")
 
 
-def action(
-    name: str,
+def _record_class_misuse(cls: type) -> None:
+    """Buffer an @action-on-class mistake for the next.E053 system check."""
+    # Recording instead of raising lets the mistake surface through
+    # manage.py check rather than a bare TypeError aborting django.setup()
+    # mid-import.
+    registration_diagnostics.action_applied_to_class.append(cls.__qualname__)
+
+
+@dataclass(frozen=True, slots=True)
+class _HandlerSpec:
+    """Bundle of @action options threaded into one registration."""
+
+    name: str
+    scope: str | None = None
+    form_class: "type[Form] | Callable[..., Any] | None" = None
+    guard: ActionGuard | None = None
+
+
+def _register_handler(
+    func: Callable[..., Any],
+    file_path: str,
+    spec: _HandlerSpec,
+) -> None:
+    """Validate the scope override and forward one registration to the manager."""
+    if spec.scope is not None and spec.scope not in _VALID_SCOPES:
+        registration_diagnostics.invalid_action_scope.append(
+            (func.__qualname__, str(spec.scope))
+        )
+        return
+    form_action_manager.register_action(
+        ActionRegistration(
+            name=spec.name,
+            file_path=_resolved_path_str(file_path),
+            scope=spec.scope if spec.scope is not None else _compute_scope(file_path),
+            handler=func,
+            form_class=spec.form_class,
+            guard=spec.guard,
+        )
+    )
+
+
+@overload
+def action[C: Callable[..., Any]](name: C, /) -> C: ...
+@overload
+def action[C: Callable[..., Any]](
+    name: str | None = None,
     *,
-    form_class: type[django_forms.Form]
-    | Callable[..., type[django_forms.Form]]
-    | None = None,
-    namespace: str | None = None,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Register a named form action. Names must be unique across the project.
+    form_class: "type[Form] | Callable[..., Any] | None" = None,
+    scope: str | None = None,
+    login_required: bool = False,
+    permission_required: str | Iterable[str] | None = None,
+) -> Callable[[C], C]: ...
+def action(
+    name: Callable[..., Any] | str | None = None,
+    *,
+    form_class: "type[Form] | Callable[..., Any] | None" = None,
+    scope: str | None = None,
+    login_required: bool = False,
+    permission_required: str | Iterable[str] | None = None,
+) -> Callable[..., Any]:
+    """Register a callable as a named form action.
 
-    Pass `namespace="app_label"` to prefix the stored key with
-    `"app_label:"`, which lets two apps use the same short name without
-    colliding. Reverse is by the namespaced name.
-
-    `form_class` may be a `Form` subclass or a callable that returns one
-    when called. Factory callables are dependency-resolved at dispatch
-    time with the request and URL kwargs, which lets admin-style
-    handlers shape the form per request (for example via
-    `ModelAdmin.get_form()`).
+    Used bare or with no name the action is registered under the function's
+    own name. `form_class` accepts a factory callable or a Form class that
+    does not register its own endpoint. `scope` overrides the file-based
+    scope with 'page' or 'shared'. `login_required` and `permission_required`
+    guard the endpoint before origin resolution, `get_initial`, and form
+    binding, so no application code runs for a denied request.
     """
+    # The definition file must be captured here. The bare form invokes the
+    # inner decorator from this module, so a frame lookup inside it would
+    # name decorators.py instead of the defining module.
+    file_path = sys._getframe(1).f_code.co_filename
+    if isinstance(name, type):
+        _record_class_misuse(name)
+        return name
+    if isinstance(name, types.FunctionType):
+        _register_handler(name, file_path, _HandlerSpec(name=name.__name__))
+        return name
+    if isinstance(form_class, type) and _is_self_registered(form_class):
+        msg = (
+            f"@action's form_class={form_class.__name__} already registers "
+            f"its own endpoint. Set Meta.abstract = True on "
+            f"{form_class.__name__}, or move the handler into its on_valid."
+        )
+        raise TypeError(msg)
+    action_name = name if isinstance(name, str) else None
+    guard = build_action_guard(
+        login_required=login_required,
+        permission_required=permission_required,
+    )
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        opts = FormActionOptions(form_class=form_class, namespace=namespace)
-        full_name = f"{namespace}:{name}" if namespace else name
-        form_action_manager.register_action(full_name, func, options=opts)
+        if isinstance(func, type):
+            _record_class_misuse(func)
+            return func
+        _register_handler(
+            func,
+            file_path,
+            _HandlerSpec(
+                name=action_name if action_name is not None else func.__name__,
+                scope=scope,
+                form_class=form_class,
+                guard=guard,
+            ),
+        )
         return func
 
     return decorator

@@ -42,7 +42,7 @@ alongside the built-in djx loader:
 
 ```python
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_BACKENDS": [{
+    "PAGE_BACKENDS": [{
         "BACKEND": "next.urls.FileRouterBackend",
         "PAGES_DIR": "screens",
         "OPTIONS": {
@@ -52,7 +52,7 @@ NEXT_FRAMEWORK = {
             ],
         },
     }],
-    "DEFAULT_COMPONENT_BACKENDS": [{
+    "COMPONENT_BACKENDS": [{
         "BACKEND": "next.components.FileComponentsBackend",
         "COMPONENTS_DIR": "_parts",
     }],
@@ -271,7 +271,7 @@ def site_nav(request: HttpRequest) -> dict[str, object]:  # noqa: ARG001
     }
 ```
 
-Wired under `NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"][0]["OPTIONS"]["context_processors"]`.
+Wired under `NEXT_FRAMEWORK["PAGE_BACKENDS"][0]["OPTIONS"]["context_processors"]`.
 The framework's [`next.E040`](../../docs/content/reference/system-checks.rst)
 check fails at `manage.py check` time if the processor signature does not
 accept `request`.
@@ -367,5 +367,5 @@ sanitising — this example trusts the files on disk.
   `@context(serialize=True)` values reach `window.Next.context`.
 - [next/components/context.py](../../next/components/context.py) —
   `@component.context` and prop/parent flattening rules.
-- [docs/content/guide/pages-and-templates.rst](../../docs/content/guide/pages-and-templates.rst)
-  — "Custom template formats" section with a more detailed loader walkthrough.
+- [docs/content/topics/pages.rst](../../docs/content/topics/pages.rst)
+  — "Custom Template Loaders" section with a more detailed loader walkthrough.

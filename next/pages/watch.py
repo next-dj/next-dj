@@ -25,7 +25,7 @@ def get_pages_directories_for_watch() -> list[Path]:
     """Return absolute page roots that the autoreloader should observe."""
     from next.urls import RouterFactory  # noqa: PLC0415
 
-    configs = next_framework_settings.DEFAULT_PAGE_BACKENDS
+    configs = next_framework_settings.PAGE_BACKENDS
     if not isinstance(configs, list):
         return []
     seen: set[Path] = set()
@@ -61,7 +61,7 @@ def iter_pages_roots_with_components_folder_names() -> list[tuple[Path, str]]:
     """Return distinct page-root and components-folder-name pairs."""
     from next.urls import RouterFactory  # noqa: PLC0415
 
-    configs = next_framework_settings.DEFAULT_PAGE_BACKENDS
+    configs = next_framework_settings.PAGE_BACKENDS
     if not isinstance(configs, list):
         return []
     seen: set[tuple[Path, str]] = set()

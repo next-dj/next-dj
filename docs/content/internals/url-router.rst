@@ -72,7 +72,7 @@ Reload Mechanics
 
 ``router_manager.reload()`` does three things in order.
 
-1. Rebuilds the backend list from ``DEFAULT_PAGE_BACKENDS``.
+1. Rebuilds the backend list from ``PAGE_BACKENDS``.
 2. Clears the Django URL resolver cache.
 3. Emits the ``router_reloaded`` signal.
 

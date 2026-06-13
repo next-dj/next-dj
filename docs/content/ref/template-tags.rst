@@ -12,19 +12,43 @@ Templates therefore use them without an explicit ``{% load %}`` statement.
 Forms
 -----
 
-.. describe:: {% form @action="<name>" %}...{% endform %}
+.. describe:: {% form "<name>" key="value" ... %}...{% endform %}
 
    Renders a form bound to a registered action.
-   Injects the CSRF token and the hidden ``_next_form_page`` origin field.
+   The first argument is the action name, a quoted string or a context variable that resolves to a string.
+   Injects two hidden inputs: the ``csrfmiddlewaretoken`` CSRF field and the ``_next_form_origin`` field carrying the URL path of the rendering page.
    The block body has access to the bound or unbound form through ``{{ form }}``.
 
-   The HTTP method is always ``post``. It cannot be passed as an argument.
+   Optional ``key="value"`` arguments after the action name render as HTML attributes on the ``<form>`` element, for example ``{% form "upload_form" class="stack" %}``.
+   Attribute values are escaped, and an unquoted value resolves as a context variable.
 
-   Accepts every HTML attribute as a keyword.
-   Captured URL parameters from ``request.resolver_match.kwargs`` are emitted automatically as ``_url_param_<name>`` hidden inputs. They are not passed as tag arguments.
+   The opening tag emits its attributes in a fixed order: ``action`` with the dispatch URL, ``method="post"``, ``data-next-action`` with the action UID when the registry meta is available, ``enctype="multipart/form-data"`` when the form is multipart, then the attributes passed to the tag.
+   The ``enctype`` attribute is automatic for any form whose widgets need multipart encoding, so a file-upload form needs no extra argument.
+   An explicit ``enctype="..."`` argument on the tag suppresses the automatic value and renders in the user-attribute position, for example ``{% form "upload_form" enctype="text/plain" %}``.
 
-   The tag requires ``request`` and ``current_page_module_path`` in the template context.
-   The file router supplies both, so ``{% form %}`` works only inside a file-routed page.
+   The HTTP method is always ``post``.
+   The tag owns the ``action`` and ``method`` attributes plus every attribute starting with ``data-next-``, and passing any of them raises ``TemplateSyntaxError`` at parse time.
+   ``data-next-*`` is the single framework namespace in rendered markup.
+
+   Captured URL parameters travel inside the origin path, the dispatcher recovers them by resolving ``_next_form_origin`` against the URLconf.
+
+   The tag requires ``request`` in the template context for the CSRF token.
+   It also uses ``current_page_module_path`` when present to scope the action lookup to the origin page, which is how the file router renders it.
+   That context value is not strictly required: when it is absent the action lookup falls back to the name index.
+
+.. describe:: {% action_url "<name>" %}
+
+   Returns the dispatch endpoint URL for a registered action.
+   The first argument is the action name, a quoted string or a context variable that resolves to a string.
+   The lookup uses the same page scoping as ``{% form %}``: a page-scoped match for the rendering page wins over a shared one, read from ``current_page_module_path`` when present.
+
+   As a ``simple_tag`` it supports assignment, ``{% action_url "delete_note" as delete_url %}``.
+
+   Use it for hand-written forms and client-side requests that post outside the ``{% form %}`` tag.
+   Such a request supplies the CSRF token and the hidden ``_next_form_origin`` field itself, see the manual-form notes in :doc:`/content/topics/forms/templates`.
+
+   An unknown name raises ``FormActionNotFound`` at render time, with the closest registered names in the message.
+   An argument that resolves to an empty string raises ``FormActionNotFound`` with a hint to quote the literal name, since an unquoted name is read as a template variable.
 
 Components
 ----------

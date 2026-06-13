@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       test-command:
-        description: Command to run tests (run against the wheel-installed venv, do not use `uv run`)
+        description: Command to run tests (run via `uv run --no-project` against the wheel-installed venv)
         required: true
         type: string
       upload-codecov:
@@ -25,12 +25,10 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
         django-version: ["4.2", "5.0", "5.1", "5.2", "6.0"]
         exclude:
-          # Django 4.2 and 5.0 don't support Python 3.13
           - python-version: "3.13"
             django-version: "4.2"
           - python-version: "3.13"
             django-version: "5.0"
-          # Python 3.14 is only supported on Django 6.0+
           - python-version: "3.14"
             django-version: "4.2"
           - python-version: "3.14"
@@ -70,7 +68,7 @@ jobs:
       run: uv pip install "django==${{ matrix.django-version }}"
     - name: Verify Django version
       run: |
-        .venv/bin/python -c 'import django; print(f"Django version: {django.get_version()}")'
+        uv run --no-project python -c 'import django; print(f"Django version: {django.get_version()}")'
     - name: Run tests
       run: ${{ inputs.test-command }}
     - name: Upload coverage to Codecov

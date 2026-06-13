@@ -4,20 +4,30 @@ Register handlers with `@action`. Each action gets a stable UID
 endpoint. Valid submissions run the handler. Invalid forms re-render
 with errors. CSRF is applied for posted forms.
 
-Advanced integrations can import dispatch helpers from ``next.forms.dispatch`` when a
-submodule import clarifies intent.
+Any public `django.forms` name resolves through `next.forms` unless
+next.dj deliberately overrides it. The formset and modelform factories
+plus `BoundField` are re-exported statically for type checkers, the
+rest of the `django.forms` passthrough resolves at runtime only.
+Framework machinery lives in the submodules, for example
+`next.forms.dispatch` and `next.forms.manager`.
 """
 
-from __future__ import annotations
+from django import forms as _django_forms
+from django.forms import (
+    BoundField,
+    formset_factory,
+    inlineformset_factory,
+    modelform_factory,
+    modelformset_factory,
+)
 
-from next.pages import page
-
-from . import checks, signals
+from . import signals
+from .autodiscover import autodiscover_forms
 from .backends import (
-    ActionMeta,
+    ActionGuard,
+    ActionRegistration,
     FormActionBackend,
-    FormActionFactory,
-    FormActionOptions,
+    FormActionNotFound,
     RegistryFormActionBackend,
 )
 from .base import (
@@ -26,52 +36,51 @@ from .base import (
     BooleanField,
     CharField,
     CheckboxInput,
+    CheckboxSelectMultiple,
     ChoiceField,
+    ClearableFileInput,
     DateField,
     DateInput,
     DateTimeField,
     DateTimeInput,
     DecimalField,
+    DurationField,
     EmailField,
     EmailInput,
     FileField,
+    FileInput,
     FloatField,
     Form,
     HiddenInput,
     ImageField,
     IntegerField,
+    JSONField,
+    ModelChoiceField,
     ModelForm,
+    ModelMultipleChoiceField,
     MultipleChoiceField,
     NumberInput,
     PasswordInput,
+    RadioSelect,
     RegexField,
     Select,
     SelectMultiple,
+    SlugField,
     Textarea,
     TextInput,
+    TimeField,
     TimeInput,
     TypedChoiceField,
     URLField,
     URLInput,
+    UUIDField,
     ValidationError,
     Widget,
 )
 from .decorators import action
-from .dispatch import (
-    FormActionDispatch,
-    _bind_form_for_post,
-    _filter_reserved_url_kwargs,
-    _form_action_context_callable,
-    _form_from_initial_data,
-    _get_caller_path,
-    _normalize_handler_response,
-    _url_kwargs_from_post,
-    _url_kwargs_from_resolver_or_post,
-    build_form_namespace_for_action,
-)
+from .dispatch import ActionOutcome, ActionOutcomeKind
 from .formsets import cleanup_extra_initial
-from .manager import FormActionManager, form_action_manager
-from .markers import DForm, FormProvider
+from .markers import DForm
 from .serializers import (
     FieldKind,
     FieldSpec,
@@ -83,86 +92,111 @@ from .serializers import (
     form_spec,
     formset_spec,
 )
-from .uid import (
-    FORM_ACTION_REVERSE_NAME,
-    URL_NAME_FORM_ACTION,
-    _make_uid,
-    redirect_to_origin,
-    validated_next_form_page_path,
+from .uid import redirect_to_origin
+from .widgets import ComponentWidget
+from .wizard import (
+    CacheFormWizardBackend,
+    FormWizard,
+    FormWizardBackend,
+    SessionFormWizardBackend,
 )
 
 
+_MISSING = object()
+
+
+def __getattr__(name: str) -> object:
+    """Resolve public `django.forms` names that next.dj does not override."""
+    if not name.startswith("_"):
+        value = getattr(_django_forms, name, _MISSING)
+        if value is not _MISSING:
+            return value
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
+
+def __dir__() -> list[str]:
+    """List the curated surface plus the public `django.forms` namespace."""
+    django_public = {n for n in dir(_django_forms) if not n.startswith("_")}
+    return sorted(set(__all__) | django_public)
+
+
 __all__ = [
-    "FORM_ACTION_REVERSE_NAME",
-    "URL_NAME_FORM_ACTION",
-    "ActionMeta",
+    "ActionGuard",
+    "ActionOutcome",
+    "ActionOutcomeKind",
+    "ActionRegistration",
     "BaseForm",
     "BaseModelForm",
     "BooleanField",
+    "BoundField",
+    "CacheFormWizardBackend",
     "CharField",
     "CheckboxInput",
+    "CheckboxSelectMultiple",
     "ChoiceField",
+    "ClearableFileInput",
+    "ComponentWidget",
     "DForm",
     "DateField",
     "DateInput",
     "DateTimeField",
     "DateTimeInput",
     "DecimalField",
+    "DurationField",
     "EmailField",
     "EmailInput",
     "FieldKind",
     "FieldSpec",
     "FileField",
+    "FileInput",
     "FloatField",
     "Form",
     "FormActionBackend",
-    "FormActionDispatch",
-    "FormActionFactory",
-    "FormActionManager",
-    "FormActionOptions",
-    "FormProvider",
+    "FormActionNotFound",
     "FormSectionSpec",
     "FormSpec",
+    "FormWizard",
+    "FormWizardBackend",
     "FormsetRowSpec",
     "FormsetSpec",
     "HiddenInput",
     "ImageField",
     "IntegerField",
+    "JSONField",
+    "ModelChoiceField",
     "ModelForm",
+    "ModelMultipleChoiceField",
     "MultipleChoiceField",
     "NumberInput",
     "PasswordInput",
+    "RadioSelect",
     "RegexField",
     "RegistryFormActionBackend",
     "Select",
     "SelectMultiple",
+    "SessionFormWizardBackend",
+    "SlugField",
     "TextInput",
     "Textarea",
+    "TimeField",
     "TimeInput",
     "TypedChoiceField",
     "URLField",
     "URLInput",
+    "UUIDField",
     "ValidationError",
     "Widget",
-    "_bind_form_for_post",
-    "_filter_reserved_url_kwargs",
-    "_form_action_context_callable",
-    "_form_from_initial_data",
-    "_get_caller_path",
-    "_make_uid",
-    "_normalize_handler_response",
-    "_url_kwargs_from_post",
-    "_url_kwargs_from_resolver_or_post",
     "action",
-    "build_form_namespace_for_action",
-    "checks",
+    "autodiscover_forms",
     "cleanup_extra_initial",
     "field_spec",
-    "form_action_manager",
     "form_spec",
+    "formset_factory",
     "formset_spec",
-    "page",
+    "inlineformset_factory",
+    "modelform_factory",
+    "modelformset_factory",
     "redirect_to_origin",
     "signals",
-    "validated_next_form_page_path",
 ]

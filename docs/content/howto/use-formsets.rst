@@ -29,8 +29,15 @@ Define the row form and the formset.
        class Meta:
            model = Note
            fields = ("title", "body")
+           abstract = True
 
    NoteFormSet = formset_factory(NoteRowForm, extra=3, can_delete=True)
+
+``abstract = True`` matters here.
+Without it, subclassing ``ModelForm`` would register ``NoteRowForm`` as the standalone action ``note_row_form`` through ``__init_subclass__``.
+That is a live endpoint that saves a single row through the default ``on_valid``, even though only the formset action is intended.
+The flag suppresses that registration, and ``formset_factory`` still builds the formset from the abstract class as usual.
+See :ref:`Preventing Registration <topics-forms-actions-abstract>` for the ``Meta.abstract`` semantics.
 
 Register the action.
 
@@ -44,7 +51,7 @@ Register the action.
    from notes.forms import NoteFormSet
 
    def build_bulk_formset() -> tuple[type[BaseFormSet], dict]:
-       return NoteFormSet, {}
+       return NoteFormSet, {"prefix": "notes"}
 
    @action("bulk_create", form_class=build_bulk_formset)
    def bulk_create(form: NoteFormSet) -> HttpResponseRedirect:
@@ -53,9 +60,10 @@ Register the action.
                row.save()
        return HttpResponseRedirect(reverse("next:page_"))
 
-Passing a formset class directly to ``form_class`` raises ``TypeError`` at dispatch time because the dispatcher expects a ``get_initial`` method on the form class.
+Passing a formset class directly to ``@action``'s ``form_class`` is accepted at decoration time but fails at request time, because the dispatcher calls ``get_initial`` on a directly passed class and Django formset classes have none.
 Register a factory callable that returns a ``(FormSetClass, init_kwargs)`` tuple instead.
-The ``init_kwargs`` reach the formset constructor and the dispatcher skips the ``get_initial`` step.
+The ``init_kwargs`` reach the formset constructor, and a non-empty dict makes the dispatcher skip the ``get_initial`` step.
+A formset has no ``get_initial``, so the ``init_kwargs`` must be non-empty even if they only set the ``prefix``.
 
 The ``page_{path}`` URL name follows the file-router naming convention, see :doc:`/content/topics/file-router`.
 
@@ -64,7 +72,7 @@ Render the formset.
 .. code-block:: jinja
    :caption: notes/pages/notes/bulk/template.djx
 
-   {% form @action="bulk_create" %}
+   {% form "bulk_create" %}
      {{ form.management_form }}
      {% for row in form %}
        <fieldset>
@@ -104,7 +112,10 @@ Use ``cleanup_extra_initial`` to clear initial values from blank extra rows befo
    def bulk_create_form() -> SimpleNamespace:
        return SimpleNamespace(form=build_formset([{"title": "Draft"}]))
 
-The ``@context`` callable named after the action publishes the formset under the key the ``{% form %}`` tag reads on the initial render.
+The ``{% form %}`` tag looks up a context variable named after the action and reads its ``.form`` attribute.
+A regular form action satisfies this through its own ``get_initial``, but a formset has no ``get_initial``, so the ``@context`` callable must publish the value itself.
+The callable name must match the action name, and the returned object must expose ``.form``, hence the ``SimpleNamespace(form=...)`` wrapper.
+Returning the bare formset, or publishing it under a different key, leaves ``form`` as ``None`` in the template.
 
 Verification
 ------------

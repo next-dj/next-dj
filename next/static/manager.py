@@ -57,7 +57,7 @@ class StaticManager:
     """Coordinate static backends, asset discovery, and placeholder injection.
 
     Backends are loaded lazily from
-    `NEXT_FRAMEWORK['DEFAULT_STATIC_BACKENDS']` on first access. URL
+    `NEXT_FRAMEWORK['STATIC_BACKENDS']` on first access. URL
     resolution is handled by the built-in staticfiles backend by
     default, which delegates to Django staticfiles.
     """
@@ -107,8 +107,8 @@ class StaticManager:
         collector: StaticCollector,
     ) -> None:
         """Forward component asset discovery to the shared discovery instance."""
-        self._ensure_backends()  # pragma: no cover
-        self.discovery.discover_component_assets(info, collector)  # pragma: no cover
+        self._ensure_backends()
+        self.discovery.discover_component_assets(info, collector)
 
     def inject(
         self,
@@ -241,7 +241,7 @@ class StaticManager:
         self._script_builder = None
         self._dedup_factory = None
         self._js_policy_factory = None
-        configs = next_framework_settings.DEFAULT_STATIC_BACKENDS
+        configs = next_framework_settings.STATIC_BACKENDS
         if not isinstance(configs, list):  # pragma: no cover
             configs = []
         for config in configs:
@@ -307,6 +307,21 @@ class DefaultStaticManager(LazyObject):
 
 
 default_manager: DefaultStaticManager = DefaultStaticManager()
+
+
+def collect_component_assets(
+    info: ComponentInfo,
+    collector: StaticCollector | None,
+) -> None:
+    """Discover a composite component's co-located assets into the collector.
+
+    Simple components never own co-located assets and a missing collector
+    means there is no sink, so both cases short-circuit before dispatching
+    through the lazy default manager.
+    """
+    if collector is None or info.is_simple:
+        return
+    default_manager.discover_component_assets(info, collector)
 
 
 def reset_default_manager() -> None:

@@ -8,9 +8,12 @@
         <div class="flex items-center gap-3 text-sm">
           {% if user.is_authenticated %}
             <span class="text-muted-foreground">{{ user.get_username }}</span>
-            {% form @action="admin:logout" class="inline" %}
+            {# Hand-crafted form: action_url resolves the dispatch URL by action name, the CSRF and origin fields the form tag would emit are written out by hand. #}
+            <form action="{% action_url 'admin:logout' %}" method="post" class="inline">
+              {% csrf_token %}
+              <input type="hidden" name="_next_form_origin" value="{{ request.path }}">
               {% component "button" type="submit" text="Sign out" variant="outline" size="sm" %}
-            {% endform %}
+            </form>
           {% else %}
             {% component "button" href="/admin/login/" text="Sign in" variant="outline" size="sm" %}
           {% endif %}

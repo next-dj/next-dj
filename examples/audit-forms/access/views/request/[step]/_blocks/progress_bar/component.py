@@ -1,57 +1,60 @@
 from typing import Any
 
-from access.steps import STEP_FIELDS, STEP_LABEL, STEP_ORDER, normalise_step
-from django.http import HttpRequest
-
 from next.components import component
+from next.forms import FormWizard
 
 
-def _draft(request: HttpRequest) -> dict[str, Any]:
-    return dict(request.session.get("access_request", {}))
+_STEP_LABELS = {
+    "identity": "Identity",
+    "scope": "Scope",
+    "approval": "Approval",
+}
+
+
+def _label(step: str) -> str:
+    return _STEP_LABELS.get(step, step.replace("_", " ").title())
 
 
 @component.context("steps")
-def _steps(request: HttpRequest, step: str = "applicant") -> list[dict[str, Any]]:
-    """Synthesise step descriptors from the URL kwarg and the session draft.
+def steps(wizard: FormWizard) -> list[dict[str, Any]]:
+    """Describe each step with its label, index, and status from the wizard.
 
-    Status comes from session truth, not URL position: a step is
-    ``"current"`` when it matches the URL kwarg, ``"saved"`` when every
-    field it owns is persisted in ``request.session["access_request"]``,
-    otherwise ``"pending"``. This keeps the bar honest if a user lands on
-    step 2 without going through step 1.
+    Status is sourced from wizard storage truth, not URL position: a step
+    is ``"current"`` when it is the active step, ``"saved"`` when it has
+    stored data, otherwise ``"pending"``.
     """
-    current = normalise_step(step)
-    draft = _draft(request)
+    current = wizard.current_step()
+    completed = set(wizard.completed_steps())
     return [
         {
-            "key": key,
-            "label": STEP_LABEL[key],
+            "key": name,
+            "label": _label(name),
             "index": index + 1,
-            "status": _status(key, current, draft),
+            "status": _status(name, current, completed),
         }
-        for index, key in enumerate(STEP_ORDER)
+        for index, name in enumerate(wizard.step_names())
     ]
 
 
-def _status(key: str, current: str, draft: dict[str, Any]) -> str:
+def _status(key: str, current: str, completed: set[str]) -> str:
     if key == current:
         return "current"
-    fields = STEP_FIELDS[key]
-    if fields and all(field in draft for field in fields):
+    if key in completed:
         return "saved"
     return "pending"
 
 
 @component.context("step_index")
-def _step_index(step: str = "applicant") -> int:
-    return STEP_ORDER.index(normalise_step(step)) + 1
+def step_index(wizard: FormWizard) -> int:
+    names = wizard.step_names()
+    return names.index(wizard.current_step()) + 1
 
 
 @component.context("step_total")
-def _step_total() -> int:
-    return len(STEP_ORDER)
+def step_total(wizard: FormWizard) -> int:
+    return len(wizard.step_names())
 
 
 @component.context("step_label")
-def _step_label(step: str = "applicant") -> str:
-    return STEP_LABEL[normalise_step(step)]
+def step_label(wizard: FormWizard) -> str:
+    return _label(wizard.current_step())

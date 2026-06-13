@@ -31,9 +31,9 @@ the last through a custom `BabelJsxBackend` that emits
 | `/stats/components/` | Per-component render counts. |
 | `/stats/forms/` | Action dispatch and validation-failure counts. |
 | `/stats/static/` | Asset, dedup, and HTML-injection totals. |
-| `POST obs:filter_window` | Persists the chosen window via querystring and redirects back. |
+| `POST` to `window_filter_form` | Persists the chosen window via querystring and redirects back. |
 
-The filter form uses the framework `{% form @action %}` tag.
+The filter form uses the framework `{% form "window_filter_form" %}` tag.
 Submitting it fires `forms.action_dispatched` so the example exercises
 the full form path without adding a model write.
 
@@ -88,7 +88,7 @@ obs/
     │   ├── stat_card/        <- card composite reused on every page
     │   ├── counter_list/     <- list/table widget shared by every stats subpage
     │   ├── stats_nav/        <- nav tabs rendered from a Python list
-    │   ├── filter_window/    <- form composite
+    │   ├── filter_window/    <- window filter form (template-only component)
     │   ├── render_chart/     <- Chart.js bar chart, scripts=[chart.js cdn]
     │   └── sparkline/        <- React + JSX sparkline, scripts=[react, babel cdn]
     └── stats/
@@ -125,7 +125,7 @@ class CountingComponentsBackend(FileComponentsBackend):
         return info
 ```
 
-Wired through `DEFAULT_COMPONENT_BACKENDS` in
+Wired through `COMPONENT_BACKENDS` in
 [config/settings.py](config/settings.py).
 
 ### 3. The custom static backend and JSX kind
@@ -146,11 +146,11 @@ default_kinds.register(
 `render_babel_script_tag` returns a `<script type="text/babel">` tag.
 Babel-standalone parses the tag in the browser and executes the JSX,
 no npm required. The custom backend installs through the same
-`DEFAULT_STATIC_BACKENDS` slot the framework's default backend uses,
+`STATIC_BACKENDS` slot the framework's default backend uses,
 and pairs with `InstrumentedDedup` through the `OPTIONS` block:
 
 ```python
-"DEFAULT_STATIC_BACKENDS": [
+"STATIC_BACKENDS": [
     {
         "BACKEND": "obs.backends.BabelJsxBackend",
         "OPTIONS": {
@@ -235,11 +235,13 @@ the table fires at least once during the walk.
 
 ### 6. The filter form, time-bucketing, and `action_dispatched`
 
-`WindowFilterForm` carries one `ChoiceField`. The action handler in
-`obs/dashboards/stats/page.py` redirects with `?window=...` and
-returns a `HttpResponseRedirect` so subsequent renders inherit the new
-window through the `@context("window", inherit_context=True)`
-callable on the same page.
+`WindowFilterForm` carries one `ChoiceField`. Subclassing
+`next.forms.Form` in [obs/forms.py](obs/forms.py) auto-registers the
+action as `window_filter_form`. Its `on_valid` method redirects with
+`?window=...` and returns a `HttpResponseRedirect` so subsequent
+renders inherit the new window through the
+`@context("window", inherit_context=True)` callable in
+`obs/dashboards/stats/page.py`.
 
 Behind the form, `metrics.incr` writes both a cumulative counter and
 a minute-floor bucket key. `metrics.read_window(kind, minutes)` sums
@@ -249,11 +251,15 @@ window narrows the aggregation in real time. The four cumulative
 sub-pages (`/stats/pages/`, `/stats/components/`, `/stats/forms/`,
 `/stats/static/`) keep using `read_kind` for the lifetime totals.
 
-The form composite lives under
+The form component lives under
 [`_widgets/filter_window/`](obs/dashboards/_widgets/filter_window/).
-It uses `{% form @action="obs:filter_window" %}` so submission goes
-through the framework dispatcher and `forms.action_dispatched` fires
-end to end, not only in tests.
+It uses `{% form "window_filter_form" %}` so submission goes through
+the framework dispatcher and `forms.action_dispatched` fires end to
+end, not only in tests. Inside the block the template renders the
+bound field as `{{ form.window }}` — the styled `Select` widget
+declared on the form — and `WindowFilterForm.get_initial(request)`
+seeds it with the window currently on the query string, so the select
+always shows the active choice.
 
 ### 7. The flush command
 
@@ -286,6 +292,6 @@ calling out before adopting the pattern in production.
 ## Further reading
 
 - Aggregated signal catalogue at
-  [docs/content/api/signals.rst](../../docs/content/api/signals.rst).
-- Static-asset pipeline and the per-decorator serializer override at
-  [docs/content/guide/static-assets.rst](../../docs/content/guide/static-assets.rst).
+  [docs/content/ref/signals.rst](../../docs/content/ref/signals.rst).
+- JS context serialization and the per-decorator serializer override at
+  [docs/content/topics/static-assets/js-context.rst](../../docs/content/topics/static-assets/js-context.rst).

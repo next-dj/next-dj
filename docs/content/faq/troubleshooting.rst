@@ -49,8 +49,10 @@ Forms
 HTTP 400 From Form Submission
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The dispatcher rejected the request because ``_next_form_page`` is missing or invalid.
-Always render the form through ``{% form @action="name" %}`` or include both ``csrf_token`` and the ``_next_form_page`` field by hand.
+The dispatcher rejected the request because ``_next_form_origin`` is missing or does not resolve against the URLconf.
+Always render the form through ``{% form "name" %}`` or include both ``csrf_token`` and the ``_next_form_origin`` field by hand, set to the URL path of the page.
+A form rendered by a hand-written view re-renders only when that view carries a ``next_page_path`` attribute, see :ref:`topics-forms-templates-handwritten-views`.
+Under :func:`django.conf.urls.i18n.i18n_patterns` the same 400 appears when the user switches the language between the render and the submit, because the posted origin keeps the old language prefix and no longer resolves.
 
 HTTP 403 on POST
 ~~~~~~~~~~~~~~~~
@@ -59,11 +61,54 @@ CSRF token is missing or stale.
 The ``{% form %}`` tag injects the token automatically.
 Manual forms need ``{% csrf_token %}`` plus a fresh cookie.
 
+When the token is fine, the 403 can come from an access guard.
+An authenticated user missing a ``Meta.permission_required`` permission gets ``PermissionDenied``.
+See :ref:`topics-forms-actions-guards`.
+
+Form POST Redirects to the Login Page
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The action declares ``Meta.login_required`` or ``login_required=True`` on ``@action``, and the submission came from an anonymous session.
+The dispatcher answers with a 302 to ``LOGIN_URL`` carrying ``next`` set to the origin page, before any POST data reaches the handler.
+This is the declared behaviour, not an error.
+Sign in, or hide the form from anonymous visitors in the template, since the guard protects the mutation and not the markup.
+
+``MessageFailure`` on a Valid Submission
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The form declares ``Meta.success_message`` but the messages framework is not fully installed.
+Add ``django.contrib.messages`` to ``INSTALLED_APPS`` and ``django.contrib.messages.middleware.MessageMiddleware`` to ``MIDDLEWARE``.
+The framework raises rather than dropping the requested message silently, and ``manage.py check`` reports the gap upfront as :ref:`next.W061 <ref-system-checks>`.
+
 next.E041 Collision
 ~~~~~~~~~~~~~~~~~~~
 
 Two actions are registered under the same name by different handlers.
-Rename one of them or change its namespace to avoid the collision.
+Rename one of them or move one to a different scope to avoid the collision.
+
+Unknown Form Action
+~~~~~~~~~~~~~~~~~~~
+
+``{% form "name" %}``, ``{% action_url "name" %}``, ``NextClient.post_action``, ``resolve_action_url``, and ``build_form_for`` raise ``next.forms.FormActionNotFound`` when no registered action matches the name.
+The message ends with ``Closest matches: ...`` listing the nearest registered names, so a typo is usually visible in the error itself.
+Check the name against the suggestions, confirm the declaring module was imported before the lookup, and remember that a page-scoped action resolves only from its own page.
+
+Wizard Draft Disappears Between Steps
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The default ``SessionFormWizardBackend`` stores drafts in the session, so a lost draft means the session itself did not survive.
+Confirm that ``django.contrib.sessions`` is in ``INSTALLED_APPS`` and ``SessionMiddleware`` is enabled.
+``manage.py check`` reports :ref:`next.W056 <ref-system-checks>` when sessions are missing while wizards are registered.
+With ``CacheFormWizardBackend`` the usual cause is a local-memory cache under a multi-worker server, where each worker holds its own copy of the draft.
+Point that backend at a shared cache such as Redis, and check that its ``TIMEOUT`` does not expire mid-flow.
+
+``ImproperlyConfigured`` From a Wizard Step Save
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Both bundled wizard backends raise ``ImproperlyConfigured`` when a step is saved on a request without session support, see the previous entry.
+``SessionFormWizardBackend`` also raises it when the step's ``cleaned_data`` holds a value its codec cannot encode, such as an unsaved model instance or a file object, and the error names the offending type.
+Switch to ``CacheFormWizardBackend`` or a custom backend for cleaned data that does not fit the codec.
+See :doc:`/content/topics/forms/wizard-backend` for the codec rules.
 
 Components
 ----------
@@ -77,7 +122,7 @@ Rename one or move one to a different page tree.
 Component Does Not Render
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Confirm that ``COMPONENTS_DIR`` is set on ``DEFAULT_COMPONENT_BACKENDS``.
+Confirm that ``COMPONENTS_DIR`` is set on ``COMPONENT_BACKENDS``.
 Confirm that the component folder name matches the string argument to ``{% component %}``.
 
 Component Prop Does Not Resolve
@@ -105,13 +150,13 @@ The watcher picks up file content changes but a hash computed at startup can sta
 next.W030 Empty Static Backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``manage.py check`` warns when ``DEFAULT_STATIC_BACKENDS`` is empty.
+``manage.py check`` warns when ``STATIC_BACKENDS`` is empty.
 The framework falls back to the bundled ``StaticFilesBackend``, but you should either restore an explicit backend entry or accept that no custom chain is configured.
 
 next.E038 Duplicate BACKEND Entries
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Two identical ``BACKEND`` dotted paths appear in ``DEFAULT_STATIC_BACKENDS``.
+Two identical ``BACKEND`` dotted paths appear in ``STATIC_BACKENDS``.
 Remove or rename one entry so each backend class appears once.
 
 next.W042 Unusable JS_CONTEXT_SERIALIZER
@@ -205,7 +250,7 @@ URL Name Not Found
 ~~~~~~~~~~~~~~~~~~
 
 Run ``uv run python manage.py shell`` and print ``reverse("next:page_<name>")``.
-If it raises ``NoReverseMatch``, verify that the directory contains at least one of ``page.py``, ``template.djx``, or a child page, and that it sits under an active ``PAGES_DIR`` root configured in ``DEFAULT_PAGE_BACKENDS``.
+If it raises ``NoReverseMatch``, verify that the directory contains at least one of ``page.py``, ``template.djx``, or a child page, and that it sits under an active ``PAGES_DIR`` root configured in ``PAGE_BACKENDS``.
 
 Captured Parameter Name Differs From Directory Name
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -1,4 +1,4 @@
-.PHONY: help install test bench lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js lint-js format-js format-js-check test-examples
+.PHONY: help install test bench test-compat lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js lint-js format-js format-js-check test-examples
 
 # Allow CI to point at a prebuilt venv's pytest (bypassing `uv run` and its sync step)
 PYTEST ?= uv run pytest
@@ -8,6 +8,7 @@ help: # show this help message
 	@echo "  install         - sync runtime deps + project from uv.lock (no dev group)"
 	@echo "  test            - run tests in parallel with 100% coverage requirement"
 	@echo "  bench           - run performance benchmarks (opt-in, no coverage)"
+	@echo "  test-compat     - run ecosystem compatibility tests (no coverage)"
 	@echo "  test-examples   - run Python + JS tests for examples with coverage"
 	@echo "  lint            - run linting with ruff"
 	@echo "  format          - format code with ruff"
@@ -72,6 +73,9 @@ BENCH_EXTRA ?=
 
 bench: # run performance benchmarks (opt-in, no coverage, flags match CI)
 	uv run pytest tests/benchmarks $(BENCH_FLAGS) $(BENCH_EXTRA)
+
+test-compat: # run ecosystem compatibility tests (allauth, crispy-forms, django-htmx, widget-tweaks)
+	uv run --group compat pytest tests/compat -q --no-cov
 
 test-examples: # run Python, JS tests for examples with coverage
 	@set -e; \
@@ -147,6 +151,7 @@ ci: # run all CI checks locally with 100% coverage
 	make test-js
 	make test
 	make test-examples
+	make test-compat
 
 dev-setup: # setup development environment
 	uv sync --locked --dev

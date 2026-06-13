@@ -159,7 +159,7 @@ class TestRegisterComponentsFolderFromRouterWalk:
 
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_COMPONENT_BACKENDS": [config],
+                "COMPONENT_BACKENDS": [config],
                 "LAZY_COMPONENT_MODULES": True,
             },
         ):
@@ -486,10 +486,10 @@ class TestGetComponentPathsForWatch:
     """``get_component_paths_for_watch`` mirrors discovery without mutating managers."""
 
     def test_empty_when_backend_settings_not_lists(self) -> None:
-        """Return empty sets when ``DEFAULT_*_BACKENDS`` are not lists."""
+        """Return empty sets when ``*_BACKENDS`` settings are not lists."""
         mock_nf = SimpleNamespace(
-            DEFAULT_PAGE_BACKENDS="not-a-list",
-            DEFAULT_COMPONENT_BACKENDS="not-a-list",
+            PAGE_BACKENDS="not-a-list",
+            COMPONENT_BACKENDS="not-a-list",
         )
         with patch("next.components.watch.next_framework_settings", mock_nf):
             assert get_component_paths_for_watch() == set()
@@ -502,7 +502,7 @@ class TestGetComponentPathsForWatch:
         (comp_dir / "component.djx").write_text("<span/>")
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [
+                "PAGE_BACKENDS": [
                     {
                         "BACKEND": "next.urls.FileRouterBackend",
                         "PAGES_DIR": "pages",
@@ -511,7 +511,7 @@ class TestGetComponentPathsForWatch:
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
@@ -533,7 +533,7 @@ class TestGetComponentPathsForWatch:
         (comp_dir / "component.py").write_text('component = "<b/>"\n')
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [
+                "PAGE_BACKENDS": [
                     {
                         "BACKEND": "next.urls.FileRouterBackend",
                         "PAGES_DIR": "pages",
@@ -542,7 +542,7 @@ class TestGetComponentPathsForWatch:
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
@@ -557,11 +557,11 @@ class TestGetComponentPathsForWatch:
         assert (comp_dir / "component.py").resolve() in paths
 
     def test_skips_non_dict_page_config(self) -> None:
-        """Non-dict ``DEFAULT_PAGE_BACKENDS`` entries are ignored."""
+        """Non-dict ``PAGE_BACKENDS`` entries are ignored."""
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": ["not-dict"],
-                "DEFAULT_COMPONENT_BACKENDS": [],
+                "PAGE_BACKENDS": ["not-dict"],
+                "COMPONENT_BACKENDS": [],
             },
         ):
             next_framework_settings.reload()
@@ -569,11 +569,11 @@ class TestGetComponentPathsForWatch:
         next_framework_settings.reload()
 
     def test_skips_non_dict_component_config(self) -> None:
-        """Non-dict ``DEFAULT_COMPONENT_BACKENDS`` entries are ignored."""
+        """Non-dict ``COMPONENT_BACKENDS`` entries are ignored."""
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [],
-                "DEFAULT_COMPONENT_BACKENDS": ["bad"],
+                "PAGE_BACKENDS": [],
+                "COMPONENT_BACKENDS": ["bad"],
             },
         ):
             next_framework_settings.reload()
@@ -587,8 +587,8 @@ class TestGetComponentPathsForWatch:
         (root / "solo.djx").write_text("x")
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "PAGE_BACKENDS": [],
+                "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [str(root)],
@@ -608,7 +608,7 @@ class TestGetComponentPathsForWatch:
         pages_root.mkdir()
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [
+                "PAGE_BACKENDS": [
                     {
                         "BACKEND": "next.urls.FileRouterBackend",
                         "PAGES_DIR": "pages",
@@ -617,7 +617,7 @@ class TestGetComponentPathsForWatch:
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [],
+                "COMPONENT_BACKENDS": [],
             },
         ):
             next_framework_settings.reload()
@@ -634,7 +634,7 @@ class TestGetComponentPathsForWatch:
         pages_root.mkdir()
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [
+                "PAGE_BACKENDS": [
                     {
                         "BACKEND": "next.urls.FileRouterBackend",
                         "PAGES_DIR": "pages",
@@ -643,7 +643,7 @@ class TestGetComponentPathsForWatch:
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
@@ -665,7 +665,7 @@ class TestGetComponentPathsForWatch:
         (comp_dir / "component.djx").write_text("x")
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [
+                "PAGE_BACKENDS": [
                     {
                         "BACKEND": "next.urls.FileRouterBackend",
                         "PAGES_DIR": "pages",
@@ -674,7 +674,7 @@ class TestGetComponentPathsForWatch:
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
@@ -692,8 +692,8 @@ class TestGetComponentPathsForWatch:
         """Failure to build a component backend is skipped."""
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "PAGE_BACKENDS": [],
+                "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
@@ -714,8 +714,8 @@ class TestGetComponentPathsForWatch:
         """Non-``FileComponentsBackend`` entries do not contribute paths."""
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "PAGE_BACKENDS": [],
+                "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.DummyBackend",
                         "DIRS": [],
@@ -734,8 +734,8 @@ class TestGetComponentPathsForWatch:
         root.mkdir()
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "PAGE_BACKENDS": [],
+                "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [str(root)],
@@ -755,7 +755,7 @@ class TestGetComponentPathsForWatch:
         pages_root.mkdir()
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [
+                "PAGE_BACKENDS": [
                     {
                         "BACKEND": "next.urls.FileRouterBackend",
                         "PAGES_DIR": "pages",
@@ -764,7 +764,7 @@ class TestGetComponentPathsForWatch:
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
@@ -789,7 +789,7 @@ class TestGetComponentPathsForWatch:
         fake.write_text("not a directory")
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [
+                "PAGE_BACKENDS": [
                     {
                         "BACKEND": "next.urls.FileRouterBackend",
                         "PAGES_DIR": "pages",
@@ -798,7 +798,7 @@ class TestGetComponentPathsForWatch:
                         "OPTIONS": {},
                     },
                 ],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [],
@@ -817,8 +817,8 @@ class TestGetComponentPathsForWatch:
         root.mkdir()
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_PAGE_BACKENDS": [],
-                "DEFAULT_COMPONENT_BACKENDS": [
+                "PAGE_BACKENDS": [],
+                "COMPONENT_BACKENDS": [
                     {
                         "BACKEND": "next.components.FileComponentsBackend",
                         "DIRS": [str(root)],

@@ -27,6 +27,8 @@ SCRIPTS_PLACEHOLDER = "<!-- next:scripts -->"
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from next.components import ComponentInfo
+
 
 CSS_URL = "https://cdn.example.com/a.css"
 JS_URL = "https://cdn.example.com/a.js"
@@ -76,14 +78,14 @@ class TestReloadConfig:
     def test_invalid_backend_falls_back(self) -> None:
         manager = StaticManager()
         with override_settings(
-            NEXT_FRAMEWORK={"DEFAULT_STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
+            NEXT_FRAMEWORK={"STATIC_BACKENDS": [{"BACKEND": "builtins.dict"}]}
         ):
             manager._reload_config()
         assert isinstance(manager.default_backend, StaticFilesBackend)
 
     def test_empty_backends_seeds_default(self) -> None:
         manager = StaticManager()
-        with override_settings(NEXT_FRAMEWORK={"DEFAULT_STATIC_BACKENDS": []}):
+        with override_settings(NEXT_FRAMEWORK={"STATIC_BACKENDS": []}):
             manager._reload_config()
         assert len(manager) == 1
 
@@ -322,6 +324,21 @@ class TestDiscoveryForwarding:
             "/static/next/index.css"
         ]
 
+    def test_discover_component_assets_delegates(
+        self,
+        composite_component: ComponentInfo,
+        fresh_manager: StaticManager,
+    ) -> None:
+        collector = StaticCollector()
+        with mock.patch(
+            "next.static.backends.staticfiles_storage.url",
+            return_value="/static/next/components/widget.css",
+        ):
+            fresh_manager.discover_component_assets(composite_component, collector)
+        style_urls = [a.url for a in collector.assets_in_slot("styles")]
+        assert "/static/next/components/widget.css" in style_urls
+        assert "https://cdn.example.com/extra.css" in style_urls
+
 
 class TestDefaultManagerLazy:
     def test_resolves_to_static_manager(self, reset_default: None) -> None:
@@ -353,9 +370,7 @@ class TestSettingChangedReload:
 
         with override_settings(
             NEXT_FRAMEWORK={
-                "DEFAULT_STATIC_BACKENDS": [
-                    {"BACKEND": "next.static.StaticFilesBackend"}
-                ]
+                "STATIC_BACKENDS": [{"BACKEND": "next.static.StaticFilesBackend"}]
             }
         ):
             # override_settings fires setting_changed, which calls reload.

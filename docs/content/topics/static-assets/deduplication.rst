@@ -44,7 +44,7 @@ The static manager builds the collector per request and reads the strategy dotte
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {
                "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {
@@ -97,7 +97,7 @@ Point the backend ``OPTIONS`` at the new strategy.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_STATIC_BACKENDS": [
+       "STATIC_BACKENDS": [
            {
                "BACKEND": "next.static.StaticFilesBackend",
                "OPTIONS": {

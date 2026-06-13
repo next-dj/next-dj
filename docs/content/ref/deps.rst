@@ -57,10 +57,10 @@ Context
 .. automodule:: next.deps.context
    :members:
 
-``RESERVED_KEYS`` lists the names (``request``, ``form``, ``_cache``, ``_stack``, ``_context_data``) stripped from name-based resolution.
+``RESERVED_KEYS`` lists the names (``request``, ``form``, ``cleaned_data``, ``_cache``, ``_stack``, ``_context_data``) stripped from name-based resolution.
 A context key cannot shadow a reserved resolver input.
 ``DependencyResolver.EXPLICIT_RESOLVE_KEYS`` is the class-level alias of the same frozenset.
-Subclasses override it to broaden or narrow the stripped names, and the resolver reads ``self.EXPLICIT_RESOLVE_KEYS`` rather than the module constant during dispatch.
+The resolver reads ``self.EXPLICIT_RESOLVE_KEYS``, which a subclass may override.
 See :doc:`/content/internals/di-resolver` for the resolution detail.
 
 Signals

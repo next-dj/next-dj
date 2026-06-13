@@ -3,353 +3,470 @@
 Actions
 =======
 
-An action is a Python callable registered as a form handler.
-The framework assigns it a stable URL, dispatches form submissions to it, and resolves its parameters through the dependency injector.
-This page covers every shape of the ``@action`` decorator, the handler signature options, the return type contract, and the patterns for registering actions across applications.
+An action is a registered entry point for a form POST.
+Either a form class or a plain function can act as an action.
+Form classes register automatically through ``__init_subclass__``.
+Plain functions register through the ``@action`` decorator.
 
 .. contents::
    :local:
    :depth: 2
 
-The Decorator
+Class-Bound Forms
+-----------------
+
+Declaring a subclass of ``next.forms.Form`` or ``next.forms.ModelForm`` registers the class automatically.
+No decorator is needed.
+
+.. code-block:: python
+   :caption: notes/pages/note/page.py
+
+   import next.forms
+   from next.forms import redirect_to_origin
+
+   class NoteForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title", "body"]
+
+       def on_valid(self, request):
+           self.save()
+           return redirect_to_origin(request)
+
+The framework derives the action name from the class name and infers the scope from the file where the class is declared.
+
+Name Derivation
+---------------
+
+The action name is the ``CamelCase`` class name converted to ``snake_case`` by inserting underscores before each uppercase letter that is preceded by a lowercase letter or a digit.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Class name
+     - Action name
+   * - ``NoteForm``
+     - ``note_form``
+   * - ``ArticleEditForm``
+     - ``article_edit_form``
+   * - ``ContactForm``
+     - ``contact_form``
+   * - ``Note2Form``
+     - ``note2_form``
+   * - ``Form``
+     - ``form``
+
+The conversion collapses consecutive uppercase runs, so an acronym stays a single word.
+``HTTPLoginForm`` becomes ``http_login_form`` and ``HTMLForm`` becomes ``html_form``.
+
+.. warning::
+
+   Renaming a form class changes its action name.
+   Any ``{% form "old_name" %}`` tag or reverse URL that used the old name will fail at render time with ``FormActionNotFound``.
+   The exception message lists the closest registered names, so a rename typo is usually visible in the error itself.
+   Update every template and reverse call when renaming a class.
+
+Anchor Files and Scope
+----------------------
+
+The scope of a form class depends on the file it is declared in.
+
+Page scope.
+   A class declared in ``page.py`` or ``component.py`` receives ``page`` scope.
+   The framework keys it to the absolute path of that file.
+   A page-scoped name is local to its directory, the way a name is local to a Python module.
+   Two pages may each declare a ``NoteForm`` with no coordination, and a form opts into a project-wide name by moving to a shared file.
+
+Shared scope.
+   A class declared in any other file receives ``shared`` scope.
+   The framework keys it to the dotted module name.
+   The name is reachable project-wide.
+
+Override with ``Meta.scope``.
+   Set ``class Meta: scope = "page"`` or ``class Meta: scope = "shared"`` to pin the scope explicitly, regardless of file name.
+   Any other value triggers ``next.E047`` and the class is not registered.
+
+Customise the set of anchor file names through ``NEXT_FRAMEWORK["FORM_ANCHOR_FILES"]``.
+The default set is ``["page.py", "component.py"]``.
+
+.. _topics-forms-actions-uid:
+
+UID Stability
 -------------
 
-``next.forms.action`` registers a callable as a form handler.
+Each action gets a stable URL at ``/_next/form/<uid>/``.
+The UID is the first 16 hex characters of ``SHA-256("next:form:{scope_key}:{name}")``, where ``name`` is the derived action name and ``scope_key`` depends on the scope.
+
+Page scope.
+   ``scope_key`` is the absolute filesystem path of the declaring ``page.py`` or ``component.py``.
+   The UID is therefore stable only as long as the file stays where it is.
+
+Shared scope.
+   ``scope_key`` is the dotted module name, walked up from the file while an ``__init__.py`` exists.
+   The UID is stable as long as the module path stays the same.
+
+This has one practical consequence.
+
+.. warning::
+
+   Moving a page-scoped form's file or renaming its class changes the UID, and so changes the POST URL.
+   A bookmarked or cached ``/_next/form/<uid>/`` URL from the old location stops resolving.
+   The same holds for a shared form when its module moves.
+   Treat a file move or a class rename as a URL change and expect old action URLs to 404.
+
+The UID is derived, never stored in a template by hand.
+A ``{% form "name" %}`` tag reverses the current UID at render time, so a freshly rendered page always posts to the right URL.
+Only out-of-band references to a stale UID break.
+
+The ``on_valid`` Method
+-----------------------
+
+``on_valid`` runs after the framework validates the submitted form.
+The method signature uses the same dependency-injection rules as any other DI-resolved callable.
 
 .. code-block:: python
-   :caption: notes/pages/page.py
 
-   from django.http import HttpResponseRedirect
-   from next.forms import action
-   from notes.forms import NoteForm
+   def on_valid(self, request):
+       ...
 
-   @action("create_note", form_class=NoteForm)
-   def create_note(form: NoteForm) -> HttpResponseRedirect:
-       form.save()
-       return HttpResponseRedirect("/")
+``self`` is the bound, validated form instance.
+``request`` is the current ``HttpRequest``.
+Any additional parameter is resolved through the DI injector: ``DUrl[...]`` markers, ``Depends`` providers, and so on.
 
-The decorator takes one required positional argument, the action name, and two keyword arguments.
+The default implementation on ``BaseForm`` redirects to ``Meta.success_url`` when declared, otherwise it returns ``redirect_to_origin(request)``.
+The default implementation on ``BaseModelForm`` calls ``self.save()`` then follows the same redirect rule.
+See `Success Feedback`_ for the ``success_url`` contract.
 
-name (required).
-   String identifier used in templates and inside the registry.
-   Must be unique across the project unless a namespace prefix differentiates duplicates.
+The return value follows the same contract as a handler function, checked in a fixed order.
+An ``HttpResponse`` instance passes through unchanged, and this check runs first, so every rich response type the framework ships subclasses ``HttpResponse``.
+A string becomes the body of an HTTP 200 response, never a redirect target.
+``None`` triggers a re-render of the origin page with HTTP 200.
+A model instance with a ``get_absolute_url`` method redirects to that URL, the ``CreateView``-style idiom for a handler that saves and shows the result.
+Any other object with a truthy ``url`` attribute redirects to that URL, a last-resort convenience for model-like objects.
+Any other return value emits a ``RuntimeWarning`` and is treated as ``None``.
 
-form_class (optional, keyword only).
-   Form class to bind and validate the POST body against.
-   Omit it for non form POST actions, see the section below.
+``get_initial`` Pre-Populates the Form
+--------------------------------------
 
-namespace (optional, keyword only).
-   Prefix prepended to the name as ``"<namespace>:<name>"``.
-   Useful when several apps share short names such as ``"save"``.
-
-The decorated function joins the form action registry when the module that contains it is imported.
-The framework imports ``page.py`` files when resolving URL patterns and imports ``component.py`` files when the components backend initialises, so actions declared in either file are registered before the first request.
-Actions in other modules (such as a shared ``actions.py``) register when those modules are first imported. Import them from ``AppConfig.ready`` to guarantee early registration.
-
-Action Names and Namespaces
----------------------------
-
-Names hash into a 16 character UID that becomes the path of the dispatch URL.
-Two ``@action`` calls that register the same name from different handlers are reported by the ``next.E041`` system check.
-Two distinct names that hash to the same UID raise ``ImproperlyConfigured`` at import time.
+Override ``get_initial`` as a classmethod to provide initial data before the first render.
+The classmethod is DI-resolved, so it can receive ``request``, URL parameters, or providers.
 
 .. code-block:: python
-   :caption: collision-free naming
 
-   from next.forms import action
+   @classmethod
+   def get_initial(cls, request, note_id: int | None = None):
+       if note_id is None:
+           return {}
+       return Note.objects.get(pk=note_id)
 
-   @action("save", namespace="notes")
-   def save_note(form):
-       form.save()
+``BaseModelForm.get_initial`` may return a model instance.
+The framework uses it as the ``instance`` kwarg when constructing the form.
+``BaseForm.get_initial`` must return a dict.
 
-   @action("save", namespace="comments")
-   def save_comment(form):
-       form.save()
+You never call ``get_initial`` yourself.
+The dispatcher calls it through the dependency injector before the initial render.
+``request`` is supplied by the framework.
+A parameter whose name matches a captured URL segment is filled from the URL, so ``note_id`` above receives the ``note_id`` route kwarg.
+Any other parameter resolves through a registered provider, the same as on a handler.
+The base signatures carry no positional arguments of their own: ``BaseForm.get_initial(cls)`` takes none, and ``BaseModelForm.get_initial(cls, **url_kwargs)`` accepts the URL kwargs as keywords.
+Declare only the parameters an override actually reads.
 
-Templates address each action through ``@action="notes:save"`` and ``@action="comments:save"``.
-
-Rename one of the actions to resolve a hash collision when namespaces are not appropriate.
-
-Handler Signature
+Form-Less Actions
 -----------------
 
-The handler can take any parameters the dependency injector knows how to resolve.
+Use ``@action`` to register a plain callable when no form fields are needed.
+Typical use cases include logout buttons, delete confirmations, and any simple POST with no user input.
+The name is optional.
+A bare ``@action`` or an empty ``@action()`` registers the function under its own name, and ``@action("custom_name")`` overrides it.
 
 .. code-block:: python
-   :caption: typical handlers
+   :caption: page.py
 
-   from django.conf import settings
-   from django.http import HttpRequest, HttpResponseRedirect
-   from next.forms import action
+   from django.http import HttpRequest
+   from next.forms import action, redirect_to_origin
    from next.urls import DUrl
-   from notes.forms import NoteForm
-   from notes.models import Note
-
-   @action("simple", form_class=NoteForm)
-   def simple(form: NoteForm) -> HttpResponseRedirect:
-       form.save()
-       return HttpResponseRedirect("/")
-
-   @action("with_request", form_class=NoteForm)
-   def with_request(form: NoteForm, request: HttpRequest) -> HttpResponseRedirect:
-       form.user = request.user
-       form.save()
-       return HttpResponseRedirect("/")
-
-   @action("with_url", form_class=NoteForm)
-   def with_url(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
-       form.instance = Note.objects.get(pk=note_id)
-       form.save()
-       return HttpResponseRedirect("/")
-
-   @action("gated_create", form_class=NoteForm)
-   def gated_create(form: NoteForm, request: HttpRequest) -> HttpResponseRedirect:
-       if settings.NOTES_WRITE_ENABLED and request.user.is_authenticated:
-           form.save()
-       return HttpResponseRedirect("/")
-
-The injector fills each parameter from the first matching provider.
-Omitted parameters are not resolved and not passed to the handler.
-Action dispatch resolves ``request``, bound ``form``, captured URL parameters, and ``Depends`` providers.
-It does not resolve page context values, so a handler reads request state or settings directly instead of a ``Context`` marker.
-
-Injecting by Type Annotation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-``DForm[MyForm]`` is a type-annotation marker that tells the dispatcher to inject the bound form regardless of the parameter name.
-
-.. code-block:: python
-   :caption: using DForm
-
-   from next.forms import action, DForm
-   from notes.forms import NoteForm
-
-   @action("save_note", form_class=NoteForm)
-   def save_note(submitted: DForm[NoteForm]) -> None:
-       submitted.save()
-
-Use ``DForm[MyForm]`` when the parameter name carries domain meaning that conflicts with the ``form`` convention, or when a type checker benefits from the explicit annotation.
-A plain ``form: MyForm`` annotation resolves by name match and is sufficient in most cases.
-
-Return Types
-------------
-
-A handler returns a response that the dispatcher forwards to the client.
-
-HttpResponse subclasses.
-   Returned verbatim.
-   ``HttpResponseRedirect``, ``JsonResponse``, ``StreamingHttpResponse``, and your own subclasses all work.
-
-String.
-   Wrapped in an ``HttpResponse`` by the dispatcher.
-
-Object with a ``url`` attribute.
-   Coerced into an ``HttpResponseRedirect`` to that URL.
-
-None.
-   For an action registered with a ``form_class`` the dispatcher returns the re-rendered origin page with HTTP 200.
-   For a handler-only action it returns an empty HTTP 204 response.
-   Return a redirect or a string explicitly when a handler-only action needs a visible result.
-
-.. _topics-forms-actions-no-form-class:
-
-Actions Without form_class
---------------------------
-
-Drop ``form_class`` to handle non form POST submissions such as confirmation buttons.
-
-.. code-block:: python
-   :caption: confirmation action
-
-   from next.forms import action
 
    @action("delete_note")
-   def delete_note(note_id: DUrl["id", int]) -> HttpResponseRedirect:
+   def delete_note(note_id: DUrl["id", int], request: HttpRequest):
        Note.objects.filter(pk=note_id).delete()
-       return HttpResponseRedirect("/")
+       return redirect_to_origin(request)
 
-The template still uses ``{% form @action="delete_note" %}``.
-The dispatcher posts to the action URL without binding a form.
-A ``form`` parameter in the handler signature resolves to ``None`` because no form is bound.
+The scope of a form-less action follows the same anchor-file rule: ``page.py`` and ``component.py`` produce page-scoped actions.
+All other files produce shared actions.
+Pass ``scope="page"`` or ``scope="shared"`` to override the file-derived scope, the same override ``Meta.scope`` provides for a form class.
+Any other value triggers ``next.E047`` and the action is not registered.
+The ``login_required`` and ``permission_required`` keywords guard the endpoint, see `Access Guards`_.
 
-ModelForm Actions
------------------
+Applying ``@action`` to a class registers no action: the decorator records the misuse, returns the class unchanged, and ``manage.py check`` reports it as ``next.E053``.
+Form classes register through ``__init_subclass__`` and must not use ``@action``.
 
-A ``ModelForm`` handles create and edit flows.
-A create handler is the plain ``@action`` handler shown under *The Decorator* above.
-It saves the bound form and redirects.
-An edit handler additionally loads the instance the form updates.
+Injecting the Form Into a Handler
+---------------------------------
+
+A handler registered with ``@action("name", form_class=...)`` receives the bound, validated form.
+A parameter named ``form`` resolves to it, untyped.
+Annotate the parameter with ``DForm[FormClass]`` to type the form for editors and type checkers.
+
+``form_class=`` accepts the form class directly when that class does not register an endpoint of its own.
+A ``next.forms`` base marked ``Meta.abstract = True`` is the canonical case: it skips auto-registration yet keeps the ``get_initial`` classmethod the dispatcher calls.
+Passing a class that already registered itself raises ``TypeError`` at decoration time.
+Mark such a class abstract, or move the handler logic into its ``on_valid``.
 
 .. code-block:: python
-   :caption: edit flow
+   :caption: page.py
 
-   from django.shortcuts import get_object_or_404
+   import next.forms
+   from django.shortcuts import redirect
    from next.forms import action
-   from next.urls import DUrl
-   from notes.forms import NoteForm
-   from notes.models import Note
+   from next.forms.markers import DForm
 
-   @action("update_note", form_class=NoteForm)
-   def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
-       form.instance = get_object_or_404(Note, pk=note_id)
+   class ContactForm(next.forms.ModelForm):
+       class Meta:
+           model = Contact
+           fields = ["name", "email"]
+           abstract = True
+
+   @action("create_contact", form_class=ContactForm)
+   def create_contact(form: DForm[ContactForm]):
        form.save()
-       return HttpResponseRedirect("/")
+       return redirect("/contacts/")
 
-See :doc:`modelforms` for ``get_initial`` patterns that preload the instance from the request.
+A handler that returns a bare string sends it as the response body, so a redirect must come back as a response object.
+The marker only types the parameter.
+The framework still injects the same bound form a parameter named ``form`` would receive.
+See :doc:`/content/ref/decorators` for ``DForm`` and ``FormProvider``.
 
-Form Factory Callable
----------------------
+Dynamic Form Classes
+--------------------
 
-The ``form_class`` argument accepts a factory callable in place of a concrete ``Form`` subclass.
-The framework resolves the factory through the dependency injector once per request, before binding the POST body.
-The factory may return either of two shapes.
+A ``form_class=`` argument may be a factory callable instead of a form class.
+The factory is dependency-injected, so it can read ``request`` and URL kwargs, and it returns one of two shapes.
 
-A ``Form`` subclass.
-   The dispatcher binds POST data and ``get_initial`` exactly as it does for a static ``form_class``.
-   Use this when only the choice of class is dynamic.
+A plain form class.
+   The dispatcher then calls ``get_initial`` on it and binds the form as usual.
 
 A ``(FormClass, init_kwargs)`` tuple.
-   The dispatcher passes ``**init_kwargs`` straight to the form constructor and skips ``get_initial`` entirely.
-   Use this when the form needs constructor arguments that only exist at request time.
-
-Do not include ``data`` or ``files`` in ``init_kwargs``.
-The dispatcher passes both keyword arguments itself, populated from ``request.POST`` and ``request.FILES``, so a kwarg with either name would conflict at construction time.
-
-The factory is dependency-resolved, so it can declare ``request: HttpRequest``, a ``DUrl[...]`` parameter, or any ``Depends`` provider in its signature.
+   When ``init_kwargs`` is non-empty, the dispatcher passes ``**init_kwargs`` straight to the form constructor and skips ``get_initial``.
+   An empty dict behaves like returning the bare class, so a class with no ``get_initial`` needs at least the neutral ``{"initial": {}}``.
+   Use the tuple when the constructor needs arguments that ``get_initial`` cannot supply, such as a preloaded model ``instance`` or a formset ``queryset``.
 
 .. code-block:: python
-   :caption: notes/pages/login/page.py
+   :caption: page.py — a factory returning the tuple form
 
-   from typing import Any
-   from django.contrib.auth import login as auth_login
-   from django.contrib.auth.forms import AuthenticationForm
-   from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
-   from next.forms import action
-
-   def login_form_factory(
-       request: HttpRequest,
-   ) -> tuple[type[AuthenticationForm], dict[str, Any]]:
-       return AuthenticationForm, {"request": request}
-
-   @action("login", form_class=login_form_factory)
-   def login(request: HttpRequest, form: AuthenticationForm) -> HttpResponse:
-       auth_login(request, form.get_user())
-       return HttpResponseRedirect("/")
-
-``AuthenticationForm`` requires ``request`` as its first constructor argument and has no ``get_initial`` method, so the tuple shape fits.
-
-A factory that returns a bare class picks the form per request without changing the constructor call.
-
-.. code-block:: python
-   :caption: choosing a class per request
-
-   from django.http import HttpResponse, HttpResponseRedirect
+   from django.shortcuts import get_object_or_404, redirect
    from next.forms import action
    from next.urls import DUrl
-   from reports.forms import DailyReportForm, WeeklyReportForm
 
-   def report_form_factory(kind: DUrl["kind", str]) -> type:
-       return WeeklyReportForm if kind == "weekly" else DailyReportForm
+   def edit_form_factory(note_id: DUrl["id", int]) -> tuple:
+       note = get_object_or_404(Note, pk=note_id)
+       return NoteForm, {"instance": note}
 
-   @action("submit_report", form_class=report_form_factory)
-   def submit_report(form) -> HttpResponse:
+   @action("edit_note", form_class=edit_form_factory)
+   def edit_note(form: NoteForm):
        form.save()
-       return HttpResponseRedirect("/reports/")
+       return redirect("/notes/")
 
-A factory that returns anything other than a class or a ``(class, dict)`` tuple raises ``TypeError`` when the dispatcher resolves the factory.
+The tuple path bypasses ``get_initial`` only while ``init_kwargs`` stays non-empty, so do not rely on the skip when a factory may return an empty dict.
+See :doc:`formsets` for the same pattern applied to formset and inline-formset actions.
+:doc:`/content/howto/integrate-django-allauth-forms` shows the ``{"initial": {}}`` idiom on a class without ``get_initial``.
 
-When the action name itself is computed at render time, the ``{% form %}`` tag accepts it through a context variable.
+.. _topics-forms-actions-abstract:
 
-.. code-block:: jinja
-   :caption: action name from context
+Preventing Registration
+-----------------------
 
-   {% form @action=action_name %}
-
-Multiple Actions on One Page
-----------------------------
-
-A page module can register several actions.
-Each lives at its own URL so the dispatcher can tell them apart.
+A project base class that other forms subclass should not register as an action of its own.
+Set ``Meta.abstract = True`` to skip auto-registration.
 
 .. code-block:: python
-   :caption: notes/pages/notes/[id]/page.py
+   :caption: app/forms.py — a shared base that does not register
 
-   from django.http import HttpResponseRedirect
-   from next.forms import action
-   from next.urls import DUrl
-   from notes.forms import NoteForm
-   from notes.models import Note
+   class TenantForm(next.forms.Form):
+       class Meta:
+           abstract = True
 
-   @action("update_note", form_class=NoteForm)
-   def update_note(form: NoteForm, note_id: DUrl["id", int]) -> HttpResponseRedirect:
-       form.instance = Note.objects.get(pk=note_id)
-       form.save()
-       return HttpResponseRedirect("/")
+       def on_valid(self, request):
+           return redirect_to_origin(request)
 
-   @action("delete_note")
-   def delete_note(note_id: DUrl["id", int]) -> HttpResponseRedirect:
-       Note.objects.filter(pk=note_id).delete()
-       return HttpResponseRedirect("/")
+   class InviteForm(TenantForm):
+       email = next.forms.EmailField()
 
-Templates reference both names.
+``TenantForm`` is skipped at the ``__init_subclass__`` hook and never appears in the registry.
+``InviteForm`` registers normally as ``invite_form`` and inherits the base behaviour.
+The same ``Meta.abstract`` flag works on a ``FormWizard`` base class.
 
-.. code-block:: jinja
-   :caption: notes/pages/notes/[id]/template.djx
+.. _topics-forms-actions-guards:
 
-   {% form @action="update_note" %}
-     {{ form.title }}
-     {{ form.body }}
-     <button type="submit">Save</button>
-   {% endform %}
+Access Guards
+-------------
 
-   {% form @action="delete_note" %}
-     <button type="submit" class="danger">Delete</button>
-   {% endform %}
-
-Both forms render on a page whose URL captures ``id``.
-Each handler resolves ``DUrl["id", int]`` without any extra tag argument because the ``{% form %}`` tag forwards every captured kwarg automatically, as covered under Captured URL Parameters in :doc:`templates`.
-
-Component Actions
------------------
-
-A composite component can register its own actions.
-The action stays valid wherever the component renders.
+The dispatch endpoint of an action lives at ``/_next/form/<uid>/``, outside the page URL space, so page-level protection does not cover it.
+Declare the access requirements on the action itself.
+``Meta.login_required`` and ``Meta.permission_required`` guard a class-bound form, and the same names are keyword arguments on ``@action``.
 
 .. code-block:: python
-   :caption: _components/comment_box/component.py
+   :caption: page.py
 
-   from django.http import HttpRequest, HttpResponseRedirect
+   import next.forms
+   from django.http import HttpRequest
    from next.forms import action, redirect_to_origin
+   from next.urls import DUrl
 
-   @action("post_comment", form_class=CommentForm, namespace="comments")
-   def post_comment(form: CommentForm, request: HttpRequest) -> HttpResponseRedirect:
-       form.save()
-       return redirect_to_origin(request, fallback="/")
+   class NoteDeleteForm(next.forms.Form):
+       class Meta:
+           login_required = True
+           permission_required = "notes.delete_note"
 
-``redirect_to_origin(request, fallback="/")`` reads the hidden ``_next_form_origin`` field so the user lands back on whichever page rendered the component.
+   @action("purge_note", login_required=True)
+   def purge_note(note_id: DUrl["id", int], request: HttpRequest):
+       Note.objects.filter(pk=note_id).delete()
+       return redirect_to_origin(request)
 
-Components register their actions when the components backend imports each ``component.py``.
+The semantics mirror Django's :class:`~django.contrib.auth.mixins.PermissionRequiredMixin`.
+``permission_required`` accepts a single permission string or an iterable of them, the user must hold every listed permission, and declaring a permission implicitly requires authentication.
+The guard runs before the form is built, ahead of ``get_initial``, form binding, and any database access.
+An anonymous user is redirected to ``LOGIN_URL`` with ``next`` set to the posted origin page.
+An authenticated user missing a permission gets :exc:`~django.core.exceptions.PermissionDenied`, which Django renders as HTTP 403.
+
+Unlike ``Meta.abstract``, which is own-class-only, the guard keys survive subclassing through plain class-attribute lookup.
+A subclass that declares no ``Meta`` of its own inherits the base ``Meta`` and stays guarded.
+A subclass that declares its own ``Meta`` shadows the base one entirely and registers unguarded.
+A concrete ``ModelForm`` subclass is the usual trap, because its ``Meta`` must carry ``model`` and ``fields``.
+Extend the inherited ``Meta`` there, ``class Meta(Base.Meta):``, or re-declare the guard keys in the new ``Meta``.
+The same ``Meta`` keys work on a ``FormWizard``, where the guard is enforced on every step submission.
+
+Rendering a guarded form on a public page is not blocked.
+The guard protects the mutation, not the markup, exactly as a rendered Django form knows nothing about authorisation.
+Hide the form in the template when the page should not show it to anonymous visitors.
+
+The guard is stored as an ``ActionGuard`` on the action's registry metadata, so a custom backend that delegates to the standard pipeline inherits the enforcement.
+The ``next.W060`` check warns when ``permission_required`` is declared while ``django.contrib.auth`` is not installed.
+
+.. _topics-forms-actions-success:
+
+Success Feedback
+----------------
+
+Two ``Meta`` keys describe what a valid submission tells the user: a flash message and a redirect target.
+
+Success Messages
+~~~~~~~~~~~~~~~~
+
+``Meta.success_message`` flashes a message through :doc:`django.contrib.messages <django:ref/contrib/messages>` after a valid submission.
+The template is interpolated with ``%`` formatting over ``cleaned_data``, the exact contract of Django's ``SuccessMessageMixin``.
+
+.. code-block:: python
+
+   class NoteForm(next.forms.ModelForm):
+       class Meta:
+           model = Note
+           fields = ["title", "body"]
+           success_message = "Note %(title)s saved."
+
+Override ``get_success_message(cleaned_data)`` for a dynamic message, for example to name attributes of the saved instance on a ``ModelForm``.
+An empty return value sends nothing.
+
+The message is sent only when the action outcome shapes into a response with a status below 400, so a failed validation flashes nothing.
+On a ``FormWizard`` the message is sent once, after ``done`` succeeds, interpolated over the merged step data.
+
+The messages framework must be fully installed: ``django.contrib.messages`` in ``INSTALLED_APPS`` and ``MessageMiddleware`` in ``MIDDLEWARE``.
+Without it a valid submission raises ``MessageFailure`` rather than silently dropping the message, and the ``next.W061`` check reports the gap at ``manage.py check`` time.
+
+A handler-only action has no ``cleaned_data`` to interpolate, so ``@action`` takes no ``success_message`` keyword.
+Call ``messages.success`` in the handler body instead.
+
+.. code-block:: python
+
+   from django.contrib import messages
+   from django.http import HttpRequest
+   from next.forms import action, redirect_to_origin
+   from next.urls import DUrl
+
+   @action("archive_note")
+   def archive_note(note_id: DUrl["id", int], request: HttpRequest):
+       Note.objects.filter(pk=note_id).update(archived=True)
+       messages.success(request, "Note archived.")
+       return redirect_to_origin(request)
+
+Success Redirects
+~~~~~~~~~~~~~~~~~
+
+``Meta.success_url`` names where the default ``on_valid`` redirects after a valid submission.
+An explicit ``success_url`` wins over the ``redirect_to_origin`` default.
+The value is a path string, a lazy object, or a zero-argument callable returning the path, evaluated when the response is built.
+:func:`next.urls.page_reverse_lazy` is the lazy companion of ``page_reverse`` for exactly this position, because ``Meta`` evaluates at class definition, before the URLconf is ready.
+
+.. code-block:: python
+
+   from next.urls import page_reverse_lazy
+
+   class AttachmentForm(next.forms.ModelForm):
+       class Meta:
+           model = Attachment
+           fields = ("title", "file")
+           success_url = page_reverse_lazy("attachments")
+
+On a ``ModelForm`` the default ``on_valid`` saves first, then follows ``success_url``.
+A custom ``on_valid`` or handler that saves an instance can lean on the model itself: returning the instance redirects to its ``get_absolute_url()``, the ``CreateView`` idiom.
+
+.. code-block:: python
+
+   def on_valid(self, request: HttpRequest):
+       return self.save()
 
 System Checks
 -------------
 
-The forms subsystem contributes Django system checks.
+The forms subsystem contributes Django system checks that run through ``python manage.py check``.
 
-- ``next.E041`` reports two or more ``@action`` registrations that share a name but come from different handlers.
-- ``next.E044`` reports a malformed or non-importable ``DEFAULT_FORM_ACTION_BACKENDS`` entry, including a non-string ``BACKEND`` path.
-- ``next.E045`` reports a backend that does not subclass ``FormActionBackend``.
+``next.E041``
+   Two or more registrations share the same action name but come from different handlers.
+   Rename one of them or move one to a different scope.
 
-A UID hash collision between two distinct action names is not a check.
-It raises ``ImproperlyConfigured`` at import time, as described under Action Names and Namespaces above.
+``next.E046``
+   Two distinct modules declare a shared form action with the same derived name.
+   Bare-name lookups resolve to whichever module imported first.
+   Rename one class or set ``Meta.scope = 'page'`` on one of them.
 
-Run the checks through ``uv run python manage.py check``.
+``next.W046`` (Warning)
+   A form class was declared in a file outside ``BASE_DIR``.
+   The class is not registered automatically.
+
+``next.E047``
+   A form class ``Meta.scope`` or an ``@action`` ``scope`` keyword is set to a value other than ``"page"`` or ``"shared"``.
+   The class or action is not registered.
+
+``next.E048``
+   ``Meta.instance_from_url`` references a field name that does not exist on the model.
+
+``next.E049``
+   ``Meta.instance_from_url`` is set on a class that does not subclass ``next.forms.ModelForm``.
+
+``next.E052``
+   ``FORM_ANCHOR_FILES`` is not None or a list of strings.
+   Only a list round-trips through the settings merge, so a tuple or set is rejected instead of silently falling back to the defaults.
+
+``next.E053``
+   ``@action`` was applied to a class.
+   Remove the decorator and let the class register through ``__init_subclass__``.
+
+``next.W060`` (Warning)
+   An action declares ``permission_required`` while ``django.contrib.auth`` is not in ``INSTALLED_APPS``, so the permission check cannot resolve users or permissions.
+
+``next.W061`` (Warning)
+   An action declares ``Meta.success_message`` while the messages framework is not fully installed.
+   A valid submission raises ``MessageFailure`` until ``django.contrib.messages`` and ``MessageMiddleware`` are both configured.
+
+A UID hash collision between two distinct registrations is not reported as a system check.
+It raises ``ImproperlyConfigured`` at import time when two different ``(scope_key, name)`` pairs hash to the same UID.
+This is distinct from the ``next.E041`` name collision above, which fires when one name is registered from two different handlers.
 
 See Also
 --------
 
 .. seealso::
 
+   :doc:`overview` for the mental model.
    :doc:`templates` for the ``{% form %}`` tag.
    :doc:`validation-rerender` for what happens on a failing submission.
-   :doc:`/content/howto/handle-file-uploads` for file inputs.
    :doc:`/content/ref/forms` for the public API.

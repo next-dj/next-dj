@@ -1,28 +1,25 @@
-"""Template tag ``{% form %}`` for next-dj form actions.
+"""Template tags for rendering next.forms form blocks."""
 
-Parses ``@action`` and other attributes, inserts the CSRF token, and emits POST forms.
-"""
-
-from __future__ import annotations
-
-import re
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from django import template
 from django.core.exceptions import ImproperlyConfigured
 from django.middleware.csrf import get_token
-from django.utils.html import escape, format_html
+from django.utils.html import format_html
 
-from next.deps import RESERVED_KEYS
-from next.forms import build_form_namespace_for_action, form_action_manager
+from next.forms.backends import FormActionNotFound
+from next.forms.manager import _build_form_namespace_from_meta, form_action_manager
+from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
+from next.forms.widgets import bind_component_widgets
 
 
-_NEXT_FORM_PAGE = "_next_form_page"
-_NEXT_FORM_ORIGIN = "_next_form_origin"
+_MIN_FORM_TAG_BITS = 2
+_RESERVED_FORM_ATTRS = frozenset({"action", "method"})
+_RESERVED_FORM_ATTR_PREFIX = "data-next-"
 
 
 if TYPE_CHECKING:
+    from django import forms as django_forms
     from django.http import HttpRequest
     from django.template.base import FilterExpression
 
@@ -30,153 +27,78 @@ if TYPE_CHECKING:
 register = template.Library()
 
 
-_ARG_PATTERN = re.compile(
-    r"(@?[\w.-]+)\s*=\s*"
-    r'(?:"((?:[^"\\]|\\.)*)"'  # double-quoted
-    r"|'((?:[^'\\]|\\.)*)'"  # single-quoted
-    r"|(\S+))"  # unquoted
-)
-
-_RESERVED_KEYS = frozenset({"action", "method"})
-MIN_FORM_TAG_BITS = 2
-
-
-def _parse_form_tag_args(contents: str) -> dict[str, str]:
-    """Parse tag contents into key=value dict of bare strings.
-
-    Quoted values lose their quotes here. The unquoted form is taken
-    verbatim. Use `_parse_form_tag_tokens` when the value will be
-    handed to `parser.compile_filter`, which expects quotes preserved
-    so it can tell literals from variable lookups.
-    """
-    out: dict[str, str] = {}
-    for m in _ARG_PATTERN.finditer(contents):
-        key = m.group(1).strip()
-        value = m.group(2) or m.group(3) or m.group(4)
-        if m.group(4) is not None:
-            value = value.strip().strip("'\"").strip()
-        out[key] = value
-    return out
-
-
-def _parse_form_tag_tokens(contents: str) -> dict[str, str]:
-    """Parse tag contents preserving quote style for `compile_filter`.
-
-    Double-quoted values come back as ``'"value"'``, single-quoted as
-    ``"'value'"``, unquoted as the bare token. This is the shape Django's
-    ``parser.compile_filter`` expects so that ``@action="admin:add"`` is
-    treated as a string literal while ``@action=state.action_name`` is
-    treated as a variable lookup that resolves at render time.
-    """
-    out: dict[str, str] = {}
-    for m in _ARG_PATTERN.finditer(contents):
-        key = m.group(1).strip()
-        if m.group(2) is not None:
-            token = f'"{m.group(2)}"'
-        elif m.group(3) is not None:
-            token = f"'{m.group(3)}'"
-        else:
-            token = m.group(4).strip()
-        out[key] = token
-    return out
-
-
-@dataclass(frozen=True, slots=True)
-class FormConfig:
-    """Immutable configuration parsed from `{% form %}` tag arguments.
-
-    Both `action_expr` and `html_attrs` carry `FilterExpression` objects
-    so string literals (`"admin:save"`) and context variables
-    (`state.action_name`, `form_state.css_class|default:""`) work the
-    same way and resolve at render time.
-    """
-
-    action_expr: FilterExpression
-    html_attrs: tuple[tuple[str, FilterExpression], ...] = ()
-
-    @classmethod
-    def from_tag_args(
-        cls,
-        args: dict[str, str],
-        parser: template.base.Parser,
-    ) -> FormConfig:
-        """Build FormConfig by compiling every value into a FilterExpression."""
-        raw_action = args.get("@action") or args.get("action")
-        if not raw_action:
-            msg = "{% form %} tag requires @action='action_name'"
-            raise template.TemplateSyntaxError(msg)
-
-        action_expr = parser.compile_filter(raw_action)
-        html_attrs = tuple(
-            (k, parser.compile_filter(v))
-            for k, v in args.items()
-            if not k.startswith("@") and k not in _RESERVED_KEYS
-        )
-
-        return cls(action_expr=action_expr, html_attrs=html_attrs)
-
-
-@dataclass(slots=True)
-class FormAttrsBuilder:
-    """Build the `<form ...>` opening tag from resolved values."""
-
-    action_url: str = ""
-    html_attrs: tuple[tuple[str, str], ...] = ()
-
-    @classmethod
-    def from_resolved(
-        cls,
-        action_name: str,
-        html_attrs: tuple[tuple[str, str], ...],
-    ) -> FormAttrsBuilder:
-        """Look up the action's URL and pair it with already-resolved HTML attrs."""
-        try:
-            action_url = form_action_manager.get_action_url(action_name)
-        except KeyError:
-            action_url = ""
-        return cls(action_url=action_url, html_attrs=html_attrs)
-
-    def build_opening_tag(self) -> str:
-        """Build `<form action="..." method="post" ...>`."""
-        parts = ['<form action="{}" method="post"']
-        values: list[str] = [escape(self.action_url)]
-
-        for name, value in self.html_attrs:
-            parts.append(' {}="{}"')
-            values.extend([escape(name), escape(str(value))])
-
-        parts.append(">")
-        return format_html("".join(parts), *values)
-
-
 @register.tag(name="form")
-def do_form(parser: template.base.Parser, token: template.base.Token) -> FormNode:
-    """Block tag for `{% form %}` with @action."""
+def do_form(parser: template.base.Parser, token: template.base.Token) -> "FormNode":
+    """Block tag accepting an action name plus optional HTML attributes."""
     bits = token.split_contents()
-    if len(bits) < MIN_FORM_TAG_BITS:
-        msg = f"{bits[0]!r} tag requires at least @action='...'"
-        raise template.TemplateSyntaxError(msg) from None
-
-    tokens = _parse_form_tag_tokens(" ".join(bits[1:]))
-    config = FormConfig.from_tag_args(tokens, parser)
-
+    if len(bits) < _MIN_FORM_TAG_BITS:
+        msg = f"{bits[0]!r} tag requires the action name as its first argument"
+        raise template.TemplateSyntaxError(msg)
+    action_expr = parser.compile_filter(bits[1])
+    attrs = tuple(_parse_form_attr(parser, bits[0], bit) for bit in bits[2:])
     nodelist = parser.parse(("endform",))
     parser.delete_first_token()
+    return FormNode(action_expr=action_expr, nodelist=nodelist, attrs=attrs)
 
-    return FormNode(config=config, nodelist=nodelist)
+
+def _page_path_from_context(context: template.Context) -> str | None:
+    """Return the current page module path stored in the render context."""
+    raw_page = context.get("current_page_module_path")
+    return str(raw_page) if raw_page else None
+
+
+@register.simple_tag(takes_context=True)
+def action_url(context: template.Context, action_name: str) -> str:
+    """Return the endpoint URL for an action, page-scoped like `{% form %}`."""
+    name = str(action_name)
+    if not name:
+        msg = (
+            "{% action_url %} resolved its argument to an empty action name. "
+            "An unquoted name is looked up as a template variable, quote the "
+            "action name to pass it as a literal."
+        )
+        raise FormActionNotFound(msg)
+    return form_action_manager.get_action_url(
+        name, page_path=_page_path_from_context(context)
+    )
+
+
+def _parse_form_attr(
+    parser: template.base.Parser,
+    tag_name: str,
+    bit: str,
+) -> "tuple[str, FilterExpression]":
+    """Parse one `key="value"` tag argument into an attribute name and value."""
+    name, eq, value = bit.partition("=")
+    if not eq or not name or not value:
+        msg = (
+            f"{tag_name!r} tag arguments after the action name must use "
+            f'the key="value" form, got {bit!r}'
+        )
+        raise template.TemplateSyntaxError(msg)
+    if name in _RESERVED_FORM_ATTRS or name.startswith(_RESERVED_FORM_ATTR_PREFIX):
+        msg = f"{tag_name!r} tag reserves the {name!r} attribute for the framework"
+        raise template.TemplateSyntaxError(msg)
+    return name, parser.compile_filter(value)
 
 
 class FormNode(template.Node):
-    """Render `<form>` with action URL, method="post", csrf_token."""
+    """Render `<form>` with action URL, method=post, csrf_token."""
 
-    __slots__ = ("config", "nodelist")
+    __slots__ = ("action_expr", "attrs", "nodelist")
 
-    def __init__(self, config: FormConfig, nodelist: template.NodeList) -> None:
-        """Initialize with parsed config and template nodelist."""
-        self.config = config
+    def __init__(
+        self,
+        action_expr: "FilterExpression",
+        nodelist: template.NodeList,
+        attrs: "tuple[tuple[str, FilterExpression], ...]" = (),
+    ) -> None:
+        """Initialize with the action expression, nodelist, and HTML attributes."""
+        self.action_expr = action_expr
         self.nodelist = nodelist
+        self.attrs = attrs
 
-    def _get_request(self, context: template.Context) -> HttpRequest:
+    def _get_request(self, context: template.Context) -> "HttpRequest":
         """Extract request from context or raise ImproperlyConfigured."""
         request = context.get("request")
         if request is None:
@@ -188,84 +110,119 @@ class FormNode(template.Node):
             raise ImproperlyConfigured(msg)
         return cast("HttpRequest", request)
 
-    def _build_hidden_inputs(
-        self,
-        request: HttpRequest,
-        *,
-        next_form_page: str | None,
-    ) -> str:
-        """Build CSRF, origin page, and URL parameter hidden inputs."""
+    def _build_hidden_inputs(self, request: "HttpRequest") -> str:
+        """Build the CSRF and origin hidden inputs."""
         inputs = [
             format_html(
                 '<input type="hidden" name="csrfmiddlewaretoken" value="{}">',
                 get_token(request),
             )
         ]
-        if next_form_page:
-            inputs.append(
-                format_html(
-                    '<input type="hidden" name="{}" value="{}">',
-                    _NEXT_FORM_PAGE,
-                    escape(next_form_page),
-                )
-            )
-        origin = getattr(request, "path", None)
+        origin = self._origin_path(request)
         if origin:
             inputs.append(
                 format_html(
                     '<input type="hidden" name="{}" value="{}">',
-                    _NEXT_FORM_ORIGIN,
-                    escape(origin),
+                    ORIGIN_FIELD_NAME,
+                    origin,
                 )
             )
 
-        if request.resolver_match and request.resolver_match.kwargs:
-            for key, value in request.resolver_match.kwargs.items():
-                # Skip uid (form action URL) and names reserved for DI
-                if key != "uid" and key not in RESERVED_KEYS:
-                    inputs.append(
-                        format_html(
-                            '<input type="hidden" name="_url_param_{}" value="{}">',
-                            escape(key),
-                            escape(str(value)),
-                        )
-                    )
-
         return "\n".join(inputs)
+
+    @staticmethod
+    def _origin_path(request: "HttpRequest") -> str | None:
+        """Return the page path the form belongs to.
+
+        On the validation-error re-render the request targets the action
+        endpoint, so the posted origin of the original page wins over
+        `request.path`.
+        """
+        if getattr(request, "method", None) == "POST":
+            posted = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
+            if posted is not None:
+                return posted
+        return getattr(request, "path", None)
+
+    def _opening_tag(
+        self,
+        context: template.Context,
+        action_url: str,
+        uid: str | None,
+        form_instance: "django_forms.Form | None",
+    ) -> str:
+        """Build the opening form element with framework and extra attributes."""
+        bits: list[str] = [format_html('<form action="{}" method="post"', action_url)]
+        if uid:
+            bits.append(format_html('data-next-action="{}"', uid))
+        if (
+            form_instance is not None
+            and form_instance.is_multipart()
+            and all(name != "enctype" for name, _expr in self.attrs)
+        ):
+            bits.append('enctype="multipart/form-data"')
+        bits.extend(
+            format_html('{}="{}"', name, str(expr.resolve(context)))
+            for name, expr in self.attrs
+        )
+        return " ".join(bits) + ">"
 
     def render(self, context: template.Context) -> str:
         """Render form tag with action URL, method=post, CSRF, and content."""
         request = self._get_request(context)
 
-        action_name = str(self.config.action_expr.resolve(context))
-        html_attrs = tuple(
-            (name, str(expr.resolve(context))) for name, expr in self.config.html_attrs
-        )
-        builder = FormAttrsBuilder.from_resolved(action_name, html_attrs)
-
-        raw_page = context.get("current_page_module_path")
-        if not raw_page:
+        action_name = str(self.action_expr.resolve(context))
+        if not action_name:
+            token = self.action_expr.token
             msg = (
-                "{% form %} requires 'current_page_module_path' in template context "
-                "(set when rendering file-based pages)."
+                f"{{% form {token} %}} resolved to an empty action name. "
+                f"An unquoted name is looked up as a template variable, "
+                f'write {{% form "{token}" %}} to pass the action name as '
+                "a literal."
             )
-            raise ImproperlyConfigured(msg)
-        next_form_page = str(raw_page)
+            raise FormActionNotFound(msg, name=token)
+
+        page_path = _page_path_from_context(context)
+
+        resolved_action_url = form_action_manager.get_action_url(
+            action_name, page_path=page_path
+        )
+        meta = form_action_manager.get_action_meta(action_name, page_path=page_path)
 
         form_obj = context.get(action_name)
         if form_obj and hasattr(form_obj, "form"):
             form_instance = form_obj.form
+            wizard_instance = getattr(form_obj, "wizard", None)
         else:
-            built = build_form_namespace_for_action(action_name, request)
+            built = (
+                _build_form_namespace_from_meta(meta, request)
+                if meta is not None
+                else None
+            )
             form_instance = built.form if built is not None else None
+            wizard_instance = getattr(built, "wizard", None) if built else None
 
-        opening_tag = builder.build_opening_tag()
-        hidden_inputs = self._build_hidden_inputs(
-            request,
-            next_form_page=next_form_page,
+        if form_instance is not None:
+            bind_component_widgets(
+                form_instance,
+                template_path=context.get("current_template_path"),
+                request=request,
+                collector=context.get("_static_collector"),
+                with_errors=form_instance.is_bound,
+            )
+
+        opening_tag = self._opening_tag(
+            context,
+            resolved_action_url,
+            meta.get("uid") if meta is not None else None,
+            form_instance,
         )
+        hidden_inputs = self._build_hidden_inputs(request)
 
-        with context.push(form=form_instance):
+        push_kwargs: dict[str, object] = {"form": form_instance}
+        if wizard_instance is not None:
+            push_kwargs["wizard"] = wizard_instance
+        with context.push(**push_kwargs):
             content = self.nodelist.render(context)
 
         return f"{opening_tag}\n{hidden_inputs}\n{content}\n</form>"

@@ -5,6 +5,7 @@ from __future__ import annotations
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.urls import reverse
+from django.utils.functional import lazy
 
 from next.conf import next_framework_settings
 
@@ -22,6 +23,11 @@ def page_reverse(
     clean_name = default_url_parser.prepare_url_name(path_template)
     full_name = next_framework_settings.URL_NAME_TEMPLATE.format(name=clean_name)
     return reverse(f"{namespace}:{full_name}", kwargs=kwargs or None)
+
+
+# Lazy variant for values evaluated at class-definition time, before the
+# URLconf is ready, such as `Meta.success_url` on form classes.
+page_reverse_lazy = lazy(page_reverse, str)
 
 
 def with_query(base: str, **overrides: object) -> str:
@@ -48,4 +54,4 @@ def with_query(base: str, **overrides: object) -> str:
     )
 
 
-__all__ = ["page_reverse", "with_query"]
+__all__ = ["page_reverse", "page_reverse_lazy", "with_query"]

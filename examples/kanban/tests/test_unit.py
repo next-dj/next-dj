@@ -491,28 +491,11 @@ class TestCreateCardHandlerRace:
         col_a, _ = two_columns
         col_a.wip_limit = 2
         col_a.save()
-        # Form sees one free slot.
         form = CreateCardForm(data={"column_id": str(col_a.pk), "title": "Late"})
         Card.objects.create(column=col_a, title="One", position=0)
         assert form.is_valid()
-        # Concurrent post fills the slot before the handler runs.
         Card.objects.create(column=col_a, title="Two", position=1)
 
-        page_module = _load_handler_module()
-        response = page_module.create_card(form)
+        request = HttpRequest()
+        response = form.on_valid(request)
         assert response.status_code == 400
-
-
-def _load_handler_module():
-    spec = importlib.util.spec_from_file_location(
-        "_test_board_page",
-        Path(__file__).parent.parent
-        / "kanban"
-        / "boards"
-        / "board"
-        / "[int:id]"
-        / "page.py",
-    )
-    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod

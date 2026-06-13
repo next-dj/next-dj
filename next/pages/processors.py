@@ -1,7 +1,7 @@
 """Context-processor discovery and loading.
 
 Context processors come from two sources. First, each entry in
-`NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"]` may list processors under
+`NEXT_FRAMEWORK["PAGE_BACKENDS"]` may list processors under
 `OPTIONS.context_processors`. Second, Django's `TEMPLATES` setting
 includes its own `OPTIONS.context_processors`. Both sources merge with
 Next-router entries taking precedence and duplicates dropped.
@@ -40,7 +40,7 @@ def _import_context_processor(
 
 def _get_context_processors() -> list[Callable[[Any], dict[str, Any]]]:
     """Return the merged context processors from Next routers and Django."""
-    configs = next_framework_settings.DEFAULT_PAGE_BACKENDS
+    configs = next_framework_settings.PAGE_BACKENDS
     if not isinstance(configs, list):
         configs = []
     from_next = [

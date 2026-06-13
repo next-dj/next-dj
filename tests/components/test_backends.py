@@ -290,7 +290,7 @@ class TestComponentsFactoryManager:
         assert b.collect_visible_components(Path("/t.djx")) == {}
 
     def test_manager_skips_non_list_config_and_non_dict_entries(self) -> None:
-        """If ``DEFAULT_COMPONENT_BACKENDS`` is not a list, return early. Non-dict entries are skipped."""
+        """If ``COMPONENT_BACKENDS`` is not a list, return early. Non-dict entries are skipped."""
         mgr = ComponentsManager()
         mock_ns = _next_framework_settings_component_backends_list("bad")
         with patch("next.components.manager.next_framework_settings", mock_ns):

@@ -12,6 +12,7 @@ from next.urls import page_reverse
 # a lazy reverse result.
 ADMIN_PREFIX = "/admin/"
 LOGIN_URL = "/admin/login/"
+LOGOUT_URL = "/admin/logout/"
 
 
 def resolve_model_admin(
@@ -56,6 +57,11 @@ def dashboard_url() -> str:
 def login_url() -> str:
     """URL of the login page."""
     return page_reverse("login")
+
+
+def logout_url() -> str:
+    """URL of the signed-out page."""
+    return page_reverse("logout")
 
 
 def changelist_url(app_label: str, model_name: str) -> str:

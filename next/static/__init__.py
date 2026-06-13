@@ -37,7 +37,12 @@ from .collector import (
 from .defaults import register_defaults
 from .discovery import AssetDiscovery
 from .finders import NextStaticFilesFinder
-from .manager import StaticManager, default_manager, reset_default_manager
+from .manager import (
+    StaticManager,
+    collect_component_assets,
+    default_manager,
+    reset_default_manager,
+)
 from .scripts import NextScriptBuilder, ScriptInjectionPolicy
 from .serializers import (
     JsContextSerializer,
@@ -64,6 +69,7 @@ __all__ = [
     "StaticFilesBackend",
     "StaticManager",
     "StaticsFactory",
+    "collect_component_assets",
     "default_kinds",
     "default_manager",
     "default_placeholders",

@@ -8,8 +8,10 @@ Terms used throughout the next.dj documentation.
 .. glossary::
 
    action
-      A Python callable registered with ``@action("name")``.
-      The handler receives the validated form plus any DI-resolved parameters, and the framework derives a stable dispatch URL from the action name.
+      A registered entry point for a form POST.
+      Form classes register automatically through ``__init_subclass__`` with a ``snake_case`` name derived from the class name.
+      Form-less functions register through ``@action("name")``.
+      The framework derives a stable dispatch URL from the action name.
 
    asset
       A file registered with the static pipeline.
@@ -34,6 +36,10 @@ Terms used throughout the next.dj documentation.
       A reusable template fragment under the components root.
       Has a template and optional Python module.
 
+   ComponentWidget
+      A form widget that renders a field through a registered next.dj component instead of a Django widget template.
+      One field maps to one component, and the component owns the markup.
+
    context function
       A Python callable decorated with ``@context("key")`` that publishes a value to the template scope.
 
@@ -52,6 +58,19 @@ Terms used throughout the next.dj documentation.
    FormSpec
       A frozen dataclass that describes a form layout.
       Used to render forms in custom templates.
+
+   FormWizard
+      A multi-step form that routes a sequence of step forms across requests.
+      Steps are declared as ``(name, FormClass)`` tuples in ``Meta.steps``, and ``done`` runs after the final step validates.
+
+   form wizard backend
+      The draft-persistence contract for a ``FormWizard``, a ``FormWizardBackend`` subclass that stores each step's cleaned data between requests.
+      Selected through ``NEXT_FRAMEWORK["FORM_WIZARD_BACKEND"]``, with the bundled ``SessionFormWizardBackend`` as the default and ``CacheFormWizardBackend`` as the cache-backed alternative.
+
+   guard
+      The access requirement declared on an action through ``Meta.login_required`` and ``Meta.permission_required``, or the matching ``@action`` keywords.
+      Stored as an ``ActionGuard`` on the registry metadata and enforced before the form is built.
+      See :ref:`topics-forms-actions-guards`.
 
    inherit_context
       The ``inherit_context=True`` flag on ``@context`` in ``page.py``.
@@ -79,17 +98,21 @@ Terms used throughout the next.dj documentation.
 
    origin page
       The page that rendered a form.
-      Identified through the hidden ``_next_form_page`` field at dispatch time.
+      Identified at dispatch time by resolving the hidden ``_next_form_origin`` URL path against the URLconf.
+
+   outcome
+      The ``ActionOutcome`` dataclass a form action backend produces from a dispatch, shaped into the HTTP response by ``shape_response``.
+      See :doc:`/content/topics/forms/backends`.
 
    page
       A directory under the page root with a ``page.py``, or a virtual route with only a ``template.djx``.
 
    page root
       A directory that the router walks for page discovery.
-      Comes from ``APP_DIRS`` and ``DIRS`` in ``DEFAULT_PAGE_BACKENDS``.
+      Comes from ``APP_DIRS`` and ``DIRS`` in ``PAGE_BACKENDS``.
 
    multi-project layout
-      Multiple Django applications or explicit ``DIRS`` entries each contributing page trees while optionally sharing component directories through ``DEFAULT_COMPONENT_BACKENDS``.
+      Multiple Django applications or explicit ``DIRS`` entries each contributing page trees while optionally sharing component directories through ``COMPONENT_BACKENDS``.
       See :doc:`/content/topics/multi-project`.
 
    provider
@@ -109,6 +132,12 @@ Terms used throughout the next.dj documentation.
       The Django URL name string inside the ``next`` namespace (``app_name`` on ``next.urls``).
       Values come from ``NEXT_FRAMEWORK["URL_NAME_TEMPLATE"]``, default ``"page_{name}"``, where ``{name}`` is derived from the normalized filesystem path.
       Reverse from templates as ``{% url 'next:page_notes_id' id=note.id %}`` or from Python through :doc:`/content/topics/url-reversing`.
+
+   scope
+      The keying rule for an action name, ``page`` or ``shared``.
+      A page-scoped action is keyed to the absolute path of its declaring ``page.py`` or ``component.py``, while a shared action is keyed to its dotted module name and is reachable project-wide.
+      The resulting key is the scope key that the UID hashes together with the action name.
+      See :doc:`/content/topics/forms/actions`.
 
    signal
       A Django signal emitted by one subsystem.
@@ -134,7 +163,7 @@ Terms used throughout the next.dj documentation.
       A swappable algorithm such as ``DedupStrategy`` for static deduplication.
 
    UID
-      The 16 character hash of an action name that becomes part of the dispatch URL.
+      The 16 character hash of an action's scope key and name that becomes part of the dispatch URL.
 
    virtual route
       A directory with only ``template.djx`` and no ``page.py``.

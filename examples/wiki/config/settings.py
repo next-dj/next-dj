@@ -75,7 +75,7 @@ STATICFILES_DIRS = [SHARED_DIR / "static"]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_BACKENDS": [
+    "PAGE_BACKENDS": [
         {
             "BACKEND": "wiki.backends.HybridRouterBackend",
             "APP_DIRS": True,
@@ -92,7 +92,7 @@ NEXT_FRAMEWORK = {
             },
         },
     ],
-    "DEFAULT_COMPONENT_BACKENDS": [
+    "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [str(SHARED_DIR / "_components")],

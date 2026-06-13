@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
 
 from django.core.cache import cache
 from django.core.management import call_command
@@ -15,18 +14,27 @@ class TestShorten:
     """Submitting the form creates a Link and redirects home."""
 
     def test_post_creates_link_and_redirects(self, client) -> None:
-        response = client.post_action("create_link", {"url": "https://example.com/a"})
+        response = client.post_action(
+            "create_link_form", {"url": "https://example.com/a"}
+        )
         assert response.status_code == 302
         assert response["Location"] == "/"
         assert Link.objects.count() == 1
 
-    def test_invalid_url_renders_form_with_errors(self, client) -> None:
-        page_path = (
-            Path(__file__).resolve().parent.parent / "shortener" / "routes" / "page.py"
-        )
+    def test_success_message_flashes_on_home(self, client) -> None:
         response = client.post_action(
-            "create_link",
-            {"url": "not-a-url", "_next_form_page": str(page_path)},
+            "create_link_form",
+            {"url": "https://example.com/a"},
+            follow=True,
+        )
+        body = response.content.decode()
+        assert "Short link created for https://example.com/a." in body
+
+    def test_invalid_url_renders_form_with_errors(self, client) -> None:
+        response = client.post_action(
+            "create_link_form",
+            {"url": "not-a-url"},
+            origin="/",
         )
         assert response.status_code == 200
         assert b"Enter a valid URL" in response.content

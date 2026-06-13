@@ -117,7 +117,7 @@ A custom kind reuses one of these methods, or a custom backend can add a new met
        renderer="render_babel_tag",
    )
 
-The backend is registered through ``DEFAULT_STATIC_BACKENDS``, see :doc:`backends`.
+The backend is registered through ``STATIC_BACKENDS``, see :doc:`backends`.
 
 Placeholder Slots
 -----------------

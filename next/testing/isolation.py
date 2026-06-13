@@ -8,7 +8,9 @@ registry behaviour or need to reload backends after swapping settings.
 from __future__ import annotations
 
 from next.components.manager import components_manager
+from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
+from next.forms.wizard import wizard_backend_manager
 from next.pages.manager import page
 
 
@@ -17,7 +19,7 @@ def reset_form_actions() -> None:
 
     Forms register imperatively at import time, so the manager does not
     auto-rebuild on `settings_reloaded`. Tests that swap
-    `NEXT_FRAMEWORK["DEFAULT_FORM_ACTION_BACKENDS"]` call this helper to
+    `NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]` call this helper to
     discard the stale backend list and pick the new one up on next use.
     """
     form_action_manager._reload_config()
@@ -26,6 +28,13 @@ def reset_form_actions() -> None:
 def reset_components() -> None:
     """Drop cached component backends so the next render reloads them."""
     components_manager._reload_config()
+
+
+def reset_form_registration_state() -> None:
+    """Clear every form registry and registration-warning buffer for test isolation."""
+    form_action_manager.clear_registries()
+    registration_diagnostics.clear()
+    wizard_backend_manager.reset()
 
 
 def reset_registries() -> None:
@@ -46,12 +55,14 @@ def reset_page_cache() -> None:
     composed template strings per file path.
     """
     page._template_registry.clear()
+    page._compiled_registry.clear()
     page._template_source_mtimes.clear()
 
 
 __all__ = [
     "reset_components",
     "reset_form_actions",
+    "reset_form_registration_state",
     "reset_page_cache",
     "reset_registries",
 ]

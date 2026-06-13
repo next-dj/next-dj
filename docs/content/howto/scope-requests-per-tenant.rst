@@ -181,7 +181,7 @@ List it in the page backend ``OPTIONS`` so the file router runs it.
    :caption: config/settings.py
 
    NEXT_FRAMEWORK = {
-       "DEFAULT_PAGE_BACKENDS": [
+       "PAGE_BACKENDS": [
            {
                "BACKEND": "next.urls.FileRouterBackend",
                "DIRS": [],
@@ -203,7 +203,7 @@ Prefix Asset URLs Per Tenant
 Scope the static backend the same way.
 Subclass ``StaticFilesBackend`` and override the renderer methods.
 Read the tenant from the ``request`` keyword argument that the static manager passes to every renderer, then prepend the tenant slug to each collected URL.
-Register the subclass in ``DEFAULT_STATIC_BACKENDS``.
+Register the subclass in ``STATIC_BACKENDS``.
 
 See :doc:`write-a-static-backend` under *Tenant URL Prefix* for the full implementation.
 

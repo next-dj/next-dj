@@ -48,7 +48,9 @@ Every page render starts with three keys already populated, before any user-defi
 ``current_page_module_path``.
    The absolute path of the ``page.py`` module being rendered.
 
-User ``@context`` callables can read these keys by parameter name, and template-side machinery such as the ``{% component %}`` and ``{% form %}`` tags relies on them.
+A user ``@context`` callable reads ``request`` through an ``HttpRequest`` annotation rather than by parameter name.
+The ``current_template_path`` and ``current_page_module_path`` keys live in the template scope for the ``{% form %}`` and ``{% component %}`` tags to consume.
+They are not injected into a context callable by parameter name.
 
 The Decorator
 -------------
@@ -178,7 +180,7 @@ The framework computes the template scope in this order.
 2. Inherited context functions from every ancestor ``page.py``, walked from the route root inward.
 3. Page level context functions declared in the current ``page.py``.
 4. Context processors run after every ``@context`` callable.
-   The first source is ``OPTIONS.context_processors`` on each page backend entry inside ``DEFAULT_PAGE_BACKENDS``.
+   The first source is ``OPTIONS.context_processors`` on each page backend entry inside ``PAGE_BACKENDS``.
    The second source is the ``context_processors`` list of the first ``TEMPLATES`` entry in Django settings.
    See :ref:`ref-settings` and :doc:`project-layout` for the backend layout.
    The two lists merge in that order with duplicate dotted paths dropped, so a processor listed twice runs once.

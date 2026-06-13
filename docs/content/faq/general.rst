@@ -35,6 +35,21 @@ Watch the repository on GitHub.
 Releases ship through PyPI under the distribution name ``next.dj``, imported as ``next`` (see :doc:`/content/intro/install`).
 Discussions and feature requests live on GitHub Discussions.
 
+How Is This Different From Plain Django Forms
+---------------------------------------------
+
+Three things.
+A next.dj form needs no URL entry and no view.
+Subclassing ``next.forms.Form`` or ``next.forms.ModelForm`` registers it and attaches a POST endpoint, CSRF, and a re-render-on-failure pipeline (see :doc:`/content/topics/forms/overview`).
+A failed submission re-renders the origin page with the entered values and field errors instead of an error page, so you write no re-render code (see :doc:`/content/topics/forms/validation-rerender`).
+A ``next.forms.FormWizard`` persists per-step data through a configured backend rather than hand-managed session keys (see :doc:`/content/topics/forms/wizard`).
+
+When To Use FormWizard Versus Rolling Your Own Session Logic
+------------------------------------------------------------
+
+Use ``next.forms.FormWizard`` when a flow spans several steps that share a final commit, where you would otherwise stash partial data in the session and wire step routing, back-navigation, and conditional branching by hand.
+A single form, or two independent forms with no shared finalisation, does not need a wizard.
+
 What About Plugins
 ------------------
 

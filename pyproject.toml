@@ -55,6 +55,13 @@ dev = [
     "markdown>=3.7",
     "time-machine>=2.16",
 ]
+compat = [
+    "django-crispy-forms>=2.3",
+    "crispy-bootstrap5>=2024.10",
+    "django-widget-tweaks>=1.5",
+    "django-htmx>=1.19",
+    "django-allauth>=65.18",
+]
 docs = [
     "doc8==2.0.0",
     "sphinx==9.1.0",
@@ -207,6 +214,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "examples/*" = [
+    "ARG002",
     "D100", "D101", "D103", "D104", "D105", "D106",
     "EXE001",
     "INP001",

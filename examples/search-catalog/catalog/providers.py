@@ -1,19 +1,12 @@
-from __future__ import annotations
-
+import inspect
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING
+
+from django.http import HttpRequest
 
 from next.deps import DDependencyBase, RegisteredParameterProvider
+from next.deps.context import ResolutionContext
 from next.urls import get_multi_values
-
-
-if TYPE_CHECKING:
-    import inspect
-
-    from django.http import HttpRequest
-
-    from next.deps.context import ResolutionContext
 
 
 DEFAULT_PER_PAGE = 6

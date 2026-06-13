@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -123,12 +122,12 @@ class TestNoteEditForm:
     ) -> None:
         note = _acme_note(acme)
         response = client.post_action(
-            "notes:note_edit",
+            "note_edit_form",
             {
-                "note_id": note.pk,
                 "title": note.title,
                 "body": "edited body content",
             },
+            origin=f"/notes/{note.pk}/edit/",
             HTTP_X_TENANT="acme",
         )
         assert response.status_code == 302
@@ -141,28 +140,17 @@ class TestNoteEditForm:
     ) -> None:
         note = _acme_note(acme)
         response = client.post_action(
-            "notes:note_edit",
+            "note_edit_form",
             {
-                "note_id": note.pk,
                 "title": "hijack",
                 "body": "should not save",
             },
+            origin=f"/notes/{note.pk}/edit/",
             HTTP_X_TENANT="globex",
         )
         assert response.status_code == 404
         note.refresh_from_db()
         assert note.title != "hijack"
-
-
-EDIT_PAGE_FILE = (
-    Path(__file__).resolve().parent.parent
-    / "notes"
-    / "workspaces"
-    / "notes"
-    / "[int:id]"
-    / "edit"
-    / "page.py"
-)
 
 
 class TestNoteEditFormErrorRerender:
@@ -174,14 +162,12 @@ class TestNoteEditFormErrorRerender:
     ) -> None:
         note = _acme_note(acme)
         response = client.post_action(
-            "notes:note_edit",
+            "note_edit_form",
             {
-                "note_id": note.pk,
                 "title": "",
                 "body": "x",
-                "_next_form_page": str(EDIT_PAGE_FILE),
-                "_url_param_id": str(note.pk),
             },
+            origin=f"/notes/{note.pk}/edit/",
             HTTP_X_TENANT="acme",
         )
         body = response.content.decode()
@@ -210,7 +196,7 @@ class TestNoteCreate:
     ) -> None:
         existing = set(Note.objects.filter(tenant=acme).values_list("pk", flat=True))
         response = client.post_action(
-            "notes:note_create",
+            "note_create_form",
             {"title": "Fresh idea", "body": "## body"},
             HTTP_X_TENANT="acme",
         )
@@ -231,7 +217,7 @@ class TestNoteCreate:
         self, client: NextClient, acme: Tenant, globex: Tenant
     ) -> None:
         client.post_action(
-            "notes:note_create",
+            "note_create_form",
             {"title": "Globex only", "body": ""},
             HTTP_X_TENANT="globex",
         )

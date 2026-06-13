@@ -10,7 +10,7 @@ class TestBenchExtendDefaultBackend:
     def test_extend_single_override(self, benchmark) -> None:
         benchmark(
             extend_default_backend,
-            "DEFAULT_PAGE_BACKENDS",
+            "PAGE_BACKENDS",
             PAGES_DIR="routes",
         )
 
@@ -18,7 +18,7 @@ class TestBenchExtendDefaultBackend:
     def test_extend_nested_options_merge(self, benchmark) -> None:
         benchmark(
             extend_default_backend,
-            "DEFAULT_PAGE_BACKENDS",
+            "PAGE_BACKENDS",
             PAGES_DIR="routes",
             APP_DIRS=True,
             OPTIONS={"context_processors": ["myapp.ctx.one", "myapp.ctx.two"]},

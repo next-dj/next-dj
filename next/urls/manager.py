@@ -1,7 +1,7 @@
 """Router manager, lazy urlpatterns list, and settings-reload wiring.
 
 `RouterManager` owns the list of active `RouterBackend` instances and
-rebuilds it from `NEXT_FRAMEWORK["DEFAULT_PAGE_BACKENDS"]` whenever
+rebuilds it from `NEXT_FRAMEWORK["PAGE_BACKENDS"]` whenever
 framework settings change. `_LazyUrlPatterns` is a `list`-subclass
 used as Django's `urlpatterns` so the first access triggers router
 and form-action resolution without walking the page tree at import
@@ -17,7 +17,7 @@ from django.urls import clear_url_caches
 
 from next.conf import next_framework_settings
 from next.conf.signals import settings_reloaded
-from next.forms import form_action_manager
+from next.forms.manager import form_action_manager
 
 from .backends import RouterBackend, RouterFactory
 from .signals import router_reloaded
@@ -60,7 +60,7 @@ class RouterManager:
         return self._backends[index]
 
     def reload(self) -> None:
-        """Rebuild backends from `DEFAULT_PAGE_BACKENDS` and notify listeners.
+        """Rebuild backends from `PAGE_BACKENDS` and notify listeners.
 
         The Django URL resolver caches resolved patterns. The cache is
         cleared here so the next request sees the freshly built backend
@@ -85,7 +85,7 @@ class RouterManager:
         """Router list from `settings.NEXT_FRAMEWORK` (merged defaults, cached)."""
         if self._config_cache is not None:
             return self._config_cache
-        routers = next_framework_settings.DEFAULT_PAGE_BACKENDS
+        routers = next_framework_settings.PAGE_BACKENDS
         if not isinstance(routers, list):
             self._config_cache = []
             return self._config_cache

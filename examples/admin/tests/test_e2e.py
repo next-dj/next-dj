@@ -15,7 +15,7 @@ def _action_form_body(body: str, *, action_substring: str = "/_next/form/") -> s
     but with no formset) by picking the last matching form.
     """
     forms = re.findall(
-        r'<form[^>]*action="([^"]+)"[^>]*>(.+?)</form>',
+        r'<form[^>]*?(?<!-)action="([^"]+)"[^>]*>(.+?)</form>',
         body,
         re.DOTALL,
     )
@@ -91,9 +91,16 @@ class TestAuth:
     def test_logout_clears_session(self, admin_client):
         r = admin_client.post_action("admin:logout", {})
         assert r.status_code == 302
+        assert r["Location"] == "/admin/logout/"
         r2 = admin_client.get("/admin/")
         assert r2.status_code == 302
         assert r2["Location"].startswith("/admin/login/")
+
+    def test_logout_lands_on_farewell_page(self, admin_client):
+        r = admin_client.post_action("admin:logout", {}, follow=True)
+        body = r.content.decode()
+        assert "You have been signed out." in body
+        assert "Sign in again" in body
 
     def test_bad_credentials_renders_form_error(self, client, admin_user):
         rendered = _extract_form_inputs(client.get("/admin/login/").content.decode())
@@ -104,6 +111,100 @@ class TestAuth:
         assert r.status_code == 200
         body = r.content.decode()
         assert "Please enter a correct" in body or "correct username" in body
+
+
+class TestActionGuards:
+    """Mutating actions reject anonymous POSTs and unauthorized users."""
+
+    def test_anonymous_add_post_redirects_to_login(self, client):
+        r = client.post_action(
+            "admin:add",
+            {"name": "Sneaky", "slug": "sneaky"},
+            origin="/admin/library/tag/add/",
+        )
+        assert r.status_code == 302
+        assert r["Location"].startswith("/admin/login/")
+        assert not Tag.objects.exists()
+
+    def test_anonymous_change_post_redirects_to_login(self, client):
+        tag = Tag.objects.create(name="Old", slug="old")
+        r = client.post_action(
+            "admin:change",
+            {"name": "Hacked", "slug": "hacked"},
+            origin=f"/admin/library/tag/{tag.pk}/change/",
+        )
+        assert r.status_code == 302
+        assert r["Location"].startswith("/admin/login/")
+        tag.refresh_from_db()
+        assert tag.name == "Old"
+
+    def test_anonymous_delete_post_redirects_to_login(self, client):
+        tag = Tag.objects.create(name="Keep", slug="keep")
+        r = client.post_action(
+            "admin:delete",
+            origin=f"/admin/library/tag/{tag.pk}/delete/",
+        )
+        assert r.status_code == 302
+        assert r["Location"].startswith("/admin/login/")
+        assert Tag.objects.filter(pk=tag.pk).exists()
+
+    def test_anonymous_bulk_action_post_redirects_to_login(self, client):
+        author = Author.objects.create(full_name="A")
+        book = Book.objects.create(title="B", author=author, status=Book.DRAFT)
+        r = client.post_action(
+            "admin:bulk_action",
+            {"action": "mark_as_published", "_selected_action": [str(book.pk)]},
+            origin="/admin/library/book/",
+        )
+        assert r.status_code == 302
+        assert r["Location"].startswith("/admin/login/")
+        book.refresh_from_db()
+        assert book.status == Book.DRAFT
+
+    def test_non_staff_add_post_is_forbidden(self, client, django_user_model):
+        client.force_login(django_user_model.objects.create_user("intruder"))
+        r = client.post_action(
+            "admin:add",
+            {"name": "Sneaky", "slug": "sneaky"},
+            origin="/admin/library/tag/add/",
+        )
+        assert r.status_code == 403
+        assert not Tag.objects.exists()
+
+    def test_non_staff_change_post_is_forbidden(self, client, django_user_model):
+        client.force_login(django_user_model.objects.create_user("intruder"))
+        tag = Tag.objects.create(name="Old", slug="old")
+        r = client.post_action(
+            "admin:change",
+            {"name": "Hacked", "slug": "hacked"},
+            origin=f"/admin/library/tag/{tag.pk}/change/",
+        )
+        assert r.status_code == 403
+        tag.refresh_from_db()
+        assert tag.name == "Old"
+
+    def test_non_staff_delete_post_is_forbidden(self, client, django_user_model):
+        client.force_login(django_user_model.objects.create_user("intruder"))
+        tag = Tag.objects.create(name="Keep", slug="keep")
+        r = client.post_action(
+            "admin:delete",
+            origin=f"/admin/library/tag/{tag.pk}/delete/",
+        )
+        assert r.status_code == 403
+        assert Tag.objects.filter(pk=tag.pk).exists()
+
+    def test_non_staff_bulk_action_post_is_forbidden(self, client, django_user_model):
+        client.force_login(django_user_model.objects.create_user("intruder"))
+        author = Author.objects.create(full_name="A")
+        book = Book.objects.create(title="B", author=author, status=Book.DRAFT)
+        r = client.post_action(
+            "admin:bulk_action",
+            {"action": "mark_as_published", "_selected_action": [str(book.pk)]},
+            origin="/admin/library/book/",
+        )
+        assert r.status_code == 403
+        book.refresh_from_db()
+        assert book.status == Book.DRAFT
 
 
 class TestChangelist:
@@ -206,11 +307,8 @@ class TestBulkAction:
     def test_bulk_action_with_no_selection_redirects(self, admin_client):
         r = admin_client.post_action(
             "admin:bulk_action",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "book",
-                "action": "",
-            },
+            {"action": ""},
+            origin="/admin/library/book/",
         )
         assert r.status_code == 302
         assert r["Location"] == "/admin/library/book/"
@@ -227,12 +325,8 @@ class TestAddView:
     def test_add_post_creates_record(self, admin_client):
         r = admin_client.post_action(
             "admin:add",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "tag",
-                "name": "SciFi",
-                "slug": "scifi",
-            },
+            {"name": "SciFi", "slug": "scifi"},
+            origin="/admin/library/tag/add/",
         )
         assert r.status_code == 302
         assert r["Location"] == "/admin/library/tag/"
@@ -262,13 +356,8 @@ class TestChangeView:
         tag = Tag.objects.create(name="Old", slug="old")
         r = admin_client.post_action(
             "admin:change",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "tag",
-                "_url_param_pk": str(tag.pk),
-                "name": "New",
-                "slug": "new",
-            },
+            {"name": "New", "slug": "new"},
+            origin=f"/admin/library/tag/{tag.pk}/change/",
         )
         assert r.status_code == 302
         tag.refresh_from_db()
@@ -293,11 +382,7 @@ class TestDeleteView:
         tag = Tag.objects.create(name="Doomed", slug="doomed")
         r = admin_client.post_action(
             "admin:delete",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "tag",
-                "_url_param_pk": str(tag.pk),
-            },
+            origin=f"/admin/library/tag/{tag.pk}/delete/",
         )
         assert r.status_code == 302
         assert not Tag.objects.filter(pk=tag.pk).exists()
@@ -309,11 +394,7 @@ class TestDeleteView:
     def test_delete_post_unknown_pk_404(self, admin_client):
         r = admin_client.post_action(
             "admin:delete",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "tag",
-                "_url_param_pk": "99999",
-            },
+            origin="/admin/library/tag/99999/delete/",
         )
         assert r.status_code == 404
 
@@ -342,8 +423,8 @@ class TestInlines:
         """Mirrors a browser: GET the form, copy every rendered input, POST.
 
         Catches regressions where the GET page omits a hidden field the
-        dispatcher relies on (csrf, _next_form_page, _url_param_*), and where
-        the rendered initial values for an unfilled `extra` inline row would
+        dispatcher relies on (csrf, _next_form_origin), and where the
+        rendered initial values for an unfilled `extra` inline row would
         make the formset look "changed" and trigger validation against
         otherwise-skipped empty required fields.
         """
@@ -355,9 +436,7 @@ class TestInlines:
         rendered = _extract_form_inputs(get.content.decode())
 
         assert "csrfmiddlewaretoken" in rendered
-        assert "_next_form_page" in rendered
-        assert rendered.get("_url_param_app_label") == "library"
-        assert rendered.get("_url_param_model_name") == "book"
+        assert rendered.get("_next_form_origin") == "/admin/library/book/add/"
 
         payload = {
             **rendered,
@@ -402,13 +481,8 @@ class TestHistoryView:
         tag = Tag.objects.create(name="Old", slug="old")
         admin_client.post_action(
             "admin:change",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "tag",
-                "_url_param_pk": str(tag.pk),
-                "name": "New",
-                "slug": "new",
-            },
+            {"name": "New", "slug": "new"},
+            origin=f"/admin/library/tag/{tag.pk}/change/",
         )
         r = admin_client.get(f"/admin/library/tag/{tag.pk}/history/")
         assert r.status_code == 200
@@ -472,13 +546,8 @@ class TestSaveContinue:
     def test_save_continue_redirects_to_change(self, admin_client):
         r = admin_client.post_action(
             "admin:add",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "tag",
-                "name": "Drama",
-                "slug": "drama",
-                "_save_continue": "1",
-            },
+            {"name": "Drama", "slug": "drama", "_save_continue": "1"},
+            origin="/admin/library/tag/add/",
         )
         assert r.status_code == 302
         tag = Tag.objects.get(slug="drama")
@@ -487,13 +556,8 @@ class TestSaveContinue:
     def test_save_addanother_redirects_to_add(self, admin_client):
         r = admin_client.post_action(
             "admin:add",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "tag",
-                "name": "Comedy",
-                "slug": "comedy",
-                "_save_addanother": "1",
-            },
+            {"name": "Comedy", "slug": "comedy", "_save_addanother": "1"},
+            origin="/admin/library/tag/add/",
         )
         assert r.status_code == 302
         assert r["Location"] == "/admin/library/tag/add/"
@@ -503,14 +567,8 @@ class TestSaveContinue:
         tag = Tag.objects.create(name="Old", slug="old")
         r = admin_client.post_action(
             "admin:change",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "tag",
-                "_url_param_pk": str(tag.pk),
-                "name": "Renamed",
-                "slug": "renamed",
-                "_save_continue": "1",
-            },
+            {"name": "Renamed", "slug": "renamed", "_save_continue": "1"},
+            origin=f"/admin/library/tag/{tag.pk}/change/",
         )
         assert r.status_code == 302
         assert r["Location"] == f"/admin/library/tag/{tag.pk}/change/"
@@ -534,11 +592,10 @@ class TestCustomBulkAction:
         r = admin_client.post_action(
             "admin:bulk_action",
             {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "book",
                 "action": "mark_as_published",
                 "_selected_action": [str(b1.pk), str(b2.pk)],
             },
+            origin="/admin/library/book/",
         )
         assert r.status_code == 302
         b1.refresh_from_db()
@@ -553,12 +610,8 @@ class TestActivityLog:
     def test_add_records_entry(self, admin_client):
         admin_client.post_action(
             "admin:add",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "tag",
-                "name": "Thriller",
-                "slug": "thriller",
-            },
+            {"name": "Thriller", "slug": "thriller"},
+            origin="/admin/library/tag/add/",
         )
         entries = list(AdminActivityLog.objects.all())
         assert len(entries) == 1
@@ -575,11 +628,10 @@ class TestActivityLog:
         admin_client.post_action(
             "admin:bulk_action",
             {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "book",
                 "action": "mark_as_published",
                 "_selected_action": [str(book.pk)],
             },
+            origin="/admin/library/book/",
         )
         entries = list(AdminActivityLog.objects.filter(action="bulk_action"))
         assert len(entries) == 1
@@ -606,12 +658,8 @@ class TestFlashMessages:
     def test_add_flashes_success(self, admin_client):
         r = admin_client.post_action(
             "admin:add",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "tag",
-                "name": "Mystery",
-                "slug": "mystery",
-            },
+            {"name": "Mystery", "slug": "mystery"},
+            origin="/admin/library/tag/add/",
             follow=True,
         )
         body = r.content.decode()
@@ -621,13 +669,8 @@ class TestFlashMessages:
         tag = Tag.objects.create(name="Old", slug="old")
         r = admin_client.post_action(
             "admin:change",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "tag",
-                "_url_param_pk": str(tag.pk),
-                "name": "New",
-                "slug": "new",
-            },
+            {"name": "New", "slug": "new"},
+            origin=f"/admin/library/tag/{tag.pk}/change/",
             follow=True,
         )
         body = r.content.decode()
@@ -637,11 +680,7 @@ class TestFlashMessages:
         tag = Tag.objects.create(name="Doomed", slug="doomed")
         r = admin_client.post_action(
             "admin:delete",
-            {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "tag",
-                "_url_param_pk": str(tag.pk),
-            },
+            origin=f"/admin/library/tag/{tag.pk}/delete/",
             follow=True,
         )
         body = r.content.decode()
@@ -654,11 +693,10 @@ class TestFlashMessages:
         r = admin_client.post_action(
             "admin:bulk_action",
             {
-                "_url_param_app_label": "library",
-                "_url_param_model_name": "book",
                 "action": "mark_as_published",
                 "_selected_action": [str(Book.objects.get(title="X").pk)],
             },
+            origin="/admin/library/book/",
             follow=True,
         )
         body = r.content.decode()

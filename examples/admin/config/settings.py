@@ -85,7 +85,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "/admin/login/"
 
 NEXT_FRAMEWORK = {
-    "DEFAULT_PAGE_BACKENDS": [
+    "PAGE_BACKENDS": [
         {
             "BACKEND": "next.urls.FileRouterBackend",
             # `chrome/` is the project-level page root. It only holds
@@ -99,7 +99,7 @@ NEXT_FRAMEWORK = {
             "OPTIONS": {"context_processors": []},
         },
     ],
-    "DEFAULT_COMPONENT_BACKENDS": [
+    "COMPONENT_BACKENDS": [
         {
             "BACKEND": "next.components.FileComponentsBackend",
             "DIRS": [

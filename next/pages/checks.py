@@ -660,7 +660,7 @@ def check_context_processor_signature(
             if not isinstance(path, str):
                 continue
             loc = (
-                f"NEXT_FRAMEWORK['DEFAULT_PAGE_BACKENDS'][{backend_index}]"
+                f"NEXT_FRAMEWORK['PAGE_BACKENDS'][{backend_index}]"
                 f".OPTIONS.context_processors[{processor_index}]"
             )
             message = _check_processor_request_parameter(path, loc)
@@ -672,7 +672,7 @@ def check_context_processor_signature(
 def _iter_page_backend_configs() -> list[tuple[int, dict[str, Any]]]:
     """Return indexed page backend dicts from `NEXT_FRAMEWORK`."""
     raw = getattr(settings, "NEXT_FRAMEWORK", {}) or {}
-    backends = raw.get("DEFAULT_PAGE_BACKENDS", []) if isinstance(raw, dict) else []
+    backends = raw.get("PAGE_BACKENDS", []) if isinstance(raw, dict) else []
     return [
         (idx, backend)
         for idx, backend in enumerate(backends)

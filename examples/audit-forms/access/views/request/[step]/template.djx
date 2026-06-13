@@ -3,21 +3,19 @@
     ← Back to home
   </a>
 
-  {% component "progress_bar" %}
+  <div class="space-y-3 rounded-md border border-border bg-card p-6 shadow-sm">
+  {% form "access_request_wizard" %}
+    {% component "progress_bar" %}
 
-  {% form @action="access:request_step" class="space-y-3 rounded-md border border-border bg-card p-6 shadow-sm" %}
-    <input type="hidden" name="step" value="{{ current_step }}">
-
-    {% component "step_section" step="applicant" %}
-    {% component "step_section" step="justification" %}
-    {% component "step_section" step="review" %}
+    {% component "step_section" %}
 
     <div class="flex items-center justify-end pt-2">
-      {% if current_step == "review" %}
+      {% if wizard.is_last %}
         {% component "button" type="submit" text="Submit request" variant="default" %}
       {% else %}
         {% component "button" type="submit" text="Continue" variant="default" %}
       {% endif %}
     </div>
   {% endform %}
+  </div>
 </div>
