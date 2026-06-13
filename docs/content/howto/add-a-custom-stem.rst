@@ -62,7 +62,11 @@ Confirm the staticfiles finder picks the new file up.
 .. code-block:: bash
    :caption: shell
 
-   uv run python manage.py findstatic next/notes/pages/page.css
+   uv run python manage.py findstatic next/index.css
+
+The finder maps a template-directory asset to ``next/<logical_name><suffix>``.
+The logical name is the template directory relative to its page root, and a root template has the logical name ``index``.
+The stem does not appear in the static path, so ``page.css`` next to the root ``template.djx`` resolves under ``next/index.css``.
 
 See Also
 --------

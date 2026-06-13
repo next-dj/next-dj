@@ -355,6 +355,8 @@ System Checks
 -------------
 
 The ``next.E050`` and ``next.E051`` checks guard the steps declaration and the wizard backend configuration.
+``next.E054`` errors when a page-scoped wizard's page path has no ``[url_param]`` directory, so the route never captures the step kwarg and the wizard cannot advance past its first step.
+Add a ``[step]`` route segment or point ``Meta.url_param`` at the captured kwarg.
 ``next.W056`` warns when wizards are registered and the configured backend needs Django sessions while ``django.contrib.sessions`` is not installed.
 ``next.W057`` warns when a static ``Meta.steps`` form class is also registered as a standalone action, which the plain-Django-form step pattern avoids.
 ``next.W058`` warns when a static step declares a ``FileField`` or ``ImageField``, whose uploads do not survive the draft round trip.

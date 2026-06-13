@@ -61,7 +61,8 @@ CSRF token is missing or stale.
 The ``{% form %}`` tag injects the token automatically.
 Manual forms need ``{% csrf_token %}`` plus a fresh cookie.
 
-When the token is fine, the 403 can come from an access guard: an authenticated user missing a ``Meta.permission_required`` permission gets ``PermissionDenied``.
+When the token is fine, the 403 can come from an access guard.
+An authenticated user missing a ``Meta.permission_required`` permission gets ``PermissionDenied``.
 See :ref:`topics-forms-actions-guards`.
 
 Form POST Redirects to the Login Page

@@ -55,12 +55,12 @@ One Response Funnel
 -------------------
 
 Every outcome of the pipeline leaves through one funnel.
-The active backend's ``shape_response`` turns the dispatch outcome — a handler return value, a wizard advance, or an invalid form — into the ``HttpResponse`` sent to the client.
+The active backend's ``shape_response`` turns the dispatch outcome, a handler return value or a wizard advance or an invalid form, into the ``HttpResponse`` sent to the client.
 For an invalid form the default envelope asks the backend's ``render_invalid_page`` to produce the re-rendered page HTML.
 A custom backend overrides that one method to change how validation errors render, without touching the rest of the pipeline.
 
 The default backend answers an invalid submission with HTTP 200, the full origin page, and the headers ``X-Next-Form: invalid`` and ``X-Next-Action: <uid>``.
-A success re-render — a handler that returned ``None`` — carries no such headers, so a client can branch on the headers without scraping the HTML.
+A success re-render of a handler that returned ``None`` carries no such headers, so a client can branch on the headers without scraping the HTML.
 The status and the headers are behaviour of the default backend, not a guarantee of the endpoint, and the ``X-Next-*`` header namespace is reserved for the framework.
 See :doc:`backends` for the override signature and the bundled implementation.
 

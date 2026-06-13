@@ -35,7 +35,8 @@ Form actions.
    The ``{% form "name" %}`` template tag renders that form by name.
    The framework validates the submitted data and calls the ``on_valid`` method, injecting only the parameters the method signature asks for.
    ``Meta`` keys declare access guards (``login_required``, ``permission_required``) and success feedback (``success_url``, ``success_message``).
-   Plain functions with no form can also register as actions with ``@action("name")`` — useful for logout buttons and simple confirmations.
+   Plain functions with no form can also register as actions with ``@action("name")``.
+   This is useful for logout buttons and simple confirmations.
 
 .. _intro-overview-django-unchanged:
 

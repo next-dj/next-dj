@@ -13,7 +13,8 @@ Overview
 --------
 
 The resolver is a singleton instance of ``DependencyResolver``.
-Every page context function, every page render, every component context function, and every form action handler is invoked through the resolver.
+Every page context function, every page render, and every component context function is invoked through the resolver.
+The form dispatch adds its own call sites: the form-class factory, ``get_initial``, the ``@action`` handler, ``on_valid``, and ``wizard.done``.
 
 Pipeline
 --------
@@ -48,6 +49,7 @@ Modules
 
 ``next.deps.providers``.
    The ``ParameterProvider`` protocol, the ``RegisteredParameterProvider`` base class, and the ``ProviderRegistry`` list-style helper.
+   ``ProviderRegistry`` is kept for tests and external consumers and is not used by the resolver, which reads the auto-registry on ``RegisteredParameterProvider._registry`` instead.
 
 ``next.deps.cache``.
    ``DependencyCache`` accumulator, the ``REQUEST_DEP_CACHE_ATTR`` constant, the ``DependencyCycleError`` exception, and the ``get_request_dep_cache`` accessor.
@@ -66,9 +68,10 @@ Each provider declares whether it can handle a parameter through ``can_handle``.
 The first provider that returns ``True`` produces the value.
 
 Every ``RegisteredParameterProvider`` subclass carries a ``priority`` class attribute, and the resolver sorts the registry by it.
-The eight built-in providers pin the values ``10`` through ``80``, which yields
+The nine built-in providers pin the values ``10`` through ``80``, which yields
 ``DependsProvider``, ``ContextByDefaultProvider``, ``ContextByNameProvider``, ``FormProvider``,
-``HttpRequestProvider``, ``UrlByAnnotationProvider``, ``UrlKwargsProvider``, and ``QueryParamProvider``.
+``CleanedDataProvider``, ``HttpRequestProvider``, ``UrlByAnnotationProvider``, ``UrlKwargsProvider``, and ``QueryParamProvider``.
+``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
 
 See :doc:`/content/topics/dependency-injection` for the single source of truth on this order and what each provider matches.
 
@@ -95,8 +98,8 @@ It carries the current request, the captured URL kwargs, the template scope carr
 Query-string values are read off the request by the query provider.
 Providers read what they need and never mutate the context.
 
-The names in ``RESERVED_KEYS`` (``request``, ``form``, ``_cache``, ``_stack``, ``_context_data``) are stripped from name-based resolution.
-A context key called ``request`` cannot shadow the ``HttpRequest`` provider, and the other four names stay reserved for the resolver's own inputs.
+The names in ``RESERVED_KEYS`` (``request``, ``form``, ``cleaned_data``, ``_cache``, ``_stack``, ``_context_data``) are stripped from name-based resolution.
+A context key called ``request`` cannot shadow the ``HttpRequest`` provider, and the other five names stay reserved for the resolver's own inputs.
 
 Cache
 -----

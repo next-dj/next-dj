@@ -152,7 +152,7 @@ The page manager caches the composed template source and its compiled ``Template
 Signals
 -------
 
-One signal fires at import time, the other four fire per request.
+Five signals fire: ``action_registered`` at import time, the other four per request.
 
 - ``action_registered`` fires at import time, once per registration when the registry stores the action target: a handler, a form class, or a wizard class.
 - ``form_validation_failed`` fires at request time, once per failing submission, including a failing wizard step.

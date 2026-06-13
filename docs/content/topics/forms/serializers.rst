@@ -161,7 +161,7 @@ Render a Form in a Different Engine
 
 Use the spec to ship form structure to a Jinja2 macro or a JSON consumer.
 Each spec is a frozen dataclass, so a custom renderer can read its fields directly or build its own plain-dict projection.
-A bare Django ``Form`` is not JSON-encodable, so a form destined for ``@context(..., serialize=True)`` must travel as a ``FormSpec`` (or a custom projection) rather than as the form instance itself.
+A bare Django ``Form`` is not JSON-encodable, so a form destined for ``@context(..., serialize=True)`` (see :doc:`/content/topics/static-assets/js-context`) must travel as a ``FormSpec`` (or a custom projection) rather than as the form instance itself.
 
 Snapshot Diffing
 ~~~~~~~~~~~~~~~~

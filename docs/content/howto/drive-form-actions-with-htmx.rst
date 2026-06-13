@@ -16,9 +16,7 @@ The tag reserves only ``action``, ``method``, and the ``data-next-*`` prefix, so
 Boost the form with ``hx-boost`` and carve its region out of the response with ``hx-select``.
 Verified with django-htmx 1.19 and later on Django 4.2 through 6.0.
 
-The dispatcher answers an invalid submission with the complete origin page, not a fragment, and ``hx-select`` is what cuts the form region out of it.
-Native fragment responses are a future improvement.
-This recipe documents the behaviour of the current release, and the ``hx-select`` carving becomes unnecessary once fragments land.
+The dispatcher answers an invalid submission with the complete origin page, not a fragment, so ``hx-select`` carves the form region out of it.
 
 Walkthrough
 -----------

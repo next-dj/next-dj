@@ -45,7 +45,6 @@ Manager
 ``default_manager`` is the process-wide static manager handle exported from ``next.static``.
 It builds its wrapped ``StaticManager`` lazily on first access.
 ``reset_default_manager`` drops that wrapped instance so the next access rebuilds it, which keeps the manager consistent when ``NEXT_FRAMEWORK`` changes under ``override_settings``.
-The ``DefaultStaticManager`` wrapper class itself is internal and is not part of the public API.
 
 Scripts
 ~~~~~~~

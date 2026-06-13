@@ -54,6 +54,8 @@ Subclassing either one auto-registers the form.
 The action name is derived from the class name in ``snake_case``: ``CreateNoteForm`` registers as ``create_note_form``, ``DeleteNoteForm`` registers as ``delete_note_form``.
 Override ``on_valid`` to run code after the form passes validation.
 The default ``on_valid`` on ``ModelForm`` calls ``self.save()`` then redirects back.
+``redirect_to_origin`` sends the visitor back to the page that rendered the form.
+See the :term:`origin page` glossary entry.
 ``next.forms`` re-exports the common Django form fields and widgets used in this tutorial, so ``BooleanField`` and the rest are importable from one place.
 Import other fields directly from :mod:`django.forms` when you need them.
 
@@ -249,7 +251,7 @@ Update ``notes/forms.py`` to add the full import block and the delete logic.
 The complete file now looks like this.
 
 .. code-block:: python
-   :caption: notes/forms.py — complete
+   :caption: notes/forms.py, complete file
 
    from django.http import HttpRequest, HttpResponseRedirect
    from django.shortcuts import get_object_or_404

@@ -227,7 +227,8 @@ A user-provided ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` replaces the default list
 Include ``DjxTemplateLoader`` explicitly when you still want sibling ``template.djx`` files to load.
 
 Call ``next.pages.page.register_template(file_path, template_str)`` from an app's ``ready()`` to attach an in-process template string to a page path without authoring a loader class.
-The method seeds the same composed-template registry that the regular pipeline writes to, so the next render of that page serves the supplied string.
+The method stores the supplied body verbatim, with no layout composition, so no ancestor ``layout.djx`` wraps it.
+Pre-compose the body through the layout chain before registering it when wrapping is required.
 See :doc:`/content/ref/pages` for the full ``Page`` surface.
 
 Loader Contract
@@ -315,9 +316,14 @@ Reach for ``StreamingHttpResponse`` when the body is produced incrementally, suc
 .. code-block:: python
    :caption: notes/pages/notes/[id]/stream/page.py
 
+   from collections.abc import Iterator
+
    from django.http import StreamingHttpResponse
    from notes.models import Note
    from notes.providers import DNote
+
+   def event_stream(note_id: int) -> Iterator[bytes]:
+       ...  # see examples/live-polls for a worked generator
 
    def render(note: DNote[Note]) -> StreamingHttpResponse:
        return StreamingHttpResponse(
@@ -326,6 +332,7 @@ Reach for ``StreamingHttpResponse`` when the body is produced incrementally, suc
            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
        )
 
+``DNote`` is a custom DI provider that resolves the note from the captured URL segment, defined in ``notes/providers.py``.
 A synchronous generator works under WSGI and the development server.
 An ASGI deployment can yield from an async generator instead.
 See ``examples/live-polls`` for a worked SSE broker.

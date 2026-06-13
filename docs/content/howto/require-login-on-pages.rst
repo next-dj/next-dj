@@ -124,7 +124,8 @@ Guard Form Actions
 
 Form actions dispatch at ``/_next/form/<uid>/``, outside the page URL space.
 The global middleware above still covers them because it gates every request path.
-A project that protects pages selectively instead declares the requirement on the action itself, with ``Meta.login_required`` and ``Meta.permission_required`` on the form class or the same keywords on ``@action``.
+A project that protects pages selectively declares the requirement on the action itself.
+Use ``Meta.login_required`` and ``Meta.permission_required`` on the form class, or the same keywords on ``@action``.
 
 .. code-block:: python
    :caption: notes/pages/admin-notes/page.py

@@ -423,6 +423,11 @@ The forms subsystem contributes Django system checks that run through ``python m
    Two or more registrations share the same action name but come from different handlers.
    Rename one of them or move one to a different scope.
 
+``next.E046``
+   Two distinct modules declare a shared form action with the same derived name.
+   Bare-name lookups resolve to whichever module imported first.
+   Rename one class or set ``Meta.scope = 'page'`` on one of them.
+
 ``next.W046`` (Warning)
    A form class was declared in a file outside ``BASE_DIR``.
    The class is not registered automatically.

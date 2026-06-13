@@ -58,8 +58,7 @@ SQL injection.
    See :doc:`di-and-untrusted-input` for the custom-provider validation pattern.
 
 Mass assignment.
-   Use ``ModelForm.Meta.fields`` to whitelist editable fields.
-   Avoid ``Meta.exclude`` because new fields default to editable.
+   Whitelist editable fields on ``ModelForm``, see :doc:`di-and-untrusted-input` for the rule.
 
 Origin spoofing.
    The only page identity a form submission carries is the ``_next_form_origin`` URL path, which the dispatcher resolves through the URLconf with :func:`django.urls.resolve`.

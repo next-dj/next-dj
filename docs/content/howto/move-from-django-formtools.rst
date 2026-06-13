@@ -84,7 +84,7 @@ Files in Steps
 ~~~~~~~~~~~~~~
 
 formtools supports uploads inside steps through ``file_storage``.
-The ``FormWizard`` has no equivalent yet.
+The ``FormWizard`` has no ``file_storage`` equivalent.
 Wizard storage persists cleaned data between requests, and an uploaded file does not survive that round trip, so the ``next.W058`` system check warns when a static step declares a ``FileField``.
 Collect the upload in a standalone form action instead, see :doc:`handle-file-uploads`.
 

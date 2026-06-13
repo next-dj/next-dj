@@ -215,6 +215,42 @@ Co-located JS and inline scripts then read the value under ``window.Next.context
 The runtime script defines ``window.Next`` before the collected scripts run.
 The runtime script is always the first tag in the ``scripts`` slot, ahead of every co-located, module-list, and ``{% use_script %}`` asset, so any of those may safely read ``window.Next``.
 
+Client Event API
+~~~~~~~~~~~~~~~~~
+
+The ``Next`` object exposes an event API alongside ``window.Next.context``.
+Code that needs the context the moment it lands subscribes through ``Next.on`` rather than reading ``window.Next.context`` at an arbitrary time.
+
+``Next.on(event, listener)`` registers a listener and returns an unsubscribe function.
+The function removes that listener when called.
+The ``listener`` receives the context object as its only argument and reads its values.
+
+Two events fire.
+The ``"context-updated"`` event fires whenever the framework loads a new context.
+The ``"ready"`` event fires once the first context is loaded, and a listener registered after that point receives an immediate replay with the current context.
+
+.. code-block:: javascript
+   :caption: notes/_components/note_card/component.js
+
+   const unsubscribe = window.Next.on("ready", (context) => {
+     const count = context.note_count ?? 0;
+     console.log(`There are ${count} notes.`);
+   });
+
+   window.Next.on("context-updated", (context) => {
+     render(context);
+   });
+
+``Next.use(plugin)`` calls ``plugin`` with the ``Next`` object and returns whatever the plugin returns.
+A plugin is any function that takes the ``Next`` object, so it can subscribe to events or read the context and expose its own helper.
+
+.. code-block:: javascript
+   :caption: notes/static/counter.js
+
+   const counter = window.Next.use((next) => ({
+     value: () => next.context.note_count ?? 0,
+   }));
+
 Runtime Script Options
 ----------------------
 

@@ -61,8 +61,7 @@ Namespace Override
 
 The default namespace is ``next``, configured through ``next.urls.manager.app_name``.
 ``page_reverse`` forwards ``namespace=`` straight to ``django.urls.reverse``, so the value must name a Django URL namespace that already exists.
-The ``next`` namespace exists because ``next.urls`` sets ``app_name = "next"``.
-A second namespace exists only when ``next.urls`` is mounted again under an explicit ``namespace`` argument.
+The ``next`` namespace exists because ``next.urls`` sets ``app_name = "next"``, and a second namespace exists only when ``next.urls`` is mounted again under an explicit ``namespace`` argument.
 
 .. code-block:: python
    :caption: config/urls.py

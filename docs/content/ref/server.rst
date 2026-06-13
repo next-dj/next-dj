@@ -15,7 +15,9 @@ Public API
 Autoreload
 ~~~~~~~~~~
 
-``NextStatReloader`` subclasses Django's ``StatReloader``. In addition to watching ``.py`` mtimes, it recomputes the discovered route set on every tick and triggers a reload when pages appear or disappear from the routing tree, even when no file mtime changed. ``.djx`` templates are not watched.
+``NextStatReloader`` subclasses Django's ``StatReloader``.
+In addition to watching ``.py`` mtimes, it recomputes the discovered route set on every tick and triggers a reload when pages appear or disappear from the routing tree, even when no file mtime changed.
+``.djx`` templates are not watched.
 They are re-read on render with mtime-based invalidation.
 
 .. automodule:: next.server.autoreload
@@ -42,7 +44,9 @@ The watcher does not iterate contributors at runtime, so registration goes throu
 Roots
 ~~~~~
 
-``get_framework_filesystem_roots_for_linking`` returns the sorted unique roots derived from page trees and component ``DIRS``. Each root is resolved to an absolute path. Tooling that needs to symlink or scan those directories reads them from here instead of recomputing paths.
+``get_framework_filesystem_roots_for_linking`` returns the sorted unique roots derived from page trees and component ``DIRS``.
+Each root is resolved to an absolute path.
+Tooling that needs to symlink or scan those directories reads them from here instead of recomputing paths.
 
 .. automodule:: next.server.roots
    :members:

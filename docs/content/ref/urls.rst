@@ -59,8 +59,11 @@ Reverse Helpers
 
 .. py:function:: next.urls.reverse.page_reverse_lazy(path_template="", *, namespace=app_name, **kwargs)
 
-   Lazy variant of ``page_reverse`` built with :func:`django.utils.functional.lazy`.
-   The URL resolves when the value is first coerced to ``str``, which makes it safe in positions evaluated at class-definition time, before the URLconf is ready, such as ``Meta.success_url`` on a form class.
+   Lazy variant of ``page_reverse``, the way :func:`~django.urls.reverse_lazy` pairs with :func:`~django.urls.reverse`.
+   The URL resolves when the value is first coerced to ``str``,
+   which makes it safe in positions evaluated at class-definition time,
+   before the URLconf is ready,
+   such as ``Meta.success_url`` on a form class.
 
 .. autofunction:: next.urls.reverse.with_query
 
@@ -87,7 +90,8 @@ They are exported from ``next.urls`` for introspection and for authors writing c
    * - ``UrlByAnnotationProvider``
      - Supplies a URL kwarg value for parameters annotated with ``DUrl[...]``.
    * - ``UrlKwargsProvider``
-     - Supplies raw URL kwargs by parameter name when no annotation is present.
+     - Supplies a URL kwarg value by parameter name, coercing the raw string to the parameter annotation when one is present.
+       ``DUrl``-annotated parameters are claimed by ``UrlByAnnotationProvider`` first.
    * - ``QueryParamProvider``
      - Supplies ``request.GET`` values for parameters annotated with ``DQuery[...]``.
 

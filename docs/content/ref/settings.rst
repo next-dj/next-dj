@@ -14,8 +14,7 @@ For production-specific recommendations (which values to change and why), see :d
 Key Naming
 ----------
 
-Keys inside ``NEXT_FRAMEWORK`` carry no ``DEFAULT_`` prefix — the dict
-itself is the framework defaults namespace. A plural ``*_BACKENDS`` key
+Keys inside ``NEXT_FRAMEWORK`` carry no ``DEFAULT_`` prefix. The dict itself is the framework defaults namespace. A plural ``*_BACKENDS`` key
 holds an ordered list of sources the manager consults in order. A
 singular ``*_BACKEND`` key holds the one engine for a concern. A
 subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``,

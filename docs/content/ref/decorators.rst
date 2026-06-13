@@ -48,7 +48,8 @@ Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 Registers a plain callable as a named form action.
 The name is optional: a bare ``@action`` or an empty ``@action()`` registers the function under its own name, and ``@action("custom_name")`` overrides it.
 The name must be unique within its scope, see :doc:`/content/topics/forms/actions`.
-Used without ``form_class``, the handler runs with no form validation — for example delete confirmations or logout buttons.
+Used without ``form_class``, the handler runs with no form validation.
+Reach for it for delete confirmations or logout buttons.
 Form classes register automatically through ``__init_subclass__`` and must not use ``@action``.
 Pass ``form_class=`` to receive the bound, validated form in the handler.
 It accepts a form class that does not register its own endpoint, such as a base marked ``Meta.abstract = True``, or a factory callable that builds the form class per request.

@@ -48,7 +48,9 @@ Every page render starts with three keys already populated, before any user-defi
 ``current_page_module_path``.
    The absolute path of the ``page.py`` module being rendered.
 
-User ``@context`` callables can read these keys by parameter name, and template-side machinery such as the ``{% component %}`` and ``{% form %}`` tags relies on them.
+A user ``@context`` callable reads ``request`` through an ``HttpRequest`` annotation rather than by parameter name.
+The ``current_template_path`` and ``current_page_module_path`` keys live in the template scope for the ``{% form %}`` and ``{% component %}`` tags to consume.
+They are not injected into a context callable by parameter name.
 
 The Decorator
 -------------

@@ -332,7 +332,8 @@ Hot Reload
 A backend that reads from a database or other dynamic source needs to rebuild its pattern list when the data changes.
 ``router_manager.reload()`` clears the resolver cache and rebuilds every backend, and the call is idempotent.
 Each invocation emits a ``router_reloaded`` signal with the manager class as sender, so long lived processes can listen for it to refresh cached URL references.
-The call walks every page tree configured in ``PAGE_BACKENDS``, so a burst of model writes can dominate the request latency.
+Rebuilding drops the cached patterns, so the next request walks every page tree configured in ``PAGE_BACKENDS`` again.
+A burst of model writes that each triggers a reload can dominate that request.
 Receivers should debounce or batch invocations when one logical change triggers many model signals at once.
 See :doc:`/content/howto/reload-routes-from-code` for the model-signal receiver that triggers the reload.
 

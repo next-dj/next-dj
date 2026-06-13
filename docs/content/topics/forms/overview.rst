@@ -141,7 +141,8 @@ Form-Less Actions
 
 Use ``@action`` to register a plain function when no form fields are needed.
 A logout button or a delete confirmation is a typical case.
-The name is optional — a bare ``@action`` registers the function under its own name.
+The name is optional.
+A bare ``@action`` registers the function under its own name.
 
 .. code-block:: python
    :caption: page.py

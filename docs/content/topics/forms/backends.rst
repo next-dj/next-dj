@@ -41,7 +41,7 @@ The factory imports the ``BACKEND`` dotted path and calls the class with the who
 .. code-block:: python
    :caption: what the factory does per entry
 
-   backend_class = import_class(config["BACKEND"])
+   backend_class = import_class_cached(config["BACKEND"])
    backend = backend_class(config)
 
 The constructor therefore receives the full entry, not just ``OPTIONS``.
@@ -109,7 +109,7 @@ A backend that defers entirely to ``RegistryFormActionBackend`` need not overrid
 
 ``iter_actions()`` yields the ``ActionMeta`` of every action the backend owns.
 The base implementation yields nothing, and ``RegistryFormActionBackend`` yields its registry entries in registration order.
-The forms system checks, ``next.W054`` through ``next.W061``, walk every configured backend through this hook, so a backend that stores its own actions should implement it, or those actions stay invisible to ``manage.py check``.
+The forms system checks that inspect registered actions, the wizard checks including ``next.E054``, the component-widget checks, the guard check, and the message check, walk every configured backend through this hook, so a backend that stores its own actions should implement it, or those actions stay invisible to ``manage.py check``.
 A subclass of ``RegistryFormActionBackend`` inherits a working implementation.
 
 Shaping the Response
