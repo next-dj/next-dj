@@ -124,6 +124,23 @@ def _send_success_message(
         messages.success(request, message)
 
 
+def _flash_success_before_rerender(
+    request: "HttpRequest",
+    source: object,
+    cleaned_data: dict[str, Any],
+    raw: "HttpResponse | None",
+    page_path: "Path | None",
+) -> bool:
+    """Flash the success message ahead of an in-place origin re-render."""
+    # A None result re-renders the origin within this same request, so the
+    # message must reach the store before that render reads {% messages %}. An
+    # unresolvable origin degrades to 400 and is left to the caller status guard.
+    if raw is None and page_path is not None:
+        _send_success_message(request, source, cleaned_data)
+        return True
+    return False
+
+
 def _build_form(
     form_class: "type[django_forms.Form]",
     initial_data: object,
@@ -775,6 +792,9 @@ class FormActionDispatch:
             raw = params.handler(**resolved)
 
         duration_ms = (time.perf_counter() - start) * 1000
+        flashed = _flash_success_before_rerender(
+            request, form, form.cleaned_data, raw, state.page_path
+        )
         response = backend.shape_response(
             request,
             ActionOutcome(
@@ -785,7 +805,7 @@ class FormActionDispatch:
                 form=form,
             ),
         )
-        if response.status_code < _HTTP_ERROR_FLOOR:
+        if not flashed and response.status_code < _HTTP_ERROR_FLOOR:
             _send_success_message(request, form, form.cleaned_data)
         state.emit_action_dispatched(
             request, params.action_name, form, duration_ms, response
@@ -860,6 +880,9 @@ class FormActionDispatch:
             start = time.perf_counter()
             raw = wizard.done(**resolved)
             duration_ms = (time.perf_counter() - start) * 1000
+            flashed = _flash_success_before_rerender(
+                request, wizard, merged, raw, state.page_path
+            )
             response = backend.shape_response(
                 request,
                 ActionOutcome(
@@ -872,7 +895,8 @@ class FormActionDispatch:
                 ),
             )
             if response.status_code < _HTTP_ERROR_FLOOR:
-                _send_success_message(request, wizard, merged)
+                if not flashed:
+                    _send_success_message(request, wizard, merged)
                 wizard.clear_storage()
                 state.emit_wizard_completed(request, wizard_class, merged)
         else:
