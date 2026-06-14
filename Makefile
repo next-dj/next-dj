@@ -1,4 +1,4 @@
-.PHONY: help install test bench test-compat lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js lint-js format-js format-js-check test-examples
+.PHONY: help install test bench test-compat lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js lint-js format-js format-js-check test-examples ci pre-commit-install pre-commit-run dev-setup
 
 # Allow CI to point at a prebuilt venv's pytest (bypassing `uv run` and its sync step)
 PYTEST ?= uv run pytest
@@ -17,7 +17,7 @@ help: # show this help message
 	@echo "  build           - build the package"
 	@echo "  pre-commit-install - install pre-commit hooks"
 	@echo "  pre-commit-run  - run pre-commit on all files"
-	@echo "  ci              - run all CI checks locally with 100% coverage"
+	@echo "  ci              - run the core CI checks locally with 100% coverage (docs and security run only in GitHub Actions)"
 	@echo "  dev-setup       - setup development environment"
 	@echo "  docs            - build documentation"
 	@echo "  docs-serve      - build and serve documentation"
@@ -113,7 +113,7 @@ test-examples: # run Python, JS tests for examples with coverage
 	done
 
 lint: # run linting with ruff
-	uv run ruff check next/ tests/ examples/ --fix
+	uv run ruff check next/ tests/ examples/
 	uv run ruff format --check next/ tests/ examples/
 
 format: # format code with ruff
@@ -142,7 +142,7 @@ pre-commit-install: # install pre-commit hooks
 pre-commit-run: # run pre-commit on all files
 	uv run pre-commit run --all-files
 
-ci: # run all CI checks locally with 100% coverage
+ci: # run the core CI checks locally with 100% coverage (docs and security run only in GitHub Actions)
 	make lint
 	make type-check
 	make build-js

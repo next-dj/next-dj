@@ -63,6 +63,7 @@ Manual forms need ``{% csrf_token %}`` plus a fresh cookie.
 
 When the token is fine, the 403 can come from an access guard.
 An authenticated user missing a ``Meta.permission_required`` permission gets ``PermissionDenied``.
+A dynamic permission hook, ``check_permissions`` or ``has_object_permission``, returning ``False`` or raising ``PermissionDenied`` produces the same bare 403, see :ref:`topics-forms-actions-dynamic-guards`.
 See :ref:`topics-forms-actions-guards`.
 
 Form POST Redirects to the Login Page

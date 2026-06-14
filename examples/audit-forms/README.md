@@ -129,7 +129,7 @@ class AccessRequestWizard(next.forms.FormWizard):
         ]
         url_param = "step"
 
-    def done(self, request, cleaned_data):
+    def done(self, request: HttpRequest, cleaned_data):
         access_request = AccessRequest.objects.create(**cleaned_data)
         request.session["access_request_just_created"] = access_request.pk
         return HttpResponseRedirect(f"/request/{access_request.pk}/audit/?just=1")
@@ -192,9 +192,11 @@ def _on_form_access_denied(action_name, layer, reason, **_):
 ```
 
 Because the denied step writes no draft and no `dispatched` row, this
-`access_denied` row is the only trace the workflow leaves behind — which
-is the whole point of the audit channel. Filter the admin log to it with
-`/admin/audit/?kind=access_denied`.
+`access_denied` row is the only trace that records *why* the request was
+refused — the backend channel still leaves a `request_started` row (with
+no `reason`) before `super().dispatch` reaches the denying hook, which is
+the whole point of the signal channel. Filter the admin log to the denial
+with `/admin/audit/?kind=access_denied`.
 
 ### 4. Three ordinary forms, one per step
 

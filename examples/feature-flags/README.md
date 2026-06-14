@@ -317,7 +317,7 @@ def _invalidate_on_delete(sender, instance, **_):
 
 @receiver(page_rendered)
 def _count_page_render(sender, file_path, **_):
-    record_render(file_path.name)
+    record_render(_page_key(file_path))
 ```
 
 The two database receivers mean the cache and the DB can never drift apart.

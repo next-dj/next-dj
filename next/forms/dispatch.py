@@ -336,11 +336,7 @@ def _enforce_object_permissions(
     action_name: str,
     state: "_DispatchState",
 ) -> "HttpResponse | None":
-    """Run the object-level has_object_permission hook after the form binds.
-
-    Returns the hook's HttpResponse to short-circuit, re-raises
-    PermissionDenied, or returns None to let dispatch continue.
-    """
+    """Run the object-level has_object_permission hook after the form binds."""
     present = getattr(type(form), "_has_object_permission", False)
     hook = (
         cast("_ObjectPermissionHook", form).has_object_permission if present else None

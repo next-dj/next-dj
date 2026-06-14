@@ -203,9 +203,7 @@ class NoteEditForm(ModelForm):
         return tenant.is_active
 
     def has_object_permission(self) -> PermissionOutcome:
-        if self.instance.locked:
-            raise PermissionDenied
-        return None
+        return not self.instance.locked
 ```
 
 `check_permissions` is the view-level gate. The dispatcher resolves its
@@ -219,9 +217,9 @@ this rule exists only at the hook layer. Returning `False` denies with `403`.
 
 `has_object_permission` is the object-level gate. It runs after binding, so
 `self.instance` is the loaded note. A `locked` note belongs to its tenant and
-loads without a `404`, yet must stay read-only, so the hook raises
-`PermissionDenied` for a bare `403` with no re-render. Returning `None` or
-`True` allows the edit through to `is_valid`.
+loads without a `404`, yet must stay read-only, so the hook returns `False`
+to deny with a bare `403` and no re-render. Returning `True` allows the edit
+through to `is_valid`.
 
 Both hooks emit `next.signals.form_access_denied` on a denial, carrying the
 `action_name`, `uid`, `request`, the `layer` (`"view"` or `"object"`), and
@@ -230,14 +228,17 @@ silent when both hooks allow the request.
 
 The `notes` app consumes that signal. [`notes/receivers.py`](notes/receivers.py)
 connects a receiver that logs each denial under the `notes.access` logger,
-reading the active tenant slug from `request.tenant` so the line names the
+reading the active tenant through `get_active_tenant` so the line names the
 tenant whose edit was refused. `NotesConfig.ready` imports the module so the
 connection is live at startup.
 
 ```python
+from .access import get_active_tenant
+
+
 @receiver(form_access_denied)
-def _on_form_access_denied(action_name, layer, reason, request=None, **_):
-    tenant = getattr(request, "tenant", None)
+def _on_form_access_denied(action_name, layer, reason, request, **_):
+    tenant = get_active_tenant(request)
     tenant_slug = getattr(tenant, "slug", "unknown")
     logger.warning(
         "form access denied action=%s layer=%s reason=%s tenant=%s",

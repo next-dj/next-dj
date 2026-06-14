@@ -35,7 +35,11 @@ The framework emits these signals on hot rendering paths, so receivers stay sync
    from django.dispatch import receiver
    from next.pages.signals import page_rendered
    from next.components.signals import component_rendered
-   from next.forms.signals import action_dispatched, form_validation_failed
+   from next.forms.signals import (
+       action_dispatched,
+       form_access_denied,
+       form_validation_failed,
+   )
    from .metrics import incr
 
    @receiver(page_rendered)
@@ -63,10 +67,22 @@ The framework emits these signals on hot rendering paths, so receivers stay sync
    ) -> None:
        incr("forms.validation_failed", str(action_name))
 
+   @receiver(form_access_denied)
+   def on_form_access_denied(
+       action_name: str | None = None,
+       layer: str | None = None,
+       reason: str | None = None,
+       **_kwargs: object,
+   ) -> None:
+       incr("forms.access_denied", f"{action_name}:{layer}:{reason}")
+
 The keyword names are fixed by the framework.
 ``page_rendered`` carries ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``, and ``context_keys``.
 ``action_dispatched`` carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
 ``form_validation_failed`` carries ``action_name``, ``uid``, ``request``, ``error_count``, and ``field_names``.
+``form_access_denied`` carries ``action_name``, ``uid``, ``request``, ``layer``, and ``reason``.
+It fires only when a dynamic permission hook denies a request, never on the static ``ActionGuard`` path, which makes it the signal to audit refused form submissions.
+See :ref:`topics-forms-signals-form-access-denied` for the full contract.
 The ``request`` value is the live ``HttpRequest`` of the dispatch, so a receiver reads it synchronously and never stores it past the call.
 
 Cover the Static Pipeline

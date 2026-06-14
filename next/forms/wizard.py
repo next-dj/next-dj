@@ -14,6 +14,7 @@ from django.conf import settings
 from django.core.cache import caches
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Model
+from django.http import HttpRequest, HttpResponse
 
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
@@ -34,7 +35,6 @@ from .manager import form_action_manager
 if TYPE_CHECKING:
     from django.core.cache.backends.base import BaseCache
     from django.forms import Form as DjangoForm
-    from django.http import HttpRequest, HttpResponse
 
 
 _WIZARD_LOAD_CACHE_ATTR: Final[str] = "_next_wizard_load_cache"
@@ -557,9 +557,9 @@ class FormWizard:
 
     def done(
         self,
-        request: "HttpRequest",
+        request: HttpRequest,
         cleaned_data: dict[str, Any],
-    ) -> "HttpResponse":
+    ) -> HttpResponse:
         """Finalise the wizard after the last step. Subclasses must override."""
         msg = f"{type(self).__name__} must implement done(request, cleaned_data)."
         raise NotImplementedError(msg)

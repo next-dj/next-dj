@@ -8,8 +8,8 @@ from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
 from next.components.signals import component_rendered
+from next.forms.signals import form_access_denied
 from next.pages.signals import page_rendered
-from next.signals import form_access_denied
 
 from .cache import invalidate_flag
 from .metrics import record_render

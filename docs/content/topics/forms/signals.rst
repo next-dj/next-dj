@@ -31,7 +31,7 @@ Import that module from ``AppConfig.ready`` so every receiver is connected befor
        name = "notes"
 
        def ready(self) -> None:
-           from notes import receivers  # noqa: F401
+           from notes import receivers  # noqa: F401, PLC0415
 
 .. _topics-forms-signals-action-registered:
 

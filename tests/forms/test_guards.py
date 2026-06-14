@@ -635,7 +635,7 @@ class TestDetectionFlags:
         assert _Concrete._has_check_permissions is True
 
     def test_subclass_redeclaring_hook_sets_own_flag(self) -> None:
-        """A subclass re-declaring the hook stamps its own flag True even when the body delegates to the base sentinel, because detection keys on __func__ identity."""
+        """Re-declaring the hook flags the subclass even when the body delegates."""
 
         class _GuardedBase(Form):
             @classmethod
@@ -669,7 +669,11 @@ class _HookLayer:
 
 _HOOK_LAYERS = (
     _HookLayer(
-        "view", _ViewHookForm, "check_permissions", "_has_check_permissions", classmethod
+        "view",
+        _ViewHookForm,
+        "check_permissions",
+        "_has_check_permissions",
+        classmethod,
     ),
     _HookLayer(
         "object",
@@ -702,6 +706,7 @@ class TestPermissionHookReturnContract:
     ) -> None:
         value = _hook_value(case)
 
+        # layer.wrap binds receiver to cls or self, so the resolver only sees request.
         def hook(receiver, request=None):
             if value is PERMISSION_HOOK_RAISE:
                 raise PermissionDenied
@@ -782,6 +787,34 @@ class TestGuardedViewFormDispatch:
         assert response.status_code == 302
 
 
+class _NamedUrlViewHookForm(Form):
+    """View hook reading a named URL kwarg resolved as a typed positional param."""
+
+    name = django_forms.CharField(max_length=50)
+    seen_names: ClassVar[list[str]] = []
+
+    @classmethod
+    def check_permissions(cls, request: HttpRequest, name: str) -> PermissionOutcome:
+        cls.seen_names.append(name)
+        return name == "editors"
+
+
+@pytest.mark.django_db()
+class TestUrlKwargReachesViewHook:
+    """A named URL kwarg is resolved into a typed positional hook parameter."""
+
+    def test_named_url_kwarg_resolves_into_view_hook(self, mock_http_request) -> None:
+        _NamedUrlViewHookForm.seen_names.clear()
+        backend = RegistryFormActionBackend()
+        _register_matrix_form(backend, _NamedUrlViewHookForm)
+        meta = backend.get_meta("matrix_action")
+        assert meta is not None
+        request = build_post_request(mock_http_request, origin="/groups/editors/")
+        response = FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
+        assert response.status_code == 302
+        assert _NamedUrlViewHookForm.seen_names == ["editors"]
+
+
 class _OrderingForm(Form):
     """Form with both a static login guard and a view hook spy."""
 
@@ -832,6 +865,37 @@ class TestStaticGuardPrecedesDynamicHook:
         assert response.url == "/accounts/login/?next=/"
         # The static guard short-circuited before the hook could run.
         assert _OrderingForm.check_calls == []
+
+
+class _ViewDeniesObjectSpyForm(Form):
+    """Stacks a denying view hook over a spying object hook on one form."""
+
+    name = django_forms.CharField(max_length=50)
+    object_calls: ClassVar[list[bool]] = []
+
+    @classmethod
+    def check_permissions(cls, request: HttpRequest) -> PermissionOutcome:
+        return False
+
+    def has_object_permission(self, request: HttpRequest) -> PermissionOutcome:
+        type(self).object_calls.append(True)
+        return None
+
+
+@pytest.mark.django_db()
+class TestViewDenialShortCircuitsObjectHook:
+    """A view denial halts before the form binds and the object hook runs."""
+
+    def test_view_denial_skips_object_hook(self, mock_http_request) -> None:
+        _ViewDeniesObjectSpyForm.object_calls.clear()
+        backend = RegistryFormActionBackend()
+        _register_matrix_form(backend, _ViewDeniesObjectSpyForm)
+        meta = backend.get_meta("matrix_action")
+        assert meta is not None
+        request = build_post_request(mock_http_request)
+        with pytest.raises(PermissionDenied):
+            FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
+        assert _ViewDeniesObjectSpyForm.object_calls == []
 
 
 def _board_factory(**_kwargs: object) -> type:
@@ -973,6 +1037,22 @@ class TestObjectLevelOwnerEdit:
         with pytest.raises(PermissionDenied):
             self._dispatch(_OwnerOnlyModelForm, "stranger", mock_http_request)
 
+    def test_object_hook_denies_invalid_submission_before_is_valid(
+        self, mock_http_request
+    ) -> None:
+        """A denied object hook wins over an invalid form, never a 200 re-render."""
+        Group.objects.create(name="stranger")
+        backend = RegistryFormActionBackend()
+        _register_matrix_form(backend, _OwnerOnlyModelForm)
+        meta = backend.get_meta("matrix_action")
+        assert meta is not None
+        post = QueryDict(mutable=True)
+        post["name"] = ""
+        post["_next_form_origin"] = "/groups/stranger/"
+        request = mock_http_request(method="POST", POST=post, FILES=None)
+        with pytest.raises(PermissionDenied):
+            FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
+
     def test_http404_precedes_the_hook(self, mock_http_request) -> None:
         """A missing instance raises Http404 before the object hook runs."""
         _AnonInspectingModelForm.saw_anonymous.clear()
@@ -1107,7 +1187,10 @@ class TestFormAccessDeniedPayload:
             with pytest.raises(PermissionDenied):
                 FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
         else:
-            FormActionDispatch.dispatch(backend, request, "matrix_action", meta)
+            response = FormActionDispatch.dispatch(
+                backend, request, "matrix_action", meta
+            )
+            assert response.status_code == 403
 
         assert len(captured) == 1
         assert captured[0]["layer"] == layer

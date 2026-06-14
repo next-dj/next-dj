@@ -30,6 +30,7 @@ The wizard lists them in order.
    import next.forms
    from access.models import AccessRequest
    from django import forms
+   from django.http import HttpRequest
    from next.forms import redirect_to_origin
 
    class IdentityStep(forms.ModelForm):
@@ -53,7 +54,7 @@ The wizard lists them in order.
                ("approval", ApprovalStep),
            ]
 
-       def done(self, request, cleaned_data):
+       def done(self, request: HttpRequest, cleaned_data):
            AccessRequest.objects.create(**cleaned_data)
            return redirect_to_origin(request)
 

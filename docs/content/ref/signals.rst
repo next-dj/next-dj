@@ -17,7 +17,7 @@ passed to ``Signal.send``. Receivers connected with a matching ``sender`` only
 fire for that sender.
 
 The dispatch-time form signals (``action_dispatched``, ``form_validation_failed``,
-``wizard_step_submitted``, ``wizard_completed``) share two keyword arguments.
+``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``) share two keyword arguments.
 ``uid`` is the registry identity of the action, the value the dispatch URL and the
 ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores
 no uid in its meta. ``request`` is the live ``HttpRequest`` being dispatched and must

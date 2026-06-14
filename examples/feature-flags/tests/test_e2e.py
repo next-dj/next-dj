@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from django.core.cache import cache
 from flags.cache import FLAG_PREFIX, get_cached_flag
 from flags.models import Flag
@@ -127,8 +129,7 @@ class TestWriteGate:
         body = client.get("/admin/metrics/").content.decode()
         assert "form permission denials" in body
         denial_card = body.split("form permission denials</p>", 1)[1]
-        value_open = '<p class="mt-2 text-3xl font-semibold tabular-nums text-foreground">'
-        assert denial_card.lstrip().startswith(f"{value_open}1</p>")
+        assert re.match(r"\s*<p[^>]*>\s*1\s*</p>", denial_card)
 
 
 class TestDemoPage:

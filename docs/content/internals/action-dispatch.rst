@@ -135,6 +135,7 @@ Both hooks are dependency-injected through ``resolver.resolve_dependencies`` wit
 A return of ``None`` or ``True`` allows, ``False`` raises ``PermissionDenied``, an ``HttpResponse`` short-circuits, and any other type raises ``TypeError``.
 On a denial the dispatcher emits ``form_access_denied`` when a receiver is connected.
 A wizard enforces ``check_permissions`` once per step POST before the step binds, and the step form's ``has_object_permission`` is enforced per step after the step form binds and before ``is_valid``.
+A wizard step binds without ``get_initial`` or ``Meta.instance_from_url``, so a ``ModelForm`` step reads an unbound ``self.instance`` in that hook, not the URL-addressed target the standalone path loads.
 The guide covers the authoring contract at :ref:`topics-forms-actions-dynamic-guards`.
 
 Origin Resolution

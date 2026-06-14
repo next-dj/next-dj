@@ -152,7 +152,7 @@ class TestWizardStorageRoundTripBudgets:
         assert counting_backend.saves == 1
         # Exact count today: 1, the completion gate and the merged
         # cleaned data share a single load through the request memo.
-        assert counting_backend.loads <= 1
+        assert counting_backend.loads == 1
         assert counting_backend.clears == 1
 
     def test_invalid_step_rerender_budget(
@@ -181,7 +181,7 @@ class TestWizardStorageRoundTripBudgets:
         assert counting_backend.saves == 1
         # Exact count today: 1, the write-through after save keeps the
         # post-save get_steps re-evaluation off the backend.
-        assert counting_backend.loads <= 1
+        assert counting_backend.loads == 1
         assert counting_backend.clears == 0
 
 

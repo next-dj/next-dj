@@ -184,11 +184,11 @@ Two signals fire during the validation pipeline.
 
 ``form_validation_failed``.
    Fires when ``form.is_valid()`` returns false.
-   Payload carries ``action_name``, ``error_count``, and ``field_names``.
+   Payload carries ``action_name``, ``uid``, ``request``, ``error_count``, and ``field_names``.
 
 ``action_dispatched``.
    Fires after the handler returns successfully.
-   Payload carries ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
+   Payload carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
 
 See :doc:`signals` for the full list and payload shapes.
 

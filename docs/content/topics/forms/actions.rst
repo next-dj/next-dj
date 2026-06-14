@@ -429,7 +429,8 @@ Both hooks share one return contract.
 - Returning an ``HttpResponse``, including a redirect, short-circuits and that response is returned verbatim.
 - Any other return type raises ``TypeError``, so a misconfigured gate fails loudly.
 
-The ``HttpResponse`` return is how an anonymous visitor is sent to a login page or a paywall instead of receiving a bare 403, a decision the static ``login_required`` redirect cannot express per request.
+The ``HttpResponse`` return is how an anonymous visitor is sent to a login page or a paywall instead of receiving a bare 403,
+a decision the static ``login_required`` redirect cannot express per request.
 The hook return type alias is ``next.forms.PermissionOutcome``, equal to ``bool | HttpResponse | None``, for annotating an override.
 
 The two hooks combine with the static guard in a fixed order.
@@ -439,7 +440,8 @@ A request it denies never reaches a dynamic hook, so the static guard stays the 
 
 The view hook resolves on the resolved form class, so a factory ``form_class`` is covered as well, see `Dynamic Form Classes`_.
 A handler-only ``@action`` carries no class to host a method, so it has no dynamic hook.
-Such a handler runs its own check in the body and raises :exc:`~django.core.exceptions.PermissionDenied` or returns a redirect, the same pattern shown for ``messages.success`` under `Success Messages`_.
+Such a handler runs its own check in the body and raises :exc:`~django.core.exceptions.PermissionDenied` or returns a redirect,
+the same pattern shown for ``messages.success`` under `Success Messages`_.
 
 An object-level denial returns a bare HTTP 403.
 It does not re-render the origin page.
@@ -457,7 +459,8 @@ See :doc:`signals` for the payload and the receiver rules.
 
 On a ``FormWizard`` the ``check_permissions`` classmethod runs per step POST, before the step form binds, so a denied step writes no storage.
 The wizard class has no object-level hook of its own.
-A step form that declares ``has_object_permission`` has it enforced after the step binds, the same as a standalone form.
+A step form that declares ``has_object_permission`` has it enforced after the step binds and before ``is_valid``.
+A wizard step binds from posted data and ``get_form_kwargs`` and never runs ``get_initial`` or ``Meta.instance_from_url``, so a ``ModelForm`` step sees a fresh unsaved ``self.instance`` rather than a URL-addressed row, unlike a standalone form.
 
 .. note::
 

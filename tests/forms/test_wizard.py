@@ -1237,6 +1237,7 @@ class TestWizardStepObjectPermissionHook:
         assert resp.status_code == 403
 
     def test_allowing_step_object_hook_proceeds(self, client_no_csrf) -> None:
+        assert ObjectGuardedStep._has_object_permission is True
         resp = self._post(client_no_csrf, "owner")
         assert resp.status_code == 302
         assert resp.url == "/thanks/"

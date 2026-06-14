@@ -133,24 +133,6 @@ URL_BY_ANNOTATION_RESOLVE_CASES: tuple[UrlByAnnotationResolveCase, ...] = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class ComponentTagCase:
-    """One row for parametrized ``{% component %}`` template tag tests."""
-
-    id: str
-    template: str
-    match: str
-
-
-@dataclass(frozen=True, slots=True)
-class FormDispatchCase:
-    """One row for parametrized form dispatch status-code tests."""
-
-    id: str
-    form_data: dict[str, object]
-    expected_status: int
-
-
 # Sentinels marking a hook return that the matrix interprets specially. RAISE
 # means the hook body raises PermissionDenied, BAD_TYPE means it returns an
 # unsupported type so the normaliser must raise TypeError.

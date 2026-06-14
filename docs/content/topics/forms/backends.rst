@@ -44,7 +44,7 @@ The factory imports the ``BACKEND`` dotted path and calls the class with the who
    backend_class = import_class_cached(config["BACKEND"])
    backend = backend_class(config)
 
-The constructor therefore receives the full entry, not just ``OPTIONS``.
+The constructor therefore receives the full entry, not only ``OPTIONS``.
 ``RegistryFormActionBackend.__init__`` accepts the config and ignores it, which is why a subclass that reads no options needs no constructor at all.
 A backend that reads an option declares a constructor and pulls ``OPTIONS`` out of the passed dict.
 
@@ -100,7 +100,7 @@ The URL reverse takes a different path: the manager calls each backend's ``get_a
 The proxy method ``FormActionManager.get_action_meta`` exposes the meta resolution, and the ``{% form %}`` tag calls it to stamp the meta's ``uid`` key onto the ``data-next-action`` attribute of the rendered ``<form>`` element.
 A backend whose meta omits ``uid`` therefore renders forms without that attribute, and the dispatch-time signals carry ``uid=None`` for its actions.
 A custom backend whose ``get_meta`` returns ``None`` for its own actions still resolves their URLs through ``get_action_url``, so the ``{% form %}`` tag renders the form element.
-That form just renders without ``data-next-action`` and without a bound form instance, and the dispatch-time signals carry ``uid=None``.
+That form renders without ``data-next-action`` and without a bound form instance, and the dispatch-time signals carry ``uid=None``.
 Return a truthy meta for owned names to restore the attribute, the bound form, and the uid.
 A backend that defers entirely to ``RegistryFormActionBackend`` need not override ``get_meta``.
 

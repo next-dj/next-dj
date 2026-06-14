@@ -5,8 +5,6 @@ from tests.support.cases import (
     URL_BY_ANNOTATION_RESOLVE_CASES,
     URL_KWARGS_RESOLVE_CASES,
     CoerceUrlValueCase,
-    ComponentTagCase,
-    FormDispatchCase,
     UrlByAnnotationResolveCase,
     UrlKwargsResolveCase,
 )
@@ -52,8 +50,6 @@ __all__ = [
     "URL_BY_ANNOTATION_RESOLVE_CASES",
     "URL_KWARGS_RESOLVE_CASES",
     "CoerceUrlValueCase",
-    "ComponentTagCase",
-    "FormDispatchCase",
     "GuardedTenantForm",
     "UrlByAnnotationResolveCase",
     "UrlKwargsResolveCase",

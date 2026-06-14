@@ -38,7 +38,7 @@ The client therefore never names a file, and a re-render can target only pages t
 A re-render whose field fails these checks returns HTTP 400.
 
 On the success path the same field feeds ``redirect_to_origin`` without URLconf resolution.
-A missing or off-site value never blocks a successful dispatch, ``redirect_to_origin`` simply falls back to ``/``.
+A missing or off-site value never blocks a successful dispatch, ``redirect_to_origin`` falls back to ``/``.
 Handlers can call ``redirect_to_origin`` from ``next.forms`` to redirect back to the page that rendered the form.
 
 Manual Forms

@@ -121,7 +121,7 @@ A test signs in as the owner, edits the row, then signs in as another user and c
        assert Note.objects.get(pk=note.pk).title == "Intro v2"
 
 The owner's POST binds the form, passes ``has_object_permission``, and saves.
-The stranger's POST binds the same row, the hook returns ``False``, and the dispatcher returns a bare HTTP 403 without re-rendering, so the row is unchanged.
+The stranger's POST binds the same row, the hook returns ``False``, and the dispatcher raises :exc:`~django.core.exceptions.PermissionDenied` which Django renders as a bare HTTP 403 without re-rendering the origin, so the row is unchanged.
 
 A ``form_access_denied`` signal fires on the denial with ``layer="object"`` and ``reason="denied"``.
 Connect a receiver to audit refused edits, see :ref:`topics-forms-signals-form-access-denied`.
