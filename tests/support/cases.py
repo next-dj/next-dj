@@ -133,19 +133,58 @@ URL_BY_ANNOTATION_RESOLVE_CASES: tuple[UrlByAnnotationResolveCase, ...] = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class ComponentTagCase:
-    """One row for parametrized ``{% component %}`` template tag tests."""
-
-    id: str
-    template: str
-    match: str
+# Sentinels marking a hook return that the matrix interprets specially. RAISE
+# means the hook body raises PermissionDenied, BAD_TYPE means it returns an
+# unsupported type so the normaliser must raise TypeError.
+PERMISSION_HOOK_RAISE = object()
+PERMISSION_HOOK_BAD_TYPE = object()
 
 
 @dataclass(frozen=True, slots=True)
-class FormDispatchCase:
-    """One row for parametrized form dispatch status-code tests."""
+class PermissionHookCase:
+    """One row for the dynamic permission-hook return-contract matrix.
+
+    ``hook_return`` is the value a hook returns, or one of the
+    ``PERMISSION_HOOK_*`` sentinels for the raise and bad-type branches.
+    ``expected_status`` is the HTTP status of a full dispatch, or None when
+    the hook is expected to raise (PermissionDenied at the view boundary
+    surfaces as 403 through the test client, TypeError propagates raw).
+    """
 
     id: str
-    form_data: dict[str, object]
-    expected_status: int
+    hook_return: object
+    expected_status: int | None
+    expected_redirect: str | None = None
+    raises_permission_denied: bool = False
+    raises_type_error: bool = False
+
+
+PERMISSION_OUTCOME_CASES: tuple[PermissionHookCase, ...] = (
+    PermissionHookCase("none_allows", None, 302, expected_redirect="/"),
+    PermissionHookCase("true_allows", True, 302, expected_redirect="/"),
+    PermissionHookCase(
+        "false_denies",
+        False,
+        None,
+        raises_permission_denied=True,
+    ),
+    PermissionHookCase(
+        "redirect_short_circuits",
+        "redirect",
+        302,
+        expected_redirect="/paywall/",
+    ),
+    PermissionHookCase("response_403_verbatim", "response_403", 403),
+    PermissionHookCase(
+        "raised_propagates",
+        PERMISSION_HOOK_RAISE,
+        None,
+        raises_permission_denied=True,
+    ),
+    PermissionHookCase(
+        "bad_type_raises_type_error",
+        PERMISSION_HOOK_BAD_TYPE,
+        None,
+        raises_type_error=True,
+    ),
+)

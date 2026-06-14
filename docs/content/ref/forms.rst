@@ -32,6 +32,7 @@ Advanced.
    the frozen specs (``FieldSpec``, ``FormsetSpec``, ``FormSpec``, ``FormSectionSpec``,
    ``FormsetRowSpec``, ``FieldKind``), the spec helpers (``field_spec``, ``form_spec``,
    ``formset_spec``), the formset helper ``cleanup_extra_initial``,
+   the ``PermissionOutcome`` type alias for the dynamic permission hooks,
    and the ``signals`` and ``checks`` submodules.
    Use these when writing a custom backend or a form renderer.
 
@@ -94,6 +95,10 @@ When ``registry_empty`` is true the message also explains that no actions are re
 Form Base Classes
 ~~~~~~~~~~~~~~~~~
 
+``check_permissions`` and ``has_object_permission`` are the opt-in dynamic permission hooks.
+Both return ``PermissionOutcome``, the ``bool | HttpResponse | None`` alias re-exported from ``next.forms``.
+See :ref:`topics-forms-actions-dynamic-guards` for the authoring contract and the ordering against the static guard.
+
 .. autoclass:: next.forms.Form
    :members:
 
@@ -101,16 +106,17 @@ Form Base Classes
    :members:
 
 .. autoclass:: next.forms.BaseForm
-   :members: get_initial, get_success_message, on_valid
+   :members: get_initial, get_success_message, on_valid, check_permissions, has_object_permission
 
 .. autoclass:: next.forms.BaseModelForm
-   :members: get_initial, get_success_message, on_valid
+   :members: get_initial, get_success_message, on_valid, check_permissions, has_object_permission
 
 Form Wizard
 ~~~~~~~~~~~
 
 ``FormWizard`` routes a sequence of step forms across requests.
 ``FormWizardBackend`` is the draft-persistence contract, ``SessionFormWizardBackend`` is the bundled default, and ``CacheFormWizardBackend`` is the cache-backed alternative.
+The wizard ``check_permissions`` classmethod is the view-level dynamic permission hook, enforced per step POST.
 See :doc:`/content/topics/forms/wizard` and :doc:`/content/topics/forms/wizard-backend` for the topic guides.
 
 .. autoclass:: next.forms.FormWizard
@@ -274,7 +280,7 @@ Signals
 
 See :doc:`signals` and :doc:`/content/topics/forms/signals` for the form signals
 (``action_registered``, ``action_dispatched``, ``form_validation_failed``,
-``wizard_step_submitted``, ``wizard_completed``).
+``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``).
 
 See Also
 --------

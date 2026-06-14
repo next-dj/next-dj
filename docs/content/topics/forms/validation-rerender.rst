@@ -184,11 +184,11 @@ Two signals fire during the validation pipeline.
 
 ``form_validation_failed``.
    Fires when ``form.is_valid()`` returns false.
-   Payload carries ``action_name``, ``error_count``, and ``field_names``.
+   Payload carries ``action_name``, ``uid``, ``request``, ``error_count``, and ``field_names``.
 
 ``action_dispatched``.
    Fires after the handler returns successfully.
-   Payload carries ``action_name``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
+   Payload carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
 
 See :doc:`signals` for the full list and payload shapes.
 
@@ -235,3 +235,4 @@ See Also
    :doc:`templates` for the ``{% form %}`` tag and ``_next_form_origin``.
    :doc:`backends` for swapping the dispatch backend.
    :doc:`/content/internals/action-dispatch` for the full pipeline.
+   :ref:`topics-forms-actions-dynamic-guards` for the object-level hook, whose denial returns a bare 403 instead of re-rendering.

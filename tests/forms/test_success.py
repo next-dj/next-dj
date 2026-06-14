@@ -8,6 +8,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.functional import lazy
 
 from next.forms import Form, FormWizard, ModelForm
+from next.forms.backends import RegistryFormActionBackend
 from next.forms.base import _declared_success_url, _format_success_message
 from next.forms.checks import check_success_message_framework
 from next.forms.dispatch import FormActionDispatch, _send_success_message
@@ -47,6 +48,20 @@ class MessageForm(Form):
         """Message template over cleaned_data."""
 
         success_message = "Saved %(name)s."
+
+
+class MessageNoneReturnForm(Form):
+    """Form whose on_valid returns None, flashing on the in-place re-render."""
+
+    name = django_forms.CharField(max_length=50)
+
+    class Meta:
+        """Message shown on the success re-render."""
+
+        success_message = "Saved %(name)s."
+
+    def on_valid(self, request: HttpRequest) -> None:
+        """Return None so the dispatcher re-renders the origin in place."""
 
 
 class ErrorStatusMessageForm(Form):
@@ -164,6 +179,22 @@ class MessageWizard(FormWizard):
     ) -> HttpResponseRedirect:
         """Redirect to a thank-you page."""
         return HttpResponseRedirect("/thanks/")
+
+
+class NoneDoneMessageWizard(FormWizard):
+    """Wizard whose done returns None, flashing on the in-place re-render."""
+
+    class Meta:
+        """Two steps and a merged-data message."""
+
+        steps: ClassVar = [
+            ("identity", WizardIdentityMsgStep),
+            ("scope", WizardScopeMsgStep),
+        ]
+        success_message = "Wizard saved %(name)s in %(scope)s."
+
+    def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> None:
+        """Return None so the dispatcher re-renders the origin in place."""
 
 
 class FailingDoneMessageWizard(FormWizard):
@@ -351,6 +382,54 @@ class TestSuccessMessageViaClient:
         )
         assert resp.status_code == 500
         assert _flashed(resp) == []
+
+
+@pytest.mark.django_db()
+class TestSuccessMessageRerenderOrdering:
+    """The success message reaches the store before an in-place origin re-render."""
+
+    def _record_messages_at_render(self, monkeypatch) -> list[list[str]]:
+        # Reading messages inside render_invalid_page mirrors a {% messages %}
+        # block, capturing what the store holds when the origin re-renders.
+        seen: list[list[str]] = []
+        original = RegistryFormActionBackend.render_invalid_page
+
+        def recording(
+            self, request, action_name, form, page_file_path=None, url_kwargs=None
+        ):
+            seen.append([m.message for m in get_messages(request)])
+            return original(
+                self, request, action_name, form, page_file_path, url_kwargs
+            )
+
+        monkeypatch.setattr(RegistryFormActionBackend, "render_invalid_page", recording)
+        return seen
+
+    def test_form_message_precedes_origin_rerender(
+        self, client_no_csrf, monkeypatch
+    ) -> None:
+        seen = self._record_messages_at_render(monkeypatch)
+        resp = _post_action(client_no_csrf, "message_none_return_form", {"name": "Ada"})
+        assert resp.status_code == 200
+        assert seen == [["Saved Ada."]]
+
+    def test_wizard_message_precedes_origin_rerender(
+        self, client_no_csrf, monkeypatch
+    ) -> None:
+        seen = self._record_messages_at_render(monkeypatch)
+        url = form_action_manager.get_action_url("none_done_message_wizard")
+        client_no_csrf.post(
+            url,
+            data={"_next_form_origin": "/request/identity/", "name": "Ada"},
+            follow=False,
+        )
+        resp = client_no_csrf.post(
+            url,
+            data={"_next_form_origin": "/request/scope/", "scope": "ops"},
+            follow=False,
+        )
+        assert resp.status_code == 200
+        assert seen == [["Wizard saved Ada in ops."]]
 
 
 @pytest.mark.django_db()

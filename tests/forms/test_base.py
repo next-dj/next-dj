@@ -13,6 +13,9 @@ from next.forms import (
     ActionRegistration,
     Form,
     ModelForm,
+    PermissionOutcome,
+    base as forms_base,
+    wizard as forms_wizard,
 )
 from next.forms.base import (
     _FRAMEWORK_ROOT,
@@ -653,3 +656,28 @@ class TestComputeScope:
             assert _compute_scope(str(tmp_path / "page.py")) == "shared"
             assert _compute_scope(str(tmp_path / "component.py")) == "shared"
         next_framework_settings.reload()
+
+
+class TestPermissionHookAnnotationSafety:
+    """The DI-inspected hook modules keep real, non-string annotations.
+
+    A `from __future__ import annotations` in base.py or wizard.py would
+    stringify every subclass annotation and break the resolver reading a
+    user's `check_permissions(cls, board: Board)`. The hook return
+    annotations stay the real `PermissionOutcome` alias, never the string.
+    """
+
+    @pytest.mark.parametrize(
+        "hook",
+        [
+            forms_base._PermissionHooks.check_permissions,
+            forms_base._PermissionHooks.has_object_permission,
+            forms_wizard.FormWizard.check_permissions,
+        ],
+        ids=["view", "object", "wizard"],
+    )
+    def test_hook_return_annotation_is_a_real_type(self, hook) -> None:
+        """Each hook return annotation is the real alias, not a stringified one."""
+        annotation = hook.__annotations__["return"]
+        assert annotation is PermissionOutcome
+        assert not isinstance(annotation, str)

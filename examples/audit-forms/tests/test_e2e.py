@@ -4,7 +4,11 @@ import pytest
 from access.models import AccessRequest, AuditEntry
 
 from next.forms import FormActionNotFound
-from next.forms.signals import action_dispatched, form_validation_failed
+from next.forms.signals import (
+    action_dispatched,
+    form_access_denied,
+    form_validation_failed,
+)
 from next.testing import SignalRecorder, resolve_action_url
 
 
@@ -24,6 +28,11 @@ APPROVAL: dict[str, str] = {}
 
 
 def _post_step(client, step: str, data: dict[str, str]):
+    payload = {**data, "policy_acknowledged": "on"}
+    return client.post_action(WIZARD_ACTION, payload, origin=f"/request/{step}/")
+
+
+def _post_step_unacknowledged(client, step: str, data: dict[str, str]):
     return client.post_action(WIZARD_ACTION, dict(data), origin=f"/request/{step}/")
 
 
@@ -149,17 +158,68 @@ class TestValidationFailure:
         page = client.get("/request/identity/")
         assert page.status_code == 200
         block = _wizard_form_block(page.content.decode())
+        ack = {"policy_acknowledged": "on"}
         invalid = client.post(
             _form_action_url(block),
-            {**_hidden_fields(block), **IDENTITY, "email": ""},
+            {**_hidden_fields(block), **ack, **IDENTITY, "email": ""},
         )
         assert invalid.status_code == 200
         rerendered = _wizard_form_block(invalid.content.decode())
         refields = _hidden_fields(rerendered)
         assert refields["_next_form_origin"] == "/request/identity/"
-        fixed = client.post(_form_action_url(rerendered), {**refields, **IDENTITY})
+        fixed = client.post(
+            _form_action_url(rerendered), {**refields, **ack, **IDENTITY}
+        )
         assert fixed.status_code == 302
         assert fixed["Location"] == "/request/scope/"
+
+
+class TestAccessDenied:
+    def test_unacknowledged_step_post_is_denied_with_403(self, client) -> None:
+        response = _post_step_unacknowledged(client, "identity", IDENTITY)
+        assert response.status_code == 403
+        assert AccessRequest.objects.exists() is False
+
+    def test_denied_step_records_one_signal_access_row(self, client) -> None:
+        with SignalRecorder(form_access_denied) as recorder:
+            _post_step_unacknowledged(client, "identity", IDENTITY)
+
+        rows = AuditEntry.objects.filter(
+            source=AuditEntry.SOURCE_SIGNAL,
+            kind=AuditEntry.KIND_ACCESS_DENIED,
+        )
+        assert rows.count() == 1
+        row = rows.get()
+        assert row.access_layer == "view"
+        assert row.access_reason == "denied"
+        assert row.action_name == WIZARD_ACTION
+
+        events = recorder.events_for(form_access_denied)
+        assert len(events) == 1
+        assert events[0].kwargs["layer"] == "view"
+        assert events[0].kwargs["reason"] == "denied"
+
+    def test_denied_step_writes_no_draft(self, client) -> None:
+        _post_step_unacknowledged(client, "identity", IDENTITY)
+        body = client.get("/request/scope/").content.decode()
+        assert 'data-step-section="identity" data-state="saved"' not in body
+
+    def test_acknowledged_step_post_advances(self, client) -> None:
+        with SignalRecorder(form_access_denied) as recorder:
+            response = _post_step(client, "identity", IDENTITY)
+        assert response.status_code == 302
+        assert response["Location"] == "/request/scope/"
+        assert recorder.events_for(form_access_denied) == []
+
+    def test_denial_leaves_no_dispatched_backend_row(self, client) -> None:
+        _post_step_unacknowledged(client, "identity", IDENTITY)
+        assert (
+            AuditEntry.objects.filter(
+                source=AuditEntry.SOURCE_BACKEND,
+                kind=AuditEntry.KIND_DISPATCHED,
+            ).count()
+            == 0
+        )
 
 
 class TestSessionResume:
@@ -220,6 +280,15 @@ class TestAdminAuditPage:
             AuditEntry.objects.filter(kind=AuditEntry.KIND_VALIDATION_FAILED).count()
             == 1
         )
+
+    def test_admin_surfaces_access_denied_rows(self, client) -> None:
+        _post_step_unacknowledged(client, "identity", IDENTITY)
+
+        response = client.get("/admin/audit/?kind=access_denied")
+        body = response.content.decode()
+        assert 'data-kind="access_denied"' in body
+        assert "view/denied" in body
+        assert 'data-kind="dispatched"' not in body
 
 
 class TestUnknownUid:

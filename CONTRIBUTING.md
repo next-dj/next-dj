@@ -85,13 +85,13 @@ Tests mirror this layout:
 
 | Command | Purpose |
 | --- | --- |
-| `make pre-commit-run` | All pre-commit hooks on all files: typos, `uv-lock`, prettier, eslint. |
+| `make pre-commit-run` | All pre-commit hooks on all files: typos, `uv-lock`, doc8, prettier, eslint. |
 | `make docs` | Build Sphinx docs. |
 | `make docs-linkcheck` | Link check only. |
 
 ### Before a PR
 
-Run **`make ci`**. It runs, in order: `lint`, `type-check`, `build-js`, `lint-js`, `format-js-check`, `test-js`, `test`, `test-examples`.
+Run **`make ci`**. It runs, in order: `lint`, `type-check`, `build-js`, `lint-js`, `format-js-check`, `test-js`, `test`, `test-examples`, `test-compat`.
 
 ### CI vs local `make ci`
 
@@ -101,9 +101,9 @@ GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) additional
 - Builds docs with warnings as errors (`sphinx-build -W --keep-going`) and runs linkcheck.
 - Runs the `security` job: typos and `uv-lock` via pre-commit.
 - On pull requests: dependency review (`dependency-review` job).
-- In CI, `lint` runs on **`next/` only**, plus a separate import-order pass with `--select I`. Locally, `make lint` also covers `tests/` and `examples/`. Keep those directories clean so you do not surprise reviewers.
+- In CI, `lint` runs on **`next/` only**. Locally, `make lint` also covers `tests/` and `examples/`. Keep those directories clean so you do not surprise reviewers.
 - The test matrix installs a specific Django with `uv pip install "django==…"` **after** installing the wheel. That override is intentional, not a broken lockfile.
-- A dedicated **Benchmarks** workflow ([.github/workflows/bench.yml](.github/workflows/bench.yml)) runs on every PR and posts a comment with side-by-side deltas. The `bench` job has a hard gate at `mean:99%` (≈×2 slowdown) — the job fails and blocks merge if the gate trips. On `main`, HEAD numbers are pushed to `gh-pages` with an informational `alert-threshold: 200%` that never blocks. See [Benchmarks](#benchmarks).
+- A dedicated **Benchmarks** workflow ([.github/workflows/bench.yml](.github/workflows/bench.yml)) runs on every PR and posts a comment with side-by-side deltas. The `bench` job has a hard gate at `median:99%` (≈×2 slowdown) — the job fails and blocks merge if the gate trips. On `main`, HEAD numbers are pushed to `gh-pages` with an informational `alert-threshold: 200%` that never blocks. See [Benchmarks](#benchmarks).
 
 Ruff uses `select = ["ALL"]` with ignores and per-file rules in [pyproject.toml](pyproject.toml) (line length 88, isort with `known-first-party = ["next"]`, relaxed rules for `examples/`, `tests/`, and `conftest.py`).
 
@@ -169,7 +169,7 @@ Major pieces (template loaders, router backends, factories) should stay **replac
 - **`next/`**: CI and `make test` enforce 100% line coverage via `--cov-fail-under=100`.
 - Files under `next/**/checks.py` and [next/checks/](next/checks/) are **excluded** from coverage (see `[tool.coverage.run] omit` in `pyproject.toml`). Do not chase coverage there.
 - [tool.coverage.paths] collapses `next/` and `*/site-packages/next/` so coverage works identically for editable and wheel-installed runs.
-- **Examples**: Each example must ship tests in `tests/` or `tests.py`. `make test-examples` does **not** enforce `--cov-fail-under=100`. Aim for full coverage anyway. Reviewers may ask you to close gaps.
+- **Examples**: Each example must ship tests in `tests/` or `tests.py` and reach 100% coverage. `make test-examples` enforces `--cov-fail-under=100` per example, so a partially-covered example fails the build.
 
 ### Benchmarks
 
@@ -186,7 +186,7 @@ Micro-benchmarks in [tests/benchmarks/](tests/benchmarks/) guard the hot paths i
 The [Benchmarks workflow](.github/workflows/bench.yml) runs on every PR and every push to `main`:
 
 - On `main`: writes a baseline into `gh-pages` under `dev/bench/`.
-- On PRs: runs the same benchmarks and posts a comment with side-by-side deltas. A hard gate at `mean:99%` (≈×2 of base — the strictest value the flag parser accepts) fails the `bench` job and blocks merge on a detected regression. Put `[skip bench]` in the PR title or commit message to bypass.
+- On PRs: runs the same benchmarks and posts a comment with side-by-side deltas. A hard gate at `median:99%` (≈×2 of base — the strictest value the flag parser accepts) fails the `bench` job and blocks merge on a detected regression. Put `[skip bench]` in the PR title or commit message to bypass.
 - Uses a single Python/Django version (3.13 / latest) so cross-matrix noise does not pollute comparisons.
 
 **Adding a benchmark**

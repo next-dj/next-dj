@@ -540,7 +540,12 @@ def check_action_guard_permissions(
     *_args: object,
     **_kwargs: object,
 ) -> list[CheckMessage]:
-    """Warn when permission_required is declared without django.contrib.auth."""
+    """Warn when permission_required is declared without django.contrib.auth.
+
+    This inspects the static `ActionGuard` only. The dynamic `check_permissions`
+    and `has_object_permission` hooks run application code per request and are
+    not statically inspectable, so no check covers them.
+    """
     if "django.contrib.auth" in settings.INSTALLED_APPS:
         return []
     return [

@@ -205,6 +205,32 @@ class TestArticleEdit:
         assert "<strong>posted preview</strong>" in body
 
 
+class TestArticleObjectPermission:
+    """The edit form denies a locked article through has_object_permission."""
+
+    def test_locked_article_edit_denied(self, client: NextClient) -> None:
+        locked = Article.objects.create(
+            slug="locked-page",
+            title="Locked page",
+            body_md="Original body.",
+            locked=True,
+        )
+        response = client.post_action(
+            "article_edit_form",
+            {
+                "slug": locked.slug,
+                "title": locked.title,
+                "body_md": "Attempted overwrite.",
+            },
+            origin=reverse(
+                "next:page_articles_edit_slug", kwargs={"slug": locked.slug}
+            ),
+        )
+        assert response.status_code == 403
+        locked.refresh_from_db()
+        assert locked.body_md == "Original body."
+
+
 class TestArticleDeletion:
     """Deleting an article removes its dynamic URL within the same process."""
 

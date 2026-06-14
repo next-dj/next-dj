@@ -24,12 +24,23 @@ class TestRedirectToOrigin:
         [
             "https://attacker.example.com/x/",
             "//attacker.example.com/x/",
+            "/\\attacker.example.com/x/",
+            "/\\/attacker.example.com/x/",
             "javascript:alert(1)",
             "ftp://x/y",
             "",
             "no-leading-slash",
         ],
-        ids=("https", "protocol_relative", "javascript", "ftp", "empty", "relative"),
+        ids=(
+            "https",
+            "protocol_relative",
+            "backslash_protocol_relative",
+            "backslash_slash",
+            "javascript",
+            "ftp",
+            "empty",
+            "relative",
+        ),
     )
     def test_rejects_open_redirect_attempts(self, mock_http_request, origin) -> None:
         post = MagicMock()

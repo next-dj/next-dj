@@ -5,10 +5,12 @@ from tests.support.cases import (
     URL_BY_ANNOTATION_RESOLVE_CASES,
     URL_KWARGS_RESOLVE_CASES,
     CoerceUrlValueCase,
-    ComponentTagCase,
-    FormDispatchCase,
     UrlByAnnotationResolveCase,
     UrlKwargsResolveCase,
+)
+from tests.support.forms import (
+    GuardedTenantForm,
+    build_post_request,
 )
 from tests.support.helpers import (
     _ctx,
@@ -48,8 +50,7 @@ __all__ = [
     "URL_BY_ANNOTATION_RESOLVE_CASES",
     "URL_KWARGS_RESOLVE_CASES",
     "CoerceUrlValueCase",
-    "ComponentTagCase",
-    "FormDispatchCase",
+    "GuardedTenantForm",
     "UrlByAnnotationResolveCase",
     "UrlKwargsResolveCase",
     "_ctx",
@@ -57,6 +58,7 @@ __all__ = [
     "_minimal_resolver",
     "_resolver_with_form",
     "build_mock_http_request",
+    "build_post_request",
     "default_page_router_config",
     "file_router_backend_from_params",
     "file_router_config_entry",

@@ -1,14 +1,7 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
+from django.utils.safestring import SafeString
 from wiki.markdown_render import render_markdown
 
 from next.components import component
-
-
-if TYPE_CHECKING:
-    from django.utils.safestring import SafeString
 
 
 scripts = ["https://cdn.jsdelivr.net/npm/marked/marked.min.js"]

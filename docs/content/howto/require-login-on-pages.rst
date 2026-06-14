@@ -143,6 +143,7 @@ Use ``Meta.login_required`` and ``Meta.permission_required`` on the form class, 
 An anonymous POST redirects to ``LOGIN_URL`` with ``next`` set to the origin page, and an authenticated user missing the permission gets HTTP 403.
 The guard protects the mutation, not the markup: a GET still renders the page and its form, so hide the form in the template when anonymous visitors should not see it.
 See :ref:`topics-forms-actions-guards` for the full semantics, including guard inheritance.
+For a per-request decision that the static keys cannot express, such as owner-only edits, override ``check_permissions`` or ``has_object_permission`` on the form class, see :ref:`topics-forms-actions-dynamic-guards`.
 
 Verification
 ------------

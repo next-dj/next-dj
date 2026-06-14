@@ -49,6 +49,15 @@ response from `done` skips the signal and keeps the saved drafts for
 retry. The sender is the wizard class. The keyword arguments are
 `cleaned_data`, `uid`, and `request`. `cleaned_data` is the merged
 mapping passed to `done`.
+
+The `form_access_denied` signal fires only when a dynamic permission
+hook denies a request, never on the static `ActionGuard` fast-path. The
+sender is `FormActionDispatch`. The keyword arguments are `action_name`,
+`uid`, `request`, `layer`, and `reason`. `layer` is `"view"` for a
+`check_permissions` denial or `"object"` for a `has_object_permission`
+denial. `reason` is `"raised"` when the hook raised `PermissionDenied`,
+`"denied"` when it returned `False`, or `"response"` when it returned an
+`HttpResponse` short-circuit.
 """
 
 from __future__ import annotations
@@ -61,11 +70,13 @@ action_dispatched: Signal = Signal()
 form_validation_failed: Signal = Signal()
 wizard_step_submitted: Signal = Signal()
 wizard_completed: Signal = Signal()
+form_access_denied: Signal = Signal()
 
 
 __all__ = [
     "action_dispatched",
     "action_registered",
+    "form_access_denied",
     "form_validation_failed",
     "wizard_completed",
     "wizard_step_submitted",

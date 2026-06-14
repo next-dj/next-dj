@@ -14,15 +14,18 @@ from django.conf import settings
 from django.core.cache import caches
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Model
+from django.http import HttpRequest, HttpResponse
 
 from next.conf import import_class_cached, next_framework_settings
 from next.conf.signals import settings_reloaded
 
 from .backends import ActionRegistration, scope_key_for
 from .base import (
+    PermissionOutcome,
     _format_success_message,
     _meta_guard,
     _registration_gate,
+    _stamp_hook_flag,
     _to_snake_case,
 )
 from .diagnostics import registration_diagnostics
@@ -32,7 +35,6 @@ from .manager import form_action_manager
 if TYPE_CHECKING:
     from django.core.cache.backends.base import BaseCache
     from django.forms import Form as DjangoForm
-    from django.http import HttpRequest, HttpResponse
 
 
 _WIZARD_LOAD_CACHE_ATTR: Final[str] = "_next_wizard_load_cache"
@@ -332,6 +334,7 @@ class FormWizard:
     """Routes a sequence of forms across requests and finalises on the last step."""
 
     _storage_scope_key: ClassVar[str]
+    _has_check_permissions: ClassVar[bool] = False
 
     class Meta:
         """Default wizard options, overridden on subclasses."""
@@ -340,9 +343,17 @@ class FormWizard:
         url_param: str = "step"
 
     def __init_subclass__(cls, **kwargs: object) -> None:
-        """Register the wizard subclass automatically."""
+        """Register the wizard subclass automatically and stamp the hook flag."""
         super().__init_subclass__(**kwargs)
+        cls._has_check_permissions = _stamp_hook_flag(
+            FormWizard.check_permissions, cls.check_permissions
+        )
         _auto_register_wizard_class(cls)
+
+    @classmethod
+    def check_permissions(cls) -> PermissionOutcome:
+        """View-level gate per step POST, DI-resolved. None or True allows."""
+        return None
 
     def __init__(
         self,
@@ -546,9 +557,9 @@ class FormWizard:
 
     def done(
         self,
-        request: "HttpRequest",
+        request: HttpRequest,
         cleaned_data: dict[str, Any],
-    ) -> "HttpResponse":
+    ) -> HttpResponse:
         """Finalise the wizard after the last step. Subclasses must override."""
         msg = f"{type(self).__name__} must implement done(request, cleaned_data)."
         raise NotImplementedError(msg)

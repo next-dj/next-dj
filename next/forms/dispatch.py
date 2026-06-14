@@ -6,7 +6,7 @@ import types
 import warnings
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from django.conf import settings
@@ -32,6 +32,7 @@ from .origin import (
 )
 from .signals import (
     action_dispatched,
+    form_access_denied,
     form_validation_failed,
     wizard_completed,
     wizard_step_submitted,
@@ -42,14 +43,26 @@ from .uid import ORIGIN_FIELD_NAME, validated_origin_path
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+    from typing import Protocol
 
     from django import forms as django_forms
     from django.http import HttpRequest
 
     from .backends import ActionGuard, ActionMeta, FormActionBackend
-    from .base import BaseForm as NextBaseForm
+    from .base import BaseForm as NextBaseForm, PermissionOutcome
     from .origin import _OriginMatch
     from .wizard import FormWizard
+
+    class _ViewPermissionHook(Protocol):
+        """Anything exposing a DI-resolved view-level check_permissions classmethod."""
+
+        @classmethod
+        def check_permissions(cls) -> "PermissionOutcome": ...
+
+    class _ObjectPermissionHook(Protocol):
+        """A bound form exposing a DI-resolved object-level permission method."""
+
+        def has_object_permission(self) -> "PermissionOutcome": ...
 
 
 _FACTORY_TUPLE_LEN = 2
@@ -111,6 +124,23 @@ def _send_success_message(
         messages.success(request, message)
 
 
+def _flash_success_before_rerender(
+    request: "HttpRequest",
+    source: object,
+    cleaned_data: dict[str, Any],
+    raw: "HttpResponse | None",
+    page_path: "Path | None",
+) -> bool:
+    """Flash the success message ahead of an in-place origin re-render."""
+    # A None result re-renders the origin within this same request, so the
+    # message must reach the store before that render reads {% messages %}. An
+    # unresolvable origin degrades to 400 and is left to the caller status guard.
+    if raw is None and page_path is not None:
+        _send_success_message(request, source, cleaned_data)
+        return True
+    return False
+
+
 def _build_form(
     form_class: "type[django_forms.Form]",
     initial_data: object,
@@ -163,6 +193,28 @@ def _accepts_var_keyword(func: "Callable[..., Any]") -> bool:
     return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
 
 
+def _resolve_and_call(
+    hook: "Callable[..., Any]",
+    request: "HttpRequest",
+    url_kwargs: dict[str, Any],
+    *,
+    deps: _DepsState,
+) -> object:
+    """Resolve a hook's dependencies and call it, feeding url_kwargs to kwargs."""
+    cache, stack = deps
+    resolved = resolver.resolve_dependencies(
+        hook,
+        request=request,
+        _cache=cache,
+        _stack=stack,
+        **url_kwargs,
+    )
+    if _accepts_var_keyword(hook):
+        for key, value in url_kwargs.items():
+            resolved.setdefault(key, value)
+    return hook(**resolved)
+
+
 def _call_get_initial(
     form_class: "type[django_forms.Form]",
     request: "HttpRequest",
@@ -180,19 +232,139 @@ def _call_get_initial(
             "a get_initial classmethod."
         )
         raise TypeError(msg)
-    cache, stack = deps
-    get_initial = form_class.get_initial
-    resolved = resolver.resolve_dependencies(
-        get_initial,
-        request=request,
-        _cache=cache,
-        _stack=stack,
-        **url_kwargs,
+    return _resolve_and_call(form_class.get_initial, request, url_kwargs, deps=deps)
+
+
+def _normalize_permission(raw: object) -> "HttpResponse | None":
+    """Map a permission-hook return to a denial response, or None to allow."""
+    if raw is None or raw is True:
+        return None
+    if raw is False:
+        raise PermissionDenied
+    if isinstance(raw, HttpResponse):
+        return raw
+    msg = (
+        f"permission hook returned unsupported {type(raw).__name__}, return "
+        "None or True to allow, False or raise PermissionDenied to deny, or an "
+        "HttpResponse to short-circuit."
     )
-    if _accepts_var_keyword(get_initial):
-        for key, value in url_kwargs.items():
-            resolved.setdefault(key, value)
-    return get_initial(**resolved)
+    raise TypeError(msg)
+
+
+def _emit_form_access_denied(
+    request: "HttpRequest",
+    action_name: str,
+    uid: str | None,
+    *,
+    layer: Literal["view", "object"],
+    reason: Literal["raised", "denied", "response"],
+) -> None:
+    """Send `form_access_denied` when any receiver is connected."""
+    if form_access_denied.receivers:
+        form_access_denied.send(
+            sender=FormActionDispatch,
+            action_name=action_name,
+            uid=uid,
+            request=request,
+            layer=layer,
+            reason=reason,
+        )
+
+
+def _enforce_permission_hook(
+    request: "HttpRequest",
+    action_name: str,
+    state: "_DispatchState",
+    *,
+    hook: "Callable[..., Any] | None",
+    layer: Literal["view", "object"],
+) -> "HttpResponse | None":
+    """Run a DI-resolved permission hook for one layer, emitting on a denial.
+
+    A `None` hook means the layer is undeclared, so dispatch continues.
+    """
+    if hook is None:
+        return None
+    try:
+        raw = _resolve_and_call(
+            hook,
+            request,
+            state.url_kwargs,
+            deps=(state.dep_cache, state.dep_stack),
+        )
+    except PermissionDenied:
+        _emit_form_access_denied(
+            request, action_name, state.uid, layer=layer, reason="raised"
+        )
+        raise
+    return _resolve_permission_outcome(
+        raw, request, action_name, state.uid, layer=layer
+    )
+
+
+def _enforce_view_permissions(
+    form_class: type,
+    request: "HttpRequest",
+    action_name: str,
+    state: "_DispatchState",
+) -> "HttpResponse | None":
+    """Run the view-level check_permissions hook, emitting on a denial."""
+    present = getattr(form_class, "_has_check_permissions", False)
+    hook = (
+        cast("type[_ViewPermissionHook]", form_class).check_permissions
+        if present
+        else None
+    )
+    return _enforce_permission_hook(
+        request,
+        action_name,
+        state,
+        hook=hook,
+        layer="view",
+    )
+
+
+def _resolve_permission_outcome(
+    raw: object,
+    request: "HttpRequest",
+    action_name: str,
+    uid: str | None,
+    *,
+    layer: Literal["view", "object"],
+) -> "HttpResponse | None":
+    """Normalise a hook return, emitting the audit signal on a denial."""
+    try:
+        denial = _normalize_permission(raw)
+    except PermissionDenied:
+        _emit_form_access_denied(
+            request, action_name, uid, layer=layer, reason="denied"
+        )
+        raise
+    if denial is not None:
+        _emit_form_access_denied(
+            request, action_name, uid, layer=layer, reason="response"
+        )
+    return denial
+
+
+def _enforce_object_permissions(
+    form: "django_forms.Form",
+    request: "HttpRequest",
+    action_name: str,
+    state: "_DispatchState",
+) -> "HttpResponse | None":
+    """Run the object-level has_object_permission hook after the form binds."""
+    present = getattr(type(form), "_has_object_permission", False)
+    hook = (
+        cast("_ObjectPermissionHook", form).has_object_permission if present else None
+    )
+    return _enforce_permission_hook(
+        request,
+        action_name,
+        state,
+        hook=hook,
+        layer="object",
+    )
 
 
 def _form_action_context_callable(
@@ -493,24 +665,40 @@ class FormActionDispatch:
             )
 
         if form_class is not None:
-            resolved_form_class, init_kwargs = _resolve_form_class(
-                form_class,
-                request,
-                state.url_kwargs,
-                (state.dep_cache, state.dep_stack),
-                action_name=action_name,
-            )
-            params = _FormDispatchParams(
-                action_name=action_name,
-                handler=handler,
-                form_class=resolved_form_class,
-                init_kwargs=init_kwargs,
-            )
-            return FormActionDispatch._dispatch_with_form(
-                backend, request, params, state
+            return FormActionDispatch._dispatch_form_class(
+                backend, request, action_name, meta, state
             )
 
         return HttpResponseBadRequest("Invalid action configuration")
+
+    @staticmethod
+    def _dispatch_form_class(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        action_name: str,
+        meta: "ActionMeta",
+        state: _DispatchState,
+    ) -> HttpResponse:
+        """Resolve the form class, enforce the view hook, then bind and dispatch."""
+        resolved_form_class, init_kwargs = _resolve_form_class(
+            meta.get("form_class"),
+            request,
+            state.url_kwargs,
+            (state.dep_cache, state.dep_stack),
+            action_name=action_name,
+        )
+        denial = _enforce_view_permissions(
+            resolved_form_class, request, action_name, state
+        )
+        if denial is not None:
+            return denial
+        params = _FormDispatchParams(
+            action_name=action_name,
+            handler=meta.get("handler"),
+            form_class=resolved_form_class,
+            init_kwargs=init_kwargs,
+        )
+        return FormActionDispatch._dispatch_with_form(backend, request, params, state)
 
     @staticmethod
     def _dispatch_handler_only(
@@ -562,6 +750,9 @@ class FormActionDispatch:
                 action_name=params.action_name,
             )
             form = _bind_form_for_post(params.form_class, request, initial_data)
+        denial = _enforce_object_permissions(form, request, params.action_name, state)
+        if denial is not None:
+            return denial
         if not form.is_valid():
             state.emit_form_validation_failed(request, params.action_name, form)
             return backend.shape_response(
@@ -601,6 +792,9 @@ class FormActionDispatch:
             raw = params.handler(**resolved)
 
         duration_ms = (time.perf_counter() - start) * 1000
+        flashed = _flash_success_before_rerender(
+            request, form, form.cleaned_data, raw, state.page_path
+        )
         response = backend.shape_response(
             request,
             ActionOutcome(
@@ -611,7 +805,7 @@ class FormActionDispatch:
                 form=form,
             ),
         )
-        if response.status_code < _HTTP_ERROR_FLOOR:
+        if not flashed and response.status_code < _HTTP_ERROR_FLOOR:
             _send_success_message(request, form, form.cleaned_data)
         state.emit_action_dispatched(
             request, params.action_name, form, duration_ms, response
@@ -629,6 +823,9 @@ class FormActionDispatch:
         """Validate the current wizard step, then route forward or finalise."""
         if state.origin_match is None:
             return HttpResponseBadRequest("Missing or invalid _next_form_origin")
+        denial = _enforce_view_permissions(wizard_class, request, action_name, state)
+        if denial is not None:
+            return denial
         wizard = wizard_class(
             request=request,
             url_kwargs=state.url_kwargs,
@@ -642,6 +839,9 @@ class FormActionDispatch:
         form_kwargs = wizard.get_form_kwargs(step_name)
         files = request.FILES if hasattr(request, "FILES") else None
         form = form_class(request.POST, files, **form_kwargs)
+        denial = _enforce_object_permissions(form, request, action_name, state)
+        if denial is not None:
+            return denial
         if not form.is_valid():
             state.emit_form_validation_failed(request, action_name, form)
             return backend.shape_response(
@@ -680,6 +880,9 @@ class FormActionDispatch:
             start = time.perf_counter()
             raw = wizard.done(**resolved)
             duration_ms = (time.perf_counter() - start) * 1000
+            flashed = _flash_success_before_rerender(
+                request, wizard, merged, raw, state.page_path
+            )
             response = backend.shape_response(
                 request,
                 ActionOutcome(
@@ -692,7 +895,8 @@ class FormActionDispatch:
                 ),
             )
             if response.status_code < _HTTP_ERROR_FLOOR:
-                _send_success_message(request, wizard, merged)
+                if not flashed:
+                    _send_success_message(request, wizard, merged)
                 wizard.clear_storage()
                 state.emit_wizard_completed(request, wizard_class, merged)
         else:

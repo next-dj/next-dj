@@ -11,6 +11,7 @@
           <option value="dispatched" {% if active_kind == "dispatched" %}selected{% endif %}>dispatched</option>
           <option value="validation_failed" {% if active_kind == "validation_failed" %}selected{% endif %}>validation_failed</option>
           <option value="request_started" {% if active_kind == "request_started" %}selected{% endif %}>request_started</option>
+          <option value="access_denied" {% if active_kind == "access_denied" %}selected{% endif %}>access_denied</option>
         </select>
       </form>
     {% /slot %}

@@ -7,7 +7,7 @@ from notes.access import get_active_tenant
 from notes.models import Note
 from notes.providers import DTenant
 
-from next.forms import ComponentWidget, ModelForm
+from next.forms import ComponentWidget, ModelForm, PermissionOutcome
 from next.pages import context
 
 
@@ -26,9 +26,18 @@ class NoteEditForm(ModelForm):
         }
 
     @classmethod
+    def check_permissions(cls, tenant: DTenant) -> PermissionOutcome:
+        """View-level gate. A suspended tenant may not edit any note."""
+        return tenant.is_active
+
+    @classmethod
     def get_initial(cls, request: HttpRequest, id: int | None = None) -> object:  # noqa: A002
         """Load the tenant-owned note addressed by the URL, or raise 404."""
         return get_owned_note(get_active_tenant(request), id)
+
+    def has_object_permission(self) -> PermissionOutcome:
+        """Object-level gate. A locked note is read-only even for its tenant."""
+        return not self.instance.locked
 
     def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
         """Persist edits and redirect back to the note editor."""

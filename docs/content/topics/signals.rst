@@ -90,6 +90,9 @@ each signal.
    * - ``wizard_completed``
      - Forms
      - After the wizard ``done`` method returns a response below HTTP 400 for the final step.
+   * - ``form_access_denied``
+     - Forms
+     - When a dynamic permission hook denies a request, never on the static guard path.
    * - ``asset_registered``
      - Static
      - After a file is registered with a backend and added to the collector.

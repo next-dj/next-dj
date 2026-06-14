@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from next.pages import context
 
 

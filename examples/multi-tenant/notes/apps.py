@@ -6,5 +6,5 @@ class NotesConfig(AppConfig):
     name = "notes"
 
     def ready(self) -> None:
-        """Import provider modules so DI auto-registry wires up at startup."""
-        from notes import providers  # noqa: F401, PLC0415
+        """Import provider and receiver modules so DI and signals wire up at startup."""
+        from notes import providers, receivers  # noqa: F401, PLC0415

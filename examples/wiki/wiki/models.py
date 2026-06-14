@@ -21,6 +21,7 @@ class Article(models.Model):
     slug = models.SlugField(max_length=80, unique=True, validators=[SLUG_VALIDATOR])
     title = models.CharField(max_length=200)
     body_md = models.TextField(blank=True)
+    locked = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

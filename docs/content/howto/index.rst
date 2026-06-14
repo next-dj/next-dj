@@ -75,6 +75,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
 :doc:`use-modelform-for-crud`
    Power create, update, and delete pages with ``ModelForm``.
 
+:doc:`enforce-object-level-permissions`
+   Gate a ``ModelForm`` edit on the loaded row's owner.
+
 :doc:`use-formsets`
    Render and validate a Django formset.
 
@@ -148,6 +151,7 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    build-a-custom-asset-backend
    handle-file-uploads
    use-modelform-for-crud
+   enforce-object-level-permissions
    use-formsets
    build-a-multi-step-wizard
    move-from-django-formtools

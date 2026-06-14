@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from access.models import AccessRequest, AuditEntry
 
 from next.pages import context

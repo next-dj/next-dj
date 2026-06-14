@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from django.urls import reverse
 from wiki.models import Article
 

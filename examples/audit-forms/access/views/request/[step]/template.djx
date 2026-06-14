@@ -9,6 +9,11 @@
 
     {% component "step_section" %}
 
+    <label class="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground" data-policy-notice>
+      <input type="checkbox" name="policy_acknowledged" checked class="mt-0.5">
+      <span>I acknowledge the data-retention policy. Submitted details are stored for the duration of the request.</span>
+    </label>
+
     <div class="flex items-center justify-end pt-2">
       {% if wizard.is_last %}
         {% component "button" type="submit" text="Submit request" variant="default" %}

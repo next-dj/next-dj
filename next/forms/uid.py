@@ -30,7 +30,8 @@ def validated_origin_path(raw: object) -> str | None:
     if not isinstance(raw, str):
         return None
     raw = raw.strip()
-    if not raw.startswith("/") or raw.startswith("//"):
+    collapsed = raw.replace("\\", "/")
+    if not raw.startswith("/") or collapsed.startswith("//"):
         return None
     return raw
 

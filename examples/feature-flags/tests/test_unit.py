@@ -4,11 +4,14 @@ from pathlib import Path
 
 import pytest
 from django.core.cache import cache
+from django.core.exceptions import PermissionDenied
 from flags.cache import FLAG_PREFIX, MISSING_SENTINEL, get_cached_flag, invalidate_flag
 from flags.metrics import RENDER_INDEX_KEY, record_render, render_counts
 from flags.models import Flag
 from flags.panels._chunks.feature_guard import component as guard
-from flags.receivers import _page_key
+from flags.panels.admin.page import BulkToggleForm
+from flags.providers import WRITE_GATE_FLAG, FlagService, flag_service
+from flags.receivers import DENIED_COUNT_KEY, _page_key, access_denied_count
 
 from next.testing import resolve_call
 
@@ -87,3 +90,52 @@ class TestPageKey:
 
     def test_path_without_anchor_falls_back_to_stem(self) -> None:
         assert _page_key(Path("/elsewhere/page.py")) == "page"
+
+
+class TestFlagService:
+    """`FlagService.is_enabled` reads through the flag cache."""
+
+    def test_enabled_flag_is_true(self) -> None:
+        Flag.objects.create(name="beta", label="Beta", enabled=True)
+        assert FlagService().is_enabled("beta") is True
+
+    def test_disabled_flag_is_false(self) -> None:
+        Flag.objects.create(name="beta", label="Beta", enabled=False)
+        assert FlagService().is_enabled("beta") is False
+
+    def test_absent_flag_is_false(self) -> None:
+        assert FlagService().is_enabled("unknown") is False
+
+    def test_named_dependency_returns_service(self) -> None:
+        assert isinstance(flag_service(), FlagService)
+
+
+class TestWriteGateHook:
+    """`BulkToggleForm.check_permissions` denies while the gate flag is off."""
+
+    def test_hook_allows_when_gate_on(self) -> None:
+        Flag.objects.create(name=WRITE_GATE_FLAG, label="Writes", enabled=True)
+        kwargs = resolve_call(BulkToggleForm.check_permissions)
+        assert BulkToggleForm.check_permissions(**kwargs) is None
+
+    def test_hook_denies_when_gate_off(self) -> None:
+        Flag.objects.create(name=WRITE_GATE_FLAG, label="Writes", enabled=False)
+        kwargs = resolve_call(BulkToggleForm.check_permissions)
+        with pytest.raises(PermissionDenied):
+            BulkToggleForm.check_permissions(**kwargs)
+
+    def test_hook_denies_when_gate_absent(self) -> None:
+        kwargs = resolve_call(BulkToggleForm.check_permissions)
+        with pytest.raises(PermissionDenied):
+            BulkToggleForm.check_permissions(**kwargs)
+
+
+class TestAccessDeniedCount:
+    """`access_denied_count` reflects the form_access_denied counter."""
+
+    def test_counter_starts_at_zero(self) -> None:
+        assert access_denied_count() == 0
+
+    def test_counter_reads_cached_value(self) -> None:
+        cache.set(DENIED_COUNT_KEY, 3)
+        assert access_denied_count() == 3

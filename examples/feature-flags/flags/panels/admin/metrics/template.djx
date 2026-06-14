@@ -31,4 +31,6 @@
   {% /component %}
 
   {% component "stat_card" label="feature_guard component renders" value=feature_guard_count hint="Driven by the component_rendered signal, filtered to feature_guard." %}
+
+  {% component "stat_card" label="form permission denials" value=access_denied_count hint="Driven by the form_access_denied signal. The bulk-toggle check_permissions hook denies while the admin_writes flag is off." %}
 </div>

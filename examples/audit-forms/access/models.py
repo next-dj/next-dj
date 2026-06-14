@@ -24,10 +24,12 @@ class AuditEntry(models.Model):
     KIND_DISPATCHED = "dispatched"
     KIND_VALIDATION_FAILED = "validation_failed"
     KIND_REQUEST_STARTED = "request_started"
+    KIND_ACCESS_DENIED = "access_denied"
     KIND_CHOICES: ClassVar = [
         (KIND_DISPATCHED, "dispatched"),
         (KIND_VALIDATION_FAILED, "validation_failed"),
         (KIND_REQUEST_STARTED, "request_started"),
+        (KIND_ACCESS_DENIED, "access_denied"),
     ]
 
     SOURCE_BACKEND = "backend"
@@ -53,6 +55,8 @@ class AuditEntry(models.Model):
     response_status = models.PositiveSmallIntegerField(null=True, blank=True)
     error_count = models.PositiveSmallIntegerField(null=True, blank=True)
     field_names = models.JSONField(default=list, blank=True)
+    access_layer = models.CharField(max_length=10, blank=True)
+    access_reason = models.CharField(max_length=10, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

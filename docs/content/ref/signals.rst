@@ -17,7 +17,7 @@ passed to ``Signal.send``. Receivers connected with a matching ``sender`` only
 fire for that sender.
 
 The dispatch-time form signals (``action_dispatched``, ``form_validation_failed``,
-``wizard_step_submitted``, ``wizard_completed``) share two keyword arguments.
+``wizard_step_submitted``, ``wizard_completed``, ``form_access_denied``) share two keyword arguments.
 ``uid`` is the registry identity of the action, the value the dispatch URL and the
 ``data-next-action`` markup attribute carry, or ``None`` when a custom backend stores
 no uid in its meta. ``request`` is the live ``HttpRequest`` being dispatched and must
@@ -76,6 +76,11 @@ not be retained past the receiver call.
      - ``PageContextRegistry``
      - ``file_path``, ``key``
      - After a context callable is attached to a page module.
+   * - ``form_access_denied``
+     - ``FormActionDispatch``
+     - ``action_name``, ``uid``, ``request``, ``layer``, ``reason``
+     - When a dynamic permission hook denies a request, never on the static guard path.
+       ``layer`` is ``"view"`` or ``"object"``. ``reason`` is ``"raised"``, ``"denied"``, or ``"response"``.
    * - ``form_validation_failed``
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``error_count``, ``field_names``

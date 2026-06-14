@@ -3,9 +3,9 @@
 A three-step access-request workflow whose every dispatch and validation
 failure is recorded by **two parallel audit channels**: a custom
 `FormActionBackend` that writes synchronously inside `dispatch`, and signal
-receivers reacting to `action_dispatched` and `form_validation_failed`.
-The admin page interleaves rows from both channels so you can compare them
-side by side.
+receivers reacting to `action_dispatched`, `form_validation_failed`, and
+`form_access_denied`. The admin page interleaves rows from both channels so
+you can compare them side by side.
 
 The example focuses on the form-action subsystem of next-dj: a custom
 backend wired through `NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`, a
@@ -25,7 +25,7 @@ API.
 | `/request/scope/` | Step 2 — project slug, free-form reason, expiry days. |
 | `/request/approval/` | Step 3 — read-only confirmation summary. |
 | `/request/<id>/audit/` | Per-request audit trail, opened on submit with a "✅ Submitted" banner. |
-| `/admin/audit/` | Global audit log. Filter by `kind` via `?kind=…`. Backend rows link to their per-request page. |
+| `/admin/audit/` | Global audit log. Filter by `kind` via `?kind=…` (`access_denied` included). Backend rows link to their per-request page. |
 
 The user flow:
 
@@ -65,18 +65,19 @@ wizard threads step data across requests through the configured
   (with `response_status` and the redirect target).
 - `source="signal"` — written by the receivers in
   [`access/receivers.py`](access/receivers.py). They subscribe to
-  `next.forms.signals.action_dispatched` and `form_validation_failed`,
-  using only the kwargs the framework ships in those signals. They never
-  see the raw request, which is the whole point: the signal channel is
-  decoupled from the backend class.
+  `next.forms.signals.action_dispatched`, `form_validation_failed`, and
+  `form_access_denied`, using only the kwargs the framework ships in those
+  signals. They never see the raw request, which is the whole point: the
+  signal channel is decoupled from the backend class.
 
 The two channels intentionally overlap on `kind="dispatched"` so the
 admin page can show them side by side. Pick whichever fits your project —
 or run both, like this example does.
 
-> **PII caveat.** `_safe_form_payload` strips framework-internal fields
-> (`csrfmiddlewaretoken` and `_next_form_origin`) but
-> stores every other POST value verbatim, including emails and free-text
+> **PII caveat.** `_safe_form_payload` strips control fields
+> (`csrfmiddlewaretoken`, `_next_form_origin`, and the
+> `policy_acknowledged` gate field) but stores every other POST value
+> verbatim, including emails and free-text
 > reasons. If you adopt this pattern in production, extend
 > `_RESERVED_FORM_KEYS` with any password / secret / personal-data field
 > name your forms collect, or hash sensitive values before persisting.
@@ -128,7 +129,7 @@ class AccessRequestWizard(next.forms.FormWizard):
         ]
         url_param = "step"
 
-    def done(self, request, cleaned_data):
+    def done(self, request: HttpRequest, cleaned_data):
         access_request = AccessRequest.objects.create(**cleaned_data)
         request.session["access_request_just_created"] = access_request.pk
         return HttpResponseRedirect(f"/request/{access_request.pk}/audit/?just=1")
@@ -139,6 +140,63 @@ the auto-name `access_request_wizard` resolves with
 `resolve_action_url("access_request_wizard")`. A namespaced name does
 not — see `tests/test_e2e.py::TestNamespacedAction`. Adding a step is one
 edit to `Meta.steps`.
+
+### 3a. A dynamic permission gate on the wizard
+
+```python
+# access/views/request/[step]/page.py
+class AccessRequestWizard(next.forms.FormWizard):
+    @classmethod
+    def check_permissions(cls, request):
+        return request.POST.get("policy_acknowledged") == "on"
+```
+
+`check_permissions` is a DI-resolved classmethod the framework runs on
+**every step POST, before the step form binds**. It declares only what it
+reads — here the `request` and its POST data. Return `None` or `True` to
+allow, `False` or `raise PermissionDenied` to deny with a 403, or return
+an `HttpResponse` to short-circuit verbatim. A denied step writes no
+draft, so the wizard storage stays untouched.
+
+The gate is the retention-policy acknowledgement. The step template
+renders a checked `policy_acknowledged` checkbox inside the form (the
+`data-policy-notice` block), so a normal submission carries the field and
+passes, while a replayed or forged action URL that never rendered the
+form omits it and is denied. The acknowledgement field is a control field,
+not user data, so `_RESERVED_FORM_KEYS` in `access/backends.py` strips it
+from the captured payload. That denial is exactly the kind of event an
+audit example should capture.
+
+The framework fires `next.forms.signals.form_access_denied` **only** on a
+dynamic-hook denial, never on the static `ActionGuard` fast-path. The
+sender is `FormActionDispatch` and the kwargs are `action_name`, `uid`,
+`request`, `layer` (`"view"` for `check_permissions`, `"object"` for
+`has_object_permission`), and `reason` (`"denied"` when the hook returned
+`False`, `"raised"` on `PermissionDenied`, `"response"` on an
+`HttpResponse` short-circuit). The receiver in
+[`access/receivers.py`](access/receivers.py) records one signal-sourced
+`AuditEntry` per denial with `kind="access_denied"`, storing `layer` and
+`reason` in the dedicated `access_layer` / `access_reason` columns:
+
+```python
+# access/receivers.py
+@receiver(form_access_denied)
+def _on_form_access_denied(action_name, layer, reason, **_):
+    AuditEntry.objects.create(
+        action_name=action_name,
+        kind=AuditEntry.KIND_ACCESS_DENIED,
+        source=AuditEntry.SOURCE_SIGNAL,
+        access_layer=layer,
+        access_reason=reason,
+    )
+```
+
+Because the denied step writes no draft and no `dispatched` row, this
+`access_denied` row is the only trace that records *why* the request was
+refused — the backend channel still leaves a `request_started` row (with
+no `reason`) before `super().dispatch` reaches the denying hook, which is
+the whole point of the signal channel. Filter the admin log to the denial
+with `/admin/audit/?kind=access_denied`.
 
 ### 4. Three ordinary forms, one per step
 
@@ -234,9 +292,10 @@ as `selected`. No JavaScript, no AJAX.
 
 | | Backend channel | Signal channel |
 |---|---|---|
-| Where written | inside `AuditedFormActionBackend.dispatch` | `@receiver(action_dispatched / form_validation_failed)` |
+| Where written | inside `AuditedFormActionBackend.dispatch` | `@receiver(action_dispatched / form_validation_failed / form_access_denied)` |
 | Sees raw POST? | yes | no — only the signal kwargs |
 | Sees response status? | yes | yes (via signal kwarg) |
+| Records permission denials? | partially — a denial raises before the `dispatched` row, leaving only the `request_started` row with no reason | yes — `form_access_denied` carries `layer` and `reason` |
 | Correlated to `AccessRequest`? | yes (last step only) | no |
 | Coupled to backend class? | yes — only fires when this backend dispatches | no — fires whatever backend is configured |
 | When to pick | compliance, full request payloads, transactional rollback | metrics, side effects on action lifecycle, decoupled from backend swap |
@@ -258,7 +317,8 @@ want decoupling and minimal coupling to the backend implementation.
   `FormActionBackend` ABC and `RegistryFormActionBackend` superclass.
 - [`next/forms/dispatch.py`](../../next/forms/dispatch.py) — where
   `action_dispatched`, `form_validation_failed`, `wizard_step_submitted`,
-  and `wizard_completed` are sent.
+  `wizard_completed`, and `form_access_denied` are sent, and where the
+  `check_permissions` / `has_object_permission` hooks run.
 - [`next/forms/checks.py`](../../next/forms/checks.py) — `next.E041`
   (duplicate handlers), `next.E044` (bad backend config), `next.E045`
   (wrong backend type).

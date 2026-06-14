@@ -9,16 +9,18 @@ signal firing in real time.
 The example focuses on the signal / receiver / cache layer of the framework:
 a composite component with a Python `render()` that returns empty to hide
 gated content, a custom DI provider that resolves a `Flag` by name, a
-bulk-toggle form, a nested admin layout, and two signal receivers
-(`post_save` for cache invalidation, `page_rendered` for metrics).
+bulk-toggle form whose view-level `check_permissions` hook is gated by a
+feature flag, a nested admin layout, and signal receivers (`post_save` for
+cache invalidation, `page_rendered` for metrics, `form_access_denied` for
+the gated action).
 
 ## What you will see
 
 | URL | Description |
 |-----|-------------|
 | `/` | Two columns — enabled flags on the left, disabled on the right. |
-| `/admin/` | Bulk-toggle form. Each row shows a live "on/off" preview component. |
-| `/admin/metrics/` | Per-page render counters from the `page_rendered` receiver. |
+| `/admin/` | Bulk-toggle form, gated by the `admin_writes` flag. Each row shows a live "on/off" preview component. |
+| `/admin/metrics/` | Per-page render counters from the `page_rendered` receiver plus the `form_access_denied` denial count. |
 | `/demo/` | `feature_guard` components for three demo flags. Disabled flags render nothing. |
 
 ## How to run
@@ -44,8 +46,14 @@ Flag.objects.create(name='dark_sidebar', label='Dark sidebar',
                     description='Experimental dark-mode navigation.', enabled=False)
 Flag.objects.create(name='ai_suggestions', label='AI suggestions',
                     description='Recommendations powered by the v2 model.', enabled=False)
+Flag.objects.create(name='admin_writes', label='Admin writes',
+                    description='Gate for the bulk-toggle action.', enabled=True)
 "
 ```
+
+The `admin_writes` flag gates the bulk-toggle action. Leave it off and the
+admin form returns `403` on submit. See section 7 for the
+`check_permissions` hook.
 
 ## Walking the code
 
@@ -243,10 +251,60 @@ The widget has Tailwind `class="hidden"` so each checkbox is visually
 replaced by an inline `<input type="checkbox">` in the template — the label
 wraps the whole row so the entire card is clickable.
 
-### 7. Receivers — `post_save`, `post_delete`, `page_rendered`
+### 7. Flag-gated `check_permissions` — a feature flag guards the action
 
-[`flags/receivers.py`](flags/receivers.py) wires three receivers at app
-ready time:
+A second flag controls whether the bulk-toggle action may run at all. The
+form declares a view-level `check_permissions` classmethod that the
+dispatcher resolves with dependency injection, exactly like `get_initial`.
+It runs after the static guard and before binding, and injects the flag
+service through `Depends`:
+
+```python
+class BulkToggleForm(Form):
+    @classmethod
+    def check_permissions(cls, flags: FlagService = Depends("flag_service")) -> None:
+        if not flags.is_enabled(WRITE_GATE_FLAG):
+            raise PermissionDenied
+```
+
+`WRITE_GATE_FLAG` is `"admin_writes"`. When that flag is absent or off the
+hook raises `PermissionDenied` and the action returns `403`, so no flag is
+touched. Enable `admin_writes` and the same POST succeeds and redirects. The
+gate uses the example's own flag mechanism — the same `Flag` rows and the
+same read-through cache — so toggling the gate is itself an ordinary flag
+edit.
+
+[`flags/providers.py`](flags/providers.py) registers the injected service as
+a named dependency:
+
+```python
+@resolver.dependency("flag_service")
+def flag_service() -> FlagService:
+    return FlagService()
+```
+
+`FlagService.is_enabled(name)` reads through `get_cached_flag`, so the gate
+check shares the same LocMemCache layer as everything else. The hook
+declares only what it reads — here a single `Depends("flag_service")`
+parameter. It could equally take `request` or a captured URL kwarg.
+
+The return contract mirrors a Django permission check. `None` or `True`
+allows. `False` or a raised `PermissionDenied` denies with `403`. Returning
+an `HttpResponse` short-circuits the dispatch with that response verbatim,
+which is the seam for redirecting to an upgrade page instead of a bare
+`403`. Any other return type raises `TypeError`.
+
+A denial emits `next.signals.form_access_denied` with `action_name`, `uid`,
+`request`, `layer` (`"view"` here), and `reason` (`"raised"` for the
+`PermissionDenied` path). The `_count_access_denied` receiver in
+[`flags/receivers.py`](flags/receivers.py) bumps a counter, and the
+`/admin/metrics/` page surfaces it as a stat card next to the render
+counters.
+
+### 8. Receivers — `post_save`, `post_delete`, `page_rendered`
+
+[`flags/receivers.py`](flags/receivers.py) wires its database and render
+receivers at app ready time:
 
 ```python
 @receiver(post_save, sender=Flag)
@@ -259,7 +317,7 @@ def _invalidate_on_delete(sender, instance, **_):
 
 @receiver(page_rendered)
 def _count_page_render(sender, file_path, **_):
-    record_render(file_path.name)
+    record_render(_page_key(file_path))
 ```
 
 The two database receivers mean the cache and the DB can never drift apart.
@@ -276,7 +334,7 @@ the `page.py` that produced it. Because every page file is literally named
 because the signal fires *after* rendering, the metrics page's own entry
 only appears on the next visit.
 
-### 8. Shared `nav_link` component — active state from `request.resolver_match`
+### 9. Shared `nav_link` component — active state from `request.resolver_match`
 
 Same pattern as the other examples — no duplication, no manual "current
 page" flags. The link component reads the view name from the resolver and
@@ -295,7 +353,7 @@ The root header uses `active_when="page_admin"` so `/admin/` and
 `/admin/metrics/` both highlight the "Admin" tab. The subnav inside the
 admin layout uses exact matches (`next:page_admin`, `next:page_admin_metrics`).
 
-### 9. URL names from the file router
+### 10. URL names from the file router
 
 | File | URL | Name |
 |------|-----|------|
@@ -353,5 +411,9 @@ sender=Flag)` will crash looking up `Flag`.
   payload documentation.
 - [next/forms/manager.py](../../next/forms/manager.py) — form-action
   registration, dispatch, and the CSRF + form-class contract.
+- [next/forms/dispatch.py](../../next/forms/dispatch.py) — where
+  `check_permissions` runs in the dispatch sequence and how its return is
+  normalised into an allow / `403` / verbatim response.
 - [next/signals.py](../../next/signals.py) — aggregate re-export covering
-  every signal the framework emits, including `page_rendered`.
+  every signal the framework emits, including `page_rendered` and
+  `form_access_denied`.

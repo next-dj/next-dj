@@ -142,6 +142,39 @@ class TestBenchDispatchEndToEnd:
         )
 
     @pytest.mark.benchmark(group="forms.dispatch")
+    def test_dispatch_unguarded_form_no_hook_overhead(self, benchmark) -> None:
+        """A no-hook form pays no permission-hook resolve on the dispatch path.
+
+        Pins the zero-overhead promise that an undeclared check_permissions or
+        has_object_permission costs the dispatcher only the two ClassVar reads,
+        not a third resolver call.
+        """
+        backend = RegistryFormActionBackend()
+        backend.register_action(
+            ActionRegistration(
+                name="bench_action",
+                file_path=__file__,
+                scope="shared",
+                handler=_ok_handler,
+                form_class=_BenchForm,
+            )
+        )
+        meta = backend.get_meta("bench_action")
+        assert meta is not None
+        assert _BenchForm._has_check_permissions is False
+        assert _BenchForm._has_object_permission is False
+        post = MagicMock()
+        post.items.return_value = [("name", "bench")]
+        request = build_mock_http_request(method="POST", POST=post, FILES=None)
+        benchmark(
+            FormActionDispatch.dispatch,
+            backend,
+            request,
+            "bench_action",
+            meta,
+        )
+
+    @pytest.mark.benchmark(group="forms.dispatch")
     def test_dispatch_through_subclassed_backend(self, benchmark) -> None:
         """Dispatch through a thin `RegistryFormActionBackend` subclass.
 

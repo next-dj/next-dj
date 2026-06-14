@@ -30,6 +30,11 @@ The access guards also match plain forms.
 The keys are read through plain class-attribute lookup, so a wizard subclassing a guarded base while declaring its own ``Meta`` must extend the base ``Meta`` or re-declare the guard keys.
 See :ref:`topics-forms-actions-guards` for the semantics and the inheritance rule.
 
+A wizard also accepts the dynamic ``check_permissions`` classmethod for a per-request decision.
+It is enforced per step POST, before the step form binds, so a denied step writes no storage.
+A wizard has no object-level hook.
+See :ref:`topics-forms-actions-dynamic-guards` for the hook contract.
+
 Declaring Steps
 ---------------
 
@@ -42,6 +47,7 @@ Each form class is a plain ``django.forms.Form`` or ``django.forms.ModelForm``.
    import next.forms
    from access.models import AccessRequest
    from django import forms
+   from django.http import HttpRequest
    from next.forms import redirect_to_origin
 
    class IdentityStep(forms.ModelForm):
@@ -66,7 +72,7 @@ Each form class is a plain ``django.forms.Form`` or ``django.forms.ModelForm``.
            ]
            url_param = "step"
 
-       def done(self, request, cleaned_data):
+       def done(self, request: HttpRequest, cleaned_data):
            AccessRequest.objects.create(**cleaned_data)
            return redirect_to_origin(request)
 
@@ -104,7 +110,7 @@ Call ``self.get_cleaned_data_for_step(step)`` when the per-step value matters: i
 .. code-block:: python
    :caption: finalising the wizard
 
-   def done(self, request, cleaned_data):
+   def done(self, request: HttpRequest, cleaned_data):
        AccessRequest.objects.create(**cleaned_data)
        return redirect_to_origin(request)
 
@@ -129,7 +135,8 @@ A flow that must serialise concurrent tabs needs a custom backend that locks or 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The dispatcher resolves ``done`` through the same injector as an action handler or ``on_valid``.
-The classic signature ``done(self, request, cleaned_data)`` resolves by parameter name, because ``request`` and ``cleaned_data`` are reserved context keys.
+The classic signature ``done(self, request: HttpRequest, cleaned_data)`` reads ``request`` through its ``HttpRequest`` annotation, the same way a context callable does, so an unannotated ``request`` resolves to ``None``.
+Only ``cleaned_data`` is reserved by parameter name.
 ``cleaned_data`` is reserved the way ``form`` is on a handler, so it always carries the merged step data and wins over a provider or a URL kwarg of the same name.
 Beyond the reserved names, ``done`` declares markers and named dependencies like any injected callable, and URL kwargs resolve by parameter name.
 
@@ -138,7 +145,7 @@ Beyond the reserved names, ``done`` declares markers and named dependencies like
 
    from next.deps import Depends
 
-   def done(self, request, cleaned_data, tenant=Depends("active_tenant")):
+   def done(self, request: HttpRequest, cleaned_data, tenant=Depends("active_tenant")):
        AccessRequest.objects.create(tenant=tenant, **cleaned_data)
        return redirect_to_origin(request)
 
