@@ -18,6 +18,8 @@ _SITE_PAGES = _PARTIAL_DIR.parent / "site_pages"
 _ZONED_PAGE = _SITE_PAGES / "zoned" / "page.py"
 _BOARD_FORMS_PAGE = _SITE_PAGES / "board_forms" / "page.py"
 _BOARD_SETTINGS_PAGE = _SITE_PAGES / "board_settings" / "page.py"
+_WIZARD_PAGE = _SITE_PAGES / "wizard" / "[step]" / "page.py"
+_WIZARD_PUSH_PAGE = _SITE_PAGES / "wizard_push" / "[step]" / "page.py"
 
 _PARTIAL_MODULES = (
     _REGRESSION_FORMS,
@@ -25,6 +27,8 @@ _PARTIAL_MODULES = (
     _ZONED_PAGE,
     _BOARD_FORMS_PAGE,
     _BOARD_SETTINGS_PAGE,
+    _WIZARD_PAGE,
+    _WIZARD_PUSH_PAGE,
 )
 
 

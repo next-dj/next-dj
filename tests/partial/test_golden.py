@@ -132,6 +132,52 @@ def _invalid_form_extract() -> GoldenCase:
     )
 
 
+def _validate_form() -> GoldenCase:
+    html = (
+        '<form data-next-action="ab12cd34" data-next-validate="blur">'
+        '<ul class="errorlist"><li>Enter a valid email address.</li></ul>'
+        '<input name="email" value="bad" aria-invalid="true"></form>'
+    )
+    form = FormMeta(
+        uid="ab12cd34",
+        valid=False,
+        errors={"email": ["Enter a valid email address."]},
+    )
+    envelope = (
+        Patches("9f3c2e1b")
+        .morph({"form": "ab12cd34"}, html, extract=True)
+        .set_form(form)
+        .envelope()
+    )
+    return GoldenCase(
+        name="validate_form",
+        envelope=envelope,
+        description=(
+            "An inline validate pass: one form morph by uid carrying only the "
+            "blurred field's error, no invalid-submission headers."
+        ),
+        version="9f3c2e1b",
+    )
+
+
+def _wizard_advance() -> GoldenCase:
+    html = (
+        '<div data-next-zone="wizard-zone">'
+        '<form data-next-action="ab12cd34">'
+        '<input name="scope" value=""></form></div>'
+    )
+    envelope = Patches("9f3c2e1b").morph({"zone": "wizard-zone"}, html).envelope()
+    return GoldenCase(
+        name="wizard_advance",
+        envelope=envelope,
+        description=(
+            "A wizard step advance: one zone morph swapping the master zone "
+            "for the next step's unbound form, never a redirect."
+        ),
+        version="9f3c2e1b",
+    )
+
+
 def _result_form_visit() -> GoldenCase:
     envelope = Envelope(
         version="9f3c2e1b",
@@ -156,6 +202,8 @@ GOLDEN_CASES = [
     _zone_get(),
     _invalid_form(),
     _invalid_form_extract(),
+    _validate_form(),
+    _wizard_advance(),
     _result_form_visit(),
 ]
 
@@ -242,3 +290,24 @@ class TestWriteGoldenFixtures:
         write_case(_result_form_visit())
         data = json.loads(read_envelope_bytes("result_form_visit"))
         assert data["ops"] == [{"op": "visit", "href": "/board/7/settings/"}]
+
+    def test_validate_envelope_morphs_the_form_with_meta(self) -> None:
+        write_case(_validate_form())
+        data = json.loads(read_envelope_bytes("validate_form"))
+        op = data["ops"][0]
+        assert op["op"] == "morph"
+        assert op["target"] == {"form": "ab12cd34"}
+        assert data["form"]["errors"] == {"email": ["Enter a valid email address."]}
+
+    def test_validate_meta_omits_the_invalid_headers(self) -> None:
+        write_case(_validate_form())
+        headers = read_meta("validate_form")["headers"]
+        assert "X-Next-Form" not in headers
+        assert "X-Next-Action" not in headers
+
+    def test_wizard_advance_envelope_morphs_the_master_zone(self) -> None:
+        write_case(_wizard_advance())
+        data = json.loads(read_envelope_bytes("wizard_advance"))
+        assert [op["op"] for op in data["ops"]] == ["morph"]
+        assert data["ops"][0]["target"] == {"zone": "wizard-zone"}
+        assert 'name="scope"' in data["ops"][0]["html"]

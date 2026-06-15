@@ -14,10 +14,11 @@ from .patches import (
 )
 from .registry import ZoneInfo, register_patch_op, zone_requested, zones_of
 from .render import UnknownZoneError, ZoneRenderResult, render_zone
-from .shaping import drain_messages, shape_partial
+from .shaping import ActionRef, drain_messages, shape_partial, shape_validate
 
 
 __all__ = [
+    "ActionRef",
     "Asset",
     "DeferZone",
     "Envelope",
@@ -37,6 +38,7 @@ __all__ = [
     "register_patch_op",
     "render_zone",
     "shape_partial",
+    "shape_validate",
     "signals",
     "zone_requested",
     "zones_of",

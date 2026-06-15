@@ -188,6 +188,7 @@ class Patches:
         self._assets: list[Asset] = []
         self._defer: list[DeferZone] = []
         self._form: FormMeta | None = None
+        self._csrf: Mapping[str, Any] | None = None
         self._page_path: Path | None = None
         self._page_resolved = False
 
@@ -384,6 +385,11 @@ class Patches:
         self._form = form
         return self
 
+    def set_csrf(self, csrf: "Mapping[str, Any]") -> "Patches":
+        """Attach the rotated CSRF payload so the runtime refreshes tokens."""
+        self._csrf = dict(csrf)
+        return self
+
     def envelope(self) -> Envelope:
         """Return the assembled envelope value object."""
         return Envelope(
@@ -392,6 +398,7 @@ class Patches:
             assets=tuple(self._assets),
             defer=tuple(self._defer),
             form=self._form,
+            csrf=self._csrf,
         )
 
     def response(self, fallback: str | None = None) -> "PatchResponse | HttpResponse":

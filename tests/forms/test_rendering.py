@@ -817,3 +817,73 @@ class TestFormTagMarkupIdentity:
         )
         assert 'enctype="text/plain">' in html
         assert "multipart/form-data" not in html
+
+
+class TestFormTagPartialParams:
+    """The validate, trigger, debounce, and zone params compile to data-next-*.
+
+    The server authors the client attribute names so the markup never
+    carries a raw selector or swap mode. Without the params the opening
+    tag stays free of every partial attribute.
+    """
+
+    @staticmethod
+    def _render(form_engine, csrf_request, source: str) -> str:
+        t = form_engine.from_string(source)
+        return t.render(
+            Context(
+                {
+                    "request": csrf_request,
+                    "current_page_module_path": str(PAGE_MODULE_FOR_FORM_TESTS),
+                }
+            )
+        )
+
+    def test_validate_blur_renders_the_validate_attribute(
+        self, form_engine, csrf_request
+    ) -> None:
+        """A validate="blur" param renders data-next-validate="blur"."""
+        html = self._render(
+            form_engine,
+            csrf_request,
+            '{% form "simple_form" validate="blur" %}x{% endform %}',
+        )
+        assert 'data-next-validate="blur"' in html
+
+    def test_every_partial_param_renders_its_attribute(
+        self, form_engine, csrf_request
+    ) -> None:
+        """The four partial params render their data-next-* attributes together."""
+        html = self._render(
+            form_engine,
+            csrf_request,
+            '{% form "simple_form" validate="blur" trigger="change"'
+            ' debounce="300" zone="rename-board" %}x{% endform %}',
+        )
+        assert 'data-next-validate="blur"' in html
+        assert 'data-next-trigger="change"' in html
+        assert 'data-next-debounce="300"' in html
+        assert 'data-next-target="rename-board"' in html
+
+    def test_no_partial_params_emit_no_partial_attributes(
+        self, form_engine, csrf_request
+    ) -> None:
+        """A plain form tag carries none of the partial attributes."""
+        html = self._render(
+            form_engine, csrf_request, '{% form "simple_form" %}x{% endform %}'
+        )
+        assert "data-next-validate" not in html
+        assert "data-next-trigger" not in html
+        assert "data-next-debounce" not in html
+        assert "data-next-target" not in html
+
+    def test_partial_params_precede_author_attributes(
+        self, form_engine, csrf_request
+    ) -> None:
+        """The partial attributes render before plain author attributes."""
+        html = self._render(
+            form_engine,
+            csrf_request,
+            '{% form "simple_form" validate="blur" class="stack" %}x{% endform %}',
+        )
+        assert html.index('data-next-validate="blur"') < html.index('class="stack"')

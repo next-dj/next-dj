@@ -17,6 +17,16 @@ _MIN_FORM_TAG_BITS = 2
 _RESERVED_FORM_ATTRS = frozenset({"action", "method"})
 _RESERVED_FORM_ATTR_PREFIX = "data-next-"
 
+# Python params of the tag that compile to client `data-next-*` attributes
+# on the form. The server authors these names, the client reads them, the
+# markup never carries a raw selector or swap mode.
+_PARTIAL_FORM_PARAMS: dict[str, str] = {
+    "validate": "data-next-validate",
+    "trigger": "data-next-trigger",
+    "debounce": "data-next-debounce",
+    "zone": "data-next-target",
+}
+
 
 if TYPE_CHECKING:
     from django import forms as django_forms
@@ -29,16 +39,35 @@ register = template.Library()
 
 @register.tag(name="form")
 def do_form(parser: template.base.Parser, token: template.base.Token) -> "FormNode":
-    """Block tag accepting an action name plus optional HTML attributes."""
+    """Block tag accepting an action name plus optional HTML attributes.
+
+    The `validate`, `trigger`, `debounce`, and `zone` params compile to
+    client `data-next-*` attributes on the form, every other key="value"
+    pair stays a plain HTML attribute.
+    """
     bits = token.split_contents()
     if len(bits) < _MIN_FORM_TAG_BITS:
         msg = f"{bits[0]!r} tag requires the action name as its first argument"
         raise template.TemplateSyntaxError(msg)
     action_expr = parser.compile_filter(bits[1])
-    attrs = tuple(_parse_form_attr(parser, bits[0], bit) for bit in bits[2:])
+    attrs: list[tuple[str, FilterExpression]] = []
+    partial_attrs: list[tuple[str, FilterExpression]] = []
+    for bit in bits[2:]:
+        name, eq, value = bit.partition("=")
+        if eq and name in _PARTIAL_FORM_PARAMS:
+            partial_attrs.append(
+                (_PARTIAL_FORM_PARAMS[name], parser.compile_filter(value))
+            )
+            continue
+        attrs.append(_parse_form_attr(parser, bits[0], bit))
     nodelist = parser.parse(("endform",))
     parser.delete_first_token()
-    return FormNode(action_expr=action_expr, nodelist=nodelist, attrs=attrs)
+    return FormNode(
+        action_expr=action_expr,
+        nodelist=nodelist,
+        attrs=tuple(attrs),
+        partial_attrs=tuple(partial_attrs),
+    )
 
 
 def _page_path_from_context(context: template.Context) -> str | None:
@@ -85,18 +114,20 @@ def _parse_form_attr(
 class FormNode(template.Node):
     """Render `<form>` with action URL, method=post, csrf_token."""
 
-    __slots__ = ("action_expr", "attrs", "nodelist")
+    __slots__ = ("action_expr", "attrs", "nodelist", "partial_attrs")
 
     def __init__(
         self,
         action_expr: "FilterExpression",
         nodelist: template.NodeList,
         attrs: "tuple[tuple[str, FilterExpression], ...]" = (),
+        partial_attrs: "tuple[tuple[str, FilterExpression], ...]" = (),
     ) -> None:
-        """Initialize with the action expression, nodelist, and HTML attributes."""
+        """Initialize with the action, nodelist, HTML attrs, and partial attrs."""
         self.action_expr = action_expr
         self.nodelist = nodelist
         self.attrs = attrs
+        self.partial_attrs = partial_attrs
 
     def _get_request(self, context: template.Context) -> "HttpRequest":
         """Extract request from context or raise ImproperlyConfigured."""
@@ -155,6 +186,10 @@ class FormNode(template.Node):
         bits: list[str] = [format_html('<form action="{}" method="post"', action_url)]
         if uid:
             bits.append(format_html('data-next-action="{}"', uid))
+        bits.extend(
+            format_html('{}="{}"', name, str(expr.resolve(context)))
+            for name, expr in self.partial_attrs
+        )
         if (
             form_instance is not None
             and form_instance.is_multipart()

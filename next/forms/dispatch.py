@@ -616,6 +616,33 @@ class _FormDispatchParams:
     init_kwargs: dict[str, Any] = field(default_factory=dict)
 
 
+def _maybe_validate_only(
+    backend: "FormActionBackend",
+    request: "HttpRequest",
+    form: "django_forms.Form",
+    action_name: str,
+    state: "_DispatchState",
+) -> "HttpResponse | None":
+    """Return a validate-only response when the request asks for one.
+
+    The branch only fires once both authorization layers have passed and
+    the form is already bound, so a guarded action's validator is never an
+    anonymous oracle. The handler never runs, success signals never fire,
+    and wizard storage stays untouched. A request without validate fields
+    falls through to the normal submit path.
+    """
+    # Deferred to break the next.forms <-> next.partial import cycle, the
+    # validate shaping imports the dispatch and origin helpers in turn.
+    from next.partial import partial_intent  # noqa: PLC0415
+    from next.partial.shaping import ActionRef, shape_validate  # noqa: PLC0415
+
+    intent = partial_intent(request)
+    if not intent.validate_fields:
+        return None
+    action = ActionRef(action_name=action_name, uid=state.uid or "")
+    return shape_validate(backend, request, form, intent, action)
+
+
 class FormActionDispatch:
     """Shared POST pipeline and response shaping for backends."""
 
@@ -753,6 +780,11 @@ class FormActionDispatch:
         denial = _enforce_object_permissions(form, request, params.action_name, state)
         if denial is not None:
             return denial
+        validated = _maybe_validate_only(
+            backend, request, form, params.action_name, state
+        )
+        if validated is not None:
+            return validated
         if not form.is_valid():
             state.emit_form_validation_failed(request, params.action_name, form)
             return backend.shape_response(
@@ -813,14 +845,21 @@ class FormActionDispatch:
         return response
 
     @staticmethod
-    def _dispatch_wizard(
+    def _bind_wizard_step(
         backend: "FormActionBackend",
         request: "HttpRequest",
         action_name: str,
         wizard_class: "type[FormWizard]",
         state: _DispatchState,
-    ) -> HttpResponse:
-        """Validate the current wizard step, then route forward or finalise."""
+    ) -> "HttpResponse | tuple[FormWizard, str, django_forms.Form]":
+        """Authorize the step POST and bind its form, or return an early response.
+
+        The wizard authorization, the step resolution, the object-level
+        permission hook, and the validate-only short circuit all run here
+        before any storage write, so a guarded validator never runs for an
+        unauthorized caller. The success path returns the wizard, the
+        active step name, and the bound form.
+        """
         if state.origin_match is None:
             return HttpResponseBadRequest("Missing or invalid _next_form_origin")
         denial = _enforce_view_permissions(wizard_class, request, action_name, state)
@@ -835,13 +874,32 @@ class FormActionDispatch:
         form_class = wizard.step_form_class(step_name)
         if form_class is None:
             return HttpResponseBadRequest("Unknown wizard step")
-
         form_kwargs = wizard.get_form_kwargs(step_name)
         files = request.FILES if hasattr(request, "FILES") else None
         form = form_class(request.POST, files, **form_kwargs)
         denial = _enforce_object_permissions(form, request, action_name, state)
         if denial is not None:
             return denial
+        validated = _maybe_validate_only(backend, request, form, action_name, state)
+        if validated is not None:
+            return validated
+        return wizard, step_name, form
+
+    @staticmethod
+    def _dispatch_wizard(
+        backend: "FormActionBackend",
+        request: "HttpRequest",
+        action_name: str,
+        wizard_class: "type[FormWizard]",
+        state: _DispatchState,
+    ) -> HttpResponse:
+        """Validate the current wizard step, then route forward or finalise."""
+        bound = FormActionDispatch._bind_wizard_step(
+            backend, request, action_name, wizard_class, state
+        )
+        if isinstance(bound, HttpResponse):
+            return bound
+        wizard, step_name, form = bound
         if not form.is_valid():
             state.emit_form_validation_failed(request, action_name, form)
             return backend.shape_response(

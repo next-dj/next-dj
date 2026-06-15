@@ -60,10 +60,66 @@ class TestSuccessFunnelEnvelope:
         assert "X-Next-Form" not in response
 
 
-class TestWizardAdvanceShapingPending:
-    """Advance shaping is stubbed until the next wizard step lands."""
+@pytest.mark.django_db()
+class TestWizardAdvanceMorphsTheNextStepZone:
+    """A partial step advance morphs the master zone of the next step.
 
-    @pytest.mark.skip(reason="advance shaping pending")
-    def test_advance_emits_step_zone_morph(self) -> None:
-        msg = "advance shaping renders the next wizard step zone"
-        raise NotImplementedError(msg)
+    The wizard page declares the `wizard-zone` master. A valid first step
+    advances without a redirect, the second wizard binds to the next step
+    page and renders the unbound scope form into a zone morph.
+    """
+
+    def test_advance_returns_a_zone_morph_envelope(self, client: NextClient) -> None:
+        response = client.post_action(
+            "step_wizard",
+            {"name": "Ada"},
+            origin="/wizard/identity/",
+            partial=True,
+            zones="wizard-zone",
+        )
+        assert response.status_code == 200
+        assert response["Content-Type"] == CONTENT_TYPE
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["wizard-zone"]
+
+    def test_advance_renders_the_next_step_form(self, client: NextClient) -> None:
+        response = client.post_action(
+            "step_wizard",
+            {"name": "Ada"},
+            origin="/wizard/identity/",
+            partial=True,
+            zones="wizard-zone",
+        )
+        html = envelope_of(response).html_for_zone("wizard-zone")
+        assert 'name="scope"' in html
+        assert 'name="name"' not in html
+
+    def test_default_advance_pushes_no_history(self, client: NextClient) -> None:
+        response = client.post_action(
+            "step_wizard",
+            {"name": "Ada"},
+            origin="/wizard/identity/",
+            partial=True,
+            zones="wizard-zone",
+        )
+        assert "url" not in envelope_of(response).op_verbs()
+
+
+@pytest.mark.django_db()
+class TestWizardAdvancePushesHistoryWhenOptedIn:
+    """A wizard with `Meta.push_steps` adds a `url.push` to the advance."""
+
+    def test_advance_pushes_the_next_step_url(self, client: NextClient) -> None:
+        response = client.post_action(
+            "push_step_wizard",
+            {"name": "Ada"},
+            origin="/wizard_push/identity/",
+            partial=True,
+            zones="push-zone",
+        )
+        ops = envelope_of(response).ops
+        url_ops = [op for op in ops if op["op"] == "url"]
+        assert url_ops == [
+            {"op": "url", "action": "push", "href": "/wizard_push/scope/"}
+        ]

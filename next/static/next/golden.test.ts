@@ -167,4 +167,34 @@ describe("golden fixtures apply to the DOM", () => {
     );
     expect(envelope.ops).toEqual([{ op: "visit", href: "/board/7/settings/" }]);
   });
+
+  it("validate_form morphs the form by uid and carries scrubbed errors", () => {
+    document.body.innerHTML =
+      '<form data-next-action="ab12cd34"><input name="email" value="bad"></form>';
+    const meta = readMeta("validate_form");
+    const { applier } = makeApplier();
+    const result: Envelope = applier.apply(
+      JSON.parse(readEnvelopeBytes(meta.envelope_file)),
+    );
+    const form = document.querySelector('[data-next-action="ab12cd34"]')!;
+    expect(form.querySelector('input[aria-invalid="true"]')).not.toBeNull();
+    expect(result.form).toEqual({
+      uid: "ab12cd34",
+      valid: false,
+      errors: { email: ["Enter a valid email address."] },
+    });
+    expect(meta.headers["X-Next-Form"]).toBeUndefined();
+  });
+
+  it("wizard_advance morphs the master zone to the next step form", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="wizard-zone"><form data-next-action="ab12cd34">' +
+      '<input name="name" value="Ada"></form></div>';
+    const meta = readMeta("wizard_advance");
+    const { applier } = makeApplier();
+    applier.apply(JSON.parse(readEnvelopeBytes(meta.envelope_file)));
+    const zone = document.querySelector('[data-next-zone="wizard-zone"]')!;
+    expect(zone.querySelector('input[name="scope"]')).not.toBeNull();
+    expect(zone.querySelector('input[name="name"]')).toBeNull();
+  });
 });
