@@ -12,9 +12,9 @@ backend wired through `NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`, a
 declarative `FormWizard` that routes all three steps from one class, three
 composite components (`progress_bar` and `step_section` inside the form,
 `audit_row` shared between the admin and per-request audit pages),
-session-backed step state with a `request_id` correlation column on
-`AuditEntry`, and full coverage of the `next.testing` `SignalRecorder`
-API.
+cache-backed step state through a non-default `FORM_WIZARD_BACKEND` with a
+`request_id` correlation column on `AuditEntry`, and full coverage of the
+`next.testing` `SignalRecorder` API.
 
 ## What you will see
 
@@ -46,10 +46,12 @@ uv run pytest
 
 Tailwind loads via the Play CDN in
 [`portal/layout.djx`](portal/layout.djx). No Node, no build step. The
-wizard threads step data across requests through the configured
-`FORM_WIZARD_BACKEND`, which defaults to the session-backed
-`SessionFormWizardBackend`, so keep `SessionMiddleware` in `MIDDLEWARE`
-(it is by default in [`config/settings.py`](config/settings.py)).
+wizard threads step drafts across requests through the configured
+`FORM_WIZARD_BACKEND`, here the cache-backed `CacheFormWizardBackend` on a
+dedicated `wizards` cache alias (see section 7). `SessionMiddleware` stays in
+`MIDDLEWARE` because `done` still uses the session to hand the new request id
+to the audit backend (it is on by default in
+[`config/settings.py`](config/settings.py)).
 
 ## Walking the code
 
@@ -273,13 +275,26 @@ Each step posts only its visible fields plus the framework's hidden
 resolves that origin URL against the URLconf to recover the typed
 `step` kwarg, and `_step_from_origin` in the audit backend does the
 same for the audit rows. The wizard saves the cleaned data through the
-configured `FORM_WIZARD_BACKEND` (the session-backed
-`SessionFormWizardBackend` by default), so on `GET` of step 2 you can
-see "Computing" already filled into the team summary — that is what
-`tests/test_e2e.py::TestSessionResume` asserts. Point
-`FORM_WIZARD_BACKEND` at `CacheFormWizardBackend` when drafts need
-their own TTL or a Redis-backed cache, or at a custom backend, without
-touching any view code.
+configured `FORM_WIZARD_BACKEND`, here the cache-backed
+`CacheFormWizardBackend` pinned to a dedicated `wizards` cache alias with a
+30-minute lifetime:
+
+```python
+# config/settings.py
+"FORM_WIZARD_BACKEND": {
+    "BACKEND": "next.forms.CacheFormWizardBackend",
+    "OPTIONS": {"CACHE_ALIAS": "wizards", "TIMEOUT": 1800},
+},
+```
+
+Swapping wizard storage off the session is a settings-only change, no wizard
+class is touched. On `GET` of step 2 you still see "Computing" already filled
+into the team summary because the draft survives in the cache —
+`tests/test_e2e.py::TestCacheBackedDrafts` asserts that by reading the
+`wizards` alias directly, and `TestSessionResume` covers the resume behaviour
+end to end. Point `FORM_WIZARD_BACKEND` at the default
+`SessionFormWizardBackend`, a Redis-backed cache, or a custom backend the same
+way.
 
 ### 8. Admin filter by GET query
 
@@ -308,9 +323,9 @@ want decoupling and minimal coupling to the backend implementation.
 ## Further reading
 
 - [`next/forms/wizard.py`](../../next/forms/wizard.py) — the declarative
-  `FormWizard` base class, the `FormWizardBackend` contract, the default
-  `SessionFormWizardBackend` this example builds on, and the optional
-  `CacheFormWizardBackend`.
+  `FormWizard` base class, the `FormWizardBackend` contract, the
+  `CacheFormWizardBackend` this example configures, and the default
+  `SessionFormWizardBackend`.
 - [`next/forms/manager.py`](../../next/forms/manager.py) — the lazy,
   settings-driven `FormActionManager` used by every example.
 - [`next/forms/backends.py`](../../next/forms/backends.py) — the

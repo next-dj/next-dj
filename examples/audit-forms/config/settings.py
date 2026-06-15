@@ -60,6 +60,12 @@ CACHES = {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "audit-forms",
     },
+    # A dedicated alias for wizard drafts so step data has its own store and
+    # lifetime, separate from the application cache.
+    "wizards": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "audit-forms-wizards",
+    },
 }
 
 LANGUAGE_CODE = "en-us"
@@ -99,4 +105,10 @@ NEXT_FRAMEWORK = {
     "FORM_ACTION_BACKENDS": [
         {"BACKEND": "access.backends.AuditedFormActionBackend"},
     ],
+    # Wizard step drafts live in the dedicated `wizards` cache alias rather
+    # than the session, with a short lifetime that fits a PII-carrying flow.
+    "FORM_WIZARD_BACKEND": {
+        "BACKEND": "next.forms.CacheFormWizardBackend",
+        "OPTIONS": {"CACHE_ALIAS": "wizards", "TIMEOUT": 1800},
+    },
 }

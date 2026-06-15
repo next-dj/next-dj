@@ -1,13 +1,13 @@
 from typing import Any, ClassVar
 
 from access.models import AccessRequest
-from django import forms
+from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 
 from next.forms import ComponentWidget, FormWizard, PermissionOutcome
 
 
-class IdentityStep(forms.ModelForm):
+class IdentityStep(django_forms.ModelForm):
     """First wizard step capturing who is asking for access."""
 
     class Meta:
@@ -20,7 +20,7 @@ class IdentityStep(forms.ModelForm):
         }
 
 
-class ScopeStep(forms.ModelForm):
+class ScopeStep(django_forms.ModelForm):
     """Second wizard step capturing what access is requested and for how long."""
 
     class Meta:
@@ -33,12 +33,12 @@ class ScopeStep(forms.ModelForm):
         }
 
 
-class ApprovalStep(forms.Form):
+class ApprovalStep(django_forms.Form):
     """Final wizard step that only confirms the merged request."""
 
 
 class AccessRequestWizard(FormWizard):
-    """Three-step access-request wizard with session-backed drafts."""
+    """Three-step access-request wizard with cache-backed step drafts."""
 
     class Meta:
         steps: ClassVar = [

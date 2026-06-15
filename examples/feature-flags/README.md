@@ -10,7 +10,9 @@ The example focuses on the signal / receiver / cache layer of the framework:
 a composite component with a Python `render()` that returns empty to hide
 gated content, a custom DI provider that resolves a `Flag` by name, a
 bulk-toggle form whose view-level `check_permissions` hook is gated by a
-feature flag, a nested admin layout, and signal receivers (`post_save` for
+feature flag and whose success redirect and flash use the declarative
+`success_url` / `success_message` contract, a nested admin layout, and
+signal receivers (`post_save` for
 cache invalidation, `page_rendered` for metrics, `form_access_denied` for
 the gated action).
 
@@ -19,7 +21,7 @@ the gated action).
 | URL | Description |
 |-----|-------------|
 | `/` | Two columns — enabled flags on the left, disabled on the right. |
-| `/admin/` | Bulk-toggle form, gated by the `admin_writes` flag. Each row shows a live "on/off" preview component. |
+| `/admin/` | Bulk-toggle form, gated by the `admin_writes` flag. Each row shows a live "on/off" preview component, and a success banner confirms each save. |
 | `/admin/metrics/` | Per-page render counters from the `page_rendered` receiver plus the `form_access_denied` denial count. |
 | `/demo/` | `feature_guard` components for three demo flags. Disabled flags render nothing. |
 
@@ -223,6 +225,10 @@ class BulkToggleForm(Form):
         widget=forms.CheckboxSelectMultiple(attrs={"class": "hidden"}),
     )
 
+    class Meta:
+        success_url = "/admin/"
+        success_message = "Flag toggles saved."
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["enabled_names"].choices = [
@@ -236,16 +242,23 @@ class BulkToggleForm(Form):
             if flag.enabled != should_be_on:
                 flag.enabled = should_be_on
                 flag.save(update_fields=["enabled", "updated_at"])
-        return HttpResponseRedirect("/admin/")
+        return super().on_valid(request)
 ```
 
-Two details worth noting:
+Three details worth noting:
 
 - `choices` is populated in `__init__` rather than at class-define time so
   the field reflects the current set of flags on every request.
 - Only **changed** flags are saved. Untouched rows do not fire `post_save`,
   which keeps the cache-invalidation receiver honest — nothing gets
   invalidated unless there is a real state transition.
+- The redirect and the flash come from the declarative success contract.
+  `Meta.success_url` and `Meta.success_message` let the overridden `on_valid`
+  end with `super().on_valid(request)` instead of a hand-built
+  `HttpResponseRedirect`. The base method redirects to `/admin/` and flashes
+  "Flag toggles saved." through Django's messages framework. A
+  `flash_messages` context drains the queue and the admin template renders it
+  in an `alert` banner.
 
 The widget has Tailwind `class="hidden"` so each checkbox is visually
 replaced by an inline `<input type="checkbox">` in the template — the label
