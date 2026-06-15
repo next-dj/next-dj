@@ -1,20 +1,22 @@
 import json
 import re
+import threading
+import time
 
 import pytest
 from polls.broker import (
+    Change,
     PollBroker,
     Snapshot,
     broker,
     build_snapshot,
-    format_event,
-    format_keepalive,
     read_snapshot,
     store_snapshot,
 )
 from polls.models import Choice, Poll
 
 from next.forms.signals import action_dispatched, form_validation_failed
+from next.partial.headers import REQUEST_ID
 from next.testing import (
     NextClient,
     SignalRecorder,
@@ -64,19 +66,38 @@ def _next_init_payload(html: str) -> dict:
     return json.loads(match.group(1))
 
 
-def _parse_sse_payload(frame: bytes) -> dict:
-    """Parse one SSE event frame and return the JSON `data:` payload as a dict."""
-    return json.loads(frame.split(b"data: ", 1)[1].split(b"\n\n", 1)[0])
+def _consume_one_change(
+    target: PollBroker,
+    poll_id: int,
+    snapshot: Snapshot,
+    *,
+    request_id: str | None = None,
+) -> Change | None:
+    """Drain one change a worker captures after the main thread publishes.
+
+    A consumer thread starts on the lazy `changes` generator and captures
+    its baseline revision before the main thread publishes, so the wake
+    is race-free without depending on the generator's start timing.
+    """
+    captured: list[Change] = []
+    stream = target.changes(poll_id)
+    worker = threading.Thread(target=lambda: captured.append(next(stream)))
+    worker.start()
+    time.sleep(0.05)
+    target.publish(snapshot, request_id=request_id)
+    worker.join(timeout=2)
+    stream.close()
+    return captured[0] if captured else None
 
 
 @pytest.fixture()
 def primed_broker(poll: Poll) -> PollBroker:
-    """Stand-alone broker with `poll`'s initial snapshot already cached.
+    """Stand-alone broker with `poll`'s snapshot cached for change tests.
 
     Tests use a local instance so revision counters do not leak across
-    cases. The cache is process-wide, so seeding through
-    `store_snapshot` is enough to make the first `subscribe` yield a
-    snapshot frame.
+    cases. The cache is process-wide, so seeding through `store_snapshot`
+    is enough for a `changes` consumer to read the snapshot on its first
+    wake.
     """
     store_snapshot(build_snapshot(poll))
     return PollBroker()
@@ -149,6 +170,20 @@ class TestPollDetailPage:
         body = _detail_html(client, poll)
         assert f'data-poll-chart="{poll.pk}"' in body
         assert "data-poll-chart-app" in body
+        assert 'id="poll-chart-app"' in body
+        assert "data-next-keep" in body
+
+    def test_poll_chart_data_block_carries_fresh_counts(
+        self, client: NextClient, poll: Poll
+    ) -> None:
+        Choice.objects.filter(poll=poll, text="Tabs").update(votes=4)
+        Choice.objects.filter(poll=poll, text="Spaces").update(votes=3)
+        body = _detail_html(client, poll)
+        tabs = poll.choices.get(text="Tabs")
+        assert 'data-poll-chart-data data-total-votes="7"' in body
+        assert f'data-choice-id="{tabs.pk}"' in body
+        assert 'data-choice-text="Tabs"' in body
+        assert 'data-choice-votes="4"' in body
 
     def test_inherit_context_carries_active_polls_count(
         self, client: NextClient, poll: Poll, second_poll: Poll
@@ -165,7 +200,12 @@ class TestPollDetailPage:
         assert payload["results"]["poll_id"] == poll.pk
         assert payload["results"]["total_votes"] == 0
         assert {c["text"] for c in payload["results"]["choices"]} == {"Tabs", "Spaces"}
-        assert payload["results"]["stream_url"] == f"/polls/{poll.pk}/stream/"
+
+    def test_page_declares_the_sse_connection(
+        self, client: NextClient, poll: Poll
+    ) -> None:
+        body = _detail_html(client, poll)
+        assert f'data-next-sse="/polls/{poll.pk}/stream/"' in body
 
 
 class TestVoteAction:
@@ -272,9 +312,9 @@ class TestBroadcastReceiver:
         captured: list[Snapshot] = []
         real_publish = broker.publish
 
-        def spy(snapshot: Snapshot) -> None:
+        def spy(snapshot: Snapshot, request_id: str | None = None) -> None:
             captured.append(snapshot)
-            real_publish(snapshot)
+            real_publish(snapshot, request_id=request_id)
 
         monkeypatch.setattr(broker, "publish", spy)
         choice = poll.choices.get(text="Tabs")
@@ -294,7 +334,7 @@ class TestBroadcastReceiver:
 
 
 class TestStreamEndpoint:
-    """The SSE endpoint streams initial snapshot then live updates."""
+    """The SSE endpoint opens a polite patch event stream over the broker."""
 
     def test_response_uses_event_stream_content_type(
         self, client: NextClient, poll: Poll
@@ -303,76 +343,67 @@ class TestStreamEndpoint:
         try:
             assert response.status_code == 200
             assert response["Content-Type"].startswith("text/event-stream")
-            assert response["Cache-Control"] == "no-cache"
+            assert response["Cache-Control"] == "no-cache, no-transform"
             assert response["X-Accel-Buffering"] == "no"
         finally:
             response.close()
 
-    def test_http_endpoint_yields_cached_snapshot_as_first_frame(
+    def test_http_endpoint_leads_with_retry_frame(
         self, client: NextClient, poll: Poll
     ) -> None:
-        """Reading the streaming response proves the page module wires the broker.
+        """The first byte frame is the retry hint, proving the page wires the stream.
 
-        Earlier broker tests instantiate `PollBroker()` directly, which
-        does not exercise `polls.screens.polls.[int:id].stream.page`.
-        Reading one frame off the actual streaming response is the
-        only way to verify the HTTP path end to end. The frame is
-        consumed in a `try/finally` so the response closes even if
-        the assertion fails before the loop reaches the read.
+        Reading the leading frame off the actual streaming response is
+        the only way to verify the HTTP path end to end without blocking
+        on the broker condition. The frame is consumed in a `try/finally`
+        so the response closes even if the assertion fails before the
+        read.
         """
-        broker.publish(build_snapshot(poll))
         response = client.get(f"/polls/{poll.pk}/stream/")
         try:
             first = next(iter(response.streaming_content))
-            assert first.startswith(b"event: snapshot")
-            assert _parse_sse_payload(first)["poll_id"] == poll.pk
+            assert first.startswith(b"retry: ")
         finally:
             response.close()
 
-    def test_first_frame_is_cached_snapshot(
+    def test_change_yields_refresh_and_context_envelope(
         self, primed_broker: PollBroker, poll: Poll
     ) -> None:
-        stream = primed_broker.subscribe(poll.pk)
-        first = next(stream)
-        stream.close()
-        assert first.startswith(b"event: snapshot")
-        assert _parse_sse_payload(first)["poll_id"] == poll.pk
-
-    def test_publish_wakes_subscriber_with_update_event(
-        self, primed_broker: PollBroker, poll: Poll
-    ) -> None:
-        stream = primed_broker.subscribe(poll.pk)
-        next(stream)  # consume initial snapshot
         Choice.objects.filter(poll=poll, text="Tabs").update(votes=2)
-        primed_broker.publish(build_snapshot(poll))
-        update = next(stream)
-        stream.close()
-        assert update.startswith(b"event: update")
+        change = _consume_one_change(
+            primed_broker, poll.pk, build_snapshot(poll), request_id="r1"
+        )
+        assert change is not None
+        assert change.request_id == "r1"
         votes_by_text = {
-            row["text"]: row["votes"] for row in _parse_sse_payload(update)["choices"]
+            row["text"]: row["votes"] for row in change.snapshot["choices"]
         }
         assert votes_by_text["Tabs"] == 2
 
-    def test_publish_fans_out_to_multiple_subscribers(
+    def test_change_fans_out_to_multiple_subscribers(
         self, primed_broker: PollBroker, poll: Poll
     ) -> None:
         """Every open subscriber wakes on a single publish without losing events."""
-        stream_a = primed_broker.subscribe(poll.pk)
-        stream_b = primed_broker.subscribe(poll.pk)
-        next(stream_a)  # initial snapshot
-        next(stream_b)
         Choice.objects.filter(poll=poll, text="Tabs").update(votes=3)
-        primed_broker.publish(build_snapshot(poll))
-        update_a = next(stream_a)
-        update_b = next(stream_b)
-        stream_a.close()
-        stream_b.close()
-        assert update_a.startswith(b"event: update")
-        assert update_b.startswith(b"event: update")
-        for frame in (update_a, update_b):
+        snapshot = build_snapshot(poll)
+        streams = [primed_broker.changes(poll.pk) for _ in range(2)]
+        captured: list[list[Change]] = [[], []]
+        workers = [
+            threading.Thread(target=lambda s=s, c=c: c.append(next(s)))
+            for s, c in zip(streams, captured, strict=True)
+        ]
+        for worker in workers:
+            worker.start()
+        time.sleep(0.05)
+        primed_broker.publish(snapshot)
+        for worker in workers:
+            worker.join(timeout=2)
+        for stream in streams:
+            stream.close()
+        for bucket in captured:
+            assert bucket
             votes_by_text = {
-                row["text"]: row["votes"]
-                for row in _parse_sse_payload(frame)["choices"]
+                row["text"]: row["votes"] for row in bucket[0].snapshot["choices"]
             }
             assert votes_by_text["Tabs"] == 3
 
@@ -384,18 +415,74 @@ class TestStreamEndpoint:
             response.close()
 
 
-class TestSnapshotFormat:
-    """Snapshot helpers produce SSE-conformant frames."""
+class TestEchoThreading:
+    """The vote's request id rides the change so the initiator drops its echo."""
 
-    def test_format_event_carries_event_name_and_payload(self) -> None:
-        snapshot = Snapshot(poll_id=1, total_votes=5, choices=())
-        frame = format_event(snapshot.to_payload(), event="update")
-        assert frame.startswith(b"event: update\n")
-        assert b'"poll_id":1' in frame
-        assert frame.endswith(b"\n\n")
+    def test_request_id_header_reaches_the_change(
+        self, client: NextClient, poll: Poll
+    ) -> None:
+        choice = poll.choices.get(text="Tabs")
+        captured: list[Change] = []
+        stream = broker.changes(poll.pk)
 
-    def test_format_keepalive_uses_comment_form(self) -> None:
-        assert format_keepalive() == b": keepalive\n\n"
+        def drain() -> None:
+            captured.append(next(stream))
+
+        worker = threading.Thread(target=drain)
+        worker.start()
+        time.sleep(0.05)
+        client.post_action(
+            "vote_form",
+            {"poll": poll.pk, "choice": choice.pk},
+            **{f"HTTP_{REQUEST_ID.upper().replace('-', '_')}": "vote-1"},
+        )
+        worker.join(timeout=2)
+        stream.close()
+        assert captured
+        assert captured[0].request_id == "vote-1"
+
+
+@pytest.mark.django_db(transaction=True)
+class TestStreamPatchFrame:
+    """A change over the open HTTP stream yields a refresh patch with the echo.
+
+    The poll is committed so the streaming response, consumed on a worker
+    thread, builds the envelope from its own database connection. The
+    refresh fan-out carries the change's request id so the initiator's
+    own tab drops the echo.
+    """
+
+    def test_change_frame_carries_refresh_and_echo(self, client: NextClient) -> None:
+        poll = Poll.objects.create(question="Streamed?")
+        Choice.objects.create(poll=poll, text="Yes", votes=0)
+        try:
+            response = client.get(f"/polls/{poll.pk}/stream/")
+            frames: list[bytes] = []
+            iterator = iter(response.streaming_content)
+
+            def drain() -> None:
+                frames.append(next(iterator))
+                frames.append(next(iterator))
+
+            worker = threading.Thread(target=drain)
+            worker.start()
+            time.sleep(0.05)
+            broker.publish(build_snapshot(poll), request_id="r9")
+            worker.join(timeout=2)
+            response.close()
+            assert frames[0].startswith(b"retry: ")
+            data = frames[1].split(b"data: ", 1)[1].split(b"\n\n", 1)[0]
+            envelope = json.loads(data)
+            assert [op["op"] for op in envelope["ops"]] == ["refresh"]
+            assert envelope["ops"][0]["zone"] == "poll-results"
+            assert envelope["request_id"] == "r9"
+        finally:
+            Choice.objects.filter(poll=poll).delete()
+            poll.delete()
+
+
+class TestSnapshotCache:
+    """The module-level broker writes snapshots to the shared cache."""
 
     def test_module_level_broker_publishes_snapshot_to_cache(self, poll: Poll) -> None:
         snapshot = build_snapshot(poll)
@@ -403,6 +490,13 @@ class TestSnapshotFormat:
         cached = read_snapshot(poll.pk)
         assert cached is not None
         assert cached["poll_id"] == poll.pk
+
+    def test_snapshot_payload_shape(self) -> None:
+        snapshot = Snapshot(poll_id=1, total_votes=5, choices=())
+        payload = snapshot.to_payload()
+        assert payload["poll_id"] == 1
+        assert payload["total_votes"] == 5
+        assert payload["choices"] == []
 
 
 class TestProductionStartup:

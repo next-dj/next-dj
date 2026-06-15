@@ -355,6 +355,14 @@ export class Applier {
       if (asString(patch.action) === "replace") this.#history?.replace(href);
       else this.#history?.push(href);
     });
+    this.#ops.set("context", (patch) => {
+      // Merge server-serialised provider values into the client context, which
+      // fires context-updated so islands react. Only registered serialize
+      // providers reach here, the server builds the data.
+      const data = patch.data;
+      if (data !== null && typeof data === "object")
+        this.#mergeContext(data as Record<string, unknown>);
+    });
   }
 
   // The default verb. The new content is parsed and script-neutralised, then the

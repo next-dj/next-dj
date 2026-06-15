@@ -133,6 +133,44 @@ class TestWizardAdvanceRendersZoneNotPageView:
 
 
 @pytest.mark.django_db()
+class TestWizardAdvanceCsrfMeta:
+    """A token rotation on a step advance stamps the CSRF meta on the morph.
+
+    The success funnel and the invalid shape already prove the uniform
+    stamp. The advance reads the rotation flag before the next step's zone
+    re-render mints a token, so a login mid-wizard refreshes the document
+    tokens on the same envelope that swaps the step.
+    """
+
+    def test_rotation_on_advance_stamps_csrf(
+        self, client: NextClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The submit request rotated its token, modelled by forcing the flag
+        # the shaper reads before any step re-render mints a fresh one.
+        monkeypatch.setattr(shaping_module, "_csrf_rotated", lambda _request: True)
+        response = client.post_action(
+            "step_wizard",
+            {"name": "Ada"},
+            origin="/wizard/identity/",
+            partial=True,
+            zones="wizard-zone",
+        )
+        envelope = envelope_of(response).data
+        assert "csrf" in envelope
+        assert envelope["csrf"]["token"]
+
+    def test_no_rotation_leaves_no_csrf_on_advance(self, client: NextClient) -> None:
+        response = client.post_action(
+            "step_wizard",
+            {"name": "Ada"},
+            origin="/wizard/identity/",
+            partial=True,
+            zones="wizard-zone",
+        )
+        assert "csrf" not in envelope_of(response).data
+
+
+@pytest.mark.django_db()
 class TestWizardAdvanceStorageBudget:
     """One round trip to wizard storage per advanced step.
 

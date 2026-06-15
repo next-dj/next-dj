@@ -2,18 +2,20 @@
 
 Two listeners live here. The first broadcasts a fresh snapshot to the
 in-process broker after every successful vote. It is enabled by the
-`form` and `url_kwargs` fields the framework added to
-`action_dispatched` so the receiver knows which poll changed without
-re-querying state. The second injects the Vite dev client into pages
-that carry Vue assets when DEBUG is true so HMR works during local
-development.
+`form`, `request`, and `url_kwargs` fields the framework added to
+`action_dispatched` so the receiver knows which poll changed and which
+request changed it without re-querying state. The second injects the
+Vite dev client into pages that carry Vue assets when DEBUG is true so
+HMR works during local development.
 """
 
 from django import forms as django_forms
 from django.conf import settings
 from django.dispatch import receiver
+from django.http import HttpRequest
 
 from next.forms.signals import action_dispatched
+from next.partial.headers import REQUEST_ID
 from next.static.assets import StaticAsset
 from next.static.signals import collector_finalized
 from polls.broker import broker, build_snapshot
@@ -26,24 +28,27 @@ VOTE_ACTION_NAME = "vote_form"
 def broadcast_vote(
     action_name: str = "",
     form: django_forms.Form | None = None,
+    request: HttpRequest | None = None,
     **_: object,
 ) -> None:
     """Publish a fresh snapshot for the poll that just received a vote.
 
-    The receiver consumes the bound form that the framework attaches
-    to `action_dispatched`. Without that field the receiver could not
-    tell which poll changed without reissuing the query. Other
-    payload fields (`sender`, `url_kwargs`, `duration_ms`,
-    `response_status`) are absorbed by `**_` because this listener
-    only needs the form.
+    The receiver consumes the bound form the framework attaches to
+    `action_dispatched` to tell which poll changed without reissuing the
+    query, and the request to read the mutation's `X-Next-Request-Id`.
+    Threading that id to `broker.publish` lets the stream echo it so the
+    voter's own tab drops the fan-out update. Other payload fields are
+    absorbed by `**_` because this listener needs only the form and the
+    request.
     """
     if action_name != VOTE_ACTION_NAME or form is None:
         return
     poll = form.cleaned_data.get("poll")
     if poll is None:
         return
+    request_id = request.headers.get(REQUEST_ID) if request is not None else None
     snapshot = build_snapshot(poll)
-    broker.publish(snapshot)
+    broker.publish(snapshot, request_id=request_id)
 
 
 def _has_module_assets(collector: object) -> bool:

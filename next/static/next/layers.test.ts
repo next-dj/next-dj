@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLayers } from "./layers";
 import type { DialogAdapter, LayerStack } from "./layers";
+import { HEADER_ORIGIN, HEADER_ZONE } from "./wire";
 
 type Dispatched = { event: string; detail: Record<string, unknown> };
 
@@ -153,5 +154,65 @@ describe("layer stack", () => {
     expect(layers.size()).toBe(0);
     expect(document.querySelector("[data-next-toasts]")).toBeNull();
     expect(document.querySelector("dialog")).toBeNull();
+  });
+});
+
+describe("layer requests carry the host origin", () => {
+  type Request = { url: string; zone: string; headers?: Record<string, string> };
+
+  function makeOriginStack() {
+    const requests: Request[] = [];
+    const layers = createLayers({
+      dispatch: () => undefined,
+      fetch: async (request) => {
+        requests.push(request);
+      },
+      document,
+      dialog: { open: () => () => undefined },
+    });
+    return { layers, requests };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    window.history.replaceState(null, "", "/host/page/");
+  });
+
+  it("stamps X-Next-Origin with the host page on the body GET", async () => {
+    const { layers, requests } = makeOriginStack();
+    await layers.open(null, "/wizard/identity/", "access-wizard");
+    expect(requests[0].headers?.[HEADER_ORIGIN]).toBe("/host/page/");
+    expect(requests[0].headers?.[HEADER_ZONE]).toBe("access-wizard");
+    layers._reset();
+  });
+
+  it("re-GETs the host zone on accept with the same captured origin", async () => {
+    const { layers, requests } = makeOriginStack();
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/wizard/identity/");
+    opener.setAttribute("data-next-accepted", "request-list");
+    document.body.append(opener);
+    await layers.open(opener, "/wizard/identity/", "access-wizard");
+    requests.length = 0;
+    layers.close({ result: { id: 7 } });
+    expect(requests[0].url).toBe("/host/page/");
+    expect(requests[0].headers?.[HEADER_ORIGIN]).toBe("/host/page/");
+    expect(requests[0].headers?.[HEADER_ZONE]).toBe("request-list");
+    layers._reset();
+  });
+
+  it("keeps the open-time host even after a later navigation", async () => {
+    const { layers, requests } = makeOriginStack();
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/wizard/identity/");
+    opener.setAttribute("data-next-accepted", "request-list");
+    document.body.append(opener);
+    await layers.open(opener, "/wizard/identity/", "access-wizard");
+    window.history.replaceState(null, "", "/moved/elsewhere/");
+    requests.length = 0;
+    layers.close({ result: { id: 7 } });
+    expect(requests[0].url).toBe("/host/page/");
+    expect(requests[0].headers?.[HEADER_ORIGIN]).toBe("/host/page/");
+    layers._reset();
   });
 });

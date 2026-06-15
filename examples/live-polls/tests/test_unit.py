@@ -1,11 +1,19 @@
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
+from django.core.cache import cache
 from django.http import Http404
 from polls import broker as broker_module
 from polls.backends import ViteManifestBackend
-from polls.broker import PollBroker, format_keepalive
+from polls.broker import (
+    SNAPSHOT_KEY,
+    PollBroker,
+    build_snapshot,
+    store_snapshot,
+)
 from polls.forms import VoteForm
 from polls.models import Choice, Poll
 from polls.providers import DPoll
@@ -329,50 +337,58 @@ class TestBroadcastReceiverGuards:
         broadcast_vote(action_name=action_name, form=form_factory())
 
 
-class TestBrokerEdgeFrames:
-    """Keepalive timeout and post-publish cache eviction stay non-fatal."""
+class TestBrokerChangeLoop:
+    """The change loop spins through timeouts and evictions without crashing."""
 
     @pytest.fixture(autouse=True)
-    def _zero_keepalive(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Make `wait_for` return immediately so the generator advances per call."""
-        monkeypatch.setattr(broker_module, "KEEPALIVE_SECONDS", 0)
+    def _fast_wake(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Shorten the wake timeout so the loop spins fast in tests."""
+        monkeypatch.setattr(broker_module, "WAKE_TIMEOUT_SECONDS", 0.01)
 
-    def test_subscriber_keepalive_loop_resumes_into_next_iteration(self) -> None:
-        """A keepalive yield is followed by a clean loop reentry.
+    def test_timeout_spins_until_a_real_change_arrives(self, poll: Poll) -> None:
+        """A timeout with no new revision loops until a publish lands.
 
-        The first `next()` yields a keepalive frame and pauses the
-        generator. The second `next()` advances past the post-yield
-        `continue`, loops back into the wait, and yields a fresh
-        keepalive. Two keepalives in a row prove the loop did not
-        leak control or stall after the yield.
+        The loop continues on every timeout that carries no new
+        revision, so a quiet stream yields nothing. A consumer thread
+        spins on the loop until the test publishes, then the loop reads
+        the snapshot once and yields a single `Change`.
         """
         local = PollBroker()
-        stream = local.subscribe(poll_id=1)
-        try:
-            assert next(stream) == format_keepalive()
-            assert next(stream) == format_keepalive()
-        finally:
-            stream.close()
+        captured: list[object] = []
+        stream = local.changes(poll.pk)
+        worker = threading.Thread(target=lambda: captured.append(next(stream)))
+        worker.start()
+        time.sleep(0.05)
+        local.publish(build_snapshot(poll), request_id="r1")
+        worker.join(timeout=2)
+        stream.close()
+        assert captured
+        assert captured[0].request_id == "r1"
 
-    def test_subscriber_skips_yield_when_payload_was_evicted(self) -> None:
-        """A revision bump without a fresh cache entry loops without crashing.
+    def test_evicted_payload_is_skipped_until_a_fresh_snapshot(
+        self, poll: Poll
+    ) -> None:
+        """A revision bump whose cache entry is missing loops without yielding.
 
-        The branch guards against a publisher that bumps the revision
-        but cannot reach the cache, or a cache eviction that lands
-        between `notify_all` and the subscriber's `read_snapshot`. The
-        first `next()` captures the zero baseline and yields the
-        timeout keepalive. The bump then races the cache, and the
-        second `next()` reaches `read_snapshot`, gets `None`,
-        re-enters the wait, and yields another keepalive instead of
-        leaking a `None` payload to the client.
+        The branch guards against a cache eviction that lands between
+        `notify_all` and the subscriber's `read_snapshot`. The consumer
+        thread spins past the bumped-but-evicted revision and yields only
+        once a real snapshot is cached and published.
         """
         local = PollBroker()
-        stream = local.subscribe(poll_id=42)
-        try:
-            assert next(stream) == format_keepalive()
-            with local._conditions[42]:
-                local._revisions[42] += 1
-                local._conditions[42].notify_all()
-            assert next(stream) == format_keepalive()
-        finally:
-            stream.close()
+        captured: list[object] = []
+        stream = local.changes(poll.pk)
+        worker = threading.Thread(target=lambda: captured.append(next(stream)))
+        worker.start()
+        time.sleep(0.05)
+        cache.delete(SNAPSHOT_KEY.format(poll_id=poll.pk))
+        with local._conditions[poll.pk]:
+            local._revisions[poll.pk] += 1
+            local._conditions[poll.pk].notify_all()
+        time.sleep(0.05)
+        store_snapshot(build_snapshot(poll))
+        local.publish(build_snapshot(poll))
+        worker.join(timeout=2)
+        stream.close()
+        assert captured
+        assert captured[0].snapshot["poll_id"] == poll.pk

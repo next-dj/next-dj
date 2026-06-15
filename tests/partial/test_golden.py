@@ -224,9 +224,7 @@ def _append_page() -> GoldenCase:
         '<a href="/catalog/?page=3" data-next-merge="append" '
         'data-next-target="catalog-results">more</a></li>'
     )
-    envelope = (
-        Patches("9f3c2e1b").append({"zone": "catalog-results"}, rows).envelope()
-    )
+    envelope = Patches("9f3c2e1b").append({"zone": "catalog-results"}, rows).envelope()
     return GoldenCase(
         name="append_page",
         envelope=envelope,
@@ -258,6 +256,20 @@ def _defer_zone() -> GoldenCase:
     )
 
 
+def _sse_refresh() -> GoldenCase:
+    envelope = Patches("9f3c2e1b", echo_of="r9").refresh(zone="poll-results").envelope()
+    return GoldenCase(
+        name="sse_refresh",
+        envelope=envelope,
+        description=(
+            "An SSE fan-out event: one refresh asking every tab to refetch the "
+            "zone, the originating mutation's id riding as request_id so the "
+            "initiator drops its own echo while another tab revalidates."
+        ),
+        version="9f3c2e1b",
+    )
+
+
 def _result_form_visit() -> GoldenCase:
     envelope = Envelope(
         version="9f3c2e1b",
@@ -269,6 +281,24 @@ def _result_form_visit() -> GoldenCase:
         description=(
             "A successful submission whose handler redirected: the redirect is "
             "packed into one internal visit the client navigates to."
+        ),
+        version="9f3c2e1b",
+    )
+
+
+def _context_merge() -> GoldenCase:
+    # The wire shape the request-bound builder emits for a context patch, built
+    # from the low-level value objects so the fixture needs no serialize provider.
+    envelope = Envelope(
+        version="9f3c2e1b",
+        ops=(Patch(op="context", extras={"data": {"unread": 3, "user": "ada"}}),),
+    )
+    return GoldenCase(
+        name="context_merge",
+        envelope=envelope,
+        description=(
+            "A context patch merging serialized provider values into the client "
+            "context so islands react through context-updated."
         ),
         version="9f3c2e1b",
     )
@@ -288,7 +318,9 @@ GOLDEN_CASES = [
     _layer_oob_list(),
     _append_page(),
     _defer_zone(),
+    _sse_refresh(),
     _result_form_visit(),
+    _context_merge(),
 ]
 
 
@@ -375,6 +407,11 @@ class TestWriteGoldenFixtures:
         data = json.loads(read_envelope_bytes("result_form_visit"))
         assert data["ops"] == [{"op": "visit", "href": "/board/7/settings/"}]
 
+    def test_context_merge_envelope_carries_the_serialized_data(self) -> None:
+        write_case(_context_merge())
+        data = json.loads(read_envelope_bytes("context_merge"))
+        assert data["ops"] == [{"op": "context", "data": {"unread": 3, "user": "ada"}}]
+
     def test_validate_envelope_morphs_the_form_with_meta(self) -> None:
         write_case(_validate_form())
         data = json.loads(read_envelope_bytes("validate_form"))
@@ -426,3 +463,10 @@ class TestWriteGoldenFixtures:
         data = json.loads(read_envelope_bytes("defer_zone"))
         assert [op["op"] for op in data["ops"]] == ["morph"]
         assert data["defer"] == [{"zone": "audit-table", "trigger": "load"}]
+
+    def test_sse_refresh_envelope_carries_refresh_and_echo_id(self) -> None:
+        write_case(_sse_refresh())
+        data = json.loads(read_envelope_bytes("sse_refresh"))
+        assert [op["op"] for op in data["ops"]] == ["refresh"]
+        assert data["ops"][0]["zone"] == "poll-results"
+        assert data["request_id"] == "r9"

@@ -1,53 +1,19 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { flushPromises, mount } from "@vue/test-utils";
+import { describe, expect, it } from "vitest";
+import { mount } from "@vue/test-utils";
 import PollChart from "./component.vue";
 
-const constructed = [];
-let lastSource = null;
-
-class TrackedEventSource {
-  constructor(url) {
-    this.url = url;
-    this.listeners = {};
-    this.closed = false;
-    constructed.push(url);
-    lastSource = this;
-  }
-  addEventListener(type, fn) {
-    (this.listeners[type] ??= []).push(fn);
-  }
-  emit(type, payload) {
-    for (const fn of this.listeners[type] ?? []) {
-      fn({ data: JSON.stringify(payload) });
-    }
-  }
-  close() {
-    this.closed = true;
-  }
-}
-
-beforeEach(() => {
-  constructed.length = 0;
-  lastSource = null;
-  window.Next = {
-    context: {
-      results: {
-        poll_id: 1,
-        stream_url: "/polls/1/stream/",
-        total_votes: 5,
-        choices: [
-          { id: 10, text: "Tabs", votes: 3 },
-          { id: 11, text: "Spaces", votes: 2 },
-        ],
-      },
-    },
-  };
-  window.EventSource = TrackedEventSource;
-});
+const SNAPSHOT = {
+  poll_id: 1,
+  total_votes: 5,
+  choices: [
+    { id: 10, text: "Tabs", votes: 3 },
+    { id: 11, text: "Spaces", votes: 2 },
+  ],
+};
 
 describe("PollChart", () => {
   it("renders one row per choice with vote counts and total", () => {
-    const wrapper = mount(PollChart);
+    const wrapper = mount(PollChart, { props: { snapshot: SNAPSHOT } });
     const rows = wrapper.findAll(".poll-chart-row");
     expect(rows).toHaveLength(2);
     expect(rows[0].text()).toContain("Tabs");
@@ -57,65 +23,64 @@ describe("PollChart", () => {
     expect(wrapper.find("[data-poll-chart-total]").text()).toBe("5");
   });
 
-  it("subscribes to the configured stream URL on mount", () => {
-    mount(PollChart);
-    expect(constructed).toEqual(["/polls/1/stream/"]);
-    expect(lastSource).not.toBeNull();
-  });
-
-  it.each([["snapshot"], ["update"]])(
-    "rebinds choices and total when a %s event arrives",
-    async (eventName) => {
-      const wrapper = mount(PollChart);
-      lastSource.emit(eventName, {
-        poll_id: 1,
-        total_votes: 10,
-        choices: [
-          { id: 10, text: "Tabs", votes: 7 },
-          { id: 11, text: "Spaces", votes: 3 },
-        ],
-      });
-      await flushPromises();
-      expect(wrapper.find("[data-poll-chart-total]").text()).toBe("10");
-      const tabsRow = wrapper.find('[data-choice-id="10"]');
-      expect(tabsRow.find("[data-poll-chart-votes]").text()).toBe("7");
-      expect(tabsRow.attributes("data-just-updated")).toBe("true");
-    },
-  );
-
-  it("closes the EventSource when the component unmounts", () => {
+  it("renders an empty chart when mounted without a snapshot", () => {
     const wrapper = mount(PollChart);
-    wrapper.unmount();
-    expect(lastSource.closed).toBe(true);
+    expect(wrapper.findAll(".poll-chart-row")).toHaveLength(0);
+    expect(wrapper.find("[data-poll-chart-total]").text()).toBe("0");
   });
 
-  it.each([
-    [
-      "empty-context-object",
-      () => {
-        window.Next.context = {};
+  it("rebinds choices and total when applySnapshot pushes a fresh snapshot", async () => {
+    const wrapper = mount(PollChart, { props: { snapshot: SNAPSHOT } });
+    wrapper.vm.applySnapshot({
+      poll_id: 1,
+      total_votes: 10,
+      choices: [
+        { id: 10, text: "Tabs", votes: 7 },
+        { id: 11, text: "Spaces", votes: 3 },
+      ],
+    });
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find("[data-poll-chart-total]").text()).toBe("10");
+    const tabsRow = wrapper.find('[data-choice-id="10"]');
+    expect(tabsRow.find("[data-poll-chart-votes]").text()).toBe("7");
+    expect(tabsRow.attributes("data-just-updated")).toBe("true");
+  });
+
+  it("ignores an empty applySnapshot payload", async () => {
+    const wrapper = mount(PollChart, { props: { snapshot: SNAPSHOT } });
+    wrapper.vm.applySnapshot(null);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find("[data-poll-chart-total]").text()).toBe("5");
+    expect(wrapper.findAll(".poll-chart-row")).toHaveLength(2);
+  });
+
+  it("computes zero percent and no pulse when no votes have landed", () => {
+    const wrapper = mount(PollChart, {
+      props: {
+        snapshot: {
+          poll_id: 1,
+          total_votes: 0,
+          choices: [{ id: 10, text: "Tabs", votes: 0 }],
+        },
       },
-    ],
-    [
-      "null-results",
-      () => {
-        window.Next.context.results = null;
-      },
-    ],
-    [
-      "undefined-Next",
-      () => {
-        delete window.Next;
-      },
-    ],
-  ])(
-    "renders empty list and skips EventSource when context is unavailable (%s)",
-    (_label, mutate) => {
-      mutate();
-      const wrapper = mount(PollChart);
-      expect(wrapper.findAll(".poll-chart-row")).toHaveLength(0);
-      expect(wrapper.find("[data-poll-chart-total]").text()).toBe("0");
-      expect(constructed).toHaveLength(0);
-    },
-  );
+    });
+    const bar = wrapper.find(".poll-chart-bar");
+    expect(bar.attributes("style")).toContain("width: 0%");
+    expect(wrapper.find(".poll-chart-row").attributes("data-just-updated")).toBe(
+      "false",
+    );
+  });
+
+  it("keeps the total when a snapshot omits total_votes", async () => {
+    const wrapper = mount(PollChart, { props: { snapshot: SNAPSHOT } });
+    wrapper.vm.applySnapshot({
+      poll_id: 1,
+      choices: [{ id: 10, text: "Tabs", votes: 9 }],
+    });
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find("[data-poll-chart-total]").text()).toBe("5");
+    expect(wrapper.find('[data-choice-id="10"] [data-poll-chart-votes]').text()).toBe(
+      "9",
+    );
+  });
 });

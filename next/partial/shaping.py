@@ -59,12 +59,20 @@ def shape_partial(
     request: "HttpRequest",
     outcome: ActionOutcome,
 ) -> HttpResponse:
-    """Shape one action outcome as a patch envelope for a partial request."""
+    """Shape one action outcome as a patch envelope for a partial request.
+
+    The CSRF rotation marker is read here, before any form or zone
+    re-render mints a token and sets the marker as a side effect, so a
+    login on the submit path stamps the fresh token onto whichever shape
+    the outcome takes. Reading it after a re-render would flag every
+    response as rotated.
+    """
+    rotated = _csrf_rotated(request)
     if outcome.kind == ActionOutcomeKind.INVALID:
-        return _shape_invalid(backend, request, outcome)
+        return _shape_invalid(backend, request, outcome, rotated=rotated)
     if outcome.kind == ActionOutcomeKind.WIZARD_ADVANCE:
-        return _shape_advance(request, outcome)
-    return _shape_result(backend, request, outcome)
+        return _shape_advance(request, outcome, rotated=rotated)
+    return _shape_result(backend, request, outcome, rotated=rotated)
 
 
 def shape_validate(
@@ -131,6 +139,8 @@ def _shape_invalid(
     backend: "FormActionBackend",
     request: "HttpRequest",
     outcome: ActionOutcome,
+    *,
+    rotated: bool,
 ) -> HttpResponse:
     """Shape an invalid submission as a patch addressing only the failed form.
 
@@ -158,7 +168,7 @@ def _shape_invalid(
         patches.morph({"form": uid}, html, extract=True)
     if form is not None:
         patches.set_form(_form_meta(uid, form))
-    response = _envelope_response(patches)
+    response = _envelope_response(patches, request=request, rotated=rotated)
     response[RESPONSE_FORM] = "invalid"
     if outcome.uid:
         response[RESPONSE_ACTION] = outcome.uid
@@ -168,6 +178,8 @@ def _shape_invalid(
 def _shape_advance(
     request: "HttpRequest",
     outcome: ActionOutcome,
+    *,
+    rotated: bool,
 ) -> HttpResponse:
     """Shape a wizard step advance as a master-zone morph, never a redirect.
 
@@ -205,13 +217,15 @@ def _shape_advance(
         patches.morph({"zone": zone}, result.html[zone])
     if _should_push_steps(wizard):
         patches.push_url(redirect_to)
-    return _envelope_response(patches)
+    return _envelope_response(patches, request=request, rotated=rotated)
 
 
 def _shape_result(
     backend: "FormActionBackend",
     request: "HttpRequest",
     outcome: ActionOutcome,
+    *,
+    rotated: bool,
 ) -> HttpResponse:
     """Shape a successful outcome, packing redirects and the success funnel.
 
@@ -225,15 +239,17 @@ def _shape_result(
     if isinstance(raw, PatchResponse):
         return raw
     if isinstance(raw, HttpResponseRedirect):
-        return _redirect_as_visit(request, raw)
+        return _redirect_as_visit(request, raw, rotated=rotated)
     if raw is None:
-        return _success_funnel(backend, request, outcome)
+        return _success_funnel(backend, request, outcome, rotated=rotated)
     return FormActionDispatch.shape_response(backend, request, outcome)
 
 
 def _redirect_as_visit(
     request: "HttpRequest",
     redirect: HttpResponseRedirect,
+    *,
+    rotated: bool,
 ) -> HttpResponse:
     """Pack a handler redirect into a `visit`, full-navigating external hosts.
 
@@ -250,13 +266,15 @@ def _redirect_as_visit(
     )
     patches = Patches(request)
     patches.redirect(href, external=not internal)
-    return _envelope_response(patches)
+    return _envelope_response(patches, request=request, rotated=rotated)
 
 
 def _success_funnel(
     backend: "FormActionBackend",
     request: "HttpRequest",
     outcome: ActionOutcome,
+    *,
+    rotated: bool,
 ) -> HttpResponse:
     """Morph the form in place on a None result and drain messages to toasts."""
     match = _resolve_origin(request)
@@ -277,7 +295,7 @@ def _success_funnel(
         )
         patches.morph({"form": uid}, html, extract=True)
     drain_messages(request, patches)
-    return _envelope_response(patches)
+    return _envelope_response(patches, request=request, rotated=rotated)
 
 
 def _form_zone(request: "HttpRequest", page_path: "Path | None") -> str | None:
@@ -500,8 +518,21 @@ def _error_count(form: "BaseForm | BaseFormSet") -> int:
     return sum(len(errors) for errors in form.errors.values())
 
 
-def _envelope_response(patches: Patches) -> PatchResponse:
-    """Serialise the builder's envelope into a partial response."""
+def _envelope_response(
+    patches: Patches,
+    *,
+    request: "HttpRequest | None" = None,
+    rotated: bool = False,
+) -> PatchResponse:
+    """Serialise the builder's envelope into a partial response.
+
+    When a request rotated its CSRF token the fresh payload is stamped
+    here so every shaped outcome carries it, not only the validate path.
+    The `rotated` flag is read before any re-render by the caller, so the
+    re-render's own `get_token` never registers as a fresh rotation.
+    """
+    if request is not None and rotated:
+        _stamp_csrf(request, patches, rotated=rotated)
     backend_obj = partial_backend_manager.get()
     body = backend_obj.serialize_envelope(patches.envelope())
     return PatchResponse(

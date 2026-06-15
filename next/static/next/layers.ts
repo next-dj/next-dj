@@ -12,7 +12,7 @@
 // stay in the excluded adapters file.
 
 import { defaultDialog } from "./adapters";
-import { HEADER_ZONE } from "./wire";
+import { HEADER_ORIGIN, HEADER_ZONE } from "./wire";
 
 const LAYER_ATTR = "data-next-layer";
 const ACCEPTED_ATTR = "data-next-accepted";
@@ -46,6 +46,11 @@ interface Layer {
   close: DialogControl;
   // The element to return focus to once the layer closes.
   returnFocus: Element | null;
+  // The path of the page that opened the layer, captured at open time. It rides
+  // X-Next-Origin on the layer's requests so the server resolves the host for a
+  // page-addressed out-of-band render of its zones, rather than falling back to
+  // the step page the form lives on.
+  host: string;
 }
 
 export interface LayerDeps {
@@ -142,14 +147,21 @@ export function createLayers(deps: LayerDeps): LayerStack {
     dialog.append(root);
     doc.body.append(dialog);
     const returnFocus = doc.activeElement;
+    // The host page is the one that opened the layer, captured before the
+    // request so a later navigation cannot move it. It rides X-Next-Origin.
+    const host = doc.location.pathname;
     // A browser dismiss gesture (Esc, backdrop, dialog form) reaches the same
     // close path as a server dismiss, so the reason flows through one channel.
     const close = dialogAdapter.open(dialog, (reason) => dismissFrom(dialog, reason));
-    stack.push({ dialog, root, opener, close, returnFocus });
+    stack.push({ dialog, root, opener, close, returnFocus, host });
     emit("partial:layer-opened", { opener });
     const release = busy(opener, root);
     try {
-      await deps.fetch({ url: href, zone, headers: { [HEADER_ZONE]: zone } });
+      await deps.fetch({
+        url: href,
+        zone,
+        headers: { [HEADER_ZONE]: zone, [HEADER_ORIGIN]: host },
+      });
     } finally {
       release();
     }
@@ -168,12 +180,12 @@ export function createLayers(deps: LayerDeps): LayerStack {
     if (accepted) {
       // The opener wires master and list: on accept the host page is re-GET for
       // the named zone, so the list under the modal morphs. The master never
-      // names the list. The host page is the opener's own page, the current URL.
-      const path = (deps.document ?? document).location.pathname;
+      // names the list. The host is the page that opened the layer, remembered
+      // at open time and sent as X-Next-Origin so the server resolves it.
       void deps.fetch({
-        url: path,
+        url: layer.host,
         zone: accepted,
-        headers: { [HEADER_ZONE]: accepted },
+        headers: { [HEADER_ZONE]: accepted, [HEADER_ORIGIN]: layer.host },
       });
     }
   }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { Wire, CONTENT_TYPE, REQUEST_FLAG } from "./wire";
+import { Wire, CONTENT_TYPE, REQUEST_FLAG, HEADER_REQUEST_ID } from "./wire";
 import { ACCEPT } from "./apply";
 
 function envelopeResponse(
@@ -278,6 +278,69 @@ describe("Wire before-request", () => {
     const ev = h.dispatched.find((d) => d.event === "partial:before-request");
     expect(ev!.detail.url).toBe("/list/");
     expect(ev!.detail.method).toBe("GET");
+  });
+});
+
+describe("Wire echo request id", () => {
+  function withRemember(
+    responder: (url: string, init: RequestInit) => Promise<Response>,
+  ) {
+    const remembered: string[] = [];
+    const calls: { init: RequestInit }[] = [];
+    const wire = new Wire({
+      fetch: (url, init) => {
+        calls.push({ init });
+        return responder(url, init);
+      },
+      navigate: () => undefined,
+      dispatch: () => undefined,
+      onEnvelope: () => undefined,
+      rememberRequestId: (id) => remembered.push(id),
+    });
+    return { wire, remembered, calls };
+  }
+
+  function header(calls: { init: RequestInit }[], name: string): string | undefined {
+    return (calls[0].init.headers as Record<string, string>)[name];
+  }
+
+  it("stamps a request id on a mutation and reports it to the ring", async () => {
+    const h = withRemember(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+    const stamped = header(h.calls, HEADER_REQUEST_ID);
+    expect(stamped).toBeDefined();
+    expect(h.remembered).toEqual([stamped]);
+  });
+
+  it("does not stamp a request id on a safe GET", async () => {
+    const h = withRemember(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(header(h.calls, HEADER_REQUEST_ID)).toBeUndefined();
+    expect(h.remembered).toEqual([]);
+  });
+
+  it("leaves an abortable validate POST out of the echo ring", async () => {
+    const h = withRemember(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({
+      url: "/_next/form/u1/",
+      method: "POST",
+      zone: "z",
+      abortable: true,
+    });
+    expect(header(h.calls, HEADER_REQUEST_ID)).toBeUndefined();
+    expect(h.remembered).toEqual([]);
+  });
+
+  it("keeps a caller-supplied request id over a fresh one", async () => {
+    const h = withRemember(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({
+      url: "/_next/form/u1/",
+      method: "POST",
+      uid: "u1",
+      headers: { [HEADER_REQUEST_ID]: "given" },
+    });
+    expect(header(h.calls, HEADER_REQUEST_ID)).toBe("given");
+    expect(h.remembered).toEqual([]);
   });
 });
 

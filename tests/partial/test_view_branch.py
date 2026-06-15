@@ -103,9 +103,7 @@ class TestZoneGetMergeIntent:
         assert envelope_of(response).op_verbs() == ["prepend"]
 
     def test_unknown_merge_value_falls_back_to_morph(self) -> None:
-        response = NextClient().get_zones(
-            "/zoned/", "alpha", HTTP_X_NEXT_MERGE="bogus"
-        )
+        response = NextClient().get_zones("/zoned/", "alpha", HTTP_X_NEXT_MERGE="bogus")
         assert envelope_of(response).op_verbs() == ["morph"]
 
     def test_merge_response_varies_on_merge_header(self) -> None:

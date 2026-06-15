@@ -12,6 +12,8 @@ export const HEADER_ACCEPT = "Accept";
 export const HEADER_ZONE = "X-Next-Zone";
 export const HEADER_MERGE = "X-Next-Merge";
 export const HEADER_VERSION = "X-Next-Version";
+export const HEADER_REQUEST_ID = "X-Next-Request-Id";
+export const HEADER_ORIGIN = "X-Next-Origin";
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
@@ -68,6 +70,10 @@ export interface WireDeps {
   csrf?: () => CsrfPayload | undefined;
   // The dirty counter read at fetch time, threaded to apply with the response.
   dirtySnapshot?: () => number;
+  // The mutation request id sink: every mutating request stamps X-Next-Request-Id
+  // and reports it here so the SSE echo ring drops the matching stream event,
+  // whose POST already brought the fresh zone. Absent, no id is stamped.
+  rememberRequestId?: (id: string) => void;
 }
 
 interface QueueEntry {
@@ -79,6 +85,15 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+// A ring id for a mutation, unique enough to suppress the SSE echo of this
+// client's own change. crypto.randomUUID is present in every secure context and
+// in jsdom, the timestamp fallback covers a plain-HTTP origin.
+function newRequestId(): string {
+  return globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export class Wire {
   readonly #fetch: FetchAdapter;
   readonly #navigate: Navigate;
@@ -87,6 +102,7 @@ export class Wire {
   readonly #version: () => string;
   readonly #csrf: () => CsrfPayload | undefined;
   readonly #dirtySnapshot: () => number;
+  readonly #rememberRequestId: (id: string) => void;
 
   // Latest-wins per-target GET queues and the per-uid mutation lock. Both are
   // wiped by `_reset` so vitest files start from a clean slate.
@@ -102,6 +118,7 @@ export class Wire {
     this.#version = deps.version ?? (() => "");
     this.#csrf = deps.csrf ?? (() => undefined);
     this.#dirtySnapshot = deps.dirtySnapshot ?? (() => 0);
+    this.#rememberRequestId = deps.rememberRequestId ?? (() => undefined);
   }
 
   _reset(): void {
@@ -262,6 +279,14 @@ export class Wire {
     if (!SAFE_METHODS.has(method)) {
       const csrf = this.#csrf();
       if (csrf !== undefined) headers[csrf.header] = csrf.token;
+      // A true mutation (not an abortable validate POST) carries a ring id so
+      // the SSE bridge suppresses its own echo. The id is reported to the ring
+      // before it leaves, the fresh zone the POST returns arrives anyway.
+      if (request.abortable !== true && headers[HEADER_REQUEST_ID] === undefined) {
+        const id = newRequestId();
+        headers[HEADER_REQUEST_ID] = id;
+        this.#rememberRequestId(id);
+      }
     }
     return headers;
   }

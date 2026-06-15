@@ -27,6 +27,8 @@ import { createAssets } from "./assets";
 import type { LinkLoader, SessionStore } from "./assets";
 import { createTriggers } from "./triggers";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
+import { createSse } from "./sse";
+import type { EventSourceAdapter, Sse, VisibilityAdapter } from "./sse";
 import { defaultHistory } from "./adapters";
 
 export interface PartialDeps {
@@ -55,6 +57,10 @@ export interface PartialAdapters {
   session?: SessionStore;
   confirm?: ConfirmAdapter;
   cssTimeoutMs?: number;
+  // The EventSource and visibility seams of the SSE bridge, both absent in
+  // jsdom: tests drive message, error, and the visibility flip through mocks.
+  source?: EventSourceAdapter;
+  visibility?: VisibilityAdapter;
 }
 
 export interface PartialSurface {
@@ -70,6 +76,9 @@ export interface PartialSurface {
   // The modal layer stack, exposed so the harness drives open/close/resolve
   // without synthesising a click.
   layers: LayerStack;
+  // The SSE bridge, exposed so the harness drives the echo ring, the scan, and
+  // the resync without a real EventSource.
+  sse: Sse;
   // Run the on-`ready` work: seed the asset registry, mount the initial DOM,
   // fire the batched load zones. The core calls this from `_init`.
   ready(): void;
@@ -101,12 +110,14 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       }
     }
     triggers.scan(root);
+    sse.scan(root);
   };
 
   let assets = createAssets(assetsDeps());
   let history: HistoryAdapter = defaultHistory();
   let layers = createLayers(layerDeps());
   let triggers = createTriggers(triggerDeps());
+  let sse = createSse(sseDeps());
   let applier = new Applier(applyDeps());
   let wire = new Wire(wireDeps());
   let detachLayers = layers.install(document);
@@ -164,6 +175,19 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     };
   }
 
+  function sseDeps(adapters?: PartialAdapters) {
+    return {
+      // A stream event carries no per-target dirty snapshot, so it applies with
+      // the server value winning, the same as a direct apply.
+      apply: (raw: unknown) => void applier.apply(raw),
+      fetch: (request: WireRequest) => void wire.fetch(request),
+      dispatch: deps.dispatch,
+      document: adapters?.document,
+      source: adapters?.source,
+      visibility: adapters?.visibility,
+    };
+  }
+
   function wireDeps(adapters?: PartialAdapters) {
     return {
       fetch: adapters?.fetch,
@@ -178,6 +202,9 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       version: () => assets.version(),
       csrf: () => csrf,
       dirtySnapshot: () => dirty.snapshot(),
+      // Every mutating request feeds its ring id to the SSE bridge so the
+      // matching stream event is dropped as the client's own echo.
+      rememberRequestId: (id: string) => sse.remember(id),
     };
   }
 
@@ -203,6 +230,9 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     get layers() {
       return layers;
     },
+    get sse() {
+      return sse;
+    },
     ready() {
       assets.seed();
       runMount(document);
@@ -214,8 +244,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       assets = createAssets(assetsDeps(adapters));
       detachLayers();
       detachTriggers();
+      sse._reset();
       layers = createLayers(layerDeps(adapters));
       triggers = createTriggers(triggerDeps(adapters));
+      sse = createSse(sseDeps(adapters));
       applier = new Applier(applyDeps(adapters));
       wire = new Wire(wireDeps(adapters));
       detachLayers = layers.install(adapters.document ?? document);
@@ -228,6 +260,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       layers._reset();
       triggers._reset();
       assets._reset();
+      sse._reset();
       mounts.length = 0;
       csrf = undefined;
     },

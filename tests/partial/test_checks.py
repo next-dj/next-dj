@@ -343,9 +343,7 @@ class TestManifestVersionStorageCheck:
     def test_sentinel_without_manifest_storage_warns(self) -> None:
         with (
             _partial_version("manifest"),
-            override_settings(
-                STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}
-            ),
+            override_settings(STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}),
         ):
             ids = [m.id for m in checks.check_manifest_version_has_manifest_storage()]
         assert ids == [checks.W_MANIFEST_VERSION_NO_STORAGE]
@@ -354,9 +352,7 @@ class TestManifestVersionStorageCheck:
         # an OPTIONS mapping with no VERSION key defaults to the manifest sentinel
         with (
             _partial_version(None),
-            override_settings(
-                STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}
-            ),
+            override_settings(STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}),
         ):
             ids = [m.id for m in checks.check_manifest_version_has_manifest_storage()]
         assert ids == [checks.W_MANIFEST_VERSION_NO_STORAGE]
@@ -372,9 +368,7 @@ class TestManifestVersionStorageCheck:
     def test_manifest_storage_is_silent(self) -> None:
         with (
             _partial_version("manifest"),
-            override_settings(
-                STORAGES={"staticfiles": {"BACKEND": _MANIFEST_STORAGE}}
-            ),
+            override_settings(STORAGES={"staticfiles": {"BACKEND": _MANIFEST_STORAGE}}),
         ):
             assert checks.check_manifest_version_has_manifest_storage() == []
 
@@ -390,9 +384,7 @@ class TestManifestVersionStorageCheck:
         # so the guard is live by other means and the warning never fires
         with (
             _partial_version("release-7"),
-            override_settings(
-                STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}
-            ),
+            override_settings(STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}),
         ):
             assert checks.check_manifest_version_has_manifest_storage() == []
 
@@ -401,9 +393,7 @@ class TestManifestVersionStorageCheck:
         settings_ns.PARTIAL_BACKENDS = []
         with (
             patch("next.partial.checks.next_framework_settings", settings_ns),
-            override_settings(
-                STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}
-            ),
+            override_settings(STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}),
         ):
             assert checks.check_manifest_version_has_manifest_storage() == []
 

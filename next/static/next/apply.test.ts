@@ -173,6 +173,36 @@ describe("Applier verbs", () => {
       ),
     ).toEqual([]);
   });
+
+  it("context merges server-serialised values into the client context", () => {
+    const { applier, merged } = makeApplier();
+    applier.apply(envelope([{ op: "context", data: { user: "x", count: 3 } }]));
+    expect(merged).toEqual([{ user: "x", count: 3 }]);
+  });
+
+  it("context is no longer an unknown op and emits no partial:error", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "context", data: { ok: true } }]));
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+  });
+
+  it("context with an empty data object merges nothing of substance", () => {
+    const { applier, merged } = makeApplier();
+    applier.apply(envelope([{ op: "context", data: {} }]));
+    expect(merged).toEqual([{}]);
+  });
+
+  it("context without a data payload skips the merge", () => {
+    const { applier, merged } = makeApplier();
+    applier.apply(envelope([{ op: "context" }]));
+    expect(merged).toEqual([]);
+  });
+
+  it("context with a null data payload skips the merge", () => {
+    const { applier, merged } = makeApplier();
+    applier.apply(envelope([{ op: "context", data: null }]));
+    expect(merged).toEqual([]);
+  });
 });
 
 describe("Applier script neutralisation", () => {

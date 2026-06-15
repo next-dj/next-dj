@@ -17,6 +17,7 @@ from .patches import (
 from .registry import ZoneInfo, register_patch_op, zone_requested, zones_of
 from .render import UnknownZoneError, ZoneRenderResult, render_zone
 from .shaping import ActionRef, drain_messages, shape_partial, shape_validate
+from .sse import PatchEventStream
 
 
 __all__ = [
@@ -31,6 +32,7 @@ __all__ = [
     "PartialOrigin",
     "PartialProtocolBackend",
     "Patch",
+    "PatchEventStream",
     "PatchResponse",
     "Patches",
     "UnknownZoneError",

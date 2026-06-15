@@ -1,5 +1,8 @@
+from typing import Any
+
 from django import forms
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.middleware.csrf import rotate_token
 
 from next.forms import Form
 from next.partial import Patches, PatchResponse
@@ -57,3 +60,45 @@ class RichResponseForm(Form):
     def on_valid(self, request: HttpRequest) -> HttpResponse:
         """Return a plain HTML response the default shaping path serves."""
         return HttpResponse("<p>plain</p>")
+
+
+class RotatingResultForm(Form):
+    """Form that rotates the CSRF token then succeeds with a None result.
+
+    A login mid-submit rotates the token, so this proves the success
+    funnel envelope carries the fresh CSRF payload, not only the validate
+    path. The rotation runs during initial resolution, before any zone or
+    form re-render mints a token.
+    """
+
+    name = forms.CharField(max_length=100)
+
+    @classmethod
+    def get_initial(cls, request: HttpRequest) -> dict[str, Any]:
+        """Rotate the request CSRF token before the form binds."""
+        rotate_token(request)
+        return {}
+
+    def on_valid(self, request: HttpRequest) -> HttpResponse | None:
+        """Accept the submission and fall back to the success funnel."""
+        return None
+
+
+class RotatingInvalidForm(Form):
+    """Form that rotates the CSRF token then fails validation.
+
+    The invalid-shape envelope must carry the fresh CSRF payload so a
+    rotation on a failed submit still refreshes the document tokens.
+    """
+
+    name = forms.CharField(max_length=100)
+
+    @classmethod
+    def get_initial(cls, request: HttpRequest) -> dict[str, Any]:
+        """Rotate the request CSRF token before the form binds."""
+        rotate_token(request)
+        return {}
+
+    def on_valid(self, request: HttpRequest) -> HttpResponse | None:
+        """Accept the submission and fall back to the default redirect."""
+        return None

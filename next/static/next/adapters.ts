@@ -10,6 +10,7 @@ import type { HistoryAdapter } from "./apply";
 import type { LinkLoader, SessionStore } from "./assets";
 import type { DialogAdapter, DialogControl } from "./layers";
 import type { Move } from "./morph";
+import type { EventSourceAdapter, VisibilityAdapter } from "./sse";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import type { Clock, FetchAdapter, Navigate } from "./wire";
 
@@ -144,6 +145,38 @@ export const defaultMove: Move = (parent, node, before) => {
   }
   parent.insertBefore(node, before);
 };
+
+// The EventSource seam for the SSE bridge. jsdom does not implement EventSource,
+// so the native connection, its next-patches listener, and the server-driven
+// reconnect with retry live here, and the sse module runs against a mock that
+// drives message and error directly.
+export function defaultEventSource(): EventSourceAdapter {
+  return {
+    open(url, onMessage, onError) {
+      const es = new EventSource(url, { withCredentials: true });
+      es.addEventListener("next-patches", (event) =>
+        onMessage((event as MessageEvent).data),
+      );
+      es.onerror = () => onError();
+      // close ends the connection and discards every listener with the object.
+      return { close: () => es.close() };
+    },
+  };
+}
+
+// The visibility seam over document.visibilityState and visibilitychange. A
+// background tab pauses the streams, a foreground tab resumes them. The real
+// document signal lives here so the sse module runs against a mock that flips
+// the state and fires the listener deterministically.
+export function defaultVisibility(): VisibilityAdapter {
+  return {
+    hidden: () => document.visibilityState === "hidden",
+    onChange(listener) {
+      document.addEventListener("visibilitychange", listener);
+      return () => document.removeEventListener("visibilitychange", listener);
+    },
+  };
+}
 
 // The native <dialog> modality: showModal traps focus, and the browser dismiss
 // gestures (Esc, backdrop click, <form method="dialog">) are wired to one

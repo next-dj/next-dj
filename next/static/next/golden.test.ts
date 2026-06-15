@@ -215,6 +215,41 @@ describe("golden fixtures apply to the DOM", () => {
     expect(document.querySelector("#sentinel a")).not.toBeNull();
   });
 
+  it("sse_refresh re-GETs the named zone over the refresh seam", () => {
+    const refresh = vi.fn();
+    const applier = new Applier({
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+      document,
+      refresh,
+      here: () => "/polls/7/",
+    });
+    const meta = readMeta("sse_refresh");
+    const envelope: Envelope = applier.apply(
+      JSON.parse(readEnvelopeBytes(meta.envelope_file)),
+    );
+    expect(envelope.request_id).toBe("r9");
+    expect(refresh).toHaveBeenCalledWith({
+      url: "/polls/7/",
+      zone: "poll-results",
+      headers: { "X-Next-Zone": "poll-results" },
+    });
+  });
+
+  it("context_merge feeds the serialized values into the client context", () => {
+    const merged: Record<string, unknown>[] = [];
+    const dispatched: { event: string; detail: Record<string, unknown> }[] = [];
+    const applier = new Applier({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      mergeContext: (data) => merged.push(data),
+      document,
+    });
+    const meta = readMeta("context_merge");
+    applier.apply(JSON.parse(readEnvelopeBytes(meta.envelope_file)));
+    expect(merged).toEqual([{ unread: 3, user: "ada" }]);
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+  });
+
   it("defer_zone queues the audit zone for a follow-up GET", () => {
     document.body.innerHTML = '<div data-next-zone="summary">stale</div>';
     const refresh = vi.fn();

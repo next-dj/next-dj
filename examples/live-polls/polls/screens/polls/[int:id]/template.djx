@@ -1,1 +1,4 @@
-{% component "poll_chart" %}
+{% zone "poll-results" %}
+  {% component "poll_chart" %}
+{% endzone %}
+<div data-next-sse="/polls/{{ poll.pk }}/stream/"></div>

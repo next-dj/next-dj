@@ -60,6 +60,37 @@ class TestSuccessFunnelEnvelope:
         assert "X-Next-Form" not in response
 
 
+class TestCsrfMetaRidesEveryShape:
+    """A rotated token stamps the CSRF meta on every shaped outcome.
+
+    The validate path already carried it. These cover the success funnel
+    and the invalid shape, so a login mid-submit refreshes the document
+    tokens whatever shape the outcome takes.
+    """
+
+    def test_rotation_on_success_stamps_csrf(self, client: NextClient) -> None:
+        response = client.post_action(
+            "rotating_result_form", {"name": "ok"}, origin="/", partial=True
+        )
+        envelope = envelope_of(response).data
+        assert "csrf" in envelope
+        assert envelope["csrf"]["token"]
+
+    def test_rotation_on_invalid_stamps_csrf(self, client: NextClient) -> None:
+        response = client.post_action(
+            "rotating_invalid_form", {"name": ""}, origin="/", partial=True
+        )
+        envelope = envelope_of(response).data
+        assert "csrf" in envelope
+        assert envelope["csrf"]["token"]
+
+    def test_no_rotation_leaves_no_csrf(self, client: NextClient) -> None:
+        response = client.post_action(
+            "regression_form", {"name": "ok"}, origin="/", partial=True
+        )
+        assert "csrf" not in envelope_of(response).data
+
+
 @pytest.mark.django_db()
 class TestWizardAdvanceMorphsTheNextStepZone:
     """A partial step advance morphs the master zone of the next step.

@@ -200,8 +200,20 @@ class Patches:
     that already hold the version and render their own HTML.
     """
 
-    def __init__(self, target: "HttpRequest | str") -> None:
-        """Start an empty builder from a request or a literal version."""
+    def __init__(
+        self,
+        target: "HttpRequest | str",
+        *,
+        echo_of: str | None = None,
+    ) -> None:
+        """Start an empty builder from a request or a literal version.
+
+        Pass `echo_of` with the originating mutation's request id so the
+        envelope carries it as `request_id`, letting an SSE subscriber
+        suppress its own echo. Only the stream path passes it, the HTTP
+        response path leaves it unset since the answer already reaches the
+        initiator.
+        """
         if isinstance(target, str):
             self._request = None
             self._version: str = target
@@ -213,6 +225,7 @@ class Patches:
         self._defer: list[DeferZone] = []
         self._form: FormMeta | None = None
         self._csrf: Mapping[str, Any] | None = None
+        self._request_id: str | None = echo_of
         self._page_path: Path | None = None
         self._page_resolved = False
 
@@ -516,6 +529,7 @@ class Patches:
             defer=tuple(self._defer),
             form=self._form,
             csrf=self._csrf,
+            request_id=self._request_id,
         )
 
     def response(self, fallback: str | None = None) -> "PatchResponse | HttpResponse":

@@ -1,0 +1,12 @@
+{
+  "name": "sse_refresh",
+  "description": "An SSE fan-out event: one refresh asking every tab to refetch the zone, the originating mutation's id riding as request_id so the initiator drops its own echo while another tab revalidates.",
+  "content_type": "application/vnd.next.patches+json",
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/vnd.next.patches+json",
+    "X-Next-Version": "9f3c2e1b",
+    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge"
+  },
+  "envelope_file": "sse_refresh.envelope.json"
+}
