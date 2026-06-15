@@ -67,6 +67,16 @@ class TestAdminBulkToggle:
         assert Flag.objects.get(name="beta").enabled is True
         assert Flag.objects.get(name="alpha").enabled is False
 
+    def test_save_flashes_success_message(self, client) -> None:
+        _open_write_gate()
+        Flag.objects.create(name="beta", label="Beta", enabled=False)
+
+        response = client.post_action(
+            "bulk_toggle_form", {"enabled_names": ["beta"]}, follow=True
+        )
+
+        assert "Flag toggles saved." in response.content.decode()
+
     def test_save_invalidates_cache(self, client) -> None:
         _open_write_gate()
         Flag.objects.create(name="beta", label="Beta", enabled=True)

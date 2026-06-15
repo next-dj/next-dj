@@ -23,6 +23,7 @@ Stable.
    ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``@action``, ``redirect_to_origin``,
    ``FormWizard``, ``DForm``, ``FormActionNotFound``, and ``autodiscover_forms``.
    Use these in application code.
+   Form classes self-register, so reach for ``@action`` only for form-less handlers.
 
 Advanced.
    ``FormActionBackend``, ``RegistryFormActionBackend``,

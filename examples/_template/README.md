@@ -4,10 +4,10 @@ This folder is not a working example. It is the canonical skeleton copied for ev
 
 ## Conventions
 
-* `PAGES_DIR` is set to `routes`, `COMPONENTS_DIR` is set to `_widgets`. Every example overrides both to show that the naming is user-controlled. Pick names that fit the domain.
-* Tailwind is loaded via the Play CDN in the root layout. No build step.
-* `conftest.py` uses `next.testing.eager_load_pages` and `NextClient`.
-* Every file is intentionally short. Fill in what you need, drop what you do not.
+- `PAGES_DIR` is set to `routes`, `COMPONENTS_DIR` is set to `_widgets`. Every example overrides both to show that the naming is user-controlled. Pick names that fit the domain.
+- Tailwind is loaded via the Play CDN in the root layout. No build step.
+- `conftest.py` uses `next.testing.eager_load_pages` and `NextClient`.
+- Every file is intentionally short. Fill in what you need, drop what you do not.
 
 ## How to run
 

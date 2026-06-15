@@ -1,20 +1,11 @@
 # Kanban
 
-A drag-and-drop Kanban board powered by co-located React components and
-a Vite build pipeline. The example demonstrates that adding a brand-new
-asset type (`.jsx`) to next.dj requires no changes to the framework
-core. A single custom `StaticFilesBackend` subclass for URL resolution,
-two registry calls in `AppConfig.ready()`, and one signal receiver are
-the entire integration layer. Rendering uses the framework built-in
-`render_module_tag`, so the example registers no custom renderers.
-Server rendering keeps every page useful without JavaScript, and the
-React layer adds native HTML5 drag-and-drop with optimistic updates on
-top.
+A drag-and-drop Kanban board powered by co-located React components and a Vite build pipeline. The example demonstrates that adding a brand-new asset type (`.jsx`) to next.dj requires no changes to the framework core. A single custom `StaticFilesBackend` subclass for URL resolution, two registry calls in `AppConfig.ready()`, and one signal receiver are the entire integration layer. Rendering uses the framework built-in `render_module_tag`, so the example registers no custom renderers. Server rendering keeps every page useful without JavaScript, and the React layer adds native HTML5 drag-and-drop with optimistic updates on top.
 
 ## What you will see
 
 | URL | Description |
-|-----|-------------|
+| --- | --- |
 | `/` | List of active boards. Archived boards are hidden. |
 | `/board/<id>/` | Server-rendered columns and cards plus React-mounted drag-and-drop with optimistic move. |
 | `/board/<id>/settings/` | Forms to rename a board, archive it, or add a column with a WIP limit. |
@@ -24,9 +15,7 @@ top.
 | `POST rename_board_form` | Update the board title. |
 | `POST archive_board_form` | Toggle the archived flag. Archived boards drop out of the index. |
 
-Three demo boards seed via a data migration. Two are active
-(`engineering-roadmap` and `marketing-launch`) and one is archived
-(`old-experiments`).
+Three demo boards seed via a data migration. Two are active (`engineering-roadmap` and `marketing-launch`) and one is archived (`old-experiments`).
 
 ## How to run
 
@@ -36,8 +25,7 @@ uv run python manage.py migrate
 uv run python manage.py runserver     # http://127.0.0.1:8000/
 ```
 
-The first `migrate` run seeds three demo boards. Open the index to land
-on the board list.
+The first `migrate` run seeds three demo boards. Open the index to land on the board list.
 
 For the React layer to hot-reload, start the Vite dev server:
 
@@ -46,10 +34,7 @@ npm install
 npm run dev                            # http://localhost:5173
 ```
 
-With the dev server running, Django resolves every `.jsx` asset to the
-Vite dev-server URL and the React Refresh preamble plus the
-`@vite/client` HMR script load through the `collector_finalized` signal.
-Override the Vite origin with the `VITE_ORIGIN` environment variable.
+With the dev server running, Django resolves every `.jsx` asset to the Vite dev-server URL and the React Refresh preamble plus the `@vite/client` HMR script load through the `collector_finalized` signal. Override the Vite origin with the `VITE_ORIGIN` environment variable.
 
 For a production-shaped build:
 
@@ -58,10 +43,7 @@ npm run build                          # writes hashed files into kanban/static/
 uv run python manage.py runserver
 ```
 
-The backend reads `dist/.vite/manifest.json` and delegates URL
-resolution to Django staticfiles. If the manifest file is missing, the
-backend logs a single warning and falls back to staticfiles so dev
-workflows stay unblocked.
+The backend reads `dist/.vite/manifest.json` and delegates URL resolution to Django staticfiles. If the manifest file is missing, the backend logs a single warning and falls back to staticfiles so dev workflows stay unblocked.
 
 ## Walking the code
 
@@ -112,15 +94,11 @@ class KanbanConfig(AppConfig):
         from kanban import providers, signals  # noqa: F401
 ```
 
-`render_module_tag` is the framework's built-in renderer for ES module
-assets, so jsx files reuse it without a custom renderer. The `signals`
-import wires the dev-mode `collector_finalized` receiver. No other
-integration point in the framework is touched.
+`render_module_tag` is the framework's built-in renderer for ES module assets, so jsx files reuse it without a custom renderer. The `signals` import wires the dev-mode `collector_finalized` receiver. No other integration point in the framework is touched.
 
 ### 3. `ViteManifestBackend`
 
-The custom backend resolves URLs only — rendering is delegated to the
-built-in `render_module_tag`:
+The custom backend resolves URLs only — rendering is delegated to the built-in `render_module_tag`:
 
 ```python
 class ViteManifestBackend(StaticFilesBackend):
@@ -134,10 +112,7 @@ class ViteManifestBackend(StaticFilesBackend):
         return super().register_file(source_path, logical_name, kind)
 ```
 
-Three resolution modes: a Vite dev-server URL when `DEV_ORIGIN` is set,
-a hashed manifest entry in production, or unmodified Django staticfiles
-when neither applies. Missing manifest emits a single warning and falls
-back to staticfiles.
+Three resolution modes: a Vite dev-server URL when `DEV_ORIGIN` is set, a hashed manifest entry in production, or unmodified Django staticfiles when neither applies. Missing manifest emits a single warning and falls back to staticfiles.
 
 ### 4. `@vite/client` via guarded signal
 
@@ -153,13 +128,11 @@ def inject_vite_dev_assets(sender, **kwargs):
     )
 ```
 
-`sender` is the collector instance. The `assets_in_slot` guard keeps
-dev plumbing off pages with no jsx scripts, including the index page.
+`sender` is the collector instance. The `assets_in_slot` guard keeps dev plumbing off pages with no jsx scripts, including the index page.
 
 ### 5. React receives data from `window.Next.context.board`
 
-`page.py` builds the board payload in one `prefetch_related` chain and
-flags it serialisable:
+`page.py` builds the board payload in one `prefetch_related` chain and flags it serialisable:
 
 ```python
 @context("board", inherit_context=True, serialize=True)
@@ -178,60 +151,27 @@ def board_payload(active_board: DBoard[Board], request: HttpRequest) -> dict:
     }
 ```
 
-`page.jsx` reads it at mount time, never owns URL constants or CSRF
-tokens, and re-uses the same payload to drive optimistic updates.
+`page.jsx` reads it at mount time, never owns URL constants or CSRF tokens, and re-uses the same payload to drive optimistic updates.
 
-`DeepMergePolicy` is configured as the JS-context policy in
-`config/settings.py`, so the layout-level `active_boards_count` from
-`boards/page.py` and the page-level `board` payload merge into one
-`window.Next.context` object.
+`DeepMergePolicy` is configured as the JS-context policy in `config/settings.py`, so the layout-level `active_boards_count` from `boards/page.py` and the page-level `board` payload merge into one `window.Next.context` object.
 
 ### 6. Optimistic move with rollback
 
-`Board` keeps `columns` in `useState`. A drop applies the move locally
-through a pure `applyMoveLocally(columns, cardId, targetColumnId,
-targetPosition)` helper before the `fetch` resolves, so the UI never
-waits on the network. On `!response.ok` or a thrown fetch the previous
-snapshot is restored and an inline error banner appears. The
-`?moved=<card_id>` query parameter still drives the SSR `preview`
-composite as a graceful fallback when JavaScript is unavailable.
+`Board` keeps `columns` in `useState`. A drop applies the move locally through a pure `applyMoveLocally(columns, cardId, targetColumnId, targetPosition)` helper before the `fetch` resolves, so the UI never waits on the network. On `!response.ok` or a thrown fetch the previous snapshot is restored and an inline error banner appears. The `?moved=<card_id>` query parameter still drives the SSR `preview` composite as a graceful fallback when JavaScript is unavailable.
 
 ### 7. WIP-limit invariant in two layers
 
-`CreateCardForm.clean()` performs a best-effort count check so common
-posts surface a friendly error before the save runs. The
-authoritative check sits inside `CreateCardForm.on_valid()` under
-`Column.objects.select_for_update()` and returns
-`HttpResponseBadRequest` if a concurrent post fills the slot between
-form validation and insertion. All five form classes live in the
-app-level [`kanban/forms.py`](kanban/forms.py) picked up by
-autodiscover, because every one of them is shared across pages or
-components. The React layer reflects the limit live
-through the WIP badge that turns red when `cards.length` exceeds
-`wip_limit`.
+`CreateCardForm.clean()` performs a best-effort count check so common posts surface a friendly error before the save runs. The authoritative check sits inside `CreateCardForm.on_valid()` under `Column.objects.select_for_update()` and returns `HttpResponseBadRequest` if a concurrent post fills the slot between form validation and insertion. All five form classes live in the app-level [`kanban/forms.py`](kanban/forms.py) picked up by autodiscover, because every one of them is shared across pages or components. The React layer reflects the limit live through the WIP badge that turns red when `cards.length` exceeds `wip_limit`.
 
 ### 8. DI provider used in URL routes and form actions
 
-`BoardProvider` resolves `DBoard[Board]` from `url_kwargs["id"]` for
-page rendering and from POST `board_id` for action handlers, so
-settings handlers receive a board through DI without
-`Board.objects.get(...)`. `CardProvider` mirrors the pattern for
-`DCard[Card]` against POST `card_id`.
+`BoardProvider` resolves `DBoard[Board]` from `url_kwargs["id"]` for page rendering and from POST `board_id` for action handlers, so settings handlers receive a board through DI without `Board.objects.get(...)`. `CardProvider` mirrors the pattern for `DCard[Card]` against POST `card_id`.
 
-Page modules that use these markers do not start with
-`from __future__ import annotations`, because the DI resolver compares
-parameter annotations by identity.
+Page modules that use these markers do not start with `from __future__ import annotations`, because the DI resolver compares parameter annotations by identity.
 
 ### Known limitation: sibling-form input is not preserved on a failed submit
 
-The settings page hosts three independent `<form>` blocks. Each one
-posts to its own action URL, so a submit sends only that form's fields.
-If a user starts typing into "Add column", then submits "Rename board"
-and rename fails validation, the re-rendered page shows the rename
-errors but the "Add column" text is gone. The browser never transmitted
-the unsubmitted form's input, so the server has nothing to restore. This
-is inherent to the server-side post-and-rerender model and is best
-addressed client-side. Submitting a single form at a time is unaffected.
+The settings page hosts three independent `<form>` blocks. Each one posts to its own action URL, so a submit sends only that form's fields. If a user starts typing into "Add column", then submits "Rename board" and rename fails validation, the re-rendered page shows the rename errors but the "Add column" text is gone. The browser never transmitted the unsubmitted form's input, so the server has nothing to restore. This is inherent to the server-side post-and-rerender model and is best addressed client-side. Submitting a single form at a time is unaffected.
 
 ## Further reading
 

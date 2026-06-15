@@ -1,7 +1,11 @@
+import importlib.util
 import re
+from pathlib import Path
 
 import pytest
 from access.models import AccessRequest, AuditEntry
+from django.core.cache import caches
+from django.http import HttpRequest
 
 from next.forms import FormActionNotFound
 from next.forms.signals import (
@@ -13,6 +17,27 @@ from next.testing import SignalRecorder, resolve_action_url
 
 
 WIZARD_ACTION = "access_request_wizard"
+
+_STEP_PAGE_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "access"
+    / "views"
+    / "request"
+    / "[step]"
+    / "page.py"
+)
+
+
+def _load_step_page():
+    spec = importlib.util.spec_from_file_location("audit_step_page_e2e", _STEP_PAGE_PATH)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+step_page = _load_step_page()
 
 IDENTITY = {
     "full_name": "Ada Lovelace",
@@ -230,6 +255,55 @@ class TestSessionResume:
         assert "Computing" in body
         assert 'data-step-section="identity" data-state="saved"' in body
         assert "data-saved-badge" in body
+
+
+def _wizard_storage_id() -> str:
+    wizard = step_page.AccessRequestWizard(
+        request=HttpRequest(),
+        url_kwargs={"step": "identity"},
+        base_path="/request/identity/",
+    )
+    return wizard.storage_id
+
+
+def _cached_draft(session_key: str) -> dict:
+    key = f"next_wizard:{session_key}:{_wizard_storage_id()}"
+    return caches["wizards"].get(key) or {}
+
+
+class TestCacheBackedDrafts:
+    def test_step_draft_lands_in_the_wizards_cache(self, client) -> None:
+        _post_step(client, "identity", IDENTITY)
+        session_key = client.session.session_key
+        assert session_key is not None
+        bucket = _cached_draft(session_key)
+        assert set(bucket) == {"identity"}
+        assert bucket["identity"]["team"] == "Computing"
+        assert bucket["identity"]["email"] == "ada@example.com"
+
+    def test_drafts_stay_out_of_the_default_cache(self, client) -> None:
+        _post_step(client, "identity", IDENTITY)
+        session_key = client.session.session_key
+        key = f"next_wizard:{session_key}:{_wizard_storage_id()}"
+        assert caches["default"].get(key) is None
+
+    def test_drafts_round_trip_across_steps_through_the_cache(self, client) -> None:
+        _post_step(client, "identity", IDENTITY)
+        _post_step(client, "scope", SCOPE)
+        bucket = _cached_draft(client.session.session_key)
+        assert set(bucket) == {"identity", "scope"}
+        assert bucket["scope"]["project_slug"] == "engine"
+        assert bucket["identity"]["full_name"] == "Ada Lovelace"
+
+    def test_three_step_flow_completes_and_clears_the_cache(self, client) -> None:
+        session_key_seen = []
+        _post_step(client, "identity", IDENTITY)
+        session_key_seen.append(client.session.session_key)
+        _post_step(client, "scope", SCOPE)
+        response = _post_step(client, "approval", APPROVAL)
+        assert response.status_code == 302
+        assert AccessRequest.objects.count() == 1
+        assert _cached_draft(session_key_seen[0]) == {}
 
 
 class TestSuccessRedirect:

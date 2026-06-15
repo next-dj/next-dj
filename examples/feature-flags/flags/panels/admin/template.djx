@@ -1,4 +1,8 @@
 <div class="space-y-6">
+  {% for message in flash_messages %}
+    {% component "alert" variant="success" text=message %}
+  {% endfor %}
+
   {% #component "section" title="Bulk toggle" description="Check the rows you want enabled and submit. Saving triggers a post_save receiver that invalidates the per-flag cache entry, so the next read reflects the new state." %}
     {% #slot "content" %}
       {% if flags %}

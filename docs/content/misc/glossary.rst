@@ -55,6 +55,12 @@ Terms used throughout the next.dj documentation.
       The pipeline that turns a form submission into a handler invocation.
       A failed validation skips the handler and re-renders the origin page instead.
 
+   dynamic permission hook
+      A per-request access check declared on a form, ``check_permissions`` for the view level and ``has_object_permission`` for the bound instance.
+      Both resolve through the dependency injector and return ``PermissionOutcome``, the ``bool | HttpResponse | None`` alias.
+      They run as an additive layer after the static :term:`guard`.
+      See :ref:`topics-forms-actions-dynamic-guards`.
+
    FormSpec
       A frozen dataclass that describes a form layout.
       Used to render forms in custom templates.

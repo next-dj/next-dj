@@ -19,7 +19,7 @@ repos:
         name: prettier
         entry: npm run format:check
         language: system
-        files: '\.(ts|mjs)$'
+        files: '(\.(ts|mjs)$|README\.md$)'
         pass_filenames: false
       - id: eslint
         name: eslint
