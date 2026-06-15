@@ -272,6 +272,228 @@ describe("Applier custom ops and reset", () => {
   });
 });
 
+describe("Applier morph verb", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("morph reuses the live node and preserves an active value", () => {
+    document.body.innerHTML =
+      '<form data-next-action="u1"><input name="email" value="server"></form>';
+    const input = document.querySelector<HTMLInputElement>('[name="email"]')!;
+    input.value = "typed";
+    input.focus();
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { form: "u1" },
+          html: '<form data-next-action="u1"><input name="email" value="server"></form>',
+        },
+      ]),
+    );
+    expect(document.querySelector('[name="email"]')).toBe(input);
+    expect(input.value).toBe("typed");
+  });
+
+  it("morph syncs an inactive field to the server value", () => {
+    document.body.innerHTML = '<div data-next-zone="z"><p>old</p></div>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<div data-next-zone="z"><p>new</p></div>',
+        },
+      ]),
+    );
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
+  });
+
+  it("morph neutralises scripts before the engine sees them", () => {
+    document.body.innerHTML = '<div data-next-zone="z"></div>';
+    const ran = vi.fn();
+    (window as unknown as { __ran: () => void }).__ran = ran;
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<div data-next-zone="z"><p>safe</p><script>window.__ran()</script></div>',
+        },
+      ]),
+    );
+    expect(document.querySelector('[data-next-zone="z"] script')).toBeNull();
+    expect(ran).not.toHaveBeenCalled();
+  });
+
+  it("morph with extract carves the target out of a full document", () => {
+    document.body.innerHTML = '<div data-next-zone="z"><span>old</span></div>';
+    const { applier } = makeApplier();
+    const full =
+      "<html><body><header>chrome</header>" +
+      '<div data-next-zone="z"><span>fresh</span></div></body></html>';
+    applier.apply(
+      envelope([{ op: "morph", target: { zone: "z" }, html: full, extract: true }]),
+    );
+    const zone = document.querySelector('[data-next-zone="z"]')!;
+    expect(zone.textContent).toBe("fresh");
+    expect(document.querySelector("header")).toBeNull();
+  });
+
+  it("morph with extract keeps a table row in its table context", () => {
+    document.body.innerHTML =
+      '<table><tbody><tr data-next-zone="r"><td>old</td></tr></tbody></table>';
+    const { applier } = makeApplier();
+    // A full-document reply: text/html parsing seats the tr inside its table, so
+    // extract finds an intact <tr> rather than a stripped fragment.
+    const full =
+      "<html><body><table><tbody>" +
+      '<tr data-next-zone="r"><td>fresh</td></tr></tbody></table></body></html>';
+    applier.apply(
+      envelope([{ op: "morph", target: { zone: "r" }, html: full, extract: true }]),
+    );
+    const row = document.querySelector('[data-next-zone="r"]')!;
+    expect(row.tagName).toBe("TR");
+    expect(row.textContent).toBe("fresh");
+  });
+
+  it("morph with extract is a no-op when the target is absent from the document", () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: "<html><body><p>no zone here</p></body></html>",
+          extract: true,
+        },
+      ]),
+    );
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("old");
+  });
+
+  it("morph is a no-op when the target is missing", () => {
+    const { applier } = makeApplier();
+    expect(() =>
+      applier.apply(
+        envelope([{ op: "morph", target: { zone: "missing" }, html: "<p>x</p>" }]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("morph treats every field as clean when no snapshot threads in", () => {
+    document.body.innerHTML =
+      '<form data-next-action="u1"><input name="email" value="old"></form>';
+    const input = document.querySelector<HTMLInputElement>('[name="email"]')!;
+    input.value = "typed";
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { form: "u1" },
+          html: '<form data-next-action="u1"><input name="email" value="new"></form>',
+        },
+      ]),
+    );
+    expect(input.value).toBe("new");
+  });
+
+  it("morph by field target resolves a named field inside a form", () => {
+    document.body.innerHTML =
+      '<form data-next-action="u1"><input name="email" value="old"></form>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { field: ["u1", "email"] },
+          html: '<input name="email" value="new">',
+        },
+      ]),
+    );
+    expect(document.querySelector<HTMLInputElement>('[name="email"]')!.value).toBe(
+      "new",
+    );
+  });
+
+  it("morph by field target is a no-op when the form is missing", () => {
+    const { applier } = makeApplier();
+    expect(() =>
+      applier.apply(
+        envelope([
+          { op: "morph", target: { field: ["gone", "email"] }, html: "<input>" },
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("does not sync a dirty field built from the wire snapshot", () => {
+    document.body.innerHTML =
+      '<form data-next-action="u1"><input name="email" value="old"></form>';
+    const input = document.querySelector<HTMLInputElement>('[name="email"]')!;
+    input.value = "typed";
+    const dispatched: Dispatched[] = [];
+    const applier = new Applier({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      mergeContext: () => undefined,
+      document,
+      dirtySince: () => (field) => field === input,
+    });
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { form: "u1" },
+          html: '<form data-next-action="u1"><input name="email" value="new"></form>',
+        },
+      ]),
+      0,
+    );
+    expect(input.value).toBe("typed");
+  });
+});
+
+describe("Applier replace stays a wholesale opt-out", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("replace is a no-op when the target is missing", () => {
+    const { applier } = makeApplier();
+    expect(() =>
+      applier.apply(
+        envelope([{ op: "replace", target: { zone: "gone" }, html: "<p>x</p>" }]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("replace swaps the node and does not preserve a live value", () => {
+    document.body.innerHTML =
+      '<form data-next-action="u1"><input name="email" value="server"></form>';
+    const old = document.querySelector<HTMLInputElement>('[name="email"]')!;
+    old.value = "typed";
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "replace",
+          target: { form: "u1" },
+          html: '<form data-next-action="u1"><input name="email" value="server"></form>',
+        },
+      ]),
+    );
+    const fresh = document.querySelector<HTMLInputElement>('[name="email"]')!;
+    expect(fresh).not.toBe(old);
+    expect(fresh.value).toBe("server");
+  });
+});
+
 describe("Applier csrf rotation", () => {
   beforeEach(() => {
     document.body.innerHTML = "";

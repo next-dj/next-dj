@@ -10,9 +10,10 @@ export default defineConfig({
       exclude: [
         "next/static/next/*.test.ts",
         // adapters.ts holds the DI-adapter seams: the navigation hook
-        // (location.assign, unimplemented in jsdom), the clock seam, and the
-        // default fetch. Each is a thin pass-through to a browser global the
-        // harness mocks, so it is excluded rather than painted with fake hits.
+        // (location.assign, unimplemented in jsdom), the clock seam, the default
+        // fetch, and the default move (native moveBefore, absent from jsdom).
+        // Each is a thin pass-through to a browser global the harness mocks, so
+        // it is excluded rather than painted with fake hits.
         "next/static/next/adapters.ts",
       ],
       // Branches carry a small buffer below the measured floor so a single

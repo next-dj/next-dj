@@ -26,4 +26,12 @@ export default tseslint.config(
     plugins: { vitest },
     rules: vitest.configs.recommended.rules,
   },
+  {
+    files: ["next/static/next/morph.bugs.test.ts"],
+    rules: {
+      // The bug checklist drives a table whose assertions live in a `verify`
+      // callback, so the rule is taught to count it as an assertion site.
+      "vitest/expect-expect": ["error", { assertFunctionNames: ["expect", "verify"] }],
+    },
+  },
 );

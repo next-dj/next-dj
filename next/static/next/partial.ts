@@ -14,6 +14,7 @@ import type {
   ParseHook,
   WireRequest,
 } from "./wire";
+import { createDirtyTracker } from "./dirty";
 
 export interface PartialDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
@@ -48,6 +49,11 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   let version = "";
   let csrf: CsrfPayload | undefined;
 
+  // The dirty registry: delegated listeners stamp touched fields, wire.ts
+  // snapshots the counter at fetch time, the applier consults the predicate.
+  const dirty = createDirtyTracker();
+  dirty.install(document);
+
   let applier = new Applier(applyDeps());
   let wire = new Wire(wireDeps());
 
@@ -57,6 +63,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       mergeContext: deps.mergeContext,
       document: adapters?.document,
       dev: adapters?.dev,
+      dirtySince: (snapshot) => dirty.isDirtySince(snapshot),
     };
   }
 
@@ -65,14 +72,15 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       fetch: adapters?.fetch,
       navigate: adapters?.navigate,
       dispatch: deps.dispatch,
-      onEnvelope: (raw: unknown) => {
-        const envelope = applier.apply(raw);
+      onEnvelope: (raw: unknown, _response: Response, snapshot: number) => {
+        const envelope = applier.apply(raw, snapshot);
         // The csrf meta rotates the payload token too, so the next mutation
         // submits the fresh token, not just the forms already in the document.
         if (envelope.csrf) csrf = envelope.csrf;
       },
       version: () => version,
       csrf: () => csrf,
+      dirtySnapshot: () => dirty.snapshot(),
     };
   }
 
@@ -93,12 +101,14 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       csrf = next;
     },
     _configure(adapters) {
+      if (adapters.document !== undefined) dirty.install(adapters.document);
       applier = new Applier(applyDeps(adapters));
       wire = new Wire(wireDeps(adapters));
     },
     _reset() {
       wire._reset();
       applier._reset();
+      dirty._reset();
       version = "";
       csrf = undefined;
     },

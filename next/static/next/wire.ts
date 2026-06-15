@@ -43,7 +43,13 @@ export interface WireRequest {
   body?: BodyInit;
 }
 
-export type EnvelopeHandler = (raw: unknown, response: Response) => void;
+// The snapshot is the dirty counter captured at fetch time, threaded to apply so
+// a field touched after this request is protected from its own response.
+export type EnvelopeHandler = (
+  raw: unknown,
+  response: Response,
+  snapshot: number,
+) => void;
 
 // A parse-hook turns a non-default content-type body into a JSON-ish envelope.
 // Plugins register a foreign wire format here, before the apply pipeline.
@@ -56,6 +62,8 @@ export interface WireDeps {
   onEnvelope: EnvelopeHandler;
   version?: () => string;
   csrf?: () => CsrfPayload | undefined;
+  // The dirty counter read at fetch time, threaded to apply with the response.
+  dirtySnapshot?: () => number;
 }
 
 interface QueueEntry {
@@ -74,6 +82,7 @@ export class Wire {
   readonly #onEnvelope: EnvelopeHandler;
   readonly #version: () => string;
   readonly #csrf: () => CsrfPayload | undefined;
+  readonly #dirtySnapshot: () => number;
 
   // Latest-wins per-target GET queues and the per-uid mutation lock. Both are
   // wiped by `_reset` so vitest files start from a clean slate.
@@ -88,6 +97,7 @@ export class Wire {
     this.#onEnvelope = deps.onEnvelope;
     this.#version = deps.version ?? (() => "");
     this.#csrf = deps.csrf ?? (() => undefined);
+    this.#dirtySnapshot = deps.dirtySnapshot ?? (() => 0);
   }
 
   _reset(): void {
@@ -149,6 +159,9 @@ export class Wire {
     const init: RequestInit = { method, headers };
     if (request.body !== undefined) init.body = request.body;
     if (entry !== undefined) init.signal = entry.controller.signal;
+    // Snapshot the dirty counter before the request leaves: a field touched
+    // after this point is dirty relative to the response it will receive.
+    const snapshot = this.#dirtySnapshot();
     this.#dispatch("partial:before-request", {
       url: request.url,
       method,
@@ -167,13 +180,14 @@ export class Wire {
     if (entry !== undefined && this.#queues.get(request.zone!)?.seq !== entry.seq) {
       return;
     }
-    await this.#classify(request, method, response);
+    await this.#classify(request, method, response, snapshot);
   }
 
   async #classify(
     request: WireRequest,
     method: string,
     response: Response,
+    snapshot: number,
   ): Promise<void> {
     // 409 on a safe method means an asset version mismatch with an empty body:
     // the runtime does a full visit of the current URL, nothing else.
@@ -191,7 +205,7 @@ export class Wire {
     const hook = this.#parseHooks.get(baseType);
     if (hook !== undefined) {
       const body = await this.#text(response);
-      this.#onEnvelope(hook(response, body), response);
+      this.#onEnvelope(hook(response, body), response, snapshot);
       return;
     }
     // Invariant 9: any non-envelope content-type, or a redirected response, is
@@ -208,7 +222,7 @@ export class Wire {
       this.#dispatch("partial:error", { status: response.status, body, error });
       return;
     }
-    this.#onEnvelope(raw, response);
+    this.#onEnvelope(raw, response, snapshot);
   }
 
   #text(response: Response): Promise<string> {

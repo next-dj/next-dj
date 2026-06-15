@@ -2,6 +2,8 @@
 // structural neutralisation of script elements before insertion. The applier
 // stays a thin executor: the server authors every address and verb.
 
+import { morph } from "./morph";
+
 // The wire content-type marker (invariant 9) and the Accept that doubles the
 // partial switch on content negotiation. Both must match the server exactly.
 export const CONTENT_TYPE = "application/vnd.next.patches+json";
@@ -65,6 +67,9 @@ export interface ApplyDeps {
   // Dev builds warn on each neutralised script. The flag is injectable so
   // tests assert both the warn-on and the silent-off behaviour.
   dev?: boolean;
+  // Build the morph dirty predicate from the request snapshot wire.ts threads
+  // in. Absent, no field is treated as dirty and the server value always wins.
+  dirtySince?: (snapshot: number) => (field: Element) => boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -109,13 +114,18 @@ export class Applier {
   readonly #dispatch: (event: string, detail: Record<string, unknown>) => void;
   readonly #mergeContext: (data: Record<string, unknown>) => void;
   readonly #document: Document;
+  readonly #dirtySince: (snapshot: number) => (field: Element) => boolean;
   #dev: boolean;
+  // The morph dirty predicate for the envelope in flight, built from the wire
+  // snapshot and reset once the envelope is fully applied.
+  #isDirty: (field: Element) => boolean = () => false;
 
   constructor(deps: ApplyDeps) {
     this.#dispatch = deps.dispatch;
     this.#mergeContext = deps.mergeContext;
     this.#document = deps.document ?? document;
     this.#dev = deps.dev ?? false;
+    this.#dirtySince = deps.dirtySince ?? (() => () => false);
     this.#registerBuiltins();
   }
 
@@ -130,10 +140,13 @@ export class Applier {
     this.#ops.set(name, handler);
   }
 
-  apply(raw: unknown): Envelope {
+  // The snapshot is the dirty counter wire.ts captured at fetch time. A direct
+  // apply with no snapshot uses the highest mark, so no field reads as dirty.
+  apply(raw: unknown, snapshot?: number): Envelope {
     const envelope = parseEnvelope(raw);
     const beforeApply = this.#emit("partial:before-apply", { envelope }, true);
     if (beforeApply.defaultPrevented) return envelope;
+    this.#isDirty = snapshot === undefined ? () => false : this.#dirtySince(snapshot);
     for (const op of envelope.ops) {
       this.#applyOp(op);
     }
@@ -166,10 +179,44 @@ export class Applier {
   }
 
   #registerBuiltins(): void {
+    // morph is the default verb: the target subtree is reused, not swapped.
+    // replace is the explicit opt-out (a wholesale swap, no morph), inner
+    // replaces only the contents.
+    this.#ops.set("morph", (patch) => this.#morph(patch));
     this.#ops.set("replace", (patch) => this.#replace(patch));
     this.#ops.set("inner", (patch) => this.#inner(patch));
     this.#ops.set("remove", (patch) => this.#remove(patch));
     this.#ops.set("event", (patch) => this.#event(patch));
+  }
+
+  // The default verb. The new content is parsed and script-neutralised, then the
+  // morph engine brings the live target up to it with the dirty predicate of the
+  // envelope in flight. extract carves the target node out of a full document.
+  #morph(patch: Patch): void {
+    const node = this.#resolve(patch.target);
+    if (node === null) return;
+    const html = patch.html ?? "";
+    const content =
+      patch.extract === true
+        ? this.#extract(html, node, patch.target)
+        : this.#fragment(html, patch.target);
+    if (content === null) return;
+    morph(node, content, { isDirty: this.#isDirty });
+  }
+
+  // Parse a full document and carve out the node matching the target, the path
+  // for a server reply that ships the whole page. The cut node still goes
+  // through script neutralisation before the engine sees it.
+  #extract(
+    html: string,
+    target: Element,
+    patchTarget: Target | undefined,
+  ): Element | null {
+    const parsed = new DOMParser().parseFromString(html, "text/html");
+    const found = this.#resolveIn(parsed, patchTarget) ?? matchByTag(parsed, target);
+    if (found === null) return null;
+    this.#neutraliseScripts(found, patchTarget);
+    return found;
   }
 
   #replace(patch: Patch): void {
@@ -224,29 +271,33 @@ export class Applier {
   }
 
   #resolve(target: Target | undefined): Element | null {
+    return this.#resolveIn(this.#document, target);
+  }
+
+  // Resolve a target against any root, the live document for the verbs or the
+  // parsed document for extract.
+  #resolveIn(root: Document, target: Target | undefined): Element | null {
     if (target === undefined) return null;
     if (target.zone !== undefined) {
-      return this.#document.querySelector(
-        `[data-next-zone="${cssEscape(target.zone)}"]`,
-      );
+      return root.querySelector(`[data-next-zone="${cssEscape(target.zone)}"]`);
     }
     if (target.form !== undefined) {
-      return this.#resolveForm(target.form);
+      return this.#resolveForm(root, target.form);
     }
     if (target.field !== undefined) {
       const [uid, name] = target.field;
-      const form = this.#resolveForm(uid);
+      const form = this.#resolveForm(root, uid);
       if (form === null) return null;
       return form.querySelector(`[name="${cssEscape(name)}"]`);
     }
     if (target.css !== undefined) {
-      return this.#document.querySelector(target.css);
+      return root.querySelector(target.css);
     }
     return null;
   }
 
-  #resolveForm(uid: string): Element | null {
-    return this.#document.querySelector(`[data-next-action="${cssEscape(uid)}"]`);
+  #resolveForm(root: Document, uid: string): Element | null {
+    return root.querySelector(`[data-next-action="${cssEscape(uid)}"]`);
   }
 
   // Rotate the CSRF token in every form of the document so unmorphed forms do
@@ -270,6 +321,14 @@ export class Applier {
     this.#dispatch(event, detail);
     return custom;
   }
+}
+
+// When the target address is absent from the parsed document, fall back to the
+// first body element sharing the live target's tag. text/html parsing already
+// seats tr/td inside the right table context, so this keeps those intact.
+function matchByTag(parsed: Document, target: Element): Element | null {
+  const tag = target.tagName.toLowerCase();
+  return parsed.body.querySelector(tag);
 }
 
 function describeTarget(target: Target | undefined): string {
