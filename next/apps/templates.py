@@ -9,6 +9,7 @@ _BUILTIN_MODULES = (
     "next.templatetags.forms",
     "next.templatetags.components",
     "next.templatetags.next_static",
+    "next.templatetags.partial",
 )
 
 

@@ -12,7 +12,7 @@ from .patches import (
     Patches,
     PatchResponse,
 )
-from .registry import register_patch_op
+from .registry import ZoneInfo, register_patch_op, zone_requested, zones_of
 
 
 __all__ = [
@@ -25,9 +25,12 @@ __all__ = [
     "Patch",
     "PatchResponse",
     "Patches",
+    "ZoneInfo",
     "is_partial_request",
     "partial_backend_manager",
     "partial_intent",
     "register_patch_op",
     "signals",
+    "zone_requested",
+    "zones_of",
 ]

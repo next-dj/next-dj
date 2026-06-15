@@ -5,8 +5,9 @@ hot-path idiom is to send only when the signal has receivers, so a
 quiet deployment pays nothing.
 
 The `zone_registered` signal fires once per compiled composed template
-when its named zones are first read. The sender is `ZoneRegistry`. The
-keyword arguments are `page_path`, `zone_name`, and `lazy`.
+when its named zones are first read. The sender is the compiled
+template class. The keyword arguments are `template`, `zone_name`, and
+`lazy`.
 
 The `zone_rendered` signal fires after a zone body renders for a
 partial request. The sender is the zone manager class. The keyword
