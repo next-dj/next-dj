@@ -178,6 +178,44 @@ def _wizard_advance() -> GoldenCase:
     )
 
 
+def _layer_close() -> GoldenCase:
+    envelope = (
+        Patches("9f3c2e1b")
+        .layer_close(result={"id": 42})
+        .toast("Request created", variant="success")
+        .envelope()
+    )
+    return GoldenCase(
+        name="layer_close",
+        envelope=envelope,
+        description=(
+            "The default wizard done: close the layer with a result and toast, "
+            "leaving the host re-GET to the client by data-next-accepted."
+        ),
+        version="9f3c2e1b",
+    )
+
+
+def _layer_oob_list() -> GoldenCase:
+    html = '<div data-next-zone="request-list"><ul><li>fresh</li></ul></div>'
+    envelope = (
+        Patches("9f3c2e1b")
+        .layer_close(result={"id": 42})
+        .morph({"zone": "request-list"}, html)
+        .toast("Request created", variant="success")
+        .envelope()
+    )
+    return GoldenCase(
+        name="layer_oob_list",
+        envelope=envelope,
+        description=(
+            "The page=-OOB done: one envelope closing the layer, morphing the "
+            "host page's foreign zone, and toasting, applied in a single pass."
+        ),
+        version="9f3c2e1b",
+    )
+
+
 def _result_form_visit() -> GoldenCase:
     envelope = Envelope(
         version="9f3c2e1b",
@@ -204,6 +242,8 @@ GOLDEN_CASES = [
     _invalid_form_extract(),
     _validate_form(),
     _wizard_advance(),
+    _layer_close(),
+    _layer_oob_list(),
     _result_form_visit(),
 ]
 
@@ -311,3 +351,18 @@ class TestWriteGoldenFixtures:
         assert [op["op"] for op in data["ops"]] == ["morph"]
         assert data["ops"][0]["target"] == {"zone": "wizard-zone"}
         assert 'name="scope"' in data["ops"][0]["html"]
+
+    def test_layer_close_envelope_closes_with_a_result_and_toasts(self) -> None:
+        write_case(_layer_close())
+        data = json.loads(read_envelope_bytes("layer_close"))
+        assert [op["op"] for op in data["ops"]] == ["layer.close", "toast"]
+        assert data["ops"][0]["result"] == {"id": 42}
+        assert data["ops"][1]["text"] == "Request created"
+        assert data["ops"][1]["variant"] == "success"
+
+    def test_layer_oob_envelope_closes_morphs_the_host_zone_and_toasts(self) -> None:
+        write_case(_layer_oob_list())
+        data = json.loads(read_envelope_bytes("layer_oob_list"))
+        assert [op["op"] for op in data["ops"]] == ["layer.close", "morph", "toast"]
+        assert data["ops"][1]["target"] == {"zone": "request-list"}
+        assert "fresh" in data["ops"][1]["html"]

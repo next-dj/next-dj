@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
@@ -22,7 +23,8 @@ from .registry import patch_op_registry
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
-    from pathlib import Path
+
+    from django.http import HttpResponseBase
 
     from .render import ZoneRenderResult
 
@@ -46,6 +48,28 @@ class UnknownPatchOpError(LookupError):
         super().__init__(
             f'Patch op "{name}" is not registered. Register it with '
             "register_patch_op() before emitting it."
+        )
+
+
+class ForeignPageNotAuthorizedError(PermissionError):
+    """Raised when an OOB morph names a foreign page that denies the request.
+
+    A `morph(page=...)` re-runs the foreign page's body resolution before
+    rendering its zone, so the zone never travels in the master's response
+    when the page would have redirected or denied the caller on its own
+    request. The denial is surfaced rather than swallowed into an empty
+    morph so the master path can answer with a clear shape.
+    """
+
+    def __init__(self, page_path: "Path", status_code: int) -> None:
+        """Store the page path and the short-circuit status code."""
+        self.page_path = page_path
+        self.status_code = status_code
+        super().__init__(
+            f"Page {page_path} did not authorize an out-of-band zone morph, "
+            f"its body resolution short-circuited with status {status_code}. "
+            "The zone of a foreign page is rendered only when that page would "
+            "have served the request."
         )
 
 
@@ -203,6 +227,8 @@ class Patches:
         html: str | None = None,
         *,
         zone: str | None = None,
+        page: "Path | str | None" = None,
+        url_kwargs: "Mapping[str, Any] | None" = None,
         form: str | None = None,
         component: str | None = None,
         props: "Mapping[str, Any] | None" = None,
@@ -213,12 +239,18 @@ class Patches:
 
         The named argument selects how the HTML and target are produced.
         `zone` renders the named zone of the origin page, with optional
-        context `overrides`. `component` renders the named component with
-        `props`. `form` extract-morphs the form addressed by its uid.
-        `html` morphs a passed target into ready HTML. `extract` marks
-        `html` as a whole document the client trims down to the node
-        matching the target.
+        context `overrides`. Pass `page` alongside `zone` to render the
+        named zone of a foreign page out of band, addressed by its page
+        path or a URL of it, with that page's `url_kwargs`. The foreign
+        page's body resolution is re-run first so its guards, denials, and
+        redirects are honoured before its zone travels in this response.
+        `component` renders the named component with `props`. `form`
+        extract-morphs the form addressed by its uid. `html` morphs a
+        passed target into ready HTML. `extract` marks `html` as a whole
+        document the client trims down to the node matching the target.
         """
+        if zone is not None and page is not None:
+            return self._morph_foreign_zone(zone, page, url_kwargs)
         if zone is not None:
             return self._morph_zone(zone, overrides)
         if component is not None:
@@ -250,6 +282,71 @@ class Patches:
         result = self._render_zone(zone, overrides)
         self._collect_assets(result)
         return self._append_morph({"zone": zone}, result.html[zone], extract=False)
+
+    def _morph_foreign_zone(
+        self,
+        zone: str,
+        page: "Path | str",
+        url_kwargs: "Mapping[str, Any] | None",
+    ) -> "Patches":
+        """Render a zone of a foreign page out of band, re-running its guards.
+
+        The page is named by its page path or by a URL of it, which is
+        resolved through the URLconf to the page that serves it. The
+        foreign page's body resolution runs first, so a redirect or a
+        denial short-circuits before any zone renders and raises instead
+        of morphing an empty body. With the page authorized, the named
+        zone renders standalone with the foreign page's URL kwargs and
+        morphs in place addressed by zone name.
+        """
+        request = self._require_request()
+        foreign_path = self._foreign_page_path(page)
+        kwargs = dict(url_kwargs or {})
+        denial = self._foreign_authorization(foreign_path, request, kwargs)
+        if denial is not None:
+            raise ForeignPageNotAuthorizedError(foreign_path, denial.status_code)
+        result = self._render_foreign_zone(foreign_path, zone, request, kwargs)
+        self._collect_assets(result)
+        return self._append_morph({"zone": zone}, result.html[zone], extract=False)
+
+    def _foreign_page_path(self, page: "Path | str") -> "Path":
+        """Return the page path named by a path or a URL of the foreign page."""
+        if isinstance(page, Path):
+            return page
+        resolved = self._page_path_for_url(page)
+        if resolved is None:
+            msg = f'No page resolves the URL "{page}" for an out-of-band morph.'
+            raise LookupError(msg)
+        return resolved
+
+    def _page_path_for_url(self, url: str) -> "Path | None":
+        """Resolve a URL of a foreign page to its page path through the URLconf."""
+        from next.forms.origin import _page_path_from_url  # noqa: PLC0415
+
+        return _page_path_from_url(url, self._require_request())
+
+    def _foreign_authorization(
+        self,
+        foreign_path: "Path",
+        request: HttpRequest,
+        url_kwargs: dict[str, Any],
+    ) -> "HttpResponseBase | None":
+        """Re-run the foreign page's body resolution and return its short-circuit."""
+        from next.pages import page  # noqa: PLC0415
+
+        return page.authorization_response(foreign_path, request, **url_kwargs)
+
+    def _render_foreign_zone(
+        self,
+        foreign_path: "Path",
+        zone: str,
+        request: HttpRequest,
+        url_kwargs: dict[str, Any],
+    ) -> "ZoneRenderResult":
+        """Render the named zone of an already authorized foreign page."""
+        from .render import render_zone  # noqa: PLC0415
+
+        return render_zone(foreign_path, (zone,), request, url_kwargs=url_kwargs)
 
     def _morph_component(
         self,
@@ -551,6 +648,7 @@ __all__ = [
     "Asset",
     "DeferZone",
     "Envelope",
+    "ForeignPageNotAuthorizedError",
     "FormMeta",
     "Patch",
     "PatchResponse",

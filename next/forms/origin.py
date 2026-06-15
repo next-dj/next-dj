@@ -43,12 +43,8 @@ def _page_path_from_view(view: object) -> "Path | None":
     return None
 
 
-def _resolve_origin_match(request: "HttpRequest") -> "_OriginMatch | None":
-    """Resolve the posted origin field against the URLconf."""
-    raw = request.POST.get(ORIGIN_FIELD_NAME) if hasattr(request, "POST") else None
-    origin = validated_origin_path(raw)
-    if origin is None:
-        return None
+def _resolve_url_match(origin: str, request: "HttpRequest") -> "_OriginMatch | None":
+    """Resolve a same-site origin URL against the URLconf to a page identity."""
     path = origin.partition("?")[0]
     prefix = get_script_prefix()
     if prefix != "/" and path.startswith(prefix):
@@ -62,6 +58,27 @@ def _resolve_origin_match(request: "HttpRequest") -> "_OriginMatch | None":
         url_kwargs=_filter_reserved_url_kwargs(dict(match.kwargs)),
         origin=origin,
     )
+
+
+def _resolve_origin_match(request: "HttpRequest") -> "_OriginMatch | None":
+    """Resolve the posted origin field against the URLconf."""
+    raw = request.POST.get(ORIGIN_FIELD_NAME) if hasattr(request, "POST") else None
+    origin = validated_origin_path(raw)
+    if origin is None:
+        return None
+    return _resolve_url_match(origin, request)
+
+
+def _page_path_from_url(url: str, request: "HttpRequest") -> "Path | None":
+    """Resolve a URL to the page path of the view that serves it.
+
+    The URL travels through the same URLconf the request uses, with the
+    script prefix stripped, so a foreign page named by a URL maps to its
+    page source without running its view. A URL that resolves to a view
+    without a `next_page_path` or that fails to resolve returns None.
+    """
+    match = _resolve_url_match(url, request)
+    return match.page_path if match is not None else None
 
 
 def _resolve_origin(request: "HttpRequest") -> "_OriginMatch | None":
@@ -91,6 +108,7 @@ def _url_kwargs_for_request(request: "HttpRequest") -> dict[str, object]:
 
 __all__ = [
     "_OriginMatch",
+    "_page_path_from_url",
     "_resolve_origin",
     "_url_kwargs_for_request",
 ]

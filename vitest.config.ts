@@ -11,9 +11,11 @@ export default defineConfig({
         "next/static/next/*.test.ts",
         // adapters.ts holds the DI-adapter seams: the navigation hook
         // (location.assign, unimplemented in jsdom), the clock seam, the default
-        // fetch, and the default move (native moveBefore, absent from jsdom).
-        // Each is a thin pass-through to a browser global the harness mocks, so
-        // it is excluded rather than painted with fake hits.
+        // fetch, the default move (native moveBefore, absent from jsdom), the
+        // history seam, and the native <dialog> modality (showModal, the focus
+        // trap, and the Esc/backdrop/dialog-form dismiss gestures jsdom does not
+        // model). Each is a thin pass-through to a browser global the harness
+        // mocks, so the file is excluded rather than painted with fake hits.
         "next/static/next/adapters.ts",
       ],
       // Branches carry a small buffer below the measured floor so a single

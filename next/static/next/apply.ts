@@ -60,6 +60,25 @@ export interface ApplyContext {
   dev: boolean;
 }
 
+// The layer-aware bits the applier needs from the layer stack: a top-down zone
+// resolve, the open and close verbs, and the toast container. The LayerStack
+// satisfies this structurally, so partial.ts passes it directly. A
+// server-initiated open carries no opener element.
+export interface LayerBridge {
+  resolveZone(name: string, root: ParentNode): Element | null;
+  open(opener: null, href: string, zone: string): unknown;
+  close(detail: { result?: unknown; dismiss?: boolean; reason?: string }): void;
+  toast(text: string, variant: string): void;
+}
+
+// The history seam for the `url` verb. The server validates the href, so the
+// runtime only pushes or replaces. Injectable because jsdom's history is shared
+// global state the harness inspects.
+export interface HistoryAdapter {
+  push(href: string): void;
+  replace(href: string): void;
+}
+
 export interface ApplyDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   mergeContext: (data: Record<string, unknown>) => void;
@@ -70,6 +89,11 @@ export interface ApplyDeps {
   // Build the morph dirty predicate from the request snapshot wire.ts threads
   // in. Absent, no field is treated as dirty and the server value always wins.
   dirtySince?: (snapshot: number) => (field: Element) => boolean;
+  // The layer stack, consulted for zone targets (top layer down) and the home
+  // of layer.close and toast. Absent, zone resolve falls back to the document.
+  layers?: LayerBridge;
+  // The history seam for the url verb. Absent, the verb is a no-op.
+  history?: HistoryAdapter;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -115,6 +139,8 @@ export class Applier {
   readonly #mergeContext: (data: Record<string, unknown>) => void;
   readonly #document: Document;
   readonly #dirtySince: (snapshot: number) => (field: Element) => boolean;
+  readonly #layers: LayerBridge | undefined;
+  readonly #history: HistoryAdapter | undefined;
   #dev: boolean;
   // The morph dirty predicate for the envelope in flight, built from the wire
   // snapshot and reset once the envelope is fully applied.
@@ -126,6 +152,8 @@ export class Applier {
     this.#document = deps.document ?? document;
     this.#dev = deps.dev ?? false;
     this.#dirtySince = deps.dirtySince ?? (() => () => false);
+    this.#layers = deps.layers;
+    this.#history = deps.history;
     this.#registerBuiltins();
   }
 
@@ -187,6 +215,37 @@ export class Applier {
     this.#ops.set("inner", (patch) => this.#inner(patch));
     this.#ops.set("remove", (patch) => this.#remove(patch));
     this.#ops.set("event", (patch) => this.#event(patch));
+    // The layer, toast, and history verbs ride the same ops registry as the
+    // custom defineOp path: the core eats its own dog food.
+    this.#ops.set("layer.open", (patch) => {
+      const zone = asString(patch.zone);
+      const href = asString(patch.href);
+      if (zone !== undefined && href !== undefined)
+        this.#layers?.open(null, href, zone);
+    });
+    this.#ops.set("layer.close", (patch) => {
+      // A validation error addresses no layer, so the modal survives by
+      // construction: only an explicit close patch reaches the stack.
+      this.#layers?.close({
+        result: patch.result,
+        dismiss: patch.dismiss === true,
+        reason: asString(patch.reason),
+      });
+    });
+    this.#ops.set("toast", (patch) => {
+      // toast is sugar over the stack's built-in container, set as textContent
+      // there, never parsed as HTML.
+      const text = asString(patch.text);
+      if (text !== undefined)
+        this.#layers?.toast(text, asString(patch.variant) ?? "info");
+    });
+    this.#ops.set("url", (patch) => {
+      // History from a server-validated href: push or replace, never authored.
+      const href = asString(patch.href);
+      if (href === undefined) return;
+      if (asString(patch.action) === "replace") this.#history?.replace(href);
+      else this.#history?.push(href);
+    });
   }
 
   // The default verb. The new content is parsed and script-neutralised, then the
@@ -270,12 +329,19 @@ export class Applier {
     }
   }
 
+  // Resolve against the live document. A zone is asked of the layer stack
+  // first, top layer down, so a zone inside the upper modal wins over the
+  // same-named page zone beneath it.
   #resolve(target: Target | undefined): Element | null {
+    if (target?.zone !== undefined && this.#layers !== undefined) {
+      return this.#layers.resolveZone(target.zone, this.#document);
+    }
     return this.#resolveIn(this.#document, target);
   }
 
   // Resolve a target against any root, the live document for the verbs or the
-  // parsed document for extract.
+  // parsed document for extract. The layer-aware zone resolve lives in #resolve,
+  // so the parsed extract document never consults the stack.
   #resolveIn(root: Document, target: Target | undefined): Element | null {
     if (target === undefined) return null;
     if (target.zone !== undefined) {

@@ -125,12 +125,12 @@ jobs:
       run: npm run build:next
     - name: Check bundle size budget
       run: |
-        # The compiled runtime ships on every page, so its minified size is a hard budget enforced here in CI.
-        bytes=$(wc -c < next/static/next/next.min.js)
-        budget=$((15 * 1024))
-        echo "next.min.js: ${bytes} bytes (budget ${budget} bytes)"
+        # The runtime ships gzipped on every page, so its gzip size is the hard budget enforced here in CI.
+        bytes=$(gzip -nc next/static/next/next.min.js | wc -c)
+        budget=$((10 * 1024))
+        echo "next.min.js: ${bytes} bytes gzip (budget ${budget} bytes)"
         if [ "$bytes" -gt "$budget" ]; then
-          echo "::error::next.min.js (${bytes} bytes) exceeds the 15 KB minified budget (${budget} bytes)"
+          echo "::error::next.min.js (${bytes} bytes gzip) exceeds the 10 KB gzip budget (${budget} bytes)"
           exit 1
         fi
     - name: Run JavaScript unit tests with coverage

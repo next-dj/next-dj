@@ -2,9 +2,10 @@ from typing import Any, ClassVar
 
 from access.models import AccessRequest
 from django import forms
-from django.http import HttpRequest, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse
 
 from next.forms import ComponentWidget, FormWizard, PermissionOutcome
+from next.partial import Patches, PatchResponse
 
 
 class IdentityStep(forms.ModelForm):
@@ -64,9 +65,21 @@ class AccessRequestWizard(FormWizard):
         self,
         request: HttpRequest,
         cleaned_data: dict[str, Any],
-    ) -> HttpResponseRedirect:
-        """Create the request from the merged steps and link the next dispatch."""
+    ) -> PatchResponse | HttpResponse:
+        """Create the request, close the wizard layer, and link the next dispatch.
+
+        With a live runtime the final step closes the modal with the new
+        request id and shows a success toast, then the opening link refreshes
+        the recent-requests zone on its own GET. Without the runtime the same
+        builder falls back to a redirect to the per-request audit page, so
+        the no-JS path lands on the result just as before.
+        """
         access_request = AccessRequest.objects.create(**cleaned_data)
         request.session["access_request_just_created"] = access_request.pk
         request.session.modified = True
-        return HttpResponseRedirect(f"/request/{access_request.pk}/audit/?just=1")
+        return (
+            Patches(request)
+            .layer_close(result={"id": access_request.pk})
+            .toast("Access request submitted", variant="success")
+            .response(fallback=f"/request/{access_request.pk}/audit/?just=1")
+        )

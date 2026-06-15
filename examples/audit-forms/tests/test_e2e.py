@@ -9,7 +9,7 @@ from next.forms.signals import (
     form_access_denied,
     form_validation_failed,
 )
-from next.testing import SignalRecorder, resolve_action_url
+from next.testing import SignalRecorder, envelope_of, resolve_action_url
 
 
 WIZARD_ACTION = "access_request_wizard"
@@ -34,6 +34,17 @@ def _post_step(client, step: str, data: dict[str, str]):
 
 def _post_step_unacknowledged(client, step: str, data: dict[str, str]):
     return client.post_action(WIZARD_ACTION, dict(data), origin=f"/request/{step}/")
+
+
+def _post_step_partial(client, step: str, data: dict[str, str]):
+    payload = {**data, "policy_acknowledged": "on"}
+    return client.post_action(
+        WIZARD_ACTION,
+        payload,
+        origin=f"/request/{step}/",
+        partial=True,
+        zones="access-wizard",
+    )
 
 
 def _walk_three_steps(client) -> None:
@@ -74,9 +85,11 @@ class TestFullSubmission:
         assert ar.reason == "Need read access for analysis."
         assert ar.expires_in_days == 14
 
-        assert len(recorder.events_for(action_dispatched)) == 3
-        for event in recorder:
-            assert event.kwargs["response_status"] == 302
+        events = recorder.events_for(action_dispatched)
+        assert len(events) == 3
+        statuses = [event.kwargs["response_status"] for event in events]
+        assert statuses == [302, 302, 303]
+        for event in events:
             assert event.kwargs["duration_ms"] >= 0
 
     def test_three_steps_log_both_audit_channels(self, client) -> None:
@@ -121,7 +134,7 @@ class TestFullSubmission:
         ).first()
         assert latest_signal is not None
         assert latest_signal.duration_ms is not None
-        assert latest_signal.response_status == 302
+        assert latest_signal.response_status == 303
 
 
 class TestValidationFailure:
@@ -233,12 +246,14 @@ class TestSessionResume:
 
 
 class TestSuccessRedirect:
-    def test_final_step_redirects_to_per_request_page(self, client) -> None:
+    def test_final_step_without_runtime_redirects_to_per_request_page(
+        self, client
+    ) -> None:
         _post_step(client, "identity", IDENTITY)
         _post_step(client, "scope", SCOPE)
         response = _post_step(client, "approval", APPROVAL)
         ar = AccessRequest.objects.get()
-        assert response.status_code == 302
+        assert response.status_code == 303
         assert response["Location"] == f"/request/{ar.pk}/audit/?just=1"
 
 
@@ -383,3 +398,118 @@ class TestStepSection:
         assert "Confirm and submit" in body
         assert "Ada Lovelace" in body
         assert "engine" in body
+
+
+class TestModalWizardFlagship:
+    def test_landing_links_open_a_layer_around_the_request_list(self, client) -> None:
+        body = client.get("/").content.decode()
+        assert 'data-next-layer="access-wizard"' in body
+        assert 'data-next-accepted="request-list"' in body
+        assert 'href="/request/identity/"' in body
+        assert 'data-next-zone="request-list"' in body
+
+    def test_landing_request_list_marks_each_row_with_its_key(self, client) -> None:
+        ar = AccessRequest.objects.create(
+            full_name="Grace Hopper",
+            email="grace@example.com",
+            team="Compilers",
+            project_slug="compilers",
+            reason="docs",
+            expires_in_days=3,
+        )
+        body = client.get("/").content.decode()
+        assert f'data-next-key="{ar.pk}"' in body
+
+    def test_opening_the_layer_fetches_the_wizard_zone_alone(self, client) -> None:
+        response = client.get_zones("/request/identity/", "access-wizard")
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["access-wizard"]
+        html = envelope.html_for_zone("access-wizard")
+        assert 'data-next-validate="blur"' in html
+        assert 'data-step-section="identity" data-state="active"' in html
+
+    def test_invalid_step_morphs_the_wizard_zone_and_leaves_the_layer(
+        self, client
+    ) -> None:
+        response = _post_step_partial(client, "identity", {**IDENTITY, "email": ""})
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        envelope = envelope_of(response)
+        assert envelope.zone_targets() == ["access-wizard"]
+        assert "layer.close" not in envelope.op_verbs()
+        meta = envelope.form_meta()
+        assert meta is not None
+        assert meta["valid"] is False
+        assert "email" in meta["errors"]
+        assert AccessRequest.objects.exists() is False
+
+    def test_valid_non_final_step_advances_the_zone_without_a_redirect(
+        self, client
+    ) -> None:
+        response = _post_step_partial(client, "identity", IDENTITY)
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["access-wizard"]
+        html = envelope.html_for_zone("access-wizard")
+        assert 'data-step-section="scope" data-state="active"' in html
+
+    def test_final_step_closes_the_layer_with_a_result_and_a_toast(
+        self, client
+    ) -> None:
+        _post_step_partial(client, "identity", IDENTITY)
+        _post_step_partial(client, "scope", SCOPE)
+        response = _post_step_partial(client, "approval", APPROVAL)
+        assert response.status_code == 200
+        ar = AccessRequest.objects.get()
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["layer.close", "toast"]
+        close_op = envelope.ops[0]
+        assert close_op["result"] == {"id": ar.pk}
+        toast = envelope.toasts()[0]
+        assert toast["variant"] == "success"
+        assert toast["text"] == "Access request submitted"
+
+    def test_accept_re_get_morphs_the_request_list_with_the_new_row(
+        self, client
+    ) -> None:
+        _post_step_partial(client, "identity", IDENTITY)
+        _post_step_partial(client, "scope", SCOPE)
+        _post_step_partial(client, "approval", APPROVAL)
+        ar = AccessRequest.objects.get()
+        response = client.get_zones("/", "request-list")
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.zone_targets() == ["request-list"]
+        html = envelope.html_for_zone("request-list")
+        assert f'data-next-key="{ar.pk}"' in html
+        assert "Ada Lovelace" in html
+
+    def test_unacknowledged_partial_step_is_denied_without_an_envelope(
+        self, client
+    ) -> None:
+        response = client.post_action(
+            WIZARD_ACTION,
+            dict(IDENTITY),
+            origin="/request/identity/",
+            partial=True,
+            zones="access-wizard",
+        )
+        assert response.status_code == 403
+        assert AccessRequest.objects.exists() is False
+
+    def test_partial_done_still_links_the_backend_row_to_the_request(
+        self, client
+    ) -> None:
+        _post_step_partial(client, "identity", IDENTITY)
+        _post_step_partial(client, "scope", SCOPE)
+        _post_step_partial(client, "approval", APPROVAL)
+        ar = AccessRequest.objects.get()
+        attached = AuditEntry.objects.filter(
+            source=AuditEntry.SOURCE_BACKEND,
+            kind=AuditEntry.KIND_DISPATCHED,
+            request_id=ar.pk,
+        )
+        assert attached.count() == 1

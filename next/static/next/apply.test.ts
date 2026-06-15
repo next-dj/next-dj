@@ -514,3 +514,73 @@ describe("Applier csrf rotation", () => {
     expect(result.csrf).toEqual({ header: "X-CSRFToken", token: "fresh" });
   });
 });
+
+describe("Applier layer, toast, and url verbs", () => {
+  function makeLayerApplier() {
+    const calls: { verb: string; args: unknown[] }[] = [];
+    const layers = {
+      resolveZone: (name: string, root: ParentNode) =>
+        root.querySelector(`[data-next-zone="${name}"]`),
+      open: (opener: null, href: string, zone: string) =>
+        calls.push({ verb: "open", args: [opener, href, zone] }),
+      close: (detail: Record<string, unknown>) =>
+        calls.push({ verb: "close", args: [detail] }),
+      toast: (text: string, variant: string) =>
+        calls.push({ verb: "toast", args: [text, variant] }),
+    };
+    const history = {
+      push: (href: string) => calls.push({ verb: "push", args: [href] }),
+      replace: (href: string) => calls.push({ verb: "replace", args: [href] }),
+    };
+    const applier = new Applier({
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+      document,
+      layers,
+      history,
+    });
+    return { applier, calls };
+  }
+
+  it("layer.open routes an href and zone into the stack with a null opener", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(envelope([{ op: "layer.open", href: "/w/", zone: "wiz" }]));
+    expect(calls).toEqual([{ verb: "open", args: [null, "/w/", "wiz"] }]);
+  });
+
+  it("layer.close carries result, dismiss, and reason to the stack", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(envelope([{ op: "layer.close", result: { id: 7 }, dismiss: false }]));
+    expect(calls[0]).toEqual({
+      verb: "close",
+      args: [{ result: { id: 7 }, dismiss: false, reason: undefined }],
+    });
+  });
+
+  it("toast hands text and a defaulted variant to the stack", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(envelope([{ op: "toast", text: "saved" }]));
+    expect(calls).toEqual([{ verb: "toast", args: ["saved", "info"] }]);
+  });
+
+  it("url pushes by default and replaces on the explicit action", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(
+      envelope([
+        { op: "url", href: "/a/" },
+        { op: "url", action: "replace", href: "/b/" },
+      ]),
+    );
+    expect(calls).toEqual([
+      { verb: "push", args: ["/a/"] },
+      { verb: "replace", args: ["/b/"] },
+    ]);
+  });
+
+  it("a zone target resolves through the layer bridge first", () => {
+    document.body.innerHTML = '<div data-next-zone="z">page</div>';
+    const { applier } = makeLayerApplier();
+    applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "patched" }]));
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("patched");
+  });
+});

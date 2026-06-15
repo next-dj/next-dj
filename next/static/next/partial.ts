@@ -4,7 +4,7 @@
 // surface through its extension points.
 
 import { Applier } from "./apply";
-import type { ApplyDeps, Envelope, OpHandler } from "./apply";
+import type { ApplyDeps, Envelope, HistoryAdapter, OpHandler } from "./apply";
 import { Wire } from "./wire";
 import type {
   Clock,
@@ -15,6 +15,9 @@ import type {
   WireRequest,
 } from "./wire";
 import { createDirtyTracker } from "./dirty";
+import { createLayers } from "./layers";
+import type { DialogAdapter, LayerStack } from "./layers";
+import { defaultHistory } from "./adapters";
 
 export interface PartialDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
@@ -31,6 +34,10 @@ export interface PartialAdapters {
   navigate?: Navigate;
   document?: Document;
   dev?: boolean;
+  // The native <dialog> modality, mocked in tests so the layer stack runs
+  // without jsdom's missing showModal and focus trap.
+  dialog?: DialogAdapter;
+  history?: HistoryAdapter;
 }
 
 export interface PartialSurface {
@@ -39,6 +46,9 @@ export interface PartialSurface {
   defineOp(name: string, handler: OpHandler): void;
   parseHook(contentType: string, hook: ParseHook): void;
   setCsrf(csrf: CsrfPayload | undefined): void;
+  // The modal layer stack, exposed so the harness drives open/close/resolve
+  // without synthesising a click.
+  layers: LayerStack;
   // Configure the injectable adapters and rebuild the wire and applier. Tests
   // call this in beforeEach, production wires the real platform globals once.
   _configure(adapters: PartialAdapters): void;
@@ -54,8 +64,14 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   const dirty = createDirtyTracker();
   dirty.install(document);
 
+  // The layer stack carries no transport: it asks the wire to GET the body and
+  // the host re-GET on accept, indirected through the current binding so a
+  // rebuild on _configure keeps the closure live.
+  let layers = createLayers(layerDeps());
+  let history: HistoryAdapter = defaultHistory();
   let applier = new Applier(applyDeps());
   let wire = new Wire(wireDeps());
+  let detachLayers = layers.install(document);
 
   function applyDeps(adapters?: PartialAdapters): ApplyDeps {
     return {
@@ -64,6 +80,20 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       document: adapters?.document,
       dev: adapters?.dev,
       dirtySince: (snapshot) => dirty.isDirtySince(snapshot),
+      // The stack satisfies the bridge: the applier resolves zone targets top
+      // layer down and routes the layer and toast verbs into it. _configure
+      // rebuilds the stack before the applier, so this binding stays live.
+      layers,
+      history,
+    };
+  }
+
+  function layerDeps(adapters?: PartialAdapters) {
+    return {
+      dispatch: deps.dispatch,
+      document: adapters?.document,
+      dialog: adapters?.dialog,
+      fetch: (request: { url: string; zone: string }) => wire.fetch(request),
     };
   }
 
@@ -100,15 +130,23 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     setCsrf(next) {
       csrf = next;
     },
+    get layers() {
+      return layers;
+    },
     _configure(adapters) {
       if (adapters.document !== undefined) dirty.install(adapters.document);
+      if (adapters.history !== undefined) history = adapters.history;
+      detachLayers();
+      layers = createLayers(layerDeps(adapters));
       applier = new Applier(applyDeps(adapters));
       wire = new Wire(wireDeps(adapters));
+      detachLayers = layers.install(adapters.document ?? document);
     },
     _reset() {
       wire._reset();
       applier._reset();
       dirty._reset();
+      layers._reset();
       version = "";
       csrf = undefined;
     },

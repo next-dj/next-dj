@@ -20,7 +20,7 @@ API.
 
 | URL | Description |
 |-----|-------------|
-| `/` | Landing page. Recent requests link to their per-request audit. |
+| `/` | Landing page. "Start a new request" opens the wizard in a modal layer and refreshes the recent-requests list when it closes. Recent requests link to their per-request audit. |
 | `/request/identity/` | Step 1 — full name, email, team. Saved sections show "✓ saved" pills. |
 | `/request/scope/` | Step 2 — project slug, free-form reason, expiry days. |
 | `/request/approval/` | Step 3 — read-only confirmation summary. |
@@ -34,6 +34,12 @@ The user flow:
                                                                           ↓
                                                   /request/<new id>/audit/?just=1
 ```
+
+With the client runtime loaded, the same three steps run inside a modal
+layer over the landing page, and the final step closes the modal and
+refreshes the recent-requests list in place. Both paths are described in
+[the modal-wizard walkthrough](#10-the-flagship-a-modal-wizard-that-refreshes-a-list)
+below, and both are exercised by the test suite.
 
 ## How to run
 
@@ -304,6 +310,128 @@ The example runs both because it is a *demonstration*. In production,
 pick the channel that matches your need: backend if you want raw
 inputs and atomicity with the form's database write, signal if you
 want decoupling and minimal coupling to the backend implementation.
+
+### 10. The flagship: a modal wizard that refreshes a list
+
+The landing page and the wizard wire together into one interaction that
+needs no project JavaScript: click "Start a new request", fill the wizard
+inside a modal, and watch the recent-requests list refresh under the modal
+as it closes. The whole thing is three template attributes, two zones, and
+one builder call.
+
+**The opening link and the list zone.** The landing page
+([`access/views/template.djx`](access/views/template.djx)) carries one
+plain link with two attributes and wraps the list in a named zone:
+
+```django
+<a href="{% url 'next:page_request_step' step='identity' %}"
+   data-next-layer="access-wizard" data-next-accepted="request-list">
+  Start a new request
+</a>
+
+{% zone "request-list" %}
+  <ul>
+    {% for r in recent_requests %}
+      <li data-next-key="{{ r.pk }}">…</li>
+    {% endfor %}
+  </ul>
+{% endzone %}
+```
+
+`data-next-layer` names the zone the modal hosts, `data-next-accepted`
+names the page zone to re-fetch once the modal closes with an accept
+result, and `data-next-key` lets the list morph identify rows by primary
+key. No selector and no swap mode appear in the markup — the server
+authors every operation, the client only names intent.
+
+**The wizard inside a zone.** The step template
+([`access/views/request/[step]/template.djx`](access/views/request/%5Bstep%5D/template.djx))
+wraps the existing form in the `access-wizard` zone and turns on blur
+validation:
+
+```django
+{% zone "access-wizard" %}
+  {% form "access_request_wizard" validate="blur" zone="access-wizard" %}
+    …
+  {% endform %}
+{% endzone %}
+```
+
+The page module did not change for routing or steps. The only Python edit
+is the wizard's `done`, which now closes the layer and toasts instead of
+returning a bare redirect:
+
+```python
+# access/views/request/[step]/page.py
+def done(self, request, cleaned_data):
+    access_request = AccessRequest.objects.create(**cleaned_data)
+    request.session["access_request_just_created"] = access_request.pk
+    request.session.modified = True
+    return (
+        Patches(request)
+        .layer_close(result={"id": access_request.pk})
+        .toast("Access request submitted", variant="success")
+        .response(fallback=f"/request/{access_request.pk}/audit/?just=1")
+    )
+```
+
+The session key still threads the new request id to the backend audit
+row, exactly as before — the builder change does not break the
+correlation column.
+
+**With the runtime.** The link opens a native `<dialog>` and creates an
+empty `access-wizard` container before the request, then GETs the step
+page for that zone alone. Each step submits inside the modal: an invalid
+step morphs only the `access-wizard` zone and the modal stays open, a
+valid non-final step morphs the zone to the next step with no redirect, and
+the final step's `done` returns `layer.close` plus a toast. The runtime
+closes the modal and, because the opening link named `data-next-accepted`,
+re-GETs the `request-list` zone of the landing page with its own cookies,
+so the list authorizes and renders in its own view before morphing under
+the now-closed modal.
+
+**Without the runtime.** Every attribute degrades to a plain link or
+form. The link navigates to the full `/request/identity/` page, each step
+posts and `302`-redirects to the next step's page, and the final step's
+`done` falls back to a `303` redirect to
+`/request/<id>/audit/?just=1` — the same result page the workflow always
+landed on. The `data-next-*` attributes are inert without a runtime, so
+the no-JS path is byte-for-byte the original flow with one status code
+changed from `302` to `303`. The `tests/test_e2e.py` suite asserts both
+paths: `TestModalWizardFlagship` walks the partial envelopes, the
+no-runtime regression lives in `TestSuccessRedirect`.
+
+The shared `dialog` component
+([`examples/_shared/_components/dialog/`](../_shared/_components/dialog/))
+is now a pure styling shell over `<dialog>`. The framework's layer runtime
+owns opening a dialog from a `data-next-layer` link and closing it on
+accept or dismiss, so the component ships no open trigger of its own. Its
+`component.mjs` keeps only the document-delegation idiom — a single
+document listener that survives a morph replacing the dialog markup — for
+the cases that mount a styled `<dialog>` directly without a layer.
+
+#### Smoke checklist for the modal
+
+The test suite asserts the server contract — the envelopes, the zone
+targets, the no-JS redirect — but a few edges of a native `<dialog>` only
+show up in a real browser. After any change to the modal flow, open
+`/` with the runtime loaded and check by hand:
+
+- **Modality and focus trap.** Opening the modal dims the page behind it
+  and `Tab` cycles only inside the dialog, never reaching the list or the
+  nav underneath.
+- **Focus return.** Closing the modal — by submitting the last step, by
+  `Esc`, or by clicking the backdrop — returns focus to the "Start a new
+  request" link that opened it.
+- **Caret and typed input.** A blur-validation error on the email field
+  re-renders the step without moving the caret or clearing text already
+  typed into a neighbouring field.
+- **Geometry.** The dialog is centered, scrolls its own body when the
+  step is tall, and the backdrop covers the full viewport with no gap at
+  the page edges.
+- **Toast and list refresh.** The success toast appears once on submit,
+  and the recent-requests list under the closed modal shows the new row
+  without a full page reload.
 
 ## Further reading
 

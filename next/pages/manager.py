@@ -420,6 +420,26 @@ class Page:
         template = self.composed_template_for(file_path)
         return self._render_template_str(file_path, template, start, request, **kwargs)
 
+    def authorization_response(
+        self,
+        file_path: Path,
+        request: HttpRequest,
+        **kwargs: object,
+    ) -> HttpResponseBase | None:
+        """Re-run the body resolution of a page and return its short-circuit.
+
+        The page module is loaded and its `render()` runs under the same
+        dependency injection as the unified view, so guards, denials, and
+        redirects fire exactly as they would on the page's own request.
+        A short-circuit `HttpResponseBase` such as a redirect or a denial
+        is returned for the caller to honour. `None` means the body
+        resolved to renderable content, so a standalone zone of the page
+        may be rendered on the caller's behalf.
+        """
+        module = _load_python_module_memo(file_path)
+        resolution = self._resolve_page_body(file_path, module, request, **kwargs)
+        return resolution.http_response
+
     def _create_unified_view(
         self,
         file_path: Path,

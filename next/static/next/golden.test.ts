@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Applier, parseEnvelope } from "./apply";
 import type { Envelope } from "./apply";
+import { createLayers } from "./layers";
+import type { DialogAdapter } from "./layers";
 
 const GOLDEN_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -196,5 +198,59 @@ describe("golden fixtures apply to the DOM", () => {
     const zone = document.querySelector('[data-next-zone="wizard-zone"]')!;
     expect(zone.querySelector('input[name="scope"]')).not.toBeNull();
     expect(zone.querySelector('input[name="name"]')).toBeNull();
+  });
+});
+
+describe("layer golden fixtures apply through the layer stack", () => {
+  function noopDialog(): DialogAdapter {
+    return { open: () => () => undefined };
+  }
+
+  function makeLayerApplier() {
+    const dispatched: { event: string; detail: Record<string, unknown> }[] = [];
+    const layers = createLayers({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      fetch: async () => undefined,
+      document,
+      dialog: noopDialog(),
+    });
+    const applier = new Applier({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      mergeContext: () => undefined,
+      document,
+      layers,
+    });
+    return { applier, layers, dispatched };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("layer_close accepts the open layer with its result and toasts the text", async () => {
+    const { applier, layers, dispatched } = makeLayerApplier();
+    await layers.open(null, "/request/identity/", "access-wizard");
+    const meta = readMeta("layer_close");
+    applier.apply(JSON.parse(readEnvelopeBytes(meta.envelope_file)));
+    const accepted = dispatched.find((d) => d.event === "partial:layer-accepted");
+    expect(accepted?.detail.result).toEqual({ id: 42 });
+    expect(layers.size()).toBe(0);
+    const toast = document.querySelector("[data-next-toasts] [data-next-toast]")!;
+    expect(toast.textContent).toBe("Request created");
+    layers._reset();
+  });
+
+  it("layer_oob_list closes the layer and morphs the host zone in one pass", async () => {
+    document.body.innerHTML =
+      '<div data-next-zone="request-list"><ul><li>stale</li></ul></div>';
+    const { applier, layers } = makeLayerApplier();
+    await layers.open(null, "/request/identity/", "access-wizard");
+    const meta = readMeta("layer_oob_list");
+    applier.apply(JSON.parse(readEnvelopeBytes(meta.envelope_file)));
+    expect(layers.size()).toBe(0);
+    const list = document.querySelector('[data-next-zone="request-list"]')!;
+    expect(list.textContent).toContain("fresh");
+    expect(list.querySelector("li")!.textContent).toBe("fresh");
+    layers._reset();
   });
 });
