@@ -3,11 +3,17 @@ import "./next";
 
 type NextStatic = {
   context: Readonly<Record<string, unknown>>;
+  partial: {
+    apply(raw: unknown): unknown;
+    fetch(request: { url: string }): Promise<void>;
+    defineOp(
+      name: string,
+      handler: (patch: Record<string, unknown>, ctx: unknown) => void,
+    ): void;
+    _reset(): void;
+  };
   _init(context: Record<string, unknown>): void;
-  on(
-    event: "ready" | "context-updated",
-    listener: (payload: Record<string, unknown>) => void,
-  ): () => void;
+  on(event: string, listener: (payload: Record<string, unknown>) => void): () => void;
   use<T>(plugin: (next: NextStatic) => T): T;
 };
 
@@ -184,6 +190,66 @@ describe("Next.on", () => {
       called += 1;
     });
     expect(called).toBe(0);
+  });
+});
+
+describe("Next.on arbitrary events", () => {
+  beforeEach(() => {
+    win.Next._init({});
+  });
+
+  it("carries lifecycle and user events beyond the literal union", () => {
+    let detail: Record<string, unknown> | null = null;
+    const off = win.Next.on("partial:applied", (payload) => {
+      detail = payload;
+    });
+    win.Next.partial.apply({
+      version: "v1",
+      ops: [],
+      assets: [],
+      defer: [],
+      form: null,
+    });
+    expect(detail).not.toBeNull();
+    off();
+  });
+});
+
+describe("Next.partial namespace", () => {
+  beforeEach(() => {
+    win.Next._init({});
+    win.Next.partial._reset();
+  });
+
+  it("is exposed on the Next class", () => {
+    expect(typeof win.Next.partial).toBe("object");
+    expect(typeof win.Next.partial.apply).toBe("function");
+    expect(typeof win.Next.partial.fetch).toBe("function");
+    expect(typeof win.Next.partial.defineOp).toBe("function");
+    expect(typeof win.Next.partial._reset).toBe("function");
+  });
+
+  it("merges into Next.context through a custom op and fires context-updated", () => {
+    let fired = 0;
+    const off = win.Next.on("context-updated", () => {
+      fired += 1;
+    });
+    fired = 0;
+    win.Next.partial.defineOp("seed", (_patch, ctx) => {
+      (ctx as { mergeContext(data: Record<string, unknown>): void }).mergeContext({
+        poll: 7,
+      });
+    });
+    win.Next.partial.apply({
+      version: "v1",
+      ops: [{ op: "seed" }],
+      assets: [],
+      defer: [],
+      form: null,
+    });
+    expect(win.Next.context.poll).toBe(7);
+    expect(fired).toBe(1);
+    off();
   });
 });
 

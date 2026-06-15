@@ -1,4 +1,4 @@
-.PHONY: help install test bench test-compat lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js lint-js format-js format-js-check test-examples ci pre-commit-install pre-commit-run dev-setup
+.PHONY: help install test bench test-compat lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check test-examples ci pre-commit-install pre-commit-run dev-setup
 
 # Allow CI to point at a prebuilt venv's pytest (bypassing `uv run` and its sync step)
 PYTEST ?= uv run pytest
@@ -25,6 +25,7 @@ help: # show this help message
 	@echo "  install-js      - install JS toolchain via npm ci"
 	@echo "  build-js        - compile next.ts to next.min.js via esbuild"
 	@echo "  test-js         - run JavaScript unit tests with vitest"
+	@echo "  test-js-coverage - run JavaScript unit tests with the v8 coverage gate"
 	@echo "  lint-js         - lint TypeScript files with ESLint"
 	@echo "  format-js       - format TypeScript files with Prettier"
 	@echo "  docs-linkcheck  - check documentation links"
@@ -37,6 +38,9 @@ build-js: install-js # compile next/static/next/next.ts to next.min.js via esbui
 
 test-js: # run JavaScript unit tests with vitest
 	npm run test:js
+
+test-js-coverage: # run JavaScript unit tests with v8 coverage gate
+	npm run test:js:coverage
 
 lint-js: # lint TypeScript files with ESLint
 	npm run lint:js
@@ -142,13 +146,13 @@ pre-commit-install: # install pre-commit hooks
 pre-commit-run: # run pre-commit on all files
 	uv run pre-commit run --all-files
 
-ci: # run the core CI checks locally with 100% coverage (docs and security run only in GitHub Actions)
+ci: # run the core CI checks locally with 100% coverage (docs, security, and the bundle-size budget run only in GitHub Actions)
 	make lint
 	make type-check
 	make build-js
 	make lint-js
 	make format-js-check
-	make test-js
+	make test-js-coverage
 	make test
 	make test-examples
 	make test-compat

@@ -1,0 +1,143 @@
+import json
+
+import pytest
+
+from next.partial import FormMeta, Patches
+from tests.partial.golden_support import (
+    GoldenCase,
+    read_envelope_bytes,
+    read_meta,
+    write_case,
+)
+
+
+def _replace_zone() -> GoldenCase:
+    html = '<div data-next-zone="request-list"><ul></ul></div>'
+    envelope = Patches("9f3c2e1b").replace({"zone": "request-list"}, html).envelope()
+    return GoldenCase(
+        name="replace_zone",
+        envelope=envelope,
+        description="A single replace patch swapping a named zone wholesale.",
+        version="9f3c2e1b",
+    )
+
+
+def _inner_zone() -> GoldenCase:
+    html = "<li>one</li><li>two</li>"
+    envelope = Patches("9f3c2e1b").inner({"zone": "request-list"}, html).envelope()
+    return GoldenCase(
+        name="inner_zone",
+        envelope=envelope,
+        description="An inner patch replacing only the contents of a zone.",
+        version="9f3c2e1b",
+    )
+
+
+def _remove_row() -> GoldenCase:
+    envelope = Patches("9f3c2e1b").remove({"css": "#row-42"}).envelope()
+    return GoldenCase(
+        name="remove_row",
+        envelope=envelope,
+        description="A remove patch deleting a target addressed by selector.",
+        version="9f3c2e1b",
+    )
+
+
+def _event_only() -> GoldenCase:
+    envelope = Patches("9f3c2e1b").event("request-created", {"id": 42}).envelope()
+    return GoldenCase(
+        name="event_only",
+        envelope=envelope,
+        description="An HTML-less event patch dispatching a CustomEvent.",
+        version="9f3c2e1b",
+    )
+
+
+def _invalid_form() -> GoldenCase:
+    html = (
+        '<form data-next-action="ab12cd34">'
+        '<ul class="errorlist"><li>This field is required.</li></ul>'
+        '<input name="name" value="" aria-invalid="true"></form>'
+    )
+    form = FormMeta(
+        uid="ab12cd34",
+        valid=False,
+        errors={"name": ["This field is required."]},
+    )
+    envelope = (
+        Patches("9f3c2e1b")
+        .replace({"form": "ab12cd34"}, html)
+        .event("toast", {"text": "Could not save", "variant": "error"})
+        .set_form(form)
+        .envelope()
+    )
+    return GoldenCase(
+        name="invalid_form",
+        envelope=envelope,
+        description="A form morph with machine-readable errors and a toast event.",
+        version="9f3c2e1b",
+        extra_headers={"X-Next-Form": "invalid", "X-Next-Action": "ab12cd34"},
+    )
+
+
+GOLDEN_CASES = [
+    _replace_zone(),
+    _inner_zone(),
+    _remove_row(),
+    _event_only(),
+    _invalid_form(),
+]
+
+
+class TestWriteGoldenFixtures:
+    """pytest writes real envelopes for vitest to read back through the applier."""
+
+    @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: c.name)
+    def test_writes_envelope_and_meta(self, case: GoldenCase) -> None:
+        envelope_path, meta_path = write_case(case)
+        assert envelope_path.exists()
+        assert meta_path.exists()
+
+    @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: c.name)
+    def test_envelope_bytes_are_valid_json(self, case: GoldenCase) -> None:
+        write_case(case)
+        data = json.loads(read_envelope_bytes(case.name))
+        assert data["version"] == "9f3c2e1b"
+        assert isinstance(data["ops"], list)
+
+    @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: c.name)
+    def test_meta_declares_content_type(self, case: GoldenCase) -> None:
+        write_case(case)
+        meta = read_meta(case.name)
+        assert meta["content_type"] == "application/vnd.next.patches+json"
+        assert meta["status"] == case.status
+
+    @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: c.name)
+    def test_meta_carries_response_headers(self, case: GoldenCase) -> None:
+        write_case(case)
+        headers = read_meta(case.name)["headers"]
+        assert isinstance(headers, dict)
+        assert headers["Content-Type"] == "application/vnd.next.patches+json"
+        assert "X-Next-Merge" in headers["Vary"]
+        assert headers["X-Next-Version"] == "9f3c2e1b"
+
+    @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: c.name)
+    def test_meta_points_at_envelope_file(self, case: GoldenCase) -> None:
+        write_case(case)
+        meta = read_meta(case.name)
+        assert meta["envelope_file"] == f"{case.name}.envelope.json"
+
+    def test_invalid_form_meta_headers_present(self) -> None:
+        write_case(_invalid_form())
+        headers = read_meta("invalid_form")["headers"]
+        assert headers["X-Next-Form"] == "invalid"
+        assert headers["X-Next-Action"] == "ab12cd34"
+
+    def test_invalid_form_envelope_carries_form_meta(self) -> None:
+        write_case(_invalid_form())
+        data = json.loads(read_envelope_bytes("invalid_form"))
+        assert data["form"] == {
+            "uid": "ab12cd34",
+            "valid": False,
+            "errors": {"name": ["This field is required."]},
+        }

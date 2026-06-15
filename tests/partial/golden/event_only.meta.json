@@ -1,0 +1,12 @@
+{
+  "name": "event_only",
+  "description": "An HTML-less event patch dispatching a CustomEvent.",
+  "content_type": "application/vnd.next.patches+json",
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/vnd.next.patches+json",
+    "X-Next-Version": "9f3c2e1b",
+    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge"
+  },
+  "envelope_file": "event_only.envelope.json"
+}

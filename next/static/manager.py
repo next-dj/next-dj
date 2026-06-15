@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.utils.functional import LazyObject, empty
@@ -30,7 +30,13 @@ from .assets import default_kinds
 from .backends import StaticBackend, StaticFilesBackend, StaticsFactory
 from .collector import HEAD_CLOSE, StaticCollector, default_placeholders
 from .discovery import AssetDiscovery, PathResolver
-from .scripts import NEXT_JS_STATIC_PATH, NextScriptBuilder, ScriptInjectionPolicy
+from .scripts import (
+    CSRF_PAYLOAD_KEY,
+    NEXT_JS_STATIC_PATH,
+    NextScriptBuilder,
+    ScriptInjectionPolicy,
+    csrf_payload_for,
+)
 from .signals import collector_finalized, html_injected
 
 
@@ -182,14 +188,25 @@ class StaticManager:
             collector.assets_in_slot(slot.name), backend, request=request
         )
         if slot.name == _RUNTIME_SLOT_NAME:
-            return self._wrap_with_runtime(user_tags, collector)
+            return self._wrap_with_runtime(user_tags, collector, request=request)
         return user_tags
 
-    def _wrap_with_runtime(self, user_tags: str, collector: StaticCollector) -> str:
+    def _wrap_with_runtime(
+        self,
+        user_tags: str,
+        collector: StaticCollector,
+        *,
+        request: HttpRequest | None,
+    ) -> str:
         builder = self._next_script_builder()
         if builder.policy is ScriptInjectionPolicy.AUTO:
+            csrf = csrf_payload_for(request)
+            if csrf is None:
+                js_context: dict[str, Any] = collector.js_context()
+            else:
+                js_context = {**collector.js_context(), CSRF_PAYLOAD_KEY: csrf}
             init_payload = builder.init_script(
-                collector.js_context(),
+                js_context,
                 key_serializers=collector.js_context_serializers(),
             )
             next_scripts = f"{builder.script_tag()}\n{init_payload}\n"

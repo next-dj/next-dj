@@ -140,6 +140,7 @@ GitHub.sublime-settings
 # js
 node_modules
 next/static/next/next.min.js
+coverage/
 
 # sphinx docs build outputs
 docs/_build*/

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest import mock
 
-from django.test import override_settings
+from django.test import RequestFactory, override_settings
 from django.utils.functional import empty
 
 from next.static import (
@@ -152,6 +152,34 @@ class TestInjectScriptsAuto:
         user_idx = out.index(JS_URL)
         assert next_idx < user_idx
 
+    def test_real_request_injects_csrf_payload(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        html = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+        request = RequestFactory().get("/")
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url",
+            return_value="/static/next/next.min.js",
+        ):
+            out = fresh_manager.inject(html, collector, request=request)
+        assert '"$csrf"' in out
+        assert '"header":"X-Csrftoken"' in out
+        assert '"token":' in out
+
+    def test_missing_request_omits_csrf_payload(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        collector = StaticCollector()
+        html = f"<body>{SCRIPTS_PLACEHOLDER}</body>"
+        with mock.patch(
+            "next.static.manager.staticfiles_storage.url",
+            return_value="/static/next/next.min.js",
+        ):
+            out = fresh_manager.inject(html, collector)
+        assert "$csrf" not in out
+        assert "Next._init({})" in out
+
 
 class TestInjectScriptsDisabled:
     def test_disabled_policy_skips_injection(
@@ -250,7 +278,7 @@ class TestInjectForwardsRequest:
     ) -> None:
         collector = StaticCollector()
         collector.add(StaticAsset(url=CSS_URL, kind="css"))
-        sentinel = object()
+        sentinel = RequestFactory().get("/")
         with mock.patch.object(
             fresh_manager.default_backend,
             "render_link_tag",
@@ -259,7 +287,7 @@ class TestInjectForwardsRequest:
             fresh_manager.inject(
                 f"<head>{STYLES_PLACEHOLDER}</head>",
                 collector,
-                request=sentinel,  # type: ignore[arg-type]
+                request=sentinel,
             )
         render.assert_called_once_with(CSS_URL, request=sentinel)
 

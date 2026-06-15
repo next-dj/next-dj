@@ -1,0 +1,288 @@
+// Envelope parsing, the built-in verbs, the custom-op registry, and the
+// structural neutralisation of script elements before insertion. The applier
+// stays a thin executor: the server authors every address and verb.
+
+// The wire content-type marker (invariant 9) and the Accept that doubles the
+// partial switch on content negotiation. Both must match the server exactly.
+export const CONTENT_TYPE = "application/vnd.next.patches+json";
+export const ACCEPT = "application/vnd.next.patches+json, text/html;q=0.9";
+
+export interface Target {
+  zone?: string;
+  form?: string;
+  field?: [string, string];
+  css?: string;
+}
+
+export interface Patch {
+  op: string;
+  target?: Target;
+  html?: string;
+  [extra: string]: unknown;
+}
+
+export interface Asset {
+  kind: string;
+  url: string;
+}
+
+export interface DeferZone {
+  zone: string;
+  trigger: string;
+}
+
+export interface FormMeta {
+  uid: string;
+  valid: boolean;
+  errors: Record<string, string[]>;
+}
+
+export interface Envelope {
+  version: string;
+  ops: Patch[];
+  assets: Asset[];
+  defer: DeferZone[];
+  form: FormMeta | null;
+  csrf?: { header: string; token: string };
+  request_id?: string;
+}
+
+// A custom-op handler receives the raw patch. Built-in verbs and the custom
+// registry share the same shape so the core eats its own dog food.
+export type OpHandler = (patch: Patch, ctx: ApplyContext) => void;
+
+export interface ApplyContext {
+  dispatch: (event: string, detail: Record<string, unknown>) => void;
+  mergeContext: (data: Record<string, unknown>) => void;
+  root: Document;
+  dev: boolean;
+}
+
+export interface ApplyDeps {
+  dispatch: (event: string, detail: Record<string, unknown>) => void;
+  mergeContext: (data: Record<string, unknown>) => void;
+  document?: Document;
+  // Dev builds warn on each neutralised script. The flag is injectable so
+  // tests assert both the warn-on and the silent-off behaviour.
+  dev?: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+// Narrow an unknown JSON value into an Envelope. Missing meta collapses to its
+// empty value so a terse server envelope parses without optional-field noise.
+export function parseEnvelope(raw: unknown): Envelope {
+  if (!isRecord(raw)) {
+    throw new TypeError("partial envelope is not an object");
+  }
+  const version = asString(raw.version);
+  if (version === undefined) {
+    throw new TypeError("partial envelope is missing version");
+  }
+  const ops = Array.isArray(raw.ops) ? (raw.ops as Patch[]) : [];
+  const assets = Array.isArray(raw.assets) ? (raw.assets as Asset[]) : [];
+  const defer = Array.isArray(raw.defer) ? (raw.defer as DeferZone[]) : [];
+  const form = isRecord(raw.form) ? (raw.form as unknown as FormMeta) : null;
+  const envelope: Envelope = { version, ops, assets, defer, form };
+  if (isRecord(raw.csrf)) {
+    const header = asString(raw.csrf.header);
+    const token = asString(raw.csrf.token);
+    if (header !== undefined && token !== undefined) {
+      envelope.csrf = { header, token };
+    }
+  }
+  const requestId = asString(raw.request_id);
+  if (requestId !== undefined) {
+    envelope.request_id = requestId;
+  }
+  return envelope;
+}
+
+export class Applier {
+  readonly #ops: Map<string, OpHandler> = new Map();
+  readonly #dispatch: (event: string, detail: Record<string, unknown>) => void;
+  readonly #mergeContext: (data: Record<string, unknown>) => void;
+  readonly #document: Document;
+  #dev: boolean;
+
+  constructor(deps: ApplyDeps) {
+    this.#dispatch = deps.dispatch;
+    this.#mergeContext = deps.mergeContext;
+    this.#document = deps.document ?? document;
+    this.#dev = deps.dev ?? false;
+    this.#registerBuiltins();
+  }
+
+  // Drop every custom op and re-seat the built-ins so vitest files do not
+  // leak registrations into one another.
+  _reset(): void {
+    this.#ops.clear();
+    this.#registerBuiltins();
+  }
+
+  defineOp(name: string, handler: OpHandler): void {
+    this.#ops.set(name, handler);
+  }
+
+  apply(raw: unknown): Envelope {
+    const envelope = parseEnvelope(raw);
+    const beforeApply = this.#emit("partial:before-apply", { envelope }, true);
+    if (beforeApply.defaultPrevented) return envelope;
+    for (const op of envelope.ops) {
+      this.#applyOp(op);
+    }
+    if (envelope.csrf) this.#rotateCsrf(envelope.csrf);
+    this.#emit("partial:applied", { envelope }, false);
+    return envelope;
+  }
+
+  #applyOp(patch: Patch): void {
+    const handler = this.#ops.get(patch.op);
+    if (handler === undefined) {
+      // An unknown verb is a single skipped op, never a poisoned envelope.
+      this.#emit(
+        "partial:error",
+        { status: 0, body: "", error: new Error(`unknown op ${patch.op}`) },
+        false,
+      );
+      return;
+    }
+    handler(patch, this.#context());
+  }
+
+  #context(): ApplyContext {
+    return {
+      dispatch: this.#dispatch,
+      mergeContext: this.#mergeContext,
+      root: this.#document,
+      dev: this.#dev,
+    };
+  }
+
+  #registerBuiltins(): void {
+    this.#ops.set("replace", (patch) => this.#replace(patch));
+    this.#ops.set("inner", (patch) => this.#inner(patch));
+    this.#ops.set("remove", (patch) => this.#remove(patch));
+    this.#ops.set("event", (patch) => this.#event(patch));
+  }
+
+  #replace(patch: Patch): void {
+    const node = this.#resolve(patch.target);
+    if (node === null) return;
+    const fragment = this.#fragment(patch.html ?? "", patch.target);
+    node.replaceWith(fragment);
+  }
+
+  #inner(patch: Patch): void {
+    const node = this.#resolve(patch.target);
+    if (node === null) return;
+    const fragment = this.#fragment(patch.html ?? "", patch.target);
+    node.replaceChildren(fragment);
+  }
+
+  #remove(patch: Patch): void {
+    const node = this.#resolve(patch.target);
+    if (node === null) return;
+    node.remove();
+  }
+
+  #event(patch: Patch): void {
+    const name = asString(patch.name);
+    if (name === undefined) return;
+    const detail = isRecord(patch.detail) ? patch.detail : {};
+    this.#emit(name, detail, false);
+  }
+
+  // Parse a fragment through `<template>` and structurally neutralise every
+  // script before the node ever reaches the live document (invariant 4). The
+  // guarantee is observable from jsdom, not leaning on template semantics.
+  #fragment(html: string, target: Target | undefined): DocumentFragment {
+    const template = this.#document.createElement("template");
+    template.innerHTML = html;
+    this.#neutraliseScripts(template.content, target);
+    return template.content;
+  }
+
+  #neutraliseScripts(root: ParentNode, target: Target | undefined): void {
+    const scripts = root.querySelectorAll("script");
+    for (const script of Array.from(scripts)) {
+      script.remove();
+      if (this.#dev) {
+        console.warn(
+          `[next.partial] removed a <script> from a patch targeting ${describeTarget(
+            target,
+          )}. Behaviour ships through co-located assets and the event op.`,
+        );
+      }
+    }
+  }
+
+  #resolve(target: Target | undefined): Element | null {
+    if (target === undefined) return null;
+    if (target.zone !== undefined) {
+      return this.#document.querySelector(
+        `[data-next-zone="${cssEscape(target.zone)}"]`,
+      );
+    }
+    if (target.form !== undefined) {
+      return this.#resolveForm(target.form);
+    }
+    if (target.field !== undefined) {
+      const [uid, name] = target.field;
+      const form = this.#resolveForm(uid);
+      if (form === null) return null;
+      return form.querySelector(`[name="${cssEscape(name)}"]`);
+    }
+    if (target.css !== undefined) {
+      return this.#document.querySelector(target.css);
+    }
+    return null;
+  }
+
+  #resolveForm(uid: string): Element | null {
+    return this.#document.querySelector(`[data-next-action="${cssEscape(uid)}"]`);
+  }
+
+  // Rotate the CSRF token in every form of the document so unmorphed forms do
+  // not keep a stale token after a `rotate_token` in a layer login.
+  #rotateCsrf(csrf: { header: string; token: string }): void {
+    const inputs = this.#document.querySelectorAll<HTMLInputElement>(
+      'input[name="csrfmiddlewaretoken"]',
+    );
+    for (const input of Array.from(inputs)) {
+      input.value = csrf.token;
+    }
+  }
+
+  #emit(
+    event: string,
+    detail: Record<string, unknown>,
+    cancelable: boolean,
+  ): CustomEvent {
+    const custom = new CustomEvent(event, { detail, cancelable });
+    this.#document.dispatchEvent(custom);
+    this.#dispatch(event, detail);
+    return custom;
+  }
+}
+
+function describeTarget(target: Target | undefined): string {
+  if (target === undefined) return "no target";
+  const key = Object.keys(target)[0];
+  return key === undefined
+    ? "no target"
+    : `${key} ${JSON.stringify(target[key as keyof Target])}`;
+}
+
+// CSS.escape is unavailable in jsdom, so quoted attribute values are escaped by
+// hand. Server-authored uids and zone names are ASCII slugs, this only guards
+// the rare embedded quote or backslash.
+function cssEscape(value: string): string {
+  return value.replace(/["\\]/g, "\\$&");
+}

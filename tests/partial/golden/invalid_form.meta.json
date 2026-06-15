@@ -1,0 +1,14 @@
+{
+  "name": "invalid_form",
+  "description": "A form morph with machine-readable errors and a toast event.",
+  "content_type": "application/vnd.next.patches+json",
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/vnd.next.patches+json",
+    "X-Next-Version": "9f3c2e1b",
+    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge",
+    "X-Next-Form": "invalid",
+    "X-Next-Action": "ab12cd34"
+  },
+  "envelope_file": "invalid_form.envelope.json"
+}

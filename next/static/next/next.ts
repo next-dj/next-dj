@@ -1,11 +1,19 @@
-type NextEvent = "ready" | "context-updated";
+import { createPartial } from "./partial";
+import type { PartialSurface } from "./partial";
+
+type NextEvent = "ready" | "context-updated" | (string & {});
 type NextListener = (payload: Record<string, unknown>) => void;
 type NextPlugin<T> = (next: typeof Next) => T;
 
 class Next {
   static #context: Record<string, unknown> = {};
-  static #listeners: Map<NextEvent, Set<NextListener>> = new Map();
+  static #listeners: Map<string, Set<NextListener>> = new Map();
   static #ready = false;
+
+  static partial: PartialSurface = createPartial({
+    dispatch: (event, payload) => Next.#dispatch(event, payload),
+    mergeContext: (data) => Next.#mergeContext(data),
+  });
 
   static get context(): Readonly<Record<string, unknown>> {
     return Object.freeze({ ...Next.#context });
@@ -37,7 +45,14 @@ class Next {
     return plugin(Next);
   }
 
-  static #dispatch(event: NextEvent, payload: Record<string, unknown>): void {
+  // The operation `context` and the `csrf` meta merge into the same store
+  // that `_init` owns, so context islands see one consistent snapshot.
+  static #mergeContext(data: Record<string, unknown>): void {
+    Next.#context = { ...Next.#context, ...data };
+    Next.#dispatch("context-updated", Next.#context);
+  }
+
+  static #dispatch(event: string, payload: Record<string, unknown>): void {
     const bucket = Next.#listeners.get(event);
     if (bucket === undefined) return;
     for (const listener of bucket) {

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from django.test import RequestFactory
 
 from next.static import (
     AssetDiscovery,
@@ -148,11 +149,11 @@ class TestCollectorFinalizedSignal:
         capture_collector_finalized: list[dict[str, Any]],
     ) -> None:
         collector = StaticCollector()
-        sentinel = object()
+        sentinel = RequestFactory().get("/")
         fresh_manager.inject(
             "<body/>",
             collector,
-            request=sentinel,  # type: ignore[arg-type]
+            request=sentinel,
         )
 
         assert capture_collector_finalized[0]["request"] is sentinel
@@ -209,11 +210,11 @@ class TestHtmlInjectedSignal:
     ) -> None:
         collector = StaticCollector()
         collector.add(StaticAsset(url="https://cdn/a.css", kind="css"))
-        sentinel = object()
+        sentinel = RequestFactory().get("/")
         fresh_manager.inject(
             f"<head>{STYLES_PLACEHOLDER}</head>",
             collector,
-            request=sentinel,  # type: ignore[arg-type]
+            request=sentinel,
         )
         assert capture_html_injected[0]["request"] is sentinel
 
@@ -233,7 +234,9 @@ class TestLegacyReceiverCompat:
         collector_finalized.connect(legacy)
         try:
             collector = StaticCollector()
-            fresh_manager.inject("<body/>", collector, request=object())
+            fresh_manager.inject(
+                "<body/>", collector, request=RequestFactory().get("/")
+            )
         finally:
             collector_finalized.disconnect(legacy)
 
@@ -257,7 +260,7 @@ class TestLegacyReceiverCompat:
             fresh_manager.inject(
                 f"<head>{STYLES_PLACEHOLDER}</head>",
                 collector,
-                request=object(),
+                request=RequestFactory().get("/"),
             )
         finally:
             html_injected.disconnect(legacy)

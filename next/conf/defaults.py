@@ -45,6 +45,20 @@ DEFAULTS: dict[str, Any] = {
             "OPTIONS": {},
         },
     ],
+    "PARTIAL_BACKENDS": [
+        {
+            "BACKEND": "next.partial.PartialProtocolBackend",
+            "OPTIONS": {
+                "DEFAULT_SWAP": "morph",
+                "VERSION": "manifest",
+                "PUSH_WIZARD_STEPS": False,
+                "SSE": {
+                    "HEARTBEAT_SECONDS": 25,
+                    "RETRY_MS": 3000,
+                },
+            },
+        },
+    ],
     "TEMPLATE_LOADERS": [
         "next.pages.loaders.DjxTemplateLoader",
     ],

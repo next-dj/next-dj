@@ -2,6 +2,7 @@
   "scripts": {
     "build:next": "esbuild next/static/next/next.ts --bundle --minify --target=es2020 --outfile=next/static/next/next.min.js",
     "test:js": "vitest run",
+    "test:js:coverage": "vitest run --coverage",
     "lint:js": "eslint \"{next,examples}/**/*.{mjs,ts,js,css}\"",
     "lint:js:fix": "eslint --fix \"{next,examples}/**/*.{mjs,ts,js,css}\"",
     "format": "prettier --write \"{next,examples}/**/*.{mjs,ts,js,css}\" \"vitest.config.ts\" \"eslint.config.mjs\"",

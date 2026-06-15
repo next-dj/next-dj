@@ -123,8 +123,18 @@ jobs:
       run: npm run lint:js
     - name: Build next.min.js
       run: npm run build:next
-    - name: Run JavaScript unit tests
-      run: npm run test:js
+    - name: Check bundle size budget
+      run: |
+        # The compiled runtime ships on every page, so its minified size is a hard budget enforced here in CI.
+        bytes=$(wc -c < next/static/next/next.min.js)
+        budget=$((15 * 1024))
+        echo "next.min.js: ${bytes} bytes (budget ${budget} bytes)"
+        if [ "$bytes" -gt "$budget" ]; then
+          echo "::error::next.min.js (${bytes} bytes) exceeds the 15 KB minified budget (${budget} bytes)"
+          exit 1
+        fi
+    - name: Run JavaScript unit tests with coverage
+      run: npm run test:js:coverage
 
   dependency-review:
     runs-on: ubuntu-latest
