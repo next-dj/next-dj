@@ -1,4 +1,13 @@
 {
   "trailingComma": "all",
-  "printWidth": 88
+  "printWidth": 88,
+  "proseWrap": "never",
+  "overrides": [
+    {
+      "files": "*.md",
+      "options": {
+        "embeddedLanguageFormatting": "off"
+      }
+    }
+  ]
 }

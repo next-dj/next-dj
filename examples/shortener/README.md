@@ -7,7 +7,7 @@ The example is small on purpose. It is a tour of the framework surface you will 
 ## What you will see
 
 | URL | Description |
-|-----|-------------|
+| --- | --- |
 | `/` | Form to shorten a URL, list of the latest entries. |
 | `/s/<slug>/` | 302 redirect to the original URL, bumps the click counter. |
 | `/admin/` | Top links and unflushed click counters. Nested admin layout with a subnav. |
@@ -212,7 +212,7 @@ No `request.path` string-munging, no custom template tag, no context processor. 
 Every anchor in the project goes through `{% url %}`. File-router URLs sit under the `next` namespace. The name format is `page_<prepare_url_name(url_path)>`:
 
 | File | URL | Name |
-|------|-----|------|
+| --- | --- | --- |
 | `routes/page.py` | `/` | `next:page_` |
 | `routes/admin/page.py` | `/admin/` | `next:page_admin` |
 | `routes/admin/stats/page.py` | `/admin/stats/` | `next:page_admin_stats` |
