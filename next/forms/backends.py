@@ -297,7 +297,21 @@ class FormActionBackend(ABC):
         request: "HttpRequest",
         outcome: ActionOutcome,
     ) -> "HttpResponse":
-        """Turn one pipeline outcome into the HTTP response. Default envelope."""
+        """Turn one pipeline outcome into the HTTP response.
+
+        A partial request routes through `shape_partial` for a patch
+        envelope. A plain request keeps the default full-page path
+        byte-for-byte.
+        """
+        # Deferred to break the next.forms <-> next.partial import cycle:
+        # partial shaping imports the form dispatch and origin helpers.
+        from next.partial import (  # noqa: PLC0415
+            is_partial_request,
+            shape_partial,
+        )
+
+        if is_partial_request(request):
+            return shape_partial(self, request, outcome)
         return FormActionDispatch.shape_response(self, request, outcome)
 
 

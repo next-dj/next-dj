@@ -70,6 +70,38 @@ class TestGetZones:
         assert response.wsgi_request.headers["X-Custom"] == "present"
 
 
+class TestPostActionPartialHeaders:
+    """`post_action` stamps the partial, zone, and version headers."""
+
+    @pytest.mark.django_db()
+    def test_partial_post_returns_an_envelope(self) -> None:
+        client = NextClient(enforce_csrf_checks=False)
+        response = client.post_action(
+            "simple_form", {"name": ""}, origin="/", partial=True
+        )
+        assert envelope_of(response).op_verbs() == ["morph"]
+
+    @pytest.mark.django_db()
+    def test_zones_header_reaches_the_request(self) -> None:
+        client = NextClient(enforce_csrf_checks=False)
+        response = client.post_action(
+            "simple_form",
+            {"name": ""},
+            origin="/",
+            partial=True,
+            zones=("alpha", "beta"),
+        )
+        assert response.wsgi_request.headers["X-Next-Zone"] == "alpha,beta"
+
+    @pytest.mark.django_db()
+    def test_version_header_reaches_the_request(self) -> None:
+        client = NextClient(enforce_csrf_checks=False)
+        response = client.post_action(
+            "simple_form", {"name": ""}, origin="/", partial=True, version="9f3c"
+        )
+        assert response.wsgi_request.headers["X-Next-Version"] == "9f3c"
+
+
 class TestEnvelopeHelpers:
     """The structural envelope view answers questions about ops and targets."""
 
@@ -77,6 +109,20 @@ class TestEnvelopeHelpers:
         response = Client().get("/zoned/")
         with pytest.raises(AssertionError):
             envelope_of(response)
+
+    def test_toasts_filters_toast_ops(self) -> None:
+        envelope = PartialEnvelope(
+            {
+                "version": "v1",
+                "ops": [
+                    {"op": "morph", "target": {"zone": "a"}, "html": "<div></div>"},
+                    {"op": "toast", "text": "Saved", "variant": "success"},
+                ],
+            }
+        )
+        assert envelope.toasts() == [
+            {"op": "toast", "text": "Saved", "variant": "success"}
+        ]
 
     def test_version_op_verbs_and_targets(self) -> None:
         envelope = envelope_of(NextClient().get_zones("/zoned/", ("alpha", "beta")))

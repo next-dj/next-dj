@@ -1,0 +1,4 @@
+<h1>board settings {{ greeting }}</h1>
+{% zone "rename-board" %}
+{% form "zoned_rename_form" zone="rename-board" %}<div>{{ form.title }}{{ form.title.errors }}</div>{% endform %}
+{% endzone %}

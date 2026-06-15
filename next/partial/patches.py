@@ -1,23 +1,70 @@
-"""Patch envelope value objects, the minimal builder, and PatchResponse."""
+"""Patch envelope value objects, the request-bound builder, and PatchResponse."""
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from django.http import HttpResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.utils.http import url_has_allowed_host_and_scheme
 
+from next.static.collector import default_placeholders
+from next.static.serializers import resolve_serializer
+
+from .backends import partial_backend_manager
 from .headers import (
     CONTENT_TYPE,
     RESPONSE_VERSION,
+    is_partial_request,
     set_partial_vary,
 )
+from .registry import patch_op_registry
 
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+    from pathlib import Path
+
+    from .render import ZoneRenderResult
 
 
 HTML_VERBS: frozenset[str] = frozenset({"replace", "inner"})
 TARGET_KEYS: frozenset[str] = frozenset({"zone", "form", "field", "css"})
+
+_SEE_OTHER = 303
+
+
+class UnknownPatchOpError(LookupError):
+    """Raised when the builder is asked to emit an unregistered verb.
+
+    The runtime guard pairs with the `next.E066` check, so an unknown
+    verb fails fast in `op()` rather than reaching the client.
+    """
+
+    def __init__(self, name: str) -> None:
+        """Store the unknown verb name and build a readable message."""
+        self.name = name
+        super().__init__(
+            f'Patch op "{name}" is not registered. Register it with '
+            "register_patch_op() before emitting it."
+        )
+
+
+class UnknownContextNameError(LookupError):
+    """Raised when `context()` names a value that is not a serialize provider.
+
+    Only the names of registered `serialize=True` context providers may
+    travel in a context patch, so an arbitrary mapping is rejected at the
+    builder rather than serialized blind.
+    """
+
+    def __init__(self, name: str) -> None:
+        """Store the rejected name and build a readable message."""
+        self.name = name
+        super().__init__(
+            f'Context name "{name}" is not a registered serialize=True '
+            "provider on the origin page. Mark its @context provider "
+            "serialize=True or drop it from the patch."
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,38 +166,98 @@ class Envelope:
 
 
 class Patches:
-    """Builder of a patch envelope from HTML and HTML-less verbs.
+    """Request-bound builder of a patch envelope.
 
-    Verbs take a finished `html` string or no payload at all. Targeting
-    that renders a zone or component on the builder's behalf is an
-    extension point left open on top of this surface.
+    Built from a request, the builder takes its asset version from the
+    active protocol backend and resolves the origin page lazily, so a
+    `morph(zone=...)` or `morph(component=...)` renders against the page
+    that owns the request. Built from a bare version string the builder
+    stays a low-level envelope assembler with no request, used by paths
+    that already hold the version and render their own HTML.
     """
 
-    def __init__(self, version: str) -> None:
-        """Start an empty builder stamped with the asset version."""
-        self._version = version
+    def __init__(self, target: "HttpRequest | str") -> None:
+        """Start an empty builder from a request or a literal version."""
+        if isinstance(target, str):
+            self._request = None
+            self._version: str = target
+        else:
+            self._request = target
+            self._version = partial_backend_manager.get().version()
         self._ops: list[Patch] = []
         self._assets: list[Asset] = []
         self._defer: list[DeferZone] = []
         self._form: FormMeta | None = None
+        self._page_path: Path | None = None
+        self._page_resolved = False
 
-    def morph(
+    @property
+    def version(self) -> str:
+        """Return the asset version stamped on the envelope."""
+        return self._version
+
+    def morph(  # noqa: PLR0913
+        self,
+        target: "Mapping[str, Any] | None" = None,
+        html: str | None = None,
+        *,
+        zone: str | None = None,
+        form: str | None = None,
+        component: str | None = None,
+        props: "Mapping[str, Any] | None" = None,
+        overrides: "Mapping[str, Any] | None" = None,
+        extract: bool = False,
+    ) -> "Patches":
+        """Morph a target into HTML, the default verb.
+
+        The named argument selects how the HTML and target are produced.
+        `zone` renders the named zone of the origin page, with optional
+        context `overrides`. `component` renders the named component with
+        `props`. `form` extract-morphs the form addressed by its uid.
+        `html` morphs a passed target into ready HTML. `extract` marks
+        `html` as a whole document the client trims down to the node
+        matching the target.
+        """
+        if zone is not None:
+            return self._morph_zone(zone, overrides)
+        if component is not None:
+            return self._morph_component(component, props)
+        if form is not None:
+            return self._append_morph({"form": form}, html or "", extract=True)
+        return self._append_morph(dict(target or {}), html or "", extract=extract)
+
+    def _append_morph(
         self,
         target: "Mapping[str, Any]",
         html: str,
         *,
-        extract: bool = False,
+        extract: bool,
     ) -> "Patches":
-        """Morph the target node into the given HTML, the default verb.
-
-        `extract` marks `html` as a whole document the client trims down
-        to the node matching the target.
-        """
+        """Record one morph op with an optional extract flag."""
         extras = {"extract": True} if extract else {}
         self._ops.append(
             Patch(op="morph", target=dict(target), html=html, extras=extras)
         )
         return self
+
+    def _morph_zone(
+        self,
+        zone: str,
+        overrides: "Mapping[str, Any] | None",
+    ) -> "Patches":
+        """Render the named zone of the origin page and morph it in place."""
+        result = self._render_zone(zone, overrides)
+        self._collect_assets(result)
+        return self._append_morph({"zone": zone}, result.html[zone], extract=False)
+
+    def _morph_component(
+        self,
+        name: str,
+        props: "Mapping[str, Any] | None",
+    ) -> "Patches":
+        """Render the named component with props and morph it in place."""
+        html = self._render_component(name, props)
+        return self._append_morph({"component": name}, html, extract=False)
 
     def replace(self, target: "Mapping[str, Any]", html: str) -> "Patches":
         """Replace the target node wholesale with the given HTML."""
@@ -162,9 +269,69 @@ class Patches:
         self._ops.append(Patch(op="inner", target=dict(target), html=html))
         return self
 
+    def append(
+        self,
+        target: "Mapping[str, Any]",
+        html: str,
+        *,
+        dedupe: str = "key",
+    ) -> "Patches":
+        """Append children to the target, deduplicating by key or id."""
+        self._ops.append(
+            Patch(
+                op="append",
+                target=dict(target),
+                html=html,
+                extras={"dedupe": dedupe},
+            )
+        )
+        return self
+
     def remove(self, target: "Mapping[str, Any]") -> "Patches":
         """Remove the target node."""
         self._ops.append(Patch(op="remove", target=dict(target)))
+        return self
+
+    def refresh(self, *, zone: str) -> "Patches":
+        """Ask the client to refetch the named zone with its own cookies."""
+        self._ops.append(Patch(op="refresh", extras={"zone": zone}))
+        return self
+
+    def context(self, **names: Any) -> "Patches":  # noqa: ANN401
+        """Merge named serialize provider values into the client context.
+
+        Only the names of registered `serialize=True` providers on the
+        origin page are accepted. The values are serialized through
+        `resolve_serializer()` so the wire carries plain data.
+        """
+        allowed = self._serializable_names()
+        serializer = resolve_serializer()
+        data: dict[str, Any] = {}
+        for name, value in names.items():
+            if name not in allowed:
+                raise UnknownContextNameError(name)
+            data[name] = json.loads(serializer.dumps(value))
+        self._ops.append(Patch(op="context", extras={"data": data}))
+        return self
+
+    def layer_close(
+        self,
+        *,
+        result: Any = None,  # noqa: ANN401
+        dismiss: str | None = None,
+    ) -> "Patches":
+        """Close the top layer with an accept result or a dismissal."""
+        extras: dict[str, Any] = {}
+        if result is not None:
+            extras["result"] = result
+        if dismiss is not None:
+            extras["dismiss"] = dismiss
+        self._ops.append(Patch(op="layer.close", extras=extras))
+        return self
+
+    def toast(self, text: str, variant: str = "info") -> "Patches":
+        """Show a toast, sugar over an event with a built-in container."""
+        self._ops.append(Patch(op="toast", extras={"text": text, "variant": variant}))
         return self
 
     def event(self, name: str, detail: "Mapping[str, Any] | None" = None) -> "Patches":
@@ -172,6 +339,34 @@ class Patches:
         self._ops.append(
             Patch(op="event", extras={"name": name, "detail": dict(detail or {})})
         )
+        return self
+
+    def push_url(self, href: str) -> "Patches":
+        """Push the validated href onto the browser history."""
+        self._ops.append(
+            Patch(op="url", extras={"action": "push", "href": self._safe_url(href)})
+        )
+        return self
+
+    def redirect(self, href: str, *, external: bool = False) -> "Patches":
+        """Drive a full client navigation to a server-authored href.
+
+        An internal href is validated against the request host. An
+        external href is sent with a full-navigation marker so a
+        server-authored redirect like OAuth or a payment gateway is not
+        rejected by the same-host validator.
+        """
+        if external:
+            self._ops.append(Patch(op="visit", extras={"href": href, "external": True}))
+        else:
+            self._ops.append(Patch(op="visit", extras={"href": self._safe_url(href)}))
+        return self
+
+    def op(self, name: str, **payload: Any) -> "Patches":  # noqa: ANN401
+        """Emit a custom verb registered through `register_patch_op`."""
+        if not patch_op_registry.is_registered(name):
+            raise UnknownPatchOpError(name)
+        self._ops.append(Patch(op=name, extras=dict(payload)))
         return self
 
     def add_asset(self, kind: str, url: str) -> "Patches":
@@ -198,6 +393,127 @@ class Patches:
             defer=tuple(self._defer),
             form=self._form,
         )
+
+    def response(self, fallback: str | None = None) -> "PatchResponse | HttpResponse":
+        """Assemble the response for the current request.
+
+        With the partial switch on the request the envelope travels as a
+        `PatchResponse`. Without the switch, mutation falls back to the
+        full cycle: a 303 to the request origin when no `fallback` is
+        given, or a redirect to `fallback` when it is.
+        """
+        request = self._request
+        if request is not None and is_partial_request(request):
+            backend = partial_backend_manager.get()
+            body = backend.serialize_envelope(self.envelope())
+            return PatchResponse(
+                body, content_type=backend.content_type, version=self._version
+            )
+        target = fallback if fallback is not None else self._origin_path()
+        return HttpResponseRedirect(target, status=_SEE_OTHER)
+
+    def _origin_path(self) -> str:
+        """Return the path the no-runtime fallback redirects to."""
+        request = self._request
+        if request is None:
+            return "/"
+        from next.forms.origin import _resolve_origin  # noqa: PLC0415
+
+        match = _resolve_origin(request)
+        if match is not None:
+            return match.origin
+        return request.path
+
+    def _require_request(self) -> HttpRequest:
+        """Return the bound request or raise when the builder has none."""
+        if self._request is None:
+            msg = "This builder operation needs a request-bound Patches(request)."
+            raise RuntimeError(msg)
+        return self._request
+
+    def _resolve_page_path(self) -> "Path":
+        """Resolve the origin page path of the request, memoised on the builder."""
+        if self._page_resolved:
+            if self._page_path is None:
+                msg = "The request origin does not resolve to a page."
+                raise RuntimeError(msg)
+            return self._page_path
+        request = self._require_request()
+        from next.forms.origin import _resolve_origin  # noqa: PLC0415
+
+        match = _resolve_origin(request)
+        self._page_resolved = True
+        self._page_path = match.page_path if match is not None else None
+        return self._resolve_page_path()
+
+    def _origin_url_kwargs(self) -> dict[str, object]:
+        """Return the URL kwargs of the origin page for a zone or component render."""
+        request = self._require_request()
+        from next.forms.origin import _resolve_origin  # noqa: PLC0415
+
+        match = _resolve_origin(request)
+        return dict(match.url_kwargs) if match is not None else {}
+
+    def _render_zone(
+        self,
+        zone: str,
+        overrides: "Mapping[str, Any] | None",
+    ) -> "ZoneRenderResult":
+        """Render the named zone of the origin page with optional overrides."""
+        from .render import render_zone  # noqa: PLC0415
+
+        return render_zone(
+            self._resolve_page_path(),
+            (zone,),
+            self._require_request(),
+            url_kwargs=self._origin_url_kwargs(),
+            overrides=dict(overrides) if overrides else None,
+        )
+
+    def _render_component(
+        self,
+        name: str,
+        props: "Mapping[str, Any] | None",
+    ) -> str:
+        """Render the named component of the origin page with props."""
+        from next.components import get_component, render_component  # noqa: PLC0415
+
+        request = self._require_request()
+        page_path = self._resolve_page_path()
+        info = get_component(name, page_path)
+        if info is None:
+            msg = f'Component "{name}" is not visible to the origin page.'
+            raise LookupError(msg)
+        context_data: dict[str, Any] = dict(props or {})
+        return render_component(info, context_data, request)
+
+    def _serializable_names(self) -> frozenset[str]:
+        """Return the serialize=True provider names of the origin page."""
+        from next.pages import page  # noqa: PLC0415
+
+        request = self._require_request()
+        context_data = page.build_render_context(
+            self._resolve_page_path(), request, **self._origin_url_kwargs()
+        )
+        js_context = context_data.get("_next_js_context", {})
+        return frozenset(js_context) if isinstance(js_context, dict) else frozenset()
+
+    def _collect_assets(self, result: "ZoneRenderResult") -> None:
+        """Record the assets a rendered zone body collected on the envelope."""
+        for slot in default_placeholders:
+            for static_asset in result.collector.assets_in_slot(slot.name):
+                if static_asset.url:
+                    self.add_asset(static_asset.kind, static_asset.url)
+
+    def _safe_url(self, href: str) -> str:
+        """Return `href` if it is same-site, else fall back to the origin path."""
+        request = self._require_request()
+        allowed = {request.get_host()}
+        if url_has_allowed_host_and_scheme(
+            href, allowed_hosts=allowed, require_https=request.is_secure()
+        ):
+            return href
+        return self._origin_path()
 
 
 class PatchResponse(HttpResponse):
@@ -232,4 +548,6 @@ __all__ = [
     "Patch",
     "PatchResponse",
     "Patches",
+    "UnknownContextNameError",
+    "UnknownPatchOpError",
 ]

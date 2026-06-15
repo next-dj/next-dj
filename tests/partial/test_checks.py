@@ -3,8 +3,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from next.components import ComponentInfo, FileComponentsBackend
+from next.forms.backends import FormActionBackend, RegistryFormActionBackend
 from next.partial import checks
+from next.partial.registry import patch_op_registry, register_patch_op
 
 
 @contextmanager
@@ -223,6 +227,91 @@ class TestZoneInComponentCheck:
         settings_ns.COMPONENT_BACKENDS = []
         with patch("next.partial.checks.next_framework_settings", settings_ns):
             assert checks.check_no_zone_in_component() == []
+
+
+@pytest.fixture()
+def restore_op_registry():
+    """Snapshot and restore the patch-op registry around a test."""
+    ops = set(patch_op_registry._ops)
+    custom = set(patch_op_registry._custom)
+    yield
+    patch_op_registry._ops = ops
+    patch_op_registry._custom = custom
+
+
+@pytest.mark.usefixtures("restore_op_registry")
+class TestUnregisteredOpCheck:
+    """`next.E066` fires on a custom verb that shadows or is malformed."""
+
+    def test_default_registry_is_silent(self) -> None:
+        assert checks.check_custom_patch_ops_well_formed() == []
+
+    def test_well_formed_custom_verb_is_silent(self) -> None:
+        register_patch_op("confetti")
+        assert checks.check_custom_patch_ops_well_formed() == []
+
+    def test_shadowing_a_builtin_verb_errors(self) -> None:
+        # a custom op named after a built-in verb never runs, the built-in wins
+        patch_op_registry._custom.add("morph")
+        ids = [m.id for m in checks.check_custom_patch_ops_well_formed()]
+        assert ids == [checks.E_UNREGISTERED_OP]
+
+    def test_malformed_verb_token_errors(self) -> None:
+        register_patch_op("not a token")
+        ids = [m.id for m in checks.check_custom_patch_ops_well_formed()]
+        assert ids == [checks.E_UNREGISTERED_OP]
+
+
+class _PartialUnawareBackend(RegistryFormActionBackend):
+    """Backend whose shape_response override never routes partial requests."""
+
+    def shape_response(self, request: object, outcome: object) -> object:
+        """Serve a full page regardless of the partial switch."""
+        del request, outcome
+        return object()
+
+
+@contextmanager
+def _form_backends(*backends: object, partial_active: bool) -> Iterator[None]:
+    """Point the W068 check at given form backends and partial-config state."""
+    manager = MagicMock()
+    manager.backends = tuple(backends)
+    settings_ns = MagicMock()
+    settings_ns.PARTIAL_BACKENDS = (
+        [{"BACKEND": "next.partial.PartialProtocolBackend"}] if partial_active else []
+    )
+    with (
+        patch("next.partial.checks.form_action_manager", manager),
+        patch("next.partial.checks.next_framework_settings", settings_ns),
+    ):
+        yield
+
+
+class TestFormBackendPartialAwareCheck:
+    """`next.W068` fires on a partial-unaware custom form backend."""
+
+    def test_default_backend_is_silent(self) -> None:
+        with _form_backends(RegistryFormActionBackend(), partial_active=True):
+            assert checks.check_form_backend_partial_aware() == []
+
+    def test_unaware_override_warns(self) -> None:
+        with _form_backends(_PartialUnawareBackend(), partial_active=True):
+            ids = [m.id for m in checks.check_form_backend_partial_aware()]
+        assert ids == [checks.W_FORM_BACKEND_NOT_AWARE]
+
+    def test_silent_when_partial_backends_inactive(self) -> None:
+        with _form_backends(_PartialUnawareBackend(), partial_active=False):
+            assert checks.check_form_backend_partial_aware() == []
+
+    def test_inherited_shape_response_is_silent(self) -> None:
+        # a subclass that does not override shape_response inherits the
+        # partial-aware base method, so the check stays quiet
+        assert _PartialUnawareBackend.shape_response is not (
+            FormActionBackend.shape_response
+        )
+        assert RegistryFormActionBackend.shape_response is (
+            FormActionBackend.shape_response
+        )
 
 
 class TestChecksSilentOnValidComposite:

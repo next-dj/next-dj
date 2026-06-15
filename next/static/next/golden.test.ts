@@ -140,4 +140,31 @@ describe("golden fixtures apply to the DOM", () => {
     expect(meta.headers["X-Next-Form"]).toBe("invalid");
     expect(meta.headers["X-Next-Action"]).toBe("ab12cd34");
   });
+
+  it("invalid_form_extract carves the failed form out of a full document", () => {
+    document.body.innerHTML =
+      '<form data-next-action="3f9ac21d75e04b88"><input name="title" value="kept"></form>';
+    const meta = readMeta("invalid_form_extract");
+    const { applier } = makeApplier();
+    const result: Envelope = applier.apply(
+      JSON.parse(readEnvelopeBytes(meta.envelope_file)),
+    );
+    const form = document.querySelector('[data-next-action="3f9ac21d75e04b88"]')!;
+    expect(form.querySelector(".errorlist")).not.toBeNull();
+    expect(form.querySelector('input[aria-invalid="true"]')).not.toBeNull();
+    expect(result.form).toEqual({
+      uid: "3f9ac21d75e04b88",
+      valid: false,
+      errors: { title: ["This field is required."] },
+    });
+    expect(meta.headers["X-Next-Action"]).toBe("3f9ac21d75e04b88");
+  });
+
+  it("result_form_visit names a single internal visit href", () => {
+    const meta = readMeta("result_form_visit");
+    const envelope: Envelope = parseEnvelope(
+      JSON.parse(readEnvelopeBytes(meta.envelope_file)),
+    );
+    expect(envelope.ops).toEqual([{ op: "visit", href: "/board/7/settings/" }]);
+  });
 });

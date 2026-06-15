@@ -1,0 +1,4 @@
+<h1>board settings</h1>
+{% form "rename_board_form" %}<div>{{ form.title }}{{ form.title.errors }}</div>{% endform %}
+{% form "create_column_form" %}<div>{{ form.column }}</div>{% endform %}
+{% form "archive_board_form" %}<div>{{ form.confirm }}</div>{% endform %}

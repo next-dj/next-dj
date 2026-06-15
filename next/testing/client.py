@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 from django.test import Client
 
 from next.forms.uid import ORIGIN_FIELD_NAME
-from next.partial.headers import CONTENT_TYPE, REQUEST_FLAG, ZONE
+from next.partial.headers import CONTENT_TYPE, REQUEST_FLAG, VERSION, ZONE
 
 from .actions import resolve_action_url
 
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 _PARTIAL_HEADER = f"HTTP_{REQUEST_FLAG.upper().replace('-', '_')}"
 _ZONE_HEADER = f"HTTP_{ZONE.upper().replace('-', '_')}"
+_VERSION_HEADER = f"HTTP_{VERSION.upper().replace('-', '_')}"
 
 
 class PartialEnvelope:
@@ -64,6 +65,22 @@ class PartialEnvelope:
             if isinstance(op.get("target"), dict) and "zone" in op["target"]
         ]
 
+    def form_targets(self) -> list[str]:
+        """Return the form uid of every op that addresses a form, in order."""
+        return [
+            op["target"]["form"]
+            for op in self.ops
+            if isinstance(op.get("target"), dict) and "form" in op["target"]
+        ]
+
+    def form_meta(self) -> dict[str, Any] | None:
+        """Return the machine-readable form meta object of the envelope."""
+        return cast("dict[str, Any] | None", self.data.get("form"))
+
+    def toasts(self) -> list[dict[str, Any]]:
+        """Return the payload of every toast op in order."""
+        return [op for op in self.ops if op.get("op") == "toast"]
+
     def html_for_zone(self, zone: str) -> str:
         """Return the HTML payload of the op morphing the named zone."""
         for op in self.ops:
@@ -102,18 +119,32 @@ class NextClient(Client):
         data: dict[str, Any] | None = None,
         *,
         origin: str | None = None,
+        partial: bool = False,
+        zones: str | tuple[str, ...] | None = None,
+        version: str | None = None,
         **extra: Any,  # noqa: ANN401
     ) -> HttpResponse:
         """Resolve `action_name` and POST `data` to the resulting URL.
 
         `origin` fills the `_next_form_origin` hidden field the form tag
-        emits, unless `data` already carries one.
+        emits, unless `data` already carries one. `partial` turns the
+        POST into a patch request by stamping `X-Next-Request`, `zones`
+        names the zone the form lives in, and `version` sets the client
+        asset version.
         """
         url = resolve_action_url(action_name)
         payload: dict[str, Any] = dict(data or {})
         if origin is not None:
             payload.setdefault(ORIGIN_FIELD_NAME, origin)
-        return cast("HttpResponse", self.post(url, data=payload, **extra))
+        headers: dict[str, Any] = {}
+        if partial:
+            headers[_PARTIAL_HEADER] = "1"
+        if zones is not None:
+            headers[_ZONE_HEADER] = zones if isinstance(zones, str) else ",".join(zones)
+        if version is not None:
+            headers[_VERSION_HEADER] = version
+        headers.update(extra)
+        return cast("HttpResponse", self.post(url, data=payload, **headers))
 
     def get_action_url(self, action_name: str) -> str:
         """Return the reverse URL for a registered form action."""

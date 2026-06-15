@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from next.partial import FormMeta, Patches
+from next.partial import Envelope, FormMeta, Patch, Patches
 from tests.partial.golden_support import (
     GoldenCase,
     read_envelope_bytes,
@@ -98,6 +98,56 @@ def _invalid_form() -> GoldenCase:
     )
 
 
+def _invalid_form_extract() -> GoldenCase:
+    html = (
+        "<!doctype html><html><body>"
+        '<form data-next-action="3f9ac21d75e04b88">'
+        '<ul class="errorlist"><li>This field is required.</li></ul>'
+        '<input name="title" value="" aria-invalid="true"></form>'
+        "</body></html>"
+    )
+    form = FormMeta(
+        uid="3f9ac21d75e04b88",
+        valid=False,
+        errors={"title": ["This field is required."]},
+    )
+    envelope = (
+        Patches("9f3c2e1b")
+        .morph({"form": "3f9ac21d75e04b88"}, html, extract=True)
+        .set_form(form)
+        .envelope()
+    )
+    return GoldenCase(
+        name="invalid_form_extract",
+        envelope=envelope,
+        description=(
+            "The default invalid-form envelope: one extract-morph addressing "
+            "the failed form by uid, the document trimmed to it by the client."
+        ),
+        version="9f3c2e1b",
+        extra_headers={
+            "X-Next-Form": "invalid",
+            "X-Next-Action": "3f9ac21d75e04b88",
+        },
+    )
+
+
+def _result_form_visit() -> GoldenCase:
+    envelope = Envelope(
+        version="9f3c2e1b",
+        ops=(Patch(op="visit", extras={"href": "/board/7/settings/"}),),
+    )
+    return GoldenCase(
+        name="result_form_visit",
+        envelope=envelope,
+        description=(
+            "A successful submission whose handler redirected: the redirect is "
+            "packed into one internal visit the client navigates to."
+        ),
+        version="9f3c2e1b",
+    )
+
+
 GOLDEN_CASES = [
     _replace_zone(),
     _inner_zone(),
@@ -105,6 +155,8 @@ GOLDEN_CASES = [
     _event_only(),
     _zone_get(),
     _invalid_form(),
+    _invalid_form_extract(),
+    _result_form_visit(),
 ]
 
 
@@ -171,3 +223,22 @@ class TestWriteGoldenFixtures:
         write_case(_zone_get())
         data = json.loads(read_envelope_bytes("zone_get"))
         assert data["assets"] == [{"kind": "css", "url": "/static/next/zoned.css"}]
+
+    def test_invalid_extract_envelope_marks_extract_on_the_form_target(self) -> None:
+        write_case(_invalid_form_extract())
+        data = json.loads(read_envelope_bytes("invalid_form_extract"))
+        op = data["ops"][0]
+        assert op["op"] == "morph"
+        assert op["target"] == {"form": "3f9ac21d75e04b88"}
+        assert op["extract"] is True
+
+    def test_invalid_extract_meta_headers_present(self) -> None:
+        write_case(_invalid_form_extract())
+        headers = read_meta("invalid_form_extract")["headers"]
+        assert headers["X-Next-Form"] == "invalid"
+        assert headers["X-Next-Action"] == "3f9ac21d75e04b88"
+
+    def test_result_form_visit_envelope_carries_one_internal_visit(self) -> None:
+        write_case(_result_form_visit())
+        data = json.loads(read_envelope_bytes("result_form_visit"))
+        assert data["ops"] == [{"op": "visit", "href": "/board/7/settings/"}]

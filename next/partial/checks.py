@@ -25,9 +25,12 @@ from next.checks.common import get_router_manager, iter_scanned_page_pairs
 from next.components.backends import FileComponentsBackend
 from next.components.manager import ComponentsManager
 from next.conf import next_framework_settings
+from next.forms.backends import FormActionBackend
+from next.forms.manager import form_action_manager
 from next.pages import page
 
 from .markers import ZoneNode
+from .registry import BUILTIN_OPS, patch_op_registry
 
 
 if TYPE_CHECKING:
@@ -357,6 +360,91 @@ def _component_zone_errors(template_path: Path) -> list[CheckMessage]:
     ]
 
 
+_OP_TOKEN = re.compile(r"\A[A-Za-z0-9_.-]+\Z")
+
+
+@register(Tags.templates)
+def check_custom_patch_ops_well_formed(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Error when a custom patch verb is malformed or shadows a built-in (`next.E066`).
+
+    The runtime guard in `Patches.op()` rejects an unregistered verb on
+    every call. This check turns the registry side of that contract into
+    a startup error: a verb registered with a non-token name or one that
+    silently shadows a built-in verb is caught at `manage.py check`
+    rather than only when an op of that name reaches a client.
+    """
+    messages: list[CheckMessage] = []
+    for name in sorted(patch_op_registry.custom_names()):
+        if name in BUILTIN_OPS:
+            messages.append(
+                Error(
+                    f'Custom patch op "{name}" shadows a built-in verb. The '
+                    "built-in verb wins on the wire, so the custom handler "
+                    "never runs. Register the op under a different name.",
+                    id=E_UNREGISTERED_OP,
+                )
+            )
+            continue
+        if not _OP_TOKEN.match(name):
+            messages.append(
+                Error(
+                    f'Custom patch op "{name}" is not a valid verb token. A '
+                    "patch verb travels in the JSON envelope, so use letters, "
+                    "digits, dots, hyphens, or underscores.",
+                    id=E_UNREGISTERED_OP,
+                )
+            )
+    return messages
+
+
+@register(Tags.compatibility)
+def check_form_backend_partial_aware(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when partial rendering is on but a form backend is not aware (`next.W068`).
+
+    The base `FormActionBackend.shape_response` routes partial requests
+    to the patch shaping path. A custom backend that overrides
+    `shape_response` without that branch would silently drop the patch
+    envelope and serve a full page to the runtime. The check stays silent
+    on the default backend, which inherits the partial-aware method.
+    """
+    if not _partial_backends_active():
+        return []
+    messages: list[CheckMessage] = []
+    seen: set[type] = set()
+    for backend in form_action_manager.backends:
+        backend_class = type(backend)
+        if backend_class in seen:
+            continue
+        seen.add(backend_class)
+        if backend_class.shape_response is FormActionBackend.shape_response:
+            continue
+        messages.append(
+            DjangoWarning(
+                f"Form action backend {backend_class.__name__!r} overrides "
+                "shape_response, but PARTIAL_BACKENDS is configured. Route "
+                "partial requests through next.partial.shape_partial in the "
+                "override, or the runtime receives a full page instead of a "
+                "patch envelope.",
+                id=W_FORM_BACKEND_NOT_AWARE,
+            )
+        )
+    return messages
+
+
+def _partial_backends_active() -> bool:
+    """Return True when at least one partial protocol backend is configured."""
+    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", [])
+    return isinstance(configs, list) and any(
+        isinstance(config, dict) for config in configs
+    )
+
+
 __all__ = [
     "CHECK_IDS",
     "E_DUPLICATE_ZONE",
@@ -369,7 +457,9 @@ __all__ = [
     "W_FORM_BACKEND_NOT_AWARE",
     "W_MANIFEST_VERSION_NO_STORAGE",
     "W_WITH_OVER_ZONE",
+    "check_custom_patch_ops_well_formed",
     "check_duplicate_zone_names",
+    "check_form_backend_partial_aware",
     "check_lazy_zone_has_placeholder",
     "check_no_zone_in_component",
     "check_with_directly_over_zone",

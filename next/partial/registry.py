@@ -49,10 +49,13 @@ class PatchOpRegistry:
     def __init__(self) -> None:
         """Seed the registry with the built-in verbs."""
         self._ops: set[str] = set(BUILTIN_OPS)
+        self._custom: set[str] = set()
 
     def register(self, name: str) -> None:
         """Register a custom verb and announce it to subscribers."""
         self._ops.add(name)
+        if name not in BUILTIN_OPS:
+            self._custom.add(name)
         if patch_op_registered.receivers:
             patch_op_registered.send(sender=type(self), name=name)
 
@@ -63,6 +66,10 @@ class PatchOpRegistry:
     def names(self) -> frozenset[str]:
         """Return the set of registered verb names."""
         return frozenset(self._ops)
+
+    def custom_names(self) -> frozenset[str]:
+        """Return the verb names registered beyond the built-in set."""
+        return frozenset(self._custom)
 
 
 patch_op_registry = PatchOpRegistry()
