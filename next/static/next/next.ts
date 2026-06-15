@@ -23,6 +23,10 @@ class Next {
     Next.#context = context;
     Next.#ready = true;
     Next.#dispatch("context-updated", context);
+    // Seed the asset registry, mount the initial DOM, and fire the batched load
+    // zones before `ready` listeners run, so a `ready` handler sees a mounted
+    // document.
+    Next.partial.ready();
     Next.#dispatch("ready", context);
   }
 

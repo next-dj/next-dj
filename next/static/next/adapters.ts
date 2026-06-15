@@ -7,8 +7,10 @@
 // TS-coverage rather than painted with fake hits.
 
 import type { HistoryAdapter } from "./apply";
+import type { LinkLoader, SessionStore } from "./assets";
 import type { DialogAdapter, DialogControl } from "./layers";
 import type { Move } from "./morph";
+import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import type { Clock, FetchAdapter, Navigate } from "./wire";
 
 export function defaultFetch(): FetchAdapter {
@@ -28,6 +30,30 @@ export function defaultNavigate(): Navigate {
   return (url) => globalThis.location.assign(url);
 }
 
+// The CSS loader seam. jsdom never fires link.onload, so the real insertion and
+// the onload/onerror wiring live here behind the injectable LinkLoader and the
+// assets module runs against a mock that drives the load, error, and timeout
+// branches deterministically.
+export function defaultLinkLoader(): LinkLoader {
+  return (url, nonce, done, clock, timeoutMs) => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = url;
+    if (nonce !== undefined) link.nonce = nonce;
+    let settled = false;
+    const finish = (ok: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clock.clearTimeout(timer);
+      done(ok);
+    };
+    link.onload = () => finish(true);
+    link.onerror = () => finish(false);
+    const timer = clock.setTimeout(() => finish(false), timeoutMs);
+    document.head.append(link);
+  };
+}
+
 // The history seam for the url verb. push and replace map straight onto the
 // History global, which mutates shared page state the harness inspects through
 // a mock rather than the real bar.
@@ -35,6 +61,65 @@ export function defaultHistory(): HistoryAdapter {
   return {
     push: (href) => globalThis.history.pushState(null, "", href),
     replace: (href) => globalThis.history.replaceState(null, "", href),
+  };
+}
+
+// The confirm gate for data-next-confirm. window.confirm blocks on a native
+// dialog jsdom does not render, so it lives behind the seam and tests drive
+// accept and cancel through a mock.
+export function defaultConfirm(): ConfirmAdapter {
+  return (text) => globalThis.confirm(text);
+}
+
+// The reload-once store. sessionStorage throws in private mode and when storage
+// is disabled, and the version guard must never break navigation over it, so the
+// real access lives here behind the seam wrapped in a tolerant try/catch and the
+// assets module runs against an in-memory store in tests.
+export function defaultSession(): SessionStore {
+  return {
+    get(key) {
+      try {
+        return globalThis.sessionStorage.getItem(key);
+      } catch {
+        return null;
+      }
+    },
+    set(key, value) {
+      try {
+        globalThis.sessionStorage.setItem(key, value);
+      } catch {
+        // A full or disabled store means the guard cannot persist, the next
+        // mismatch reloads again, which is the safe direction.
+      }
+    },
+    remove(key) {
+      try {
+        globalThis.sessionStorage.removeItem(key);
+      } catch {
+        // Same tolerance as set.
+      }
+    },
+  };
+}
+
+// The revealed-trigger geometry: a real IntersectionObserver fires the callback
+// once the element scrolls into view, then disconnects (one-shot reveal). jsdom
+// reports no intersections, so the geometry lives here behind the adapter and
+// the triggers run against a mock that calls the reveal callback directly.
+export function defaultObserver(): IntersectionAdapter {
+  return {
+    observe(el, onReveal) {
+      const io = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            onReveal();
+            io.disconnect();
+          }
+        }
+      });
+      io.observe(el);
+      return () => io.disconnect();
+    },
   };
 }
 

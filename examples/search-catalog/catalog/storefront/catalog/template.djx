@@ -1,12 +1,23 @@
+{% load catalog_qs %}
 <header class="flex items-baseline justify-between">
   <h1 class="text-2xl font-semibold">All products</h1>
   <p class="text-sm text-muted-foreground">{{ page_obj.total }} products</p>
 </header>
 
-<ul class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+{% zone "catalog-results" tag="ul" %}
   {% for product in page_obj.products %}
-    <li>{% component "product_card" %}</li>
+    <li data-next-key="{{ product.pk }}">{% component "product_card" %}</li>
   {% endfor %}
-</ul>
+  {% if page_obj.has_next %}
+    <li id="results-sentinel" class="sm:col-span-2 lg:col-span-3">
+      <a href="?{% querystring page=page_obj.page|add:'1' %}"
+         data-next-target="catalog-results" data-next-merge="append"
+         data-next-trigger="revealed"
+         class="block rounded-md border border-dashed border-border px-3 py-2 text-center text-sm text-muted-foreground hover:bg-accent">
+        Show more
+      </a>
+    </li>
+  {% endif %}
+{% endzone %}
 
 {% component "pagination" %}

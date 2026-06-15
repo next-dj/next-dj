@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, cast
 
+from django.conf import settings
+from django.contrib.staticfiles.storage import ManifestFilesMixin
 from django.core.checks import (
     CheckMessage,
     Error,
@@ -24,7 +26,7 @@ from django.template.defaulttags import ForNode, IfNode, WithNode
 from next.checks.common import get_router_manager, iter_scanned_page_pairs
 from next.components.backends import FileComponentsBackend
 from next.components.manager import ComponentsManager
-from next.conf import next_framework_settings
+from next.conf import import_class_cached, next_framework_settings
 from next.forms.backends import FormActionBackend
 from next.forms.manager import form_action_manager
 from next.pages import page
@@ -445,6 +447,90 @@ def _partial_backends_active() -> bool:
     )
 
 
+_VERSION_OPTION: Final = "VERSION"
+_MANIFEST_VERSION: Final = "manifest"
+_STATICFILES_ALIAS: Final = "staticfiles"
+
+
+@register(Tags.compatibility)
+def check_manifest_version_has_manifest_storage(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when manifest versioning has no manifest storage (`next.W069`).
+
+    The `VERSION: "manifest"` option asks the version stamp to track the
+    staticfiles manifest, so a deploy of new assets bumps the version and
+    the client reloads. That guard is silent unless the active staticfiles
+    storage hashes its files into a manifest. The check pairs with the
+    runtime fallback that resolves the sentinel to a stable default when no
+    manifest storage is configured, surfacing the dead guard at startup.
+    """
+    if not _manifest_version_requested():
+        return []
+    if _staticfiles_storage_is_manifest():
+        return []
+    return [
+        DjangoWarning(
+            'A partial backend sets VERSION: "manifest", but the staticfiles '
+            "storage does not hash files into a manifest. The asset-version "
+            "guard stays silent, so a deploy of new assets cannot ask clients "
+            "to reload. Use a ManifestStaticFilesStorage, or set an explicit "
+            "VERSION string to pin the version yourself.",
+            id=W_MANIFEST_VERSION_NO_STORAGE,
+        )
+    ]
+
+
+def _manifest_version_requested() -> bool:
+    """Return True when a partial backend resolves VERSION to the sentinel."""
+    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", [])
+    if not isinstance(configs, list):
+        return False
+    for config in configs:
+        if not isinstance(config, dict):
+            continue
+        options = config.get("OPTIONS")
+        version = options.get(_VERSION_OPTION) if isinstance(options, dict) else None
+        if version is None or version == _MANIFEST_VERSION:
+            return True
+    return False
+
+
+def _staticfiles_storage_is_manifest() -> bool:
+    """Return True when the configured staticfiles storage hashes its files.
+
+    The storage class is read from its dotted path rather than the resolved
+    `staticfiles_storage` proxy, so the check stays side-effect-free and
+    never fails on a project that has not set STATIC_ROOT. Both the modern
+    `STORAGES["staticfiles"]` mapping and the legacy `STATICFILES_STORAGE`
+    string resolve, since Django folds the legacy setting into STORAGES on
+    the versions that still accept it.
+    """
+    backend_path = _staticfiles_storage_path()
+    if backend_path is None:
+        return False
+    try:
+        storage_class = import_class_cached(backend_path)
+    except ImportError:
+        return False
+    return isinstance(storage_class, type) and issubclass(
+        storage_class, ManifestFilesMixin
+    )
+
+
+def _staticfiles_storage_path() -> str | None:
+    """Return the dotted path of the configured staticfiles storage backend."""
+    storages = getattr(settings, "STORAGES", None)
+    if isinstance(storages, dict):
+        entry = storages.get(_STATICFILES_ALIAS)
+        if isinstance(entry, dict):
+            backend = entry.get("BACKEND")
+            return backend if isinstance(backend, str) else None
+    legacy = getattr(settings, "STATICFILES_STORAGE", None)
+    return legacy if isinstance(legacy, str) else None
+
+
 __all__ = [
     "CHECK_IDS",
     "E_DUPLICATE_ZONE",
@@ -461,6 +547,7 @@ __all__ = [
     "check_duplicate_zone_names",
     "check_form_backend_partial_aware",
     "check_lazy_zone_has_placeholder",
+    "check_manifest_version_has_manifest_storage",
     "check_no_zone_in_component",
     "check_with_directly_over_zone",
     "check_zone_name_is_slug",

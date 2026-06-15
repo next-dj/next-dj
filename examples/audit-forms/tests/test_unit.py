@@ -37,6 +37,17 @@ _step_section = _load(
     VIEWS_ROOT / "request" / "[step]" / "_blocks" / "step_section" / "component.py",
     "audit_step_section",
 )
+_admin_audit = _load(VIEWS_ROOT / "admin" / "audit" / "page.py", "audit_admin_audit")
+
+
+def _audit_request(*, zone: str | None, kind: str = "") -> HttpRequest:
+    request = HttpRequest()
+    request.method = "GET"
+    request.GET = QueryDict(f"kind={kind}" if kind else "")
+    if zone is not None:
+        request.META["HTTP_X_NEXT_REQUEST"] = "1"
+        request.META["HTTP_X_NEXT_ZONE"] = zone
+    return request
 
 
 def _wizard(step: str, stored: dict[str, dict[str, object]] | None = None):
@@ -390,3 +401,43 @@ class TestLandingPage:
         assert "Grace Hopper" in body
         assert "compilers" in body
         assert "access_request_wizard" in body
+
+
+@pytest.mark.django_db()
+class TestLazyAuditEntries:
+    """The `entries` provider runs its query only for the lazy zone request."""
+
+    def test_full_render_request_returns_none_without_querying(self) -> None:
+        AuditEntry.objects.create(
+            action_name="x",
+            kind=AuditEntry.KIND_DISPATCHED,
+            source=AuditEntry.SOURCE_BACKEND,
+        )
+        assert _admin_audit.entries(_audit_request(zone=None)) is None
+
+    def test_zone_request_loads_the_rows(self) -> None:
+        AuditEntry.objects.create(
+            action_name="x",
+            kind=AuditEntry.KIND_DISPATCHED,
+            source=AuditEntry.SOURCE_BACKEND,
+        )
+        rows = _admin_audit.entries(_audit_request(zone="audit-table"))
+        assert rows is not None
+        assert len(rows) == 1
+
+    def test_zone_request_applies_the_kind_filter(self) -> None:
+        AuditEntry.objects.create(
+            action_name="x",
+            kind=AuditEntry.KIND_DISPATCHED,
+            source=AuditEntry.SOURCE_BACKEND,
+        )
+        AuditEntry.objects.create(
+            action_name="y",
+            kind=AuditEntry.KIND_VALIDATION_FAILED,
+            source=AuditEntry.SOURCE_SIGNAL,
+        )
+        rows = _admin_audit.entries(
+            _audit_request(zone="audit-table", kind=AuditEntry.KIND_VALIDATION_FAILED)
+        )
+        assert rows is not None
+        assert [r.kind for r in rows] == [AuditEntry.KIND_VALIDATION_FAILED]

@@ -18,26 +18,35 @@
   {% /component %}
 
   <div class="overflow-hidden rounded-md border border-border bg-card shadow-sm">
-    {% if entries %}
-      <table class="w-full text-left text-sm" data-audit-table>
-        <thead class="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
-          <tr>
-            <th class="px-4 py-2">Time</th>
-            <th class="px-4 py-2">Source</th>
-            <th class="px-4 py-2">Kind</th>
-            <th class="px-4 py-2">Action</th>
-            <th class="px-4 py-2">Status</th>
-            <th class="px-4 py-2">Summary</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-border">
-          {% for entry in entries %}
-            {% component "audit_row" %}
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="p-6 text-sm text-muted-foreground">No audit rows yet. Submit a request to populate the log.</p>
-    {% endif %}
+    {% zone "audit-table" lazy="revealed" %}
+      {% if entries %}
+        <table class="w-full text-left text-sm" data-audit-table>
+          <thead class="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th class="px-4 py-2">Time</th>
+              <th class="px-4 py-2">Source</th>
+              <th class="px-4 py-2">Kind</th>
+              <th class="px-4 py-2">Action</th>
+              <th class="px-4 py-2">Status</th>
+              <th class="px-4 py-2">Summary</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border">
+            {% for entry in entries %}
+              {% component "audit_row" %}
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="p-6 text-sm text-muted-foreground">No audit rows yet. Submit a request to populate the log.</p>
+      {% endif %}
+    {% placeholder %}
+      <div data-audit-skeleton class="space-y-2 p-4">
+        {% component "skeleton" height="1.5rem" extra="w-1/3" %}
+        {% for _ in "xxxxxx" %}
+          {% component "skeleton" height="1.25rem" %}
+        {% endfor %}
+      </div>
+    {% endzone %}
   </div>
 </div>

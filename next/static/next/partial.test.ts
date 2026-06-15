@@ -144,6 +144,77 @@ describe("createPartial surface", () => {
     await partial.fetch({ url: "/list/", zone: "z" });
     expect(dispatched.some((d) => d.event === "partial:before-request")).toBe(true);
   });
+
+  it("onMount runs over the initial DOM on ready and over inserted subtrees", () => {
+    document.body.innerHTML = '<div data-next-zone="z"><span class="w">a</span></div>';
+    const seen: string[] = [];
+    partial._configure({ document });
+    partial.onMount(".w", (el) => seen.push(el.textContent ?? ""));
+    partial.ready();
+    expect(seen).toEqual(["a"]);
+    partial.apply({
+      version: "v1",
+      ops: [
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<div data-next-zone="z"><span class="w">b</span></div>',
+        },
+      ],
+      assets: [],
+      defer: [],
+      form: null,
+    });
+    expect(seen).toEqual(["a", "b"]);
+  });
+
+  it("onMount fires when the inserted subtree root itself matches the selector", () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const seen: string[] = [];
+    partial._configure({ document });
+    partial.onMount('[data-next-zone="z"]', (el) => seen.push(el.textContent ?? ""));
+    partial.apply({
+      version: "v1",
+      ops: [
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<div data-next-zone="z">new</div>',
+        },
+      ],
+      assets: [],
+      defer: [],
+      form: null,
+    });
+    expect(seen).toEqual(["new"]);
+  });
+
+  it("ready batches the document's load zones into one zone fetch", async () => {
+    document.body.innerHTML =
+      '<div data-next-zone="a" data-next-lazy="load"></div>' +
+      '<div data-next-zone="b" data-next-lazy="load"></div>';
+    const calls: { url: string; init: RequestInit }[] = [];
+    partial._configure({
+      document,
+      fetch: async (url, init) => {
+        calls.push({ url, init });
+        return new Response(
+          '{"version":"v1","ops":[],"assets":[],"defer":[],"form":null}',
+          {
+            status: 200,
+            headers: { "content-type": "application/vnd.next.patches+json" },
+          },
+        );
+      },
+      navigate: () => {},
+    });
+    partial.ready();
+    await Promise.resolve();
+    expect(calls).toHaveLength(1);
+    expect((calls[0].init.headers as Record<string, string>)["X-Next-Zone"]).toBe(
+      "a,b",
+    );
+  });
 });
 
 describe("Next.partial integration", () => {

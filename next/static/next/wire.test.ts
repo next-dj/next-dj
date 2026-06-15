@@ -218,6 +218,59 @@ describe("Wire safe-GET queue", () => {
   });
 });
 
+describe("Wire abortable validation", () => {
+  it("queues an abortable POST by zone without taking the mutation lock", async () => {
+    const signals: AbortSignal[] = [];
+    let resolveFirst!: (r: Response) => void;
+    let n = 0;
+    const h = makeWire((_url, init) => {
+      signals.push(init.signal!);
+      n += 1;
+      if (n === 1) return new Promise<Response>((r) => (resolveFirst = r));
+      return Promise.resolve(envelopeResponse(ENVELOPE));
+    });
+    const first = h.wire.fetch({
+      url: "/f/",
+      method: "POST",
+      zone: "validate:u",
+      abortable: true,
+    });
+    const second = h.wire.fetch({
+      url: "/f/",
+      method: "POST",
+      zone: "validate:u",
+      abortable: true,
+    });
+    expect(signals[0].aborted).toBe(true);
+    resolveFirst(envelopeResponse(ENVELOPE));
+    await Promise.all([first, second]);
+    expect(h.envelopes).toHaveLength(1);
+  });
+
+  it("abort cancels the in-flight zone request and drops its late answer", async () => {
+    let resolveFirst!: (r: Response) => void;
+    const h = makeWire((_url, init) => {
+      void init;
+      return new Promise<Response>((r) => (resolveFirst = r));
+    });
+    const inflight = h.wire.fetch({
+      url: "/f/",
+      method: "POST",
+      zone: "validate:u",
+      abortable: true,
+    });
+    h.wire.abort("validate:u");
+    resolveFirst(envelopeResponse(ENVELOPE));
+    await inflight;
+    expect(h.envelopes).toHaveLength(0);
+  });
+
+  it("abort on an idle zone is a no-op", () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    expect(() => h.wire.abort("nothing")).not.toThrow();
+  });
+});
+
 describe("Wire before-request", () => {
   it("emits partial:before-request with url, method, intent", async () => {
     const h = makeWire(async () => envelopeResponse(ENVELOPE));

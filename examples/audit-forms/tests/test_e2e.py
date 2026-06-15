@@ -268,29 +268,46 @@ class TestNamespacedAction:
 
 
 class TestAdminAuditPage:
-    def test_admin_lists_both_sources(self, client) -> None:
+    def test_admin_full_render_shows_only_the_skeleton(self, client) -> None:
         _post_step(client, "identity", IDENTITY)
-        _post_step(client, "identity", {**IDENTITY, "email": ""})
 
         response = client.get("/admin/audit/")
         assert response.status_code == 200
         body = response.content.decode()
 
-        assert 'data-source="backend"' in body
-        assert 'data-source="signal"' in body
-        assert 'data-kind="dispatched"' in body
-        assert 'data-kind="validation_failed"' in body
-        assert "data-audit-table" in body
+        assert 'data-next-zone="audit-table"' in body
+        assert 'data-next-lazy="revealed"' in body
+        assert "data-audit-skeleton" in body
+        assert "data-audit-table" not in body
+        assert 'data-source="backend"' not in body
+
+    def test_zone_request_morphs_the_audit_table(self, client) -> None:
+        _post_step(client, "identity", IDENTITY)
+        _post_step(client, "identity", {**IDENTITY, "email": ""})
+
+        response = client.get_zones("/admin/audit/", "audit-table")
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["audit-table"]
+        html = envelope.html_for_zone("audit-table")
+        assert 'data-source="backend"' in html
+        assert 'data-source="signal"' in html
+        assert 'data-kind="dispatched"' in html
+        assert 'data-kind="validation_failed"' in html
+        assert "data-audit-table" in html
 
     def test_admin_filter_narrows_to_one_kind(self, client) -> None:
         _post_step(client, "identity", IDENTITY)
         _post_step(client, "identity", {**IDENTITY, "email": ""})
 
-        response = client.get("/admin/audit/?kind=validation_failed")
-        body = response.content.decode()
-        assert 'data-kind="validation_failed"' in body
-        assert 'data-kind="dispatched"' not in body
-        assert 'data-kind="request_started"' not in body
+        response = client.get_zones(
+            "/admin/audit/?kind=validation_failed", "audit-table"
+        )
+        html = envelope_of(response).html_for_zone("audit-table")
+        assert 'data-kind="validation_failed"' in html
+        assert 'data-kind="dispatched"' not in html
+        assert 'data-kind="request_started"' not in html
         assert (
             AuditEntry.objects.filter(kind=AuditEntry.KIND_VALIDATION_FAILED).count()
             == 1
@@ -299,11 +316,11 @@ class TestAdminAuditPage:
     def test_admin_surfaces_access_denied_rows(self, client) -> None:
         _post_step_unacknowledged(client, "identity", IDENTITY)
 
-        response = client.get("/admin/audit/?kind=access_denied")
-        body = response.content.decode()
-        assert 'data-kind="access_denied"' in body
-        assert "view/denied" in body
-        assert 'data-kind="dispatched"' not in body
+        response = client.get_zones("/admin/audit/?kind=access_denied", "audit-table")
+        html = envelope_of(response).html_for_zone("audit-table")
+        assert 'data-kind="access_denied"' in html
+        assert "view/denied" in html
+        assert 'data-kind="dispatched"' not in html
 
 
 class TestUnknownUid:

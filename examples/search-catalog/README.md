@@ -49,11 +49,14 @@ Tailwind loads via the Play CDN in
 [`catalog/storefront/layout.djx`](catalog/storefront/layout.djx). No
 Node, no build step. Components carry co-located CSS and JS that the
 static collector picks up, deduplicates, and emits exactly once per
-page. The `filter_panel` component ships a small `component.js` that
-auto-submits the form when any checkbox or dropdown changes and runs
-live constraint validation on the search field (minimum 3 characters)
-through the native Constraint Validation API, with a help text that
-narrates exactly how many more characters are needed.
+page. The results list lives in a `catalog-results` zone, so the
+filter panel auto-submits as you type and the listing grows on scroll
+without a full reload. The `filter_panel` component ships a small
+`component.js` that runs live constraint validation on the search
+field (minimum 3 characters) through the native Constraint Validation
+API, rewired through `Next.partial.onMount` so it survives a morphed
+panel. Every behaviour degrades to a plain GET when the runtime is
+absent.
 
 ## Walking the code
 
@@ -213,15 +216,7 @@ the landing page.
 
 `filter_panel` also ships
 [`component.js`](catalog/storefront/catalog/_cards/filter_panel/component.js).
-It does two things. First, it attaches a `change` listener to
-`[data-filter-form]` and auto-submits the form when a checkbox or
-`<select>` changes (only if the form passes `checkValidity()`).
-Number inputs and the text query field are excluded so that
-partially-typed values do not trigger a reload mid-entry — those
-commit on Enter, and the "Apply filters" button submits everything
-at once.
-
-Second, it runs live validation on the query field using the native
+It runs live validation on the query field using the native
 Constraint Validation API. The `<input>` declares `minlength="3"`, so
 the browser already enforces the rule on submit and shows the
 `invalid:` Tailwind variant (rose border on a red-tinted background).
@@ -232,8 +227,47 @@ at least 3 characters in total"), and updates the help paragraph
 with three colour states (`text-slate-500` idle, `text-rose-600` too
 short, `text-emerald-600` valid). The empty string is treated as
 "no filter" so the user can clear the field without seeing an error.
-The script is injected via `{% collect_scripts %}` in
+
+The script registers its work through `Next.partial.onMount`, not a
+`document.querySelectorAll` scan at load. The runtime runs the
+callback over the initial DOM and over every subtree it later inserts,
+so a panel that arrives in a morphed zone is wired the same way the
+first render was, with no listener orphaned by the swap. The script is
+injected via `{% collect_scripts %}` in
 [`storefront/layout.djx`](catalog/storefront/layout.djx).
+
+### 7. Auto-submit and infinite scroll on the results zone
+
+[`catalog/storefront/catalog/template.djx`](catalog/storefront/catalog/template.djx)
+wraps the product grid in `{% zone "catalog-results" tag="ul" %}`. The
+`tag="ul"` keeps the wrapper a real list element so the `<li>` rows
+stay valid children — a `<div>` would be dropped by the parser. The
+filter form carries `data-next-target="catalog-results"`,
+`data-next-trigger="input"`, and `data-next-debounce="300"`, and the
+sort `<select>` adds `data-next-trigger="change"`. As you type, the
+runtime debounces, issues a GET for the `catalog-results` zone, morphs
+the list in place, and syncs the query string with `replaceState`. The
+catalog page never changed: the `page_obj` provider still reads
+`request.GET` through `DFilters`/`DPage`, so the same view answers both
+the full page and the zone request.
+
+When the listing has another page the zone renders a sentinel `<li>`
+with `data-next-merge="append"` and `data-next-trigger="revealed"`.
+The runtime fires the GET when the sentinel scrolls into view, the
+server reads the merge intent and answers with an `append` patch
+instead of a morph, and the new rows are deduplicated by their
+`data-next-key`, so the stale sentinel (matched by `id`) is replaced
+rather than doubled. The `Vary` header always lists `X-Next-Merge`, so
+a shared cache never hands an append envelope to a client that asked
+for a morph. Changing the search term re-morphs the zone and the
+accumulated list resets on its own.
+
+Without the runtime the form is a plain `<form method="get">` and the
+sentinel is an honest pagination link, so the catalog stays bookmarkable
+and crawlable. The grid styling lives in
+[`catalog/layout.css`](catalog/storefront/catalog/layout.css) keyed by
+`ul[data-next-zone="catalog-results"]`, so it applies whether the list
+renders inline or arrives as a zone patch.
 
 [`catalog/layout.css`](catalog/storefront/catalog/layout.css) is a
 co-located layout stylesheet. It applies `position: sticky; top: 1rem`
@@ -247,7 +281,7 @@ as the
 [`test_catalog_layout_css_absent_on_landing`](tests/test_e2e.py)
 test verifies.
 
-### 7. `cached_search` and the LocMem hit path
+### 8. `cached_search` and the LocMem hit path
 
 [`catalog/queries.py`](catalog/queries.py) materialises the page slice
 into a list so the cached payload does not depend on a queryset
@@ -258,7 +292,7 @@ cache key and serve the second request from memory, which the
 [`tests/test_e2e.py::TestCacheHit`](tests/test_e2e.py) tests verify
 through the cache backend's internal map.
 
-### 8. Active filter chips
+### 9. Active filter chips
 
 [`catalog/context_processors.py`](catalog/context_processors.py)
 returns a `chips` list and a `drop_filter_qs` map keyed by

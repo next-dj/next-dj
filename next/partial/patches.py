@@ -375,9 +375,29 @@ class Patches:
         dedupe: str = "key",
     ) -> "Patches":
         """Append children to the target, deduplicating by key or id."""
+        return self._merge("append", target, html, dedupe)
+
+    def prepend(
+        self,
+        target: "Mapping[str, Any]",
+        html: str,
+        *,
+        dedupe: str = "key",
+    ) -> "Patches":
+        """Prepend children to the target, deduplicating by key or id."""
+        return self._merge("prepend", target, html, dedupe)
+
+    def _merge(
+        self,
+        op: str,
+        target: "Mapping[str, Any]",
+        html: str,
+        dedupe: str,
+    ) -> "Patches":
+        """Record a merge op appending or prepending deduplicated children."""
         self._ops.append(
             Patch(
-                op="append",
+                op=op,
                 target=dict(target),
                 html=html,
                 extras={"dedupe": dedupe},

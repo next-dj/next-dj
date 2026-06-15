@@ -79,6 +79,37 @@ export interface HistoryAdapter {
   replace(href: string): void;
 }
 
+// The asset and version bridge the applier consults around the ops. The applier
+// gates ops behind the CSS delta and runs the JS delta after, but owns neither
+// the loader nor the registry: those live in assets.ts. Absent, the ops run
+// inline with no asset handling, the path the verb-only tests exercise.
+export interface AssetBridge {
+  loadCss(manifest: Asset[], done: () => void): void;
+  loadJs(manifest: Asset[]): void;
+  versionMismatch(envelopeVersion: string, url: string): boolean;
+  acceptVersion(envelopeVersion: string): void;
+}
+
+// The re-executable mount registry: a callback runs over the document on `ready`
+// and over every inserted subtree after each apply, the one-to-one replacement
+// for DOMContentLoaded. triggers.ts also rides this hook to bind delegated
+// handlers on newly inserted zones.
+export type MountCallback = (root: ParentNode) => void;
+
+export interface MountRegistry {
+  // Run the registered callbacks over a freshly inserted subtree.
+  run(root: ParentNode): void;
+}
+
+// The fetch bridge the `refresh` verb and the defer queue use to re-GET a zone
+// with its own cookies. Absent, both are no-ops. The same shape the layer stack
+// already passes, so partial.ts wires one binding.
+export type ZoneFetch = (request: {
+  url: string;
+  zone: string;
+  headers?: Record<string, string>;
+}) => void;
+
 export interface ApplyDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   mergeContext: (data: Record<string, unknown>) => void;
@@ -94,6 +125,18 @@ export interface ApplyDeps {
   layers?: LayerBridge;
   // The history seam for the url verb. Absent, the verb is a no-op.
   history?: HistoryAdapter;
+  // The asset loader and version safeguard. Absent, ops run with no CSS gate,
+  // no JS delta, and no version check.
+  assets?: AssetBridge;
+  // The re-executable mount registry, run over every inserted subtree. Absent,
+  // only next:mounted fires.
+  mount?: MountRegistry;
+  // The zone re-GET used by the refresh verb and the defer queue. Absent, both
+  // are no-ops.
+  refresh?: ZoneFetch;
+  // The current URL the version safeguard reloads on a mismatch. Absent, the
+  // document's own location is used.
+  here?: () => string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -141,10 +184,20 @@ export class Applier {
   readonly #dirtySince: (snapshot: number) => (field: Element) => boolean;
   readonly #layers: LayerBridge | undefined;
   readonly #history: HistoryAdapter | undefined;
+  readonly #assets: AssetBridge | undefined;
+  readonly #mount: MountRegistry | undefined;
+  readonly #refresh: ZoneFetch | undefined;
+  readonly #here: () => string;
   #dev: boolean;
   // The morph dirty predicate for the envelope in flight, built from the wire
   // snapshot and reset once the envelope is fully applied.
   #isDirty: (field: Element) => boolean = () => false;
+  // The nodes a single envelope touched, collected so next:mounted and the
+  // mount registry only see what actually changed.
+  #touched: Element[] = [];
+  // Monotonic apply counter per zone. The defer queue reads it so a zone whose
+  // ancestor was re-created mid-flight does not enqueue a stale second GET.
+  readonly #applied: Map<string, number> = new Map();
 
   constructor(deps: ApplyDeps) {
     this.#dispatch = deps.dispatch;
@@ -154,6 +207,10 @@ export class Applier {
     this.#dirtySince = deps.dirtySince ?? (() => () => false);
     this.#layers = deps.layers;
     this.#history = deps.history;
+    this.#assets = deps.assets;
+    this.#mount = deps.mount;
+    this.#refresh = deps.refresh;
+    this.#here = deps.here ?? (() => this.#document.location.pathname);
     this.#registerBuiltins();
   }
 
@@ -161,7 +218,14 @@ export class Applier {
   // leak registrations into one another.
   _reset(): void {
     this.#ops.clear();
+    this.#applied.clear();
     this.#registerBuiltins();
+  }
+
+  // The apply counter of a zone, exposed so the defer queue and the lazy-zone
+  // triggers drop a GET aimed at a generation that has already moved on.
+  generation(zone: string): number {
+    return this.#applied.get(zone) ?? 0;
   }
 
   defineOp(name: string, handler: OpHandler): void {
@@ -170,17 +234,59 @@ export class Applier {
 
   // The snapshot is the dirty counter wire.ts captured at fetch time. A direct
   // apply with no snapshot uses the highest mark, so no field reads as dirty.
+  // The pipeline is normative: version → before-apply → CSS delta → ops → JS
+  // delta → mount → applied → defer. CSS is gated before the ops, so the body
+  // after the gate runs in a continuation. With no asset bridge the gate is a
+  // straight-through call and the whole apply stays synchronous.
   apply(raw: unknown, snapshot?: number): Envelope {
     const envelope = parseEnvelope(raw);
+    // A version mismatch is a full visit instead of an apply, guarded against a
+    // reload loop inside the bridge. true means the bridge took over.
+    if (this.#assets?.versionMismatch(envelope.version, this.#here())) {
+      return envelope;
+    }
     const beforeApply = this.#emit("partial:before-apply", { envelope }, true);
     if (beforeApply.defaultPrevented) return envelope;
     this.#isDirty = snapshot === undefined ? () => false : this.#dirtySince(snapshot);
+    this.#touched = [];
+    const runOps = (): void => this.#runOps(envelope);
+    if (this.#assets !== undefined) {
+      this.#assets.loadCss(envelope.assets, runOps);
+    } else {
+      runOps();
+    }
+    return envelope;
+  }
+
+  #runOps(envelope: Envelope): void {
     for (const op of envelope.ops) {
       this.#applyOp(op);
     }
     if (envelope.csrf) this.#rotateCsrf(envelope.csrf);
+    // JS after the ops: the target DOM is in place, each URL runs once.
+    this.#assets?.loadJs(envelope.assets);
+    this.#assets?.acceptVersion(envelope.version);
+    this.#runMount();
     this.#emit("partial:applied", { envelope }, false);
-    return envelope;
+    // defer is the suspense hook: the listed zones join the same queue as the
+    // lazy load zones, re-GET with X-Next-Zone.
+    for (const zone of envelope.defer) {
+      this.#refresh?.({
+        url: this.#here(),
+        zone: zone.zone,
+        headers: { "X-Next-Zone": zone.zone },
+      });
+    }
+  }
+
+  // next:mounted on each touched node and a mount-registry pass over each, so
+  // "behaviour, revive what was inserted" gets the DOM and the code together.
+  #runMount(): void {
+    for (const node of this.#touched) {
+      if (!node.isConnected) continue;
+      node.dispatchEvent(new CustomEvent("next:mounted", { bubbles: true }));
+      this.#mount?.run(node);
+    }
   }
 
   #applyOp(patch: Patch): void {
@@ -213,7 +319,10 @@ export class Applier {
     this.#ops.set("morph", (patch) => this.#morph(patch));
     this.#ops.set("replace", (patch) => this.#replace(patch));
     this.#ops.set("inner", (patch) => this.#inner(patch));
+    this.#ops.set("append", (patch) => this.#merge(patch, "append"));
+    this.#ops.set("prepend", (patch) => this.#merge(patch, "prepend"));
     this.#ops.set("remove", (patch) => this.#remove(patch));
+    this.#ops.set("refresh", (patch) => this.#refreshOp(patch));
     this.#ops.set("event", (patch) => this.#event(patch));
     // The layer, toast, and history verbs ride the same ops registry as the
     // custom defineOp path: the core eats its own dog food.
@@ -261,6 +370,7 @@ export class Applier {
         : this.#fragment(html, patch.target);
     if (content === null) return;
     morph(node, content, { isDirty: this.#isDirty });
+    this.#mark(node, patch.target);
   }
 
   // Parse a full document and carve out the node matching the target, the path
@@ -282,7 +392,11 @@ export class Applier {
     const node = this.#resolve(patch.target);
     if (node === null) return;
     const fragment = this.#fragment(patch.html ?? "", patch.target);
+    // The first child is the new live node, captured before the fragment is
+    // emptied into the document, so mount sees the replacement.
+    const inserted = fragment.firstElementChild;
     node.replaceWith(fragment);
+    this.#mark(inserted ?? null, patch.target);
   }
 
   #inner(patch: Patch): void {
@@ -290,12 +404,44 @@ export class Applier {
     if (node === null) return;
     const fragment = this.#fragment(patch.html ?? "", patch.target);
     node.replaceChildren(fragment);
+    this.#mark(node, patch.target);
+  }
+
+  // append and prepend dedupe by data-next-key, falling back to id: an existing
+  // node with the same key is replaced in place, not duplicated, so a re-fetched
+  // page of a paginated list cannot double its rows.
+  #merge(patch: Patch, side: "append" | "prepend"): void {
+    const node = this.#resolve(patch.target);
+    if (node === null) return;
+    const fragment = this.#fragment(patch.html ?? "", patch.target);
+    const incoming = Array.from(fragment.children);
+    for (const child of incoming) {
+      const key = keyOf(child);
+      const existing = key === null ? null : matchKey(node, key);
+      if (existing !== null) existing.replaceWith(child);
+      else if (side === "append") node.append(child);
+      else node.prepend(child);
+    }
+    this.#mark(node, patch.target);
+    for (const child of incoming) this.#touched.push(child);
   }
 
   #remove(patch: Patch): void {
     const node = this.#resolve(patch.target);
     if (node === null) return;
     node.remove();
+  }
+
+  // refresh re-GETs the zone with its own cookies, the safe default of an SSE
+  // fan-out: the server says "this zone is stale", the client fetches it fresh.
+  #refreshOp(patch: Patch): void {
+    const zone = asString(patch.zone) ?? asString(patch.target?.zone);
+    if (zone === undefined) return;
+    this.#refresh?.({
+      url: this.#here(),
+      zone,
+      headers: { "X-Next-Zone": zone },
+    });
   }
 
   #event(patch: Patch): void {
@@ -327,6 +473,14 @@ export class Applier {
         );
       }
     }
+  }
+
+  // Record a node as touched for the mount pass and bump the zone's apply
+  // counter, the generation the defer queue and lazy triggers read.
+  #mark(node: Element | null, target: Target | undefined): void {
+    if (node !== null) this.#touched.push(node);
+    const zone = target?.zone;
+    if (zone !== undefined) this.#applied.set(zone, this.generation(zone) + 1);
   }
 
   // Resolve against the live document. A zone is asked of the layer stack
@@ -395,6 +549,21 @@ export class Applier {
 function matchByTag(parsed: Document, target: Element): Element | null {
   const tag = target.tagName.toLowerCase();
   return parsed.body.querySelector(tag);
+}
+
+// The dedup key of a list row: data-next-key first, then id. Absent both, the
+// row has no identity and is always inserted, never matched.
+function keyOf(el: Element): string | null {
+  return el.getAttribute("data-next-key") ?? (el.id !== "" ? el.id : null);
+}
+
+// Find an existing child of the container sharing the incoming row's key, the
+// node append/prepend replaces in place.
+function matchKey(container: Element, key: string): Element | null {
+  for (const child of Array.from(container.children)) {
+    if (keyOf(child) === key) return child;
+  }
+  return null;
 }
 
 function describeTarget(target: Target | undefined): string {

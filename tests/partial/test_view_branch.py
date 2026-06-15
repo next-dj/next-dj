@@ -78,6 +78,43 @@ class TestZoneGetVersionConflict:
         assert envelope_of(response).zone_targets() == ["alpha"]
 
 
+class TestZoneGetMergeIntent:
+    """A merge header turns a zone GET into a server-authored merge patch."""
+
+    def test_append_intent_yields_an_append_patch(self) -> None:
+        response = NextClient().get_zones(
+            "/zoned/", "alpha", HTTP_X_NEXT_MERGE="append"
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["append"]
+        assert envelope.zone_targets() == ["alpha"]
+
+    def test_append_patch_carries_key_dedupe(self) -> None:
+        response = NextClient().get_zones(
+            "/zoned/", "alpha", HTTP_X_NEXT_MERGE="append"
+        )
+        assert envelope_of(response).ops[0]["dedupe"] == "key"
+
+    def test_prepend_intent_yields_a_prepend_patch(self) -> None:
+        response = NextClient().get_zones(
+            "/zoned/", "alpha", HTTP_X_NEXT_MERGE="prepend"
+        )
+        assert envelope_of(response).op_verbs() == ["prepend"]
+
+    def test_unknown_merge_value_falls_back_to_morph(self) -> None:
+        response = NextClient().get_zones(
+            "/zoned/", "alpha", HTTP_X_NEXT_MERGE="bogus"
+        )
+        assert envelope_of(response).op_verbs() == ["morph"]
+
+    def test_merge_response_varies_on_merge_header(self) -> None:
+        response = NextClient().get_zones(
+            "/zoned/", "alpha", HTTP_X_NEXT_MERGE="append"
+        )
+        assert "X-Next-Merge" in response.get("Vary", "")
+
+
 class TestFullRenderRegression:
     """Without the partial switch the page render stays byte-for-byte."""
 

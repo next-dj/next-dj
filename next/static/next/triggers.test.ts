@@ -1,0 +1,382 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createTriggers } from "./triggers";
+import type { IntersectionAdapter, Triggers } from "./triggers";
+import type { Clock } from "./wire";
+
+type Request = {
+  url: string;
+  method?: string;
+  zone?: string;
+  headers?: Record<string, string>;
+  body?: BodyInit;
+};
+
+function manualClock(): Clock & { run(): void } {
+  let pending: (() => void) | null = null;
+  return {
+    now: () => 0,
+    setTimeout: (handler) => {
+      pending = handler;
+      return 1;
+    },
+    clearTimeout: () => {
+      pending = null;
+    },
+    run() {
+      const h = pending;
+      pending = null;
+      h?.();
+    },
+  };
+}
+
+function manualObserver(): IntersectionAdapter & { reveal(): void } {
+  let cb: (() => void) | null = null;
+  return {
+    observe: (_el, onReveal) => {
+      cb = onReveal;
+      return () => {
+        cb = null;
+      };
+    },
+    reveal() {
+      cb?.();
+    },
+  };
+}
+
+function makeTriggers(over: Partial<Parameters<typeof createTriggers>[0]> = {}): {
+  triggers: Triggers;
+  requests: Request[];
+  aborted: string[];
+} {
+  const requests: Request[] = [];
+  const aborted: string[] = [];
+  const triggers = createTriggers({
+    fetch: (request) => requests.push(request),
+    abort: (zone) => aborted.push(zone),
+    version: () => "v1",
+    document,
+    clock: manualClock(),
+    observer: manualObserver(),
+    confirm: () => true,
+    ...over,
+  });
+  return { triggers, requests, aborted };
+}
+
+describe("trigger delegation", () => {
+  let detach: () => void;
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  afterEach(() => {
+    detach?.();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("batches load zones into one GET on ready", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="a" data-next-lazy="load"></div>' +
+      '<div data-next-zone="b" data-next-lazy="load"></div>';
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    triggers.ready();
+    expect(requests).toHaveLength(1);
+    expect(requests[0].headers?.["X-Next-Zone"]).toBe("a,b");
+  });
+
+  it("does not re-fire a load zone re-scanned by a parent morph", () => {
+    document.body.innerHTML = '<div data-next-zone="a" data-next-lazy="load"></div>';
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    triggers.scan(document.body);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("debounces a filter auto-submit per element", () => {
+    const clock = manualClock();
+    document.body.innerHTML =
+      '<form action="/c/" data-next-target="results">' +
+      '<input name="q" data-next-trigger="input" data-next-debounce="300">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers({ clock });
+    detach = triggers.install(document);
+    const input = document.querySelector("input")!;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(requests).toHaveLength(0);
+    clock.run();
+    expect(requests).toHaveLength(1);
+    expect(requests[0].zone).toBe("results");
+  });
+
+  it("reveals through the observer adapter", () => {
+    const observer = manualObserver();
+    document.body.innerHTML =
+      '<div data-next-zone="late" data-next-lazy="revealed"></div>';
+    const { triggers, requests } = makeTriggers({ observer });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    expect(requests).toHaveLength(0);
+    observer.reveal();
+    expect(requests).toHaveLength(1);
+    expect(requests[0].zone).toBe("late");
+  });
+
+  it("blocks a request when confirm is cancelled", () => {
+    document.body.innerHTML =
+      '<a href="/p2/" data-next-merge="append" data-next-target="list" ' +
+      'data-next-confirm="sure?">more</a>';
+    const { triggers, requests } = makeTriggers({ confirm: () => false });
+    detach = triggers.install(document);
+    document
+      .querySelector("a")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(requests).toHaveLength(0);
+  });
+
+  it("paginates with a merge header on a click", () => {
+    document.body.innerHTML =
+      '<a href="/p2/" data-next-merge="append" data-next-target="list">more</a>';
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("a")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(requests).toHaveLength(1);
+    expect(requests[0].headers?.["X-Next-Merge"]).toBe("append");
+  });
+
+  it("validates on blur with a field header and no file fields", () => {
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-validate="blur" data-next-action="u">' +
+      '<input name="email" value="a@b.c">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    const input = document.querySelector("input")!;
+    input.dispatchEvent(new FocusEvent("blur"));
+    expect(requests).toHaveLength(1);
+    expect(requests[0].method).toBe("POST");
+    expect(requests[0].headers?.["X-Next-Validate"]).toBe("email");
+    expect(requests[0].zone).toBe("validate:u");
+    expect(requests[0].abortable).toBe(true);
+  });
+
+  it("aborts the in-flight validation when the form submits", () => {
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-validate="blur" data-next-action="u">' +
+      '<input name="email" value="a@b.c">' +
+      "</form>";
+    const { triggers, aborted } = makeTriggers();
+    detach = triggers.install(document);
+    const form = document.querySelector("form")!;
+    document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
+    form.dispatchEvent(new Event("submit", { bubbles: true }));
+    expect(aborted).toEqual(["validate:u"]);
+  });
+
+  it("ignores a submit of a form without inline validation", () => {
+    document.body.innerHTML = '<form data-next-action="u"></form>';
+    const { triggers, aborted } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true }));
+    expect(aborted).toEqual([]);
+  });
+
+  it("arms an infinite-scroll sentinel observer", () => {
+    const observer = manualObserver();
+    document.body.innerHTML =
+      '<a href="/p2/" data-next-merge="append" data-next-target="list" ' +
+      'data-next-lazy="revealed">sentinel</a>';
+    const { triggers, requests } = makeTriggers({ observer });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    expect(requests).toHaveLength(0);
+    observer.reveal();
+    expect(requests).toHaveLength(1);
+    expect(requests[0].headers?.["X-Next-Merge"]).toBe("append");
+  });
+
+  it("ignores an input event whose trigger names a different type", () => {
+    document.body.innerHTML =
+      '<form action="/c/" data-next-target="r">' +
+      '<input name="q" data-next-trigger="change">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(requests).toHaveLength(0);
+  });
+
+  it("ignores a filter trigger with no target zone", () => {
+    document.body.innerHTML =
+      '<form action="/c/"><input name="q" data-next-trigger="input"></form>';
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(requests).toHaveLength(0);
+  });
+
+  it("submits a filter immediately when no debounce is set", () => {
+    document.body.innerHTML =
+      '<form action="/c/" data-next-target="r">' +
+      '<input name="q" value="x" data-next-trigger="input">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe("/c/?q=x");
+  });
+
+  it("syncs the address bar with replaceState, not a history entry", () => {
+    document.body.innerHTML =
+      '<form action="/c/" data-next-target="r">' +
+      '<input name="q" value="x" data-next-trigger="input">' +
+      "</form>";
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    const pushState = vi.spyOn(window.history, "pushState");
+    const { triggers } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/c/?q=x");
+    expect(pushState).not.toHaveBeenCalled();
+    replaceState.mockRestore();
+    pushState.mockRestore();
+  });
+
+  it("falls back to the current path when a filter form has no action", () => {
+    window.history.replaceState(null, "", "/catalog/?old=1");
+    document.body.innerHTML =
+      '<form data-next-target="r">' +
+      '<input name="q" value="z" data-next-trigger="input">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(requests[0].url).toBe("/catalog/?q=z");
+  });
+
+  it("skips a blur with no field name", () => {
+    document.body.innerHTML =
+      '<form action="/f/" data-next-validate="blur" data-next-action="u">' +
+      "<input>" +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
+    expect(requests).toHaveLength(0);
+  });
+
+  it("strips file fields from the validate body", () => {
+    document.body.innerHTML =
+      '<form action="/f/" data-next-validate="blur" data-next-action="u">' +
+      '<input name="doc" type="file">' +
+      '<input name="email" value="a@b.c">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector('input[name="email"]')!
+      .dispatchEvent(new FocusEvent("blur"));
+    const body = requests[0].body as FormData;
+    expect(body.has("doc")).toBe(false);
+    expect(body.get("email")).toBe("a@b.c");
+  });
+
+  it("does not paginate a link with an empty href", () => {
+    document.body.innerHTML =
+      '<a href="" data-next-merge="append" data-next-target="list">more</a>';
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("a")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(requests).toHaveLength(0);
+  });
+
+  it("paginates after an accepted confirm", () => {
+    document.body.innerHTML =
+      '<a href="/p2/" data-next-merge="append" data-next-target="list" ' +
+      'data-next-confirm="ok?">more</a>';
+    const { triggers, requests } = makeTriggers({ confirm: () => true });
+    detach = triggers.install(document);
+    document
+      .querySelector("a")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(requests).toHaveLength(1);
+  });
+
+  it("handles a submit of a form that never validated", () => {
+    document.body.innerHTML =
+      '<form data-next-validate="blur" data-next-action="u"></form>';
+    const { triggers } = makeTriggers();
+    detach = triggers.install(document);
+    const form = document.querySelector("form")!;
+    expect(() =>
+      form.dispatchEvent(new Event("submit", { bubbles: true })),
+    ).not.toThrow();
+  });
+
+  it("clears the pending timer when a fresh event arrives mid-debounce", () => {
+    const clock = manualClock();
+    document.body.innerHTML =
+      '<form action="/c/" data-next-target="r">' +
+      '<input name="q" data-next-trigger="input" data-next-debounce="300">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers({ clock });
+    detach = triggers.install(document);
+    const input = document.querySelector("input")!;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    clock.run();
+    expect(requests).toHaveLength(1);
+  });
+
+  it("skips a load zone element with no zone name", () => {
+    document.body.innerHTML = '<div data-next-lazy="load"></div>';
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    triggers.ready();
+    expect(requests).toHaveLength(0);
+  });
+
+  it("does not arm a plain pagination link as a sentinel on scan", () => {
+    document.body.innerHTML =
+      '<a href="/p2/" data-next-merge="append" data-next-target="list">more</a>';
+    const observer = manualObserver();
+    const { triggers, requests } = makeTriggers({ observer });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.reveal();
+    expect(requests).toHaveLength(0);
+  });
+
+  it("_reset stops outstanding observers", () => {
+    const observer = manualObserver();
+    document.body.innerHTML =
+      '<div data-next-zone="late" data-next-lazy="revealed"></div>';
+    const { triggers, requests } = makeTriggers({ observer });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    triggers._reset();
+    observer.reveal();
+    expect(requests).toHaveLength(0);
+  });
+});

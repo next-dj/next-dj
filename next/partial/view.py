@@ -7,7 +7,7 @@ from django.http import HttpResponse
 from next.static.collector import default_placeholders
 
 from .backends import partial_backend_manager
-from .headers import set_partial_vary
+from .headers import MergeMode, set_partial_vary
 from .patches import Asset, Envelope, Patches, PatchResponse
 from .render import UnknownZoneError, render_zone
 
@@ -52,7 +52,7 @@ def zone_response(
         result = render_zone(page_path, intent.zones, request, url_kwargs=url_kwargs)
     except UnknownZoneError as exc:
         return _bad_request(str(exc))
-    envelope = _build_envelope(result, intent.zones, version)
+    envelope = _build_envelope(result, intent, version)
     body = backend.serialize_envelope(envelope)
     return PatchResponse(body, content_type=backend.content_type, version=version)
 
@@ -64,16 +64,39 @@ def _version_conflict(intent: "PartialIntent", version: str) -> bool:
 
 def _build_envelope(
     result: "ZoneRenderResult",
-    zone_names: tuple[str, ...],
+    intent: "PartialIntent",
     version: str,
 ) -> Envelope:
-    """Assemble one envelope morphing every rendered zone with its assets."""
+    """Assemble one envelope patching every rendered zone with its assets.
+
+    Without a merge intent each zone morphs in place. With an `append` or
+    `prepend` merge intent each zone is patched with the matching merge
+    verb instead, so a paginating request grows the zone with deduplicated
+    children rather than replacing its body. The verb is server-authored
+    from the parsed intent, the client never names it.
+    """
     patches = Patches(version)
-    for name in zone_names:
-        patches.morph({"zone": name}, result.html[name])
+    for name in intent.zones:
+        _patch_zone(patches, name, result.html[name], intent.merge)
     for asset in _collected_assets(result):
         patches.add_asset(asset.kind, asset.url)
     return patches.envelope()
+
+
+def _patch_zone(
+    patches: Patches,
+    name: str,
+    html: str,
+    merge: "MergeMode | None",
+) -> None:
+    """Patch one zone in place, morphing it or merging deduplicated children."""
+    target = {"zone": name}
+    if merge is MergeMode.APPEND:
+        patches.append(target, html)
+    elif merge is MergeMode.PREPEND:
+        patches.prepend(target, html)
+    else:
+        patches.morph(target, html)
 
 
 def _collected_assets(result: "ZoneRenderResult") -> list[Asset]:

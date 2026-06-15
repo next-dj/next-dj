@@ -85,6 +85,16 @@ needed because the parent context flows into the component scope. The
 JavaScript layer wires the textarea to the preview pane for keystroke
 updates without round-tripping the server.
 
+The preview script registers its work through
+`Next.partial.onMount("[data-markdown-preview]", ...)` rather than a
+`document.querySelectorAll` scan at load. The runtime runs the callback
+over the initial DOM and over every subtree it later inserts, so a
+preview pane that re-renders inside a morphed form is rebound the same
+way the first render was, with no stale listener left behind by a swap.
+The callback walks up to the enclosing `<form>` to find its textarea, so
+the same script powers both the wiki form and the near-identical
+multi-tenant note form without hardcoding a field name.
+
 ### 5. Slug reservations
 
 `Article.clean()` rejects slugs that collide with file-route prefixes
@@ -99,7 +109,16 @@ intact.
 substring match against a curated catalogue surfaces matching file
 pages. A `Q(title__icontains) | Q(body_md__icontains)` query against
 `Article` surfaces matching rows. The same template renders both lists
-side by side.
+side by side inside a `search-results` zone.
+
+The search form carries `data-next-target="search-results"`,
+`data-next-trigger="input"`, and `data-next-debounce="300"`, so the
+runtime debounces keystrokes, issues a GET for the `search-results`
+zone, and morphs the two result lists in place. `page.py` does not
+change: the same view answers the full page and the zone request,
+reading `?q=` from `request.GET` either way. Without the runtime the
+form is a plain `<form method="get">` and the Search button reloads the
+page, so a bookmark of `/search/?q=routing` still reproduces the listing.
 
 ### 7. Object-level edit permission
 

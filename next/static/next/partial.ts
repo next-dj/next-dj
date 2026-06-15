@@ -4,7 +4,13 @@
 // surface through its extension points.
 
 import { Applier } from "./apply";
-import type { ApplyDeps, Envelope, HistoryAdapter, OpHandler } from "./apply";
+import type {
+  ApplyDeps,
+  Envelope,
+  HistoryAdapter,
+  MountCallback,
+  OpHandler,
+} from "./apply";
 import { Wire } from "./wire";
 import type {
   Clock,
@@ -17,6 +23,10 @@ import type {
 import { createDirtyTracker } from "./dirty";
 import { createLayers } from "./layers";
 import type { DialogAdapter, LayerStack } from "./layers";
+import { createAssets } from "./assets";
+import type { LinkLoader, SessionStore } from "./assets";
+import { createTriggers } from "./triggers";
+import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import { defaultHistory } from "./adapters";
 
 export interface PartialDeps {
@@ -24,10 +34,10 @@ export interface PartialDeps {
   mergeContext: (data: Record<string, unknown>) => void;
 }
 
-// The injectable seams the test harness overrides: the fetch adapter and the
-// navigation hook jsdom does not implement. The clock seam is held for the
-// timer-bound behaviour (CSS-wait timeout, debounce) so the surface stays
-// stable once those handlers register.
+// The injectable seams the test harness overrides: the fetch adapter, the
+// navigation hook jsdom does not implement, the clock for the timer-bound
+// behaviour (CSS-wait timeout, debounce), the CSS loader, the intersection
+// geometry, the reload-once session store, and the confirm gate.
 export interface PartialAdapters {
   fetch?: FetchAdapter;
   clock?: Clock;
@@ -38,6 +48,13 @@ export interface PartialAdapters {
   // without jsdom's missing showModal and focus trap.
   dialog?: DialogAdapter;
   history?: HistoryAdapter;
+  // The CSS loader, the intersection geometry, the reload-once store, and the
+  // confirm gate, each absent in jsdom.
+  loadLink?: LinkLoader;
+  observer?: IntersectionAdapter;
+  session?: SessionStore;
+  confirm?: ConfirmAdapter;
+  cssTimeoutMs?: number;
 }
 
 export interface PartialSurface {
@@ -46,9 +63,16 @@ export interface PartialSurface {
   defineOp(name: string, handler: OpHandler): void;
   parseHook(contentType: string, hook: ParseHook): void;
   setCsrf(csrf: CsrfPayload | undefined): void;
+  // The re-executable mount registry: the callback runs over the document on
+  // `ready` and over every inserted subtree after each apply, the replacement
+  // for DOMContentLoaded for co-located JS.
+  onMount(selector: string, callback: (el: Element) => void): void;
   // The modal layer stack, exposed so the harness drives open/close/resolve
   // without synthesising a click.
   layers: LayerStack;
+  // Run the on-`ready` work: seed the asset registry, mount the initial DOM,
+  // fire the batched load zones. The core calls this from `_init`.
+  ready(): void;
   // Configure the injectable adapters and rebuild the wire and applier. Tests
   // call this in beforeEach, production wires the real platform globals once.
   _configure(adapters: PartialAdapters): void;
@@ -56,7 +80,6 @@ export interface PartialSurface {
 }
 
 export function createPartial(deps: PartialDeps): PartialSurface {
-  let version = "";
   let csrf: CsrfPayload | undefined;
 
   // The dirty registry: delegated listeners stamp touched fields, wire.ts
@@ -64,14 +87,42 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   const dirty = createDirtyTracker();
   dirty.install(document);
 
-  // The layer stack carries no transport: it asks the wire to GET the body and
-  // the host re-GET on accept, indirected through the current binding so a
-  // rebuild on _configure keeps the closure live.
-  let layers = createLayers(layerDeps());
+  // The mount registry, shared by onMount and triggers: every inserted subtree
+  // runs the registered selector callbacks and the trigger activation.
+  const mounts: { selector: string; callback: (el: Element) => void }[] = [];
+  const runMount: MountCallback = (root) => {
+    for (const entry of mounts) {
+      for (const el of Array.from(root.querySelectorAll(entry.selector))) {
+        entry.callback(el);
+      }
+      // A subtree root that matches the selector itself is mounted too.
+      if (root instanceof Element && root.matches(entry.selector)) {
+        entry.callback(root);
+      }
+    }
+    triggers.scan(root);
+  };
+
+  let assets = createAssets(assetsDeps());
   let history: HistoryAdapter = defaultHistory();
+  let layers = createLayers(layerDeps());
+  let triggers = createTriggers(triggerDeps());
   let applier = new Applier(applyDeps());
   let wire = new Wire(wireDeps());
   let detachLayers = layers.install(document);
+  let detachTriggers = triggers.install(document);
+
+  function assetsDeps(adapters?: PartialAdapters) {
+    return {
+      dispatch: deps.dispatch,
+      document: adapters?.document,
+      clock: adapters?.clock,
+      loadLink: adapters?.loadLink,
+      navigate: adapters?.navigate,
+      session: adapters?.session,
+      cssTimeoutMs: adapters?.cssTimeoutMs,
+    };
+  }
 
   function applyDeps(adapters?: PartialAdapters): ApplyDeps {
     return {
@@ -85,6 +136,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       // rebuilds the stack before the applier, so this binding stays live.
       layers,
       history,
+      assets,
+      mount: { run: runMount },
+      refresh: (request) => void wire.fetch(request),
+      here: () => (adapters?.document ?? document).location.pathname,
     };
   }
 
@@ -94,6 +149,18 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       document: adapters?.document,
       dialog: adapters?.dialog,
       fetch: (request: { url: string; zone: string }) => wire.fetch(request),
+    };
+  }
+
+  function triggerDeps(adapters?: PartialAdapters) {
+    return {
+      fetch: (request: WireRequest) => void wire.fetch(request),
+      abort: (zone: string) => wire.abort(zone),
+      version: () => assets.version(),
+      document: adapters?.document,
+      clock: adapters?.clock,
+      observer: adapters?.observer,
+      confirm: adapters?.confirm,
     };
   }
 
@@ -108,7 +175,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
         // submits the fresh token, not just the forms already in the document.
         if (envelope.csrf) csrf = envelope.csrf;
       },
-      version: () => version,
+      version: () => assets.version(),
       csrf: () => csrf,
       dirtySnapshot: () => dirty.snapshot(),
     };
@@ -130,24 +197,38 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     setCsrf(next) {
       csrf = next;
     },
+    onMount(selector, callback) {
+      mounts.push({ selector, callback });
+    },
     get layers() {
       return layers;
+    },
+    ready() {
+      assets.seed();
+      runMount(document);
+      triggers.ready();
     },
     _configure(adapters) {
       if (adapters.document !== undefined) dirty.install(adapters.document);
       if (adapters.history !== undefined) history = adapters.history;
+      assets = createAssets(assetsDeps(adapters));
       detachLayers();
+      detachTriggers();
       layers = createLayers(layerDeps(adapters));
+      triggers = createTriggers(triggerDeps(adapters));
       applier = new Applier(applyDeps(adapters));
       wire = new Wire(wireDeps(adapters));
       detachLayers = layers.install(adapters.document ?? document);
+      detachTriggers = triggers.install(adapters.document ?? document);
     },
     _reset() {
       wire._reset();
       applier._reset();
       dirty._reset();
       layers._reset();
-      version = "";
+      triggers._reset();
+      assets._reset();
+      mounts.length = 0;
       csrf = undefined;
     },
   };

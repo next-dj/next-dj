@@ -137,6 +137,21 @@ class TestStandaloneVerbs:
         )
         assert envelope.ops[0].as_dict()["dedupe"] == "id"
 
+    def test_prepend_carries_dedupe(self) -> None:
+        envelope = Patches("v1").prepend({"zone": "feed"}, "<li></li>").envelope()
+        assert envelope.ops[0].as_dict() == {
+            "op": "prepend",
+            "target": {"zone": "feed"},
+            "html": "<li></li>",
+            "dedupe": "key",
+        }
+
+    def test_prepend_accepts_a_custom_dedupe(self) -> None:
+        envelope = (
+            Patches("v1").prepend({"zone": "feed"}, "<li></li>", dedupe="id").envelope()
+        )
+        assert envelope.ops[0].as_dict()["dedupe"] == "id"
+
     def test_refresh_names_the_zone(self) -> None:
         envelope = Patches("v1").refresh(zone="results").envelope()
         assert envelope.ops[0].as_dict() == {"op": "refresh", "zone": "results"}

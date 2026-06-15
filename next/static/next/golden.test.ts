@@ -199,6 +199,43 @@ describe("golden fixtures apply to the DOM", () => {
     expect(zone.querySelector('input[name="scope"]')).not.toBeNull();
     expect(zone.querySelector('input[name="name"]')).toBeNull();
   });
+
+  it("append_page grows the list and replaces the sentinel by id", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="catalog-results">' +
+      '<li data-next-key="11">eleven</li>' +
+      '<li data-next-key="sentinel" id="sentinel">old</li></ul>';
+    const meta = readMeta("append_page");
+    const { applier } = makeApplier();
+    applier.apply(JSON.parse(readEnvelopeBytes(meta.envelope_file)));
+    const rows = document.querySelectorAll('[data-next-zone="catalog-results"] > li');
+    const keys = Array.from(rows).map((li) => li.getAttribute("data-next-key"));
+    expect(keys).toEqual(["11", "sentinel", "12"]);
+    expect(document.querySelectorAll("#sentinel")).toHaveLength(1);
+    expect(document.querySelector("#sentinel a")).not.toBeNull();
+  });
+
+  it("defer_zone queues the audit zone for a follow-up GET", () => {
+    document.body.innerHTML = '<div data-next-zone="summary">stale</div>';
+    const refresh = vi.fn();
+    const applier = new Applier({
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+      document,
+      refresh,
+      here: () => "/audit/",
+    });
+    const meta = readMeta("defer_zone");
+    applier.apply(JSON.parse(readEnvelopeBytes(meta.envelope_file)));
+    expect(document.querySelector('[data-next-zone="summary"]')!.textContent).toBe(
+      "saved",
+    );
+    expect(refresh).toHaveBeenCalledWith({
+      url: "/audit/",
+      zone: "audit-table",
+      headers: { "X-Next-Zone": "audit-table" },
+    });
+  });
 });
 
 describe("layer golden fixtures apply through the layer stack", () => {

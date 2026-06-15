@@ -62,6 +62,7 @@ class NextFrameworkSettings:
             "COMPONENT_BACKENDS",
             "STATIC_BACKENDS",
             "FORM_ACTION_BACKENDS",
+            "PARTIAL_BACKENDS",
             "TEMPLATE_LOADERS",
             "FORM_ANCHOR_FILES",
         }

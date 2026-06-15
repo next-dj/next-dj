@@ -1,31 +1,26 @@
-document.querySelectorAll("[data-filter-form]").forEach(function (form) {
-  // Auto-submit on checkbox / select change. Number and search fields
-  // commit on Enter through the browser's default form-submit behaviour.
-  form.addEventListener("change", function (event) {
-    var el = event.target;
-    if (el.matches('input[type="checkbox"], select') && form.checkValidity()) {
-      form.submit();
-    }
-  });
+// Live constraint-validation hints for the search field. The auto-submit and
+// debounce now ride the data-next-* trigger attributes on the form and select,
+// so this script only narrates the minlength rule. Next.partial.onMount rewires
+// each panel when it mounts in the initial DOM or arrives in a morphed zone, so
+// there is no module-load scan that a partial insertion would leave behind.
 
-  // Live constraint validation for the search field. The input declares
-  // minlength=3, but we treat the empty string as "no filter" — so we
-  // only enforce the length once the user has typed something.
-  const search = form.querySelector('input[name="q"]');
-  const help = form.querySelector("[data-filter-help]");
-  if (!search || !help) {
+const TONES = {
+  idle: "text-slate-500",
+  error: "text-rose-600",
+  ok: "text-emerald-600",
+};
+
+function bindSearchHints(panel) {
+  const search = panel.querySelector('input[name="q"]');
+  const help = panel.querySelector("[data-filter-help]");
+  if (!search || !help || search.dataset.helpBound) {
     return;
   }
+  search.dataset.helpBound = "true";
 
   const defaultMessage = search.dataset.helpDefault || "";
   const tooShortTemplate = search.dataset.helpTooshort || "";
   const minLength = parseInt(search.getAttribute("minlength"), 10) || 0;
-
-  const TONES = {
-    idle: "text-slate-500",
-    error: "text-rose-600",
-    ok: "text-emerald-600",
-  };
 
   function setState(message, tone) {
     help.textContent = message;
@@ -34,26 +29,25 @@ document.querySelectorAll("[data-filter-form]").forEach(function (form) {
   }
 
   function update() {
-    var length = search.value.length;
-
+    const length = search.value.length;
     if (length === 0) {
       search.setCustomValidity("");
       setState(defaultMessage, "idle");
       return;
     }
-
     if (length < minLength) {
-      var remaining = minLength - length;
-      var message = tooShortTemplate.replace("{min}", remaining);
+      const remaining = minLength - length;
+      const message = tooShortTemplate.replace("{min}", remaining);
       search.setCustomValidity(message);
       setState(message, "error");
       return;
     }
-
     search.setCustomValidity("");
-    setState("Looks good — press Enter or click Apply filters.", "ok");
+    setState("Looks good — typing filters the catalog live.", "ok");
   }
 
   search.addEventListener("input", update);
   update();
-});
+}
+
+window.Next.partial.onMount("[data-filter-panel]", bindSearchHints);

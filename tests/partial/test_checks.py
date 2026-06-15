@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.test import override_settings
 
 from next.components import ComponentInfo, FileComponentsBackend
 from next.forms.backends import FormActionBackend, RegistryFormActionBackend
@@ -312,6 +313,99 @@ class TestFormBackendPartialAwareCheck:
         assert RegistryFormActionBackend.shape_response is (
             FormActionBackend.shape_response
         )
+
+
+_MANIFEST_STORAGE = "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
+_PLAIN_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
+
+
+@contextmanager
+def _partial_version(version: object) -> Iterator[None]:
+    """Point the W069 check at a partial backend with the given VERSION option.
+
+    A version of None means the OPTIONS mapping omits the key, so the check
+    sees the implicit manifest sentinel.
+    """
+    options: dict[str, object] = {}
+    if version is not None:
+        options["VERSION"] = version
+    settings_ns = MagicMock()
+    settings_ns.PARTIAL_BACKENDS = [
+        {"BACKEND": "next.partial.PartialProtocolBackend", "OPTIONS": options}
+    ]
+    with patch("next.partial.checks.next_framework_settings", settings_ns):
+        yield
+
+
+class TestManifestVersionStorageCheck:
+    """`next.W069` fires when manifest versioning has no manifest storage."""
+
+    def test_sentinel_without_manifest_storage_warns(self) -> None:
+        with (
+            _partial_version("manifest"),
+            override_settings(
+                STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}
+            ),
+        ):
+            ids = [m.id for m in checks.check_manifest_version_has_manifest_storage()]
+        assert ids == [checks.W_MANIFEST_VERSION_NO_STORAGE]
+
+    def test_implicit_sentinel_without_manifest_storage_warns(self) -> None:
+        # an OPTIONS mapping with no VERSION key defaults to the manifest sentinel
+        with (
+            _partial_version(None),
+            override_settings(
+                STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}
+            ),
+        ):
+            ids = [m.id for m in checks.check_manifest_version_has_manifest_storage()]
+        assert ids == [checks.W_MANIFEST_VERSION_NO_STORAGE]
+
+    def test_legacy_storage_setting_without_manifest_warns(self) -> None:
+        with (
+            _partial_version("manifest"),
+            override_settings(STORAGES={}, STATICFILES_STORAGE=_PLAIN_STORAGE),
+        ):
+            ids = [m.id for m in checks.check_manifest_version_has_manifest_storage()]
+        assert ids == [checks.W_MANIFEST_VERSION_NO_STORAGE]
+
+    def test_manifest_storage_is_silent(self) -> None:
+        with (
+            _partial_version("manifest"),
+            override_settings(
+                STORAGES={"staticfiles": {"BACKEND": _MANIFEST_STORAGE}}
+            ),
+        ):
+            assert checks.check_manifest_version_has_manifest_storage() == []
+
+    def test_legacy_manifest_storage_is_silent(self) -> None:
+        with (
+            _partial_version("manifest"),
+            override_settings(STORAGES={}, STATICFILES_STORAGE=_MANIFEST_STORAGE),
+        ):
+            assert checks.check_manifest_version_has_manifest_storage() == []
+
+    def test_explicit_version_string_is_silent(self) -> None:
+        # pinning VERSION to a literal string opts out of the manifest sentinel,
+        # so the guard is live by other means and the warning never fires
+        with (
+            _partial_version("release-7"),
+            override_settings(
+                STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}
+            ),
+        ):
+            assert checks.check_manifest_version_has_manifest_storage() == []
+
+    def test_silent_when_no_partial_backends(self) -> None:
+        settings_ns = MagicMock()
+        settings_ns.PARTIAL_BACKENDS = []
+        with (
+            patch("next.partial.checks.next_framework_settings", settings_ns),
+            override_settings(
+                STORAGES={"staticfiles": {"BACKEND": _PLAIN_STORAGE}}
+            ),
+        ):
+            assert checks.check_manifest_version_has_manifest_storage() == []
 
 
 class TestChecksSilentOnValidComposite:

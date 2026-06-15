@@ -16,6 +16,7 @@ _BACKEND_LIST_KEYS = frozenset(
         "COMPONENT_BACKENDS",
         "STATIC_BACKENDS",
         "FORM_ACTION_BACKENDS",
+        "PARTIAL_BACKENDS",
     }
 )
 

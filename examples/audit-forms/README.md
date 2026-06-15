@@ -25,7 +25,7 @@ API.
 | `/request/scope/` | Step 2 — project slug, free-form reason, expiry days. |
 | `/request/approval/` | Step 3 — read-only confirmation summary. |
 | `/request/<id>/audit/` | Per-request audit trail, opened on submit with a "✅ Submitted" banner. |
-| `/admin/audit/` | Global audit log. Filter by `kind` via `?kind=…` (`access_denied` included). Backend rows link to their per-request page. |
+| `/admin/audit/` | Global audit log. The heavy table is a lazy `audit-table` zone behind a skeleton. Filter by `kind` via `?kind=…` (`access_denied` included). Backend rows link to their per-request page. |
 
 The user flow:
 
@@ -287,12 +287,44 @@ see "Computing" already filled into the team summary — that is what
 their own TTL or a Redis-backed cache, or at a custom backend, without
 touching any view code.
 
-### 8. Admin filter by GET query
+### 8. Admin filter by GET query, plus a lazy audit table
 
 `/admin/audit/?kind=validation_failed` narrows the table to one kind
 through a plain GET form. The `@context("active_kind")` function reads
 `request.GET` and the template uses it to mark the matching `<option>`
-as `selected`. No JavaScript, no AJAX.
+as `selected`.
+
+The heavy table is a lazy zone. `views/admin/audit/template.djx` wraps
+it in `{% zone "audit-table" lazy="revealed" %}` with a `{% placeholder %}`
+branch of `skeleton` bars. On the full page render only the placeholder
+renders, and the body — the `<table>` with up to a hundred rows — is
+skipped. The body arrives as a morph patch when the zone scrolls into
+view, so the table is fetched on demand rather than on first paint.
+
+The expensive query is guarded by `zone_requested`, the idiom that makes
+the laziness honest rather than cosmetic:
+
+```python
+from next.partial import zone_requested
+
+@context("entries")
+def entries(request: HttpRequest) -> list[AuditEntry] | None:
+    if not zone_requested(request, "audit-table"):
+        return None
+    qs = AuditEntry.objects.all()
+    requested_kind = request.GET.get("kind", "")
+    if requested_kind in _VALID_KIND_FILTERS:
+        qs = qs.filter(kind=requested_kind)
+    return list(qs[:100])
+```
+
+On the full render the provider returns `None` and the query never
+runs. On the zone GET — where `X-Next-Zone: audit-table` is set —
+`zone_requested` is true and the rows load. The `?kind=` filter still
+reads `request.GET`, so it works on the zone request the same way it
+worked on the old full page. Without the runtime the placeholder simply
+stays, so the critical, always-needed content lives outside the lazy
+zone by design.
 
 ### 9. Comparing the two audit channels
 
@@ -432,6 +464,9 @@ show up in a real browser. After any change to the modal flow, open
 - **Toast and list refresh.** The success toast appears once on submit,
   and the recent-requests list under the closed modal shows the new row
   without a full page reload.
+- **Lazy audit table.** Opening `/admin/audit/` shows the skeleton first,
+  and the table fills in once it scrolls into view, with the `?kind=`
+  filter applied on the zone request the same way it was on the full page.
 
 ## Further reading
 

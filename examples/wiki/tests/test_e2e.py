@@ -11,7 +11,12 @@ from wiki.backends import HybridRouterBackend
 from wiki.models import Article
 from wiki.providers import ArticleProvider, DArticle
 
-from next.testing import NextClient, SignalRecorder, make_resolution_context
+from next.testing import (
+    NextClient,
+    SignalRecorder,
+    envelope_of,
+    make_resolution_context,
+)
 from next.urls.signals import router_reloaded
 
 
@@ -264,6 +269,50 @@ class TestSearch:
     ) -> None:
         response = client.get(reverse("next:page_search"))
         assert response.status_code == 200
+
+
+class TestSearchAutoSubmit:
+    """The search box auto-submits into a results zone with debounce."""
+
+    def test_search_form_carries_auto_submit_attributes(
+        self, client: NextClient
+    ) -> None:
+        body = client.get(reverse("next:page_search")).content.decode()
+        assert 'data-next-target="search-results"' in body
+        assert 'data-next-trigger="input"' in body
+        assert 'data-next-debounce="300"' in body
+        assert 'data-next-zone="search-results"' in body
+
+    def test_zone_request_morphs_only_the_results(
+        self, client: NextClient, routing_doc: Article, lifecycle_doc: Article
+    ) -> None:
+        response = client.get_zones(
+            reverse("next:page_search") + "?q=routing", "search-results"
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["search-results"]
+        html = envelope.html_for_zone("search-results")
+        assert routing_doc.title in html
+        assert lifecycle_doc.title not in html
+        assert "Search" not in html
+
+    def test_empty_zone_request_prompts_for_a_query(self, client: NextClient) -> None:
+        response = client.get_zones(reverse("next:page_search"), "search-results")
+        html = envelope_of(response).html_for_zone("search-results")
+        assert "Type a query" in html
+
+
+class TestMarkdownPreviewMount:
+    """The preview pane is rebindable through the mount registry."""
+
+    def test_new_article_form_carries_the_preview_root_and_script(
+        self, client: NextClient
+    ) -> None:
+        body = client.get(reverse("next:page_articles_new")).content.decode()
+        assert "data-markdown-preview" in body
+        assert "markdown_preview.js" in body
 
 
 class TestRouterReloadSignal:

@@ -216,6 +216,48 @@ def _layer_oob_list() -> GoldenCase:
     )
 
 
+def _append_page() -> GoldenCase:
+    rows = (
+        '<li data-next-key="11">eleven</li>'
+        '<li data-next-key="12">twelve</li>'
+        '<li data-next-key="sentinel" id="sentinel">'
+        '<a href="/catalog/?page=3" data-next-merge="append" '
+        'data-next-target="catalog-results">more</a></li>'
+    )
+    envelope = (
+        Patches("9f3c2e1b").append({"zone": "catalog-results"}, rows).envelope()
+    )
+    return GoldenCase(
+        name="append_page",
+        envelope=envelope,
+        description=(
+            "A paginating zone GET under X-Next-Merge: one append patch growing "
+            "the list with key-deduplicated rows and a fresh infinite-scroll "
+            "sentinel that replaces the old one by id."
+        ),
+        version="9f3c2e1b",
+    )
+
+
+def _defer_zone() -> GoldenCase:
+    html = '<div data-next-zone="summary"><p>saved</p></div>'
+    envelope = (
+        Patches("9f3c2e1b")
+        .morph({"zone": "summary"}, html)
+        .defer_zone("audit-table")
+        .envelope()
+    )
+    return GoldenCase(
+        name="defer_zone",
+        envelope=envelope,
+        description=(
+            "A form response that morphs its own zone and defers an audit zone: "
+            "the runtime queues the deferred zone for a follow-up load GET."
+        ),
+        version="9f3c2e1b",
+    )
+
+
 def _result_form_visit() -> GoldenCase:
     envelope = Envelope(
         version="9f3c2e1b",
@@ -244,6 +286,8 @@ GOLDEN_CASES = [
     _wizard_advance(),
     _layer_close(),
     _layer_oob_list(),
+    _append_page(),
+    _defer_zone(),
     _result_form_visit(),
 ]
 
@@ -366,3 +410,19 @@ class TestWriteGoldenFixtures:
         assert [op["op"] for op in data["ops"]] == ["layer.close", "morph", "toast"]
         assert data["ops"][1]["target"] == {"zone": "request-list"}
         assert "fresh" in data["ops"][1]["html"]
+
+    def test_append_page_envelope_grows_the_zone_with_keyed_rows(self) -> None:
+        write_case(_append_page())
+        data = json.loads(read_envelope_bytes("append_page"))
+        op = data["ops"][0]
+        assert op["op"] == "append"
+        assert op["target"] == {"zone": "catalog-results"}
+        assert op["dedupe"] == "key"
+        assert 'data-next-key="11"' in op["html"]
+        assert 'id="sentinel"' in op["html"]
+
+    def test_defer_zone_envelope_queues_the_audit_zone(self) -> None:
+        write_case(_defer_zone())
+        data = json.loads(read_envelope_bytes("defer_zone"))
+        assert [op["op"] for op in data["ops"]] == ["morph"]
+        assert data["defer"] == [{"zone": "audit-table", "trigger": "load"}]

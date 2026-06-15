@@ -41,6 +41,10 @@ export interface WireRequest {
   zone?: string;
   headers?: Record<string, string>;
   body?: BodyInit;
+  // An inline validation rides a POST to carry the body and reach the validate
+  // branch, but it mutates nothing, so it joins the abortable zone queue and
+  // skips the mutation lock: a fresh blur or a submit aborts it (latest-wins).
+  abortable?: boolean;
 }
 
 // The snapshot is the dirty counter captured at fetch time, threaded to apply so
@@ -115,22 +119,40 @@ export class Wire {
     this.#parseHooks.set(contentType, hook);
   }
 
+  // Abort the in-flight request on a zone queue without starting a new one. A
+  // form submit calls this to cancel its own inline validation: the bumped seq
+  // also makes any answer already on the wire discard itself.
+  abort(zone: string): void {
+    const entry = this.#queues.get(zone);
+    if (entry === undefined) return;
+    entry.controller.abort();
+    // Bump the seq so a response that resolves before the abort is observed is
+    // still dropped as stale.
+    this.#queues.set(zone, {
+      controller: new AbortController(),
+      seq: entry.seq + 1,
+    });
+  }
+
   async fetch(request: WireRequest): Promise<void> {
     const method = (request.method ?? "GET").toUpperCase();
     const safe = SAFE_METHODS.has(method);
-    if (!safe && request.uid !== undefined) {
+    // An abortable request (inline validation) is queue-managed like a safe GET
+    // even though it is a POST: it never takes the mutation lock.
+    const locked = !safe && !request.abortable && request.uid !== undefined;
+    if (locked) {
       // Per-uid mutation lock: a second submit drops while busy, a double
       // click yields exactly one fetch (invariant 8).
-      if (this.#busy.has(request.uid)) return;
-      this.#busy.add(request.uid);
+      if (this.#busy.has(request.uid!)) return;
+      this.#busy.add(request.uid!);
     }
-    const queueKey = safe ? request.zone : undefined;
+    const queueKey = safe || request.abortable === true ? request.zone : undefined;
     const entry = queueKey !== undefined ? this.#enqueue(queueKey) : undefined;
     try {
       await this.#run(request, method, entry);
     } finally {
-      if (!safe && request.uid !== undefined) {
-        this.#busy.delete(request.uid);
+      if (locked) {
+        this.#busy.delete(request.uid!);
       }
     }
   }

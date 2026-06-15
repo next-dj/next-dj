@@ -1,0 +1,327 @@
+// Delegated handlers for the data-next-* triggers. Listeners bind once on the
+// document so morph and any insertion survive for free (the delegation idiom).
+// The imperative lazy-zone activation, on the other hand, runs per inserted
+// subtree after each apply (never a module-load scan, never a whole-document
+// scan): a load zone fires its batched GET on `ready`, a revealed zone is handed
+// to the observer when it enters the DOM, a pagination sentinel arms itself.
+//
+// Per-element debounce runs through an injected clock. The revealed trigger runs
+// through an injected IntersectionObserver adapter, since jsdom models no
+// geometry. Inline validation submits a FormData stripped of file fields on
+// blur, collapses bursts through a latest-wins counter, and a form submit
+// cancels its own in-flight validation so a late validation answer cannot
+// overwrite a response the server already accepted.
+
+import { defaultClock, defaultConfirm, defaultObserver } from "./adapters";
+import { HEADER_MERGE, HEADER_ZONE } from "./wire";
+import type { Clock } from "./wire";
+
+const TRIGGER_ATTR = "data-next-trigger";
+const TARGET_ATTR = "data-next-target";
+const DEBOUNCE_ATTR = "data-next-debounce";
+const MERGE_ATTR = "data-next-merge";
+const CONFIRM_ATTR = "data-next-confirm";
+const LAZY_ATTR = "data-next-lazy";
+const ZONE_ATTR = "data-next-zone";
+const VALIDATE_ATTR = "data-next-validate";
+const ACTION_ATTR = "data-next-action";
+const HEADER_VALIDATE = "X-Next-Validate";
+
+// The geometry seam: real IntersectionObserver behind a mock the harness drives
+// by calling the callback, since jsdom reports no intersections.
+export interface IntersectionAdapter {
+  observe(el: Element, onReveal: () => void): () => void;
+}
+
+export interface ConfirmAdapter {
+  (text: string): boolean;
+}
+
+export interface TriggerDeps {
+  // The partial fetch, the only transport the triggers reach. They name zones
+  // and merge intent, never selectors.
+  fetch: (request: {
+    url: string;
+    method?: string;
+    uid?: string;
+    zone?: string;
+    headers?: Record<string, string>;
+    body?: BodyInit;
+    abortable?: boolean;
+  }) => void;
+  // Abort the in-flight request on a zone queue, called when a form submit must
+  // cancel its own inline validation.
+  abort: (zone: string) => void;
+  // The version known to the client, sent on the lazy-zone and validate GETs so
+  // the safeguard sees a stale page.
+  version: () => string;
+  document?: Document;
+  clock?: Clock;
+  observer?: IntersectionAdapter;
+  // The confirm gate. Absent, the default calls window.confirm. Injectable so
+  // tests drive accept and cancel without a real dialog.
+  confirm?: ConfirmAdapter;
+}
+
+export interface Triggers {
+  // Bind the delegated listeners once, the same lifecycle as the layer stack.
+  install(doc: Document): () => void;
+  // Fire the batched load zones of the document on `ready`.
+  ready(): void;
+  // Activate the lazy zones and arm the sentinels inside a freshly inserted
+  // subtree, run from the mount registry after every apply.
+  scan(root: ParentNode): void;
+  _reset(): void;
+}
+
+export function createTriggers(deps: TriggerDeps): Triggers {
+  const doc = deps.document ?? document;
+  const clock = deps.clock ?? defaultClock();
+  const observer = deps.observer ?? defaultObserver();
+  const confirm = deps.confirm ?? defaultConfirm();
+  // Per-element debounce handles, keyed by the element itself.
+  const timers = new WeakMap<Element, number>();
+  // Lazy zones already activated, so a parent morph that re-inserts the same
+  // zone element does not fire a second GET for it.
+  const activated = new WeakSet<Element>();
+  // Observer teardowns, dropped on reset so vitest files do not leak observers.
+  const observed: (() => void)[] = [];
+  let detach: (() => void) | null = null;
+
+  function here(): string {
+    return doc.location.pathname + doc.location.search;
+  }
+
+  // The abortable zone key of a form's inline validation, shared by the sender
+  // and the submit canceller so they address the same queue.
+  function validateZone(uid: string | null): string {
+    return `validate:${uid ?? ""}`;
+  }
+
+  // Resolve the zone an interactive element targets, on itself or an ancestor.
+  function targetZone(el: Element): string | null {
+    const owner = el.closest(`[${TARGET_ATTR}]`);
+    return owner?.getAttribute(TARGET_ATTR) ?? null;
+  }
+
+  function debounceMs(el: Element): number {
+    const raw = el.closest(`[${DEBOUNCE_ATTR}]`)?.getAttribute(DEBOUNCE_ATTR);
+    const ms = raw === null || raw === undefined ? 0 : Number.parseInt(raw, 10);
+    return Number.isFinite(ms) && ms > 0 ? ms : 0;
+  }
+
+  // Debounce by element: a fresh event clears the pending timer, so only the
+  // last of a burst runs. ms 0 runs immediately.
+  function debounced(el: Element, ms: number, run: () => void): void {
+    const pending = timers.get(el);
+    if (pending !== undefined) clock.clearTimeout(pending);
+    if (ms === 0) {
+      run();
+      return;
+    }
+    timers.set(el, clock.setTimeout(run, ms));
+  }
+
+  // A filter form auto-submits its query as a zone GET and syncs the address bar
+  // with replaceState, no history entry: this is an address sync, not a visit.
+  function submitFilter(form: HTMLFormElement, zone: string): void {
+    const query = new URLSearchParams(new FormData(form) as never).toString();
+    const action = form.getAttribute("action") || here().split("?")[0];
+    const url = query === "" ? action : `${action}?${query}`;
+    doc.defaultView?.history.replaceState(null, "", url);
+    deps.fetch({ url, zone, headers: versionHeaders({ [HEADER_ZONE]: zone }) });
+  }
+
+  // A pagination link or sentinel GETs the next page with a merge intent, the
+  // server authors the append patch with dedup.
+  function paginate(el: Element, zone: string): void {
+    const href = el.getAttribute("href");
+    if (href === null || href === "") return;
+    const merge = el.getAttribute(MERGE_ATTR) ?? "append";
+    deps.fetch({
+      url: href,
+      zone,
+      headers: versionHeaders({ [HEADER_ZONE]: zone, [HEADER_MERGE]: merge }),
+    });
+  }
+
+  function versionHeaders(extra: Record<string, string>): Record<string, string> {
+    return { ...extra, "X-Next-Version": deps.version() };
+  }
+
+  // Inline validation on blur. The FormData drops file fields so a multipart
+  // form does not re-upload on every blur, the request carries the field name,
+  // and the abortable zone queue collapses a burst of blurs to latest-wins.
+  function validateField(form: HTMLFormElement, field: string): void {
+    const uid = form.getAttribute(ACTION_ATTR);
+    const data = new FormData();
+    for (const [name, value] of new FormData(form)) {
+      if (value instanceof File) continue;
+      data.append(name, value);
+    }
+    deps.fetch({
+      url: form.getAttribute("action") ?? here(),
+      method: "POST",
+      // The validate request rides a POST for its body but mutates nothing: it
+      // is keyed by zone and abortable, never taking the uid mutation lock, so a
+      // fresh blur or a submit of the same form aborts it through the queue.
+      zone: validateZone(uid),
+      abortable: true,
+      headers: versionHeaders({ [HEADER_VALIDATE]: field }),
+      body: data,
+    });
+  }
+
+  function onInput(event: Event): void {
+    const el = event.target;
+    if (!(el instanceof Element)) return;
+    const trigger = el.closest(`[${TRIGGER_ATTR}]`);
+    if (!(trigger instanceof HTMLElement)) return;
+    const want = trigger.getAttribute(TRIGGER_ATTR);
+    if (want !== event.type) return;
+    const zone = targetZone(trigger);
+    if (zone === null) return;
+    const form = trigger.closest("form");
+    if (!(form instanceof HTMLFormElement)) return;
+    debounced(form, debounceMs(trigger), () => submitFilter(form, zone));
+  }
+
+  function onBlur(event: Event): void {
+    const el = event.target;
+    if (!(el instanceof HTMLElement)) return;
+    const form = el.closest(`form[${VALIDATE_ATTR}]`);
+    if (!(form instanceof HTMLFormElement)) return;
+    const name = el.getAttribute("name");
+    if (name === null || name === "") return;
+    debounced(el, debounceMs(form), () => validateField(form, name));
+  }
+
+  function onSubmit(event: Event): void {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (!form.hasAttribute(VALIDATE_ATTR)) return;
+    // A submit cancels its own in-flight validation: the wire aborts the
+    // validate zone so a late answer never morphs the form the server is about
+    // to re-render from the submit.
+    deps.abort(validateZone(form.getAttribute(ACTION_ATTR)));
+  }
+
+  function onClick(event: Event): void {
+    const el = event.target;
+    if (!(el instanceof Element)) return;
+    const confirmer = el.closest(`[${CONFIRM_ATTR}]`);
+    if (confirmer !== null) {
+      const text = confirmer.getAttribute(CONFIRM_ATTR) ?? "";
+      if (!confirm(text)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+    }
+    const link = el.closest(`a[${MERGE_ATTR}][${TARGET_ATTR}]`);
+    if (link instanceof HTMLAnchorElement) {
+      const zone = link.getAttribute(TARGET_ATTR);
+      if (zone !== null && zone !== "") {
+        event.preventDefault();
+        paginate(link, zone);
+      }
+    }
+  }
+
+  // Activate one lazy zone or sentinel. load fires straight away (its batch is
+  // handled on ready), revealed waits for the observer, a sentinel arms its
+  // observer to paginate.
+  function activate(el: Element): void {
+    if (activated.has(el)) return;
+    const zone = el.getAttribute(ZONE_ATTR);
+    const lazy = el.getAttribute(LAZY_ATTR);
+    const merge = el.getAttribute(MERGE_ATTR);
+    if (zone !== null && lazy === "revealed") {
+      activated.add(el);
+      const stop = observer.observe(el, () => {
+        deps.fetch({
+          url: here(),
+          zone,
+          headers: versionHeaders({ [HEADER_ZONE]: zone }),
+        });
+      });
+      observed.push(stop);
+      return;
+    }
+    if (merge !== null && el.getAttribute(TARGET_ATTR) !== null) {
+      // An infinite-scroll sentinel: paginate when it scrolls into view.
+      activated.add(el);
+      const targetZ = el.getAttribute(TARGET_ATTR)!;
+      const stop = observer.observe(el, () => paginate(el, targetZ));
+      observed.push(stop);
+    }
+  }
+
+  // Batch the document's load zones into a single GET with a comma-joined
+  // X-Next-Zone, one round trip for every load zone on the page.
+  function loadBatch(root: ParentNode): void {
+    const zones: string[] = [];
+    for (const el of Array.from(root.querySelectorAll(`[${LAZY_ATTR}="load"]`))) {
+      if (activated.has(el)) continue;
+      const zone = el.getAttribute(ZONE_ATTR);
+      if (zone === null) continue;
+      activated.add(el);
+      zones.push(zone);
+    }
+    if (zones.length === 0) return;
+    const header = zones.join(",");
+    deps.fetch({
+      url: here(),
+      // The queue key is the batch header so a re-fired batch supersedes the
+      // old one cleanly.
+      zone: header,
+      headers: versionHeaders({ [HEADER_ZONE]: header }),
+    });
+  }
+
+  function scan(root: ParentNode): void {
+    for (const el of Array.from(root.querySelectorAll(`[${LAZY_ATTR}="revealed"]`))) {
+      activate(el);
+    }
+    for (const el of Array.from(
+      root.querySelectorAll(`a[${MERGE_ATTR}][${TARGET_ATTR}]`),
+    )) {
+      // Only sentinels (non-anchor or marked) arm an observer, plain pagination
+      // links stay click-driven and are skipped here.
+      if (el.hasAttribute(LAZY_ATTR)) activate(el);
+    }
+  }
+
+  function install(target: Document): () => void {
+    if (detach !== null) detach();
+    target.addEventListener("input", onInput);
+    target.addEventListener("change", onInput);
+    // Capture for blur, which does not bubble.
+    target.addEventListener("blur", onBlur, true);
+    target.addEventListener("submit", onSubmit, true);
+    target.addEventListener("click", onClick, true);
+    detach = () => {
+      target.removeEventListener("input", onInput);
+      target.removeEventListener("change", onInput);
+      target.removeEventListener("blur", onBlur, true);
+      target.removeEventListener("submit", onSubmit, true);
+      target.removeEventListener("click", onClick, true);
+    };
+    return detach;
+  }
+
+  return {
+    install,
+    ready() {
+      loadBatch(doc);
+    },
+    scan(root) {
+      scan(root);
+      loadBatch(root);
+    },
+    _reset() {
+      for (const stop of observed) stop();
+      observed.length = 0;
+    },
+  };
+}
