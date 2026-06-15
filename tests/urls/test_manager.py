@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
-from django.test import override_settings
+from django.test import RequestFactory, override_settings
 
 from next.conf import next_framework_settings
 from next.pages import page
@@ -218,7 +218,7 @@ class TestGlobalInstances:
         assert pattern is not None
 
         view_func = pattern.callback
-        response = view_func(Mock(), other_param="value")
+        response = view_func(RequestFactory().get("/"), other_param="value")
         assert response.status_code == 200
         assert response.content == b"success"
 
@@ -374,7 +374,7 @@ class TestGlobalInstances:
             )
 
             view_func = pattern.callback
-            response = view_func(Mock(), name="John")
+            response = view_func(RequestFactory().get("/"), name="John")
 
             assert response.status_code == 200
             assert response.content == b"Hello John!"
@@ -393,7 +393,9 @@ class TestGlobalInstances:
             )
 
             view_func = pattern.callback
-            response = view_func(Mock(), args="arg1/arg2/arg3", name="Mia")
+            response = view_func(
+                RequestFactory().get("/"), args="arg1/arg2/arg3", name="Mia"
+            )
 
             assert response.status_code == 200
             assert response.content == b"Hello Mia!"
@@ -410,7 +412,7 @@ class TestGlobalInstances:
             )
 
             view_func = pattern.callback
-            response = view_func(Mock(), name="John")
+            response = view_func(RequestFactory().get("/"), name="John")
 
             assert response.status_code == 200
             assert response.content == b"Hello John!"

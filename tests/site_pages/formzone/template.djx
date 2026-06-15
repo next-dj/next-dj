@@ -1,0 +1,2 @@
+<h1>form zone page</h1>
+{% zone "editor" %}<div>{{ form.name }}{{ form.name.errors }}</div>{% endzone %}

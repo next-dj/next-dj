@@ -13,6 +13,7 @@ from .patches import (
     PatchResponse,
 )
 from .registry import ZoneInfo, register_patch_op, zone_requested, zones_of
+from .render import UnknownZoneError, ZoneRenderResult, render_zone
 
 
 __all__ = [
@@ -25,11 +26,14 @@ __all__ = [
     "Patch",
     "PatchResponse",
     "Patches",
+    "UnknownZoneError",
     "ZoneInfo",
+    "ZoneRenderResult",
     "is_partial_request",
     "partial_backend_manager",
     "partial_intent",
     "register_patch_op",
+    "render_zone",
     "signals",
     "zone_requested",
     "zones_of",

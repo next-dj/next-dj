@@ -81,6 +81,21 @@ class TestBackendOptions:
         assert backend.options == {}
 
 
+class TestBackendVersion:
+    """The backend resolves the asset version stamped on a partial response."""
+
+    def test_explicit_version_wins(self) -> None:
+        backend = PartialProtocolBackend({"OPTIONS": {"VERSION": "abc123"}})
+        assert backend.version() == "abc123"
+
+    def test_manifest_sentinel_resolves_to_default(self) -> None:
+        backend = PartialProtocolBackend({"OPTIONS": {"VERSION": "manifest"}})
+        assert backend.version() == "0"
+
+    def test_missing_version_resolves_to_default(self) -> None:
+        assert PartialProtocolBackend().version() == "0"
+
+
 class TestFactory:
     """The factory instantiates the backend named in a settings entry."""
 

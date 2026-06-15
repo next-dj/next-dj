@@ -65,10 +65,15 @@ class _BodyResolution:
     escape hatch for redirects, streaming responses, JSON, and anything
     else. The type is `HttpResponseBase` so `StreamingHttpResponse` and
     `FileResponse` flow through unchanged alongside `HttpResponse`.
+
+    `dynamic` marks a body produced by a `render()` function returning a
+    string. Such a body never reaches the composed-template cache, so a
+    zone in it has no compiled source to render standalone.
     """
 
     body: str | None = None
     http_response: HttpResponseBase | None = None
+    dynamic: bool = False
 
 
 class Page:
@@ -273,7 +278,7 @@ class Page:
         if isinstance(result, HttpResponseBase):
             return _BodyResolution(http_response=result)
         if isinstance(result, str):
-            return _BodyResolution(body=result)
+            return _BodyResolution(body=result, dynamic=True)
         msg = (
             f"page.py render() at {file_path} must return str or "
             f"HttpResponseBase, got {type(result).__name__}."
@@ -432,6 +437,22 @@ class Page:
             resolution = self._resolve_page_body(file_path, module, request, **kwargs)
             if resolution.http_response is not None:
                 return resolution.http_response
+            # next.partial imports next.pages, so the zone branch defers
+            # its imports to break the cycle. Without the partial switch the
+            # intent carries no zones and the full render path below runs
+            # byte-for-byte the same as before.
+            from next.partial import partial_intent  # noqa: PLC0415
+            from next.partial.view import zone_response  # noqa: PLC0415
+
+            intent = partial_intent(request)
+            if intent.zones:
+                return zone_response(
+                    file_path,
+                    intent,
+                    request,
+                    dynamic_body=resolution.dynamic,
+                    url_kwargs=dict(kwargs),
+                )
             body = resolution.body if resolution.body is not None else ""
             content = self._render_composed(file_path, body, request, **kwargs)
             return HttpResponse(content)

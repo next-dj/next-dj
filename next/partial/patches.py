@@ -134,6 +134,24 @@ class Patches:
         self._defer: list[DeferZone] = []
         self._form: FormMeta | None = None
 
+    def morph(
+        self,
+        target: "Mapping[str, Any]",
+        html: str,
+        *,
+        extract: bool = False,
+    ) -> "Patches":
+        """Morph the target node into the given HTML, the default verb.
+
+        `extract` marks `html` as a whole document the client trims down
+        to the node matching the target.
+        """
+        extras = {"extract": True} if extract else {}
+        self._ops.append(
+            Patch(op="morph", target=dict(target), html=html, extras=extras)
+        )
+        return self
+
     def replace(self, target: "Mapping[str, Any]", html: str) -> "Patches":
         """Replace the target node wholesale with the given HTML."""
         self._ops.append(Patch(op="replace", target=dict(target), html=html))

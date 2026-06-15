@@ -17,6 +17,9 @@ if TYPE_CHECKING:
 
 _SSE_EVENT_NAME = "next-patches"
 _PARTIAL_BACKENDS_KEY = "PARTIAL_BACKENDS"
+_VERSION_OPTION = "VERSION"
+_MANIFEST_VERSION = "manifest"
+_DEFAULT_VERSION = "0"
 
 
 class PartialProtocolBackend:
@@ -42,6 +45,19 @@ class PartialProtocolBackend:
     def options(self) -> "Mapping[str, Any]":
         """Return the backend OPTIONS mapping from settings."""
         return self._options
+
+    def version(self) -> str:
+        """Return the asset version string stamped on a partial response.
+
+        An explicit `VERSION` option wins. The `"manifest"` sentinel
+        asks for the hash of the staticfiles manifest, which a later
+        increment derives precisely. Until then the sentinel resolves
+        to a stable default so the wire shape and the sync check work.
+        """
+        configured = self._options.get(_VERSION_OPTION, _MANIFEST_VERSION)
+        if isinstance(configured, str) and configured != _MANIFEST_VERSION:
+            return configured
+        return _DEFAULT_VERSION
 
     def _dumps(self, envelope: "Envelope") -> str:
         """Serialise an envelope to a compact JSON string."""

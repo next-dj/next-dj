@@ -8,7 +8,7 @@ package imports pytest.
 from __future__ import annotations
 
 from .actions import build_form_for, resolve_action_url
-from .client import NextClient
+from .client import NextClient, PartialEnvelope, envelope_of
 from .deps import make_resolution_context, resolve_call
 from .html import assert_has_class, assert_missing_class, find_anchor
 from .isolation import (
@@ -39,6 +39,7 @@ from .signals import (
 
 __all__ = [
     "NextClient",
+    "PartialEnvelope",
     "SignalEvent",
     "SignalRecorder",
     "StaticCollectorProxy",
@@ -50,6 +51,7 @@ __all__ = [
     "clear_loaded_dirs",
     "eager_load_components",
     "eager_load_pages",
+    "envelope_of",
     "find_anchor",
     "make_resolution_context",
     "override_component_backends",

@@ -192,7 +192,9 @@ def _component(template_path: Path | None) -> Generator[None, None, None]:
     manager._backends = [backend]
 
     settings_ns = MagicMock()
-    settings_ns.COMPONENT_BACKENDS = [{"BACKEND": "next.components.FileComponentsBackend"}]
+    settings_ns.COMPONENT_BACKENDS = [
+        {"BACKEND": "next.components.FileComponentsBackend"}
+    ]
     with (
         patch("next.partial.checks.next_framework_settings", settings_ns),
         patch("next.partial.checks.ComponentsManager", return_value=manager),

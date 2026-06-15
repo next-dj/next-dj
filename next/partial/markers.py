@@ -32,6 +32,26 @@ def _strip_quotes(raw: str) -> str:
     return raw.strip("'\"").strip()
 
 
+def _wrap_zone(tag: str, name: str, body: str) -> SafeString:
+    """Return the addressable wrapper element around a rendered zone body."""
+    return SafeString(f'<{tag} {ZONE_ATTR}="{name}">{body}</{tag}>')
+
+
+def render_zone_standalone(
+    partial: "ZonePartial",
+    name: str,
+    tag: str,
+    context: "Context",
+) -> SafeString:
+    """Render one zone body wrapped in its addressable element.
+
+    The wrapper drops the lazy hint because a partial request asks for
+    the body by name and the body has already arrived. Both the inline
+    full render and the partial path share this single wrapper string.
+    """
+    return _wrap_zone(tag, name, partial.render(context))
+
+
 class ZonePartial:
     """Standalone renderable for one zone body that owns its template state.
 
@@ -104,19 +124,12 @@ class ZoneNode(Node):
         self.lazy = lazy
         self.placeholder = placeholder if placeholder is not None else NodeList()
 
-    def _open(self) -> str:
-        """Return the opening marker element for the zone wrapper."""
-        if self.lazy is None:
-            return f'<{self.tag} {ZONE_ATTR}="{self.name}">'
-        return f'<{self.tag} {ZONE_ATTR}="{self.name}" {LAZY_ATTR}="{self.lazy}">'
-
     def render(self, context: "Context") -> SafeString:
         """Render the zone inline on a full page render."""
         if self.lazy is None:
-            body = self.partial.render(context)
-        else:
-            body = self.placeholder.render(context)
-        return SafeString(f"{self._open()}{body}</{self.tag}>")
+            return render_zone_standalone(self.partial, self.name, self.tag, context)
+        open_tag = f'<{self.tag} {ZONE_ATTR}="{self.name}" {LAZY_ATTR}="{self.lazy}">'
+        return SafeString(f"{open_tag}{self.placeholder.render(context)}</{self.tag}>")
 
 
 def _parse_options(token: "Token") -> tuple[str, str, str | None]:
@@ -189,4 +202,5 @@ __all__ = [
     "ZonePartial",
     "do_zone",
     "register",
+    "render_zone_standalone",
 ]

@@ -83,9 +83,7 @@ class ZoneInfo:
     partial: "ZonePartial"
 
 
-_zone_cache: "WeakKeyDictionary[Template, Mapping[str, ZoneInfo]]" = (
-    WeakKeyDictionary()
-)
+_zone_cache: "WeakKeyDictionary[Template, Mapping[str, ZoneInfo]]" = WeakKeyDictionary()
 
 
 def _zones_from_template(template: "Template") -> dict[str, ZoneInfo]:

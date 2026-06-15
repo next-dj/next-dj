@@ -1,4 +1,5 @@
 import copy
+from pathlib import Path
 
 import pytest
 from django.core.cache import cache
@@ -6,12 +7,28 @@ from django.core.cache import cache
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
 from next.forms.wizard import wizard_backend_manager
+from next.pages.loaders import _load_python_module
 from tests.partial import regression_forms
 
 
 # Bind the module so its module-level form action is registered before the
 # registry snapshot below, whatever the collection order happens to be.
 _BASELINE_FORMS = regression_forms
+
+_ZONED_PAGE = (
+    Path(__file__).resolve().parent.parent / "site_pages" / "zoned" / "page.py"
+)
+
+
+@pytest.fixture(autouse=True)
+def _register_zoned_page_context():
+    """Re-execute the zoned page module so its @context survives global resets.
+
+    Other suites reset the page context registry between tests, so the
+    zone smoke tests re-register the providers the zoned template reads.
+    Re-execution is idempotent because registration keys on the file path.
+    """
+    _load_python_module(_ZONED_PAGE)
 
 
 @pytest.fixture(autouse=True)

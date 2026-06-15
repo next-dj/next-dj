@@ -80,6 +80,22 @@ class TestEnvelopeAsDict:
 class TestPatchesBuilder:
     """The minimal builder emits HTML and HTML-less verbs in order."""
 
+    def test_morph_is_the_default_verb(self) -> None:
+        envelope = Patches("v1").morph({"zone": "list"}, "<div></div>").envelope()
+        assert envelope.ops[0].as_dict() == {
+            "op": "morph",
+            "target": {"zone": "list"},
+            "html": "<div></div>",
+        }
+
+    def test_morph_extract_marks_payload(self) -> None:
+        envelope = (
+            Patches("v1")
+            .morph({"form": "ab12"}, "<html></html>", extract=True)
+            .envelope()
+        )
+        assert envelope.ops[0].as_dict()["extract"] is True
+
     def test_replace(self) -> None:
         envelope = Patches("v1").replace({"zone": "list"}, "<div></div>").envelope()
         assert envelope.ops[0].as_dict() == {

@@ -53,6 +53,24 @@ def _event_only() -> GoldenCase:
     )
 
 
+def _zone_get() -> GoldenCase:
+    alpha = '<div data-next-zone="alpha"><p>alpha hi</p></div>'
+    beta = '<section data-next-zone="beta"><p>beta hi</p></section>'
+    envelope = (
+        Patches("9f3c2e1b")
+        .morph({"zone": "alpha"}, alpha)
+        .morph({"zone": "beta"}, beta)
+        .add_asset("css", "/static/next/zoned.css")
+        .envelope()
+    )
+    return GoldenCase(
+        name="zone_get",
+        envelope=envelope,
+        description="A batched zone GET morphing two zones with an asset manifest.",
+        version="9f3c2e1b",
+    )
+
+
 def _invalid_form() -> GoldenCase:
     html = (
         '<form data-next-action="ab12cd34">'
@@ -85,6 +103,7 @@ GOLDEN_CASES = [
     _inner_zone(),
     _remove_row(),
     _event_only(),
+    _zone_get(),
     _invalid_form(),
 ]
 
@@ -141,3 +160,14 @@ class TestWriteGoldenFixtures:
             "valid": False,
             "errors": {"name": ["This field is required."]},
         }
+
+    def test_zone_get_envelope_morphs_both_zones(self) -> None:
+        write_case(_zone_get())
+        data = json.loads(read_envelope_bytes("zone_get"))
+        targets = [op["target"]["zone"] for op in data["ops"]]
+        assert targets == ["alpha", "beta"]
+
+    def test_zone_get_envelope_carries_asset_manifest(self) -> None:
+        write_case(_zone_get())
+        data = json.loads(read_envelope_bytes("zone_get"))
+        assert data["assets"] == [{"kind": "css", "url": "/static/next/zoned.css"}]

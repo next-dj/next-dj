@@ -3,7 +3,13 @@ from django.template import Context, Engine, TemplateSyntaxError
 from django.template.base import Template
 from django.test import RequestFactory
 
-from next.partial.markers import LAZY_ATTR, ZONE_ATTR, ZoneNode, ZonePartial
+from next.partial.markers import (
+    LAZY_ATTR,
+    ZONE_ATTR,
+    ZoneNode,
+    ZonePartial,
+    render_zone_standalone,
+)
 
 
 def _render(source: str, **ctx: object) -> str:
@@ -34,9 +40,7 @@ class TestZoneTagFullRender:
         )
 
     def test_lazy_load_trigger(self) -> None:
-        source = (
-            '{% zone "lz" lazy="load" %}body{% placeholder %}ph{% endzone %}'
-        )
+        source = '{% zone "lz" lazy="load" %}body{% placeholder %}ph{% endzone %}'
         out = _render(source)
         assert f'{LAZY_ATTR}="load"' in out
 
@@ -87,6 +91,22 @@ class TestZonePartialStandalone:
         assert node.partial.origin is template.origin
         assert node.partial.name == "z"
         assert node.partial.engine is not None
+
+
+class TestRenderZoneStandalone:
+    """`render_zone_standalone` wraps the body for a delivered partial."""
+
+    def test_wraps_body_without_lazy_hint(self) -> None:
+        template = Template(
+            '{% zone "lz" tag="section" lazy="load" %}'
+            "<b>{{ v }}</b>{% placeholder %}ph{% endzone %}"
+        )
+        node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
+        out = render_zone_standalone(
+            node.partial, node.name, node.tag, Context({"v": "x"})
+        )
+        assert out == f'<section {ZONE_ATTR}="lz"><b>x</b></section>'
+        assert LAZY_ATTR not in out
 
 
 class TestZoneDebugContract:

@@ -1,0 +1,4 @@
+<h1>zoned page</h1>
+{% zone "alpha" %}<p>alpha {{ greeting }}</p>{% endzone %}
+{% zone "beta" tag="section" %}<p>beta {{ greeting }}</p>{% endzone %}
+{% zone "later" lazy="load" %}<p>later {{ greeting }}</p>{% placeholder %}<p>loading</p>{% endzone %}
