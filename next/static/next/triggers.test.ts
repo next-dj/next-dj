@@ -6,6 +6,7 @@ import type { Clock } from "./wire";
 type Request = {
   url: string;
   method?: string;
+  uid?: string;
   zone?: string;
   headers?: Record<string, string>;
   body?: BodyInit;
@@ -179,14 +180,36 @@ describe("trigger delegation", () => {
     expect(aborted).toEqual(["validate:u"]);
   });
 
-  it("ignores a submit of a form without inline validation", () => {
-    document.body.innerHTML = '<form data-next-action="u"></form>';
-    const { triggers, aborted } = makeTriggers();
+  it("intercepts a next-action submit as a partial post carrying the zone", () => {
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-action="u" data-next-target="wizard">' +
+      '<input name="email" value="a@b.c">' +
+      '<button type="submit" name="advance" value="next">Continue</button>' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
     detach = triggers.install(document);
-    document
-      .querySelector("form")!
-      .dispatchEvent(new Event("submit", { bubbles: true }));
-    expect(aborted).toEqual([]);
+    const form = document.querySelector("form")!;
+    const event = new Event("submit", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "submitter", { value: form.querySelector("button") });
+    form.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].method).toBe("POST");
+    expect(requests[0].uid).toBe("u");
+    expect(requests[0].zone).toBe("wizard");
+    const body = requests[0].body as FormData;
+    expect(body.get("email")).toBe("a@b.c");
+    expect(body.get("advance")).toBe("next");
+  });
+
+  it("leaves a form without a next action to submit natively", () => {
+    document.body.innerHTML = '<form action="/x/"><input name="q"></form>';
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    const event = new Event("submit", { bubbles: true, cancelable: true });
+    document.querySelector("form")!.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(requests).toHaveLength(0);
   });
 
   it("arms an infinite-scroll sentinel observer", () => {

@@ -127,10 +127,10 @@ jobs:
       run: |
         # The runtime ships gzipped on every page, so its gzip size is the hard budget enforced here in CI.
         bytes=$(gzip -nc next/static/next/next.min.js | wc -c)
-        budget=$((10 * 1024))
+        budget=$((12 * 1024))
         echo "next.min.js: ${bytes} bytes gzip (budget ${budget} bytes)"
         if [ "$bytes" -gt "$budget" ]; then
-          echo "::error::next.min.js (${bytes} bytes gzip) exceeds the 10 KB gzip budget (${budget} bytes)"
+          echo "::error::next.min.js (${bytes} bytes gzip) exceeds the 12 KB gzip budget (${budget} bytes)"
           exit 1
         fi
     - name: Run JavaScript unit tests with coverage

@@ -199,11 +199,32 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   function onSubmit(event: Event): void {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
-    if (!form.hasAttribute(VALIDATE_ATTR)) return;
+    const uid = form.getAttribute(ACTION_ATTR);
+    if (uid === null) return;
     // A submit cancels its own in-flight validation: the wire aborts the
     // validate zone so a late answer never morphs the form the server is about
     // to re-render from the submit.
-    deps.abort(validateZone(form.getAttribute(ACTION_ATTR)));
+    deps.abort(validateZone(uid));
+    // Intercept the submit as a partial mutation under the uid lock. Without
+    // the runtime the form posts natively for the full post-then-redirect
+    // cycle, so this is the enhancement and never the only path.
+    event.preventDefault();
+    const body = new FormData(form);
+    // A native submit carries the pressed button, so a Continue or a Back name
+    // reaches the server: replay it onto the data the engine sends.
+    const submitter = (event as SubmitEvent).submitter;
+    const name = submitter?.getAttribute("name") ?? "";
+    if (name !== "") body.append(name, submitter?.getAttribute("value") ?? "");
+    // The zone the form declares travels as the morph target, so an invalid
+    // submit repaints that zone and a wizard step advances it in place. Without
+    // one the server falls back to the form by uid.
+    deps.fetch({
+      url: form.getAttribute("action") ?? here(),
+      method: "POST",
+      uid,
+      zone: targetZone(form) ?? undefined,
+      body,
+    });
   }
 
   function onClick(event: Event): void {
