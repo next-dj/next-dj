@@ -1,5 +1,6 @@
 """Shaping of form action outcomes into patch envelopes for partial requests."""
 
+import contextlib
 import types
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 from next.forms.dispatch import ActionOutcome, ActionOutcomeKind, FormActionDispatch
 from next.forms.origin import _resolve_origin
+from next.forms.uid import ADVANCE_ORIGIN_ATTR
 from next.pages import page
 from next.static.scripts import csrf_payload
 
@@ -211,9 +213,19 @@ def _shape_advance(
     zone = _form_zone(request, page_path)
     if zone is not None:
         overrides = _wizard_overrides(form, next_wizard, outcome.action_name)
-        result = render_zone(
-            page_path, (zone,), request, url_kwargs=url_kwargs, overrides=overrides
-        )
+        # Override the form origin for the render so the next step's hidden
+        # _next_form_origin field carries the next step URL, not the current
+        # step URL from request.POST. Without this, blur-validate probes on
+        # the new step resolve the origin back to the previous step page and
+        # morph the wrong step into the zone.
+        setattr(request, ADVANCE_ORIGIN_ATTR, redirect_to)
+        try:
+            result = render_zone(
+                page_path, (zone,), request, url_kwargs=url_kwargs, overrides=overrides
+            )
+        finally:
+            with contextlib.suppress(AttributeError):
+                delattr(request, ADVANCE_ORIGIN_ATTR)
         patches.morph({"zone": zone}, result.html[zone])
     if _should_push_steps(wizard):
         patches.push_url(redirect_to)
@@ -326,6 +338,10 @@ def _form_overrides(outcome: ActionOutcome) -> dict[str, object]:
     form = outcome.form
     if form is None:
         return {}
+    wizard = outcome.wizard
+    if wizard is not None:
+        namespace = types.SimpleNamespace(form=form, wizard=wizard)
+        return {"form": form, "wizard": wizard, outcome.action_name: namespace}
     return {"form": form, outcome.action_name: form}
 
 

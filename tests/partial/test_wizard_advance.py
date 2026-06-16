@@ -59,6 +59,20 @@ class TestWizardAdvanceStepsByEnvelope:
         assert 'name="scope"' in html
         assert 'name="name"' not in html
 
+    def test_advance_stamps_next_step_origin_in_zone_html(
+        self, client: NextClient
+    ) -> None:
+        response = client.post_action(
+            "step_wizard",
+            {"name": "Ada"},
+            origin="/wizard/identity/",
+            partial=True,
+            zones="wizard-zone",
+        )
+        html = envelope_of(response).html_for_zone("wizard-zone")
+        assert 'value="/wizard/scope/"' in html
+        assert 'value="/wizard/identity/"' not in html
+
     def test_draft_lands_in_storage_on_the_partial_advance(
         self, client: NextClient
     ) -> None:
@@ -168,6 +182,44 @@ class TestWizardAdvanceCsrfMeta:
             zones="wizard-zone",
         )
         assert "csrf" not in envelope_of(response).data
+
+
+@pytest.mark.django_db()
+class TestWizardInvalidStepZoneMorph:
+    """An invalid wizard step re-renders the bound form in the zone, not an unbound one.
+
+    Without the fix, _form_overrides passes the bare form as the action-name
+    override. The FormNode sees no .form attribute on it, falls back to
+    _build_form_namespace_from_meta, which calls current_form() — that returns
+    an UNBOUND form. Step sections receive an unbound form with no errors,
+    so the error state never renders.
+
+    With the fix, the override is a namespace(form, wizard), so the FormNode
+    picks up the bound invalid form directly. The submitted value is present
+    in the rendered zone HTML.
+    """
+
+    def test_invalid_step_zone_carries_bound_submitted_value(
+        self, client: NextClient
+    ) -> None:
+        client.post_action(
+            "step_wizard",
+            {"name": "Ada"},
+            origin="/wizard/identity/",
+            partial=True,
+            zones="wizard-zone",
+        )
+        too_long = "x" * 101
+        response = client.post_action(
+            "step_wizard",
+            {"scope": too_long},
+            origin="/wizard/scope/",
+            partial=True,
+            zones="wizard-zone",
+        )
+        assert response["X-Next-Form"] == "invalid"
+        html = envelope_of(response).html_for_zone("wizard-zone")
+        assert too_long in html
 
 
 @pytest.mark.django_db()

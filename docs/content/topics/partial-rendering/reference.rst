@@ -239,6 +239,9 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from Python 
    * - ``data-next-busy``
      - Initiator and target
      - The busy gate, written by the runtime alongside ``aria-busy="true"``.
+   * - ``data-next-dialog``
+     - Runtime ``<dialog>``
+     - Set by the runtime on every layer dialog, the styling hook for the modal shell.
 
 Lifecycle Events
 ----------------
@@ -331,6 +334,56 @@ The list holds the protocol backends, with the first one active.
      - The ``EventSource`` reconnect hint.
 
 See :doc:`/content/ref/settings` for every key inside ``NEXT_FRAMEWORK``.
+
+Styling Layers and Toasts
+-------------------------
+
+The runtime creates a bare ``<dialog data-next-dialog>`` for every layer and a ``<div data-next-toasts>`` container for toasts.
+No framework CSS is applied — the selectors are the hook.
+
+.. code-block:: css
+   :caption: plain CSS
+
+   [data-next-dialog] {
+     width: 100%;
+     max-width: 32rem;
+     border-radius: 0.5rem;
+     border: 1px solid hsl(var(--border));
+     background-color: hsl(var(--background));
+     color: hsl(var(--foreground));
+     padding: 1.5rem;
+     box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1);
+   }
+   [data-next-dialog]::backdrop {
+     background-color: rgb(0 0 0 / 0.4);
+   }
+   [data-next-toasts] {
+     position: fixed;
+     bottom: 1rem;
+     right: 1rem;
+     display: flex;
+     flex-direction: column;
+     gap: 0.5rem;
+   }
+   [data-next-toast] { /* default variant */ }
+   [data-next-toast="success"] { /* success variant */ }
+
+With Tailwind Play CDN ``@apply`` is available inside a ``<style type="text/tailwindcss">`` block in the layout template.
+
+.. code-block:: jinja
+   :caption: layout.djx
+
+   <style type="text/tailwindcss">
+     [data-next-dialog] {
+       @apply w-full max-w-lg rounded-lg border border-border
+              bg-background text-foreground shadow-xl p-6;
+     }
+     [data-next-dialog]::backdrop {
+       @apply bg-black/40;
+     }
+   </style>
+
+The ``next.dj`` examples use both patterns through the shared ``_shared/static/shared/css/base.css`` file.
 
 See Also
 --------

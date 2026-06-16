@@ -139,6 +139,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
     zone: string,
   ): Promise<void> {
     const dialog = doc.createElement("dialog");
+    dialog.setAttribute("data-next-dialog", "");
     const root = doc.createElement("div");
     // The zone container is named after the opener's own attribute and built
     // before the request, so the first morph finds the target by the ordinary

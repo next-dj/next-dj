@@ -24,6 +24,10 @@ def reverse_form_action(uid: str) -> str:
 
 ORIGIN_FIELD_NAME = "_next_form_origin"
 
+# Request attribute set by _shape_advance to override the rendered form's
+# _next_form_origin to the next step URL instead of the submitted step URL.
+ADVANCE_ORIGIN_ATTR = "_next_form_advance_origin"
+
 
 def validated_origin_path(raw: object) -> str | None:
     """Return `raw` as a same-site path or `None`."""
@@ -48,6 +52,7 @@ def redirect_to_origin(
 
 
 __all__ = [
+    "ADVANCE_ORIGIN_ATTR",
     "FORM_ACTION_REVERSE_NAME",
     "ORIGIN_FIELD_NAME",
     "URL_NAME_FORM_ACTION",

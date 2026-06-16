@@ -57,6 +57,11 @@ describe("layer stack", () => {
     expect(dispatched.some((d) => d.event === "partial:layer-opened")).toBe(true);
   });
 
+  it("stamps data-next-dialog on the created dialog element", async () => {
+    await layers.open(null, "/wizard/", "access-wizard");
+    expect(document.querySelector("[data-next-dialog]")).not.toBeNull();
+  });
+
   it("resolves a layer zone before the same-named page zone", async () => {
     document.body.innerHTML = '<div data-next-zone="z" id="page"></div>';
     await layers.open(null, "/w/", "z");

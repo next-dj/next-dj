@@ -9,7 +9,7 @@ from django.utils.html import format_html
 
 from next.forms.backends import FormActionNotFound
 from next.forms.manager import _build_form_namespace_from_meta, form_action_manager
-from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
+from next.forms.uid import ADVANCE_ORIGIN_ATTR, ORIGIN_FIELD_NAME, validated_origin_path
 from next.forms.widgets import bind_component_widgets
 
 
@@ -167,8 +167,14 @@ class FormNode(template.Node):
 
         On the validation-error re-render the request targets the action
         endpoint, so the posted origin of the original page wins over
-        `request.path`.
+        `request.path`. On a wizard advance the shaping layer sets
+        ADVANCE_ORIGIN_ATTR to the next step URL, which wins over the
+        submitted step origin so blur-validate probes on the new step
+        render from the correct page.
         """
+        advance: str | None = getattr(request, ADVANCE_ORIGIN_ATTR, None)
+        if advance is not None:
+            return advance
         if getattr(request, "method", None) == "POST":
             posted = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
             if posted is not None:

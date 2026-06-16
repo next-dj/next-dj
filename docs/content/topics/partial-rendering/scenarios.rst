@@ -416,6 +416,7 @@ On click the runtime opens a native ``<dialog>``, builds the ``access-wizard`` z
 
 A step submitted with an error answers 200 with a morph of the wizard zone and the form meta.
 No operation names the layer, so the modal lives on.
+The dialog carries the ``data-next-dialog`` attribute so project CSS can target it without relying on tag or internal structure.
 A valid non-last step advances without a 302: the dispatcher builds the next wizard and the unbound form of the next step, and morphs the wizard zone to the next step.
 
 Wizard steps inside a layer are not pushed to history by default.
