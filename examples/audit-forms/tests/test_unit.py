@@ -188,6 +188,12 @@ class TestWizardPermissionHook:
         request = self._request(acknowledged=True)
         assert _step_page.AccessRequestWizard.check_permissions(request) is True
 
+    def test_validation_probe_is_allowed_without_acknowledgement(self) -> None:
+        request = self._request(acknowledged=False)
+        request.META["HTTP_X_NEXT_REQUEST"] = "1"
+        request.META["HTTP_X_NEXT_VALIDATE"] = "name"
+        assert _step_page.AccessRequestWizard.check_permissions(request) is True
+
 
 @pytest.mark.django_db()
 class TestAccessDeniedReceiver:

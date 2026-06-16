@@ -248,9 +248,18 @@ export class Wire {
       return;
     }
     // Invariant 9: any non-envelope content-type, or a redirected response, is
-    // a full navigation to the final URL. No attempt to parse the body.
+    // a full navigation to the final URL. No attempt to parse the body. A
+    // redirect (a guard sending the browser to login) and a safe GET both
+    // point at a page, but a non-redirect non-envelope on a mutating request
+    // points at the action endpoint, not a page, so navigating there would
+    // 405: it surfaces as an error and leaves the page in place.
     if (baseType !== CONTENT_TYPE || response.redirected) {
-      this.#navigate(response.url || request.url);
+      if (response.redirected || SAFE_METHODS.has(method)) {
+        this.#navigate(response.url || request.url);
+        return;
+      }
+      const body = await this.#text(response);
+      this.#dispatch("partial:error", { status: response.status, body, error: null });
       return;
     }
     const body = await this.#text(response);

@@ -5,7 +5,7 @@ from django import forms
 from django.http import HttpRequest, HttpResponse
 
 from next.forms import ComponentWidget, FormWizard, PermissionOutcome
-from next.partial import Patches, PatchResponse
+from next.partial import Patches, PatchResponse, partial_intent
 
 
 class IdentityStep(forms.ModelForm):
@@ -51,14 +51,20 @@ class AccessRequestWizard(FormWizard):
 
     @classmethod
     def check_permissions(cls, request: HttpRequest) -> PermissionOutcome:
-        """Deny every step POST that omits the retention-policy acknowledgement.
+        """Deny every binding step POST that omits the retention acknowledgement.
 
         The form page renders the acknowledgement notice and carries the
         `policy_acknowledged` field, so a normal submission passes while a
         replayed or forged action URL that never rendered the form is
         denied before any PII binds. A denied step writes no draft and
         leaves only the `form_access_denied` audit row behind.
+
+        A blur-validation probe binds no data and asks only whether one
+        field is well formed, so it is let through ahead of the
+        acknowledgement the user has not reached yet.
         """
+        if partial_intent(request).validate_fields:
+            return True
         return request.POST.get("policy_acknowledged") == "on"
 
     def done(

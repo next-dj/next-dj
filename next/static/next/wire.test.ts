@@ -105,6 +105,20 @@ describe("Wire classification", () => {
     expect(h.navigated).toEqual(["/final/"]);
   });
 
+  it("errors instead of a 405 navigation when a mutation is denied", async () => {
+    const h = makeWire(async () =>
+      envelopeResponse("<html>denied</html>", {
+        status: 403,
+        type: "text/html",
+        url: "/_next/form/u1/",
+      }),
+    );
+    await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+    expect(h.navigated).toEqual([]);
+    const err = h.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.status).toBe(403);
+  });
+
   it("navigates on 409 on a safe method", async () => {
     const h = makeWire(async () =>
       envelopeResponse("", { status: 409, type: "text/plain", url: "/here/" }),
