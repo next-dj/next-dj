@@ -272,9 +272,12 @@ export class Wire {
     const headers: Record<string, string> = {
       [REQUEST_FLAG]: "1",
       [HEADER_ACCEPT]: ACCEPT,
-      [HEADER_VERSION]: this.#version(),
       ...request.headers,
     };
+    // The version travels only once the client has learned one from an
+    // envelope, so the first request of a page asserts no stale version.
+    const version = this.#version();
+    if (version) headers[HEADER_VERSION] = version;
     if (request.zone !== undefined) headers[HEADER_ZONE] = request.zone;
     if (!SAFE_METHODS.has(method)) {
       const csrf = this.#csrf();

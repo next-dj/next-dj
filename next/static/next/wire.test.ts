@@ -54,6 +54,13 @@ describe("Wire headers", () => {
     expect(headers["X-Next-Zone"]).toBe("request-list");
   });
 
+  it("omits the version header before the client has learned one", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), { version: "" });
+    await h.wire.fetch({ url: "/list/", zone: "request-list" });
+    const headers = h.calls[0].init.headers as Record<string, string>;
+    expect("X-Next-Version" in headers).toBe(false);
+  });
+
   it("adds the CSRF header from the payload on unsafe methods", async () => {
     const h = makeWire(async () => envelopeResponse(ENVELOPE), {
       csrf: { header: "X-CSRFToken", token: "tok" },

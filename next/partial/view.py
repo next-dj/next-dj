@@ -58,8 +58,13 @@ def zone_response(
 
 
 def _version_conflict(intent: "PartialIntent", version: str) -> bool:
-    """Return True when the client version is set and differs from the current."""
-    return intent.version is not None and intent.version != version
+    """Return True when the client asserts a version that differs from the current.
+
+    An absent or empty client version asserts nothing, so the first partial
+    request of a page, made before the client has learned a version, never
+    conflicts.
+    """
+    return bool(intent.version) and intent.version != version
 
 
 def _build_envelope(

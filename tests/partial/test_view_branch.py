@@ -59,6 +59,18 @@ class TestZoneGetVersionConflict:
         assert response.status_code == 409
         assert response.content == b""
 
+    def test_empty_version_is_not_a_conflict(self) -> None:
+        # A browser opening a zone before it has learned a version sends an
+        # empty X-Next-Version, which asserts nothing and must render.
+        response = NextClient().get(
+            "/zoned/",
+            HTTP_X_NEXT_REQUEST="1",
+            HTTP_X_NEXT_ZONE="alpha",
+            HTTP_X_NEXT_VERSION="",
+        )
+        assert response.status_code == 200
+        assert envelope_of(response).zone_targets() == ["alpha"]
+
     def test_matching_version_renders(self) -> None:
         client = NextClient()
         version = envelope_of(client.get_zones("/zoned/", "alpha")).version
