@@ -157,7 +157,9 @@ export function defaultEventSource(): EventSourceAdapter {
       es.addEventListener("next-patches", (event) =>
         onMessage((event as MessageEvent).data),
       );
-      es.onerror = () => onError();
+      // A CLOSED readyState is a 4xx or a permanent failure with no native
+      // reconnect, CONNECTING means the browser is already retrying.
+      es.onerror = () => onError(es.readyState === EventSource.CLOSED);
       // close ends the connection and discards every listener with the object.
       return { close: () => es.close() };
     },

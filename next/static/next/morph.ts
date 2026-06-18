@@ -198,8 +198,17 @@ function emit(target: Element, name: string, detail: Record<string, unknown>): b
   return !event.defaultPrevented;
 }
 
+// Signal an element is about to detach so an adapter root mounted into it can
+// unmount before the node leaves the document. Fired on the detaching root
+// itself, bubbles to the document where the delegated listener lives, and is
+// not cancelable: the detach is already decided. The complement of next:mounted.
+export function fireRemoved(node: Element): void {
+  node.dispatchEvent(new CustomEvent("next:removed", { bubbles: true }));
+}
+
 function discard(ctx: Ctx, node: Node): void {
   if (ctx.onDiscard(node) === false) return;
+  if (isElement(node)) fireRemoved(node);
   (node as ChildNode).remove();
 }
 
@@ -504,6 +513,7 @@ export function morph(
       const parent = target.parentNode;
       if (parent !== null) {
         parent.insertBefore(root, target);
+        fireRemoved(target);
         target.remove();
       }
       result = root;

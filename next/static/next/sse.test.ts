@@ -6,7 +6,7 @@ import { Wire, CONTENT_TYPE, HEADER_REQUEST_ID } from "./wire";
 interface MockSource {
   url: string;
   message(data: string): void;
-  error(): void;
+  error(fatal: boolean): void;
   closed: boolean;
 }
 
@@ -177,13 +177,40 @@ describe("createSse", () => {
     expect(applied).toHaveLength(1);
   });
 
-  it("fires partial:error on a stream error", () => {
+  it("evicts the connection and fires partial:error on a fatal error", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, mockVisibility().adapter);
     sse.scan(document);
-    opened[0].error();
+    opened[0].error(true);
+    expect(opened[0].closed).toBe(true);
+    expect(sse.size()).toBe(0);
     expect(dispatched.some((d) => d.event === "partial:error")).toBe(true);
+  });
+
+  it("leaves a transient error to the native reconnect without a toast", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, mockVisibility().adapter);
+    sse.scan(document);
+    opened[0].error(false);
+    expect(opened[0].closed).toBe(false);
+    expect(sse.size()).toBe(1);
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+  });
+
+  it("does not reopen a fatally evicted url on resume", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const visibility = mockVisibility();
+    const sse = makeSse(adapter, visibility.adapter);
+    sse.scan(document);
+    opened[0].error(true);
+    expect(sse.size()).toBe(0);
+    visibility.set(true);
+    visibility.set(false);
+    expect(opened).toHaveLength(1);
+    expect(sse.size()).toBe(0);
   });
 
   it("pauses in a background tab and reconnects with a re-GET of bound zones", () => {

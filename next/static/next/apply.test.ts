@@ -280,6 +280,124 @@ describe("Applier lifecycle events", () => {
   });
 });
 
+describe("Applier next:removed before detach", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  // Capture next:removed at the document, the bus the layer adapter delegates
+  // on, recording the target, whether it was still connected at fire time, and
+  // the event flags.
+  function captureRemoved() {
+    const seen: {
+      target: Element;
+      connected: boolean;
+      bubbles: boolean;
+      cancelable: boolean;
+    }[] = [];
+    const listener = (event: Event): void => {
+      const target = event.target as Element;
+      seen.push({
+        target,
+        connected: target.isConnected,
+        bubbles: event.bubbles,
+        cancelable: event.cancelable,
+      });
+    };
+    document.addEventListener("next:removed", listener);
+    return {
+      seen,
+      stop: () => document.removeEventListener("next:removed", listener),
+    };
+  }
+
+  it("replace fires next:removed on the old node before it detaches", () => {
+    document.body.innerHTML = '<div data-next-zone="z"><span>old</span></div>';
+    const old = document.querySelector('[data-next-zone="z"]')!;
+    const { applier } = makeApplier();
+    const { seen, stop } = captureRemoved();
+    applier.apply(
+      envelope([
+        { op: "replace", target: { zone: "z" }, html: '<p data-next-zone="z">new</p>' },
+      ]),
+    );
+    stop();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].target).toBe(old);
+    expect(seen[0].connected).toBe(true);
+    expect(seen[0].bubbles).toBe(true);
+    expect(seen[0].cancelable).toBe(false);
+  });
+
+  it("inner fires next:removed on each old child before the swap", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="z"><span>a</span><span>b</span></div>';
+    const zone = document.querySelector('[data-next-zone="z"]')!;
+    const children = Array.from(zone.children);
+    const { applier } = makeApplier();
+    const { seen, stop } = captureRemoved();
+    applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "<i>x</i>" }]));
+    stop();
+    expect(seen.map((s) => s.target)).toEqual(children);
+    expect(seen.every((s) => s.connected)).toBe(true);
+    expect(seen.every((s) => s.bubbles && !s.cancelable)).toBe(true);
+  });
+
+  it("remove fires next:removed on the target before it detaches", () => {
+    document.body.innerHTML = '<div id="row-42">x</div>';
+    const node = document.querySelector("#row-42")!;
+    const { applier } = makeApplier();
+    const { seen, stop } = captureRemoved();
+    applier.apply(envelope([{ op: "remove", target: { css: "#row-42" } }]));
+    stop();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].target).toBe(node);
+    expect(seen[0].connected).toBe(true);
+  });
+
+  it("merge fires next:removed on a deduped node it replaces in place", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="z"><li data-next-key="a">old</li></ul>';
+    const old = document.querySelector('[data-next-key="a"]')!;
+    const { applier } = makeApplier();
+    const { seen, stop } = captureRemoved();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "z" },
+          html: '<li data-next-key="a">new</li>',
+        },
+      ]),
+    );
+    stop();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].target).toBe(old);
+    expect(seen[0].connected).toBe(true);
+    expect(seen[0].cancelable).toBe(false);
+  });
+
+  it("morph fires next:removed on a discarded trailing child", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="z"><li id="a">a</li><li id="b">b</li></ul>';
+    const tail = document.querySelector("#b")!;
+    const { applier } = makeApplier();
+    const { seen, stop } = captureRemoved();
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<ul data-next-zone="z"><li id="a">a</li></ul>',
+        },
+      ]),
+    );
+    stop();
+    expect(seen.some((s) => s.target === tail && s.connected)).toBe(true);
+    expect(seen.every((s) => s.bubbles && !s.cancelable)).toBe(true);
+  });
+});
+
 describe("Applier custom ops and reset", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
@@ -612,5 +730,54 @@ describe("Applier layer, toast, and url verbs", () => {
     const { applier } = makeLayerApplier();
     applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "patched" }]));
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("patched");
+  });
+});
+
+describe("Applier visit verb", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  function makeVisitApplier() {
+    const visited: string[] = [];
+    const dispatched: Dispatched[] = [];
+    const applier = new Applier({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      mergeContext: () => undefined,
+      document,
+      navigate: (url) => visited.push(url),
+    });
+    return { applier, visited, dispatched };
+  }
+
+  it("visit navigates to an internal href and emits no error", () => {
+    const { applier, visited, dispatched } = makeVisitApplier();
+    applier.apply(envelope([{ op: "visit", href: "/dashboard/" }]));
+    expect(visited).toEqual(["/dashboard/"]);
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+  });
+
+  it("visit navigates to a cross-origin href through the same seam", () => {
+    const { applier, visited } = makeVisitApplier();
+    applier.apply(envelope([{ op: "visit", href: "https://example.com/oauth/" }]));
+    expect(visited).toEqual(["https://example.com/oauth/"]);
+  });
+
+  it("visit without an href is a no-op", () => {
+    const { applier, visited, dispatched } = makeVisitApplier();
+    applier.apply(envelope([{ op: "visit" }]));
+    expect(visited).toEqual([]);
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+  });
+
+  it("visit is a no-op when no navigate seam is wired", () => {
+    const dispatched: Dispatched[] = [];
+    const applier = new Applier({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      mergeContext: () => undefined,
+      document,
+    });
+    expect(() => applier.apply(envelope([{ op: "visit", href: "/x/" }]))).not.toThrow();
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
   });
 });

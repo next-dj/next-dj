@@ -72,7 +72,7 @@ export interface LayerStack {
   resolveZone(name: string, root: ParentNode): Element | null;
   // Open a layer. Builds the dialog and the zone container before the request,
   // then GETs the body into it. The opener link, when present, carries
-  // data-next-accepted and takes focus back on close; a server-initiated open
+  // data-next-accepted and takes focus back on close. A server-initiated open
   // passes null.
   open(opener: HTMLElement | null, href: string, zone: string): Promise<void>;
   // Close the top layer. A result accepts, a dismiss rejects with a reason. An

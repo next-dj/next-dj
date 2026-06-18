@@ -30,7 +30,11 @@ export interface EventSourceAdapter {
   open(
     url: string,
     onMessage: (data: string) => void,
-    onError: () => void,
+    // fatal is true on a CLOSED readyState (a 4xx or a permanent failure the
+    // browser will not retry), false while CONNECTING (the native reconnect is
+    // in flight), so the bridge evicts the dead connection but leaves a
+    // transient one to the server's own retry.
+    onError: (fatal: boolean) => void,
   ): SourceControl;
 }
 
@@ -128,6 +132,20 @@ export function createSse(deps: SseDeps): Sse {
     }
   }
 
+  // A stream error either evicts a dead connection or leaves a transient one to
+  // the native reconnect. A fatal error (CLOSED, a 4xx the browser will not
+  // retry) closes and drops the connection so resume does not reopen the dead
+  // url, then fires partial:error once. A transient error (CONNECTING, the
+  // browser is already retrying with the server's retry interval) is left
+  // alone: firing partial:error on every retry would spin a toast, and the
+  // native retry is the back-off, so no extra reconnect surface is warranted.
+  function onError(connection: Connection, fatal: boolean): void {
+    if (!fatal) return;
+    connection.control.close();
+    connections.delete(connection.url);
+    deps.dispatch("partial:error", { status: 0, body: "", error: null });
+  }
+
   // Open a stream to a url, carrying over the bound zones of a paused
   // predecessor so resume knows what to revalidate.
   function openConnection(url: string, bound?: Set<string>): void {
@@ -137,7 +155,7 @@ export function createSse(deps: SseDeps): Sse {
     connection.control = source.open(
       url,
       (data) => onMessage(connection, data),
-      () => deps.dispatch("partial:error", { status: 0, body: "", error: null }),
+      (fatal) => onError(connection, fatal),
     );
   }
 

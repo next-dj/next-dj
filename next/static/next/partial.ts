@@ -29,7 +29,7 @@ import { createTriggers } from "./triggers";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import { createSse } from "./sse";
 import type { EventSourceAdapter, Sse, VisibilityAdapter } from "./sse";
-import { defaultHistory } from "./adapters";
+import { defaultHistory, defaultNavigate } from "./adapters";
 
 export interface PartialDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
@@ -115,6 +115,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
 
   let assets = createAssets(assetsDeps());
   let history: HistoryAdapter = defaultHistory();
+  let navigate: Navigate = defaultNavigate();
   let layers = createLayers(layerDeps());
   let triggers = createTriggers(triggerDeps());
   let sse = createSse(sseDeps());
@@ -147,6 +148,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       // rebuilds the stack before the applier, so this binding stays live.
       layers,
       history,
+      // The visit verb rides the navigation seam, a hard navigation that takes
+      // any origin, where the url verb rides history. Defaults to the real
+      // location.assign and _configure swaps in the mock, the same as history.
+      navigate,
       assets,
       mount: { run: runMount },
       refresh: (request) => void wire.fetch(request),
@@ -241,6 +246,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     _configure(adapters) {
       if (adapters.document !== undefined) dirty.install(adapters.document);
       if (adapters.history !== undefined) history = adapters.history;
+      if (adapters.navigate !== undefined) navigate = adapters.navigate;
       assets = createAssets(assetsDeps(adapters));
       detachLayers();
       detachTriggers();

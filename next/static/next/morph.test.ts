@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { morph } from "./morph";
+import { fireRemoved, morph } from "./morph";
 
 function mount(html: string): Element {
   document.body.innerHTML = html;
@@ -323,6 +323,80 @@ describe("morph modes and root", () => {
     );
     expect(target.querySelector('[data-next-key="b"]')).toBe(rowB);
     expect(rowB!.textContent).toBe("b2");
+  });
+});
+
+describe("morph next:removed before detach", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  function captureRemoved() {
+    const seen: {
+      target: Element;
+      connected: boolean;
+      bubbles: boolean;
+      cancelable: boolean;
+    }[] = [];
+    const listener = (event: Event): void => {
+      const target = event.target as Element;
+      seen.push({
+        target,
+        connected: target.isConnected,
+        bubbles: event.bubbles,
+        cancelable: event.cancelable,
+      });
+    };
+    document.addEventListener("next:removed", listener);
+    return {
+      seen,
+      stop: () => document.removeEventListener("next:removed", listener),
+    };
+  }
+
+  it("fireRemoved emits a bubbling, non-cancelable event on the node", () => {
+    const target = mount('<div id="r"><span id="s">x</span></div>');
+    const node = target.querySelector("#s")!;
+    const { seen, stop } = captureRemoved();
+    fireRemoved(node);
+    stop();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].target).toBe(node);
+    expect(seen[0].bubbles).toBe(true);
+    expect(seen[0].cancelable).toBe(false);
+  });
+
+  it("fires on a discarded trailing child while it is still connected", () => {
+    const target = mount('<ul id="l"><li id="a">a</li><li id="b">b</li></ul>');
+    const tail = target.querySelector("#b")!;
+    const { seen, stop } = captureRemoved();
+    morph(target, '<ul id="l"><li id="a">a</li></ul>');
+    stop();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].target).toBe(tail);
+    expect(seen[0].connected).toBe(true);
+    expect(seen[0].bubbles).toBe(true);
+    expect(seen[0].cancelable).toBe(false);
+  });
+
+  it("does not fire when onDiscard keeps a node", () => {
+    const target = mount('<ul id="l"><li id="a">a</li><li id="b">b</li></ul>');
+    const { seen, stop } = captureRemoved();
+    morph(target, '<ul id="l"><li id="a">a</li></ul>', { onDiscard: () => false });
+    stop();
+    expect(seen).toHaveLength(0);
+  });
+
+  it("fires on the old root when the root tag changes, before it detaches", () => {
+    const target = mount('<div id="r">x</div>');
+    const { seen, stop } = captureRemoved();
+    morph(target, '<section id="r">x</section>');
+    stop();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].target).toBe(target);
+    expect(seen[0].connected).toBe(true);
+    expect(seen[0].bubbles).toBe(true);
+    expect(seen[0].cancelable).toBe(false);
   });
 });
 

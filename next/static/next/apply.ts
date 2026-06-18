@@ -2,7 +2,8 @@
 // structural neutralisation of script elements before insertion. The applier
 // stays a thin executor: the server authors every address and verb.
 
-import { morph } from "./morph";
+import { fireRemoved, morph } from "./morph";
+import type { Navigate } from "./wire";
 
 // The wire content-type marker (invariant 9) and the Accept that doubles the
 // partial switch on content negotiation. Both must match the server exactly.
@@ -125,6 +126,9 @@ export interface ApplyDeps {
   layers?: LayerBridge;
   // The history seam for the url verb. Absent, the verb is a no-op.
   history?: HistoryAdapter;
+  // The navigation seam for the visit verb, a hard navigation to a
+  // server-validated redirect. Absent, the verb is a no-op.
+  navigate?: Navigate;
   // The asset loader and version safeguard. Absent, ops run with no CSS gate,
   // no JS delta, and no version check.
   assets?: AssetBridge;
@@ -184,6 +188,7 @@ export class Applier {
   readonly #dirtySince: (snapshot: number) => (field: Element) => boolean;
   readonly #layers: LayerBridge | undefined;
   readonly #history: HistoryAdapter | undefined;
+  readonly #navigate: Navigate | undefined;
   readonly #assets: AssetBridge | undefined;
   readonly #mount: MountRegistry | undefined;
   readonly #refresh: ZoneFetch | undefined;
@@ -207,6 +212,7 @@ export class Applier {
     this.#dirtySince = deps.dirtySince ?? (() => () => false);
     this.#layers = deps.layers;
     this.#history = deps.history;
+    this.#navigate = deps.navigate;
     this.#assets = deps.assets;
     this.#mount = deps.mount;
     this.#refresh = deps.refresh;
@@ -355,6 +361,13 @@ export class Applier {
       if (asString(patch.action) === "replace") this.#history?.replace(href);
       else this.#history?.push(href);
     });
+    this.#ops.set("visit", (patch) => {
+      // A redirect is a hard navigation, not a history push: location.assign
+      // takes any origin, so the same seam carries an external redirect. The
+      // external flag is the server's, the client does not branch on it.
+      const href = asString(patch.href);
+      if (href !== undefined) this.#navigate?.(href);
+    });
     this.#ops.set("context", (patch) => {
       // Merge server-serialised provider values into the client context, which
       // fires context-updated so islands react. Only registered serialize
@@ -403,6 +416,7 @@ export class Applier {
     // The first child is the new live node, captured before the fragment is
     // emptied into the document, so mount sees the replacement.
     const inserted = fragment.firstElementChild;
+    fireRemoved(node);
     node.replaceWith(fragment);
     this.#mark(inserted ?? null, patch.target);
   }
@@ -411,6 +425,9 @@ export class Applier {
     const node = this.#resolve(patch.target);
     if (node === null) return;
     const fragment = this.#fragment(patch.html ?? "", patch.target);
+    // Each old child detaches when the contents swap, so each child element
+    // gets its own next:removed while it is still connected.
+    for (const child of Array.from(node.children)) fireRemoved(child);
     node.replaceChildren(fragment);
     this.#mark(node, patch.target);
   }
@@ -426,8 +443,10 @@ export class Applier {
     for (const child of incoming) {
       const key = keyOf(child);
       const existing = key === null ? null : matchKey(node, key);
-      if (existing !== null) existing.replaceWith(child);
-      else if (side === "append") node.append(child);
+      if (existing !== null) {
+        fireRemoved(existing);
+        existing.replaceWith(child);
+      } else if (side === "append") node.append(child);
       else node.prepend(child);
     }
     this.#mark(node, patch.target);
@@ -437,6 +456,7 @@ export class Applier {
   #remove(patch: Patch): void {
     const node = this.#resolve(patch.target);
     if (node === null) return;
+    fireRemoved(node);
     node.remove();
   }
 
