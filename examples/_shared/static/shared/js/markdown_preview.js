@@ -1,8 +1,13 @@
-// Live Markdown preview wired through Next.partial.onMount. The runtime runs
-// this over the initial DOM and over every subtree it later inserts, so a
-// preview that re-renders inside a morphed form is rebound the same way the
-// first render was. There is no document.querySelectorAll scan at load that a
-// partial insertion would leave behind.
+// Live Markdown preview shared by every example that ships a markdown_preview
+// block. Both wiki and multi-tenant point a `scripts = [...]` entry at this one
+// file, so the client behaviour lives in a single place while each app keeps
+// its own server-side render in component.py.
+//
+// The work registers through Next.partial.onMount. The runtime runs this over
+// the initial DOM and over every subtree it later inserts, so a preview that
+// re-renders inside a morphed form is rebound the same way the first render
+// was. There is no document.querySelectorAll scan at load that a partial
+// insertion would leave behind.
 
 const EMPTY = "<p class='text-slate-400 italic'>Nothing to preview yet.</p>";
 const UNSAFE_HREF = /href="\s*(?:javascript|data|vbscript):[^"]*"/gi;

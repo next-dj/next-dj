@@ -7,7 +7,10 @@ from django.utils.safestring import SafeString, mark_safe
 from next.components import component
 
 
-scripts = ["https://cdn.jsdelivr.net/npm/marked/marked.min.js"]
+scripts = [
+    "https://cdn.jsdelivr.net/npm/marked/marked.min.js",
+    "/static/shared/js/markdown_preview.js",
+]
 
 
 EMPTY_PREVIEW = "<p class='text-slate-400 italic'>Nothing to preview yet.</p>"

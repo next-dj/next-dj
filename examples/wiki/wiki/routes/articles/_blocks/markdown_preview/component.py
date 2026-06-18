@@ -4,7 +4,10 @@ from wiki.markdown_render import render_markdown
 from next.components import component
 
 
-scripts = ["https://cdn.jsdelivr.net/npm/marked/marked.min.js"]
+scripts = [
+    "https://cdn.jsdelivr.net/npm/marked/marked.min.js",
+    "/static/shared/js/markdown_preview.js",
+]
 
 
 @component.context("rendered_html")

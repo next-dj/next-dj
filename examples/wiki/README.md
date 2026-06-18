@@ -85,14 +85,22 @@ needed because the parent context flows into the component scope. The
 JavaScript layer wires the textarea to the preview pane for keystroke
 updates without round-tripping the server.
 
-The preview script registers its work through
+The preview script lives in `examples/_shared/static/shared/js/markdown_preview.js`,
+a single physical file the kit publishes under `/static/shared/...`. Both
+this example and `examples/multi-tenant` point a `scripts = [...]` entry in
+their `markdown_preview/component.py` at that URL, so the framework collects
+and dedupes it into the page `scripts` slot. Only the client behaviour is
+shared. Each `component.py` keeps its own server-side render — this example
+reuses its `render_markdown` helper.
+
+The script registers its work through
 `Next.partial.onMount("[data-markdown-preview]", ...)` rather than a
 `document.querySelectorAll` scan at load. The runtime runs the callback
 over the initial DOM and over every subtree it later inserts, so a
 preview pane that re-renders inside a morphed form is rebound the same
 way the first render was, with no stale listener left behind by a swap.
 The callback walks up to the enclosing `<form>` to find its textarea, so
-the same script powers both the wiki form and the near-identical
+the same file powers both the wiki form and the near-identical
 multi-tenant note form without hardcoding a field name.
 
 ### 5. Slug reservations

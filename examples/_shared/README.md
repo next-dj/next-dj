@@ -23,9 +23,12 @@ examples/_shared/
 │   ├── empty_state/    skeleton/    avatar/    stat_card/
 │   ├── dropdown/{component.djx,component.mjs}
 │   └── dialog/{component.djx,component.mjs}
-└── static/shared/css/
-    ├── tokens.css         # CSS custom properties (--background, --primary, --radius, …)
-    └── base.css           # body backdrop, focus rings, font stack
+└── static/shared/
+    ├── css/
+    │   ├── tokens.css     # CSS custom properties (--background, --primary, --radius, …)
+    │   └── base.css       # body backdrop, focus rings, font stack
+    └── js/
+        └── markdown_preview.js   # live Markdown preview behaviour shared by wiki and multi-tenant
 ```
 
 ## Wiring it into a project
@@ -54,7 +57,11 @@ NEXT_FRAMEWORK = {
 
 The `DIRS` entry registers `_shared/_components` as a **global** root. Components inside resolve at the empty route scope and become callable from every template (see the [components topic](../../docs/content/topics/components.rst), "Component Scope" section).
 
-`STATICFILES_DIRS` adds the shared static tree so `tokens.css` and `base.css` resolve under `/static/shared/...`.
+`STATICFILES_DIRS` adds the shared static tree so `tokens.css`, `base.css`, and `js/markdown_preview.js` resolve under `/static/shared/...`.
+
+## Shared client behaviour
+
+`static/shared/js/markdown_preview.js` is the one place the live Markdown preview behaviour lives. Both [`wiki`](../wiki/) and [`multi-tenant`](../multi-tenant/) ship a `markdown_preview` block whose `component.py` declares `scripts = ["/static/shared/js/markdown_preview.js"]` alongside the `marked` CDN, so the framework collects and dedupes the URL into the page `scripts` slot. The script registers through `Next.partial.onMount("[data-markdown-preview]", ...)` and walks up to the enclosing `<form>` to find its textarea, so it binds the same way for both apps without hardcoding a field name. Each app keeps its own server-side render in `component.py` — wiki reuses its `render_markdown` helper, multi-tenant renders through the `markdown` package — while the client behaviour stays in this single file.
 
 Each example houses the shared HTML envelope in a project-level page root listed under `PAGE_BACKENDS["DIRS"]` — `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/` depending on the project. The dir contains a single `layout.djx` (and optionally `_<components-dir>/` for project-shared components) that wraps every page rendered by the per-app `PAGES_DIR` tree:
 

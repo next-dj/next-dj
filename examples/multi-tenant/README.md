@@ -187,7 +187,14 @@ editor.
 The body textarea is rendered side by side with the
 `markdown_preview` composite ([`_blocks/markdown_preview/`](notes/workspaces/notes/_blocks/markdown_preview/)).
 The composite imports the `markdown` package and renders the body through
-`mark_safe` after letting the renderer escape raw HTML.
+`mark_safe` after letting the renderer escape raw HTML. Its `component.py`
+declares `scripts = ["/static/shared/js/markdown_preview.js"]`, the single
+shared preview script in [`examples/_shared`](../_shared/) that also powers
+the wiki form. `TenantPrefixStaticBackend` rewrites that URL to
+`/_t/<slug>/static/shared/js/markdown_preview.js` so the script rides the
+same per-tenant prefix as the co-located CSS. Only the client behaviour is
+shared — this example keeps its own `markdown`-package render in
+`component.py`.
 
 ### 6. Dynamic permission hooks on the edit form
 
