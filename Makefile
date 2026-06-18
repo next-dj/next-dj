@@ -1,4 +1,4 @@
-.PHONY: help install test bench test-compat lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check test-examples ci pre-commit-install pre-commit-run dev-setup
+.PHONY: help install test bench test-compat lint format type-check clean build docs docs-serve docs-clean docs-linkcheck install-js build-js test-js test-js-coverage lint-js format-js format-js-check type-check-js test-examples ci pre-commit-install pre-commit-run dev-setup
 
 # Allow CI to point at a prebuilt venv's pytest (bypassing `uv run` and its sync step)
 PYTEST ?= uv run pytest
@@ -28,6 +28,7 @@ help: # show this help message
 	@echo "  test-js-coverage - run JavaScript unit tests with the v8 coverage gate"
 	@echo "  lint-js         - lint TypeScript files with ESLint"
 	@echo "  format-js       - format TypeScript files with Prettier"
+	@echo "  type-check-js   - type-check the client runtime with tsc --noEmit"
 	@echo "  docs-linkcheck  - check documentation links"
 
 install-js: # install JS toolchain via npm ci
@@ -50,6 +51,9 @@ format-js: # format TypeScript files with Prettier (auto-fix)
 
 format-js-check: # check TypeScript formatting without writing (CI)
 	npm run format:check
+
+type-check-js: # type-check the client runtime with tsc --noEmit
+	npm run typecheck:ts
 
 install: # install the package (editable) using the lockfile
 	uv sync --locked --no-dev
@@ -152,6 +156,7 @@ ci: # run the core CI checks locally with 100% coverage (docs, security, and the
 	make build-js
 	make lint-js
 	make format-js-check
+	make type-check-js
 	make test-js-coverage
 	make test
 	make test-examples

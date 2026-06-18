@@ -1,16 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTriggers } from "./triggers";
-import type { IntersectionAdapter, Triggers } from "./triggers";
+import type { IntersectionAdapter, TriggerDeps, Triggers } from "./triggers";
 import type { Clock } from "./wire";
 
-type Request = {
-  url: string;
-  method?: string;
-  uid?: string;
-  zone?: string;
-  headers?: Record<string, string>;
-  body?: BodyInit;
-};
+// The captured request is exactly what the runtime hands its fetch seam, so the
+// assertions read the same shape (carrying abortable) the triggers emit.
+type Request = Parameters<TriggerDeps["fetch"]>[0];
 
 function manualClock(): Clock & { run(): void } {
   let pending: (() => void) | null = null;

@@ -117,6 +117,8 @@ jobs:
         cache: 'npm'
     - name: Install Node dependencies
       run: npm ci
+    - name: Type-check TypeScript (tsc)
+      run: npm run typecheck:ts
     - name: Check TypeScript formatting (Prettier)
       run: npm run format:check
     - name: Lint TypeScript (ESLint)
