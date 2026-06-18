@@ -86,6 +86,7 @@ def register_all() -> None:
         "next.server.checks",
         "next.static.checks",
         "next.partial.checks",
+        "next.apps.checks",
     ):
         importlib.import_module(module_name)
 
