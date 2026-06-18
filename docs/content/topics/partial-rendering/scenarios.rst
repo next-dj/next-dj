@@ -218,7 +218,7 @@ A wrapper ``<div>`` inside a ``<ul>`` would be dropped by the HTML parser, so a 
        <li id="results-sentinel">
          <a href="?{% querystring page=page_obj.page|add:'1' %}"
             data-next-target="catalog-results" data-next-merge="append"
-            data-next-trigger="revealed">
+            data-next-lazy="revealed">
            Show more
          </a>
        </li>
@@ -265,7 +265,7 @@ The server reads the merge intent and answers with an ``append`` patch instead o
 Dedup by ``data-next-key`` and ``id`` replaces the old sentinel with the new one and guards against duplicate rows under a race.
 The response carries ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge`` so a shared cache never hands an append envelope to a client that asked for a morph.
 Changing the search query is the morph of the same zone from the previous scenario, which resets the accumulated list on its own.
-Switching ``data-next-trigger="revealed"`` to ``"click"`` gives button pagination from the same code.
+Dropping the ``data-next-lazy="revealed"`` attribute leaves the same link click-driven, which gives button pagination from the same code.
 
 Without the runtime the sentinel is a plain link and the click navigates to ``?page=2`` through the existing pagination component.
 

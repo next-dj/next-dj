@@ -252,7 +252,7 @@ catalog page never changed: the `page_obj` provider still reads
 the full page and the zone request.
 
 When the listing has another page the zone renders a sentinel `<li>`
-with `data-next-merge="append"` and `data-next-trigger="revealed"`.
+with `data-next-merge="append"` and `data-next-lazy="revealed"`.
 The runtime fires the GET when the sentinel scrolls into view, the
 server reads the merge intent and answers with an `append` patch
 instead of a morph, and the new rows are deduplicated by their

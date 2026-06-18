@@ -198,8 +198,8 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from Python 
      - Zone wrapper
      - The zone address, written by the ``{% zone %}`` tag.
    * - ``data-next-lazy``
-     - Lazy zone wrapper
-     - ``load`` or ``revealed``, the materialisation trigger.
+     - Lazy zone wrapper, infinite-scroll sentinel
+     - ``load`` or ``revealed``, the materialisation trigger. ``load`` fetches on ``ready``, ``revealed`` waits for the viewport. On a pagination sentinel ``revealed`` arms the observer that fires the merge GET.
    * - ``data-next-action``
      - ``<form>``
      - The action uid, written by ``{% form %}``, enables submit interception.
@@ -210,8 +210,8 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from Python 
      - ``<a>``, GET ``<form>``
      - Route the response into a zone, source is the ``zone=`` tag parameter on a form.
    * - ``data-next-trigger``
-     - Form, link
-     - The triggering event: ``input``, ``change``, ``submit``, ``click``, ``revealed``, ``load``.
+     - Filter ``<form>``, sort ``<select>``
+     - The event that auto-submits a GET filter, ``input`` or ``change``. Submit and click interception are wired by ``data-next-action`` and ``data-next-merge``, not this attribute.
    * - ``data-next-debounce``
      - With ``data-next-trigger``
      - Debounce in milliseconds.
