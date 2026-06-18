@@ -31,7 +31,6 @@ from next.pages.signals import (
 from next.partial.signals import (
     field_validated,
     patch_op_registered,
-    patches_shaped,
     sse_stream_closed,
     sse_stream_opened,
     zone_registered,
@@ -64,7 +63,6 @@ __all__ = [
     "html_injected",
     "page_rendered",
     "patch_op_registered",
-    "patches_shaped",
     "provider_registered",
     "route_registered",
     "router_reloaded",

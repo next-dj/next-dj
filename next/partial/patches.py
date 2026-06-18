@@ -29,9 +29,6 @@ if TYPE_CHECKING:
     from .render import ZoneRenderResult
 
 
-HTML_VERBS: frozenset[str] = frozenset({"replace", "inner"})
-TARGET_KEYS: frozenset[str] = frozenset({"zone", "form", "field", "css"})
-
 _SEE_OTHER = 303
 
 

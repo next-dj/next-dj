@@ -22,7 +22,6 @@ class TestAggregateSignalsModule:
             "html_injected",
             "page_rendered",
             "patch_op_registered",
-            "patches_shaped",
             "provider_registered",
             "route_registered",
             "router_reloaded",

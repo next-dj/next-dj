@@ -7,7 +7,7 @@ from django.test import RequestFactory, override_settings
 from next.partial import Patches, PatchEventStream
 from next.partial.backends import partial_backend_manager
 from next.partial.signals import sse_stream_closed, sse_stream_opened
-from next.partial.sse import _retry_ms
+from next.partial.sse import _heartbeat_seconds, _retry_ms
 
 
 @pytest.fixture()
@@ -88,6 +88,84 @@ class TestRetryOption:
             partial_backend_manager.reset()
             try:
                 assert _retry_ms() == 3000
+            finally:
+                partial_backend_manager.reset()
+
+    def test_retry_falls_back_on_non_int_value(self) -> None:
+        backend = [
+            {
+                "BACKEND": "next.partial.PartialProtocolBackend",
+                "OPTIONS": {"SSE": {"RETRY_MS": "fast"}},
+            },
+        ]
+        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": backend}):
+            partial_backend_manager.reset()
+            try:
+                assert _retry_ms() == 3000
+            finally:
+                partial_backend_manager.reset()
+
+
+def _custom_heartbeat_backend(seconds: object) -> list[dict]:
+    """Return a backend config carrying a custom SSE heartbeat value."""
+    return [
+        {
+            "BACKEND": "next.partial.PartialProtocolBackend",
+            "OPTIONS": {"SSE": {"HEARTBEAT_SECONDS": seconds}},
+        },
+    ]
+
+
+class TestHeartbeatOption:
+    """The heartbeat interval reads from the active backend's SSE options."""
+
+    def test_config_value_applied_when_argument_omitted(
+        self, request_obj: object
+    ) -> None:
+        response = PatchEventStream(request_obj, iter(()))
+        assert response._heartbeat_seconds == 25.0
+
+    def test_explicit_argument_overrides_config(self, request_obj: object) -> None:
+        response = PatchEventStream(request_obj, iter(()), heartbeat_seconds=2)
+        assert response._heartbeat_seconds == 2
+
+    def test_zero_argument_overrides_config(self, request_obj: object) -> None:
+        response = PatchEventStream(request_obj, iter(()), heartbeat_seconds=0)
+        assert response._heartbeat_seconds == 0
+
+    def test_custom_setting_is_picked_up(self, request_obj: object) -> None:
+        backend = _custom_heartbeat_backend(10)
+        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": backend}):
+            partial_backend_manager.reset()
+            try:
+                response = PatchEventStream(request_obj, iter(()))
+                assert response._heartbeat_seconds == 10.0
+            finally:
+                partial_backend_manager.reset()
+
+    def test_falls_back_without_sse_option(self) -> None:
+        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": _NO_SSE_BACKEND}):
+            partial_backend_manager.reset()
+            try:
+                assert _heartbeat_seconds() == 25.0
+            finally:
+                partial_backend_manager.reset()
+
+    def test_non_numeric_value_falls_back(self) -> None:
+        backend = _custom_heartbeat_backend("nope")
+        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": backend}):
+            partial_backend_manager.reset()
+            try:
+                assert _heartbeat_seconds() == 25.0
+            finally:
+                partial_backend_manager.reset()
+
+    def test_bool_value_falls_back(self) -> None:
+        backend = _custom_heartbeat_backend(True)
+        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": backend}):
+            partial_backend_manager.reset()
+            try:
+                assert _heartbeat_seconds() == 25.0
             finally:
                 partial_backend_manager.reset()
 

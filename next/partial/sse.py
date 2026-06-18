@@ -30,8 +30,10 @@ _CACHE_CONTROL = "no-cache, no-transform"
 _ACCEL_BUFFERING = "X-Accel-Buffering"
 _HEARTBEAT_COMMENT = ": heartbeat\n\n"
 _RETRY_OPTION = "RETRY_MS"
+_HEARTBEAT_OPTION = "HEARTBEAT_SECONDS"
 _SSE_OPTION = "SSE"
 _DEFAULT_RETRY_MS = 3000
+_DEFAULT_HEARTBEAT_SECONDS = 25.0
 
 
 class PatchEventStream(StreamingHttpResponse):
@@ -54,13 +56,19 @@ class PatchEventStream(StreamingHttpResponse):
         request: "HttpRequest",
         source: "Iterable[Patches] | AsyncIterable[Patches]",
         *,
-        heartbeat_seconds: float = 25,
+        heartbeat_seconds: float | None = None,
         clock: "Callable[[], float] | None" = None,
     ) -> None:
-        """Build the stream over a sync or async source of patch builders."""
+        """Build the stream over a sync or async source of patch builders.
+
+        The heartbeat interval falls back to the active backend's
+        `HEARTBEAT_SECONDS` option when no explicit argument is passed.
+        """
         self._request = request
         self._clock = clock if clock is not None else time.monotonic
-        self._heartbeat_seconds = heartbeat_seconds
+        self._heartbeat_seconds = (
+            heartbeat_seconds if heartbeat_seconds is not None else _heartbeat_seconds()
+        )
         self._retry_ms = _retry_ms()
         self._opened_at = self._clock()
         content = self._build_content(source)
@@ -155,15 +163,26 @@ class PatchEventStream(StreamingHttpResponse):
         )
 
 
+def _sse_options() -> dict[str, object]:
+    """Return the active backend's SSE options sub-mapping, or an empty one."""
+    sse = partial_backend_manager.get().options.get(_SSE_OPTION)
+    return sse if isinstance(sse, dict) else {}
+
+
 def _retry_ms() -> int:
     """Return the EventSource retry hint from the active backend options."""
-    options = partial_backend_manager.get().options
-    sse = options.get(_SSE_OPTION)
-    if isinstance(sse, dict):
-        value = sse.get(_RETRY_OPTION, _DEFAULT_RETRY_MS)
-        if isinstance(value, int):
-            return value
+    value = _sse_options().get(_RETRY_OPTION, _DEFAULT_RETRY_MS)
+    if isinstance(value, int):
+        return value
     return _DEFAULT_RETRY_MS
+
+
+def _heartbeat_seconds() -> float:
+    """Return the heartbeat interval from the active backend options."""
+    value = _sse_options().get(_HEARTBEAT_OPTION, _DEFAULT_HEARTBEAT_SECONDS)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return _DEFAULT_HEARTBEAT_SECONDS
 
 
 __all__ = ["PatchEventStream"]
