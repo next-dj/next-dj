@@ -53,7 +53,7 @@ The framework owns the SSE framing, so the broker stays a plain pub/sub of domai
            self._revisions: dict[int, int] = defaultdict(int)
            self._request_ids: dict[int, str | None] = {}
 
-       def publish(self, snapshot, request_id=None) -> None:
+       def publish(self, snapshot: Snapshot, request_id: str | None = None) -> None:
            store_snapshot(snapshot)
            condition = self._conditions[snapshot.poll_id]
            with condition:
@@ -137,7 +137,7 @@ The signal carries the bound form after validation and the request, so the recei
    from django.http import HttpRequest
 
    from next.forms.signals import action_dispatched
-   from next.partial.headers import REQUEST_ID
+   from next.partial import REQUEST_ID
    from polls.broker import broker, build_snapshot
 
    VOTE_ACTION_NAME = "vote_form"

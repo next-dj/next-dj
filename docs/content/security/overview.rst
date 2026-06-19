@@ -69,6 +69,19 @@ Origin spoofing.
 Open redirect.
    ``HttpResponseRedirect`` accepts any URL.
    Validate destinations before passing user input into a redirect target.
+   The partial ``redirect(href, external=True)`` patch is the same escape hatch on the client side, see `Server-Authored Redirects`_.
+
+Server-Authored Redirects
+-------------------------
+
+A partial response can drive a full client navigation with the ``visit`` verb.
+The default ``redirect(href)`` validates the href against the request host, so it cannot leave the site.
+The ``external=True`` flag promotes the navigation to a full visit and bypasses that same-host check, which is what an OAuth or a payment-gateway handoff needs.
+
+The flag trusts the caller to author the href.
+Pass only a server-controlled destination through it, never a value derived from URL, query, or form input.
+A user-supplied href behind ``external=True`` turns the page into an open redirect, the same risk Django guards against in :doc:`its login next-page handling <django:topics/auth/default>`.
+The rule mirrors the plain ``HttpResponseRedirect`` case above: validate or whitelist any destination that traces back to a request value before it reaches the patch.
 
 Object-level authorization.
    A lookup keyed only on a URL value loads whatever row matches, regardless of who owns it.

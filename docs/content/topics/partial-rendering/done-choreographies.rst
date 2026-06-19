@@ -75,6 +75,8 @@ The builder takes ``page=`` and ``url_kwargs=`` alongside ``zone=``, and the req
 .. code-block:: python
    :caption: request/[step]/page.py
 
+   from django.http import Http404
+
    from next.partial import resolve_partial_origin
 
 
@@ -82,6 +84,8 @@ The builder takes ``page=`` and ``url_kwargs=`` alongside ``zone=``, and the req
        """Create the access request and patch the host page list in one response."""
        access_request = AccessRequest.objects.create(**cleaned_data)
        origin = resolve_partial_origin(request)
+       if origin is None or origin.page_path is None:
+           raise Http404
        return (
            Patches(request)
            .layer_close(result={"id": access_request.pk})

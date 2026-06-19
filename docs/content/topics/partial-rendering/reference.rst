@@ -79,7 +79,7 @@ The server is the only author of a target, the client never names one.
      - ``action: "push"``
    * - ``visit``
      - ``redirect()``
-     - A full client navigation to a server-authored href.
+     - A full client navigation to a server-authored href. ``external=True`` skips same-host validation, see :ref:`security-overview`.
      - —
 
 A verb beyond this set is registered on both sides.
@@ -354,7 +354,6 @@ The list holds the protocol backends, with the first one active.
        {
            "BACKEND": "next.partial.PartialProtocolBackend",
            "OPTIONS": {
-               "DEFAULT_SWAP": "morph",
                "VERSION": "manifest",
                "PUSH_WIZARD_STEPS": False,
                "SSE": {
@@ -372,9 +371,6 @@ The list holds the protocol backends, with the first one active.
    * - Key
      - Default
      - Meaning
-   * - ``DEFAULT_SWAP``
-     - ``"morph"``
-     - The default verb of a zone patch.
    * - ``VERSION``
      - ``"manifest"``
      - The source of ``X-Next-Version``. The sentinel hashes the staticfiles manifest when the active storage hashes its files, an explicit string overrides it, and without a manifest the version guard stays silent.
@@ -394,7 +390,7 @@ Styling Layers and Toasts
 -------------------------
 
 The runtime creates a bare ``<dialog data-next-dialog>`` for every layer and a ``<div data-next-toasts>`` container for toasts.
-No framework CSS is applied — the selectors are the hook.
+No framework CSS is applied. The selectors are the hook.
 
 .. code-block:: css
    :caption: plain CSS
