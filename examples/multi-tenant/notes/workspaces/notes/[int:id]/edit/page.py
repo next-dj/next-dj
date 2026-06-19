@@ -3,7 +3,9 @@ from typing import ClassVar
 from django.http import HttpRequest, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
+from django.utils.safestring import SafeString
 from notes.access import get_active_tenant
+from notes.markdown_render import render_markdown
 from notes.models import Note
 from notes.providers import DTenant
 
@@ -51,3 +53,9 @@ class NoteEditForm(ModelForm):
 def note(active_tenant: DTenant, id: int) -> Note:  # noqa: A002
     """Return the note iff it belongs to the active tenant."""
     return get_owned_note(active_tenant, id)
+
+
+@context("preview_html")
+def preview_html(note: Note) -> SafeString:
+    """Render the note body so the preview pane matches it on first paint."""
+    return render_markdown(note.body)

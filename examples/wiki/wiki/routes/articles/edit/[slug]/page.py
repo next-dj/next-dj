@@ -2,6 +2,8 @@ from typing import ClassVar
 
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
+from django.utils.safestring import SafeString
+from wiki.markdown_render import render_markdown
 from wiki.models import RESERVED_SLUGS, Article
 from wiki.providers import DArticle
 
@@ -48,10 +50,9 @@ def article(item: DArticle[Article]) -> Article:
     return item
 
 
-@context("body")
-def preview_body(request: HttpRequest, item: DArticle[Article]) -> str:
-    """Body that feeds the live markdown preview between submissions."""
+@context("preview_html")
+def preview_html(request: HttpRequest, item: DArticle[Article]) -> SafeString:
+    """Render the body that feeds the live preview between submissions."""
     posted = request.POST.get("body_md")
-    if posted is not None:
-        return posted
-    return item.body_md
+    body = posted if posted is not None else item.body_md
+    return render_markdown(body)

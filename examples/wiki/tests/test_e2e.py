@@ -312,7 +312,8 @@ class TestMarkdownPreviewMount:
     ) -> None:
         body = client.get(reverse("next:page_articles_new")).content.decode()
         assert "data-markdown-preview" in body
-        assert "markdown_preview.js" in body
+        assert "components/markdown_preview.mjs" in body
+        assert "marked.min.js" in body
 
 
 class TestRouterReloadSignal:

@@ -75,23 +75,25 @@ returns the matching row or raises `Http404`. The catchall page,
 the edit form, and the preview context all use the same provider,
 so the slug-to-row lookup lives in one place.
 
-### 4. Live preview through parent context
+### 4. Live preview through the shared component
 
 `articles/new/page.py` and `articles/edit/[slug]/page.py` both register
-a context entry named `body`. The `markdown_preview` component reads
-`body` from the parent template context, runs it through
-`render_markdown`, and emits the safe HTML. No explicit prop is
-needed because the parent context flows into the component scope. The
-JavaScript layer wires the textarea to the preview pane for keystroke
-updates without round-tripping the server.
+a context entry named `preview_html` that runs the form body through
+`render_markdown` and returns the safe HTML. The template passes it to
+the shared `markdown_preview` component as `rendered_html=preview_html`,
+so the preview pane is filled server-side on first paint and on every
+re-render after a failed submission. The JavaScript layer then wires the
+textarea to the pane for keystroke updates without round-tripping the
+server.
 
-The preview script lives in `examples/_shared/static/shared/js/markdown_preview.js`,
-a single physical file the kit publishes under `/static/shared/...`. Both
-this example and `examples/multi-tenant` point a `scripts = [...]` entry in
-their `markdown_preview/component.py` at that URL, so the framework collects
-and dedupes it into the page `scripts` slot. Only the client behaviour is
-shared. Each `component.py` keeps its own server-side render — this example
-reuses its `render_markdown` helper.
+`markdown_preview` lives in [`examples/_shared/_components/markdown_preview/`](../_shared/_components/markdown_preview/)
+as a pure presentation shell. Its `component.py` declares only the
+`marked` CDN, its co-located `component.mjs` ships the client behaviour,
+and its `component.css` styles code and pre blocks. The framework
+auto-discovers the co-located assets and dedupes them into the page
+slots, so this example never names a static path. Only the server-side
+render stays local — this example reuses its own `render_markdown`
+helper and injects the result through the prop.
 
 The script registers its work through
 `Next.partial.onMount("[data-markdown-preview]", ...)` rather than a
@@ -100,7 +102,7 @@ over the initial DOM and over every subtree it later inserts, so a
 preview pane that re-renders inside a morphed form is rebound the same
 way the first render was, with no stale listener left behind by a swap.
 The callback walks up to the enclosing `<form>` to find its textarea, so
-the same file powers both the wiki form and the near-identical
+the one shell powers both the wiki form and the near-identical
 multi-tenant note form without hardcoding a field name.
 
 ### 5. Slug reservations

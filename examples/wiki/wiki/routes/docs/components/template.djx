@@ -12,9 +12,10 @@
 
   <h2>Markdown preview</h2>
   <p>
-    The article forms reuse the <code>markdown_preview</code> composite. The
-    Python side rebuilds the HTML on every render through a context decorator.
-    The JavaScript layer wires a textarea to the preview pane for keystroke
-    updates without leaving the page.
+    The article forms reuse the shared <code>markdown_preview</code> shell. The
+    page renders the body to safe HTML and injects it through the
+    <code>rendered_html</code> prop for first paint. The co-located module then
+    wires the textarea to the preview pane for keystroke updates without leaving
+    the page.
   </p>
 </article>

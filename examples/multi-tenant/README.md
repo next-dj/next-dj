@@ -184,17 +184,18 @@ so a tenant requesting another tenant's note id receives a `404`. On a
 valid submission `on_valid` calls `self.save()` and redirects back to the
 editor.
 
-The body textarea is rendered side by side with the
-`markdown_preview` composite ([`_blocks/markdown_preview/`](notes/workspaces/notes/_blocks/markdown_preview/)).
-The composite imports the `markdown` package and renders the body through
-`mark_safe` after letting the renderer escape raw HTML. Its `component.py`
-declares `scripts = ["/static/shared/js/markdown_preview.js"]`, the single
-shared preview script in [`examples/_shared`](../_shared/) that also powers
-the wiki form. `TenantPrefixStaticBackend` rewrites that URL to
-`/_t/<slug>/static/shared/js/markdown_preview.js` so the script rides the
-same per-tenant prefix as the co-located CSS. Only the client behaviour is
-shared — this example keeps its own `markdown`-package render in
-`component.py`.
+The body textarea is rendered side by side with the shared
+`markdown_preview` shell ([`examples/_shared/_components/markdown_preview/`](../_shared/_components/markdown_preview/)).
+The shell is pure presentation. This example renders the body server-side
+in [`notes/markdown_render.py`](notes/markdown_render.py), which imports the
+`markdown` package and passes the result through `mark_safe` after letting
+the renderer escape raw HTML. Each page injects the HTML through the
+`rendered_html` prop, so the shell shows what the app rendered. The shell's
+co-located `component.mjs` is auto-discovered and served as a module script.
+`TenantPrefixStaticBackend` rewrites its `/static/next/components/markdown_preview.mjs`
+URL to `/_t/<slug>/static/...` so the script rides the same per-tenant prefix
+as the co-located CSS. Only the server-side render stays local — the shell
+and the client behaviour are shared with the wiki form.
 
 ### 6. Dynamic permission hooks on the edit form
 

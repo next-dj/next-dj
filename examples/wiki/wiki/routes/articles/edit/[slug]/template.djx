@@ -23,7 +23,7 @@
     </div>
 
     <aside>
-      {% component "markdown_preview" %}
+      {% component "markdown_preview" rendered_html=preview_html %}
     </aside>
   {% endform %}
 </div>
