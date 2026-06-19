@@ -180,6 +180,46 @@ describe("createPartial surface", () => {
     expect(seen).toEqual(["new"]);
   });
 
+  it("onMount registered after ready catches up over the present document", () => {
+    document.body.innerHTML = "<div data-x>here</div>";
+    const seen: Element[] = [];
+    partial._configure({ document });
+    partial.ready();
+    partial.onMount("[data-x]", (el) => seen.push(el));
+    expect(seen).toEqual([document.querySelector("[data-x]")]);
+  });
+
+  it("onMount registered before ready runs exactly once on ready", () => {
+    document.body.innerHTML = "<div data-x>here</div>";
+    const seen: string[] = [];
+    partial._configure({ document });
+    partial.onMount("[data-x]", (el) => seen.push(el.textContent ?? ""));
+    partial.ready();
+    expect(seen).toEqual(["here"]);
+  });
+
+  it("a late onMount still runs over a subtree inserted by a later apply", () => {
+    document.body.innerHTML = '<div data-next-zone="z"><span class="w">a</span></div>';
+    const seen: string[] = [];
+    partial._configure({ document });
+    partial.ready();
+    partial.onMount(".w", (el) => seen.push(el.textContent ?? ""));
+    expect(seen).toEqual(["a"]);
+    partial.apply({
+      version: "v1",
+      ops: [
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<div data-next-zone="z"><span class="w">b</span></div>',
+        },
+      ],
+      assets: [],
+      form: null,
+    });
+    expect(seen).toEqual(["a", "b"]);
+  });
+
   it("ready batches the document's load zones into one zone fetch", async () => {
     document.body.innerHTML =
       '<div data-next-zone="a" data-next-lazy="load"></div>' +

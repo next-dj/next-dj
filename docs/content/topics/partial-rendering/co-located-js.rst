@@ -55,6 +55,7 @@ Register With Next.partial.onMount
 
 ``Next.partial.onMount(selector, callback)`` is a re-executable registry.
 The callback runs over the document on ``ready`` and over every inserted subtree after each apply.
+A callback registered after ``ready`` runs at once over the current document, so a co-located script that loads after the runtime still binds the markup already present.
 It is the one-for-one replacement of a ``DOMContentLoaded`` scan.
 
 .. code-block:: javascript

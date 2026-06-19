@@ -73,8 +73,9 @@ export interface PartialSurface {
   parseHook(contentType: string, hook: ParseHook): void;
   setCsrf(csrf: CsrfPayload | undefined): void;
   // The re-executable mount registry: the callback runs over the document on
-  // `ready` and over every inserted subtree after each apply, the replacement
-  // for DOMContentLoaded for co-located JS.
+  // `ready`, over every inserted subtree after each apply, and immediately over
+  // the current document when registered after `ready`, the replacement for
+  // DOMContentLoaded for co-located JS that loads after the inline `_init`.
   onMount(selector: string, callback: (el: Element) => void): void;
   // The modal layer stack, exposed so the harness drives open/close/resolve
   // without synthesising a click.
@@ -100,8 +101,11 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   dirty.install(document);
 
   // The mount registry, shared by onMount and triggers: every inserted subtree
-  // runs the registered selector callbacks and the trigger activation.
+  // runs the registered selector callbacks and the trigger activation. The
+  // `mounted` flag records whether the initial `ready` pass has run, so a
+  // late-registered callback catches up over the present document.
   const mounts: { selector: string; callback: (el: Element) => void }[] = [];
+  let mounted = false;
   const runMount: MountCallback = (root) => {
     for (const entry of mounts) {
       for (const el of Array.from(root.querySelectorAll(entry.selector))) {
@@ -238,6 +242,15 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     },
     onMount(selector, callback) {
       mounts.push({ selector, callback });
+      // A co-located script can register after the initial `ready` pass, since
+      // it loads after the inline `_init` runs. Catch the callback up over the
+      // document already present, mirroring `Next.on("ready")` for late
+      // subscribers. It was absent from the `ready` pass, so this runs once.
+      if (mounted) {
+        for (const el of Array.from(document.querySelectorAll(selector))) {
+          callback(el);
+        }
+      }
     },
     get layers() {
       return layers;
@@ -248,6 +261,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     ready() {
       assets.seed();
       runMount(document);
+      mounted = true;
       triggers.ready();
     },
     _configure(adapters) {
@@ -275,6 +289,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       assets._reset();
       sse._reset();
       mounts.length = 0;
+      mounted = false;
       csrf = undefined;
     },
   };
