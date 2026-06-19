@@ -18,7 +18,7 @@ function mockDialog() {
   return { adapter, dismissed };
 }
 
-function makeStack() {
+function makeStackOn(doc: Document) {
   const dispatched: Dispatched[] = [];
   const fetched: { url: string; zone: string }[] = [];
   const { adapter, dismissed } = mockDialog();
@@ -27,10 +27,14 @@ function makeStack() {
     fetch: async (request) => {
       fetched.push({ url: request.url, zone: request.zone });
     },
-    document,
+    document: doc,
     dialog: adapter,
   });
   return { layers, dispatched, fetched, dismissed };
+}
+
+function makeStack() {
+  return makeStackOn(document);
 }
 
 describe("layer stack", () => {
@@ -159,6 +163,122 @@ describe("layer stack", () => {
     expect(layers.size()).toBe(0);
     expect(document.querySelector("[data-next-toasts]")).toBeNull();
     expect(document.querySelector("dialog")).toBeNull();
+  });
+
+  it("close on an empty stack is a no-op", () => {
+    layers.close({ result: 1 });
+    expect(dispatched.some((d) => d.event === "partial:layer-accepted")).toBe(false);
+    expect(layers.size()).toBe(0);
+  });
+
+  it("a dismiss verb with no reason falls back to the dismissed reason", async () => {
+    await layers.open(null, "/w/", "z");
+    layers.close({ dismiss: true });
+    const event = dispatched.find((d) => d.event === "partial:layer-dismissed");
+    expect(event?.detail.reason).toBe("dismissed");
+  });
+
+  it("a second browser dismiss on an already-closed dialog is a no-op", async () => {
+    await layers.open(null, "/w/", "z");
+    dismissed[0]("escape");
+    const before = dispatched.filter(
+      (d) => d.event === "partial:layer-dismissed",
+    ).length;
+    dismissed[0]("escape");
+    const after = dispatched.filter(
+      (d) => d.event === "partial:layer-dismissed",
+    ).length;
+    expect(after).toBe(before);
+  });
+
+  it("returns focus only to an HTMLElement, skipping a null activeElement", async () => {
+    // A document proxy whose activeElement is null exercises the focus guard's
+    // false arm, which jsdom cannot reach since its activeElement is the body.
+    const proxy = new Proxy(document, {
+      get(base, prop) {
+        if (prop === "activeElement") return null;
+        const value = Reflect.get(base, prop);
+        return typeof value === "function" ? value.bind(base) : value;
+      },
+    });
+    const local = makeStackOn(proxy as Document);
+    await local.layers.open(null, "/w/", "z");
+    expect(() => local.layers.close({ result: 1 })).not.toThrow();
+    expect(local.layers.size()).toBe(0);
+  });
+
+  it("reuses the connected toast host across toasts", () => {
+    layers.toast("one", "info");
+    layers.toast("two", "info");
+    const hosts = document.querySelectorAll("[data-next-toasts]");
+    expect(hosts).toHaveLength(1);
+    expect(hosts[0].children).toHaveLength(2);
+  });
+
+  it("rebuilds the toast host once it is detached from the document", () => {
+    layers.toast("one", "info");
+    document.querySelector("[data-next-toasts]")!.remove();
+    layers.toast("two", "info");
+    const hosts = document.querySelectorAll("[data-next-toasts]");
+    expect(hosts).toHaveLength(1);
+    expect(hosts[0].children).toHaveLength(1);
+    expect(hosts[0].textContent).toBe("two");
+  });
+
+  it("ignores a click whose target is not an Element", () => {
+    const detach = layers.install(document);
+    const event = new Event("click", { bubbles: true });
+    Object.defineProperty(event, "target", { value: null });
+    expect(() => document.dispatchEvent(event)).not.toThrow();
+    expect(layers.size()).toBe(0);
+    detach();
+  });
+
+  it("treats a layer link with an empty zone as a plain navigation", () => {
+    const detach = layers.install(document);
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/wizard/");
+    opener.setAttribute("data-next-layer", "");
+    document.body.append(opener);
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    opener.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(layers.size()).toBe(0);
+    detach();
+  });
+
+  it("install replaces a prior delegated handler", () => {
+    const first = layers.install(document);
+    const second = layers.install(document);
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/wizard/");
+    opener.setAttribute("data-next-layer", "z");
+    document.body.append(opener);
+    opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    // The first install was torn down by the second, so a single open fires.
+    expect(layers.size()).toBe(1);
+    expect(first).not.toBe(second);
+    second();
+  });
+
+  it("the teardown is idempotent across the popstate listener", () => {
+    let detached = 0;
+    const popstate: PopStateAdapter = {
+      listen: () => () => {
+        detached += 1;
+      },
+    };
+    const local = createLayers({
+      dispatch: () => undefined,
+      fetch: async () => undefined,
+      document,
+      dialog: mockDialog().adapter,
+      popstate,
+    });
+    const teardown = local.install(document);
+    teardown();
+    teardown();
+    expect(detached).toBe(1);
   });
 });
 

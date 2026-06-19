@@ -21,6 +21,10 @@ const ECHO_LIMIT = 25;
 // reconnects the stream but skips the zone re-GET, so flicking between tabs does
 // not storm the server. A longer pause may have missed events, so it converges.
 const RESUME_REVALIDATE_MS = 3000;
+// The transient placeholder control between openConnection setting it and the
+// synchronous source.open returning the real one. Its close is never reached:
+// nothing closes a connection between those two statements in the same tick.
+/* v8 ignore next */
 const NOOP: SourceControl = { close: () => undefined };
 
 // The control returned from opening an EventSource: a listener for next-patches

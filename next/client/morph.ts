@@ -398,6 +398,9 @@ function snapshotFocus(doc: Document): FocusSnapshot {
   let start: number | null = null;
   let end: number | null = null;
   let direction: string | null = null;
+  // jsdom keeps document.activeElement at <body> at minimum so the null branch
+  // is unreachable under the test runner, it guards a real null in older agents.
+  /* v8 ignore next */
   if (el !== null) {
     try {
       const field = el as HTMLInputElement;

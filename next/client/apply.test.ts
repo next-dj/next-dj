@@ -60,6 +60,31 @@ describe("parseEnvelope", () => {
     });
     expect(parsed.ops).toEqual([{ op: "inner" }]);
   });
+
+  it("collapses a non-record form-errors value to an empty map", () => {
+    const parsed = parseEnvelope({
+      version: "v1",
+      form: { uid: "u1", valid: false, errors: "nope" },
+    });
+    expect(parsed.form).toEqual({ uid: "u1", valid: false, errors: {} });
+  });
+
+  it("drops a form-errors field whose messages are not all strings", () => {
+    const parsed = parseEnvelope({
+      version: "v1",
+      form: {
+        uid: "u1",
+        valid: false,
+        errors: { email: ["bad"], tags: ["ok", 7] },
+      },
+    });
+    expect(parsed.form!.errors).toEqual({ email: ["bad"] });
+  });
+
+  it("defaults a form uid to an empty string when absent", () => {
+    const parsed = parseEnvelope({ version: "v1", form: { valid: true } });
+    expect(parsed.form).toEqual({ uid: "", valid: true, errors: {} });
+  });
 });
 
 describe("Applier verbs", () => {
@@ -186,6 +211,39 @@ describe("Applier verbs", () => {
   it("is a no-op for a remove without a target", () => {
     const { applier } = makeApplier();
     expect(() => applier.apply(envelope([{ op: "remove" }]))).not.toThrow();
+  });
+
+  it("coerces a non-record event detail to an empty object", () => {
+    const { applier, dispatched } = makeApplier();
+    const onDoc = vi.fn();
+    document.addEventListener("ping", onDoc);
+    applier.apply(envelope([{ op: "event", name: "ping", detail: "scalar" }]));
+    expect((onDoc.mock.calls[0][0] as CustomEvent).detail).toEqual({});
+    expect(dispatched).toContainEqual({ event: "ping", detail: {} });
+    document.removeEventListener("ping", onDoc);
+  });
+
+  it("contains a throwing op and surfaces it as partial:error", () => {
+    const { applier, dispatched } = makeApplier();
+    applier.defineOp("boom", () => {
+      throw new Error("op blew up");
+    });
+    applier.apply(envelope([{ op: "boom" }]));
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect((err!.detail.error as Error).message).toBe("op blew up");
+    expect(dispatched.some((d) => d.event === "partial:applied")).toBe(true);
+  });
+
+  it("url without an href is a no-op", () => {
+    const calls: string[] = [];
+    const applier = new Applier({
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+      document,
+      history: { push: (h) => calls.push(h), replace: (h) => calls.push(h) },
+    });
+    applier.apply(envelope([{ op: "url" }]));
+    expect(calls).toEqual([]);
   });
 
   it("skips an event op without a name", () => {
@@ -558,6 +616,27 @@ describe("Applier morph verb", () => {
     ).not.toThrow();
   });
 
+  it("treats every field as clean under a snapshot with no dirty predicate wired", () => {
+    document.body.innerHTML =
+      '<form data-next-action="u1"><input name="email" value="old"></form>';
+    const input = document.querySelector<HTMLInputElement>('[name="email"]')!;
+    input.value = "typed";
+    // No dirtySince dep, so the default predicate runs for the threaded snapshot
+    // and reports no field dirty: the server value still wins.
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { form: "u1" },
+          html: '<form data-next-action="u1"><input name="email" value="new"></form>',
+        },
+      ]),
+      0,
+    );
+    expect(input.value).toBe("new");
+  });
+
   it("morph treats every field as clean when no snapshot threads in", () => {
     document.body.innerHTML =
       '<form data-next-action="u1"><input name="email" value="old"></form>';
@@ -628,6 +707,42 @@ describe("Applier morph verb", () => {
       0,
     );
     expect(input.value).toBe("typed");
+  });
+});
+
+describe("Applier verbs default an absent html to empty", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("morph with no html parses an empty fragment without throwing", () => {
+    document.body.innerHTML = '<div data-next-zone="z"><span>old</span></div>';
+    const { applier } = makeApplier();
+    expect(() =>
+      applier.apply(envelope([{ op: "morph", target: { zone: "z" } }])),
+    ).not.toThrow();
+    expect(document.querySelector('[data-next-zone="z"]')).not.toBeNull();
+  });
+
+  it("replace with no html drops the target with no replacement node", () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const { applier } = makeApplier();
+    applier.apply(envelope([{ op: "replace", target: { zone: "z" } }]));
+    expect(document.querySelector('[data-next-zone="z"]')).toBeNull();
+  });
+
+  it("inner with no html clears the target contents", () => {
+    document.body.innerHTML = '<div data-next-zone="z"><span>old</span></div>';
+    const { applier } = makeApplier();
+    applier.apply(envelope([{ op: "inner", target: { zone: "z" } }]));
+    expect(document.querySelector('[data-next-zone="z"]')!.innerHTML).toBe("");
+  });
+
+  it("append with no html appends nothing", () => {
+    document.body.innerHTML = '<ul data-next-zone="z"><li>a</li></ul>';
+    const { applier } = makeApplier();
+    applier.apply(envelope([{ op: "append", target: { zone: "z" } }]));
+    expect(document.querySelectorAll("li")).toHaveLength(1);
   });
 });
 
@@ -718,6 +833,18 @@ describe("Applier layer, toast, and url verbs", () => {
     const { applier, calls } = makeLayerApplier();
     applier.apply(envelope([{ op: "layer.open", href: "/w/", zone: "wiz" }]));
     expect(calls).toEqual([{ verb: "open", args: [null, "/w/", "wiz"] }]);
+  });
+
+  it("layer.open without a zone or href is a no-op", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(envelope([{ op: "layer.open", href: "/w/" }]));
+    expect(calls).toEqual([]);
+  });
+
+  it("toast without text is a no-op", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(envelope([{ op: "toast" }]));
+    expect(calls).toEqual([]);
   });
 
   it("layer.close carries result, dismiss, and reason to the stack", () => {

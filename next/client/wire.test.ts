@@ -80,6 +80,21 @@ describe("Wire headers", () => {
   });
 });
 
+describe("Wire request body", () => {
+  it("forwards a request body to the fetch init", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE), {
+      csrf: { header: "X-CSRFToken", token: "tok" },
+    });
+    await h.wire.fetch({
+      url: "/_next/form/u1/",
+      method: "POST",
+      uid: "u1",
+      body: "name=alice",
+    });
+    expect(h.calls[0].init.body).toBe("name=alice");
+  });
+});
+
 describe("Wire classification", () => {
   it("hands a partial envelope to onEnvelope", async () => {
     const h = makeWire(async () => envelopeResponse(ENVELOPE));
@@ -125,6 +140,35 @@ describe("Wire classification", () => {
     );
     await h.wire.fetch({ url: "/here/", zone: "z" });
     expect(h.navigated).toEqual(["/here/"]);
+  });
+
+  it("falls back to the request url on a 409 with an empty response url", async () => {
+    const h = makeWire(async () =>
+      envelopeResponse("", { status: 409, type: "text/plain", url: "" }),
+    );
+    await h.wire.fetch({ url: "/here/", zone: "z" });
+    expect(h.navigated).toEqual(["/here/"]);
+  });
+
+  it("falls back to the request url on a non-envelope with an empty response url", async () => {
+    const h = makeWire(async () =>
+      envelopeResponse("<html></html>", { type: "text/html", url: "" }),
+    );
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.navigated).toEqual(["/list/"]);
+  });
+
+  it("treats a response with no content-type header as a navigation", async () => {
+    const h = makeWire(async () => {
+      const response = new Response("<html></html>", { status: 200 });
+      response.headers.delete("content-type");
+      Object.defineProperty(response, "url", { value: "/page/" });
+      Object.defineProperty(response, "redirected", { value: false });
+      return response;
+    });
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.navigated).toEqual(["/page/"]);
+    expect(h.envelopes).toEqual([]);
   });
 
   it("emits partial:error on 5xx with the body", async () => {
@@ -350,6 +394,26 @@ describe("Wire echo request id", () => {
     });
     expect(header(h.calls, HEADER_REQUEST_ID)).toBeUndefined();
     expect(h.remembered).toEqual([]);
+  });
+
+  it("falls back to a timestamp id when crypto.randomUUID is absent", async () => {
+    const original = globalThis.crypto;
+    Object.defineProperty(globalThis, "crypto", {
+      value: { ...original, randomUUID: undefined },
+      configurable: true,
+    });
+    try {
+      const h = withRemember(async () => envelopeResponse(ENVELOPE));
+      await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
+      const stamped = header(h.calls, HEADER_REQUEST_ID);
+      expect(stamped).toMatch(/^\d+-[a-z0-9]+$/);
+      expect(h.remembered).toEqual([stamped]);
+    } finally {
+      Object.defineProperty(globalThis, "crypto", {
+        value: original,
+        configurable: true,
+      });
+    }
   });
 
   it("keeps a caller-supplied request id over a fresh one", async () => {

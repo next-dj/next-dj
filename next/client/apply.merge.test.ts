@@ -155,6 +155,15 @@ describe("append and prepend dedup", () => {
     );
     expect(keys).toEqual(["1", "2", "3"]);
   });
+
+  it("is a no-op when the merge target is absent from the document", () => {
+    const { applier } = makeApplier();
+    expect(() =>
+      applier.apply(
+        envelope([{ op: "append", target: { zone: "gone" }, html: "<li>x</li>" }]),
+      ),
+    ).not.toThrow();
+  });
 });
 
 describe("refresh verb", () => {
@@ -171,6 +180,24 @@ describe("refresh verb", () => {
       zone: "feed",
       headers: { "X-Next-Zone": "feed" },
     });
+  });
+
+  it("refresh derives the zone from the target when no top-level zone is set", () => {
+    const refresh = vi.fn<ZoneFetch>();
+    const { applier } = makeApplier({ refresh, here: () => "/page/" });
+    applier.apply(envelope([{ op: "refresh", target: { zone: "feed" } }]));
+    expect(refresh).toHaveBeenCalledWith({
+      url: "/page/",
+      zone: "feed",
+      headers: { "X-Next-Zone": "feed" },
+    });
+  });
+
+  it("refresh without any zone is a no-op", () => {
+    const refresh = vi.fn<ZoneFetch>();
+    const { applier } = makeApplier({ refresh });
+    applier.apply(envelope([{ op: "refresh" }]));
+    expect(refresh).not.toHaveBeenCalled();
   });
 });
 
@@ -198,6 +225,23 @@ describe("mount and generation", () => {
     );
     expect(seen).toEqual(["mounted"]);
     expect(ran).toEqual(["DIV"]);
+  });
+
+  it("skips next:mounted on a touched node a later op detached", () => {
+    document.body.innerHTML = '<ul data-next-zone="z"></ul>';
+    const ran: Element[] = [];
+    const mount: MountRegistry = { run: (root) => ran.push(root as Element) };
+    const { applier } = makeApplier({ mount });
+    // The append marks the new row as touched, then the remove detaches it, so
+    // the mount pass sees a disconnected node and skips it.
+    applier.apply(
+      envelope([
+        { op: "append", target: { zone: "z" }, html: '<li id="row">x</li>' },
+        { op: "remove", target: { css: "#row" } },
+      ]),
+    );
+    expect(document.querySelector("#row")).toBeNull();
+    expect(ran.some((node) => node.id === "row")).toBe(false);
   });
 
   it("bumps the per-zone generation on each apply", () => {

@@ -267,6 +267,59 @@ describe("createSse", () => {
     expect(fetched).toHaveLength(0);
   });
 
+  it("applies a non-record event body without binding any zone", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, mockVisibility().adapter);
+    sse.scan(document);
+    opened[0].message("[1,2,3]");
+    expect(applied).toEqual([[1, 2, 3]]);
+  });
+
+  it("binds no zone when the event ops field is not an array", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const visibility = mockVisibility();
+    let clock = 0;
+    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    sse.scan(document);
+    opened[0].message('{"ops":"nope"}');
+    visibility.set(true);
+    clock = 5000;
+    visibility.set(false);
+    expect(fetched).toHaveLength(0);
+  });
+
+  it("skips a non-record op and an op without a zone when binding", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const visibility = mockVisibility();
+    let clock = 0;
+    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    sse.scan(document);
+    opened[0].message(
+      JSON.stringify({
+        version: "v1",
+        ops: [42, { op: "event", name: "ping" }, { op: "refresh", zone: "poll" }],
+        assets: [],
+        form: null,
+      }),
+    );
+    visibility.set(true);
+    clock = 5000;
+    visibility.set(false);
+    expect(fetched.map((f) => f.zone)).toEqual(["poll"]);
+  });
+
+  it("ignores a data-next-sse container with an empty url", () => {
+    document.body.innerHTML = '<div data-next-sse=""></div>';
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, mockVisibility().adapter);
+    sse.scan(document);
+    expect(opened).toHaveLength(0);
+    expect(sse.size()).toBe(0);
+  });
+
   it("_reset closes every connection and detaches visibility", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();

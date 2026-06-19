@@ -76,6 +76,29 @@ describe("morph node reuse", () => {
     expect([...target.querySelectorAll("li")].map((li) => li.id)).toEqual(["b", "a"]);
   });
 
+  it("refuses a soft match at a pointer that carries a persistent id", () => {
+    // The pointer #a shares an id present on both sides, so it is reserved for a
+    // hard match. A keyless new <li> finds no hard match and the soft match at
+    // #a is refused, so a fresh node is inserted ahead of the reserved #a.
+    const target = mount('<ul id="l"><li id="a">a</li></ul>');
+    const reserved = target.querySelector("#a");
+    morph(target, '<ul id="l"><li>fresh</li><li id="a">a</li></ul>');
+    expect([...target.querySelectorAll("li")].map((li) => li.id)).toEqual(["", "a"]);
+    expect(target.querySelector("#a")).toBe(reserved);
+    expect(target.firstElementChild!.textContent).toBe("fresh");
+  });
+
+  it("soft-matches a pointer whose only id is gone from the new tree", () => {
+    // #ghost lives on the old side alone, so it owns no persistent vote. The
+    // keyless new <li> takes it as a soft match rather than inserting fresh.
+    const target = mount('<ul id="l"><li id="ghost">old</li></ul>');
+    const ghost = target.querySelector("#ghost");
+    morph(target, '<ul id="l"><li>new</li></ul>');
+    expect(target.querySelector("li")).toBe(ghost);
+    expect(target.querySelectorAll("li")).toHaveLength(1);
+    expect(target.textContent).toBe("new");
+  });
+
   it("syncs text and comment nodeValue by nodeType", () => {
     const target = mount("<div>old<!--c--></div>");
     morph(target, "<div>new<!--d--></div>");
@@ -124,6 +147,18 @@ describe("morph attribute sync", () => {
     });
     morph(target, '<details id="d"></details>');
     expect(target.hasAttribute("open")).toBe(true);
+  });
+
+  it("a cancelled update keeps the old attribute value", () => {
+    const target = mount('<div id="x" class="old"></div>');
+    target.addEventListener("next:morph-attribute", (e) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.name === "class" && detail.mutationType === "update") {
+        e.preventDefault();
+      }
+    });
+    morph(target, '<div id="x" class="new"></div>');
+    expect(target.getAttribute("class")).toBe("old");
   });
 
   it("a cancelled remove keeps the stale attribute", () => {
@@ -186,12 +221,33 @@ describe("morph modes and root", () => {
     expect(target.querySelectorAll("li")).toHaveLength(2);
   });
 
+  it("children mode skips a leading text node when collecting ids", () => {
+    const target = mount('<ul id="l"><li id="a">a</li></ul>');
+    const row = target.querySelector("#a");
+    morph(target, 'lead<li id="a">a2</li>', { mode: "children" });
+    expect(target.childNodes[0].nodeValue).toBe("lead");
+    expect(target.querySelector("#a")).toBe(row);
+    expect(row!.textContent).toBe("a2");
+  });
+
   it("returns the recreated root when the root tag changes", () => {
     const target = mount('<div id="r">x</div>');
     const result = morph(target, '<section id="r">x</section>');
     expect(result.tagName).toBe("SECTION");
     expect(document.querySelector("#r")).toBe(result);
     expect(document.querySelector("div")).toBeNull();
+  });
+
+  it("returns the new root on a tag change of a detached target", () => {
+    // A target with no parent cannot be relinked, so the new root is returned
+    // and the old detached node is simply left behind.
+    const target = document.createElement("div");
+    target.id = "r";
+    target.textContent = "x";
+    const result = morph(target, '<section id="r">x</section>');
+    expect(result.tagName).toBe("SECTION");
+    expect(result).not.toBe(target);
+    expect(target.isConnected).toBe(false);
   });
 
   it("returns the target when the new content is empty", () => {
@@ -309,6 +365,15 @@ describe("morph hooks and events", () => {
     expect(target.querySelector("#b")).not.toBeNull();
   });
 
+  it("beforeNode false on a matched pair leaves the old node untouched", () => {
+    const target = mount('<div id="r"><span id="s">old</span></div>');
+    morph(target, '<div id="r"><span id="s">new</span></div>', {
+      beforeNode: (oldNode) =>
+        oldNode !== null && (oldNode as Element).id === "s" ? false : undefined,
+    });
+    expect(target.querySelector("#s")!.textContent).toBe("old");
+  });
+
   it("fires afterNode for a morphed pair", () => {
     const target = mount('<div id="r">x</div>');
     const after = vi.fn();
@@ -362,6 +427,79 @@ describe("morph hooks and events", () => {
     expect(document.activeElement).toBe(input);
     expect(input.selectionStart).toBe(1);
     expect(input.selectionEnd).toBe(3);
+  });
+
+  it("re-focuses and restores the caret when a relocate drops focus", () => {
+    // A real browser blurs a focused node while it is being relocated. jsdom
+    // keeps focus through insertBefore, so the move adapter blurs to model the
+    // native behaviour and drive the focus-loss restore branch.
+    const target = mount(
+      '<ul id="l"><li id="a"><input id="ia" name="a" value="hello"></li>' +
+        '<li id="b">b</li></ul>',
+    );
+    const input = target.querySelector<HTMLInputElement>("#ia")!;
+    input.focus();
+    input.setSelectionRange(1, 3);
+    morph(
+      target,
+      '<ul id="l"><li id="b">b</li>' +
+        '<li id="a"><input id="ia" name="a" value="hello"></li></ul>',
+      {
+        move: (parent, node, before) => {
+          (document.activeElement as HTMLElement | null)?.blur();
+          parent.insertBefore(node, before);
+        },
+      },
+    );
+    expect(document.activeElement).toBe(input);
+    expect(input.selectionStart).toBe(1);
+    expect(input.selectionEnd).toBe(3);
+  });
+
+  it("re-focuses a checkbox whose caret read is null without a range restore", () => {
+    // A checkbox reports a null selectionStart, so snap.start stays null and the
+    // restore re-focuses the box but never reaches setSelectionRange.
+    const target = mount(
+      '<ul id="l"><li id="a"><input id="ca" type="checkbox" name="a"></li>' +
+        '<li id="b">b</li></ul>',
+    );
+    const box = target.querySelector<HTMLInputElement>("#ca")!;
+    box.focus();
+    morph(
+      target,
+      '<ul id="l"><li id="b">b</li>' +
+        '<li id="a"><input id="ca" type="checkbox" name="a"></li></ul>',
+      {
+        move: (parent, node, before) => {
+          (document.activeElement as HTMLElement | null)?.blur();
+          parent.insertBefore(node, before);
+        },
+      },
+    );
+    expect(document.activeElement).toBe(box);
+  });
+
+  it("re-focuses a button and skips a caret restore it cannot accept", () => {
+    // A button exposes no settable selection range, so the caret restore enters
+    // and setSelectionRange throws, exercising the swallow on the restore path.
+    const target = mount(
+      '<ul id="l"><li id="a"><button id="btn">go</button></li>' +
+        '<li id="b">b</li></ul>',
+    );
+    const button = target.querySelector<HTMLButtonElement>("#btn")!;
+    button.focus();
+    morph(
+      target,
+      '<ul id="l"><li id="b">b</li>' +
+        '<li id="a"><button id="btn">go</button></li></ul>',
+      {
+        move: (parent, node, before) => {
+          (document.activeElement as HTMLElement | null)?.blur();
+          parent.insertBefore(node, before);
+        },
+      },
+    );
+    expect(document.activeElement).toBe(button);
   });
 
   it("accepts an already-parsed element as new content", () => {

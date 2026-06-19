@@ -347,8 +347,11 @@ export class Applier {
   readonly #here: () => string;
   #dev: boolean;
   // The morph dirty predicate for the envelope in flight, built from the wire
-  // snapshot and reset once the envelope is fully applied.
+  // snapshot and reset once the envelope is fully applied. apply always reassigns
+  // this before any morph reads it, so the field initialiser body never runs.
+  /* v8 ignore start */
   #isDirty: (field: Element) => boolean = () => false;
+  /* v8 ignore stop */
   // The nodes a single envelope touched, collected so next:mounted and the
   // mount registry only see what actually changed.
   #touched: Element[] = [];
@@ -794,9 +797,13 @@ function matchKey(container: Element, key: string): Element | null {
 }
 
 function describeTarget(target: Target | undefined): string {
+  // Script neutralisation only runs on a resolved node, which requires a target
+  // carrying a recognised key, so the no-target and no-key guards are unreachable
+  // here and exist only to keep the helper total.
+  /* v8 ignore start */
   if (target === undefined) return "no target";
   const key = Object.keys(target)[0];
-  return key === undefined
-    ? "no target"
-    : `${key} ${JSON.stringify(target[key as keyof Target])}`;
+  if (key === undefined) return "no target";
+  /* v8 ignore stop */
+  return `${key} ${JSON.stringify(target[key as keyof Target])}`;
 }

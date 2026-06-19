@@ -149,6 +149,10 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   function paginate(el: Element, zone: string): void {
     const href = el.getAttribute("href");
     if (href === null || href === "") return;
+    // Every caller (onClick and the sentinel activate) reaches paginate only via
+    // a [data-next-merge] match, so the attribute is always present and the
+    // "append" fallback is never taken.
+    /* v8 ignore next */
     const merge = el.getAttribute(MERGE_ATTR) ?? "append";
     deps.fetch({
       url: href,
@@ -244,6 +248,9 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     if (!(el instanceof Element)) return;
     const confirmer = el.closest(`[${CONFIRM_ATTR}]`);
     if (confirmer !== null) {
+      // closest matched on the attribute's presence, so getAttribute returns a
+      // string (empty at worst) and the "" fallback is never taken.
+      /* v8 ignore next */
       const text = confirmer.getAttribute(CONFIRM_ATTR) ?? "";
       if (!confirm(text)) {
         event.preventDefault();
@@ -252,6 +259,10 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       }
     }
     const link = el.closest(`a[${MERGE_ATTR}][${TARGET_ATTR}]`);
+    // The selector restricts the match to <a> elements, which are always
+    // HTMLAnchorElement, so the narrowing guard's false branch never runs. The
+    // instanceof stays for the type narrowing the closure below relies on.
+    /* v8 ignore next */
     if (link instanceof HTMLAnchorElement) {
       const zone = link.getAttribute(TARGET_ATTR);
       if (zone !== null && zone !== "") {

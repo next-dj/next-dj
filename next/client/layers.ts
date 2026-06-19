@@ -233,6 +233,10 @@ export function createLayers(deps: LayerDeps): LayerStack {
   // Splice the layer out, end its dialog, and return focus to the opener.
   function remove(layer: Layer): void {
     const index = stack.indexOf(layer);
+    // The miss arm is a defensive guard: every caller (close, dismissFrom,
+    // _reset) hands remove a layer that is still on the stack, so indexOf never
+    // returns -1 through the public surface.
+    /* v8 ignore next */
     if (index !== -1) stack.splice(index, 1);
     layer.close();
     layer.dialog.remove();

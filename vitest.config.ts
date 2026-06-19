@@ -21,13 +21,14 @@ export default defineConfig({
         // the file is excluded rather than painted with fake hits.
         "next/client/adapters.ts",
       ],
-      // Branches carry a small buffer below the measured floor so a single
-      // defensive-default branch cannot flip the gate red.
+      // The gate is a cumulative 100% across every metric, mirroring the
+      // Python core. No buffer remains. adapters.ts stays excluded as the
+      // browser-global seam jsdom cannot model.
       thresholds: {
-        lines: 95,
-        branches: 88,
-        functions: 90,
-        statements: 95,
+        lines: 100,
+        branches: 100,
+        functions: 100,
+        statements: 100,
       },
     },
   },

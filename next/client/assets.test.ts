@@ -183,6 +183,14 @@ describe("version safeguard and reload-once", () => {
     expect(navigate).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores an empty version on accept, keeping the known one", () => {
+    const session = memorySession();
+    const { assets } = makeAssets({ session });
+    assets.versionMismatch("v1", "/here/");
+    assets.acceptVersion("");
+    expect(assets.version()).toBe("v1");
+  });
+
   it("clears the reload flag once a version matches", () => {
     const session = memorySession();
     const { assets } = makeAssets({ session });

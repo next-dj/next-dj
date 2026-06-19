@@ -386,6 +386,147 @@ describe("trigger delegation", () => {
     expect(requests).toHaveLength(0);
   });
 
+  it("ignores delegated events whose target is not an element", () => {
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document.dispatchEvent(new Event("input", { bubbles: true }));
+    document.dispatchEvent(new FocusEvent("blur"));
+    document.dispatchEvent(new Event("submit", { bubbles: true }));
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(requests).toHaveLength(0);
+  });
+
+  it("ignores an input event on an element outside any trigger", () => {
+    document.body.innerHTML = "<div><span>plain</span></div>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("span")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(requests).toHaveLength(0);
+  });
+
+  it("ignores a filter trigger that sits outside a form", () => {
+    document.body.innerHTML =
+      '<div data-next-target="r"><input data-next-trigger="input"></div>';
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(requests).toHaveLength(0);
+  });
+
+  it("ignores a blur on an element outside any validate form", () => {
+    document.body.innerHTML = '<form action="/x/"><input name="q"></form>';
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
+    expect(requests).toHaveLength(0);
+  });
+
+  it("keys the validate zone empty when the form carries no action uid", () => {
+    document.body.innerHTML =
+      '<form action="/f/" data-next-validate="blur">' +
+      '<input name="email" value="a@b.c">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
+    expect(requests[0].zone).toBe("validate:");
+  });
+
+  it("falls back to the current path when a validate form has no action", () => {
+    window.history.replaceState(null, "", "/here/");
+    document.body.innerHTML =
+      '<form data-next-validate="blur" data-next-action="u">' +
+      '<input name="email" value="a@b.c">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
+    expect(requests[0].url).toBe("/here/");
+  });
+
+  it("submits a filter to the bare action when the query is empty", () => {
+    document.body.innerHTML =
+      '<form action="/c/" data-next-target="r">' +
+      '<input data-next-trigger="input">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(requests[0].url).toBe("/c/");
+  });
+
+  it("appends an empty submitter value when the pressed button has none", () => {
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-action="u">' +
+      '<button type="submit" name="advance">Go</button>' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    const form = document.querySelector("form")!;
+    const event = new Event("submit", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "submitter", {
+      value: form.querySelector("button"),
+    });
+    form.dispatchEvent(event);
+    const body = requests[0].body as FormData;
+    expect(body.get("advance")).toBe("");
+  });
+
+  it("drops a file field from a filter auto-submit query", () => {
+    document.body.innerHTML =
+      '<form action="/c/" data-next-target="r">' +
+      '<input name="doc" type="file" data-next-trigger="input">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("input")!
+      .dispatchEvent(new Event("input", { bubbles: true }));
+    expect(requests[0].url).toBe("/c/");
+  });
+
+  it("skips a pagination link whose target zone is empty", () => {
+    document.body.innerHTML =
+      '<a href="/p2/" data-next-merge="append" data-next-target="">more</a>';
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("a")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(requests).toHaveLength(0);
+  });
+
+  it("arms no sentinel for a revealed element without a zone, merge, or target", () => {
+    const observer = manualObserver();
+    document.body.innerHTML =
+      '<div data-next-lazy="revealed"></div>' +
+      '<div data-next-lazy="revealed" data-next-merge="append"></div>';
+    const { triggers, requests } = makeTriggers({ observer });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.reveal();
+    expect(requests).toHaveLength(0);
+  });
+
+  it("re-installs cleanly by detaching the previous binding first", () => {
+    document.body.innerHTML =
+      '<a href="/p2/" data-next-merge="append" data-next-target="list">more</a>';
+    const { triggers, requests } = makeTriggers();
+    const first = triggers.install(document);
+    detach = triggers.install(document);
+    document
+      .querySelector("a")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(requests).toHaveLength(1);
+    first();
+  });
+
   it("_reset stops outstanding observers", () => {
     const observer = manualObserver();
     document.body.innerHTML =
