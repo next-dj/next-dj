@@ -12,7 +12,7 @@
     <li id="results-sentinel" class="sm:col-span-2 lg:col-span-3">
       <a href="?{% querystring page=page_obj.page|add:'1' %}"
          data-next-target="catalog-results" data-next-merge="append"
-         data-next-trigger="revealed"
+         data-next-lazy="revealed"
          class="block rounded-md border border-dashed border-border px-3 py-2 text-center text-sm text-muted-foreground hover:bg-accent">
         Show more
       </a>

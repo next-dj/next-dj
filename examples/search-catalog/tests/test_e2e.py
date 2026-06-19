@@ -297,7 +297,7 @@ class TestInfiniteScrollAppend:
         body = client.get("/catalog/").content.decode()
         assert 'id="results-sentinel"' in body
         assert 'data-next-merge="append"' in body
-        assert 'data-next-trigger="revealed"' in body
+        assert 'data-next-lazy="revealed"' in body
         assert "page=2" in body
 
     def test_append_merge_grows_the_zone_without_replacing_it(
