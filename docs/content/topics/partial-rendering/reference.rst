@@ -284,7 +284,19 @@ The runtime fires events on the document and the ``Next.on`` bus.
      - ``{reason}``
    * - ``next:mounted``
      - No
-     - Fired on each touched node, bubbles. The node is the event target.
+     - Fired on each touched node, bubbles. The node is the event target. Pairs with ``next:removed`` as the mount half of a framework island lifecycle.
+   * - ``next:removed``
+     - No
+     - Fired on a node just before it detaches, bubbles, no detail. The unmount half of the island lifecycle, the place to tear down a mounted root or a timer.
+   * - ``next:morph-element``
+     - Yes
+     - Fired on the old node before a pair morphs. Detail ``{newNode}``. ``preventDefault()`` skips the morph of this node and its subtree.
+   * - ``next:morph-attribute``
+     - Yes
+     - Fired on the old element before one attribute changes. Detail ``{name, mutationType}``, where ``mutationType`` is ``"update"`` or ``"remove"``. ``preventDefault()`` skips that one attribute mutation.
+
+The mount and morph events run during the patch apply, so a framework island can take over a node by vetoing its morph and managing its own subtree.
+The mounted and removed pair brackets the node's life inside the document, the symmetry an adapter relies on to mount and unmount a root.
 
 Settings
 --------
