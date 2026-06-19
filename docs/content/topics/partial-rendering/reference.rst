@@ -247,6 +247,8 @@ Lifecycle Events
 ----------------
 
 The runtime fires events on the document and the ``Next.on`` bus.
+The ``next:*`` node events fire on the element as a bubbling ``CustomEvent`` caught with ``addEventListener``.
+The ``partial:*``, ``ready``, ``context-updated``, and ``next:toast`` events also reach the ``Next.on`` bus.
 
 .. list-table::
    :header-rows: 1
