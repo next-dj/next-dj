@@ -1,7 +1,32 @@
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
+import type { Envelope } from "./apply";
 
-type NextEvent = "ready" | "context-updated" | (string & {});
+// The client context store, the same shape _init seeds and the context op and
+// csrf meta merge into.
+export type NextContext = Readonly<Record<string, unknown>>;
+
+// The payload of every runtime event reaching Next.on, keyed by event name, so a
+// known event types its listener argument. Each entry mirrors the detail the
+// runtime actually dispatches through #dispatch, no more and no less. A custom
+// event op or a plugin event falls through to the open on() overload.
+export interface NextEventMap {
+  ready: NextContext;
+  "context-updated": NextContext;
+  "partial:before-request": {
+    url: string;
+    method: string;
+    intent: { zone?: string; uid?: string };
+  };
+  "partial:before-apply": { envelope: Envelope };
+  "partial:applied": { envelope: Envelope };
+  "partial:error": { status: number; body: string; error: unknown };
+  "partial:layer-opened": { opener: HTMLElement | null };
+  "partial:layer-accepted": { result: unknown };
+  "partial:layer-dismissed": { reason: string };
+  "next:toast": { text: string; variant: string };
+}
+
 type NextListener = (payload: Record<string, unknown>) => void;
 type NextPlugin<T> = (next: typeof Next) => T;
 
@@ -30,7 +55,16 @@ class Next {
     Next.#dispatch("ready", context);
   }
 
-  static on(event: NextEvent, listener: NextListener): () => void {
+  // A known runtime event types its listener payload through NextEventMap, a
+  // custom event op or a plugin event falls through to the open overload. The
+  // dispatch mechanism is unchanged: every listener lands in the same
+  // Map<string, Set>, the overloads are a type-only narrowing of the argument.
+  static on<K extends keyof NextEventMap>(
+    event: K,
+    listener: (payload: NextEventMap[K]) => void,
+  ): () => void;
+  static on(event: string, listener: (payload: unknown) => void): () => void;
+  static on(event: string, listener: NextListener): () => void {
     let bucket = Next.#listeners.get(event);
     if (bucket === undefined) {
       bucket = new Set();
@@ -65,4 +99,10 @@ class Next {
   }
 }
 
-(window as unknown as { Next: typeof Next }).Next = Next;
+declare global {
+  interface Window {
+    Next: typeof Next;
+  }
+}
+
+window.Next = Next;

@@ -59,7 +59,7 @@ Tests mirror this layout:
 | --- | --- |
 | `make test` | Runs `tests/` with coverage. Fails if `next/` coverage is below 100%. Parallel (`pytest -n auto`). HTML report in `htmlcov/`. Benchmarks are skipped by default. |
 | `make test-examples` | Each example must have `tests/` or `tests.py`. Runs pytest with coverage per example. |
-| `make test-js` | Vitest unit tests for `next/static/next/next.ts`. |
+| `make test-js` | Vitest unit tests for `next/client/next.ts`. |
 | `uv run pytest tests/ -n auto` | Fast iteration without coverage flags. |
 | `make bench` | Opt-in micro-benchmarks with CI-aligned flags (warmup, min-rounds, gc-disabled, storage under `.benchmarks/`). Override via `BENCH_FLAGS`. See [Benchmarks](#benchmarks). |
 

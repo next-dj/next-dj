@@ -13,7 +13,13 @@
 // overwrite a response the server already accepted.
 
 import { defaultClock, defaultConfirm, defaultObserver } from "./adapters";
-import { HEADER_MERGE, HEADER_ZONE } from "./wire";
+import {
+  ATTR_ACTION,
+  ATTR_ZONE,
+  HEADER_MERGE,
+  HEADER_VERSION,
+  HEADER_ZONE,
+} from "./protocol";
 import type { Clock } from "./wire";
 
 const TRIGGER_ATTR = "data-next-trigger";
@@ -22,9 +28,9 @@ const DEBOUNCE_ATTR = "data-next-debounce";
 const MERGE_ATTR = "data-next-merge";
 const CONFIRM_ATTR = "data-next-confirm";
 const LAZY_ATTR = "data-next-lazy";
-const ZONE_ATTR = "data-next-zone";
 const VALIDATE_ATTR = "data-next-validate";
-const ACTION_ATTR = "data-next-action";
+// X-Next-Validate is local to inline validation, so it stays here rather than in
+// the shared protocol vocabulary.
 const HEADER_VALIDATE = "X-Next-Validate";
 
 // The geometry seam: real IntersectionObserver behind a mock the harness drives
@@ -146,14 +152,14 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   }
 
   function versionHeaders(extra: Record<string, string>): Record<string, string> {
-    return { ...extra, "X-Next-Version": deps.version() };
+    return { ...extra, [HEADER_VERSION]: deps.version() };
   }
 
   // Inline validation on blur. The FormData drops file fields so a multipart
   // form does not re-upload on every blur, the request carries the field name,
   // and the abortable zone queue collapses a burst of blurs to latest-wins.
   function validateField(form: HTMLFormElement, field: string): void {
-    const uid = form.getAttribute(ACTION_ATTR);
+    const uid = form.getAttribute(ATTR_ACTION);
     const data = new FormData();
     for (const [name, value] of new FormData(form)) {
       if (value instanceof File) continue;
@@ -199,7 +205,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   function onSubmit(event: Event): void {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
-    const uid = form.getAttribute(ACTION_ATTR);
+    const uid = form.getAttribute(ATTR_ACTION);
     if (uid === null) return;
     // A submit cancels its own in-flight validation: the wire aborts the
     // validate zone so a late answer never morphs the form the server is about
@@ -254,7 +260,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   // observer to paginate.
   function activate(el: Element): void {
     if (activated.has(el)) return;
-    const zone = el.getAttribute(ZONE_ATTR);
+    const zone = el.getAttribute(ATTR_ZONE);
     const lazy = el.getAttribute(LAZY_ATTR);
     const merge = el.getAttribute(MERGE_ATTR);
     if (zone !== null && lazy === "revealed") {
@@ -284,7 +290,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     const zones: string[] = [];
     for (const el of Array.from(root.querySelectorAll(`[${LAZY_ATTR}="load"]`))) {
       if (activated.has(el)) continue;
-      const zone = el.getAttribute(ZONE_ATTR);
+      const zone = el.getAttribute(ATTR_ZONE);
       if (zone === null) continue;
       activated.add(el);
       zones.push(zone);

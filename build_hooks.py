@@ -16,7 +16,7 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 
 class NextJsBuildHook(BuildHookInterface):
-    """Compile `next/static/next/next.ts` to `next.min.js` via esbuild."""
+    """Compile `next/client/next.ts` to `next.min.js` via esbuild."""
 
     PLUGIN_NAME = "next-js-build"
 

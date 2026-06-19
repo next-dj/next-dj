@@ -9,7 +9,7 @@ import type { DialogAdapter } from "./layers";
 
 const GOLDEN_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
-  "../../../tests/partial/golden",
+  "../../tests/partial/golden",
 );
 
 interface GoldenMeta {

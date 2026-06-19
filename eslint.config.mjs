@@ -3,7 +3,7 @@ import tseslint from "typescript-eslint";
 import vitest from "@vitest/eslint-plugin";
 import prettier from "eslint-config-prettier";
 
-const TS_SOURCES = ["next/static/next/*.ts", "vitest.config.ts", "eslint.config.mjs"];
+const TS_SOURCES = ["next/client/*.ts", "vitest.config.ts", "eslint.config.mjs"];
 
 export default tseslint.config(
   {
@@ -22,12 +22,12 @@ export default tseslint.config(
     extends: [eslint.configs.recommended, tseslint.configs.recommended, prettier],
   },
   {
-    files: ["next/static/next/*.test.ts"],
+    files: ["next/client/*.test.ts"],
     plugins: { vitest },
     rules: vitest.configs.recommended.rules,
   },
   {
-    files: ["next/static/next/morph.bugs.test.ts"],
+    files: ["next/client/morph.bugs.test.ts"],
     rules: {
       // The bug checklist drives a table whose assertions live in a `verify`
       // callback, so the rule is taught to count it as an assertion site.

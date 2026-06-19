@@ -3,12 +3,12 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "jsdom",
-    include: ["next/static/next/**/*.test.ts"],
+    include: ["next/client/**/*.test.ts"],
     coverage: {
       provider: "v8",
-      include: ["next/static/next/*.ts"],
+      include: ["next/client/*.ts"],
       exclude: [
-        "next/static/next/*.test.ts",
+        "next/client/*.test.ts",
         // adapters.ts holds the DI-adapter seams: the navigation hook
         // (location.assign, unimplemented in jsdom), the clock seam, the default
         // fetch, the default move (native moveBefore, absent from jsdom), the
@@ -19,7 +19,7 @@ export default defineConfig({
         // jsdom), the reload-once sessionStorage wrapper, and the confirm gate.
         // Each is a thin pass-through to a browser global the harness mocks, so
         // the file is excluded rather than painted with fake hits.
-        "next/static/next/adapters.ts",
+        "next/client/adapters.ts",
       ],
       // Branches carry a small buffer below the measured floor so a single
       // defensive-default branch cannot flip the gate red.

@@ -11,7 +11,7 @@
 // the stream lives on.
 
 import { defaultEventSource, defaultVisibility } from "./adapters";
-import { HEADER_ZONE } from "./wire";
+import { HEADER_ZONE } from "./protocol";
 
 const SSE_ATTR = "data-next-sse";
 // The ring holds the last 25 own request ids, matching the server-side echo

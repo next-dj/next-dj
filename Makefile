@@ -34,7 +34,7 @@ help: # show this help message
 install-js: # install JS toolchain via npm ci
 	npm ci
 
-build-js: install-js # compile next/static/next/next.ts to next.min.js via esbuild
+build-js: install-js # compile next/client/next.ts to next.min.js via esbuild
 	npm run build:next
 
 test-js: # run JavaScript unit tests with vitest

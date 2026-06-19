@@ -89,7 +89,7 @@ path = "build_hooks.py"
 packages = ["next"]
 artifacts = ["next/static/next/next.min.js"]
 exclude = [
-    "next/static/next/*.ts",
+    "next/client/",
     "next/static/next/next.meta.json",
 ]
 
@@ -106,7 +106,7 @@ include = [
 ]
 artifacts = ["next/static/next/next.min.js"]
 exclude = [
-    "next/static/next/*.test.ts",
+    "next/client/*.test.ts",
     "next/static/next/next.meta.json",
     "examples/",
     "docs/",

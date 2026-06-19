@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "build:next": "esbuild next/static/next/next.ts --bundle --minify --target=es2020 --outfile=next/static/next/next.min.js",
+    "build:next": "esbuild next/client/next.ts --bundle --minify --target=es2020 --outfile=next/static/next/next.min.js",
     "test:js": "vitest run",
     "test:js:coverage": "vitest run --coverage",
     "lint:js": "eslint \"{next,examples}/**/*.{mjs,ts,js,css}\"",

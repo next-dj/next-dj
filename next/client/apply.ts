@@ -3,12 +3,12 @@
 // stays a thin executor: the server authors every address and verb.
 
 import { fireRemoved, morph } from "./morph";
+import { ATTR_ACTION, ATTR_KEY, ATTR_ZONE, HEADER_ZONE } from "./protocol";
 import type { Navigate } from "./wire";
 
-// The wire content-type marker (invariant 9) and the Accept that doubles the
-// partial switch on content negotiation. Both must match the server exactly.
-export const CONTENT_TYPE = "application/vnd.next.patches+json";
-export const ACCEPT = "application/vnd.next.patches+json, text/html;q=0.9";
+// Re-exported so wire.ts and the existing tests keep importing the wire markers
+// from here, while protocol.ts is the single source.
+export { ACCEPT, CONTENT_TYPE } from "./protocol";
 
 export interface Target {
   zone?: string;
@@ -17,11 +17,137 @@ export interface Target {
   css?: string;
 }
 
-export interface Patch {
-  op: string;
+// The built-in verbs as a discriminated union keyed by op, so a handler that has
+// narrowed on op reads its own fields without re-deriving them from unknown. Each
+// variant lists only the fields the server authors for that verb, so an extra
+// property is a type error rather than a silent passthrough.
+export interface MorphPatch {
+  op: "morph";
   target?: Target;
   html?: string;
+  extract?: boolean;
+}
+
+export interface ReplacePatch {
+  op: "replace";
+  target?: Target;
+  html?: string;
+}
+
+export interface InnerPatch {
+  op: "inner";
+  target?: Target;
+  html?: string;
+}
+
+export interface MergePatch {
+  op: "append" | "prepend";
+  target?: Target;
+  html?: string;
+}
+
+export interface RemovePatch {
+  op: "remove";
+  target?: Target;
+}
+
+export interface RefreshPatch {
+  op: "refresh";
+  target?: Target;
+  zone?: string;
+}
+
+export interface EventPatch {
+  op: "event";
+  name?: string;
+  detail?: unknown;
+}
+
+export interface LayerOpenPatch {
+  op: "layer.open";
+  zone?: string;
+  href?: string;
+}
+
+export interface LayerClosePatch {
+  op: "layer.close";
+  result?: unknown;
+  dismiss?: boolean;
+  reason?: string;
+}
+
+export interface ToastPatch {
+  op: "toast";
+  text?: string;
+  variant?: string;
+}
+
+export interface UrlPatch {
+  op: "url";
+  href?: string;
+  action?: string;
+}
+
+export interface VisitPatch {
+  op: "visit";
+  href?: string;
+  external?: boolean;
+}
+
+export interface ContextPatch {
+  op: "context";
+  data?: unknown;
+}
+
+export type BuiltinPatch =
+  | MorphPatch
+  | ReplacePatch
+  | InnerPatch
+  | MergePatch
+  | RemovePatch
+  | RefreshPatch
+  | EventPatch
+  | LayerOpenPatch
+  | LayerClosePatch
+  | ToastPatch
+  | UrlPatch
+  | VisitPatch
+  | ContextPatch;
+
+// A custom op registered through defineOp. Its op is any non-built-in string and
+// its payload is open, so a plugin reads its own fields off the index signature.
+export interface CustomPatch {
+  op: string;
   [extra: string]: unknown;
+}
+
+export type Patch = BuiltinPatch | CustomPatch;
+
+// The set of built-in op names, kept in sync with the BuiltinPatch union by the
+// isBuiltin guard below. A custom op shadowing one of these is dispatched
+// through the registry first, so the name still belongs to a built-in here.
+const BUILTIN_OPS = new Set<string>([
+  "morph",
+  "replace",
+  "inner",
+  "append",
+  "prepend",
+  "remove",
+  "refresh",
+  "event",
+  "layer.open",
+  "layer.close",
+  "toast",
+  "url",
+  "visit",
+  "context",
+]);
+
+// Narrow a patch to a built-in verb by its op. A type predicate rather than an
+// op-only check so the switch in #applyBuiltin sees a BuiltinPatch, with no
+// CustomPatch in the union to defeat the per-op narrowing.
+function isBuiltin(patch: Patch): patch is BuiltinPatch {
+  return BUILTIN_OPS.has(patch.op);
 }
 
 export interface Asset {
@@ -44,9 +170,12 @@ export interface Envelope {
   request_id?: string;
 }
 
-// A custom-op handler receives the raw patch. Built-in verbs and the custom
-// registry share the same shape so the core eats its own dog food.
-export type OpHandler = (patch: Patch, ctx: ApplyContext) => void;
+// A custom-op handler receives the open patch shape, so a plugin reads its own
+// server-authored fields off the index signature. Built-in verbs and custom ops
+// share one apply path and one ApplyContext, the core eating its own dog food,
+// but the built-ins carry static variants and so dispatch through a typed switch
+// rather than the registry that erases their shape.
+export type OpHandler = (patch: CustomPatch, ctx: ApplyContext) => void;
 
 export interface ApplyContext {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
@@ -144,19 +273,39 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+// The raw shape of a wire envelope after the only structural check JSON.parse
+// leaves to do. Every field is still unknown: parseEnvelope narrows each one,
+// so the typed Envelope is built from honest checks rather than a blind cast
+// over the wire boundary.
+type RawEnvelope = Record<string, unknown>;
+
+// Build the typed form meta from its unknown wire value, reading each field
+// through a check rather than pretending the record already has the shape. An
+// absent or non-record form collapses to null.
+function parseFormMeta(value: unknown): FormMeta | null {
+  if (!isRecord(value)) return null;
+  const uid = asString(value.uid) ?? "";
+  const valid = value.valid === true;
+  const errors = isRecord(value.errors)
+    ? (value.errors as Record<string, string[]>)
+    : {};
+  return { uid, valid, errors };
+}
+
 // Narrow an unknown JSON value into an Envelope. Missing meta collapses to its
 // empty value so a terse server envelope parses without optional-field noise.
 export function parseEnvelope(raw: unknown): Envelope {
   if (!isRecord(raw)) {
     throw new TypeError("partial envelope is not an object");
   }
-  const version = asString(raw.version);
+  const wire: RawEnvelope = raw;
+  const version = asString(wire.version);
   if (version === undefined) {
     throw new TypeError("partial envelope is missing version");
   }
-  const ops = Array.isArray(raw.ops) ? (raw.ops as Patch[]) : [];
-  const assets = Array.isArray(raw.assets) ? (raw.assets as Asset[]) : [];
-  const form = isRecord(raw.form) ? (raw.form as unknown as FormMeta) : null;
+  const ops = Array.isArray(wire.ops) ? (wire.ops as Patch[]) : [];
+  const assets = Array.isArray(wire.assets) ? (wire.assets as Asset[]) : [];
+  const form = parseFormMeta(wire.form);
   const envelope: Envelope = { version, ops, assets, form };
   if (isRecord(raw.csrf)) {
     const header = asString(raw.csrf.header);
@@ -209,15 +358,14 @@ export class Applier {
     this.#mount = deps.mount;
     this.#refresh = deps.refresh;
     this.#here = deps.here ?? (() => this.#document.location.pathname);
-    this.#registerBuiltins();
   }
 
-  // Drop every custom op and re-seat the built-ins so vitest files do not
-  // leak registrations into one another.
+  // Drop every custom op so vitest files do not leak registrations into one
+  // another. The built-ins live in the typed switch, not the registry, so they
+  // survive the clear with no re-seat.
   _reset(): void {
     this.#ops.clear();
     this.#applied.clear();
-    this.#registerBuiltins();
   }
 
   // The apply counter of a zone, exposed so the lazy-zone triggers drop a GET
@@ -279,17 +427,78 @@ export class Applier {
   }
 
   #applyOp(patch: Patch): void {
-    const handler = this.#ops.get(patch.op);
-    if (handler === undefined) {
-      // An unknown verb is a single skipped op, never a poisoned envelope.
-      this.#emit(
-        "partial:error",
-        { status: 0, body: "", error: new Error(`unknown op ${patch.op}`) },
-        false,
-      );
+    // A built-in verb dispatches through a typed switch, where narrowing on op
+    // gives each verb its own variant without re-deriving fields from unknown.
+    // Checking built-ins first also narrows the remaining patch to CustomPatch,
+    // so a custom handler reads its own server-authored fields off the open
+    // shape with no cast at the call site.
+    if (isBuiltin(patch)) {
+      this.#applyBuiltin(patch);
       return;
     }
-    handler(patch, this.#context());
+    // A custom op registered through defineOp shares this apply path and the
+    // same ApplyContext as the built-ins, the core eating its own dog food.
+    const handler = this.#ops.get(patch.op);
+    if (handler !== undefined) {
+      handler(patch, this.#context());
+      return;
+    }
+    // An unknown verb is a single skipped op, never a poisoned envelope.
+    this.#emit(
+      "partial:error",
+      { status: 0, body: "", error: new Error(`unknown op ${patch.op}`) },
+      false,
+    );
+  }
+
+  // The built-in verbs ride the same apply path and ApplyContext as the custom
+  // ops, the core eating its own dog food, but their static variants dispatch
+  // through this switch rather than a registry that would erase the shape.
+  #applyBuiltin(patch: BuiltinPatch): void {
+    switch (patch.op) {
+      case "morph":
+        this.#morph(patch);
+        return;
+      case "replace":
+        this.#replace(patch);
+        return;
+      case "inner":
+        this.#inner(patch);
+        return;
+      case "append":
+        this.#merge(patch, "append");
+        return;
+      case "prepend":
+        this.#merge(patch, "prepend");
+        return;
+      case "remove":
+        this.#remove(patch);
+        return;
+      case "refresh":
+        this.#refreshOp(patch);
+        return;
+      case "event":
+        this.#event(patch);
+        return;
+      case "layer.open":
+        this.#layerOpen(patch);
+        return;
+      case "layer.close":
+        this.#layerClose(patch);
+        return;
+      case "toast":
+        this.#toast(patch);
+        return;
+      case "url":
+        this.#url(patch);
+        return;
+      case "visit":
+        this.#visit(patch);
+        return;
+      case "context":
+        this.#contextOp(patch);
+        return;
+    }
   }
 
   #context(): ApplyContext {
@@ -301,70 +510,53 @@ export class Applier {
     };
   }
 
-  #registerBuiltins(): void {
-    // morph is the default verb: the target subtree is reused, not swapped.
-    // replace is the explicit opt-out (a wholesale swap, no morph), inner
-    // replaces only the contents.
-    this.#ops.set("morph", (patch) => this.#morph(patch));
-    this.#ops.set("replace", (patch) => this.#replace(patch));
-    this.#ops.set("inner", (patch) => this.#inner(patch));
-    this.#ops.set("append", (patch) => this.#merge(patch, "append"));
-    this.#ops.set("prepend", (patch) => this.#merge(patch, "prepend"));
-    this.#ops.set("remove", (patch) => this.#remove(patch));
-    this.#ops.set("refresh", (patch) => this.#refreshOp(patch));
-    this.#ops.set("event", (patch) => this.#event(patch));
-    // The layer, toast, and history verbs ride the same ops registry as the
-    // custom defineOp path: the core eats its own dog food.
-    this.#ops.set("layer.open", (patch) => {
-      const zone = asString(patch.zone);
-      const href = asString(patch.href);
-      if (zone !== undefined && href !== undefined)
-        this.#layers?.open(null, href, zone);
+  #layerOpen(patch: LayerOpenPatch): void {
+    if (patch.zone !== undefined && patch.href !== undefined)
+      this.#layers?.open(null, patch.href, patch.zone);
+  }
+
+  #layerClose(patch: LayerClosePatch): void {
+    // A validation error addresses no layer, so the modal survives by
+    // construction: only an explicit close patch reaches the stack.
+    this.#layers?.close({
+      result: patch.result,
+      dismiss: patch.dismiss === true,
+      reason: patch.reason,
     });
-    this.#ops.set("layer.close", (patch) => {
-      // A validation error addresses no layer, so the modal survives by
-      // construction: only an explicit close patch reaches the stack.
-      this.#layers?.close({
-        result: patch.result,
-        dismiss: patch.dismiss === true,
-        reason: asString(patch.reason),
-      });
-    });
-    this.#ops.set("toast", (patch) => {
-      // toast is sugar over the stack's built-in container, set as textContent
-      // there, never parsed as HTML.
-      const text = asString(patch.text);
-      if (text !== undefined)
-        this.#layers?.toast(text, asString(patch.variant) ?? "info");
-    });
-    this.#ops.set("url", (patch) => {
-      // History from a server-validated href: push or replace, never authored.
-      const href = asString(patch.href);
-      if (href === undefined) return;
-      if (asString(patch.action) === "replace") this.#history?.replace(href);
-      else this.#history?.push(href);
-    });
-    this.#ops.set("visit", (patch) => {
-      // A redirect is a hard navigation, not a history push: location.assign
-      // takes any origin, so the same seam carries an external redirect. The
-      // external flag is the server's, the client does not branch on it.
-      const href = asString(patch.href);
-      if (href !== undefined) this.#navigate?.(href);
-    });
-    this.#ops.set("context", (patch) => {
-      // Merge server-serialised provider values into the client context, which
-      // fires context-updated so islands react. Only registered serialize
-      // providers reach here, the server builds the data.
-      const data = patch.data;
-      if (data !== null && typeof data === "object")
-        this.#mergeContext(data as Record<string, unknown>);
-    });
+  }
+
+  // toast is sugar over the stack's built-in container, set as textContent
+  // there, never parsed as HTML.
+  #toast(patch: ToastPatch): void {
+    if (patch.text !== undefined)
+      this.#layers?.toast(patch.text, patch.variant ?? "info");
+  }
+
+  // History from a server-validated href: push or replace, never authored.
+  #url(patch: UrlPatch): void {
+    if (patch.href === undefined) return;
+    if (patch.action === "replace") this.#history?.replace(patch.href);
+    else this.#history?.push(patch.href);
+  }
+
+  // A redirect is a hard navigation, not a history push: location.assign takes
+  // any origin, so the same seam carries an external redirect. The external flag
+  // is the server's, the client does not branch on it.
+  #visit(patch: VisitPatch): void {
+    if (patch.href !== undefined) this.#navigate?.(patch.href);
+  }
+
+  // Merge server-serialised provider values into the client context, which fires
+  // context-updated so islands react. Only registered serialize providers reach
+  // here, the server builds the data.
+  #contextOp(patch: ContextPatch): void {
+    if (isRecord(patch.data)) this.#mergeContext(patch.data);
   }
 
   // The default verb. The new content is parsed and script-neutralised, then the
   // morph engine brings the live target up to it with the dirty predicate of the
   // envelope in flight. extract carves the target node out of a full document.
-  #morph(patch: Patch): void {
+  #morph(patch: MorphPatch): void {
     const node = this.#resolve(patch.target);
     if (node === null) return;
     const html = patch.html ?? "";
@@ -392,7 +584,7 @@ export class Applier {
     return found;
   }
 
-  #replace(patch: Patch): void {
+  #replace(patch: ReplacePatch): void {
     const node = this.#resolve(patch.target);
     if (node === null) return;
     const fragment = this.#fragment(patch.html ?? "", patch.target);
@@ -404,7 +596,7 @@ export class Applier {
     this.#mark(inserted ?? null, patch.target);
   }
 
-  #inner(patch: Patch): void {
+  #inner(patch: InnerPatch): void {
     const node = this.#resolve(patch.target);
     if (node === null) return;
     const fragment = this.#fragment(patch.html ?? "", patch.target);
@@ -418,7 +610,7 @@ export class Applier {
   // append and prepend dedupe by data-next-key, falling back to id: an existing
   // node with the same key is replaced in place, not duplicated, so a re-fetched
   // page of a paginated list cannot double its rows.
-  #merge(patch: Patch, side: "append" | "prepend"): void {
+  #merge(patch: MergePatch, side: "append" | "prepend"): void {
     const node = this.#resolve(patch.target);
     if (node === null) return;
     const fragment = this.#fragment(patch.html ?? "", patch.target);
@@ -436,7 +628,7 @@ export class Applier {
     for (const child of incoming) this.#touched.push(child);
   }
 
-  #remove(patch: Patch): void {
+  #remove(patch: RemovePatch): void {
     const node = this.#resolve(patch.target);
     if (node === null) return;
     fireRemoved(node);
@@ -445,21 +637,20 @@ export class Applier {
 
   // refresh re-GETs the zone with its own cookies, the safe default of an SSE
   // fan-out: the server says "this zone is stale", the client fetches it fresh.
-  #refreshOp(patch: Patch): void {
-    const zone = asString(patch.zone) ?? asString(patch.target?.zone);
+  #refreshOp(patch: RefreshPatch): void {
+    const zone = patch.zone ?? patch.target?.zone;
     if (zone === undefined) return;
     this.#refresh?.({
       url: this.#here(),
       zone,
-      headers: { "X-Next-Zone": zone },
+      headers: { [HEADER_ZONE]: zone },
     });
   }
 
-  #event(patch: Patch): void {
-    const name = asString(patch.name);
-    if (name === undefined) return;
+  #event(patch: EventPatch): void {
+    if (patch.name === undefined) return;
     const detail = isRecord(patch.detail) ? patch.detail : {};
-    this.#emit(name, detail, false);
+    this.#emit(patch.name, detail, false);
   }
 
   // Parse a fragment through `<template>` and structurally neutralise every
@@ -510,7 +701,7 @@ export class Applier {
   #resolveIn(root: Document, target: Target | undefined): Element | null {
     if (target === undefined) return null;
     if (target.zone !== undefined) {
-      return root.querySelector(`[data-next-zone="${cssEscape(target.zone)}"]`);
+      return root.querySelector(`[${ATTR_ZONE}="${cssEscape(target.zone)}"]`);
     }
     if (target.form !== undefined) {
       return this.#resolveForm(root, target.form);
@@ -528,7 +719,7 @@ export class Applier {
   }
 
   #resolveForm(root: Document, uid: string): Element | null {
-    return root.querySelector(`[data-next-action="${cssEscape(uid)}"]`);
+    return root.querySelector(`[${ATTR_ACTION}="${cssEscape(uid)}"]`);
   }
 
   // Rotate the CSRF token in every form of the document so unmorphed forms do
@@ -565,7 +756,7 @@ function matchByTag(parsed: Document, target: Element): Element | null {
 // The dedup key of a list row: data-next-key first, then id. Absent both, the
 // row has no identity and is always inserted, never matched.
 function keyOf(el: Element): string | null {
-  return el.getAttribute("data-next-key") ?? (el.id !== "" ? el.id : null);
+  return el.getAttribute(ATTR_KEY) ?? (el.id !== "" ? el.id : null);
 }
 
 // Find an existing child of the container sharing the incoming row's key, the

@@ -2,18 +2,30 @@
 // classification (invariant 9 "a non-envelope is navigation"), per-target GET
 // queues with latest-wins aborts, and the per-uid mutation lock.
 
-import { CONTENT_TYPE, ACCEPT } from "./apply";
+import {
+  ACCEPT,
+  CONTENT_TYPE,
+  HEADER_ACCEPT,
+  HEADER_REQUEST_ID,
+  HEADER_VERSION,
+  HEADER_ZONE,
+  REQUEST_FLAG,
+} from "./protocol";
 import { defaultFetch, defaultNavigate } from "./adapters";
 
-export { CONTENT_TYPE, ACCEPT } from "./apply";
-
-export const REQUEST_FLAG = "X-Next-Request";
-export const HEADER_ACCEPT = "Accept";
-export const HEADER_ZONE = "X-Next-Zone";
-export const HEADER_MERGE = "X-Next-Merge";
-export const HEADER_VERSION = "X-Next-Version";
-export const HEADER_REQUEST_ID = "X-Next-Request-Id";
-export const HEADER_ORIGIN = "X-Next-Origin";
+// Re-exported so the existing imports and tests keep reaching the wire markers
+// and header names through wire.ts, while protocol.ts is the single source.
+export {
+  ACCEPT,
+  CONTENT_TYPE,
+  HEADER_ACCEPT,
+  HEADER_MERGE,
+  HEADER_ORIGIN,
+  HEADER_REQUEST_ID,
+  HEADER_VERSION,
+  HEADER_ZONE,
+  REQUEST_FLAG,
+} from "./protocol";
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 

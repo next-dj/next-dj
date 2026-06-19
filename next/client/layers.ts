@@ -12,7 +12,7 @@
 // stay in the excluded adapters file.
 
 import { defaultDialog } from "./adapters";
-import { HEADER_ORIGIN, HEADER_ZONE } from "./wire";
+import { HEADER_ORIGIN, HEADER_ZONE } from "./protocol";
 
 const LAYER_ATTR = "data-next-layer";
 const ACCEPTED_ATTR = "data-next-accepted";
