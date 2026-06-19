@@ -117,6 +117,10 @@ class TestPatchesBuilder:
         with pytest.raises(TypeError, match="conflicting selector"):
             Patches("v1").morph(zone="list", component="card")
 
+    def test_morph_rejects_a_none_valued_selector(self) -> None:
+        with pytest.raises(TypeError, match="unexpected selector"):
+            Patches("v1").morph(zone=None)
+
     def test_replace(self) -> None:
         envelope = Patches("v1").replace({"zone": "list"}, "<div></div>").envelope()
         assert envelope.ops[0].as_dict() == {
