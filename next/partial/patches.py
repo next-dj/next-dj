@@ -249,6 +249,13 @@ class Patches:
     ) -> "Patches":
         """Route a keyword-selected morph to its typed per-verb method."""
         zone = select.get("zone")
+        component = select.get("component")
+        form = select.get("form")
+        selectors = {"zone": zone, "component": component, "form": form}
+        chosen = [name for name, value in selectors.items() if isinstance(value, str)]
+        if len(chosen) > 1:
+            msg = f"morph() got conflicting selector keywords {chosen}."
+            raise TypeError(msg)
         if isinstance(zone, str) and "page" in select:
             return self.morph_foreign_zone(
                 zone,
@@ -258,11 +265,9 @@ class Patches:
         if isinstance(zone, str):
             overrides = cast("Mapping[str, Any] | None", select.get("overrides"))
             return self.morph_zone(zone, overrides=overrides)
-        component = select.get("component")
         if isinstance(component, str):
             props = cast("Mapping[str, Any] | None", select.get("props"))
             return self.morph_component(component, props=props)
-        form = select.get("form")
         if isinstance(form, str):
             return self.morph_form(form, html or "")
         msg = f"morph() got unexpected selector keywords {sorted(select)}."
