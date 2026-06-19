@@ -298,6 +298,47 @@ The runtime fires events on the document and the ``Next.on`` bus.
 The mount and morph events run during the patch apply, so a framework island can take over a node by vetoing its morph and managing its own subtree.
 The mounted and removed pair brackets the node's life inside the document, the symmetry an adapter relies on to mount and unmount a root.
 
+Client Runtime
+--------------
+
+The runtime exposes ``window.Next`` once the bundle loads.
+The surface is small, and every entry mirrors a seam the runtime already uses internally.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 62
+
+   * - Member
+     - Purpose
+   * - ``Next.on(event, listener)``
+     - Subscribe to a lifecycle event and receive a teardown function. A known event from the table above types its payload. A ``ready`` listener added after the runtime is ready fires at once.
+   * - ``Next.use(plugin)``
+     - Run a plugin function with ``Next`` and return its result, the registration point for an island adapter or a wire-format plugin.
+   * - ``Next.context``
+     - A frozen snapshot of the client context the server seeded and the ``context`` verb merges into.
+   * - ``Next.partial.defineOp(name, handler)``
+     - Register a handler for a custom verb the server authors, dispatched through the same pipeline as the built-ins.
+   * - ``Next.partial.onMount(selector, callback)``
+     - A re-executable mount registry. The callback runs over the matching elements at load and over every matching element a later patch inserts.
+   * - ``Next.partial.parseHook(contentType, hook)``
+     - Register a parser that turns a foreign content type into an envelope before the apply pipeline, so a third party can emulate another wire format.
+
+Intercepting Modals
+-------------------
+
+A ``data-next-layer`` link opens a modal over the current view and pushes the honest URL of the modal body.
+The pushed URL is the real address of the body rather than a masked URL of the page beneath it.
+A refresh or a shared link resolves that URL as its own standalone page through its own ``page.py``, and Back closes the top layer.
+There is no client router and no URL masking.
+A single ``popstate`` handler closes the layer whose pushed URL the browser moved past.
+
+Foreign-Zone Authorisation
+--------------------------
+
+A modal body and a page-addressed zone ride ``X-Next-Origin`` so the server resolves the host page that owns the zone.
+The server authorises that origin before rendering a foreign page's zone, raising ``ForeignPageNotAuthorizedError`` when the origin may not render it.
+This keeps a page-addressed out-of-band render from reaching a zone the requester has no claim on.
+
 Settings
 --------
 

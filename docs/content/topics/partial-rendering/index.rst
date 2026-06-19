@@ -22,6 +22,9 @@ It walks six concrete tasks from markup to handler, and the rest of the section 
 
 .. rubric:: Concepts
 
+:doc:`how-it-works`
+   One partial update followed end to end, from the zone in the template to the envelope on the wire to the morph in the browser.
+
 :doc:`zones`
    Why zones are an optimisation rather than required markup, what the extract default costs today, and the keying rule for dynamic list rows.
 
@@ -30,6 +33,9 @@ It walks six concrete tasks from markup to handler, and the rest of the section 
 
 :doc:`co-located-js`
    Three idioms for co-located JavaScript that survives a partial update, and the one anti-pattern that does not.
+
+:doc:`framework-islands`
+   Mounting a Vue or React root into a zone and unmounting it cleanly, through the events and the preservation attribute the runtime ships.
 
 :doc:`sse`
    Streaming patch envelopes over Server-Sent Events, the WSGI and ASGI contract, and the refresh fan-out pattern.
@@ -48,8 +54,10 @@ It walks six concrete tasks from markup to handler, and the rest of the section 
    :maxdepth: 1
 
    scenarios
+   how-it-works
    zones
    done-choreographies
    co-located-js
+   framework-islands
    sse
    reference
