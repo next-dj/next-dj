@@ -119,7 +119,7 @@ describe("append and prepend dedup", () => {
   });
 });
 
-describe("refresh verb and defer queue", () => {
+describe("refresh verb", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
   });
@@ -132,17 +132,6 @@ describe("refresh verb and defer queue", () => {
       url: "/page/",
       zone: "feed",
       headers: { "X-Next-Zone": "feed" },
-    });
-  });
-
-  it("queues defer zones after applying", () => {
-    const refresh = vi.fn<ZoneFetch>();
-    const { applier } = makeApplier({ refresh, here: () => "/page/" });
-    applier.apply(envelope([], { defer: [{ zone: "audit", trigger: "load" }] }));
-    expect(refresh).toHaveBeenCalledWith({
-      url: "/page/",
-      zone: "audit",
-      headers: { "X-Next-Zone": "audit" },
     });
   });
 });

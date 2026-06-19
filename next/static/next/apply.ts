@@ -29,11 +29,6 @@ export interface Asset {
   url: string;
 }
 
-export interface DeferZone {
-  zone: string;
-  trigger: string;
-}
-
 export interface FormMeta {
   uid: string;
   valid: boolean;
@@ -44,7 +39,6 @@ export interface Envelope {
   version: string;
   ops: Patch[];
   assets: Asset[];
-  defer: DeferZone[];
   form: FormMeta | null;
   csrf?: { header: string; token: string };
   request_id?: string;
@@ -102,9 +96,9 @@ export interface MountRegistry {
   run(root: ParentNode): void;
 }
 
-// The fetch bridge the `refresh` verb and the defer queue use to re-GET a zone
-// with its own cookies. Absent, both are no-ops. The same shape the layer stack
-// already passes, so partial.ts wires one binding.
+// The fetch bridge the `refresh` verb uses to re-GET a zone with its own
+// cookies. Absent, it is a no-op. The same shape the layer stack already
+// passes, so partial.ts wires one binding.
 export type ZoneFetch = (request: {
   url: string;
   zone: string;
@@ -135,8 +129,7 @@ export interface ApplyDeps {
   // The re-executable mount registry, run over every inserted subtree. Absent,
   // only next:mounted fires.
   mount?: MountRegistry;
-  // The zone re-GET used by the refresh verb and the defer queue. Absent, both
-  // are no-ops.
+  // The zone re-GET used by the refresh verb. Absent, it is a no-op.
   refresh?: ZoneFetch;
   // The current URL the version safeguard reloads on a mismatch. Absent, the
   // document's own location is used.
@@ -163,9 +156,8 @@ export function parseEnvelope(raw: unknown): Envelope {
   }
   const ops = Array.isArray(raw.ops) ? (raw.ops as Patch[]) : [];
   const assets = Array.isArray(raw.assets) ? (raw.assets as Asset[]) : [];
-  const defer = Array.isArray(raw.defer) ? (raw.defer as DeferZone[]) : [];
   const form = isRecord(raw.form) ? (raw.form as unknown as FormMeta) : null;
-  const envelope: Envelope = { version, ops, assets, defer, form };
+  const envelope: Envelope = { version, ops, assets, form };
   if (isRecord(raw.csrf)) {
     const header = asString(raw.csrf.header);
     const token = asString(raw.csrf.token);
@@ -200,8 +192,8 @@ export class Applier {
   // The nodes a single envelope touched, collected so next:mounted and the
   // mount registry only see what actually changed.
   #touched: Element[] = [];
-  // Monotonic apply counter per zone. The defer queue reads it so a zone whose
-  // ancestor was re-created mid-flight does not enqueue a stale second GET.
+  // Monotonic apply counter per zone. The lazy-zone triggers read it so a zone
+  // whose ancestor was re-created mid-flight does not enqueue a stale second GET.
   readonly #applied: Map<string, number> = new Map();
 
   constructor(deps: ApplyDeps) {
@@ -228,8 +220,8 @@ export class Applier {
     this.#registerBuiltins();
   }
 
-  // The apply counter of a zone, exposed so the defer queue and the lazy-zone
-  // triggers drop a GET aimed at a generation that has already moved on.
+  // The apply counter of a zone, exposed so the lazy-zone triggers drop a GET
+  // aimed at a generation that has already moved on.
   generation(zone: string): number {
     return this.#applied.get(zone) ?? 0;
   }
@@ -241,8 +233,8 @@ export class Applier {
   // The snapshot is the dirty counter wire.ts captured at fetch time. A direct
   // apply with no snapshot uses the highest mark, so no field reads as dirty.
   // The pipeline is normative: version → before-apply → CSS delta → ops → JS
-  // delta → mount → applied → defer. CSS is gated before the ops, so the body
-  // after the gate runs in a continuation. With no asset bridge the gate is a
+  // delta → mount → applied. CSS is gated before the ops, so the body after the
+  // gate runs in a continuation. With no asset bridge the gate is a
   // straight-through call and the whole apply stays synchronous.
   apply(raw: unknown, snapshot?: number): Envelope {
     const envelope = parseEnvelope(raw);
@@ -274,15 +266,6 @@ export class Applier {
     this.#assets?.acceptVersion(envelope.version);
     this.#runMount();
     this.#emit("partial:applied", { envelope }, false);
-    // defer is the suspense hook: the listed zones join the same queue as the
-    // lazy load zones, re-GET with X-Next-Zone.
-    for (const zone of envelope.defer) {
-      this.#refresh?.({
-        url: this.#here(),
-        zone: zone.zone,
-        headers: { "X-Next-Zone": zone.zone },
-      });
-    }
   }
 
   // next:mounted on each touched node and a mount-registry pass over each, so
@@ -504,7 +487,7 @@ export class Applier {
   }
 
   // Record a node as touched for the mount pass and bump the zone's apply
-  // counter, the generation the defer queue and lazy triggers read.
+  // counter, the generation the lazy triggers read.
   #mark(node: Element | null, target: Target | undefined): void {
     if (node !== null) this.#touched.push(node);
     const zone = target?.zone;

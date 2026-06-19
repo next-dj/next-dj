@@ -17,7 +17,7 @@ function makeApplier(dev = false) {
 }
 
 function envelope(ops: unknown[], extra: Record<string, unknown> = {}): unknown {
-  return { version: "v1", ops, assets: [], defer: [], form: null, ...extra };
+  return { version: "v1", ops, assets: [], form: null, ...extra };
 }
 
 describe("parseEnvelope", () => {
@@ -25,7 +25,6 @@ describe("parseEnvelope", () => {
     const parsed = parseEnvelope({ version: "v1" });
     expect(parsed.ops).toEqual([]);
     expect(parsed.assets).toEqual([]);
-    expect(parsed.defer).toEqual([]);
     expect(parsed.form).toBeNull();
     expect(parsed.csrf).toBeUndefined();
     expect(parsed.request_id).toBeUndefined();

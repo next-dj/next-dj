@@ -249,28 +249,6 @@ describe("golden fixtures apply to the DOM", () => {
     expect(merged).toEqual([{ unread: 3, user: "ada" }]);
     expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
   });
-
-  it("defer_zone queues the audit zone for a follow-up GET", () => {
-    document.body.innerHTML = '<div data-next-zone="summary">stale</div>';
-    const refresh = vi.fn();
-    const applier = new Applier({
-      dispatch: () => undefined,
-      mergeContext: () => undefined,
-      document,
-      refresh,
-      here: () => "/audit/",
-    });
-    const meta = readMeta("defer_zone");
-    applier.apply(JSON.parse(readEnvelopeBytes(meta.envelope_file)));
-    expect(document.querySelector('[data-next-zone="summary"]')!.textContent).toBe(
-      "saved",
-    );
-    expect(refresh).toHaveBeenCalledWith({
-      url: "/audit/",
-      zone: "audit-table",
-      headers: { "X-Next-Zone": "audit-table" },
-    });
-  });
 });
 
 describe("layer golden fixtures apply through the layer stack", () => {
