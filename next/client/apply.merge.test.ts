@@ -16,7 +16,7 @@ function makeApplier(over: Partial<ApplyDeps> = {}) {
 }
 
 function envelope(ops: unknown[], extra: Record<string, unknown> = {}): unknown {
-  return { version: "v1", ops, assets: [], defer: [], form: null, ...extra };
+  return { version: "v1", ops, assets: [], form: null, ...extra };
 }
 
 describe("append and prepend dedup", () => {

@@ -41,7 +41,7 @@ function makeWire(
   return { wire, dispatched, navigated, envelopes, calls };
 }
 
-const ENVELOPE = '{"version":"v1","ops":[],"assets":[],"defer":[],"form":null}';
+const ENVELOPE = '{"version":"v1","ops":[],"assets":[],"form":null}';
 
 describe("Wire headers", () => {
   it("sends the intent headers on a GET", async () => {

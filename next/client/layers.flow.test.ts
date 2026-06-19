@@ -33,7 +33,7 @@ function envelopeResponse(
 }
 
 function envelope(ops: unknown[]): Record<string, unknown> {
-  return { version: "v1", ops, assets: [], defer: [], form: null };
+  return { version: "v1", ops, assets: [], form: null };
 }
 
 function zoneMorphBody(zone: string, html: string): string {

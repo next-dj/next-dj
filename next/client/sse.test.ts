@@ -63,7 +63,6 @@ function envelope(ops: unknown[], requestId?: string): string {
     version: "v1",
     ops,
     assets: [],
-    defer: [],
     form: null,
   };
   if (requestId !== undefined) body.request_id = requestId;
@@ -143,7 +142,7 @@ describe("createSse", () => {
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, mockVisibility().adapter);
     sse.scan(document);
-    const envelopeBody = '{"version":"v1","ops":[],"assets":[],"defer":[],"form":null}';
+    const envelopeBody = '{"version":"v1","ops":[],"assets":[],"form":null}';
     const sent: { headers: Record<string, string> }[] = [];
     const wire = new Wire({
       fetch: async (_url, init) => {

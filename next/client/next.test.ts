@@ -207,7 +207,6 @@ describe("Next.on arbitrary events", () => {
       version: "v1",
       ops: [],
       assets: [],
-      defer: [],
       form: null,
     });
     expect(detail).not.toBeNull();
@@ -244,7 +243,6 @@ describe("Next.partial namespace", () => {
       version: "v1",
       ops: [{ op: "seed" }],
       assets: [],
-      defer: [],
       form: null,
     });
     expect(win.Next.context.poll).toBe(7);

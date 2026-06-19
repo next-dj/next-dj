@@ -30,7 +30,6 @@ describe("createPartial surface", () => {
       version: "v1",
       ops: [{ op: "inner", target: { zone: "z" }, html: "new" }],
       assets: [],
-      defer: [],
       form: null,
     });
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
@@ -43,7 +42,6 @@ describe("createPartial surface", () => {
       version: "v1",
       ops: [{ op: "confetti", origin: "btn" }],
       assets: [],
-      defer: [],
       form: null,
     });
     expect(seen).toEqual(["btn"]);
@@ -55,13 +53,10 @@ describe("createPartial surface", () => {
       document,
       fetch: async (_url, init) => {
         calls.push(init);
-        return new Response(
-          '{"version":"v1","ops":[],"assets":[],"defer":[],"form":null}',
-          {
-            status: 200,
-            headers: { "content-type": "application/vnd.next.patches+json" },
-          },
-        );
+        return new Response('{"version":"v1","ops":[],"assets":[],"form":null}', {
+          status: 200,
+          headers: { "content-type": "application/vnd.next.patches+json" },
+        });
       },
       navigate: () => {},
     });
@@ -73,7 +68,7 @@ describe("createPartial surface", () => {
   it("a csrf meta in an applied envelope rotates the token for the next mutation", async () => {
     const calls: RequestInit[] = [];
     let body =
-      '{"version":"v1","ops":[],"assets":[],"defer":[],"form":null,' +
+      '{"version":"v1","ops":[],"assets":[],"form":null,' +
       '"csrf":{"header":"X-CSRFToken","token":"rotated"}}';
     partial._configure({
       document,
@@ -83,7 +78,7 @@ describe("createPartial surface", () => {
           status: 200,
           headers: { "content-type": "application/vnd.next.patches+json" },
         });
-        body = '{"version":"v1","ops":[],"assets":[],"defer":[],"form":null}';
+        body = '{"version":"v1","ops":[],"assets":[],"form":null}';
         return r;
       },
       navigate: () => {},
@@ -109,7 +104,6 @@ describe("createPartial surface", () => {
       version: "v1",
       ops: [{ op: "inner", target: { zone: "z" }, html: "hooked" }],
       assets: [],
-      defer: [],
       form: null,
     }));
     await partial.fetch({ url: "/list/", zone: "z" });
@@ -125,7 +119,6 @@ describe("createPartial surface", () => {
       version: "v1",
       ops: [{ op: "confetti" }],
       assets: [],
-      defer: [],
       form: null,
     });
     expect(dispatched.some((d) => d.event === "partial:error")).toBe(true);
@@ -135,7 +128,7 @@ describe("createPartial surface", () => {
     partial._configure({
       document,
       fetch: async () =>
-        new Response('{"version":"v1","ops":[],"assets":[],"defer":[],"form":null}', {
+        new Response('{"version":"v1","ops":[],"assets":[],"form":null}', {
           status: 200,
           headers: { "content-type": "application/vnd.next.patches+json" },
         }),
@@ -162,7 +155,6 @@ describe("createPartial surface", () => {
         },
       ],
       assets: [],
-      defer: [],
       form: null,
     });
     expect(seen).toEqual(["a", "b"]);
@@ -183,7 +175,6 @@ describe("createPartial surface", () => {
         },
       ],
       assets: [],
-      defer: [],
       form: null,
     });
     expect(seen).toEqual(["new"]);
@@ -198,13 +189,10 @@ describe("createPartial surface", () => {
       document,
       fetch: async (url, init) => {
         calls.push({ url, init });
-        return new Response(
-          '{"version":"v1","ops":[],"assets":[],"defer":[],"form":null}',
-          {
-            status: 200,
-            headers: { "content-type": "application/vnd.next.patches+json" },
-          },
-        );
+        return new Response('{"version":"v1","ops":[],"assets":[],"form":null}', {
+          status: 200,
+          headers: { "content-type": "application/vnd.next.patches+json" },
+        });
       },
       navigate: () => {},
     });
