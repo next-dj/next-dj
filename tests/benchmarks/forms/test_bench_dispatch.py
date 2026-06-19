@@ -54,8 +54,12 @@ class TestBenchDispatchHelpers:
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_resolve_origin_cold(self, benchmark) -> None:
+        # A fixed urlconf keeps this measuring the resolver itself rather
+        # than the live test site page count.
         request = build_mock_http_request(
-            method="POST", POST={"_next_form_origin": "/items/42/"}
+            method="POST",
+            POST={"_next_form_origin": "/items/42/"},
+            urlconf="tests.benchmarks.forms.urls_bench",
         )
 
         def run() -> object:
@@ -70,7 +74,9 @@ class TestBenchDispatchHelpers:
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_resolve_origin_memoised(self, benchmark) -> None:
         request = build_mock_http_request(
-            method="POST", POST={"_next_form_origin": "/items/42/"}
+            method="POST",
+            POST={"_next_form_origin": "/items/42/"},
+            urlconf="tests.benchmarks.forms.urls_bench",
         )
         first = resolve_origin(request)
         match = benchmark(resolve_origin, request)
