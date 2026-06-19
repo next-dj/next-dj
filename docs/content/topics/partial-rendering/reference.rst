@@ -228,8 +228,8 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from Python 
      - Form, link
      - A confirmation prompt before the request.
    * - ``data-next-keep``
-     - Any element with an id
-     - The morph leaves the node untouched.
+     - Any element
+     - The morph leaves the node untouched, paired by id when present and by position otherwise.
    * - ``data-next-key``
      - List rows
      - The match key for the morph and for ``append`` dedup, falling back to ``id``.
