@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from django.core.checks import Warning as DjangoWarning
 from django.test import override_settings
 
-from next.apps.checks import check_django_templates_backend_present
+from next.apps import checks
+from next.apps.checks import (
+    check_builtin_tag_libraries_complete,
+    check_django_templates_backend_present,
+)
+from next.apps.templates import _BUILTIN_MODULES
 
 
 _DJANGO_BACKEND = "django.template.backends.django.DjangoTemplates"
@@ -42,3 +49,24 @@ class TestDjangoTemplatesBackendCheck:
         ):
             messages = check_django_templates_backend_present(app_configs=None)
         assert messages == []
+
+
+class TestBuiltinTagLibrariesComplete:
+    """``check_builtin_tag_libraries_complete`` guards the builtin tuple."""
+
+    def test_discovery_finds_every_builtin(self) -> None:
+        discovered = checks._iter_tag_library_modules()
+        assert set(discovered) == set(_BUILTIN_MODULES)
+
+    def test_complete_list_emits_nothing(self) -> None:
+        messages = check_builtin_tag_libraries_complete(app_configs=None)
+        assert messages == []
+
+    def test_unregistered_library_emits_w063(self) -> None:
+        with patch.object(checks, "_BUILTIN_MODULES", ("next.templatetags.forms",)):
+            messages = check_builtin_tag_libraries_complete(app_configs=None)
+        assert _ids(messages) == ["next.W063"] * (len(_BUILTIN_MODULES) - 1)
+        assert all(isinstance(m, DjangoWarning) for m in messages)
+        objs = {m.obj for m in messages}
+        assert "next.templatetags.forms" not in objs
+        assert "next.templatetags.partial" in objs

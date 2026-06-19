@@ -3,7 +3,7 @@ from django.template import Context, Engine, TemplateSyntaxError
 from django.template.base import Template
 from django.test import RequestFactory
 
-from next.partial.markers import (
+from next.partial.zone import (
     LAZY_ATTR,
     ZONE_ATTR,
     ZoneNode,

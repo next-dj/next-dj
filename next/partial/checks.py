@@ -31,8 +31,8 @@ from next.forms.backends import FormActionBackend
 from next.forms.manager import form_action_manager
 from next.pages import page
 
-from .markers import ZoneNode
 from .registry import BUILTIN_OPS, patch_op_registry
+from .zone import ZoneNode
 
 
 if TYPE_CHECKING:

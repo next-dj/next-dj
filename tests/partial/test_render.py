@@ -6,8 +6,8 @@ from django.test import RequestFactory
 
 import next.partial.render as render_module
 from next.partial import UnknownZoneError, ZoneRenderResult, render_zone
-from next.partial.markers import ZONE_ATTR
 from next.partial.signals import zone_rendered
+from next.partial.zone import ZONE_ATTR
 
 
 PAGES_ROOT = Path(__file__).resolve().parent.parent / "site_pages"

@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING, cast
 from weakref import WeakKeyDictionary
 
 from .headers import partial_intent
-from .markers import ZoneNode
 from .signals import patch_op_registered, zone_registered
+from .zone import ZoneNode
 
 
 if TYPE_CHECKING:
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
     from django.template.base import Template
 
-    from .markers import ZonePartial
+    from .zone import ZonePartial
 
 
 BUILTIN_OPS: frozenset[str] = frozenset(

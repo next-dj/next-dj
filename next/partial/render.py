@@ -9,9 +9,9 @@ from django.template import Context as DjangoTemplateContext
 from next.pages.manager import page
 from next.static.manager import default_manager
 
-from .markers import render_zone_standalone
 from .registry import zones_of
 from .signals import zone_rendered
+from .zone import render_zone_standalone
 
 
 if TYPE_CHECKING:
