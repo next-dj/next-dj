@@ -8,7 +8,7 @@
 
 import type { HistoryAdapter } from "./apply";
 import type { LinkLoader, SessionStore } from "./assets";
-import type { DialogAdapter, DialogControl } from "./layers";
+import type { DialogAdapter, DialogControl, PopStateAdapter } from "./layers";
 import type { Move } from "./morph";
 import type { EventSourceAdapter, VisibilityAdapter } from "./sse";
 import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
@@ -62,6 +62,19 @@ export function defaultHistory(): HistoryAdapter {
   return {
     push: (href) => globalThis.history.pushState(null, "", href),
     replace: (href) => globalThis.history.replaceState(null, "", href),
+  };
+}
+
+// The popstate seam for the intercepting modal lifecycle. The Back gesture is a
+// browser global jsdom does not drive, so the listener lives here and tests
+// invoke the captured handler directly through a mock.
+export function defaultPopState(): PopStateAdapter {
+  return {
+    listen(handler) {
+      const fn = (): void => handler();
+      window.addEventListener("popstate", fn);
+      return () => window.removeEventListener("popstate", fn);
+    },
   };
 }
 

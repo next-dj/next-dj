@@ -22,7 +22,7 @@ import type {
 } from "./wire";
 import { createDirtyTracker } from "./dirty";
 import { createLayers } from "./layers";
-import type { DialogAdapter, LayerStack } from "./layers";
+import type { DialogAdapter, LayerStack, PopStateAdapter } from "./layers";
 import { createAssets } from "./assets";
 import type { LinkLoader, SessionStore } from "./assets";
 import { createTriggers } from "./triggers";
@@ -50,6 +50,9 @@ export interface PartialAdapters {
   // without jsdom's missing showModal and focus trap.
   dialog?: DialogAdapter;
   history?: HistoryAdapter;
+  // The Back-gesture seam of the intercepting modal lifecycle, mocked in tests
+  // so the popstate handler runs without jsdom driving real history.
+  popstate?: PopStateAdapter;
   // The CSS loader, the intersection geometry, the reload-once store, and the
   // confirm gate, each absent in jsdom.
   loadLink?: LinkLoader;
@@ -164,6 +167,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       dispatch: deps.dispatch,
       document: adapters?.document,
       dialog: adapters?.dialog,
+      // The layer stack shares the applier's history seam so a modal pushes its
+      // honest URL and a close replaces it back through the same channel.
+      history,
+      popstate: adapters?.popstate,
       fetch: (request: { url: string; zone: string }) => wire.fetch(request),
     };
   }

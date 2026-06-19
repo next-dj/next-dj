@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLayers } from "./layers";
-import type { DialogAdapter, LayerStack } from "./layers";
+import type { DialogAdapter, LayerStack, PopStateAdapter } from "./layers";
 import { HEADER_ORIGIN, HEADER_ZONE } from "./wire";
 
 type Dispatched = { event: string; detail: Record<string, unknown> };
@@ -219,5 +219,83 @@ describe("layer requests carry the host origin", () => {
     expect(requests[0].url).toBe("/host/page/");
     expect(requests[0].headers?.[HEADER_ORIGIN]).toBe("/host/page/");
     layers._reset();
+  });
+});
+
+describe("layer intercepting URL lifecycle", () => {
+  let layers: LayerStack;
+  let dispatched: Dispatched[];
+  let fire: () => void;
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    window.history.replaceState(null, "", "/feed/");
+    dispatched = [];
+    let handler: (() => void) | null = null;
+    const popstate: PopStateAdapter = {
+      listen(h) {
+        handler = h;
+        return () => {
+          handler = null;
+        };
+      },
+    };
+    layers = createLayers({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      fetch: async () => {},
+      document,
+      dialog: mockDialog().adapter,
+      popstate,
+    });
+    layers.install(document);
+    fire = () => handler?.();
+  });
+
+  it("pushes the honest URL of the layer body on open", async () => {
+    await layers.open(null, "/photos/1/", "photo");
+    expect(window.location.pathname).toBe("/photos/1/");
+    expect(layers.size()).toBe(1);
+  });
+
+  it("closes the top layer when Back moves past its pushed URL", async () => {
+    await layers.open(null, "/photos/1/", "photo");
+    window.history.replaceState(null, "", "/feed/");
+    fire();
+    expect(layers.size()).toBe(0);
+    expect(
+      dispatched.some(
+        (d) => d.event === "partial:layer-dismissed" && d.detail.reason === "popstate",
+      ),
+    ).toBe(true);
+  });
+
+  it("replaces the URL back to the host on a programmatic accept", async () => {
+    await layers.open(null, "/photos/1/", "photo");
+    layers.close({ result: { id: 1 } });
+    expect(layers.size()).toBe(0);
+    expect(window.location.pathname).toBe("/feed/");
+  });
+
+  it("replaces the URL back to the host on a programmatic dismiss", async () => {
+    await layers.open(null, "/photos/1/", "photo");
+    layers.close({ dismiss: true, reason: "escape" });
+    expect(layers.size()).toBe(0);
+    expect(window.location.pathname).toBe("/feed/");
+  });
+
+  it("Back closes only the top of a nested stack", async () => {
+    await layers.open(null, "/photos/1/", "a");
+    await layers.open(null, "/photos/1/edit/", "b");
+    window.history.replaceState(null, "", "/photos/1/");
+    fire();
+    expect(layers.size()).toBe(1);
+  });
+
+  it("a stray popstate after a programmatic close is a no-op", async () => {
+    await layers.open(null, "/photos/1/", "photo");
+    layers.close({ result: undefined });
+    expect(layers.size()).toBe(0);
+    fire();
+    expect(layers.size()).toBe(0);
   });
 });

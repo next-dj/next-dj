@@ -11,7 +11,8 @@
 // the surface here is exercised in jsdom while the untestable browser globals
 // stay in the excluded adapters file.
 
-import { defaultDialog } from "./adapters";
+import { defaultDialog, defaultHistory, defaultPopState } from "./adapters";
+import type { HistoryAdapter } from "./apply";
 import { HEADER_ORIGIN, HEADER_ZONE } from "./protocol";
 
 const LAYER_ATTR = "data-next-layer";
@@ -37,6 +38,13 @@ export interface DialogAdapter {
   open(dialog: HTMLDialogElement, onDismiss: (reason: string) => void): DialogControl;
 }
 
+// The popstate seam for the intercepting modal lifecycle. listen registers the
+// Back handler and returns its teardown, so the browser global stays in the
+// excluded adapters file while tests invoke the handler through a mock.
+export interface PopStateAdapter {
+  listen(handler: () => void): () => void;
+}
+
 interface Layer {
   dialog: HTMLDialogElement;
   root: HTMLElement;
@@ -51,6 +59,11 @@ interface Layer {
   // page-addressed out-of-band render of its zones, rather than falling back to
   // the step page the form lives on.
   host: string;
+  // The honest URL pushed when the layer opened, so the modal is shareable and
+  // refresh-resolves to the standalone page. Absent for a layer that never
+  // touched history. A programmatic close replaces it back to the host, and the
+  // popstate handler closes the layer once Back moves past it.
+  pushedUrl?: string;
 }
 
 export interface LayerDeps {
@@ -64,6 +77,12 @@ export interface LayerDeps {
   }) => Promise<void>;
   document?: Document;
   dialog?: DialogAdapter;
+  // The history seam, shared with the applier, so an opening layer pushes its
+  // honest URL and a programmatic close replaces it back to the host.
+  history?: HistoryAdapter;
+  // The Back-gesture seam. A popstate whose URL no longer matches the top
+  // layer's pushed URL closes that layer.
+  popstate?: PopStateAdapter;
 }
 
 export interface LayerStack {
@@ -95,12 +114,19 @@ export interface LayerStack {
 export function createLayers(deps: LayerDeps): LayerStack {
   const doc = deps.document ?? document;
   const dialogAdapter = deps.dialog ?? defaultDialog();
+  const history = deps.history ?? defaultHistory();
+  const popstate = deps.popstate ?? defaultPopState();
   const stack: Layer[] = [];
   let toastHost: HTMLElement | null = null;
   let detach: (() => void) | null = null;
+  let popstateDetach: (() => void) | null = null;
 
   function topLayer(): Layer | undefined {
     return stack[stack.length - 1];
+  }
+
+  function currentUrl(): string {
+    return doc.location.pathname + doc.location.search;
   }
 
   function resolveZone(name: string, root: ParentNode): Element | null {
@@ -154,7 +180,12 @@ export function createLayers(deps: LayerDeps): LayerStack {
     // A browser dismiss gesture (Esc, backdrop, dialog form) reaches the same
     // close path as a server dismiss, so the reason flows through one channel.
     const close = dialogAdapter.open(dialog, (reason) => dismissFrom(dialog, reason));
-    stack.push({ dialog, root, opener, close, returnFocus, host });
+    const layer: Layer = { dialog, root, opener, close, returnFocus, host };
+    stack.push(layer);
+    // Push the honest URL of the layer body so the modal is shareable and a
+    // refresh resolves it as the standalone page, while Back closes it.
+    history.push(href);
+    layer.pushedUrl = currentUrl();
     emit("partial:layer-opened", { opener });
     const release = busy(opener, root);
     try {
@@ -206,6 +237,24 @@ export function createLayers(deps: LayerDeps): LayerStack {
     layer.close();
     layer.dialog.remove();
     if (layer.returnFocus instanceof HTMLElement) layer.returnFocus.focus();
+    // A programmatic close still sits on the pushed URL, so replace it back to
+    // the host. A close driven by Back already moved the URL, so the guard
+    // skips it and no second history entry is written, which also keeps the
+    // popstate handler from looping back into this layer.
+    if (layer.pushedUrl !== undefined && currentUrl() === layer.pushedUrl) {
+      history.replace(layer.host);
+    }
+  }
+
+  // The single bounded Back handler: when the top layer's pushed URL is no
+  // longer current, the user navigated past it, so close that layer. It never
+  // restores zones or writes history, the narrow contract that keeps this short
+  // of a client router.
+  function onPopstate(): void {
+    const layer = topLayer();
+    if (layer?.pushedUrl !== undefined && layer.pushedUrl !== currentUrl()) {
+      dismissFrom(layer.dialog, "popstate");
+    }
   }
 
   function toast(text: string, variant: string): void {
@@ -250,7 +299,12 @@ export function createLayers(deps: LayerDeps): LayerStack {
   function install(target: Document): () => void {
     if (detach !== null) detach();
     target.addEventListener("click", onClick);
-    detach = () => target.removeEventListener("click", onClick);
+    popstateDetach = popstate.listen(onPopstate);
+    detach = () => {
+      target.removeEventListener("click", onClick);
+      if (popstateDetach !== null) popstateDetach();
+      popstateDetach = null;
+    };
     return detach;
   }
 
