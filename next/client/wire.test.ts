@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { Wire, CONTENT_TYPE, REQUEST_FLAG, HEADER_REQUEST_ID } from "./wire";
-import { ACCEPT } from "./apply";
+import { Wire } from "./wire";
+import { ACCEPT, CONTENT_TYPE, HEADER_REQUEST_ID, REQUEST_FLAG } from "./protocol";
 
 function envelopeResponse(
   body: string,

@@ -52,6 +52,14 @@ describe("parseEnvelope", () => {
   it("throws when version is missing", () => {
     expect(() => parseEnvelope({ ops: [] })).toThrow(TypeError);
   });
+
+  it("drops a non-record op rather than carrying it into apply", () => {
+    const parsed = parseEnvelope({
+      version: "v1",
+      ops: [null, { op: "inner" }, "nope", 7],
+    });
+    expect(parsed.ops).toEqual([{ op: "inner" }]);
+  });
 });
 
 describe("Applier verbs", () => {
@@ -140,6 +148,23 @@ describe("Applier verbs", () => {
     );
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
     expect(dispatched.some((d) => d.event === "partial:error")).toBe(true);
+  });
+
+  it("skips a non-record op without poisoning the rest of the envelope", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="a">stale</div><div data-next-zone="b">stale</div>';
+    const { applier, dispatched } = makeApplier();
+    applier.apply(
+      envelope([
+        { op: "inner", target: { zone: "a" }, html: "fresh" },
+        null,
+        { op: "inner", target: { zone: "b" }, html: "fresh" },
+      ]),
+    );
+    expect(document.querySelector('[data-next-zone="a"]')!.textContent).toBe("fresh");
+    expect(document.querySelector('[data-next-zone="b"]')!.textContent).toBe("fresh");
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+    expect(dispatched.some((d) => d.event === "partial:applied")).toBe(true);
   });
 
   it("is a no-op when the target is absent from the document", () => {

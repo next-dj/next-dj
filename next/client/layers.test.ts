@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLayers } from "./layers";
 import type { DialogAdapter, LayerStack, PopStateAdapter } from "./layers";
-import { HEADER_ORIGIN, HEADER_ZONE } from "./wire";
+import { HEADER_ORIGIN, HEADER_ZONE } from "./protocol";
 
 type Dispatched = { event: string; detail: Record<string, unknown> };
 

@@ -215,6 +215,25 @@ describe("golden fixtures apply to the DOM", () => {
     expect(document.querySelector("#sentinel a")).not.toBeNull();
   });
 
+  it("zone_get morphs both zones from a batched GET", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="alpha"><p>stale</p></div>' +
+      '<section data-next-zone="beta"><p>stale</p></section>';
+    const meta = readMeta("zone_get");
+    const { applier, dispatched } = makeApplier();
+    const envelope: Envelope = applier.apply(
+      JSON.parse(readEnvelopeBytes(meta.envelope_file)),
+    );
+    expect(document.querySelector('[data-next-zone="alpha"]')!.textContent).toBe(
+      "alpha hi",
+    );
+    expect(document.querySelector('[data-next-zone="beta"]')!.textContent).toBe(
+      "beta hi",
+    );
+    expect(envelope.assets).toEqual([{ kind: "css", url: "/static/next/zoned.css" }]);
+    expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+  });
+
   it("sse_refresh re-GETs the named zone over the refresh seam", () => {
     const refresh = vi.fn();
     const applier = new Applier({

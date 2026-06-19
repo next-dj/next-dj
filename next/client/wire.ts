@@ -1,5 +1,5 @@
 // The fetch layer: intent headers, CSRF from the payload, response
-// classification (invariant 9 "a non-envelope is navigation"), per-target GET
+// classification (a non-envelope content-type is navigation), per-target GET
 // queues with latest-wins aborts, and the per-uid mutation lock.
 
 import {
@@ -12,20 +12,6 @@ import {
   REQUEST_FLAG,
 } from "./protocol";
 import { defaultFetch, defaultNavigate } from "./adapters";
-
-// Re-exported so the existing imports and tests keep reaching the wire markers
-// and header names through wire.ts, while protocol.ts is the single source.
-export {
-  ACCEPT,
-  CONTENT_TYPE,
-  HEADER_ACCEPT,
-  HEADER_MERGE,
-  HEADER_ORIGIN,
-  HEADER_REQUEST_ID,
-  HEADER_VERSION,
-  HEADER_ZONE,
-  REQUEST_FLAG,
-} from "./protocol";
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
@@ -170,8 +156,8 @@ export class Wire {
     // even though it is a POST: it never takes the mutation lock.
     const locked = !safe && !request.abortable && request.uid !== undefined;
     if (locked) {
-      // Per-uid mutation lock: a second submit drops while busy, a double
-      // click yields exactly one fetch (invariant 8).
+      // Per-uid mutation lock: a second submit drops while busy, so a double
+      // click yields exactly one fetch.
       if (this.#busy.has(request.uid!)) return;
       this.#busy.add(request.uid!);
     }
@@ -259,8 +245,8 @@ export class Wire {
       this.#onEnvelope(hook(response, body), response, snapshot);
       return;
     }
-    // Invariant 9: any non-envelope content-type, or a redirected response, is
-    // a full navigation to the final URL. No attempt to parse the body. A
+    // Any non-envelope content-type, or a redirected response, is a full
+    // navigation to the final URL. No attempt to parse the body. A
     // redirect (a guard sending the browser to login) and a safe GET both
     // point at a page, but a non-redirect non-envelope on a mutating request
     // points at the action endpoint, not a page, so navigating there would

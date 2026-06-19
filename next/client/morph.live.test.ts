@@ -64,6 +64,15 @@ describe("checkbox checked splits from its default twin", () => {
     expect(box.checked).toBe(false);
     expect(box.defaultChecked).toBe(true);
   });
+
+  it("pins live checked when the box is active", () => {
+    const target = mount('<form id="f"><input id="c" type="checkbox" name="c"></form>');
+    const box = target.querySelector<HTMLInputElement>("#c")!;
+    box.checked = true;
+    box.focus();
+    morph(target, '<form id="f"><input id="c" type="checkbox" name="c"></form>');
+    expect(box.checked).toBe(true);
+  });
 });
 
 describe("textarea value and its text node sync together", () => {
@@ -136,6 +145,22 @@ describe("option selected aligns the select value", () => {
       { isDirty: (el) => el === select },
     );
     expect(select.value).toBe("x");
+  });
+});
+
+describe("checked and selected sync together on inactive controls", () => {
+  it("lifts both a checkbox and a select in one clean morph", () => {
+    const target = mount(
+      '<form id="f"><input id="c" type="checkbox"><select id="s">' +
+        '<option value="x">x</option><option value="y">y</option></select></form>',
+    );
+    morph(
+      target,
+      '<form id="f"><input id="c" type="checkbox" checked><select id="s">' +
+        '<option value="x">x</option><option value="y" selected>y</option></select></form>',
+    );
+    expect(target.querySelector<HTMLInputElement>("#c")!.checked).toBe(true);
+    expect(target.querySelector<HTMLSelectElement>("#s")!.value).toBe("y");
   });
 });
 

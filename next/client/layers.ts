@@ -13,7 +13,7 @@
 
 import { defaultDialog, defaultHistory, defaultPopState } from "./adapters";
 import type { HistoryAdapter } from "./apply";
-import { HEADER_ORIGIN, HEADER_ZONE } from "./protocol";
+import { HEADER_ORIGIN, HEADER_ZONE, cssEscape } from "./protocol";
 
 const LAYER_ATTR = "data-next-layer";
 const ACCEPTED_ATTR = "data-next-accepted";
@@ -324,10 +324,4 @@ export function createLayers(deps: LayerDeps): LayerStack {
       }
     },
   };
-}
-
-// CSS.escape is unavailable in jsdom. Zone names are ASCII slugs, this only
-// guards the rare embedded quote or backslash.
-function cssEscape(value: string): string {
-  return value.replace(/["\\]/g, "\\$&");
 }

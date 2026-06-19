@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSse } from "./sse";
 import type { EventSourceAdapter, SourceControl, VisibilityAdapter } from "./sse";
-import { Wire, CONTENT_TYPE, HEADER_REQUEST_ID } from "./wire";
+import { Wire } from "./wire";
+import { CONTENT_TYPE, HEADER_REQUEST_ID } from "./protocol";
 
 interface MockSource {
   url: string;
@@ -81,7 +82,11 @@ describe("createSse", () => {
     dispatched = [];
   });
 
-  function makeSse(source: EventSourceAdapter, visibility: VisibilityAdapter) {
+  function makeSse(
+    source: EventSourceAdapter,
+    visibility: VisibilityAdapter,
+    now?: () => number,
+  ) {
     return createSse({
       apply: (raw) => applied.push(raw),
       fetch: (request) => fetched.push({ url: request.url, zone: request.zone }),
@@ -89,6 +94,7 @@ describe("createSse", () => {
       document,
       source,
       visibility,
+      now,
     });
   }
 
@@ -216,7 +222,8 @@ describe("createSse", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
     const visibility = mockVisibility();
-    const sse = makeSse(adapter, visibility.adapter);
+    let clock = 0;
+    const sse = makeSse(adapter, visibility.adapter, () => clock);
     sse.scan(document);
     opened[0].message(
       envelope([
@@ -226,11 +233,38 @@ describe("createSse", () => {
     );
     visibility.set(true);
     expect(opened[0].closed).toBe(true);
+    // A pause longer than the revalidate threshold may have missed events, so
+    // resume re-GETs every bound zone.
+    clock = 5000;
     visibility.set(false);
     expect(opened).toHaveLength(2);
     expect(opened[1].closed).toBe(false);
     expect(sse.size()).toBe(1);
     expect(fetched.map((f) => f.zone).sort()).toEqual(["list", "poll"]);
+  });
+
+  it("reconnects without a re-GET when the tab flickers briefly", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const visibility = mockVisibility();
+    let clock = 0;
+    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    sse.scan(document);
+    opened[0].message(
+      envelope([
+        { op: "refresh", zone: "poll" },
+        { op: "morph", target: { zone: "list" } },
+      ]),
+    );
+    visibility.set(true);
+    // A momentary alt-tab reconnects the stream but skips the zone re-GET, so
+    // flicking between tabs does not storm the server.
+    clock = 500;
+    visibility.set(false);
+    expect(opened).toHaveLength(2);
+    expect(opened[1].closed).toBe(false);
+    expect(sse.size()).toBe(1);
+    expect(fetched).toHaveLength(0);
   });
 
   it("_reset closes every connection and detaches visibility", () => {

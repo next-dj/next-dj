@@ -3,12 +3,16 @@
 // stays a thin executor: the server authors every address and verb.
 
 import { fireRemoved, morph } from "./morph";
-import { ATTR_ACTION, ATTR_KEY, ATTR_ZONE, HEADER_ZONE } from "./protocol";
+import {
+  ATTR_ACTION,
+  ATTR_KEY,
+  ATTR_ZONE,
+  HEADER_ZONE,
+  asString,
+  cssEscape,
+  isRecord,
+} from "./protocol";
 import type { Navigate } from "./wire";
-
-// Re-exported so wire.ts and the existing tests keep importing the wire markers
-// from here, while protocol.ts is the single source.
-export { ACCEPT, CONTENT_TYPE } from "./protocol";
 
 export interface Target {
   zone?: string;
@@ -148,7 +152,7 @@ const BUILTIN_OPS = new Set<string>([
 // op-only check so the switch in #applyBuiltin sees a BuiltinPatch, with no
 // CustomPatch in the union to defeat the per-op narrowing.
 function isBuiltin(patch: Patch): patch is BuiltinPatch {
-  return BUILTIN_OPS.has(patch.op);
+  return typeof patch.op === "string" && BUILTIN_OPS.has(patch.op);
 }
 
 export interface Asset {
@@ -266,19 +270,25 @@ export interface ApplyDeps {
   here?: () => string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
 // The raw shape of a wire envelope after the only structural check JSON.parse
 // leaves to do. Every field is still unknown: parseEnvelope narrows each one,
 // so the typed Envelope is built from honest checks rather than a blind cast
 // over the wire boundary.
 type RawEnvelope = Record<string, unknown>;
+
+// Narrow a form-errors record to the field-to-messages shape, keeping only
+// string-array values so a malformed errors map cannot smuggle a non-array past
+// the boundary.
+function parseFormErrors(value: unknown): Record<string, string[]> {
+  if (!isRecord(value)) return {};
+  const errors: Record<string, string[]> = {};
+  for (const [field, messages] of Object.entries(value)) {
+    if (Array.isArray(messages) && messages.every((m) => typeof m === "string")) {
+      errors[field] = messages;
+    }
+  }
+  return errors;
+}
 
 // Build the typed form meta from its unknown wire value, reading each field
 // through a check rather than pretending the record already has the shape. An
@@ -287,10 +297,7 @@ function parseFormMeta(value: unknown): FormMeta | null {
   if (!isRecord(value)) return null;
   const uid = asString(value.uid) ?? "";
   const valid = value.valid === true;
-  const errors = isRecord(value.errors)
-    ? (value.errors as Record<string, string[]>)
-    : {};
-  return { uid, valid, errors };
+  return { uid, valid, errors: parseFormErrors(value.errors) };
 }
 
 // Narrow an unknown JSON value into an Envelope. Missing meta collapses to its
@@ -304,7 +311,10 @@ export function parseEnvelope(raw: unknown): Envelope {
   if (version === undefined) {
     throw new TypeError("partial envelope is missing version");
   }
-  const ops = Array.isArray(wire.ops) ? (wire.ops as Patch[]) : [];
+  // Keep only record ops, so a non-object element (ops: [null]) is a dropped op
+  // rather than a poison that throws mid-apply over a half-mutated DOM. Each op
+  // still carries an unknown op name, narrowed by isBuiltin at apply time.
+  const ops = Array.isArray(wire.ops) ? (wire.ops.filter(isRecord) as Patch[]) : [];
   const assets = Array.isArray(wire.assets) ? (wire.assets as Asset[]) : [];
   const form = parseFormMeta(wire.form);
   const envelope: Envelope = { version, ops, assets, form };
@@ -407,7 +417,14 @@ export class Applier {
 
   #runOps(envelope: Envelope): void {
     for (const op of envelope.ops) {
-      this.#applyOp(op);
+      // A single failing op is contained so it never poisons the envelope: the
+      // remaining ops still apply, the failure surfaces as partial:error, and
+      // mount and partial:applied still run over what did change.
+      try {
+        this.#applyOp(op);
+      } catch (error) {
+        this.#emit("partial:error", { status: 0, body: "", error }, false);
+      }
     }
     if (envelope.csrf) this.#rotateCsrf(envelope.csrf);
     // JS after the ops: the target DOM is in place, each URL runs once.
@@ -616,15 +633,21 @@ export class Applier {
     if (node === null) return;
     const fragment = this.#fragment(patch.html ?? "", patch.target);
     const incoming = Array.from(fragment.children);
+    // New rows collect into a fragment so prepend inserts them all in their
+    // source order in one move, rather than one-by-one which would reverse them.
+    const fresh = this.#document.createDocumentFragment();
     for (const child of incoming) {
       const key = keyOf(child);
       const existing = key === null ? null : matchKey(node, key);
       if (existing !== null) {
         fireRemoved(existing);
         existing.replaceWith(child);
-      } else if (side === "append") node.append(child);
-      else node.prepend(child);
+      } else {
+        fresh.append(child);
+      }
     }
+    if (side === "append") node.append(fresh);
+    else node.prepend(fresh);
     this.#mark(node, patch.target);
     for (const child of incoming) this.#touched.push(child);
   }
@@ -655,8 +678,9 @@ export class Applier {
   }
 
   // Parse a fragment through `<template>` and structurally neutralise every
-  // script before the node ever reaches the live document (invariant 4). The
-  // guarantee is observable from jsdom, not leaning on template semantics.
+  // script before the node ever reaches the live document, so no server html can
+  // run a script through a patch. The guarantee is observable from jsdom, not
+  // leaning on template semantics.
   #fragment(html: string, target: Target | undefined): DocumentFragment {
     const template = this.#document.createElement("template");
     template.innerHTML = html;
@@ -775,11 +799,4 @@ function describeTarget(target: Target | undefined): string {
   return key === undefined
     ? "no target"
     : `${key} ${JSON.stringify(target[key as keyof Target])}`;
-}
-
-// CSS.escape is unavailable in jsdom, so quoted attribute values are escaped by
-// hand. Server-authored uids and zone names are ASCII slugs, this only guards
-// the rare embedded quote or backslash.
-function cssEscape(value: string): string {
-  return value.replace(/["\\]/g, "\\$&");
 }

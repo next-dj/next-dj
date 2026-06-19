@@ -76,7 +76,9 @@ export interface PartialSurface {
   // `ready`, over every inserted subtree after each apply, and immediately over
   // the current document when registered after `ready`, the replacement for
   // DOMContentLoaded for co-located JS that loads after the inline `_init`.
-  onMount(selector: string, callback: (el: Element) => void): void;
+  // Returns a teardown that unregisters the callback, symmetric with the other
+  // install seams, so a plugin can remove its own mount hook.
+  onMount(selector: string, callback: (el: Element) => void): () => void;
   // The modal layer stack, exposed so the harness drives open/close/resolve
   // without synthesising a click.
   layers: LayerStack;
@@ -241,7 +243,8 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       csrf = next;
     },
     onMount(selector, callback) {
-      mounts.push({ selector, callback });
+      const entry = { selector, callback };
+      mounts.push(entry);
       // A co-located script can register after the initial `ready` pass, since
       // it loads after the inline `_init` runs. Catch the callback up over the
       // document already present, mirroring `Next.on("ready")` for late
@@ -251,6 +254,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
           callback(el);
         }
       }
+      return () => {
+        const index = mounts.indexOf(entry);
+        if (index !== -1) mounts.splice(index, 1);
+      };
     },
     get layers() {
       return layers;

@@ -131,7 +131,13 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   // A filter form auto-submits its query as a zone GET and syncs the address bar
   // with replaceState, no history entry: this is an address sync, not a visit.
   function submitFilter(form: HTMLFormElement, zone: string): void {
-    const query = new URLSearchParams(new FormData(form) as never).toString();
+    // URLSearchParams takes string pairs, so the FormData is walked and file
+    // fields are dropped, rather than casting the whole FormData past the check.
+    const pairs: [string, string][] = [];
+    for (const [name, value] of new FormData(form)) {
+      if (typeof value === "string") pairs.push([name, value]);
+    }
+    const query = new URLSearchParams(pairs).toString();
     const action = form.getAttribute("action") || here().split("?")[0];
     const url = query === "" ? action : `${action}?${query}`;
     doc.defaultView?.history.replaceState(null, "", url);

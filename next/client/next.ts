@@ -1,3 +1,8 @@
+// The public facade: the global `Next` every page reaches. It owns the client
+// context store, the event bus (Next.on), the plugin hook (Next.use), and mounts
+// Next.partial for the morph and fetch runtime. A static class, never
+// instantiated, since there is one runtime per page.
+
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import type { Envelope } from "./apply";
@@ -6,10 +11,11 @@ import type { Envelope } from "./apply";
 // csrf meta merge into.
 export type NextContext = Readonly<Record<string, unknown>>;
 
-// The payload of every runtime event reaching Next.on, keyed by event name, so a
-// known event types its listener argument. Each entry mirrors the detail the
-// runtime actually dispatches through #dispatch, no more and no less. A custom
-// event op or a plugin event falls through to the open on() overload.
+// The payload of every runtime event reaching the Next.on bus, keyed by event
+// name, so a known event types its listener argument. This is only the bus
+// channel: the next:* DOM events (next:mounted, next:removed) fire on the
+// document instead and are not in this map. A custom event op or a plugin event
+// falls through to the open on() overload.
 export interface NextEventMap {
   ready: NextContext;
   "context-updated": NextContext;
@@ -44,6 +50,9 @@ class Next {
     return Object.freeze({ ...Next.#context });
   }
 
+  // The entry point the template's inline script calls once per page with the
+  // server-seeded context. It is the runtime's true bootstrap, ahead of any
+  // co-located script, so it seeds context and mounts before ready listeners run.
   static _init(context: Record<string, unknown>): void {
     Next.#context = context;
     Next.#ready = true;

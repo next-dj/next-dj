@@ -5,8 +5,9 @@
 // or imported in two hops. A constant local to a single module stays in that
 // module.
 
-// The wire content-type marker (invariant 9) and the Accept that doubles the
-// partial switch on content negotiation. Both must match the server exactly.
+// A non-envelope content-type is navigation, never a patch, so the wire markers
+// here are the one place several modules read the same content-type. Both must
+// match the server exactly.
 export const CONTENT_TYPE = "application/vnd.next.patches+json";
 export const ACCEPT = "application/vnd.next.patches+json, text/html;q=0.9";
 
@@ -29,3 +30,21 @@ export const HEADER_ORIGIN = "X-Next-Origin";
 export const ATTR_ZONE = "data-next-zone";
 export const ATTR_ACTION = "data-next-action";
 export const ATTR_KEY = "data-next-key";
+
+// The boundary predicates the wire parsers share. Several modules narrow an
+// unknown JSON value the same way, so the checks live here next to the wire
+// vocabulary rather than being copied per module.
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+// CSS.escape is unavailable in jsdom, so a quoted attribute value is escaped by
+// hand. Server-authored uids and zone names are ASCII slugs, this only guards
+// the rare embedded quote or backslash.
+export function cssEscape(value: string): string {
+  return value.replace(/["\\]/g, "\\$&");
+}

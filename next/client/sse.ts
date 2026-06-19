@@ -11,12 +11,16 @@
 // the stream lives on.
 
 import { defaultEventSource, defaultVisibility } from "./adapters";
-import { HEADER_ZONE } from "./protocol";
+import { HEADER_ZONE, asString, isRecord } from "./protocol";
 
 const SSE_ATTR = "data-next-sse";
 // The ring holds the last 25 own request ids, matching the server-side echo
 // window. Overflow is safe: a dropped id yields an extra refresh, not a break.
 const ECHO_LIMIT = 25;
+// A visibility flip shorter than this revalidates nothing: a momentary alt-tab
+// reconnects the stream but skips the zone re-GET, so flicking between tabs does
+// not storm the server. A longer pause may have missed events, so it converges.
+const RESUME_REVALIDATE_MS = 3000;
 const NOOP: SourceControl = { close: () => undefined };
 
 // The control returned from opening an EventSource: a listener for next-patches
@@ -61,6 +65,9 @@ export interface SseDeps {
   document?: Document;
   source?: EventSourceAdapter;
   visibility?: VisibilityAdapter;
+  // The monotonic clock the resume gate reads to measure how long the tab was
+  // hidden. Injectable so tests drive the anti-storm threshold deterministically.
+  now?: () => number;
 }
 
 export interface Sse {
@@ -87,12 +94,16 @@ export function createSse(deps: SseDeps): Sse {
   const doc = deps.document ?? document;
   const source = deps.source ?? defaultEventSource();
   const visibility = deps.visibility ?? defaultVisibility();
+  const now = deps.now ?? (() => Date.now());
   // The connections keyed by url so a re-scan of a re-inserted container does
   // not open a second stream to the same endpoint.
   const connections = new Map<string, Connection>();
   // The own request ids, a ring of the last ECHO_LIMIT values.
   const echo: string[] = [];
   let paused = false;
+  // The clock reading at the last pause, so resume measures the hidden span and
+  // skips revalidation for a flicker.
+  let pausedAt = 0;
   let detachVisibility: (() => void) | null = null;
 
   function remember(id: string): void {
@@ -170,17 +181,22 @@ export function createSse(deps: SseDeps): Sse {
   // registry survives so resume knows which zones to revalidate.
   function pause(): void {
     paused = true;
+    pausedAt = now();
     for (const connection of connections.values()) connection.control.close();
   }
 
-  // On returning visibility every paused connection reopens and its bound zones
-  // are re-GET with their own cookies, so events missed while hidden converge.
+  // On returning visibility every paused connection reopens. Its bound zones are
+  // re-GET only when the tab was hidden long enough to have missed events, so a
+  // flicker between tabs reconnects without storming the server. A longer pause
+  // revalidates with the zone's own cookies so missed events converge.
   function resume(): void {
     paused = false;
+    const revalidate = now() - pausedAt >= RESUME_REVALIDATE_MS;
     const pending = [...connections.values()];
     connections.clear();
     for (const previous of pending) {
       openConnection(previous.url, previous.bound);
+      if (!revalidate) continue;
       for (const zone of previous.bound) {
         deps.fetch({
           url: doc.location.pathname,
@@ -205,16 +221,9 @@ export function createSse(deps: SseDeps): Sse {
       connections.clear();
       echo.length = 0;
       paused = false;
+      pausedAt = 0;
       if (detachVisibility !== null) detachVisibility();
       detachVisibility = null;
     },
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
 }

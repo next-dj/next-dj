@@ -117,6 +117,44 @@ describe("append and prepend dedup", () => {
     );
     expect(keys).toEqual(["1", "2"]);
   });
+
+  it("prepends several roots in one html string in source order", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="3">c</li></ul>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "prepend",
+          target: { zone: "rows" },
+          html: '<li data-next-key="1">a</li><li data-next-key="2">b</li>',
+        },
+      ]),
+    );
+    const keys = Array.from(document.querySelectorAll("li")).map((li) =>
+      li.getAttribute("data-next-key"),
+    );
+    expect(keys).toEqual(["1", "2", "3"]);
+  });
+
+  it("appends several roots in one html string in source order", () => {
+    document.body.innerHTML =
+      '<ul data-next-zone="rows"><li data-next-key="1">a</li></ul>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([
+        {
+          op: "append",
+          target: { zone: "rows" },
+          html: '<li data-next-key="2">b</li><li data-next-key="3">c</li>',
+        },
+      ]),
+    );
+    const keys = Array.from(document.querySelectorAll("li")).map((li) =>
+      li.getAttribute("data-next-key"),
+    );
+    expect(keys).toEqual(["1", "2", "3"]);
+  });
 });
 
 describe("refresh verb", () => {
