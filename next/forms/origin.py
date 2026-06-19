@@ -20,8 +20,8 @@ _UNSET = object()
 
 
 @dataclass(frozen=True, slots=True)
-class _OriginMatch:
-    """Resolved identity of the page named by the posted origin field."""
+class OriginMatch:
+    """Resolved identity of the page named by a same-site origin URL."""
 
     page_path: "Path | None"
     url_kwargs: dict[str, object]
@@ -43,9 +43,20 @@ def _page_path_from_view(view: object) -> "Path | None":
     return None
 
 
-def _resolve_url_match(origin: str, request: "HttpRequest") -> "_OriginMatch | None":
-    """Resolve a same-site origin URL against the URLconf to a page identity."""
-    path = origin.partition("?")[0]
+def resolve_url_to_match(
+    url: str,
+    request: "HttpRequest",
+    *,
+    filter_reserved: bool = True,
+) -> "OriginMatch | None":
+    """Resolve a same-site URL against the URLconf to a page identity.
+
+    The URL travels through the same URLconf the request uses, with the
+    script prefix stripped. Set `filter_reserved` to keep the captured URL
+    kwargs raw when the caller needs every captured parameter rather than
+    only the DI-safe ones.
+    """
+    path = url.partition("?")[0]
     prefix = get_script_prefix()
     if prefix != "/" and path.startswith(prefix):
         path = "/" + path.removeprefix(prefix)
@@ -53,39 +64,38 @@ def _resolve_url_match(origin: str, request: "HttpRequest") -> "_OriginMatch | N
         match = resolve(path, urlconf=getattr(request, "urlconf", None))
     except Resolver404:
         return None
-    return _OriginMatch(
+    kwargs = dict(match.kwargs)
+    return OriginMatch(
         page_path=_page_path_from_view(match.func),
-        url_kwargs=_filter_reserved_url_kwargs(dict(match.kwargs)),
-        origin=origin,
+        url_kwargs=_filter_reserved_url_kwargs(kwargs) if filter_reserved else kwargs,
+        origin=url,
     )
 
 
-def _resolve_origin_match(request: "HttpRequest") -> "_OriginMatch | None":
+def resolve_url_to_page(url: str, request: "HttpRequest") -> "Path | None":
+    """Resolve a URL to the page path of the view that serves it.
+
+    A URL that resolves to a view without a `next_page_path` or that fails
+    to resolve returns None.
+    """
+    match = resolve_url_to_match(url, request)
+    return match.page_path if match is not None else None
+
+
+def _resolve_origin_match(request: "HttpRequest") -> "OriginMatch | None":
     """Resolve the posted origin field against the URLconf."""
     raw = request.POST.get(ORIGIN_FIELD_NAME) if hasattr(request, "POST") else None
     origin = validated_origin_path(raw)
     if origin is None:
         return None
-    return _resolve_url_match(origin, request)
+    return resolve_url_to_match(origin, request)
 
 
-def _page_path_from_url(url: str, request: "HttpRequest") -> "Path | None":
-    """Resolve a URL to the page path of the view that serves it.
-
-    The URL travels through the same URLconf the request uses, with the
-    script prefix stripped, so a foreign page named by a URL maps to its
-    page source without running its view. A URL that resolves to a view
-    without a `next_page_path` or that fails to resolve returns None.
-    """
-    match = _resolve_url_match(url, request)
-    return match.page_path if match is not None else None
-
-
-def _resolve_origin(request: "HttpRequest") -> "_OriginMatch | None":
-    """Return the origin match for the request, memoised on the request."""
+def resolve_origin(request: "HttpRequest") -> "OriginMatch | None":
+    """Return the posted-origin match for the request, memoised on the request."""
     cached = getattr(request, _ORIGIN_MATCH_ATTR, _UNSET)
     if cached is not _UNSET:
-        return cast("_OriginMatch | None", cached)
+        return cast("OriginMatch | None", cached)
     match = _resolve_origin_match(request)
     setattr(request, _ORIGIN_MATCH_ATTR, match)
     return match
@@ -95,20 +105,21 @@ def _url_kwargs_for_request(request: "HttpRequest") -> dict[str, object]:
     """Return the URL kwargs of the page the request renders or re-renders."""
     match = getattr(request, "resolver_match", None)
     if match is not None and getattr(match, "url_name", None) == URL_NAME_FORM_ACTION:
-        origin_match = _resolve_origin(request)
+        origin_match = resolve_origin(request)
         return dict(origin_match.url_kwargs) if origin_match is not None else {}
     if match is not None and getattr(match, "kwargs", None):
         return _filter_reserved_url_kwargs(dict(match.kwargs))
     if getattr(request, "method", None) == "POST":
-        origin_match = _resolve_origin(request)
+        origin_match = resolve_origin(request)
         if origin_match is not None:
             return dict(origin_match.url_kwargs)
     return {}
 
 
 __all__ = [
-    "_OriginMatch",
-    "_page_path_from_url",
-    "_resolve_origin",
+    "OriginMatch",
     "_url_kwargs_for_request",
+    "resolve_origin",
+    "resolve_url_to_match",
+    "resolve_url_to_page",
 ]

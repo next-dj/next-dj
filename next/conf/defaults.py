@@ -49,7 +49,6 @@ DEFAULTS: dict[str, Any] = {
         {
             "BACKEND": "next.partial.PartialProtocolBackend",
             "OPTIONS": {
-                "DEFAULT_SWAP": "morph",
                 "VERSION": "manifest",
                 "PUSH_WIZARD_STEPS": False,
                 "SSE": {

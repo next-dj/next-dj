@@ -1,27 +1,9 @@
-from collections.abc import Generator
-
 import pytest
 
-from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.partial import shaping as shaping_module
 from next.partial.headers import CONTENT_TYPE
 from next.testing import NextClient, envelope_of
-from tests.forms.test_perf_budgets import _CountingWizardBackend
-
-
-@pytest.fixture()
-def client() -> NextClient:
-    """Test client that submits form fields manually, without CSRF checks."""
-    return NextClient(enforce_csrf_checks=False)
-
-
-@pytest.fixture()
-def counting_wizard_backend() -> Generator[_CountingWizardBackend, None, None]:
-    """Install a counting wizard backend wrapping the session storage."""
-    counting = _CountingWizardBackend(SessionFormWizardBackend({}))
-    wizard_backend_manager._backend = counting
-    yield counting
-    wizard_backend_manager.reset()
+from tests.support import CountingWizardBackend
 
 
 @pytest.mark.django_db()
@@ -34,9 +16,9 @@ class TestWizardAdvanceStepsByEnvelope:
     """
 
     def test_partial_advance_is_an_envelope_not_a_redirect(
-        self, client: NextClient
+        self, next_client: NextClient
     ) -> None:
-        response = client.post_action(
+        response = next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
@@ -47,8 +29,8 @@ class TestWizardAdvanceStepsByEnvelope:
         assert response["Content-Type"] == CONTENT_TYPE
         assert envelope_of(response).zone_targets() == ["wizard-zone"]
 
-    def test_partial_advance_swaps_the_step_fields(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_partial_advance_swaps_the_step_fields(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
@@ -60,9 +42,9 @@ class TestWizardAdvanceStepsByEnvelope:
         assert 'name="name"' not in html
 
     def test_advance_stamps_next_step_origin_in_zone_html(
-        self, client: NextClient
+        self, next_client: NextClient
     ) -> None:
-        response = client.post_action(
+        response = next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
@@ -74,16 +56,16 @@ class TestWizardAdvanceStepsByEnvelope:
         assert 'value="/wizard/identity/"' not in html
 
     def test_draft_lands_in_storage_on_the_partial_advance(
-        self, client: NextClient
+        self, next_client: NextClient
     ) -> None:
-        client.post_action(
+        next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
             partial=True,
             zones="wizard-zone",
         )
-        follow = client.post_action(
+        follow = next_client.post_action(
             "step_wizard",
             {"scope": ""},
             origin="/wizard/scope/",
@@ -98,15 +80,15 @@ class TestWizardAdvanceStepsByEnvelope:
 class TestWizardAdvanceWithoutPartialSwitch:
     """A wizard POST without the partial switch keeps its plain 302 step redirect."""
 
-    def test_advance_is_a_redirect_to_the_next_step(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_advance_is_a_redirect_to_the_next_step(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "step_wizard", {"name": "Ada"}, origin="/wizard/identity/"
         )
         assert response.status_code == 302
         assert response["Location"] == "/wizard/scope/"
 
-    def test_no_partial_response_headers_leak(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_no_partial_response_headers_leak(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "step_wizard", {"name": "Ada"}, origin="/wizard/identity/"
         )
         assert response["Content-Type"] != CONTENT_TYPE
@@ -124,7 +106,7 @@ class TestWizardAdvanceRendersZoneNotPageView:
     """
 
     def test_advance_renders_one_zone_and_no_page_view(
-        self, client: NextClient, monkeypatch: pytest.MonkeyPatch
+        self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         calls: list[tuple] = []
         original = shaping_module.render_zone
@@ -134,7 +116,7 @@ class TestWizardAdvanceRendersZoneNotPageView:
             return original(page_path, zones, request, **kwargs)
 
         monkeypatch.setattr(shaping_module, "render_zone", _spy)
-        client.post_action(
+        next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
@@ -157,12 +139,12 @@ class TestWizardAdvanceCsrfMeta:
     """
 
     def test_rotation_on_advance_stamps_csrf(
-        self, client: NextClient, monkeypatch: pytest.MonkeyPatch
+        self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # The submit request rotated its token, modelled by forcing the flag
         # the shaper reads before any step re-render mints a fresh one.
         monkeypatch.setattr(shaping_module, "_csrf_rotated", lambda _request: True)
-        response = client.post_action(
+        response = next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
@@ -173,8 +155,8 @@ class TestWizardAdvanceCsrfMeta:
         assert "csrf" in envelope
         assert envelope["csrf"]["token"]
 
-    def test_no_rotation_leaves_no_csrf_on_advance(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_no_rotation_leaves_no_csrf_on_advance(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
@@ -186,23 +168,16 @@ class TestWizardAdvanceCsrfMeta:
 
 @pytest.mark.django_db()
 class TestWizardInvalidStepZoneMorph:
-    """An invalid wizard step re-renders the bound form in the zone, not an unbound one.
+    """An invalid wizard step morphs the bound form with errors into the zone.
 
-    Without the fix, _form_overrides passes the bare form as the action-name
-    override. The FormNode sees no .form attribute on it, falls back to
-    _build_form_namespace_from_meta, which calls current_form() — that returns
-    an UNBOUND form. Step sections receive an unbound form with no errors,
-    so the error state never renders.
-
-    With the fix, the override is a namespace(form, wizard), so the FormNode
-    picks up the bound invalid form directly. The submitted value is present
-    in the rendered zone HTML.
+    The submitted value rides the bound form into the zone body, so the
+    error state renders rather than an empty unbound step.
     """
 
     def test_invalid_step_zone_carries_bound_submitted_value(
-        self, client: NextClient
+        self, next_client: NextClient
     ) -> None:
-        client.post_action(
+        next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
@@ -210,7 +185,7 @@ class TestWizardInvalidStepZoneMorph:
             zones="wizard-zone",
         )
         too_long = "x" * 101
-        response = client.post_action(
+        response = next_client.post_action(
             "step_wizard",
             {"scope": too_long},
             origin="/wizard/scope/",
@@ -232,9 +207,9 @@ class TestWizardAdvanceStorageBudget:
     """
 
     def test_partial_advance_pays_one_save_and_one_load(
-        self, client: NextClient, counting_wizard_backend: _CountingWizardBackend
+        self, next_client: NextClient, counting_wizard_backend: CountingWizardBackend
     ) -> None:
-        response = client.post_action(
+        response = next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",

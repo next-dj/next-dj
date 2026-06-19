@@ -2,12 +2,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from django.test import RequestFactory
 
 import next.partial.render as render_module
 from next.partial import UnknownZoneError, ZoneRenderResult, render_zone
 from next.partial.signals import zone_rendered
 from next.partial.zone import ZONE_ATTR
+from tests.support import plain_get
 
 
 PAGES_ROOT = Path(__file__).resolve().parent.parent / "site_pages"
@@ -16,7 +16,7 @@ ZONED_PAGE = PAGES_ROOT / "zoned" / "page.py"
 
 def _request():
     """Return a plain GET request for the zoned page URL."""
-    return RequestFactory().get("/zoned/")
+    return plain_get("/zoned/")
 
 
 class TestRenderZoneBatch:

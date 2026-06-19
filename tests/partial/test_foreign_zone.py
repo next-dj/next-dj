@@ -1,36 +1,19 @@
 from pathlib import Path
 
 import pytest
-from django.test import RequestFactory
 
-from next.forms.uid import ORIGIN_FIELD_NAME
 from next.partial import (
     ForeignPageNotAuthorizedError,
     OriginSource,
     Patches,
     resolve_partial_origin,
 )
-from next.partial.headers import ORIGIN, REQUEST_FLAG
+from tests.support import partial_request
 
 
 _PAGES_ROOT = Path(__file__).resolve().parent.parent / "site_pages"
 _ZONED_PAGE = _PAGES_ROOT / "zoned" / "page.py"
 _REDIRECTING_PAGE = _PAGES_ROOT / "redirecting" / "page.py"
-
-_PARTIAL_META = {f"HTTP_{REQUEST_FLAG.upper().replace('-', '_')}": "1"}
-
-
-def _partial_request(origin: str = "/zoned/", host: str | None = None):
-    """Return a partial POST whose form origin resolves to a real page.
-
-    Pass `host` to stamp the `X-Next-Origin` header with a host page URL.
-    """
-    meta = dict(_PARTIAL_META)
-    if host is not None:
-        meta[f"HTTP_{ORIGIN.upper().replace('-', '_')}"] = host
-    return RequestFactory().post(
-        "/_next/form/x/", data={ORIGIN_FIELD_NAME: origin}, **meta
-    )
 
 
 class TestForeignZoneByPath:
@@ -38,7 +21,7 @@ class TestForeignZoneByPath:
 
     def test_foreign_page_path_morphs_its_zone(self) -> None:
         envelope = (
-            Patches(_partial_request()).morph(zone="alpha", page=_ZONED_PAGE).envelope()
+            Patches(partial_request()).morph(zone="alpha", page=_ZONED_PAGE).envelope()
         )
         op = envelope.ops[0].as_dict()
         assert op["op"] == "morph"
@@ -47,7 +30,7 @@ class TestForeignZoneByPath:
 
     def test_foreign_zone_assets_travel_in_the_envelope(self) -> None:
         envelope = (
-            Patches(_partial_request()).morph(zone="alpha", page=_ZONED_PAGE).envelope()
+            Patches(partial_request()).morph(zone="alpha", page=_ZONED_PAGE).envelope()
         )
         assert {"kind": "css", "url": "/static/next/zoned.css"} in [
             asset.as_dict() for asset in envelope.assets
@@ -59,7 +42,7 @@ class TestForeignZoneByUrl:
 
     def test_foreign_url_resolves_to_its_page(self) -> None:
         envelope = (
-            Patches(_partial_request()).morph(zone="alpha", page="/zoned/").envelope()
+            Patches(partial_request()).morph(zone="alpha", page="/zoned/").envelope()
         )
         assert (
             envelope.ops[0].html == '<div data-next-zone="alpha"><p>alpha hi</p></div>'
@@ -67,7 +50,7 @@ class TestForeignZoneByUrl:
 
     def test_unresolvable_url_raises_lookup(self) -> None:
         with pytest.raises(LookupError):
-            Patches(_partial_request()).morph(zone="alpha", page="/no/such/url/")
+            Patches(partial_request()).morph(zone="alpha", page="/no/such/url/")
 
 
 class TestForeignZoneAuthorization:
@@ -75,12 +58,12 @@ class TestForeignZoneAuthorization:
 
     def test_redirecting_page_raises_not_authorized(self) -> None:
         with pytest.raises(ForeignPageNotAuthorizedError) as exc:
-            Patches(_partial_request()).morph(zone="alpha", page=_REDIRECTING_PAGE)
+            Patches(partial_request()).morph(zone="alpha", page=_REDIRECTING_PAGE)
         assert exc.value.page_path == _REDIRECTING_PAGE
         assert exc.value.status_code == 302
 
     def test_no_partial_zone_op_is_recorded_on_denial(self) -> None:
-        patches = Patches(_partial_request())
+        patches = Patches(partial_request())
         with pytest.raises(ForeignPageNotAuthorizedError):
             patches.morph(zone="alpha", page=_REDIRECTING_PAGE)
         assert patches.envelope().ops == ()
@@ -90,27 +73,27 @@ class TestResolvePartialOrigin:
     """`resolve_partial_origin` prefers the host header over the form origin."""
 
     def test_header_origin_wins(self) -> None:
-        request = _partial_request(origin="/zoned/", host="/zoned/")
+        request = partial_request(origin="/zoned/", host="/zoned/")
         origin = resolve_partial_origin(request)
         assert origin is not None
         assert origin.page_path == _ZONED_PAGE
         assert origin.source is OriginSource.HEADER
 
     def test_form_origin_is_the_fallback(self) -> None:
-        request = _partial_request(origin="/zoned/")
+        request = partial_request(origin="/zoned/")
         origin = resolve_partial_origin(request)
         assert origin is not None
         assert origin.page_path == _ZONED_PAGE
         assert origin.source is OriginSource.FORM
 
     def test_unresolvable_origin_returns_none(self) -> None:
-        request = _partial_request(origin="/no/such/url/")
+        request = partial_request(origin="/no/such/url/")
         assert resolve_partial_origin(request) is None
 
     def test_offsite_header_is_rejected_and_falls_back_to_the_form(self) -> None:
         # An off-site X-Next-Origin must not steer the OOB render, the same-site
         # guard drops it and the resolver falls back to the posted form origin.
-        request = _partial_request(origin="/zoned/", host="//evil.example.com/")
+        request = partial_request(origin="/zoned/", host="//evil.example.com/")
         origin = resolve_partial_origin(request)
         assert origin is not None
         assert origin.page_path == _ZONED_PAGE
@@ -119,14 +102,14 @@ class TestResolvePartialOrigin:
     def test_header_that_does_not_resolve_falls_back_to_the_form(self) -> None:
         # A same-site header that names no page leaves the form origin to win,
         # so a stale layer host never blanks the resolved page.
-        request = _partial_request(origin="/zoned/", host="/no/such/url/")
+        request = partial_request(origin="/zoned/", host="/no/such/url/")
         origin = resolve_partial_origin(request)
         assert origin is not None
         assert origin.page_path == _ZONED_PAGE
         assert origin.source is OriginSource.FORM
 
     def test_host_header_morphs_the_named_page(self) -> None:
-        request = _partial_request(origin="/zoned/", host="/zoned/")
+        request = partial_request(origin="/zoned/", host="/zoned/")
         origin = resolve_partial_origin(request)
         assert origin is not None
         envelope = (
@@ -149,14 +132,14 @@ class TestLayerOriginMorphsTheHostNotTheStep:
     def test_header_host_renders_the_host_pages_zone_body(self) -> None:
         # The form origin names the step page, the layer host header names the
         # owning page, so the resolver must steer the render to the host.
-        request = _partial_request(origin="/counted/", host="/zoned/")
+        request = partial_request(origin="/counted/", host="/zoned/")
         origin = resolve_partial_origin(request)
         assert origin is not None
         assert origin.page_path == _ZONED_PAGE
         assert origin.source is OriginSource.HEADER
 
     def test_done_morphs_the_host_zone_html_over_the_step_page(self) -> None:
-        request = _partial_request(origin="/counted/", host="/zoned/")
+        request = partial_request(origin="/counted/", host="/zoned/")
         origin = resolve_partial_origin(request)
         assert origin is not None
         envelope = (

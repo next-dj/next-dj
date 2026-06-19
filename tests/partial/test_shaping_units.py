@@ -1,4 +1,3 @@
-from pathlib import Path
 
 import pytest
 from django import forms
@@ -9,7 +8,6 @@ from django.urls import set_script_prefix
 from next.forms.dispatch import ActionOutcome, ActionOutcomeKind
 from next.forms.manager import form_action_manager
 from next.partial import Patches, shape_partial, shaping as shaping_module
-from next.partial.headers import REQUEST_FLAG
 from next.partial.shaping import (
     ActionRef,
     _csrf_rotated,
@@ -18,16 +16,13 @@ from next.partial.shaping import (
     _form_meta,
     _meta_errors,
     _origin_target,
-    _page_path_from_view,
     _resolve_step_target,
     _scrub_errors,
     _should_push_steps,
     _stamp_csrf,
     _validate_targets,
 )
-
-
-_PARTIAL_META = {f"HTTP_{REQUEST_FLAG.upper().replace('-', '_')}": "1"}
+from tests.support import partial_request
 
 
 class _MemberForm(forms.Form):
@@ -49,11 +44,6 @@ def _bound_formset():
     return formset
 
 
-def _partial_request():
-    """Return a partial POST that names no resolvable origin page."""
-    return RequestFactory().post("/_next/form/x/", data={}, **_PARTIAL_META)
-
-
 class _PushWizard:
     class Meta:
         push_steps = True
@@ -73,7 +63,7 @@ class TestAdvanceWithoutAResolvableTarget:
             action_name="step_wizard",
         )
         backend = form_action_manager.default_backend
-        response = shape_partial(backend, _partial_request(), outcome)
+        response = shape_partial(backend, partial_request(origin=None), outcome)
         assert response.status_code == 204
 
     def test_missing_wizard_returns_the_step_redirect(self) -> None:
@@ -83,7 +73,7 @@ class TestAdvanceWithoutAResolvableTarget:
             redirect_to="/wizard/scope/",
         )
         backend = form_action_manager.default_backend
-        response = shape_partial(backend, _partial_request(), outcome)
+        response = shape_partial(backend, partial_request(origin=None), outcome)
         assert isinstance(response, HttpResponseRedirect)
         assert response["Location"] == "/wizard/scope/"
 
@@ -95,7 +85,7 @@ class TestAdvanceWithoutAResolvableTarget:
             wizard=_PlainWizard(),
         )
         backend = form_action_manager.default_backend
-        response = shape_partial(backend, _partial_request(), outcome)
+        response = shape_partial(backend, partial_request(origin=None), outcome)
         assert isinstance(response, HttpResponseRedirect)
         assert response["Location"] == "/no/such/route/"
 
@@ -212,7 +202,7 @@ class TestResultRichResponseFallThrough:
             raw=HttpResponse("<p>plain</p>"),
         )
         backend = form_action_manager.default_backend
-        response = shape_partial(backend, _partial_request(), outcome)
+        response = shape_partial(backend, partial_request(origin=None), outcome)
         assert response.content == b"<p>plain</p>"
 
 
@@ -220,7 +210,7 @@ class TestFormZoneWithoutAResolvedPage:
     """`_form_zone` returns None when the origin resolves to no page."""
 
     def test_none_page_path_yields_no_zone(self) -> None:
-        zone = shaping_module._form_zone(_partial_request(), None)
+        zone = shaping_module._form_zone(partial_request(origin=None), None)
         assert zone is None
 
 
@@ -228,16 +218,12 @@ class TestOriginTarget:
     """`_origin_target` resolves the request origin to a page path and kwargs."""
 
     def test_unresolvable_origin_yields_none_and_empty_kwargs(self) -> None:
-        page_path, url_kwargs = _origin_target(_partial_request())
+        page_path, url_kwargs = _origin_target(partial_request(origin=None))
         assert page_path is None
         assert url_kwargs == {}
 
     def test_resolvable_origin_yields_its_page_and_kwargs(self) -> None:
-        request = RequestFactory().post(
-            "/_next/form/x/",
-            data={"_next_form_origin": "/items/42/"},
-            **_PARTIAL_META,
-        )
+        request = partial_request(origin="/items/42/")
         page_path, url_kwargs = _origin_target(request)
         assert page_path is not None
         assert url_kwargs == {"id": 42}
@@ -253,25 +239,6 @@ class TestFormOverridesWithoutAForm:
             form=None,
         )
         assert shaping_module._form_overrides(outcome) == {}
-
-
-class _StringPathView:
-    next_page_path = "tests/site_pages/wizard/[step]/page.py"
-
-
-class _NoPathView:
-    pass
-
-
-class TestPagePathFromView:
-    """`_page_path_from_view` reads a `next_page_path` as a Path."""
-
-    def test_string_attribute_becomes_a_path(self) -> None:
-        result = _page_path_from_view(_StringPathView())
-        assert result == Path("tests/site_pages/wizard/[step]/page.py")
-
-    def test_missing_attribute_yields_none(self) -> None:
-        assert _page_path_from_view(_NoPathView()) is None
 
 
 class TestResolveStepTarget:
@@ -305,6 +272,6 @@ class TestBuilderRenderHelpersRequireAResolvablePage:
     """A render helper raises when the request origin resolves to no page."""
 
     def test_zone_morph_on_an_unresolved_origin_raises(self) -> None:
-        builder = Patches(_partial_request())
+        builder = Patches(partial_request(origin=None))
         with pytest.raises(RuntimeError, match="does not resolve to a page"):
             builder.morph(zone="alpha")

@@ -2,7 +2,12 @@
 
 from . import signals
 from .backends import PartialProtocolBackend
-from .headers import PartialIntent, is_partial_request, partial_intent
+from .headers import (
+    REQUEST_ID,
+    PartialIntent,
+    is_partial_request,
+    partial_intent,
+)
 from .manager import partial_backend_manager
 from .origin import OriginSource, PartialOrigin, resolve_partial_origin
 from .patches import (
@@ -16,11 +21,12 @@ from .patches import (
 )
 from .registry import ZoneInfo, register_patch_op, zone_requested, zones_of
 from .render import UnknownZoneError, ZoneRenderResult, render_zone
-from .shaping import ActionRef, drain_messages, shape_partial, shape_validate
+from .shaping import ActionRef, shape_partial, shape_validate
 from .sse import PatchEventStream
 
 
 __all__ = [
+    "REQUEST_ID",
     "ActionRef",
     "Asset",
     "Envelope",
@@ -37,7 +43,6 @@ __all__ = [
     "UnknownZoneError",
     "ZoneInfo",
     "ZoneRenderResult",
-    "drain_messages",
     "is_partial_request",
     "partial_backend_manager",
     "partial_intent",

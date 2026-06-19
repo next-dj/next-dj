@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from django import forms as django_forms
+    from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest, HttpResponse
     from django.urls import URLPattern
 
@@ -230,6 +231,15 @@ class ActionMeta(TypedDict, total=False):
     guard: ActionGuard | None
 
 
+@dataclass(frozen=True, slots=True)
+class RegistryBackendSnapshot:
+    """An immutable copy of a registry backend's action maps for rollback."""
+
+    registry: "dict[tuple[str, str], ActionMeta]"
+    uid_to_name: "dict[str, tuple[str, str]]"
+    name_index: "dict[str, tuple[str, str]]"
+
+
 @dataclass(frozen=True)
 class ActionRegistration:
     """A form action to register: its name, declaration site, and target.
@@ -284,7 +294,7 @@ class FormActionBackend(ABC):
         self,
         request: "HttpRequest",
         action_name: str,
-        form: "django_forms.Form | None",
+        form: "BaseForm | BaseFormSet | None",
         page_file_path: "Path | None" = None,
         url_kwargs: dict[str, object] | None = None,
     ) -> str:
@@ -354,6 +364,26 @@ class RegistryFormActionBackend(FormActionBackend):
         self._registry = {}
         self._uid_to_name = {}
         self._name_index = {}
+        self._url_cache = {}
+
+    def snapshot(self) -> "RegistryBackendSnapshot":
+        """Capture the registered actions so a later `restore` rolls them back.
+
+        A test that registers extra actions takes a snapshot first and
+        restores it afterwards, so a later suite sees the registry exactly
+        as it was without reaching into the backend's private maps.
+        """
+        return RegistryBackendSnapshot(
+            registry=dict(self._registry),
+            uid_to_name=dict(self._uid_to_name),
+            name_index=dict(self._name_index),
+        )
+
+    def restore(self, snapshot: "RegistryBackendSnapshot") -> None:
+        """Restore the registered actions captured by `snapshot`."""
+        self._registry = dict(snapshot.registry)
+        self._uid_to_name = dict(snapshot.uid_to_name)
+        self._name_index = dict(snapshot.name_index)
         self._url_cache = {}
 
     def register_action(self, registration: ActionRegistration) -> None:
@@ -511,7 +541,7 @@ class RegistryFormActionBackend(FormActionBackend):
         self,
         request: "HttpRequest",
         action_name: str,
-        form: "django_forms.Form | None",
+        form: "BaseForm | BaseFormSet | None",
         page_file_path: "Path | None" = None,
         url_kwargs: dict[str, object] | None = None,
     ) -> str:
@@ -544,6 +574,7 @@ __all__ = [
     "FormActionBackend",
     "FormActionFactory",
     "FormActionNotFound",
+    "RegistryBackendSnapshot",
     "RegistryFormActionBackend",
     "build_action_guard",
     "file_to_dotted_module",

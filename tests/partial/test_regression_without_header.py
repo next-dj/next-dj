@@ -1,6 +1,5 @@
 import copy
 
-import pytest
 from django.conf import settings
 from django.test import Client, override_settings
 
@@ -10,12 +9,6 @@ from next.testing import NextClient
 
 
 PAGE_BODY = b"<p>test page</p>\n"
-
-
-@pytest.fixture()
-def client_no_csrf() -> NextClient:
-    """Test client that supplies form fields manually, without CSRF checks."""
-    return NextClient(enforce_csrf_checks=False)
 
 
 def _without_partial_backends() -> dict[str, object]:
@@ -67,37 +60,37 @@ class TestPageGetWithoutPartialSwitch:
 class TestInvalidFormPostWithoutPartialSwitch:
     """An invalid form POST without the switch keeps its full-page rerender."""
 
-    def test_status_and_invalid_headers(self, client_no_csrf: NextClient) -> None:
-        response = _invalid_form_post(client_no_csrf)
+    def test_status_and_invalid_headers(self, next_client: NextClient) -> None:
+        response = _invalid_form_post(next_client)
         assert response.status_code == 200
         assert response["X-Next-Form"] == "invalid"
         assert response["X-Next-Action"]
 
-    def test_request_is_not_partial(self, client_no_csrf: NextClient) -> None:
-        response = _invalid_form_post(client_no_csrf)
+    def test_request_is_not_partial(self, next_client: NextClient) -> None:
+        response = _invalid_form_post(next_client)
         assert is_partial_request(response.wsgi_request) is False
 
-    def test_full_page_body_with_errors(self, client_no_csrf: NextClient) -> None:
-        response = _invalid_form_post(client_no_csrf)
+    def test_full_page_body_with_errors(self, next_client: NextClient) -> None:
+        response = _invalid_form_post(next_client)
         body = response.content.decode()
         assert "test page" in body
         assert "This field is required." in body
         assert 'aria-invalid="true"' in body
 
     def test_content_type_is_html_not_envelope(
-        self, client_no_csrf: NextClient
+        self, next_client: NextClient
     ) -> None:
-        response = _invalid_form_post(client_no_csrf)
+        response = _invalid_form_post(next_client)
         assert response["Content-Type"] == "text/html; charset=utf-8"
         assert response["Content-Type"] != "application/vnd.next.patches+json"
 
     def test_bytes_identical_when_partial_backends_emptied(
-        self, client_no_csrf: NextClient
+        self, next_client: NextClient
     ) -> None:
-        baseline = _invalid_form_post(client_no_csrf)
+        baseline = _invalid_form_post(next_client)
         with override_settings(NEXT_FRAMEWORK=_without_partial_backends()):
             settings_reloaded.send(sender=self.__class__)
-            without = _invalid_form_post(client_no_csrf)
+            without = _invalid_form_post(next_client)
         settings_reloaded.send(sender=self.__class__)
         assert without.content == baseline.content
         assert without.status_code == baseline.status_code

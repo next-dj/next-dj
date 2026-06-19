@@ -6,19 +6,19 @@ from typing import TYPE_CHECKING
 
 from next.pages import page
 
-from .origin import _resolve_origin
+from .origin import resolve_origin
 
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from django import forms as django_forms
+    from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest
 
     from .backends import FormActionBackend
 
 
-def _form_fallback_html(form: "django_forms.Form | None") -> str:
+def _form_fallback_html(form: "BaseForm | BaseFormSet | None") -> str:
     """Render a bare form without tripping the Django 4.2 default-renderer warning."""
     if form is None:
         return ""
@@ -30,7 +30,7 @@ class _ErrorRenderParams:
     """Bundle of failed-submission params for the validation-error re-render."""
 
     action_name: str
-    form: "django_forms.Form | None"
+    form: "BaseForm | BaseFormSet | None"
     url_kwargs: dict[str, object]
 
 
@@ -65,7 +65,7 @@ def render_form_page_with_errors(
         namespace = types.SimpleNamespace(form=form)
         wizard_class = meta.get("wizard_class")
         if wizard_class is not None:
-            origin_match = _resolve_origin(request)
+            origin_match = resolve_origin(request)
             origin = origin_match.origin if origin_match is not None else ""
             wizard = wizard_class(
                 request=request, url_kwargs=url_kwargs, base_path=origin

@@ -15,7 +15,7 @@ from next.forms.dispatch import (
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
     _filter_reserved_url_kwargs,
-    _resolve_origin,
+    resolve_origin,
 )
 from tests.support.helpers import build_mock_http_request
 
@@ -61,7 +61,7 @@ class TestBenchDispatchHelpers:
         def run() -> object:
             if hasattr(request, _ORIGIN_MATCH_ATTR):
                 delattr(request, _ORIGIN_MATCH_ATTR)
-            return _resolve_origin(request)
+            return resolve_origin(request)
 
         match = benchmark(run)
         assert match is not None
@@ -72,8 +72,8 @@ class TestBenchDispatchHelpers:
         request = build_mock_http_request(
             method="POST", POST={"_next_form_origin": "/items/42/"}
         )
-        first = _resolve_origin(request)
-        match = benchmark(_resolve_origin, request)
+        first = resolve_origin(request)
+        match = benchmark(resolve_origin, request)
         assert match is first
 
 

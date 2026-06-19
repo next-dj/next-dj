@@ -9,18 +9,17 @@ from django.utils.html import format_html
 
 from next.forms.backends import FormActionNotFound
 from next.forms.manager import _build_form_namespace_from_meta, form_action_manager
-from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
+from next.forms.uid import (
+    FORM_ORIGIN_OVERRIDE_KEY,
+    ORIGIN_FIELD_NAME,
+    validated_origin_path,
+)
 from next.forms.widgets import bind_component_widgets
 
 
 _MIN_FORM_TAG_BITS = 2
 _RESERVED_FORM_ATTRS = frozenset({"action", "method"})
 _RESERVED_FORM_ATTR_PREFIX = "data-next-"
-
-# Render-context key the shaping layer sets on a wizard advance to override
-# the rendered form's _next_form_origin. The shaping layer merges it into the
-# zone render overrides instead of mutating a request attribute.
-FORM_ORIGIN_OVERRIDE_KEY = "form_origin_override"
 
 # Python params of the tag that compile to client `data-next-*` attributes
 # on the form. The server authors these names, the client reads them, the

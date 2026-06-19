@@ -4,17 +4,11 @@ from next.partial.headers import CONTENT_TYPE
 from next.testing import NextClient, envelope_of
 
 
-@pytest.fixture()
-def client() -> NextClient:
-    """Test client that submits form fields manually, without CSRF checks."""
-    return NextClient(enforce_csrf_checks=False)
-
-
 class TestInvalidPartialEnvelope:
     """An invalid partial POST returns one extract-morph of the failed form."""
 
-    def test_status_and_headers(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_status_and_headers(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "regression_form", {"name": ""}, origin="/", partial=True
         )
         assert response.status_code == 200
@@ -22,8 +16,8 @@ class TestInvalidPartialEnvelope:
         assert response["X-Next-Form"] == "invalid"
         assert response["X-Next-Action"]
 
-    def test_single_extract_morph_of_the_form(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_single_extract_morph_of_the_form(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "regression_form", {"name": ""}, origin="/", partial=True
         )
         envelope = envelope_of(response)
@@ -32,8 +26,8 @@ class TestInvalidPartialEnvelope:
         assert envelope.form_targets() == [uid]
         assert envelope.ops[0].get("extract") is True
 
-    def test_form_meta_carries_machine_errors(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_form_meta_carries_machine_errors(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "regression_form", {"name": ""}, origin="/", partial=True
         )
         meta = envelope_of(response).form_meta()
@@ -45,16 +39,16 @@ class TestInvalidPartialEnvelope:
 class TestSuccessFunnelEnvelope:
     """A valid partial POST whose handler returns None morphs the form."""
 
-    def test_success_returns_envelope(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_success_returns_envelope(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "regression_form", {"name": "ok"}, origin="/", partial=True
         )
         assert response.status_code == 200
         assert response["Content-Type"] == CONTENT_TYPE
         assert envelope_of(response).op_verbs() == ["morph"]
 
-    def test_success_omits_invalid_headers(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_success_omits_invalid_headers(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "regression_form", {"name": "ok"}, origin="/", partial=True
         )
         assert "X-Next-Form" not in response
@@ -68,24 +62,24 @@ class TestCsrfMetaRidesEveryShape:
     tokens whatever shape the outcome takes.
     """
 
-    def test_rotation_on_success_stamps_csrf(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_rotation_on_success_stamps_csrf(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "rotating_result_form", {"name": "ok"}, origin="/", partial=True
         )
         envelope = envelope_of(response).data
         assert "csrf" in envelope
         assert envelope["csrf"]["token"]
 
-    def test_rotation_on_invalid_stamps_csrf(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_rotation_on_invalid_stamps_csrf(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "rotating_invalid_form", {"name": ""}, origin="/", partial=True
         )
         envelope = envelope_of(response).data
         assert "csrf" in envelope
         assert envelope["csrf"]["token"]
 
-    def test_no_rotation_leaves_no_csrf(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_no_rotation_leaves_no_csrf(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "regression_form", {"name": "ok"}, origin="/", partial=True
         )
         assert "csrf" not in envelope_of(response).data
@@ -100,8 +94,8 @@ class TestWizardAdvanceMorphsTheNextStepZone:
     page and renders the unbound scope form into a zone morph.
     """
 
-    def test_advance_returns_a_zone_morph_envelope(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_advance_returns_a_zone_morph_envelope(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
@@ -114,8 +108,8 @@ class TestWizardAdvanceMorphsTheNextStepZone:
         assert envelope.op_verbs() == ["morph"]
         assert envelope.zone_targets() == ["wizard-zone"]
 
-    def test_advance_renders_the_next_step_form(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_advance_renders_the_next_step_form(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
@@ -126,8 +120,8 @@ class TestWizardAdvanceMorphsTheNextStepZone:
         assert 'name="scope"' in html
         assert 'name="name"' not in html
 
-    def test_default_advance_pushes_no_history(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_default_advance_pushes_no_history(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
             origin="/wizard/identity/",
@@ -141,8 +135,8 @@ class TestWizardAdvanceMorphsTheNextStepZone:
 class TestWizardAdvancePushesHistoryWhenOptedIn:
     """A wizard with `Meta.push_steps` adds a `url.push` to the advance."""
 
-    def test_advance_pushes_the_next_step_url(self, client: NextClient) -> None:
-        response = client.post_action(
+    def test_advance_pushes_the_next_step_url(self, next_client: NextClient) -> None:
+        response = next_client.post_action(
             "push_step_wizard",
             {"name": "Ada"},
             origin="/wizard_push/identity/",

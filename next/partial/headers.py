@@ -32,7 +32,7 @@ _INTENT_ATTR = "_next_partial_intent"
 _UNSET = object()
 
 
-class MergeMode(enum.Enum):
+class MergeMode(enum.StrEnum):
     """Merge intent of a paginating partial request."""
 
     APPEND = "append"

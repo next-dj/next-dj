@@ -1,10 +1,10 @@
 from pathlib import Path
 
 from django import forms as django_forms
-from django.test import RequestFactory
 
 from next.forms import Form
 from next.partial import render_zone
+from tests.support import plain_get
 
 
 FORMZONE_PAGE = (
@@ -20,7 +20,7 @@ class EditorForm(Form):
 
 def _request():
     """Return a plain GET request for the form zone page URL."""
-    return RequestFactory().get("/formzone/")
+    return plain_get("/formzone/")
 
 
 class TestBoundFormOverride:

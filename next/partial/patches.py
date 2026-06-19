@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, cast
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.http import url_has_allowed_host_and_scheme
 
+from next.components import get_component, render_component
+from next.forms.origin import resolve_origin, resolve_url_to_page
+from next.pages import page
 from next.static.collector import default_placeholders
 from next.static.serializers import resolve_serializer
 
@@ -18,7 +21,8 @@ from .headers import (
     set_partial_vary,
 )
 from .manager import partial_backend_manager
-from .registry import patch_op_registry
+from .registry import BUILTIN_OPS, patch_op_registry
+from .render import render_zone
 
 
 if TYPE_CHECKING:
@@ -26,10 +30,13 @@ if TYPE_CHECKING:
 
     from django.http import HttpResponseBase
 
+    from next.forms.origin import OriginMatch
+
     from .render import ZoneRenderResult
 
 
 _SEE_OTHER = 303
+_RESERVED_PATCH_KEYS: frozenset[str] = frozenset({"op", "target", "html"})
 
 
 class UnknownPatchOpError(LookupError):
@@ -45,6 +52,40 @@ class UnknownPatchOpError(LookupError):
         super().__init__(
             f'Patch op "{name}" is not registered. Register it with '
             "register_patch_op() before emitting it."
+        )
+
+
+class ReservedPatchKeyError(ValueError):
+    """Raised when a custom op payload names a structural wire key.
+
+    The `op`, `target`, and `html` keys carry the patch structure, so a
+    payload that names one of them is refused rather than overwriting it.
+    """
+
+    def __init__(self, op: str, keys: frozenset[str]) -> None:
+        """Store the offending verb and the reserved keys it collided with."""
+        self.op = op
+        self.keys = keys
+        names = ", ".join(sorted(keys))
+        super().__init__(
+            f'Patch op "{op}" payload names the reserved wire key(s) {names}. '
+            "Use a different payload key, op/target/html are structural."
+        )
+
+
+class BuiltinPatchOpError(ValueError):
+    """Raised when the generic `op()` channel names a built-in verb.
+
+    A built-in verb owns typed wire keys, so it must travel through its
+    typed builder method rather than the raw `op()` payload channel.
+    """
+
+    def __init__(self, name: str) -> None:
+        """Store the built-in verb name and build a readable message."""
+        self.name = name
+        super().__init__(
+            f'Patch op "{name}" is built in, emit it through its typed '
+            "builder method rather than the generic op() channel."
         )
 
 
@@ -102,7 +143,15 @@ class Patch:
     extras: "Mapping[str, Any]" = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
-        """Return the wire form of the patch as an ordered mapping."""
+        """Return the wire form of the patch as an ordered mapping.
+
+        The `op`, `target`, and `html` keys are reserved for the structural
+        wire fields, so an extras payload that names one of them is refused
+        rather than silently overwriting the structural key.
+        """
+        collision = _RESERVED_PATCH_KEYS & self.extras.keys()
+        if collision:
+            raise ReservedPatchKeyError(self.op, frozenset(collision))
         data: dict[str, Any] = {"op": self.op}
         if self.target is not None:
             data["target"] = dict(self.target)
@@ -208,8 +257,8 @@ class Patches:
         self._form: FormMeta | None = None
         self._csrf: Mapping[str, Any] | None = None
         self._request_id: str | None = echo_of
-        self._page_path: Path | None = None
-        self._page_resolved = False
+        self._origin: OriginMatch | None = None
+        self._origin_resolved = False
 
     @property
     def version(self) -> str:
@@ -227,16 +276,9 @@ class Patches:
         """Morph a target into HTML, the default verb.
 
         A thin facade over the typed per-verb morph methods that keeps the
-        single-verb mental model. With no selector it morphs the passed
-        `target` into `html`, `extract` trimming a whole document down to
-        the node. A `zone` selector morphs the origin page's named zone,
-        or a foreign page's zone when `page` is given too. `component`
-        morphs a rendered component, `form` extract-morphs a form by uid.
-        Reach for the typed `morph_zone`, `morph_foreign_zone`,
-        `morph_component`, or `morph_form` for full type checking. The
-        facade dispatches the selector to the method that owns its
-        contract, so an unknown or conflicting selector raises rather than
-        being silently dropped.
+        single-verb mental model. The facade routes the selector keyword to
+        the method that owns its contract, so two selectors in one call or
+        an unknown selector raises rather than being silently dropped.
         """
         if not select:
             return self._append_morph(dict(target or {}), html or "", extract=extract)
@@ -337,9 +379,7 @@ class Patches:
 
     def _page_path_for_url(self, url: str) -> "Path | None":
         """Resolve a URL of a foreign page to its page path through the URLconf."""
-        from next.forms.origin import _page_path_from_url  # noqa: PLC0415
-
-        return _page_path_from_url(url, self._require_request())
+        return resolve_url_to_page(url, self._require_request())
 
     def _foreign_authorization(
         self,
@@ -348,8 +388,6 @@ class Patches:
         url_kwargs: dict[str, Any],
     ) -> "HttpResponseBase | None":
         """Re-run the foreign page's body resolution and return its short-circuit."""
-        from next.pages import page  # noqa: PLC0415
-
         return page.authorization_response(foreign_path, request, **url_kwargs)
 
     def _render_foreign_zone(
@@ -360,8 +398,6 @@ class Patches:
         url_kwargs: dict[str, Any],
     ) -> "ZoneRenderResult":
         """Render the named zone of an already authorized foreign page."""
-        from .render import render_zone  # noqa: PLC0415
-
         return render_zone(foreign_path, (zone,), request, url_kwargs=url_kwargs)
 
     def morph_component(
@@ -436,7 +472,7 @@ class Patches:
         self._ops.append(Patch(op="refresh", extras={"zone": zone}))
         return self
 
-    def context(self, **names: Any) -> "Patches":  # noqa: ANN401
+    def context(self, **names: object) -> "Patches":
         """Merge named serialize provider values into the client context.
 
         Only the names of registered `serialize=True` providers on the
@@ -453,10 +489,25 @@ class Patches:
         self._ops.append(Patch(op="context", extras={"data": data}))
         return self
 
+    def layer_open(
+        self,
+        *,
+        zone: str | None = None,
+        href: str | None = None,
+    ) -> "Patches":
+        """Open a server-initiated layer, optionally seeding a zone or href."""
+        extras: dict[str, Any] = {}
+        if zone is not None:
+            extras["zone"] = zone
+        if href is not None:
+            extras["href"] = self._safe_url(href)
+        self._ops.append(Patch(op="layer.open", extras=extras))
+        return self
+
     def layer_close(
         self,
         *,
-        result: Any = None,  # noqa: ANN401
+        result: object = None,
         dismiss: str | None = None,
     ) -> "Patches":
         """Close the top layer with an accept result or a dismissal."""
@@ -494,6 +545,10 @@ class Patches:
         external href is sent with a full-navigation marker so a
         server-authored redirect like OAuth or a payment gateway is not
         rejected by the same-host validator.
+
+        The `external=True` escape hatch bypasses same-host validation, so
+        the href must be server authored. Never pass user-supplied input
+        through it, or the page becomes an open redirect.
         """
         if external:
             self._ops.append(Patch(op="visit", extras={"href": href, "external": True}))
@@ -501,8 +556,14 @@ class Patches:
             self._ops.append(Patch(op="visit", extras={"href": self._safe_url(href)}))
         return self
 
-    def op(self, name: str, **payload: Any) -> "Patches":  # noqa: ANN401
-        """Emit a custom verb registered through `register_patch_op`."""
+    def op(self, name: str, **payload: object) -> "Patches":
+        """Emit a custom verb registered through `register_patch_op`.
+
+        A built-in verb is refused so it travels only through its typed
+        method, which owns the verb's wire keys, never as a raw payload.
+        """
+        if name in BUILTIN_OPS:
+            raise BuiltinPatchOpError(name)
         if name not in patch_op_registry:
             raise UnknownPatchOpError(name)
         self._ops.append(Patch(op=name, extras=dict(payload)))
@@ -557,9 +618,7 @@ class Patches:
         request = self._request
         if request is None:
             return "/"
-        from next.forms.origin import _resolve_origin  # noqa: PLC0415
-
-        match = _resolve_origin(request)
+        match = self._origin_match()
         if match is not None:
             return match.origin
         return request.path
@@ -571,27 +630,24 @@ class Patches:
             raise RuntimeError(msg)
         return self._request
 
-    def _resolve_page_path(self) -> "Path":
-        """Resolve the origin page path of the request, memoised on the builder."""
-        if self._page_resolved:
-            if self._page_path is None:
-                msg = "The request origin does not resolve to a page."
-                raise RuntimeError(msg)
-            return self._page_path
-        request = self._require_request()
-        from next.forms.origin import _resolve_origin  # noqa: PLC0415
+    def _origin_match(self) -> "OriginMatch | None":
+        """Resolve the request's posted origin once, memoised on the builder."""
+        if not self._origin_resolved:
+            self._origin = resolve_origin(self._require_request())
+            self._origin_resolved = True
+        return self._origin
 
-        match = _resolve_origin(request)
-        self._page_resolved = True
-        self._page_path = match.page_path if match is not None else None
-        return self._resolve_page_path()
+    def _resolve_page_path(self) -> "Path":
+        """Return the origin page path of the request, raising when it has none."""
+        match = self._origin_match()
+        if match is None or match.page_path is None:
+            msg = "The request origin does not resolve to a page."
+            raise RuntimeError(msg)
+        return match.page_path
 
     def _origin_url_kwargs(self) -> dict[str, object]:
         """Return the URL kwargs of the origin page for a zone or component render."""
-        request = self._require_request()
-        from next.forms.origin import _resolve_origin  # noqa: PLC0415
-
-        match = _resolve_origin(request)
+        match = self._origin_match()
         return dict(match.url_kwargs) if match is not None else {}
 
     def _render_zone(
@@ -600,8 +656,6 @@ class Patches:
         overrides: "Mapping[str, Any] | None",
     ) -> "ZoneRenderResult":
         """Render the named zone of the origin page with optional overrides."""
-        from .render import render_zone  # noqa: PLC0415
-
         return render_zone(
             self._resolve_page_path(),
             (zone,),
@@ -616,8 +670,6 @@ class Patches:
         props: "Mapping[str, Any] | None",
     ) -> str:
         """Render the named component of the origin page with props."""
-        from next.components import get_component, render_component  # noqa: PLC0415
-
         request = self._require_request()
         page_path = self._resolve_page_path()
         info = get_component(name, page_path)
@@ -629,8 +681,6 @@ class Patches:
 
     def _serializable_names(self) -> frozenset[str]:
         """Return the serialize=True provider names of the origin page."""
-        from next.pages import page  # noqa: PLC0415
-
         request = self._require_request()
         context_data = page.build_render_context(
             self._resolve_page_path(), request, **self._origin_url_kwargs()
@@ -682,12 +732,14 @@ class PatchResponse(HttpResponse):
 
 __all__ = [
     "Asset",
+    "BuiltinPatchOpError",
     "Envelope",
     "ForeignPageNotAuthorizedError",
     "FormMeta",
     "Patch",
     "PatchResponse",
     "Patches",
+    "ReservedPatchKeyError",
     "UnknownContextNameError",
     "UnknownPatchOpError",
 ]

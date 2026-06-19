@@ -27,8 +27,8 @@ from next.deps import REQUEST_DEP_CACHE_ATTR, resolver
 from next.deps.resolver import cached_signature
 
 from .origin import (
-    _resolve_origin,
     _url_kwargs_for_request,
+    resolve_origin,
 )
 from .signals import (
     action_dispatched,
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 
     from .backends import ActionGuard, ActionMeta, FormActionBackend
     from .base import BaseForm as NextBaseForm, PermissionOutcome
-    from .origin import _OriginMatch
+    from .origin import OriginMatch
     from .wizard import FormWizard
 
     class _ViewPermissionHook(Protocol):
@@ -521,7 +521,7 @@ class _DispatchState:
     dep_cache: dict[str, Any]
     dep_stack: list[str]
     uid: str | None = None
-    origin_match: "_OriginMatch | None" = None
+    origin_match: "OriginMatch | None" = None
 
     @property
     def page_path(self) -> "Path | None":
@@ -667,7 +667,7 @@ class FormActionDispatch:
             if denial is not None:
                 return denial
 
-        origin_match = _resolve_origin(request)
+        origin_match = resolve_origin(request)
         state = _DispatchState(
             url_kwargs=dict(origin_match.url_kwargs) if origin_match else {},
             dep_cache={},
@@ -1023,7 +1023,7 @@ class FormActionDispatch:
         `ActionOutcomeKind.INVALID` stay untouched. An unresolvable origin
         yields 400.
         """
-        origin_match = _resolve_origin(request)
+        origin_match = resolve_origin(request)
         if origin_match is None or origin_match.page_path is None:
             return HttpResponseBadRequest("Missing or invalid _next_form_origin")
         html = backend.render_invalid_page(

@@ -55,6 +55,8 @@ W_WITH_OVER_ZONE: Final = "next.W067"
 W_FORM_BACKEND_NOT_AWARE: Final = "next.W068"
 W_MANIFEST_VERSION_NO_STORAGE: Final = "next.W069"
 
+_MIN_DUPLICATE_COUNT: Final = 2
+
 
 CHECK_IDS: Final = (
     E_DUPLICATE_ZONE,
@@ -142,7 +144,7 @@ def check_duplicate_zone_names(
         for node in _zone_nodes(template):
             counts[node.name] = counts.get(node.name, 0) + 1
         for name, count in counts.items():
-            if count < 2:  # noqa: PLR2004
+            if count < _MIN_DUPLICATE_COUNT:
                 continue
             messages.append(
                 Error(

@@ -321,7 +321,6 @@ class TestPartialBackendsDefault:
 
     def test_default_options(self) -> None:
         options = NextFrameworkSettings.DEFAULTS["PARTIAL_BACKENDS"][0]["OPTIONS"]
-        assert options["DEFAULT_SWAP"] == "morph"
         assert options["VERSION"] == "manifest"
         assert options["PUSH_WIZARD_STEPS"] is False
 

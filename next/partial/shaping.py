@@ -2,21 +2,19 @@
 
 import types
 from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from django.contrib.messages import get_messages
 from django.core.exceptions import NON_FIELD_ERRORS
 from django.forms import BaseForm, BaseFormSet, FileField
 from django.http import HttpResponse, HttpResponseRedirect
-from django.urls import Resolver404, get_script_prefix, resolve
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from next.forms.dispatch import ActionOutcome, ActionOutcomeKind, FormActionDispatch
-from next.forms.origin import _resolve_origin
+from next.forms.origin import resolve_origin, resolve_url_to_match
+from next.forms.uid import FORM_ORIGIN_OVERRIDE_KEY
 from next.pages import page
 from next.static.scripts import csrf_payload
-from next.templatetags.forms import FORM_ORIGIN_OVERRIDE_KEY
 
 from .headers import RESPONSE_ACTION, RESPONSE_FORM, partial_intent
 from .manager import partial_backend_manager
@@ -27,6 +25,8 @@ from .signals import field_validated
 
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from django.http import HttpRequest
 
     from next.forms.backends import FormActionBackend
@@ -45,6 +45,12 @@ _MESSAGE_VARIANTS: dict[str, str] = {
 
 _CSRF_ROTATED_FLAG = "CSRF_COOKIE_NEEDS_UPDATE"
 _PUSH_WIZARD_STEPS_OPTION = "PUSH_WIZARD_STEPS"
+
+
+class _NonFormErrors(Protocol):
+    """The writable non-form-errors attribute Django keeps no setter for."""
+
+    _non_form_errors: object
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +116,7 @@ def shape_validate(
         html = backend.render_invalid_page(
             request,
             action.action_name,
-            cast("Any", form),
+            form,
             page_path,
             url_kwargs,
         )
@@ -261,7 +267,9 @@ def _redirect_as_visit(
     A same-site URL travels as an internal visit the validator approves.
     A server-authored external URL such as an OAuth or payment gateway
     travels with a full-navigation marker so it is not rejected by the
-    same-host validator.
+    same-host validator. The external branch trusts the handler's redirect
+    target, so a handler must never build it from user input or the page
+    becomes an open redirect.
     """
     href = redirect["Location"]
     internal = url_has_allowed_host_and_scheme(
@@ -310,7 +318,7 @@ def _origin_target(
     page, so they share one resolution. A request that names no resolvable
     origin yields a None page path and empty kwargs.
     """
-    match = _resolve_origin(request)
+    match = resolve_origin(request)
     if match is None:
         return None, {}
     return match.page_path, dict(match.url_kwargs)
@@ -377,30 +385,13 @@ def _resolve_step_target(
 
     The URL travels through the same URLconf the origin uses, so the next
     step's page path and captured kwargs come from one resolution without
-    running the step page view.
+    running the step page view. The captured kwargs stay unfiltered so the
+    next step renders with every URL parameter it declares.
     """
-    path = href.partition("?")[0]
-    prefix = get_script_prefix()
-    if prefix != "/" and path.startswith(prefix):
-        path = "/" + path.removeprefix(prefix)
-    try:
-        match = resolve(path, urlconf=getattr(request, "urlconf", None))
-    except Resolver404:
+    match = resolve_url_to_match(href, request, filter_reserved=False)
+    if match is None or match.page_path is None:
         return None
-    page_path = _page_path_from_view(match.func)
-    if page_path is None:
-        return None
-    return page_path, dict(match.kwargs)
-
-
-def _page_path_from_view(view: object) -> "Path | None":
-    """Return the `next_page_path` attribute of a resolved view as a path."""
-    raw = getattr(view, "next_page_path", None)
-    if isinstance(raw, Path):
-        return raw
-    if isinstance(raw, str):
-        return Path(raw)
-    return None
+    return match.page_path, dict(match.url_kwargs)
 
 
 def _should_push_steps(wizard: "FormWizard") -> bool:
@@ -459,8 +450,8 @@ def _scrub_errors(
             _scrub_member_errors(member, requested)
         # The non-form errors live on the protected attribute the formset
         # populates in full_clean, reset it so a cross-form clean never
-        # surfaces on a per-field blur.
-        cast("Any", form)._non_form_errors = form.error_class()
+        # surfaces on a per-field blur. Django keeps no public setter for it.
+        cast("_NonFormErrors", form)._non_form_errors = form.error_class()
         return
     _scrub_form_errors(form, requested)
 

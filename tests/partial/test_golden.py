@@ -1,14 +1,30 @@
 import json
+import os
 
 import pytest
 
 from next.partial import Envelope, FormMeta, Patch, Patches
 from tests.partial.golden_support import (
     GoldenCase,
-    read_envelope_bytes,
-    read_meta,
+    committed_drift,
+    serialize_case,
     write_case,
 )
+
+
+_UPDATE_GOLDEN = os.environ.get("GOLDEN_UPDATE") == "1"
+
+
+def _envelope_data(case: GoldenCase) -> dict:
+    """Return the parsed envelope of a freshly serialised case."""
+    body, _meta = serialize_case(case)
+    return json.loads(body)
+
+
+def _meta_of(case: GoldenCase) -> dict:
+    """Return the metadata sidecar of a freshly serialised case."""
+    _body, meta = serialize_case(case)
+    return meta
 
 
 def _replace_zone() -> GoldenCase:
@@ -304,33 +320,52 @@ GOLDEN_CASES = [
 ]
 
 
-class TestWriteGoldenFixtures:
-    """pytest writes real envelopes for vitest to read back through the applier."""
+class TestGoldenFixturesArePinned:
+    """The committed fixtures match a fresh serialisation, no silent drift.
 
+    The Python serialiser writes these bytes and vitest reads them back, so
+    a drift between the two toolchains would otherwise pass unnoticed. Run
+    `GOLDEN_UPDATE=1` to regenerate the committed fixtures after a
+    deliberate wire change.
+    """
+
+    @pytest.mark.skipif(_UPDATE_GOLDEN, reason="GOLDEN_UPDATE regenerates instead")
     @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: c.name)
-    def test_writes_envelope_and_meta(self, case: GoldenCase) -> None:
+    def test_committed_bytes_match_a_fresh_serialisation(
+        self, case: GoldenCase
+    ) -> None:
+        drift = committed_drift(case)
+        assert drift is None, (
+            f"{drift}, the golden fixtures are stale. "
+            "Regenerate with GOLDEN_UPDATE=1 and commit the result."
+        )
+
+    @pytest.mark.skipif(not _UPDATE_GOLDEN, reason="set GOLDEN_UPDATE=1 to regenerate")
+    @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: c.name)
+    def test_regenerate_committed_fixtures(self, case: GoldenCase) -> None:
         envelope_path, meta_path = write_case(case)
         assert envelope_path.exists()
         assert meta_path.exists()
 
+
+class TestGoldenFixtureShape:
+    """The serialised envelopes and metadata carry the expected wire shape."""
+
     @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: c.name)
     def test_envelope_bytes_are_valid_json(self, case: GoldenCase) -> None:
-        write_case(case)
-        data = json.loads(read_envelope_bytes(case.name))
+        data = _envelope_data(case)
         assert data["version"] == "9f3c2e1b"
         assert isinstance(data["ops"], list)
 
     @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: c.name)
     def test_meta_declares_content_type(self, case: GoldenCase) -> None:
-        write_case(case)
-        meta = read_meta(case.name)
+        meta = _meta_of(case)
         assert meta["content_type"] == "application/vnd.next.patches+json"
         assert meta["status"] == case.status
 
     @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: c.name)
     def test_meta_carries_response_headers(self, case: GoldenCase) -> None:
-        write_case(case)
-        headers = read_meta(case.name)["headers"]
+        headers = _meta_of(case)["headers"]
         assert isinstance(headers, dict)
         assert headers["Content-Type"] == "application/vnd.next.patches+json"
         assert "X-Next-Merge" in headers["Vary"]
@@ -338,19 +373,16 @@ class TestWriteGoldenFixtures:
 
     @pytest.mark.parametrize("case", GOLDEN_CASES, ids=lambda c: c.name)
     def test_meta_points_at_envelope_file(self, case: GoldenCase) -> None:
-        write_case(case)
-        meta = read_meta(case.name)
+        meta = _meta_of(case)
         assert meta["envelope_file"] == f"{case.name}.envelope.json"
 
     def test_invalid_form_meta_headers_present(self) -> None:
-        write_case(_invalid_form())
-        headers = read_meta("invalid_form")["headers"]
+        headers = _meta_of(_invalid_form())["headers"]
         assert headers["X-Next-Form"] == "invalid"
         assert headers["X-Next-Action"] == "ab12cd34"
 
     def test_invalid_form_envelope_carries_form_meta(self) -> None:
-        write_case(_invalid_form())
-        data = json.loads(read_envelope_bytes("invalid_form"))
+        data = _envelope_data(_invalid_form())
         assert data["form"] == {
             "uid": "ab12cd34",
             "valid": False,
@@ -358,79 +390,67 @@ class TestWriteGoldenFixtures:
         }
 
     def test_zone_get_envelope_morphs_both_zones(self) -> None:
-        write_case(_zone_get())
-        data = json.loads(read_envelope_bytes("zone_get"))
+        data = _envelope_data(_zone_get())
         targets = [op["target"]["zone"] for op in data["ops"]]
         assert targets == ["alpha", "beta"]
 
     def test_zone_get_envelope_carries_asset_manifest(self) -> None:
-        write_case(_zone_get())
-        data = json.loads(read_envelope_bytes("zone_get"))
+        data = _envelope_data(_zone_get())
         assert data["assets"] == [{"kind": "css", "url": "/static/next/zoned.css"}]
 
     def test_invalid_extract_envelope_marks_extract_on_the_form_target(self) -> None:
-        write_case(_invalid_form_extract())
-        data = json.loads(read_envelope_bytes("invalid_form_extract"))
+        data = _envelope_data(_invalid_form_extract())
         op = data["ops"][0]
         assert op["op"] == "morph"
         assert op["target"] == {"form": "3f9ac21d75e04b88"}
         assert op["extract"] is True
 
     def test_invalid_extract_meta_headers_present(self) -> None:
-        write_case(_invalid_form_extract())
-        headers = read_meta("invalid_form_extract")["headers"]
+        headers = _meta_of(_invalid_form_extract())["headers"]
         assert headers["X-Next-Form"] == "invalid"
         assert headers["X-Next-Action"] == "3f9ac21d75e04b88"
 
     def test_result_form_visit_envelope_carries_one_internal_visit(self) -> None:
-        write_case(_result_form_visit())
-        data = json.loads(read_envelope_bytes("result_form_visit"))
+        data = _envelope_data(_result_form_visit())
         assert data["ops"] == [{"op": "visit", "href": "/board/7/settings/"}]
 
     def test_context_merge_envelope_carries_the_serialized_data(self) -> None:
-        write_case(_context_merge())
-        data = json.loads(read_envelope_bytes("context_merge"))
+        data = _envelope_data(_context_merge())
         assert data["ops"] == [{"op": "context", "data": {"unread": 3, "user": "ada"}}]
 
     def test_validate_envelope_morphs_the_form_with_meta(self) -> None:
-        write_case(_validate_form())
-        data = json.loads(read_envelope_bytes("validate_form"))
+        data = _envelope_data(_validate_form())
         op = data["ops"][0]
         assert op["op"] == "morph"
         assert op["target"] == {"form": "ab12cd34"}
         assert data["form"]["errors"] == {"email": ["Enter a valid email address."]}
 
     def test_validate_meta_omits_the_invalid_headers(self) -> None:
-        write_case(_validate_form())
-        headers = read_meta("validate_form")["headers"]
+        headers = _meta_of(_validate_form())["headers"]
         assert "X-Next-Form" not in headers
         assert "X-Next-Action" not in headers
 
     def test_wizard_advance_envelope_morphs_the_master_zone(self) -> None:
-        write_case(_wizard_advance())
-        data = json.loads(read_envelope_bytes("wizard_advance"))
+        data = _envelope_data(_wizard_advance())
         assert [op["op"] for op in data["ops"]] == ["morph"]
         assert data["ops"][0]["target"] == {"zone": "wizard-zone"}
         assert 'name="scope"' in data["ops"][0]["html"]
 
     def test_layer_close_envelope_closes_with_a_result_and_toasts(self) -> None:
-        write_case(_layer_close())
-        data = json.loads(read_envelope_bytes("layer_close"))
+        data = _envelope_data(_layer_close())
         assert [op["op"] for op in data["ops"]] == ["layer.close", "toast"]
         assert data["ops"][0]["result"] == {"id": 42}
         assert data["ops"][1]["text"] == "Request created"
         assert data["ops"][1]["variant"] == "success"
 
     def test_layer_oob_envelope_closes_morphs_the_host_zone_and_toasts(self) -> None:
-        write_case(_layer_oob_list())
-        data = json.loads(read_envelope_bytes("layer_oob_list"))
+        data = _envelope_data(_layer_oob_list())
         assert [op["op"] for op in data["ops"]] == ["layer.close", "morph", "toast"]
         assert data["ops"][1]["target"] == {"zone": "request-list"}
         assert "fresh" in data["ops"][1]["html"]
 
     def test_append_page_envelope_grows_the_zone_with_keyed_rows(self) -> None:
-        write_case(_append_page())
-        data = json.loads(read_envelope_bytes("append_page"))
+        data = _envelope_data(_append_page())
         op = data["ops"][0]
         assert op["op"] == "append"
         assert op["target"] == {"zone": "catalog-results"}
@@ -439,8 +459,7 @@ class TestWriteGoldenFixtures:
         assert 'id="sentinel"' in op["html"]
 
     def test_sse_refresh_envelope_carries_refresh_and_echo_id(self) -> None:
-        write_case(_sse_refresh())
-        data = json.loads(read_envelope_bytes("sse_refresh"))
+        data = _envelope_data(_sse_refresh())
         assert [op["op"] for op in data["ops"]] == ["refresh"]
         assert data["ops"][0]["zone"] == "poll-results"
         assert data["request_id"] == "r9"

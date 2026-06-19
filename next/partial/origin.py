@@ -4,7 +4,7 @@ import enum
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from next.forms.origin import _resolve_origin, _resolve_url_match
+from next.forms.origin import resolve_origin, resolve_url_to_match
 from next.forms.uid import validated_origin_path
 
 from .headers import partial_intent
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
 
-class OriginSource(enum.Enum):
+class OriginSource(enum.StrEnum):
     """Where the resolved host-page origin was taken from."""
 
     HEADER = "header"
@@ -47,12 +47,13 @@ def resolve_partial_origin(request: "HttpRequest") -> "PartialOrigin | None":
     that owns the layer rather than the master's own step page. When the
     header is absent or does not resolve to a page the posted form origin
     is the fallback, which keeps the resolver usable from a master that
-    posts straight from its host page.
+    posts straight from its host page. The header is validated same-site
+    before it is trusted, so an off-site origin cannot redirect the morph.
     """
     intent = partial_intent(request)
     header = validated_origin_path(intent.origin)
     if header is not None:
-        match = _resolve_url_match(header, request)
+        match = resolve_url_to_match(header, request)
         if match is not None:
             return PartialOrigin(
                 page_path=match.page_path,
@@ -60,7 +61,7 @@ def resolve_partial_origin(request: "HttpRequest") -> "PartialOrigin | None":
                 origin=match.origin,
                 source=OriginSource.HEADER,
             )
-    form_match = _resolve_origin(request)
+    form_match = resolve_origin(request)
     if form_match is None:
         return None
     return PartialOrigin(

@@ -62,8 +62,8 @@ class TestBackendOptions:
     """OPTIONS from the settings entry are exposed on the backend."""
 
     def test_options_read_from_config(self) -> None:
-        backend = PartialProtocolBackend({"OPTIONS": {"DEFAULT_SWAP": "morph"}})
-        assert backend.options["DEFAULT_SWAP"] == "morph"
+        backend = PartialProtocolBackend({"OPTIONS": {"VERSION": "manifest"}})
+        assert backend.options["VERSION"] == "manifest"
 
     def test_options_default_empty(self) -> None:
         assert PartialProtocolBackend().options == {}

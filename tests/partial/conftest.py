@@ -1,4 +1,4 @@
-import copy
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -6,8 +6,10 @@ from django.core.cache import cache
 
 from next.forms.diagnostics import registration_diagnostics
 from next.forms.manager import form_action_manager
-from next.forms.wizard import wizard_backend_manager
+from next.forms.wizard import SessionFormWizardBackend, wizard_backend_manager
 from next.pages.loaders import _load_python_module
+from next.testing import NextClient
+from tests.support import CountingWizardBackend
 
 
 _PARTIAL_DIR = Path(__file__).resolve().parent
@@ -43,9 +45,7 @@ def _partial_form_registries():
     file path.
     """
     backend = form_action_manager.default_backend
-    registry_snapshot = copy.deepcopy(backend._registry)
-    uid_snapshot = copy.deepcopy(backend._uid_to_name)
-    name_index_snapshot = copy.deepcopy(backend._name_index)
+    backend_snapshot = backend.snapshot()
     diagnostics_snapshot = registration_diagnostics.snapshot()
 
     wizard_backend_manager.reset()
@@ -56,14 +56,23 @@ def _partial_form_registries():
 
     yield
 
-    backend._registry.clear()
-    backend._registry.update(registry_snapshot)
-    backend._uid_to_name.clear()
-    backend._uid_to_name.update(uid_snapshot)
-    backend._name_index.clear()
-    backend._name_index.update(name_index_snapshot)
-
+    backend.restore(backend_snapshot)
     registration_diagnostics.restore(diagnostics_snapshot)
 
     wizard_backend_manager.reset()
     cache.clear()
+
+
+@pytest.fixture()
+def next_client() -> NextClient:
+    """Test client that submits form fields manually, without CSRF checks."""
+    return NextClient(enforce_csrf_checks=False)
+
+
+@pytest.fixture()
+def counting_wizard_backend() -> Generator[CountingWizardBackend, None, None]:
+    """Install a counting wizard backend for the duration of the test."""
+    counting = CountingWizardBackend(SessionFormWizardBackend({}))
+    wizard_backend_manager._backend = counting
+    yield counting
+    wizard_backend_manager.reset()
