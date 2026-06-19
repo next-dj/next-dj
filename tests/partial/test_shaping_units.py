@@ -17,6 +17,7 @@ from next.partial.shaping import (
     _file_field_names,
     _form_meta,
     _meta_errors,
+    _origin_target,
     _page_path_from_view,
     _resolve_step_target,
     _scrub_errors,
@@ -221,6 +222,25 @@ class TestFormZoneWithoutAResolvedPage:
     def test_none_page_path_yields_no_zone(self) -> None:
         zone = shaping_module._form_zone(_partial_request(), None)
         assert zone is None
+
+
+class TestOriginTarget:
+    """`_origin_target` resolves the request origin to a page path and kwargs."""
+
+    def test_unresolvable_origin_yields_none_and_empty_kwargs(self) -> None:
+        page_path, url_kwargs = _origin_target(_partial_request())
+        assert page_path is None
+        assert url_kwargs == {}
+
+    def test_resolvable_origin_yields_its_page_and_kwargs(self) -> None:
+        request = RequestFactory().post(
+            "/_next/form/x/",
+            data={"_next_form_origin": "/items/42/"},
+            **_PARTIAL_META,
+        )
+        page_path, url_kwargs = _origin_target(request)
+        assert page_path is not None
+        assert url_kwargs == {"id": 42}
 
 
 class TestFormOverridesWithoutAForm:

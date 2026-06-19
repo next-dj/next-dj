@@ -9,13 +9,18 @@ from django.utils.html import format_html
 
 from next.forms.backends import FormActionNotFound
 from next.forms.manager import _build_form_namespace_from_meta, form_action_manager
-from next.forms.uid import ADVANCE_ORIGIN_ATTR, ORIGIN_FIELD_NAME, validated_origin_path
+from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
 from next.forms.widgets import bind_component_widgets
 
 
 _MIN_FORM_TAG_BITS = 2
 _RESERVED_FORM_ATTRS = frozenset({"action", "method"})
 _RESERVED_FORM_ATTR_PREFIX = "data-next-"
+
+# Render-context key the shaping layer sets on a wizard advance to override
+# the rendered form's _next_form_origin. The shaping layer merges it into the
+# zone render overrides instead of mutating a request attribute.
+FORM_ORIGIN_OVERRIDE_KEY = "form_origin_override"
 
 # Python params of the tag that compile to client `data-next-*` attributes
 # on the form. The server authors these names, the client reads them, the
@@ -141,7 +146,9 @@ class FormNode(template.Node):
             raise ImproperlyConfigured(msg)
         return cast("HttpRequest", request)
 
-    def _build_hidden_inputs(self, request: "HttpRequest") -> str:
+    def _build_hidden_inputs(
+        self, context: template.Context, request: "HttpRequest"
+    ) -> str:
         """Build the CSRF and origin hidden inputs."""
         inputs = [
             format_html(
@@ -149,7 +156,7 @@ class FormNode(template.Node):
                 get_token(request),
             )
         ]
-        origin = self._origin_path(request)
+        origin = self._origin_path(context, request)
         if origin:
             inputs.append(
                 format_html(
@@ -162,19 +169,19 @@ class FormNode(template.Node):
         return "\n".join(inputs)
 
     @staticmethod
-    def _origin_path(request: "HttpRequest") -> str | None:
+    def _origin_path(context: template.Context, request: "HttpRequest") -> str | None:
         """Return the page path the form belongs to.
 
         On the validation-error re-render the request targets the action
         endpoint, so the posted origin of the original page wins over
-        `request.path`. On a wizard advance the shaping layer sets
-        ADVANCE_ORIGIN_ATTR to the next step URL, which wins over the
-        submitted step origin so blur-validate probes on the new step
-        render from the correct page.
+        `request.path`. On a wizard advance the shaping layer merges the
+        next step URL under FORM_ORIGIN_OVERRIDE_KEY into the zone render
+        context, which wins over the submitted step origin so blur-validate
+        probes on the new step render from the correct page.
         """
-        advance: str | None = getattr(request, ADVANCE_ORIGIN_ATTR, None)
-        if advance is not None:
-            return advance
+        override = context.get(FORM_ORIGIN_OVERRIDE_KEY)
+        if override is not None:
+            return str(override)
         if getattr(request, "method", None) == "POST":
             posted = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
             if posted is not None:
@@ -258,7 +265,7 @@ class FormNode(template.Node):
             meta.get("uid") if meta is not None else None,
             form_instance,
         )
-        hidden_inputs = self._build_hidden_inputs(request)
+        hidden_inputs = self._build_hidden_inputs(context, request)
 
         push_kwargs: dict[str, object] = {"form": form_instance}
         if wizard_instance is not None:

@@ -5,7 +5,7 @@ import pytest
 from django.test import RequestFactory, override_settings
 
 from next.partial import Patches, PatchEventStream
-from next.partial.backends import partial_backend_manager
+from next.partial.manager import partial_backend_manager
 from next.partial.signals import sse_stream_closed, sse_stream_opened
 from next.partial.sse import _heartbeat_seconds, _retry_ms
 

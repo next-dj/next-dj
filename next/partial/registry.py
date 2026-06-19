@@ -59,13 +59,9 @@ class PatchOpRegistry:
         if patch_op_registered.receivers:
             patch_op_registered.send(sender=type(self), name=name)
 
-    def is_registered(self, name: str) -> bool:
+    def __contains__(self, name: object) -> bool:
         """Return True when the verb is known to the registry."""
         return name in self._ops
-
-    def names(self) -> frozenset[str]:
-        """Return the set of registered verb names."""
-        return frozenset(self._ops)
 
     def custom_names(self) -> frozenset[str]:
         """Return the verb names registered beyond the built-in set."""

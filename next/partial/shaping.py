@@ -1,6 +1,5 @@
 """Shaping of form action outcomes into patch envelopes for partial requests."""
 
-import contextlib
 import types
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,12 +14,12 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 from next.forms.dispatch import ActionOutcome, ActionOutcomeKind, FormActionDispatch
 from next.forms.origin import _resolve_origin
-from next.forms.uid import ADVANCE_ORIGIN_ATTR
 from next.pages import page
 from next.static.scripts import csrf_payload
+from next.templatetags.forms import FORM_ORIGIN_OVERRIDE_KEY
 
-from .backends import partial_backend_manager
 from .headers import RESPONSE_ACTION, RESPONSE_FORM, partial_intent
+from .manager import partial_backend_manager
 from .patches import FormMeta, Patches, PatchResponse
 from .registry import zones_of
 from .render import render_zone
@@ -101,9 +100,7 @@ def shape_validate(
     _scrub_errors(form, requested)
 
     uid = action.uid
-    match = _resolve_origin(request)
-    page_path = match.page_path if match is not None else None
-    url_kwargs = dict(match.url_kwargs) if match is not None else {}
+    page_path, url_kwargs = _origin_target(request)
     patches = Patches(request)
     zone = _form_zone(request, page_path)
     if zone is not None:
@@ -213,19 +210,15 @@ def _shape_advance(
     zone = _form_zone(request, page_path)
     if zone is not None:
         overrides = _wizard_overrides(form, next_wizard, outcome.action_name)
-        # Override the form origin for the render so the next step's hidden
-        # _next_form_origin field carries the next step URL, not the current
-        # step URL from request.POST. Without this, blur-validate probes on
-        # the new step resolve the origin back to the previous step page and
-        # morph the wrong step into the zone.
-        setattr(request, ADVANCE_ORIGIN_ATTR, redirect_to)
-        try:
-            result = render_zone(
-                page_path, (zone,), request, url_kwargs=url_kwargs, overrides=overrides
-            )
-        finally:
-            with contextlib.suppress(AttributeError):
-                delattr(request, ADVANCE_ORIGIN_ATTR)
+        # Override the form origin in the render context so the next step's
+        # hidden _next_form_origin field carries the next step URL, not the
+        # current step URL from request.POST. Without this, blur-validate
+        # probes on the new step resolve the origin back to the previous step
+        # page and morph the wrong step into the zone.
+        overrides[FORM_ORIGIN_OVERRIDE_KEY] = redirect_to
+        result = render_zone(
+            page_path, (zone,), request, url_kwargs=url_kwargs, overrides=overrides
+        )
         patches.morph({"zone": zone}, result.html[zone])
     if _should_push_steps(wizard):
         patches.push_url(redirect_to)
@@ -289,9 +282,7 @@ def _success_funnel(
     rotated: bool,
 ) -> HttpResponse:
     """Morph the form in place on a None result and drain messages to toasts."""
-    match = _resolve_origin(request)
-    page_path = match.page_path if match is not None else None
-    url_kwargs = dict(match.url_kwargs) if match is not None else {}
+    page_path, url_kwargs = _origin_target(request)
     patches = Patches(request)
     uid = outcome.uid or ""
     zone = _form_zone(request, page_path)
@@ -308,6 +299,21 @@ def _success_funnel(
         patches.morph({"form": uid}, html, extract=True)
     drain_messages(request, patches)
     return _envelope_response(patches, request=request, rotated=rotated)
+
+
+def _origin_target(
+    request: "HttpRequest",
+) -> "tuple[Path | None, dict[str, object]]":
+    """Resolve the request origin to its page path and URL kwargs.
+
+    Both the validate pass and the success funnel re-render the origin
+    page, so they share one resolution. A request that names no resolvable
+    origin yields a None page path and empty kwargs.
+    """
+    match = _resolve_origin(request)
+    if match is None:
+        return None, {}
+    return match.page_path, dict(match.url_kwargs)
 
 
 def _form_zone(request: "HttpRequest", page_path: "Path | None") -> str | None:

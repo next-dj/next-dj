@@ -3,7 +3,7 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -11,13 +11,13 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from next.static.collector import default_placeholders
 from next.static.serializers import resolve_serializer
 
-from .backends import partial_backend_manager
 from .headers import (
     CONTENT_TYPE,
     RESPONSE_VERSION,
     is_partial_request,
     set_partial_vary,
 )
+from .manager import partial_backend_manager
 from .registry import patch_op_registry
 
 
@@ -125,18 +125,6 @@ class Asset:
 
 
 @dataclass(frozen=True, slots=True)
-class DeferZone:
-    """One zone the client should fetch next, with a load trigger."""
-
-    zone: str
-    trigger: str = "load"
-
-    def as_dict(self) -> dict[str, str]:
-        """Return the wire form of the defer entry."""
-        return {"zone": self.zone, "trigger": self.trigger}
-
-
-@dataclass(frozen=True, slots=True)
 class FormMeta:
     """Machine-readable state of a form built from its field specs."""
 
@@ -165,7 +153,6 @@ class Envelope:
     version: str
     ops: "Sequence[Patch]" = ()
     assets: "Sequence[Asset]" = ()
-    defer: "Sequence[DeferZone]" = ()
     form: "FormMeta | None" = None
     csrf: "Mapping[str, Any] | None" = None
     request_id: str | None = None
@@ -176,7 +163,6 @@ class Envelope:
             "version": self.version,
             "ops": [op.as_dict() for op in self.ops],
             "assets": [asset.as_dict() for asset in self.assets],
-            "defer": [zone.as_dict() for zone in self.defer],
             "form": self.form.as_dict() if self.form is not None else None,
         }
         if self.csrf is not None:
@@ -216,10 +202,9 @@ class Patches:
             self._version: str = target
         else:
             self._request = target
-            self._version = partial_backend_manager.get().version()
+            self._version = partial_backend_manager.version()
         self._ops: list[Patch] = []
         self._assets: list[Asset] = []
-        self._defer: list[DeferZone] = []
         self._form: FormMeta | None = None
         self._csrf: Mapping[str, Any] | None = None
         self._request_id: str | None = echo_of
@@ -231,43 +216,57 @@ class Patches:
         """Return the asset version stamped on the envelope."""
         return self._version
 
-    def morph(  # noqa: PLR0913
+    def morph(
         self,
         target: "Mapping[str, Any] | None" = None,
         html: str | None = None,
         *,
-        zone: str | None = None,
-        page: "Path | str | None" = None,
-        url_kwargs: "Mapping[str, Any] | None" = None,
-        form: str | None = None,
-        component: str | None = None,
-        props: "Mapping[str, Any] | None" = None,
-        overrides: "Mapping[str, Any] | None" = None,
         extract: bool = False,
+        **select: object,
     ) -> "Patches":
         """Morph a target into HTML, the default verb.
 
-        The named argument selects how the HTML and target are produced.
-        `zone` renders the named zone of the origin page, with optional
-        context `overrides`. Pass `page` alongside `zone` to render the
-        named zone of a foreign page out of band, addressed by its page
-        path or a URL of it, with that page's `url_kwargs`. The foreign
-        page's body resolution is re-run first so its guards, denials, and
-        redirects are honoured before its zone travels in this response.
-        `component` renders the named component with `props`. `form`
-        extract-morphs the form addressed by its uid. `html` morphs a
-        passed target into ready HTML. `extract` marks `html` as a whole
-        document the client trims down to the node matching the target.
+        A thin facade over the typed per-verb morph methods that keeps the
+        single-verb mental model. With no selector it morphs the passed
+        `target` into `html`, `extract` trimming a whole document down to
+        the node. A `zone` selector morphs the origin page's named zone,
+        or a foreign page's zone when `page` is given too. `component`
+        morphs a rendered component, `form` extract-morphs a form by uid.
+        Reach for the typed `morph_zone`, `morph_foreign_zone`,
+        `morph_component`, or `morph_form` for full type checking. The
+        facade dispatches the selector to the method that owns its
+        contract, so an unknown or conflicting selector raises rather than
+        being silently dropped.
         """
-        if zone is not None and page is not None:
-            return self._morph_foreign_zone(zone, page, url_kwargs)
-        if zone is not None:
-            return self._morph_zone(zone, overrides)
-        if component is not None:
-            return self._morph_component(component, props)
-        if form is not None:
-            return self._append_morph({"form": form}, html or "", extract=True)
-        return self._append_morph(dict(target or {}), html or "", extract=extract)
+        if not select:
+            return self._append_morph(dict(target or {}), html or "", extract=extract)
+        return self._dispatch_morph(html, select)
+
+    def _dispatch_morph(
+        self,
+        html: str | None,
+        select: "Mapping[str, object]",
+    ) -> "Patches":
+        """Route a keyword-selected morph to its typed per-verb method."""
+        zone = select.get("zone")
+        if isinstance(zone, str) and "page" in select:
+            return self.morph_foreign_zone(
+                zone,
+                cast("Path | str", select["page"]),
+                url_kwargs=cast("Mapping[str, Any] | None", select.get("url_kwargs")),
+            )
+        if isinstance(zone, str):
+            overrides = cast("Mapping[str, Any] | None", select.get("overrides"))
+            return self.morph_zone(zone, overrides=overrides)
+        component = select.get("component")
+        if isinstance(component, str):
+            props = cast("Mapping[str, Any] | None", select.get("props"))
+            return self.morph_component(component, props=props)
+        form = select.get("form")
+        if isinstance(form, str):
+            return self.morph_form(form, html or "")
+        msg = f"morph() got unexpected selector keywords {sorted(select)}."
+        raise TypeError(msg)
 
     def _append_morph(
         self,
@@ -283,21 +282,23 @@ class Patches:
         )
         return self
 
-    def _morph_zone(
+    def morph_zone(
         self,
         zone: str,
-        overrides: "Mapping[str, Any] | None",
+        *,
+        overrides: "Mapping[str, Any] | None" = None,
     ) -> "Patches":
         """Render the named zone of the origin page and morph it in place."""
         result = self._render_zone(zone, overrides)
         self._collect_assets(result)
         return self._append_morph({"zone": zone}, result.html[zone], extract=False)
 
-    def _morph_foreign_zone(
+    def morph_foreign_zone(
         self,
         zone: str,
         page: "Path | str",
-        url_kwargs: "Mapping[str, Any] | None",
+        *,
+        url_kwargs: "Mapping[str, Any] | None" = None,
     ) -> "Patches":
         """Render a zone of a foreign page out of band, re-running its guards.
 
@@ -358,14 +359,19 @@ class Patches:
 
         return render_zone(foreign_path, (zone,), request, url_kwargs=url_kwargs)
 
-    def _morph_component(
+    def morph_component(
         self,
         name: str,
-        props: "Mapping[str, Any] | None",
+        *,
+        props: "Mapping[str, Any] | None" = None,
     ) -> "Patches":
         """Render the named component with props and morph it in place."""
         html = self._render_component(name, props)
         return self._append_morph({"component": name}, html, extract=False)
+
+    def morph_form(self, uid: str, html: str) -> "Patches":
+        """Extract-morph the form addressed by its uid into the given HTML."""
+        return self._append_morph({"form": uid}, html, extract=True)
 
     def replace(self, target: "Mapping[str, Any]", html: str) -> "Patches":
         """Replace the target node wholesale with the given HTML."""
@@ -492,7 +498,7 @@ class Patches:
 
     def op(self, name: str, **payload: Any) -> "Patches":  # noqa: ANN401
         """Emit a custom verb registered through `register_patch_op`."""
-        if not patch_op_registry.is_registered(name):
+        if name not in patch_op_registry:
             raise UnknownPatchOpError(name)
         self._ops.append(Patch(op=name, extras=dict(payload)))
         return self
@@ -500,11 +506,6 @@ class Patches:
     def add_asset(self, kind: str, url: str) -> "Patches":
         """Record a co-located asset in the envelope manifest."""
         self._assets.append(Asset(kind=kind, url=url))
-        return self
-
-    def defer_zone(self, zone: str, trigger: str = "load") -> "Patches":
-        """Mark a zone the client should fetch next."""
-        self._defer.append(DeferZone(zone=zone, trigger=trigger))
         return self
 
     def set_form(self, form: FormMeta) -> "Patches":
@@ -523,7 +524,6 @@ class Patches:
             version=self._version,
             ops=tuple(self._ops),
             assets=tuple(self._assets),
-            defer=tuple(self._defer),
             form=self._form,
             csrf=self._csrf,
             request_id=self._request_id,
@@ -677,7 +677,6 @@ class PatchResponse(HttpResponse):
 
 __all__ = [
     "Asset",
-    "DeferZone",
     "Envelope",
     "ForeignPageNotAuthorizedError",
     "FormMeta",

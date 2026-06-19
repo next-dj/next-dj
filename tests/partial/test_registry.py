@@ -23,8 +23,8 @@ class TestBuiltinOps:
 
     def test_fresh_registry_knows_builtins(self) -> None:
         registry = PatchOpRegistry()
-        assert registry.is_registered("morph")
-        assert registry.names() == BUILTIN_OPS
+        assert "morph" in registry
+        assert frozenset(registry._ops) == BUILTIN_OPS
 
 
 class TestRegisterPatchOp:
@@ -32,9 +32,9 @@ class TestRegisterPatchOp:
 
     def test_register_makes_verb_known(self) -> None:
         registry = PatchOpRegistry()
-        assert not registry.is_registered("confetti")
+        assert "confetti" not in registry
         registry.register("confetti")
-        assert registry.is_registered("confetti")
+        assert "confetti" in registry
 
     def test_register_emits_signal(self) -> None:
         seen: list[dict[str, object]] = []
@@ -56,11 +56,11 @@ class TestRegisterPatchOp:
     def test_register_skips_send_without_receivers(self) -> None:
         registry = PatchOpRegistry()
         registry.register("quiet")
-        assert registry.is_registered("quiet")
+        assert "quiet" in registry
 
     def test_facade_register_uses_global_registry(self) -> None:
         register_patch_op("spark")
-        assert patch_op_registry.is_registered("spark")
+        assert "spark" in patch_op_registry
 
 
 def _zoned_template() -> Template:

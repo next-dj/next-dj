@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 
 from django.http import StreamingHttpResponse
 
-from .backends import partial_backend_manager
 from .headers import set_partial_vary
+from .manager import partial_backend_manager
 from .signals import sse_stream_closed, sse_stream_opened
 
 

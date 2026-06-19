@@ -1,12 +1,12 @@
 """Public facade for the partial-rendering subsystem."""
 
 from . import signals
-from .backends import PartialProtocolBackend, partial_backend_manager
+from .backends import PartialProtocolBackend
 from .headers import PartialIntent, is_partial_request, partial_intent
+from .manager import partial_backend_manager
 from .origin import OriginSource, PartialOrigin, resolve_partial_origin
 from .patches import (
     Asset,
-    DeferZone,
     Envelope,
     ForeignPageNotAuthorizedError,
     FormMeta,
@@ -23,7 +23,6 @@ from .sse import PatchEventStream
 __all__ = [
     "ActionRef",
     "Asset",
-    "DeferZone",
     "Envelope",
     "ForeignPageNotAuthorizedError",
     "FormMeta",

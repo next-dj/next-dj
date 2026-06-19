@@ -1,6 +1,7 @@
+import pytest
+
 from next.partial import (
     Asset,
-    DeferZone,
     Envelope,
     FormMeta,
     Patch,
@@ -43,7 +44,6 @@ class TestEnvelopeAsDict:
             "version": "v1",
             "ops": [],
             "assets": [],
-            "defer": [],
             "form": None,
         }
 
@@ -52,13 +52,12 @@ class TestEnvelopeAsDict:
             version="v1",
             ops=(Patch(op="remove", target={"zone": "row"}),),
             assets=(Asset(kind="css", url="/a.css"),),
-            defer=(DeferZone(zone="audit"),),
             form=FormMeta(uid="ab12", valid=False, errors={"name": ["required"]}),
         )
         data = envelope.as_dict()
         assert data["ops"] == [{"op": "remove", "target": {"zone": "row"}}]
         assert data["assets"] == [{"kind": "css", "url": "/a.css"}]
-        assert data["defer"] == [{"zone": "audit", "trigger": "load"}]
+        assert "defer" not in data
         assert data["form"] == {
             "uid": "ab12",
             "valid": False,
@@ -95,6 +94,24 @@ class TestPatchesBuilder:
             .envelope()
         )
         assert envelope.ops[0].as_dict()["extract"] is True
+
+    def test_morph_form_extract_morphs_by_uid(self) -> None:
+        envelope = Patches("v1").morph_form("ab12", "<form></form>").envelope()
+        assert envelope.ops[0].as_dict() == {
+            "op": "morph",
+            "target": {"form": "ab12"},
+            "html": "<form></form>",
+            "extract": True,
+        }
+
+    def test_morph_facade_form_delegates_to_morph_form(self) -> None:
+        facade = Patches("v1").morph(form="ab12", html="<form></form>").envelope()
+        direct = Patches("v1").morph_form("ab12", "<form></form>").envelope()
+        assert facade.ops[0].as_dict() == direct.ops[0].as_dict()
+
+    def test_morph_rejects_an_unknown_selector(self) -> None:
+        with pytest.raises(TypeError, match="unexpected selector"):
+            Patches("v1").morph(widget="ab12")
 
     def test_replace(self) -> None:
         envelope = Patches("v1").replace({"zone": "list"}, "<div></div>").envelope()
@@ -138,17 +155,10 @@ class TestPatchesBuilder:
         )
         assert [op.op for op in envelope.ops] == ["replace", "remove", "event"]
 
-    def test_assets_defer_and_form(self) -> None:
+    def test_assets_and_form(self) -> None:
         form = FormMeta(uid="ab12", valid=True)
-        envelope = (
-            Patches("v1")
-            .add_asset("css", "/x.css")
-            .defer_zone("audit", "revealed")
-            .set_form(form)
-            .envelope()
-        )
+        envelope = Patches("v1").add_asset("css", "/x.css").set_form(form).envelope()
         assert envelope.assets[0] == Asset(kind="css", url="/x.css")
-        assert envelope.defer[0] == DeferZone(zone="audit", trigger="revealed")
         assert envelope.form is form
 
     def test_version_carried(self) -> None:

@@ -6,8 +6,8 @@ from django.http import HttpResponse
 
 from next.static.collector import default_placeholders
 
-from .backends import partial_backend_manager
 from .headers import MergeMode, set_partial_vary
+from .manager import partial_backend_manager
 from .patches import Asset, Envelope, Patches, PatchResponse
 from .render import UnknownZoneError, render_zone
 
@@ -43,7 +43,7 @@ def zone_response(
     travel back as one patch envelope.
     """
     backend = partial_backend_manager.get()
-    version = backend.version()
+    version = partial_backend_manager.version()
     if dynamic_body:
         return _bad_request("zone in dynamic body")
     if request.method in _SAFE_METHODS and _version_conflict(intent, version):

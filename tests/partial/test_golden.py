@@ -237,25 +237,6 @@ def _append_page() -> GoldenCase:
     )
 
 
-def _defer_zone() -> GoldenCase:
-    html = '<div data-next-zone="summary"><p>saved</p></div>'
-    envelope = (
-        Patches("9f3c2e1b")
-        .morph({"zone": "summary"}, html)
-        .defer_zone("audit-table")
-        .envelope()
-    )
-    return GoldenCase(
-        name="defer_zone",
-        envelope=envelope,
-        description=(
-            "A form response that morphs its own zone and defers an audit zone: "
-            "the runtime queues the deferred zone for a follow-up load GET."
-        ),
-        version="9f3c2e1b",
-    )
-
-
 def _sse_refresh() -> GoldenCase:
     envelope = Patches("9f3c2e1b", echo_of="r9").refresh(zone="poll-results").envelope()
     return GoldenCase(
@@ -317,7 +298,6 @@ GOLDEN_CASES = [
     _layer_close(),
     _layer_oob_list(),
     _append_page(),
-    _defer_zone(),
     _sse_refresh(),
     _result_form_visit(),
     _context_merge(),
@@ -457,12 +437,6 @@ class TestWriteGoldenFixtures:
         assert op["dedupe"] == "key"
         assert 'data-next-key="11"' in op["html"]
         assert 'id="sentinel"' in op["html"]
-
-    def test_defer_zone_envelope_queues_the_audit_zone(self) -> None:
-        write_case(_defer_zone())
-        data = json.loads(read_envelope_bytes("defer_zone"))
-        assert [op["op"] for op in data["ops"]] == ["morph"]
-        assert data["defer"] == [{"zone": "audit-table", "trigger": "load"}]
 
     def test_sse_refresh_envelope_carries_refresh_and_echo_id(self) -> None:
         write_case(_sse_refresh())
