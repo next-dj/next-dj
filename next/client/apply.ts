@@ -124,8 +124,9 @@ export interface CustomPatch {
 export type Patch = BuiltinPatch | CustomPatch;
 
 // The set of built-in op names, kept in sync with the BuiltinPatch union by the
-// isBuiltin guard below. A custom op shadowing one of these is dispatched
-// through the registry first, so the name still belongs to a built-in here.
+// isBuiltin guard below. #applyOp tests isBuiltin first, so a custom op
+// registered under a built-in name never reaches the registry, the built-in
+// switch claims the name.
 const BUILTIN_OPS = new Set<string>([
   "morph",
   "replace",

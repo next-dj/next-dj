@@ -6,7 +6,7 @@ Guidelines for code, tests, and pull requests. Read this before opening a PR.
 
 - Python 3.12+. See `requires-python` in `pyproject.toml`. CI runs Python 3.12–3.14 against Django 4.2, 5.0, 5.1, 5.2, 6.0 (with matrix exclusions — 3.13 drops 4.2/5.0, 3.14 is 6.0-only).
 - [uv](https://docs.astral.sh/uv/) for Python dependencies.
-- Node.js 24 + npm for the TypeScript bundle in [next/static/next/](next/static/next/). CI uses Node 24.
+- Node.js 24 + npm for the TypeScript bundle. The client runtime sources live in [next/client/](next/client/) and esbuild emits the bundle to `next/static/next/next.min.js`. CI uses Node 24.
 - Git.
 
 Use project commands via `make` / `uv run` / `npm run` rather than a bare system `python` or globally installed tools.
@@ -26,7 +26,7 @@ Skim this map before changing code. Each `next/<area>/` module owns one framewor
 | [next/pages/](next/pages/) | `Page`, template loaders (`DjxTemplateLoader`, `PythonTemplateLoader`), layouts, page registry. |
 | [next/server/](next/server/) | Dev-server autoreload (`NextStatReloader`) and filesystem watcher. |
 | [next/static/](next/static/) | Static asset discovery, collector, finders, backends, template-tag scripts. |
-| [next/static/next/](next/static/next/) | `next.ts` + `next.test.ts` — the client runtime bundled to `next.min.js`. |
+| [next/client/](next/client/) | TypeScript client runtime sources and their co-located vitest tests, bundled by esbuild to `next/static/next/next.min.js`. |
 | [next/templatetags/](next/templatetags/) | Django template tag libraries for components, forms, and `{% next_static %}`. |
 | [next/urls/](next/urls/) | File-router backends, URL-pattern parser, dispatcher, markers (`DUrl`). |
 | [next/utils.py](next/utils.py) | Small shared utilities. |
@@ -78,7 +78,7 @@ Tests mirror this layout:
 
 | Command | Purpose |
 | --- | --- |
-| `make build-js` | Bundle `next/static/next/next.ts` → `next.min.js` via esbuild. |
+| `make build-js` | Bundle `next/client/next.ts` → `next/static/next/next.min.js` via esbuild. |
 | `make build` | `uv build` — wheel + sdist. Invokes [build_hooks.py](build_hooks.py), which shells out to `npm ci && npm run build:next` so the packaged artifact contains a fresh `next.min.js`. Set `NEXT_DJ_SKIP_JS_BUILD=1` to bypass (only when the bundle is already present — used by CI between the dedicated build job and matrix jobs). |
 
 ### Docs and hooks
@@ -91,7 +91,7 @@ Tests mirror this layout:
 
 ### Before a PR
 
-Run **`make ci`**. It runs, in order: `lint`, `type-check`, `build-js`, `lint-js`, `format-js-check`, `test-js`, `test`, `test-examples`, `test-compat`.
+Run **`make ci`**. It runs, in order: `lint`, `type-check`, `build-js`, `lint-js`, `format-js-check`, `type-check-js`, `test-js-coverage`, `test`, `test-examples`, `test-compat`.
 
 ### CI vs local `make ci`
 
