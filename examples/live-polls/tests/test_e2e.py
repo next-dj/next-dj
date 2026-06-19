@@ -16,7 +16,7 @@ from polls.broker import (
 from polls.models import Choice, Poll
 
 from next.forms.signals import action_dispatched, form_validation_failed
-from next.partial.headers import REQUEST_ID
+from next.partial import REQUEST_ID
 from next.testing import (
     NextClient,
     SignalRecorder,
@@ -366,7 +366,7 @@ class TestStreamEndpoint:
         finally:
             response.close()
 
-    def test_change_yields_refresh_and_context_envelope(
+    def test_change_yields_refresh_with_request_id(
         self, primed_broker: PollBroker, poll: Poll
     ) -> None:
         Choice.objects.filter(poll=poll, text="Tabs").update(votes=2)

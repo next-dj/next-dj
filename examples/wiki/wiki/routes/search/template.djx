@@ -9,7 +9,7 @@
     </label>
     <div class="flex gap-2">
       <input id="id_q" type="text" name="q" value="{{ query }}"
-             placeholder="Type at least two letters"
+             placeholder="Search file docs and articles"
              class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
       {% component "button" type="submit" text="Search" variant="default" %}
     </div>

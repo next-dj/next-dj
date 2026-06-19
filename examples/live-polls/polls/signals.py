@@ -15,7 +15,8 @@ from django.dispatch import receiver
 from django.http import HttpRequest
 
 from next.forms.signals import action_dispatched
-from next.partial.headers import REQUEST_ID
+from next.partial import REQUEST_ID
+from next.static import StaticCollector
 from next.static.assets import StaticAsset
 from next.static.signals import collector_finalized
 from polls.broker import broker, build_snapshot
@@ -51,12 +52,12 @@ def broadcast_vote(
     broker.publish(snapshot, request_id=request_id)
 
 
-def _has_module_assets(collector: object) -> bool:
-    scripts = collector.assets_in_slot("scripts")  # type: ignore[attr-defined]
+def _has_module_assets(collector: StaticCollector) -> bool:
+    scripts = collector.assets_in_slot("scripts")
     return any(asset.kind == "vue" for asset in scripts)
 
 
-def inject_vite_dev_client(sender: object, **_kwargs: object) -> None:
+def inject_vite_dev_client(sender: StaticCollector, **_kwargs: object) -> None:
     """Prepend the Vite dev client so HMR can attach on pages with Vue assets.
 
     Vue does not need a React Refresh preamble. The single
@@ -68,7 +69,7 @@ def inject_vite_dev_client(sender: object, **_kwargs: object) -> None:
     if not _has_module_assets(sender):
         return
     origin = settings.VITE_DEV_ORIGIN
-    sender.add(  # type: ignore[attr-defined]
+    sender.add(
         StaticAsset(url=f"{origin}/@vite/client", kind="module"),
         prepend=True,
     )
