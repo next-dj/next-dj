@@ -183,13 +183,12 @@ function isAtomic(el: Element): boolean {
   return el.tagName.includes("-") || el.shadowRoot != null;
 }
 
-// A keep node is left untouched only with an id, the basis of its persistence.
-// Without an id it is an ordinary node, with a dev warning.
+// A keep node is left untouched so a foreign root mounted into it survives a
+// morph. With an id the child walk pairs it by hard match, without one it pairs
+// by position, so a framework root the server renders with no stable id is
+// preserved all the same.
 function isKept(el: Element): boolean {
-  if (!el.hasAttribute("data-next-keep")) return false;
-  if (el.getAttribute("id") !== null) return true;
-  console.warn("[next.morph] data-next-keep without id", el);
-  return false;
+  return el.hasAttribute("data-next-keep");
 }
 
 function emit(target: Element, name: string, detail: Record<string, unknown>): boolean {

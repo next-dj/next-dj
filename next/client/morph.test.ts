@@ -429,12 +429,14 @@ describe("morph hooks and events", () => {
     expect(after).toHaveBeenCalled();
   });
 
-  it("warns on a data-next-keep node without an id", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const target = mount('<div id="r"><span data-next-keep>x</span></div>');
-    morph(target, '<div id="r"><span data-next-keep class="c">y</span></div>');
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+  it("keeps a data-next-keep node without an id, paired by position", () => {
+    const target = mount('<div id="r"><span data-next-keep><b>live</b></span></div>');
+    const keep = target.querySelector("[data-next-keep]")!;
+    const child = keep.firstElementChild;
+    morph(target, '<div id="r"><span data-next-keep class="new"><i>x</i></span></div>');
+    expect(target.querySelector("[data-next-keep]")).toBe(keep);
+    expect(keep.firstElementChild).toBe(child);
+    expect(keep.hasAttribute("class")).toBe(false);
   });
 
   it("warns on a node carrying both data-next-key and id", () => {
