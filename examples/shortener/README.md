@@ -152,6 +152,19 @@ The `{% form "name" %}` tag resolves the form to its stable UID endpoint, inject
 
 > `{% form %}`, `{% component %}`, `{% collect_styles %}`, `{% url %}` etc. are all globally loaded template tags. **Do not** write `{% load forms components next_static %}` — `next.apps.templates.install()` registers them as Django builtins at startup.
 
+The admin list edits each link inline. The same form renders once per row, so each carries `key=link.slug` (`data-next-key`) and an invalid submit re-renders the submitted row, not the first:
+
+```djx
+{% form "edit_link_form" key=link.slug %}
+  <input type="hidden" name="slug" value="{{ link.slug }}">
+  <input name="url" value="{{ link.url }}" type="url">
+  {% if form.url.errors %}<span>{{ form.url.errors|join:", " }}</span>{% endif %}
+  <button type="submit">Save</button>
+{% endform %}
+```
+
+[`EditLinkForm`](shortener/routes/admin/page.py) resolves the link from the posted `slug` in `get_initial`. A looped `{% form %}` without `key=` or `zone=` raises `next.W070`.
+
 ### 6. Components — simple, composite, and shared
 
 A component lives in `_widgets/<name>/`:

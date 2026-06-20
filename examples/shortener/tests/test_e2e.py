@@ -172,3 +172,38 @@ class TestAdminSurface:
         assert "next.dj shortener" in body
         assert "data-next-link-card" in body
         assert "/s/home1/" in body
+
+
+class TestAdminInlineEdit:
+    """Each admin row carries a per-link inline edit form keyed by slug."""
+
+    def test_rows_render_edit_forms_keyed_by_slug(self, client) -> None:
+        Link.objects.create(slug="alpha", url="https://example.com/a")
+        Link.objects.create(slug="bravo", url="https://example.com/b")
+        body = client.get("/admin/").content.decode()
+        assert 'data-next-key="alpha"' in body
+        assert 'data-next-key="bravo"' in body
+        assert 'value="https://example.com/a"' in body
+
+    def test_inline_edit_saves_the_addressed_link(self, client) -> None:
+        Link.objects.create(slug="alpha", url="https://example.com/a")
+        Link.objects.create(slug="bravo", url="https://example.com/b")
+        response = client.post_action(
+            "edit_link_form",
+            {"slug": "bravo", "url": "https://example.com/updated"},
+            origin="/admin/",
+        )
+        assert response.status_code == 302
+        assert Link.objects.get(slug="bravo").url == "https://example.com/updated"
+        assert Link.objects.get(slug="alpha").url == "https://example.com/a"
+
+    def test_inline_edit_invalid_keeps_the_link(self, client) -> None:
+        Link.objects.create(slug="alpha", url="https://example.com/a")
+        response = client.post_action(
+            "edit_link_form",
+            {"slug": "alpha", "url": "not-a-url"},
+            origin="/admin/",
+        )
+        assert response.status_code == 200
+        assert b"Enter a valid URL" in response.content
+        assert Link.objects.get(slug="alpha").url == "https://example.com/a"
