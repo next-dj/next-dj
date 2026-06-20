@@ -607,6 +607,65 @@ describe("Applier morph verb", () => {
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("old");
   });
 
+  it("resolves a form target to the instance carrying the request key", () => {
+    document.body.innerHTML =
+      '<form data-next-action="u1" data-next-key="a"><i>A</i></form>' +
+      '<form data-next-action="u1" data-next-key="b"><i>B</i></form>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([{ op: "inner", target: { form: "u1" }, html: "<i>hit</i>" }]),
+      undefined,
+      "b",
+    );
+    const forms = document.querySelectorAll('[data-next-action="u1"]');
+    expect(forms[0].textContent).toBe("A");
+    expect(forms[1].textContent).toBe("hit");
+  });
+
+  it("resolves a form target to the first match when no request key is set", () => {
+    document.body.innerHTML =
+      '<form data-next-action="u1" data-next-key="a"><i>A</i></form>' +
+      '<form data-next-action="u1" data-next-key="b"><i>B</i></form>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([{ op: "inner", target: { form: "u1" }, html: "<i>hit</i>" }]),
+    );
+    const forms = document.querySelectorAll('[data-next-action="u1"]');
+    expect(forms[0].textContent).toBe("hit");
+    expect(forms[1].textContent).toBe("B");
+  });
+
+  it("falls back to the first uid match when the key is absent from the root", () => {
+    document.body.innerHTML = '<form data-next-action="u1"><i>A</i></form>';
+    const { applier } = makeApplier();
+    applier.apply(
+      envelope([{ op: "inner", target: { form: "u1" }, html: "<i>hit</i>" }]),
+      undefined,
+      "missing",
+    );
+    expect(document.querySelector('[data-next-action="u1"]')!.textContent).toBe("hit");
+  });
+
+  it("extract carves the form instance matching the request key", () => {
+    document.body.innerHTML =
+      '<form data-next-action="u1" data-next-key="a"><i>A</i></form>' +
+      '<form data-next-action="u1" data-next-key="b"><i>B</i></form>';
+    const { applier } = makeApplier();
+    const full =
+      "<html><body>" +
+      '<form data-next-action="u1" data-next-key="a"><i>A-fresh</i></form>' +
+      '<form data-next-action="u1" data-next-key="b"><i>B-fresh</i></form>' +
+      "</body></html>";
+    applier.apply(
+      envelope([{ op: "morph", target: { form: "u1" }, html: full, extract: true }]),
+      undefined,
+      "b",
+    );
+    const forms = document.querySelectorAll('[data-next-action="u1"]');
+    expect(forms[0].textContent).toBe("A");
+    expect(forms[1].textContent).toBe("B-fresh");
+  });
+
   it("morph is a no-op when the target is missing", () => {
     const { applier } = makeApplier();
     expect(() =>

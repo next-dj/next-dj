@@ -119,6 +119,11 @@ This is a documented limitation of a keyless morph, and the fix is one attribute
 ``data-next-key`` also drives the dedup of ``append`` and ``prepend``.
 A merge that brings a row whose key already exists replaces the existing row rather than duplicating it, which is what keeps infinite scroll free of duplicate rows under a race.
 
+A repeated form needs the same key.
+A ``{% form %}`` rendered inside a ``{% for %}`` produces one instance per iteration, all sharing the action uid the morph addresses.
+Give each instance a ``key=`` with a stable per-row value, ``{% form "rename_item" key=item.pk %}``, so an invalid submit re-renders the submitted instance rather than the first one on the page.
+A wrapping ``zone=`` is the alternative, and a looped form with neither raises ``next.W070`` at ``manage.py check``.
+
 Zone Rules the Checks Enforce
 -----------------------------
 

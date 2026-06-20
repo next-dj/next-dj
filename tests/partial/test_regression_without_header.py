@@ -77,9 +77,7 @@ class TestInvalidFormPostWithoutPartialSwitch:
         assert "This field is required." in body
         assert 'aria-invalid="true"' in body
 
-    def test_content_type_is_html_not_envelope(
-        self, next_client: NextClient
-    ) -> None:
+    def test_content_type_is_html_not_envelope(self, next_client: NextClient) -> None:
         response = _invalid_form_post(next_client)
         assert response["Content-Type"] == "text/html; charset=utf-8"
         assert response["Content-Type"] != "application/vnd.next.patches+json"

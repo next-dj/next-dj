@@ -115,7 +115,7 @@ class TestPatchesBuilder:
 
     def test_morph_rejects_conflicting_selectors(self) -> None:
         with pytest.raises(TypeError, match="conflicting selector"):
-            Patches("v1").morph(zone="list", component="card")
+            Patches("v1").morph(zone="list", form="ab12")
 
     def test_morph_rejects_a_none_valued_selector(self) -> None:
         with pytest.raises(TypeError, match="unexpected selector"):

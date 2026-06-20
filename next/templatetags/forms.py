@@ -29,6 +29,7 @@ _PARTIAL_FORM_PARAMS: dict[str, str] = {
     "trigger": "data-next-trigger",
     "debounce": "data-next-debounce",
     "zone": "data-next-target",
+    "key": "data-next-key",
 }
 
 
@@ -45,9 +46,10 @@ register = template.Library()
 def do_form(parser: template.base.Parser, token: template.base.Token) -> "FormNode":
     """Block tag accepting an action name plus optional HTML attributes.
 
-    The `validate`, `trigger`, `debounce`, and `zone` params compile to
-    client `data-next-*` attributes on the form, every other key="value"
-    pair stays a plain HTML attribute.
+    The `validate`, `trigger`, `debounce`, `zone`, and `key` params compile
+    to client `data-next-*` attributes on the form, every other key="value"
+    pair stays a plain HTML attribute. The `key` distinguishes one instance
+    of a repeated form so a partial morph lands on the submitted instance.
     """
     bits = token.split_contents()
     if len(bits) < _MIN_FORM_TAG_BITS:

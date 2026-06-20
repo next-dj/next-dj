@@ -1,10 +1,6 @@
-from pathlib import Path
-from unittest.mock import patch
-
 import pytest
 from django.test import RequestFactory
 
-from next.components import ComponentInfo
 from next.partial import Patches, PatchResponse, register_patch_op
 from next.partial.headers import CONTENT_TYPE
 from next.partial.patches import (
@@ -49,47 +45,6 @@ class TestMorphZone:
             .envelope()
         )
         assert "swapped" in envelope.ops[0].html
-
-
-class TestMorphComponent:
-    """`morph(component=)` renders the named component with props."""
-
-    def test_component_renders_with_props(self) -> None:
-        info = ComponentInfo(
-            name="card",
-            scope_root=Path(__file__).parent,
-            scope_relative="",
-            template_path=None,
-            module_path=None,
-            is_simple=True,
-        )
-        with (
-            patch("next.partial.patches.get_component", return_value=info),
-            patch(
-                "next.partial.patches.render_component",
-                return_value="<aside>card</aside>",
-            ) as render,
-        ):
-            envelope = (
-                Patches(partial_request())
-                .morph(component="card", props={"label": "hi"})
-                .envelope()
-            )
-        op = envelope.ops[0].as_dict()
-        assert op == {
-            "op": "morph",
-            "target": {"component": "card"},
-            "html": "<aside>card</aside>",
-        }
-        passed_props = render.call_args.args[1]
-        assert passed_props == {"label": "hi"}
-
-    def test_invisible_component_raises(self) -> None:
-        with (
-            patch("next.partial.patches.get_component", return_value=None),
-            pytest.raises(LookupError),
-        ):
-            Patches(partial_request()).morph(component="ghost")
 
 
 class TestMorphFormAndHtml:
@@ -199,9 +154,7 @@ class TestStandaloneVerbs:
 
     def test_push_url_falls_back_for_external_host(self) -> None:
         envelope = (
-            Patches(partial_request())
-            .push_url("https://evil.example.com/x")
-            .envelope()
+            Patches(partial_request()).push_url("https://evil.example.com/x").envelope()
         )
         assert envelope.ops[0].as_dict()["href"] == "/zoned/"
 

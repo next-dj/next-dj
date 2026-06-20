@@ -55,7 +55,9 @@ class TestValidateErrorFiltering:
         assert meta is not None
         assert "email" in meta["errors"]
 
-    def test_unfilled_field_gets_no_required_error(self, next_client: NextClient) -> None:
+    def test_unfilled_field_gets_no_required_error(
+        self, next_client: NextClient
+    ) -> None:
         response = next_client.post_action(
             "validate_form",
             {"email": "bad"},
@@ -282,7 +284,9 @@ class TestValidateOnAWizardStep:
 class TestValidateSignalAndFieldNames:
     """The validate signal fires behind the guard with the scrubbed fields."""
 
-    def test_signal_reports_the_requested_field_names(self, next_client: NextClient) -> None:
+    def test_signal_reports_the_requested_field_names(
+        self, next_client: NextClient
+    ) -> None:
         received: list[dict] = []
 
         def _record(**kwargs: object) -> None:

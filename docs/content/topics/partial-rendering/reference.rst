@@ -234,8 +234,8 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from Python 
      - Any element
      - The morph leaves the node untouched, paired by id when present and by position otherwise.
    * - ``data-next-key``
-     - List rows
-     - The match key for the morph and for ``append`` dedup, falling back to ``id``.
+     - List rows, repeated ``<form>``
+     - The match key for the morph and for ``append`` dedup, falling back to ``id``. On a repeated form it names the instance, written by the ``key=`` tag parameter, so a partial morph lands on the submitted form rather than the first.
    * - ``data-next-sse``
      - A container
      - Subscribe to a patch stream at the URL.

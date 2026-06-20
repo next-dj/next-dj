@@ -94,7 +94,9 @@ class TestWizardAdvanceMorphsTheNextStepZone:
     page and renders the unbound scope form into a zone morph.
     """
 
-    def test_advance_returns_a_zone_morph_envelope(self, next_client: NextClient) -> None:
+    def test_advance_returns_a_zone_morph_envelope(
+        self, next_client: NextClient
+    ) -> None:
         response = next_client.post_action(
             "step_wizard",
             {"name": "Ada"},

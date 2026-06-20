@@ -32,7 +32,9 @@ class TestInvalidEnvelopeAddressesOnlyTheFailedForm:
         assert all(target != {"form": column_uid} for target in targets)
         assert all(target != {"form": archive_uid} for target in targets)
 
-    def test_the_only_op_carries_the_extract_flag(self, next_client: NextClient) -> None:
+    def test_the_only_op_carries_the_extract_flag(
+        self, next_client: NextClient
+    ) -> None:
         response = next_client.post_action(
             "rename_board_form", {"title": ""}, origin="/board_forms/", partial=True
         )
@@ -42,7 +44,9 @@ class TestInvalidEnvelopeAddressesOnlyTheFailedForm:
 class TestInvalidEnvelopeHeaderContract:
     """The invalid-form header contract survives the partial path."""
 
-    def test_status_content_type_and_form_headers(self, next_client: NextClient) -> None:
+    def test_status_content_type_and_form_headers(
+        self, next_client: NextClient
+    ) -> None:
         response = next_client.post_action(
             "rename_board_form", {"title": ""}, origin="/board_forms/", partial=True
         )
@@ -55,7 +59,9 @@ class TestInvalidEnvelopeHeaderContract:
 class TestInvalidFormMetaIsMachineReadable:
     """The form meta carries machine-readable errors from the field specs."""
 
-    def test_meta_reports_invalid_with_field_errors(self, next_client: NextClient) -> None:
+    def test_meta_reports_invalid_with_field_errors(
+        self, next_client: NextClient
+    ) -> None:
         response = next_client.post_action(
             "rename_board_form", {"title": ""}, origin="/board_forms/", partial=True
         )
@@ -88,7 +94,9 @@ class TestInvalidWithZoneMorphsTheZone:
         assert envelope.zone_targets() == ["rename-board"]
         assert envelope.form_targets() == []
 
-    def test_bound_form_errors_reach_the_zone_body(self, next_client: NextClient) -> None:
+    def test_bound_form_errors_reach_the_zone_body(
+        self, next_client: NextClient
+    ) -> None:
         response = next_client.post_action(
             "zoned_rename_form",
             {"title": ""},
@@ -143,7 +151,9 @@ class TestResultRedirectBecomesVisit:
 class TestResultAuthoredPatchPassesThrough:
     """A handler that returns a PatchResponse passes through unchanged."""
 
-    def test_authored_envelope_is_served_verbatim(self, next_client: NextClient) -> None:
+    def test_authored_envelope_is_served_verbatim(
+        self, next_client: NextClient
+    ) -> None:
         response = next_client.post_action(
             "authored_patch_form", {"name": "ok"}, origin="/", partial=True
         )
@@ -154,7 +164,9 @@ class TestResultAuthoredPatchPassesThrough:
 class TestResultRichResponseFallsThrough:
     """A non-redirect rich response falls through to the full path."""
 
-    def test_plain_html_response_is_not_an_envelope(self, next_client: NextClient) -> None:
+    def test_plain_html_response_is_not_an_envelope(
+        self, next_client: NextClient
+    ) -> None:
         response = next_client.post_action(
             "rich_response_form", {"name": "ok"}, origin="/", partial=True
         )

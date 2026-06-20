@@ -30,6 +30,7 @@ from next.conf import import_class_cached, next_framework_settings
 from next.forms.backends import FormActionBackend
 from next.forms.manager import form_action_manager
 from next.pages import page
+from next.templatetags.forms import FormNode
 
 from .registry import BUILTIN_OPS, patch_op_registry
 from .zone import ZoneNode
@@ -54,8 +55,11 @@ E_UNREGISTERED_OP: Final = "next.E066"
 W_WITH_OVER_ZONE: Final = "next.W067"
 W_FORM_BACKEND_NOT_AWARE: Final = "next.W068"
 W_MANIFEST_VERSION_NO_STORAGE: Final = "next.W069"
+W_FORM_IN_FOR_NO_KEY: Final = "next.W070"
 
 _MIN_DUPLICATE_COUNT: Final = 2
+_FORM_TARGET_ATTR: Final = "data-next-target"
+_FORM_KEY_ATTR: Final = "data-next-key"
 
 
 CHECK_IDS: Final = (
@@ -69,6 +73,7 @@ CHECK_IDS: Final = (
     W_WITH_OVER_ZONE,
     W_FORM_BACKEND_NOT_AWARE,
     W_MANIFEST_VERSION_NO_STORAGE,
+    W_FORM_IN_FOR_NO_KEY,
 )
 
 
@@ -258,6 +263,59 @@ def _zones_under(
         now_inside = inside or isinstance(node, ancestor)
         for child in _child_nodelists(node):
             yield from _zones_under(child, ancestor, inside=now_inside)
+
+
+def _forms_in_loop(
+    nodelist: NodeList,
+    *,
+    inside: bool = False,
+) -> "Iterator[FormNode]":
+    """Yield each `{% form %}` node reached while a `{% for %}` is on the path."""
+    for node in nodelist:
+        if isinstance(node, FormNode) and inside:
+            yield node
+        now_inside = inside or isinstance(node, ForNode)
+        for child in _child_nodelists(node):
+            yield from _forms_in_loop(child, inside=now_inside)
+
+
+def _form_has_partial_attr(node: FormNode, attr: str) -> bool:
+    """Return True when the form tag wrote the given `data-next-*` attribute."""
+    return any(name == attr for name, _expr in node.partial_attrs)
+
+
+@register(Tags.templates)
+def check_repeated_form_has_key(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when a looped `{% form %}` has no key or zone (`next.W070`).
+
+    A `{% form %}` inside a `{% for %}` renders one instance per iteration, all
+    sharing the action uid. A partial morph addresses the form by that uid, so
+    without a per-instance `key=` or a wrapping `zone=` it cannot tell the
+    instances apart and re-renders the wrong one. The check pairs with the
+    client resolving a form-uid target by the initiator's `data-next-key`.
+    """
+    messages: list[CheckMessage] = []
+    for page_path, template in _iter_composed_pages():
+        for node in _forms_in_loop(template.nodelist):
+            if _form_has_partial_attr(node, _FORM_TARGET_ATTR):
+                continue
+            if _form_has_partial_attr(node, _FORM_KEY_ATTR):
+                continue
+            messages.append(
+                DjangoWarning(
+                    f"Form {node.action_expr} in {page_path} renders inside a "
+                    "{% for %} loop without a key= or a zone=. Every iteration "
+                    "shares one action uid, so a partial morph cannot tell the "
+                    "instances apart and re-renders the wrong one. Add key= with "
+                    "a stable per-row value, or a zone= that wraps the list.",
+                    obj=str(page_path),
+                    id=W_FORM_IN_FOR_NO_KEY,
+                )
+            )
+    return messages
 
 
 @register(Tags.templates)
@@ -543,6 +601,7 @@ __all__ = [
     "E_ZONE_IN_FOR",
     "E_ZONE_IN_IF",
     "W_FORM_BACKEND_NOT_AWARE",
+    "W_FORM_IN_FOR_NO_KEY",
     "W_MANIFEST_VERSION_NO_STORAGE",
     "W_WITH_OVER_ZONE",
     "check_custom_patch_ops_well_formed",
@@ -551,6 +610,7 @@ __all__ = [
     "check_lazy_zone_has_placeholder",
     "check_manifest_version_has_manifest_storage",
     "check_no_zone_in_component",
+    "check_repeated_form_has_key",
     "check_with_directly_over_zone",
     "check_zone_name_is_slug",
     "check_zone_not_in_if",

@@ -29,7 +29,9 @@ class TestWizardAdvanceStepsByEnvelope:
         assert response["Content-Type"] == CONTENT_TYPE
         assert envelope_of(response).zone_targets() == ["wizard-zone"]
 
-    def test_partial_advance_swaps_the_step_fields(self, next_client: NextClient) -> None:
+    def test_partial_advance_swaps_the_step_fields(
+        self, next_client: NextClient
+    ) -> None:
         response = next_client.post_action(
             "step_wizard",
             {"name": "Ada"},
@@ -80,7 +82,9 @@ class TestWizardAdvanceStepsByEnvelope:
 class TestWizardAdvanceWithoutPartialSwitch:
     """A wizard POST without the partial switch keeps its plain 302 step redirect."""
 
-    def test_advance_is_a_redirect_to_the_next_step(self, next_client: NextClient) -> None:
+    def test_advance_is_a_redirect_to_the_next_step(
+        self, next_client: NextClient
+    ) -> None:
         response = next_client.post_action(
             "step_wizard", {"name": "Ada"}, origin="/wizard/identity/"
         )
@@ -155,7 +159,9 @@ class TestWizardAdvanceCsrfMeta:
         assert "csrf" in envelope
         assert envelope["csrf"]["token"]
 
-    def test_no_rotation_leaves_no_csrf_on_advance(self, next_client: NextClient) -> None:
+    def test_no_rotation_leaves_no_csrf_on_advance(
+        self, next_client: NextClient
+    ) -> None:
         response = next_client.post_action(
             "step_wizard",
             {"name": "Ada"},

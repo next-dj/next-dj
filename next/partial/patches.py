@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, cast
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from next.components import get_component, render_component
 from next.forms.origin import resolve_origin, resolve_url_to_page
 from next.pages import page
 from next.static.collector import default_placeholders
@@ -226,8 +225,8 @@ class Patches:
 
     Built from a request, the builder takes its asset version from the
     active protocol backend and resolves the origin page lazily, so a
-    `morph(zone=...)` or `morph(component=...)` renders against the page
-    that owns the request. Built from a bare version string the builder
+    `morph(zone=...)` renders against the page that owns the request.
+    Built from a bare version string the builder
     stays a low-level envelope assembler with no request, used by paths
     that already hold the version and render their own HTML.
     """
@@ -291,9 +290,8 @@ class Patches:
     ) -> "Patches":
         """Route a keyword-selected morph to its typed per-verb method."""
         zone = select.get("zone")
-        component = select.get("component")
         form = select.get("form")
-        selectors = {"zone": zone, "component": component, "form": form}
+        selectors = {"zone": zone, "form": form}
         chosen = [name for name, value in selectors.items() if isinstance(value, str)]
         if len(chosen) > 1:
             msg = f"morph() got conflicting selector keywords {chosen}."
@@ -307,9 +305,6 @@ class Patches:
         if isinstance(zone, str):
             overrides = cast("Mapping[str, Any] | None", select.get("overrides"))
             return self.morph_zone(zone, overrides=overrides)
-        if isinstance(component, str):
-            props = cast("Mapping[str, Any] | None", select.get("props"))
-            return self.morph_component(component, props=props)
         if isinstance(form, str):
             return self.morph_form(form, html or "")
         msg = f"morph() got unexpected selector keywords {sorted(select)}."
@@ -399,16 +394,6 @@ class Patches:
     ) -> "ZoneRenderResult":
         """Render the named zone of an already authorized foreign page."""
         return render_zone(foreign_path, (zone,), request, url_kwargs=url_kwargs)
-
-    def morph_component(
-        self,
-        name: str,
-        *,
-        props: "Mapping[str, Any] | None" = None,
-    ) -> "Patches":
-        """Render the named component with props and morph it in place."""
-        html = self._render_component(name, props)
-        return self._append_morph({"component": name}, html, extract=False)
 
     def morph_form(self, uid: str, html: str) -> "Patches":
         """Extract-morph the form addressed by its uid into the given HTML."""
@@ -663,21 +648,6 @@ class Patches:
             url_kwargs=self._origin_url_kwargs(),
             overrides=dict(overrides) if overrides else None,
         )
-
-    def _render_component(
-        self,
-        name: str,
-        props: "Mapping[str, Any] | None",
-    ) -> str:
-        """Render the named component of the origin page with props."""
-        request = self._require_request()
-        page_path = self._resolve_page_path()
-        info = get_component(name, page_path)
-        if info is None:
-            msg = f'Component "{name}" is not visible to the origin page.'
-            raise LookupError(msg)
-        context_data: dict[str, Any] = dict(props or {})
-        return render_component(info, context_data, request)
 
     def _serializable_names(self) -> frozenset[str]:
         """Return the serialize=True provider names of the origin page."""

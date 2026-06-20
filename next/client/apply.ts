@@ -352,6 +352,11 @@ export class Applier {
   /* v8 ignore start */
   #isDirty: (field: Element) => boolean = () => false;
   /* v8 ignore stop */
+  // The data-next-key of the form that initiated this request, threaded from the
+  // wire so a form-uid target resolves to the submitted instance rather than the
+  // first match in the document. Reset each apply, undefined for a keyless form
+  // and for an SSE or direct apply with no initiator.
+  #requestKey: string | undefined = undefined;
   // The nodes a single envelope touched, collected so next:mounted and the
   // mount registry only see what actually changed.
   #touched: Element[] = [];
@@ -398,7 +403,7 @@ export class Applier {
   // delta → mount → applied. CSS is gated before the ops, so the body after the
   // gate runs in a continuation. With no asset bridge the gate is a
   // straight-through call and the whole apply stays synchronous.
-  apply(raw: unknown, snapshot?: number): Envelope {
+  apply(raw: unknown, snapshot?: number, key?: string): Envelope {
     const envelope = parseEnvelope(raw);
     // A version mismatch is a full visit instead of an apply, guarded against a
     // reload loop inside the bridge. true means the bridge took over.
@@ -408,6 +413,7 @@ export class Applier {
     const beforeApply = this.#emit("partial:before-apply", { envelope }, true);
     if (beforeApply.defaultPrevented) return envelope;
     this.#isDirty = snapshot === undefined ? () => false : this.#dirtySince(snapshot);
+    this.#requestKey = key;
     this.#touched = [];
     const runOps = (): void => this.#runOps(envelope);
     if (this.#assets !== undefined) {
@@ -746,7 +752,19 @@ export class Applier {
     return null;
   }
 
+  // A form-uid target resolves to the instance carrying the initiator's
+  // data-next-key when one is in flight, so a repeated form (one action uid, many
+  // rows) morphs the submitted row on both the live document and the parsed
+  // extract. A keyless request, or a key absent from this root, falls back to the
+  // first uid match, the legacy single-instance behaviour.
   #resolveForm(root: Document, uid: string): Element | null {
+    const key = this.#requestKey;
+    if (key !== undefined) {
+      const scoped = root.querySelector(
+        `[${ATTR_ACTION}="${cssEscape(uid)}"][${ATTR_KEY}="${cssEscape(key)}"]`,
+      );
+      if (scoped !== null) return scoped;
+    }
     return root.querySelector(`[${ATTR_ACTION}="${cssEscape(uid)}"]`);
   }
 

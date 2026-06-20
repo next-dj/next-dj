@@ -853,17 +853,29 @@ class TestFormTagPartialParams:
     def test_every_partial_param_renders_its_attribute(
         self, form_engine, csrf_request
     ) -> None:
-        """The four partial params render their data-next-* attributes together."""
+        """The five partial params render their data-next-* attributes together."""
         html = self._render(
             form_engine,
             csrf_request,
             '{% form "simple_form" validate="blur" trigger="change"'
-            ' debounce="300" zone="rename-board" %}x{% endform %}',
+            ' debounce="300" zone="rename-board" key="42" %}x{% endform %}',
         )
         assert 'data-next-validate="blur"' in html
         assert 'data-next-trigger="change"' in html
         assert 'data-next-debounce="300"' in html
         assert 'data-next-target="rename-board"' in html
+        assert 'data-next-key="42"' in html
+
+    def test_key_param_distinguishes_a_repeated_form_instance(
+        self, form_engine, csrf_request
+    ) -> None:
+        """A key="<value>" param renders data-next-key for instance addressing."""
+        html = self._render(
+            form_engine,
+            csrf_request,
+            '{% form "simple_form" key="row-7" %}x{% endform %}',
+        )
+        assert 'data-next-key="row-7"' in html
 
     def test_no_partial_params_emit_no_partial_attributes(
         self, form_engine, csrf_request
@@ -876,6 +888,7 @@ class TestFormTagPartialParams:
         assert "data-next-trigger" not in html
         assert "data-next-debounce" not in html
         assert "data-next-target" not in html
+        assert "data-next-key" not in html
 
     def test_partial_params_precede_author_attributes(
         self, form_engine, csrf_request

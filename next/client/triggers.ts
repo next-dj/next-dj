@@ -15,6 +15,7 @@
 import { defaultClock, defaultConfirm, defaultObserver } from "./adapters";
 import {
   ATTR_ACTION,
+  ATTR_KEY,
   ATTR_ZONE,
   HEADER_MERGE,
   HEADER_VERSION,
@@ -54,6 +55,7 @@ export interface TriggerDeps {
     headers?: Record<string, string>;
     body?: BodyInit;
     abortable?: boolean;
+    key?: string;
   }) => void;
   // Abort the in-flight request on a zone queue, called when a form submit must
   // cancel its own inline validation.
@@ -239,6 +241,9 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       method: "POST",
       uid,
       zone: targetZone(form) ?? undefined,
+      // The form's own key, so the response morphs this instance of a repeated
+      // form, not the first one in the document.
+      key: form.getAttribute(ATTR_KEY) ?? undefined,
       body,
     });
   }

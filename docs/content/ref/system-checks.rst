@@ -353,6 +353,9 @@ Warnings
    * - ``next.W069``
      - A partial backend sets ``VERSION: "manifest"`` while the staticfiles storage does not hash files, so the version guard stays silent.
      - ``next.partial.checks``
+   * - ``next.W070``
+     - A ``{% form %}`` renders inside a ``{% for %}`` without a ``key=`` or a ``zone=``, so a partial morph cannot tell the repeated instances apart.
+     - ``next.partial.checks``
 
 .. note::
 

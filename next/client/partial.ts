@@ -211,8 +211,13 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       fetch: adapters?.fetch,
       navigate: adapters?.navigate,
       dispatch: deps.dispatch,
-      onEnvelope: (raw: unknown, _response: Response, snapshot: number) => {
-        const envelope = applier.apply(raw, snapshot);
+      onEnvelope: (
+        raw: unknown,
+        _response: Response,
+        snapshot: number,
+        key: string | undefined,
+      ) => {
+        const envelope = applier.apply(raw, snapshot, key);
         // The csrf meta rotates the payload token too, so the next mutation
         // submits the fresh token, not just the forms already in the document.
         if (envelope.csrf) csrf = envelope.csrf;

@@ -176,6 +176,47 @@ class TestWithOverZoneCheck:
             assert checks.check_with_directly_over_zone() == []
 
 
+class TestRepeatedFormKeyCheck:
+    """`next.W070` warns when a looped `{% form %}` has no key or zone."""
+
+    def test_form_in_for_without_key_or_zone(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "rows_bad")
+        body = (
+            "{% for item in items %}"
+            '{% form "rename_item" %}<input name="title">{% endform %}'
+            "{% endfor %}"
+        )
+        with _composed_pages((page_file, body)):
+            ids = [m.id for m in checks.check_repeated_form_has_key()]
+        assert ids == [checks.W_FORM_IN_FOR_NO_KEY]
+
+    def test_form_in_for_with_key_is_silent(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "rows_key")
+        body = (
+            "{% for item in items %}"
+            '{% form "rename_item" key=item.pk %}<input name="title">{% endform %}'
+            "{% endfor %}"
+        )
+        with _composed_pages((page_file, body)):
+            assert checks.check_repeated_form_has_key() == []
+
+    def test_form_in_for_with_zone_is_silent(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "rows_zone")
+        body = (
+            "{% for item in items %}"
+            '{% form "rename_item" zone="rows" %}<input name="title">{% endform %}'
+            "{% endfor %}"
+        )
+        with _composed_pages((page_file, body)):
+            assert checks.check_repeated_form_has_key() == []
+
+    def test_form_outside_loop_is_silent(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "rows_single")
+        body = '{% form "rename_item" %}<input name="title">{% endform %}'
+        with _composed_pages((page_file, body)):
+            assert checks.check_repeated_form_has_key() == []
+
+
 @contextmanager
 def _component(template_path: Path | None) -> Generator[None, None, None]:
     """Point `next.E065` at a fake components manager with one component."""

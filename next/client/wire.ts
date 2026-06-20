@@ -45,14 +45,21 @@ export interface WireRequest {
   // branch, but it mutates nothing, so it joins the abortable zone queue and
   // skips the mutation lock: a fresh blur or a submit aborts it (latest-wins).
   abortable?: boolean;
+  // The data-next-key of the initiating form, threaded to apply so a form-uid
+  // target resolves to the submitted instance of a repeated form rather than the
+  // first match. Absent for a singleton form, where uid alone is unambiguous.
+  key?: string;
 }
 
 // The snapshot is the dirty counter captured at fetch time, threaded to apply so
-// a field touched after this request is protected from its own response.
+// a field touched after this request is protected from its own response. The key
+// is the initiating form's data-next-key, threaded the same way so a form-uid
+// target resolves to the submitted instance.
 export type EnvelopeHandler = (
   raw: unknown,
   response: Response,
   snapshot: number,
+  key: string | undefined,
 ) => void;
 
 // A parse-hook turns a non-default content-type body into a JSON-ish envelope.
@@ -242,7 +249,7 @@ export class Wire {
     const hook = this.#parseHooks.get(baseType);
     if (hook !== undefined) {
       const body = await this.#text(response);
-      this.#onEnvelope(hook(response, body), response, snapshot);
+      this.#onEnvelope(hook(response, body), response, snapshot, request.key);
       return;
     }
     // Any non-envelope content-type, or a redirected response, is a full
@@ -268,7 +275,7 @@ export class Wire {
       this.#dispatch("partial:error", { status: response.status, body, error });
       return;
     }
-    this.#onEnvelope(raw, response, snapshot);
+    this.#onEnvelope(raw, response, snapshot, request.key);
   }
 
   #text(response: Response): Promise<string> {

@@ -197,6 +197,29 @@ describe("trigger delegation", () => {
     expect(body.get("advance")).toBe("next");
   });
 
+  it("carries the form's data-next-key so the response morphs that instance", () => {
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-action="u" data-next-key="row-7">' +
+      "</form>";
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(requests[0].key).toBe("row-7");
+  });
+
+  it("omits the key for a form without one", () => {
+    document.body.innerHTML =
+      '<form action="/_next/form/u/" data-next-action="u"></form>';
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(requests[0].key).toBeUndefined();
+  });
+
   it("leaves a form without a next action to submit natively", () => {
     document.body.innerHTML = '<form action="/x/"><input name="q"></form>';
     const { triggers, requests } = makeTriggers();
