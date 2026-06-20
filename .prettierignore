@@ -1,3 +1,7 @@
 # Vite build output. Hashed bundle names plus minified content
 # break Prettier and have nothing to gain from being formatted.
 **/static/**/dist/
+
+# Pytest writes a stock README.md into its cache. Prettier does not read
+# .gitignore, so exclude it here or format:check fails on a fresh cache.
+**/.pytest_cache/

@@ -1,8 +1,10 @@
 """Form actions and helpers for next-dj.
 
-Register handlers with `@action`. Each action gets a stable UID
-endpoint. Valid submissions run the handler. Invalid forms re-render
-with errors. CSRF is applied for posted forms.
+Subclass `Form`, `ModelForm`, or `FormWizard` to auto-register an
+action through `__init_subclass__`. Use `@action` for form-less
+handlers. Each action gets a stable UID endpoint. Valid submissions
+run the handler. Invalid forms re-render with errors. CSRF is applied
+for posted forms.
 
 Any public `django.forms` name resolves through `next.forms` unless
 next.dj deliberately overrides it. The formset and modelform factories

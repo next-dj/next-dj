@@ -5,8 +5,8 @@
     "test:js:coverage": "vitest run --coverage",
     "lint:js": "eslint \"{next,examples}/**/*.{mjs,ts,js,css}\"",
     "lint:js:fix": "eslint --fix \"{next,examples}/**/*.{mjs,ts,js,css}\"",
-    "format": "prettier --write \"{next,examples}/**/*.{mjs,ts,js,css}\" \"vitest.config.ts\" \"eslint.config.mjs\"",
-    "format:check": "prettier --check \"{next,examples}/**/*.{mjs,ts,js,css}\" \"vitest.config.ts\" \"eslint.config.mjs\"",
+    "format": "prettier --write \"{next,examples}/**/*.{mjs,ts,js,css}\" \"{next,examples}/**/README.md\" \"vitest.config.ts\" \"eslint.config.mjs\"",
+    "format:check": "prettier --check \"{next,examples}/**/*.{mjs,ts,js,css}\" \"{next,examples}/**/README.md\" \"vitest.config.ts\" \"eslint.config.mjs\"",
     "typecheck:ts": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {

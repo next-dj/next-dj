@@ -149,7 +149,7 @@ The same inline config also exposes `rounded-lg`/`md`/`sm` mapped to `var(--radi
 Every entry below is a void call (`{% component "name" prop=value %}`) or a block call (`{% #component "name" %}{% #slot "content" %}…{% /slot %}{% /component %}`) depending on whether you need slots.
 
 | Component | Props | Slots |
-|---|---|---|
+| --- | --- | --- |
 | `page_head` | `title`, `tailwind_plugins` | `extra` (extra `<link>`/`<meta>`/`<style>` injected before `</head>`) |
 | `button` | `variant` (default/secondary/outline/ghost/destructive/link), `size` (sm/md/lg/icon), `type`, `href`, `target`, `name`/`value`, `disabled`, `text`, `extra` | `content` (falls back to `{{ text }}`) |
 | `card` | `title`, `description`, `extra` | `content`, `footer` |

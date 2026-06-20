@@ -1,13 +1,11 @@
 # DB-backed wiki
 
-A wiki served from two stores at once. Some pages live as files in
-`wiki/routes/`. The rest live in the database as `Article` rows. Both
-kinds share one router, one root layout, and one search page.
+A wiki served from two stores at once. Some pages live as files in `wiki/routes/`. The rest live in the database as `Article` rows. Both kinds share one router, one root layout, and one search page.
 
 ## What you will see
 
 | URL | Description |
-|-----|-------------|
+| --- | --- |
 | `/` | Index with a curated list of file documentation and every article in the database. |
 | `/docs/routing/` | File-backed page describing how the file router works. |
 | `/docs/components/` | File-backed page describing the composite component pattern. |
@@ -16,9 +14,7 @@ kinds share one router, one root layout, and one search page.
 | `/wiki/<slug>/` | Public article view rendered from the database row. |
 | `/search/?q=routing` | Mixed search across the file catalogue and article titles plus bodies. |
 
-Articles persist in SQLite. After every create, edit, or delete the
-router rebuilds itself in-process and the new URL is reachable on the
-next request.
+Articles persist in SQLite. After every create, edit, or delete the router rebuilds itself in-process and the new URL is reachable on the next request.
 
 ## How to run
 
@@ -29,132 +25,62 @@ uv run python manage.py runserver     # http://127.0.0.1:8000/
 uv run pytest
 ```
 
-Tailwind loads via the Play CDN in [`wiki/routes/layout.djx`](wiki/routes/layout.djx).
-No Node, no build step.
+Tailwind loads via the Play CDN in [`wiki/routes/layout.djx`](wiki/routes/layout.djx). No Node, no build step.
 
-Open the index, click `New article`, write some Markdown, and submit.
-The new article becomes available at `/wiki/<slug>/` immediately. Open
-the search page with `?q=...` to see both file and database matches in
-the same response.
+Open the index, click `New article`, write some Markdown, and submit. The new article becomes available at `/wiki/<slug>/` immediately. Open the search page with `?q=...` to see both file and database matches in the same response.
 
 ## Walking the code
 
 ### 1. Two URL sources, one router
 
-`wiki.backends.HybridRouterBackend.generate_urls` returns
-`super().generate_urls()` plus one named pattern per existing article.
-Each alias targets the catchall callback at `wiki/[slug]/` and binds a
-fixed `slug` kwarg so `DArticle` resolves the right row. The catchall
-file route `wiki/routes/wiki/[slug]/page.py` owns the rendering logic.
-The aliases give templates a per-slug `reverse()` name and keep the
-public URL space tidy at `/wiki/<slug>/`.
+`wiki.backends.HybridRouterBackend.generate_urls` returns `super().generate_urls()` plus one named pattern per existing article. Each alias targets the catchall callback at `wiki/[slug]/` and binds a fixed `slug` kwarg so `DArticle` resolves the right row. The catchall file route `wiki/routes/wiki/[slug]/page.py` owns the rendering logic. The aliases give templates a per-slug `reverse()` name and keep the public URL space tidy at `/wiki/<slug>/`.
 
-The catchall view never has to know whether it was reached through the
-generic `<slug>` capture or through a hybrid alias. Both paths feed the
-same DI flow.
+The catchall view never has to know whether it was reached through the generic `<slug>` capture or through a hybrid alias. Both paths feed the same DI flow.
 
 ### 2. Reloading after data changes
 
-`wiki/receivers.py` listens to `post_save` and `post_delete` of
-`Article` and calls `router_manager.reload()`. The reload path is one
-public method that:
+`wiki/receivers.py` listens to `post_save` and `post_delete` of `Article` and calls `router_manager.reload()`. The reload path is one public method that:
 
 1. Drops the cached backend list.
 2. Reinstantiates every backend from `PAGE_BACKENDS`.
 3. Clears Django's URL resolver caches.
 4. Sends the `router_reloaded` signal.
 
-The next request observes the fresh URL tree without a process restart.
-Tests confirm the loop end-to-end through `SignalRecorder`.
+The next request observes the fresh URL tree without a process restart. Tests confirm the loop end-to-end through `SignalRecorder`.
 
 ### 3. DI provider for the slug
 
-`wiki.providers.ArticleProvider` claims any parameter annotated as
-`DArticle[Article]`. It reads `context.url_kwargs["slug"]` and either
-returns the matching row or raises `Http404`. The catchall page,
-the edit form, and the preview context all use the same provider,
-so the slug-to-row lookup lives in one place.
+`wiki.providers.ArticleProvider` claims any parameter annotated as `DArticle[Article]`. It reads `context.url_kwargs["slug"]` and either returns the matching row or raises `Http404`. The catchall page, the edit form, and the preview context all use the same provider, so the slug-to-row lookup lives in one place.
 
 ### 4. Live preview through the shared component
 
-`articles/new/page.py` and `articles/edit/[slug]/page.py` both register
-a context entry named `preview_html` that runs the form body through
-`render_markdown` and returns the safe HTML. The template passes it to
-the shared `markdown_preview` component as `rendered_html=preview_html`,
-so the preview pane is filled server-side on first paint and on every
-re-render after a failed submission. The JavaScript layer then wires the
-textarea to the pane for keystroke updates without round-tripping the
-server.
+`articles/new/page.py` and `articles/edit/[slug]/page.py` both register a context entry named `preview_html` that runs the form body through `render_markdown` and returns the safe HTML. The template passes it to the shared `markdown_preview` component as `rendered_html=preview_html`, so the preview pane is filled server-side on first paint and on every re-render after a failed submission. The JavaScript layer then wires the textarea to the pane for keystroke updates without round-tripping the server.
 
-`markdown_preview` lives in [`examples/_shared/_components/markdown_preview/`](../_shared/_components/markdown_preview/)
-as a pure presentation shell. Its `component.py` declares only the
-`marked` CDN, its co-located `component.mjs` ships the client behaviour,
-and its `component.css` styles code and pre blocks. The framework
-auto-discovers the co-located assets and dedupes them into the page
-slots, so this example never names a static path. Only the server-side
-render stays local — this example reuses its own `render_markdown`
-helper and injects the result through the prop.
+`markdown_preview` lives in [`examples/_shared/_components/markdown_preview/`](../_shared/_components/markdown_preview/) as a pure presentation shell. Its `component.py` declares only the `marked` CDN, its co-located `component.mjs` ships the client behaviour, and its `component.css` styles code and pre blocks. The framework auto-discovers the co-located assets and dedupes them into the page slots, so this example never names a static path. Only the server-side render stays local — this example reuses its own `render_markdown` helper and injects the result through the prop.
 
-The script registers its work through
-`Next.partial.onMount("[data-markdown-preview]", ...)` rather than a
-`document.querySelectorAll` scan at load. The runtime runs the callback
-over the initial DOM and over every subtree it later inserts, so a
-preview pane that re-renders inside a morphed form is rebound the same
-way the first render was, with no stale listener left behind by a swap.
-The callback walks up to the enclosing `<form>` to find its textarea, so
-the one shell powers both the wiki form and the near-identical
-multi-tenant note form without hardcoding a field name.
+The script registers its work through `Next.partial.onMount("[data-markdown-preview]", ...)` rather than a `document.querySelectorAll` scan at load. The runtime runs the callback over the initial DOM and over every subtree it later inserts, so a preview pane that re-renders inside a morphed form is rebound the same way the first render was, with no stale listener left behind by a swap. The callback walks up to the enclosing `<form>` to find its textarea, so the one shell powers both the wiki form and the near-identical multi-tenant note form without hardcoding a field name.
 
 ### 5. Slug reservations
 
-`Article.clean()` rejects slugs that collide with file-route prefixes
-(`docs`, `articles`, `search`, `wiki`). Both forms enforce the same
-rule plus a uniqueness check against `Article.slug`. A reserved slug
-re-renders the form with the error message and the live preview pane
-intact.
+`Article.clean()` rejects slugs that collide with file-route prefixes (`docs`, `articles`, `search`, `wiki`). Both forms enforce the same rule plus a uniqueness check against `Article.slug`. A reserved slug re-renders the form with the error message and the live preview pane intact.
 
 ### 6. LIKE search across two stores
 
-`wiki/routes/search/page.py` runs two scans for each query. A literal
-substring match against a curated catalogue surfaces matching file
-pages. A `Q(title__icontains) | Q(body_md__icontains)` query against
-`Article` surfaces matching rows. The same template renders both lists
-side by side inside a `search-results` zone.
+`wiki/routes/search/page.py` runs two scans for each query. A literal substring match against a curated catalogue surfaces matching file pages. A `Q(title__icontains) | Q(body_md__icontains)` query against `Article` surfaces matching rows. The same template renders both lists side by side inside a `search-results` zone.
 
-The search form carries `data-next-target="search-results"`,
-`data-next-trigger="input"`, and `data-next-debounce="300"`, so the
-runtime debounces keystrokes, issues a GET for the `search-results`
-zone, and morphs the two result lists in place. `page.py` does not
-change: the same view answers the full page and the zone request,
-reading `?q=` from `request.GET` either way. Without the runtime the
-form is a plain `<form method="get">` and the Search button reloads the
-page, so a bookmark of `/search/?q=routing` still reproduces the listing.
+The search form carries `data-next-target="search-results"`, `data-next-trigger="input"`, and `data-next-debounce="300"`, so the runtime debounces keystrokes, issues a GET for the `search-results` zone, and morphs the two result lists in place. `page.py` does not change: the same view answers the full page and the zone request, reading `?q=` from `request.GET` either way. Without the runtime the form is a plain `<form method="get">` and the Search button reloads the page, so a bookmark of `/search/?q=routing` still reproduces the listing.
 
 ### 7. Object-level edit permission
 
-`Article` carries a `locked` boolean. The edit form in
-`wiki/routes/articles/edit/[slug]/page.py` declares
-`has_object_permission(self)`, an object-level hook that the framework
-resolves like `on_valid` and runs after the form binds, so
-`self.instance` is the loaded target row. The override reads only what it
-needs from `self.instance` and returns `not self.instance.locked`. A
-locked article short-circuits to a bare 403 before validation runs, so
-there is no form re-render. The create form has no such hook and stays
-open.
+`Article` carries a `locked` boolean. The edit form in `wiki/routes/articles/edit/[slug]/page.py` declares `has_object_permission(self)`, an object-level hook that the framework resolves like `on_valid` and runs after the form binds, so `self.instance` is the loaded target row. The override reads only what it needs from `self.instance` and returns `not self.instance.locked`. A locked article short-circuits to a bare 403 before validation runs, so there is no form re-render. The create form has no such hook and stays open.
 
 ### 8. No nested layout
 
-The example wires only one `layout.djx` at the routes root. A nested
-layout is not needed and would add noise. Examples that do need nested
-layouts are `examples/multi-tenant` and `examples/markdown-blog`.
+The example wires only one `layout.djx` at the routes root. A nested layout is not needed and would add noise. Examples that do need nested layouts are `examples/multi-tenant` and `examples/markdown-blog`.
 
 ## Further reading
 
-- [next/urls/manager.py](../../next/urls/manager.py) — `RouterManager.reload`
-  emits the `router_reloaded` signal.
-- [next/urls/backends.py](../../next/urls/backends.py) —
-  `FileRouterBackend.generate_urls` is the public extension surface.
-- [next/deps/providers.py](../../next/deps/providers.py) — DI provider
-  contract used by `ArticleProvider`.
-- [next/components/context.py](../../next/components/context.py) —
-  `@component.context` wiring used by `markdown_preview`.
+- [next/urls/manager.py](../../next/urls/manager.py) — `RouterManager.reload` emits the `router_reloaded` signal.
+- [next/urls/backends.py](../../next/urls/backends.py) — `FileRouterBackend.generate_urls` is the public extension surface.
+- [next/deps/providers.py](../../next/deps/providers.py) — DI provider contract used by `ArticleProvider`.
+- [next/components/context.py](../../next/components/context.py) — `@component.context` wiring used by `markdown_preview`.

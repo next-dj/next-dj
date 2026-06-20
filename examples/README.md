@@ -4,18 +4,18 @@ Each folder below is a self-contained Django project that runs on SQLite and Dja
 
 ## Shared UI kit
 
-* [`_shared/`](_shared/) — shadcn-inspired component palette every example consumes through `COMPONENT_BACKENDS["DIRS"]`. Tokens (`hsl(var(--background))`, `hsl(var(--primary))`, …) live in [`_shared/static/shared/css/tokens.css`](_shared/static/shared/css/tokens.css). Components (button, card, badge, input, alert, table primitives, nav_link, page_header, app_shell, dialog, dropdown, …) live in [`_shared/_components/`](_shared/_components/) and render through the same `{% component "name" %}` tag examples already use. See [`_shared/README.md`](_shared/README.md) for the full inventory and wiring contract.
+- [`_shared/`](_shared/) — shadcn-inspired component palette every example consumes through `COMPONENT_BACKENDS["DIRS"]`. Tokens (`hsl(var(--background))`, `hsl(var(--primary))`, …) live in [`_shared/static/shared/css/tokens.css`](_shared/static/shared/css/tokens.css). Components (button, card, badge, input, alert, table primitives, nav_link, page_header, app_shell, dialog, dropdown, …) live in [`_shared/_components/`](_shared/_components/) and render through the same `{% component "name" %}` tag examples already use. See [`_shared/README.md`](_shared/README.md) for the full inventory and wiring contract.
 
 ## Starter scaffold
 
-* [`_template/`](_template/) — empty skeleton. Copy, rename `myapp`, and fill in.
+- [`_template/`](_template/) — empty skeleton. Copy, rename `myapp`, and fill in.
 
 ## Examples
 
 Each example is a complete mini-product with e2e tests and a dedicated README.
 
 | Folder | Focus |
-|--------|-------|
+| --- | --- |
 | [`shortener/`](shortener/) | File router + DI providers + LocMemCache + management command + declarative `Meta.success_url` / `Meta.success_message` form contract |
 | [`markdown-blog/`](markdown-blog/) | Markdown posts, nested layouts, `@context(serialize=True)`, context processor, co-located `component.js` |
 | [`feature-flags/`](feature-flags/) | Composite `feature_guard`, signal receivers, cache invalidation |
@@ -41,8 +41,8 @@ Tailwind is loaded via the Play CDN (`https://cdn.tailwindcss.com`) from the roo
 
 ## Conventions every example follows
 
-* One custom `PAGES_DIR` (`routes`, `screens`, `panels`, …) and one custom components directory (`_widgets`, `_parts`, `_chunks`, …).
-* One project-level page root listed in `PAGE_BACKENDS["DIRS"]` (e.g. `host/`, `frame/`, `shell/`, `studio/`). The file router walks it alongside the per-app `PAGES_DIR`, and its `layout.djx` becomes the outermost wrapper around every page. The [`multi-tenant`](multi-tenant/) example goes one step further and also drops project-shared components inside this root (`root_blocks/header`, `root_blocks/footer`). The [`markdown-blog`](markdown-blog/) example shows the same trick with a `site/_parts/site_footer` registered through `COMPONENT_BACKENDS["DIRS"]`.
-* Co-located CSS/JS next to the `page.py`, `component.py`, or `layout.djx` they belong to. The `{% collect_styles %}` / `{% collect_scripts %}` tags place them in the rendered HTML, with deduplication.
-* E2E tests driven by `next.testing`: `eager_load_pages`, `reset_registries`, `NextClient`.
-* Forms redirect on success — either declaratively through `Meta.success_url` (plus an optional `Meta.success_message` flash, see [`shortener`](shortener/)) or by returning `HttpResponseRedirect` from `on_valid` when the target depends on the submission. The [`admin`](admin/) example shows the access side of the same surface: declarative `login_required=True` guards on every mutating action.
+- One custom `PAGES_DIR` (`routes`, `screens`, `panels`, …) and one custom components directory (`_widgets`, `_parts`, `_chunks`, …).
+- One project-level page root listed in `PAGE_BACKENDS["DIRS"]` (e.g. `host/`, `frame/`, `shell/`, `studio/`). The file router walks it alongside the per-app `PAGES_DIR`, and its `layout.djx` becomes the outermost wrapper around every page. The [`multi-tenant`](multi-tenant/) example goes one step further and also drops project-shared components inside this root (`root_blocks/header`, `root_blocks/footer`). The [`markdown-blog`](markdown-blog/) example shows the same trick with a `site/_parts/site_footer` registered through `COMPONENT_BACKENDS["DIRS"]`.
+- Co-located CSS/JS next to the `page.py`, `component.py`, or `layout.djx` they belong to. The `{% collect_styles %}` / `{% collect_scripts %}` tags place them in the rendered HTML, with deduplication.
+- E2E tests driven by `next.testing`: `eager_load_pages`, `reset_registries`, `NextClient`.
+- Forms redirect on success — either declaratively through `Meta.success_url` (plus an optional `Meta.success_message` flash, see [`shortener`](shortener/)) or by returning `HttpResponseRedirect` from `on_valid` when the target depends on the submission. The [`admin`](admin/) example shows the access side of the same surface: declarative `login_required=True` guards on every mutating action.

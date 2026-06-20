@@ -174,6 +174,10 @@ The dispatcher builds and validates that bound form before it calls ``update_not
 An ``id`` that matches no note makes ``get_object_or_404`` return Django's standard 404 response.
 See :doc:`/content/howto/customize-error-pages` for customising what the visitor sees.
 
+A ``ModelForm`` can express the same edit binding declaratively through ``Meta.instance_from_url``, which loads the instance from a URL parameter without a factory.
+This tutorial keeps the factory to show the general ``form_class`` mechanism.
+See :doc:`/content/topics/forms/modelforms` for the declarative alternative.
+
 .. code-block:: jinja
    :caption: notes/pages/notes/[id]/edit/template.djx
 

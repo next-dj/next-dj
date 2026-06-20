@@ -114,6 +114,9 @@ The method receives at least ``request`` and may declare any parameter the depen
 The default implementation redirects to the origin page, and a ModelForm saves first.
 See :doc:`actions` for the exact default behaviour and return contract.
 
+``Meta.success_url`` and ``Meta.success_message`` declare the redirect target and a flash message without writing ``on_valid`` by hand.
+The default ``on_valid`` reads both, so a save-and-redirect form can skip the method entirely.
+
 ``get_initial`` prepopulates the form before the first render.
 Declare it as a ``classmethod`` with the same DI-friendly signature.
 
