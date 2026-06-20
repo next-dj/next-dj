@@ -34,4 +34,8 @@
       </div>
     </div>
   {% endform %}
+
+  {% for section in form_state.related_sections %}
+    {% component "inline_live" section=section %}
+  {% endfor %}
 </div>

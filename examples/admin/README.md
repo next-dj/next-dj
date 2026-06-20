@@ -41,7 +41,7 @@ page.
 | `/admin/` | Dashboard with one card per registered app and quick links to each model's changelist and Add page. |
 | `/admin/<app_label>/<model_name>/` | Changelist with `list_display` columns, sortable headers (`?o=<n>`), search box (`search_fields`), `list_filter` aside, pagination, bulk-action bar. |
 | `/admin/<app_label>/<model_name>/add/` | Add view. Fieldsets from `ModelAdmin.get_fieldsets`, widgets from `ModelAdmin.get_form`, inline formsets. |
-| `/admin/<app_label>/<model_name>/<pk>/change/` | Change view. Bound form plus inline formsets bound to existing rows. |
+| `/admin/<app_label>/<model_name>/<pk>/change/` | Change view. Bound main form plus a keyed `admin:inline_change` form per existing related row and an `admin:inline_add` form for new ones. |
 | `/admin/<app_label>/<model_name>/<pk>/delete/` | Confirmation page. Lists protected references and dependent objects from `admin.utils.get_deleted_objects`. |
 | `/admin/<app_label>/<model_name>/<pk>/history/` | `LogEntry` rows for the object with Added / Changed / Deleted labels and the change message. |
 | `/admin/activity/` | Activity feed from `admin_audit.AdminActivityLog`, written by an `action_dispatched` receiver. One row per `admin:add` / `admin:change` / `admin:delete` / `admin:bulk_action`. |
@@ -218,29 +218,48 @@ uses one `{% form form_state.action_name %}` block. The tag takes the
 action name as its positional argument. Here it is a context variable,
 so the action name resolves at render time (see core change below).
 
-### 5. Inline formsets validate alongside the main form
+### 5. Inlines: batch on add, live keyed forms on change
 
-`build_inline_formsets(spec)` in
-[`shadcn_admin/forms.py`](shadcn_admin/forms.py) walks
+The **add view** binds its related rows in one batch. `build_inline_formsets(spec)`
+in [`shadcn_admin/forms.py`](shadcn_admin/forms.py) walks
 `model_admin.get_inline_instances(request, obj)`, calls
 `inline.get_formset(request, obj)`, and binds the resulting formset to
-`request.POST` on POST. For empty extra rows (`form.empty_permitted and
-not form.instance.pk`) it drops `form.initial` and each
-`field.initial`, so the rendered inputs are blank and `has_changed()`
-stays `False` when the user submits an unfilled row. Without the reset,
-Django would treat the model-default values (for example
-`Chapter.word_count=0`) as `initial`, see them differ from the
+`request.POST` when its management form is present. For empty extra rows
+(`form.empty_permitted and not form.instance.pk`) it drops `form.initial`
+and each `field.initial`, so the rendered inputs are blank and
+`has_changed()` stays `False` when the user submits an unfilled row.
+Without the reset, Django would treat the model-default values (for
+example `Chapter.word_count=0`) as `initial`, see them differ from the
 submitted empty string, mark the form as changed, and run required
-validation on the row.
+validation on the row. Inline validation runs **inside the main form's
+`clean()`**: a broken row raises `ValidationError`, so `form.is_valid()`
+returns `False` and the framework re-renders the origin page with the
+inputs populated and the row errors shown.
 
-Inline validation runs **inside the main form's `clean()`**. When any
-inline row fails, `clean()` raises `ValidationError`, so
-`form.is_valid()` returns `False` and the framework re-renders the
-origin page through its `form_validation_failed` machinery — the
-inputs stay populated, the inline rows show their per-field errors,
-and the user never sees a bare 400. No core change is required for
-this. `Form.clean()` raising `ValidationError` is the same path the
-framework already uses for field-level errors.
+The **change view** edits each existing related row on its own.
+`AdminInlineSpec` wraps one inline of the parent admin and renders every
+child as a keyed form, so a chapter saves without touching its siblings:
+
+```djx
+{% form "admin:inline_change" key=row.pk %}
+  <input type="hidden" name="_inline" value="{{ section.token }}">
+  <input type="hidden" name="_inline_pk" value="{{ row.pk }}">
+  {% for info in row.fields %}{% component "form_field" info=info %}{% endfor %}
+  {% component "button" type="submit" text="Save" %}
+{% endform %}
+```
+
+The form repeats once per row, so every instance shares one action UID.
+`key=` writes `data-next-key`, so an invalid submit re-renders the
+submitted row rather than the first. A looped `{% form %}` with neither
+a `key=` nor a wrapping `zone=` raises the `next.W070` system check.
+
+`admin:inline_change` resolves the child model from the parent admin's
+inlines (`_inline` on the wire), the row by primary key (`_inline_pk`),
+and saves just that row. A trailing `{% form "admin:inline_add" %}`
+creates a new row through the same inline form class. Both redirect back
+to the change view on success and re-render the page with the bad row's
+errors on failure, the rest of the rows untouched.
 
 ### 6. Save and continue / Save and add another
 
@@ -370,7 +389,7 @@ data=...)` signature collides with the dispatcher's
 
 ## What is in core for this example
 
-Four pre-existing pieces of next.dj's form layer plus one small core
+Five pre-existing pieces of next.dj's form layer plus one small core
 fix carry the example.
 
 * **`@action(form_class=callable)`.**
@@ -392,6 +411,12 @@ fix carry the example.
   `{% action_url %}` tag resolves the dispatch URL by action name for
   hand-crafted forms — the topbar Sign out form in
   [`surfaces/layout.djx`](shadcn_admin/surfaces/layout.djx) uses it.
+* **`{% form key=... %}` distinguishes repeated forms.** A form rendered
+  once per row shares one action UID, so `key=` writes `data-next-key`
+  and the client morphs the submitted instance rather than the first.
+  The change view's per-row `admin:inline_change` forms key on the child
+  primary key. The `next.W070` system check flags a looped `{% form %}`
+  that carries neither a `key=` nor a wrapping `zone=`.
 * **`action_dispatched` carries `form` and `url_kwargs`.**
   [`next/forms/dispatch.py`](../../next/forms/dispatch.py) sends both
   fields on every successful dispatch (the form is `None` for handlers
