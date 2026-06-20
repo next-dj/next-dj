@@ -289,14 +289,7 @@ def check_repeated_form_has_key(
     *_args: object,
     **_kwargs: object,
 ) -> list[CheckMessage]:
-    """Warn when a looped `{% form %}` has no key or zone (`next.W070`).
-
-    A `{% form %}` inside a `{% for %}` renders one instance per iteration, all
-    sharing the action uid. A partial morph addresses the form by that uid, so
-    without a per-instance `key=` or a wrapping `zone=` it cannot tell the
-    instances apart and re-renders the wrong one. The check pairs with the
-    client resolving a form-uid target by the initiator's `data-next-key`.
-    """
+    """Warn when a looped `{% form %}` has no key or zone (`next.W070`)."""
     messages: list[CheckMessage] = []
     for page_path, template in _iter_composed_pages():
         for node in _forms_in_loop(template.nodelist):

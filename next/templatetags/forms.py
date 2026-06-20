@@ -48,8 +48,7 @@ def do_form(parser: template.base.Parser, token: template.base.Token) -> "FormNo
 
     The `validate`, `trigger`, `debounce`, `zone`, and `key` params compile
     to client `data-next-*` attributes on the form, every other key="value"
-    pair stays a plain HTML attribute. The `key` distinguishes one instance
-    of a repeated form so a partial morph lands on the submitted instance.
+    pair stays a plain HTML attribute.
     """
     bits = token.split_contents()
     if len(bits) < _MIN_FORM_TAG_BITS:

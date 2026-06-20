@@ -241,8 +241,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       method: "POST",
       uid,
       zone: targetZone(form) ?? undefined,
-      // The form's own key, so the response morphs this instance of a repeated
-      // form, not the first one in the document.
+      // The form's own key, so the response morphs this instance.
       key: form.getAttribute(ATTR_KEY) ?? undefined,
       body,
     });

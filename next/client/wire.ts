@@ -45,16 +45,12 @@ export interface WireRequest {
   // branch, but it mutates nothing, so it joins the abortable zone queue and
   // skips the mutation lock: a fresh blur or a submit aborts it (latest-wins).
   abortable?: boolean;
-  // The data-next-key of the initiating form, threaded to apply so a form-uid
-  // target resolves to the submitted instance of a repeated form rather than the
-  // first match. Absent for a singleton form, where uid alone is unambiguous.
+  // The initiating form's data-next-key, threaded to apply for a repeated form.
   key?: string;
 }
 
 // The snapshot is the dirty counter captured at fetch time, threaded to apply so
-// a field touched after this request is protected from its own response. The key
-// is the initiating form's data-next-key, threaded the same way so a form-uid
-// target resolves to the submitted instance.
+// a field touched after this request is protected from its own response.
 export type EnvelopeHandler = (
   raw: unknown,
   response: Response,

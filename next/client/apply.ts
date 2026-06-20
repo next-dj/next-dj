@@ -352,10 +352,8 @@ export class Applier {
   /* v8 ignore start */
   #isDirty: (field: Element) => boolean = () => false;
   /* v8 ignore stop */
-  // The data-next-key of the form that initiated this request, threaded from the
-  // wire so a form-uid target resolves to the submitted instance rather than the
-  // first match in the document. Reset each apply, undefined for a keyless form
-  // and for an SSE or direct apply with no initiator.
+  // The initiator's data-next-key, so a form-uid target resolves to the
+  // submitted instance rather than the first match. Reset each apply.
   #requestKey: string | undefined = undefined;
   // The nodes a single envelope touched, collected so next:mounted and the
   // mount registry only see what actually changed.
@@ -752,11 +750,8 @@ export class Applier {
     return null;
   }
 
-  // A form-uid target resolves to the instance carrying the initiator's
-  // data-next-key when one is in flight, so a repeated form (one action uid, many
-  // rows) morphs the submitted row on both the live document and the parsed
-  // extract. A keyless request, or a key absent from this root, falls back to the
-  // first uid match, the legacy single-instance behaviour.
+  // A repeated form shares one action uid across rows, so an in-flight key picks
+  // the submitted row; a keyless request falls back to the first uid match.
   #resolveForm(root: Document, uid: string): Element | null {
     const key = this.#requestKey;
     if (key !== undefined) {
