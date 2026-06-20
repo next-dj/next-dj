@@ -540,4 +540,5 @@ See Also
    :doc:`zones` for why zones are optional and what the extract default costs.
    :doc:`done-choreographies` for the two ways the modal wizard refreshes the list.
    :doc:`co-located-js` for keeping co-located JavaScript alive across a morph.
+   :doc:`extending` for custom verbs and server-pushed context and events.
    :doc:`reference` for the verbs, headers, attributes, and settings.

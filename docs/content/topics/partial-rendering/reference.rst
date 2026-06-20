@@ -27,7 +27,7 @@ The server is the only author of a target, the client never names one.
      - Default
    * - ``morph``
      - ``morph()``
-     - The default verb. Morph the target into the HTML. ``extract: true`` carries a whole document the client trims to the target.
+     - The default verb. Morph the target into the HTML. The target names a zone or a form by uid. ``extract: true`` carries a whole document the client trims to the target.
      - ``extract: false``
    * - ``replace``
      - ``replace()``
@@ -66,8 +66,8 @@ The server is the only author of a target, the client never names one.
      - Show a toast, sugar over ``event`` with a built-in container.
      - ``variant: "info"``
    * - ``layer.open``
-     - —
-     - Server-initiated open of a layer.
+     - ``layer_open()``
+     - Open a layer from the server, by zone or href.
      - —
    * - ``layer.close``
      - ``layer_close()``
@@ -85,6 +85,7 @@ The server is the only author of a target, the client never names one.
 A verb beyond this set is registered on both sides.
 ``register_patch_op("confetti")`` on the server clears the ``next.E066`` check and earns the generic ``op()`` channel on the builder.
 ``Next.partial.defineOp("confetti", handler)`` on the client supplies the handler.
+See :doc:`extending` for the end-to-end recipe, the ``context`` and ``event`` seams, and the custom-verb exceptions.
 
 Request Headers
 ---------------
@@ -168,6 +169,8 @@ Status Codes
      - Patches, including an invalid form. A validation error is state, not an HTTP failure.
    * - 200 without an envelope
      - The fetch passed through a redirect. The runtime performs a full navigation to ``response.url``.
+   * - 204
+     - A success with no patch to apply, for example a wizard advance with no redirect target. The runtime applies nothing.
    * - 303
      - A mutation succeeded without the runtime, the existing full cycle.
    * - 302 or 403 without an envelope
@@ -242,6 +245,12 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from Python 
    * - ``data-next-dialog``
      - Runtime ``<dialog>``
      - Set by the runtime on every layer dialog, the styling hook for the modal shell.
+   * - ``data-next-toasts``
+     - Runtime toast container
+     - The toast tray, created by the runtime on the first ``toast`` and the styling hook for the stack.
+   * - ``data-next-toast``
+     - Runtime toast item
+     - One toast, the value is the variant, the styling hook for a single notification.
 
 Lifecycle Events
 ----------------
@@ -296,6 +305,9 @@ The ``partial:*``, ``ready``, ``context-updated``, and ``next:toast`` events als
    * - ``next:morph-attribute``
      - Yes
      - Fired on the old element before one attribute changes. Detail ``{name, mutationType}``, where ``mutationType`` is ``"update"`` or ``"remove"``. ``preventDefault()`` skips that one attribute mutation.
+   * - ``next:toast``
+     - No
+     - Detail ``{text, variant}``. The ``toast`` verb fires it on the document and the ``Next.on`` bus alongside building the toast.
 
 The mount and morph events run during the patch apply, so a framework island can take over a node by vetoing its morph and managing its own subtree.
 The mounted and removed pair brackets the node's life inside the document, the symmetry an adapter relies on to mount and unmount a root.
@@ -324,6 +336,10 @@ The surface is small, and every entry mirrors a seam the runtime already uses in
      - A re-executable mount registry. The callback runs over the matching elements at load and over every matching element a later patch inserts.
    * - ``Next.partial.parseHook(contentType, hook)``
      - Register a parser that turns a foreign content type into an envelope before the apply pipeline, so a third party can emulate another wire format.
+   * - ``Next.partial.layers``
+     - The layer stack for driving modals from script: ``open(opener, href, zone)``, ``close(detail)``, and ``size()``.
+   * - ``Next.partial.sse``
+     - The stream registry: ``size()`` for the count of open connections and ``remember(id)`` to feed a request id into the echo ring.
 
 Intercepting Modals
 -------------------

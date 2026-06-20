@@ -151,6 +151,37 @@ It reads two keys from ``OPTIONS``: ``CACHE_ALIAS`` names the cache to use, defa
 Set ``BACKEND`` to a dotted path that subclasses ``FormWizardBackend`` to swap the persistence layer.
 See :doc:`/content/topics/forms/wizard-backend` for the contract, the codec, and a custom backend.
 
+PARTIAL_BACKENDS
+~~~~~~~~~~~~~~~~
+
+List of partial protocol backend configurations.
+The first entry is active and owns the patch wire format that partial rendering serialises over HTTP and Server-Sent Events.
+
+Default value.
+
+.. code-block:: python
+
+   [
+       {
+           "BACKEND": "next.partial.PartialProtocolBackend",
+           "OPTIONS": {
+               "VERSION": "manifest",
+               "PUSH_WIZARD_STEPS": False,
+               "SSE": {
+                   "HEARTBEAT_SECONDS": 25,
+                   "RETRY_MS": 3000,
+               },
+           },
+       },
+   ]
+
+The ``OPTIONS`` keys tune the active backend.
+``VERSION`` is the source of the ``X-Next-Version`` stamp: the sentinel ``"manifest"`` hashes the staticfiles manifest when the active storage hashes its files, an explicit string pins the version yourself, and without a manifest the version guard stays silent and raises ``next.W069``.
+``PUSH_WIZARD_STEPS`` is the global default for pushing wizard steps to browser history, which a wizard's ``Meta.push_steps`` overrides per wizard.
+``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds for an async stream source, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
+
+See :doc:`/content/topics/partial-rendering/reference` for the wire protocol and :doc:`/content/topics/partial-rendering/sse` for the stream contract.
+
 Routing
 -------
 

@@ -40,6 +40,9 @@ It walks six concrete tasks from markup to handler, and the rest of the section 
 :doc:`sse`
    Streaming patch envelopes over Server-Sent Events, the WSGI and ASGI contract, and the refresh fan-out pattern.
 
+:doc:`extending`
+   The three seams that open the protocol to an application: a custom verb, a server-pushed context value, and a server-fired event.
+
 .. rubric:: Reference
 
 :doc:`reference`
@@ -60,4 +63,5 @@ It walks six concrete tasks from markup to handler, and the rest of the section 
    co-located-js
    framework-islands
    sse
+   extending
    reference

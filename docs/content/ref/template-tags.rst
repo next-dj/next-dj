@@ -127,6 +127,31 @@ Static Pipeline
    Inline JS block.
    The body is rendered with the template context and deduplicated by content.
 
+Partial Rendering
+-----------------
+
+.. describe:: {% zone "<name>" tag="<element>" lazy="<trigger>" %}...{% placeholder %}...{% endzone %}
+
+   Marks a named slice of a page template the server can re-render on its own.
+   The first argument is the quoted zone name, an ASCII slug that must be unique across the composed template, the layout chain plus the page body.
+   On a full page render the body is wrapped in ``<div data-next-zone="<name>">`` so the client can address it, and a partial request re-renders only the body.
+
+   ``tag="<element>"`` names the wrapper element, defaulting to ``div``.
+   Use it where a ``<div>`` is invalid, for example ``tag="ul"`` inside a list or ``tag="tbody"`` inside a table.
+   The wrapper carries ``data-next-zone`` whatever the tag.
+
+   ``lazy="load"`` or ``lazy="revealed"`` defers the body.
+   A lazy zone renders only its ``{% placeholder %}`` branch up front and fetches the body on ``ready`` for ``load`` or when it scrolls into view for ``revealed``.
+   Any other ``lazy`` value raises ``TemplateSyntaxError`` at parse time.
+
+.. describe:: {% placeholder %}
+
+   Opens the placeholder branch of a lazy ``{% zone %}``, shown until the deferred body arrives.
+   It is valid only between a ``{% zone %}`` and its ``{% endzone %}``, and a lazy zone without it raises ``next.E064``.
+
+A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}``, an ``{% if %}``, or directly inside a ``{% with %}``.
+The :doc:`zone placement checks </content/ref/system-checks>` enforce each rule at ``manage.py check`` time.
+
 Layouts
 -------
 
@@ -156,3 +181,4 @@ See Also
    :doc:`/content/topics/forms/templates` for the ``{% form %}`` tag.
    :doc:`/content/topics/components` for ``{% component %}`` and slots.
    :doc:`/content/topics/static-assets/template-tags` for the static tags.
+   :doc:`/content/topics/partial-rendering/zones` for the ``{% zone %}`` tag.

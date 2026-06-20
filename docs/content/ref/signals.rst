@@ -76,6 +76,10 @@ not be retained past the receiver call.
      - ``PageContextRegistry``
      - ``file_path``, ``key``
      - After a context callable is attached to a page module.
+   * - ``field_validated``
+     - The active partial protocol backend class
+     - ``action_name``, ``uid``, ``request``, ``field_names``, ``error_count``
+     - After a validate-only blur pass runs, always behind the action guard so unauthenticated validate traffic never reaches telemetry. ``field_names`` is the validated subset, ``error_count`` the number of fields that failed.
    * - ``form_access_denied``
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``layer``, ``reason``
@@ -93,6 +97,10 @@ not be retained past the receiver call.
      - ``Page``
      - ``file_path``, ``duration_ms``, ``styles_count``, ``scripts_count``, ``context_keys``
      - After ``Page.render`` produces HTML and injects static assets. ``duration_ms`` times the render. ``context_keys`` is the tuple of context keys.
+   * - ``patch_op_registered``
+     - ``PatchOpRegistry``
+     - ``name``
+     - After a custom patch verb is registered through ``register_patch_op``.
    * - ``provider_registered``
      - The ``RegisteredParameterProvider`` subclass
      - none
@@ -109,6 +117,14 @@ not be retained past the receiver call.
      - ``NextFrameworkSettings``
      - none
      - After ``NextFrameworkSettings.reload`` drops its caches.
+   * - ``sse_stream_closed``
+     - ``PatchEventStream``
+     - ``request``, ``duration_ms``, ``envelopes_sent``
+     - When a patch event stream ends, its source exhausted or the client gone. ``envelopes_sent`` counts the envelopes flushed over the connection.
+   * - ``sse_stream_opened``
+     - ``PatchEventStream``
+     - ``request``
+     - When a patch event stream starts.
    * - ``template_loaded``
      - ``Page``
      - ``file_path``
@@ -127,6 +143,14 @@ not be retained past the receiver call.
      - The wizard class
      - ``step``, ``cleaned_data``, ``uid``, ``request``
      - After a ``FormWizard`` step validates during dispatch. ``cleaned_data`` is a copy of that step's validated data.
+   * - ``zone_registered``
+     - The compiled page template class
+     - ``template``, ``zone_name``, ``lazy``
+     - Once per compiled composed template, when its named zones are first read. ``lazy`` is the trigger string or ``None``.
+   * - ``zone_rendered``
+     - ``ZoneRenderResult``
+     - ``zone_name``, ``page_path``, ``request``, ``duration_ms``
+     - After a zone body renders for a partial request. ``duration_ms`` times the zone render.
 
 Subpackage Signals
 ------------------
@@ -161,6 +185,12 @@ Static
 ~~~~~~
 
 .. automodule:: next.static.signals
+   :members:
+
+Partial Rendering
+~~~~~~~~~~~~~~~~~
+
+.. automodule:: next.partial.signals
    :members:
 
 Dependencies
