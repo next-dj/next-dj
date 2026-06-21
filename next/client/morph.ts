@@ -274,8 +274,7 @@ function isActiveOrDirty(ctx: Ctx, el: Element): boolean {
 // animation or wakes a MutationObserver. Each change is cancelable.
 function syncAttributes(ctx: Ctx, oldEl: Element, newEl: Element): void {
   const newAttrs = newEl.attributes;
-  for (let i = 0; i < newAttrs.length; i++) {
-    const attr = newAttrs[i];
+  for (const attr of Array.from(newAttrs)) {
     if (skipAttribute(ctx, oldEl, attr.name)) continue;
     if (oldEl.getAttribute(attr.name) === attr.value) continue;
     if (
@@ -288,9 +287,10 @@ function syncAttributes(ctx: Ctx, oldEl: Element, newEl: Element): void {
       }
     }
   }
-  const oldAttrs = oldEl.attributes;
-  for (let i = oldAttrs.length - 1; i >= 0; i--) {
-    const name = oldAttrs[i].name;
+  // Snapshot the old attribute names: removeAttribute mutates the live
+  // NamedNodeMap, so a fixed list keeps the pass stable while it removes.
+  const oldNames = Array.from(oldEl.attributes, (attr) => attr.name);
+  for (const name of oldNames) {
     if (newEl.hasAttribute(name) || skipAttribute(ctx, oldEl, name)) continue;
     if (emit(oldEl, "next:morph-attribute", { name, mutationType: "remove" })) {
       oldEl.removeAttribute(name);

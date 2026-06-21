@@ -241,7 +241,7 @@ export class Wire {
       return;
     }
     const contentType = response.headers.get("content-type") ?? "";
-    const baseType = contentType.split(";")[0].trim();
+    const baseType = contentType.replace(/;.*$/, "").trim();
     const hook = this.#parseHooks.get(baseType);
     if (hook !== undefined) {
       const body = await this.#text(response);

@@ -1,10 +1,13 @@
 """SSE bridge streaming patch envelopes over the page render escape hatch."""
 
 import asyncio
+import contextlib
 import time
 from collections.abc import AsyncIterable
 from typing import TYPE_CHECKING
 
+from django.core.exceptions import ImproperlyConfigured
+from django.core.handlers.asgi import ASGIRequest
 from django.http import StreamingHttpResponse
 
 from .headers import set_partial_vary
@@ -49,6 +52,12 @@ class PatchEventStream(StreamingHttpResponse):
     construction so a buffering proxy or GZipMiddleware does not eat the
     flush. The `sse_stream_opened` signal fires on construction and
     `sse_stream_closed` fires when the stream ends.
+
+    The source kind must match the server kind. Django buffers an async
+    iterator fully under WSGI and a sync iterator fully under ASGI before
+    the first byte, which hangs an infinite stream, so the constructor
+    raises `ImproperlyConfigured` when an async source meets a WSGI
+    request or a sync source meets an ASGI request.
     """
 
     def __init__(
@@ -71,6 +80,7 @@ class PatchEventStream(StreamingHttpResponse):
         )
         self._retry_ms = _retry_ms()
         self._opened_at = self._clock()
+        self._guard_source_kind(source)
         content = self._build_content(source)
         super().__init__(content, content_type=_EVENT_STREAM)
         self["Cache-Control"] = _CACHE_CONTROL
@@ -78,6 +88,35 @@ class PatchEventStream(StreamingHttpResponse):
         set_partial_vary(self)
         if sse_stream_opened.receivers:
             sse_stream_opened.send(sender=type(self), request=request)
+
+    def _guard_source_kind(
+        self,
+        source: "Iterable[Patches] | AsyncIterable[Patches]",
+    ) -> None:
+        """Refuse a source kind the request's server kind would buffer.
+
+        Django reads an async iterator fully under WSGI and a sync iterator
+        fully under ASGI before the first byte, so a mismatched stream hangs
+        instead of flushing. The mismatch is caught at construction with an
+        actionable message rather than a silent hang.
+        """
+        asgi = isinstance(self._request, ASGIRequest)
+        if isinstance(source, AsyncIterable):
+            if not asgi:
+                msg = (
+                    "PatchEventStream got an async source under a WSGI request. "
+                    "Django buffers an async iterator fully under WSGI, which "
+                    "hangs the stream. Serve this view under ASGI or pass a "
+                    "sync source."
+                )
+                raise ImproperlyConfigured(msg)
+        elif asgi:
+            msg = (
+                "PatchEventStream got a sync source under an ASGI request. "
+                "Django buffers a sync iterator fully under ASGI, which hangs "
+                "the stream. Pass an async source or serve this view under WSGI."
+            )
+            raise ImproperlyConfigured(msg)
 
     def _build_content(
         self,
@@ -116,7 +155,10 @@ class PatchEventStream(StreamingHttpResponse):
         envelope is lost. A pull that outlasts `heartbeat_seconds`
         yields a comment frame so a buffering proxy keeps the connection.
         The close signal fires once the source is exhausted or the client
-        disconnects.
+        disconnects. A disconnect throws into the `await`, so the cleanup
+        cancels the in-flight pull and closes the source generator before
+        announcing the close, leaving no pending task or suspended
+        generator behind.
         """
         sent = 0
         yield self._retry_frame()
@@ -139,7 +181,29 @@ class PatchEventStream(StreamingHttpResponse):
                 yield self._event_frame(patches)
                 sent += 1
         finally:
+            await self._cleanup_async(task, iterator)
             self._announce_closed(sent)
+
+    async def _cleanup_async(
+        self,
+        task: "asyncio.Future[Patches] | None",
+        iterator: "AsyncIterator[Patches]",
+    ) -> None:
+        """Cancel an in-flight pull and close the source generator.
+
+        A client disconnect throws into the stream while a pull is in
+        flight, so the pending task is cancelled and awaited and the source
+        generator's `aclose` is driven, both suppressed, so neither a
+        pending task nor a suspended generator is left behind.
+        """
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                await task
+        aclose = getattr(iterator, "aclose", None)
+        if callable(aclose):
+            with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                await aclose()
 
     def _event_frame(self, patches: "Patches") -> bytes:
         """Serialize one builder's envelope as an SSE event frame."""

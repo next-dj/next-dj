@@ -235,6 +235,11 @@ class TestResponse:
         assert response.status_code == 303
         assert response["Location"] == "/after/"
 
+    def test_offsite_fallback_falls_back_to_the_origin(self) -> None:
+        response = Patches(plain_request()).response(fallback="//evil.example.com/")
+        assert response.status_code == 303
+        assert response["Location"] == "/zoned/"
+
     def test_origin_falls_back_to_request_path_without_match(self) -> None:
         request = RequestFactory().post("/loose/", data={})
         response = Patches(request).response()
@@ -253,6 +258,11 @@ class TestVersionBuilderCompatibility:
         response = Patches("9f3c").response()
         assert response.status_code == 303
         assert response["Location"] == "/"
+
+    def test_version_builder_fallback_passes_through_unvalidated(self) -> None:
+        response = Patches("9f3c").response(fallback="/after/")
+        assert response.status_code == 303
+        assert response["Location"] == "/after/"
 
     def test_version_builder_render_helpers_require_a_request(self) -> None:
         with pytest.raises(RuntimeError):

@@ -74,9 +74,9 @@ describe("assets registry and delta", () => {
     const done = vi.fn();
     assets.loadCss([css("http://x/one.css"), css("http://x/two.css")], done);
     expect(done).not.toHaveBeenCalled();
-    settlers[0](true);
+    settlers[0]!(true);
     expect(done).not.toHaveBeenCalled();
-    settlers[1](true);
+    settlers[1]!(true);
     expect(done).toHaveBeenCalledTimes(1);
   });
 
@@ -86,8 +86,8 @@ describe("assets registry and delta", () => {
     const { assets, dispatched } = makeAssets({ loadLink });
     const done = vi.fn();
     assets.loadCss([css("http://x/a.css"), css("http://x/b.css")], done);
-    settlers[0](false);
-    settlers[1](false);
+    settlers[0]!(false);
+    settlers[1]!(false);
     expect(done).toHaveBeenCalledTimes(1);
     expect(dispatched.filter((d) => d.event === "partial:error")).toHaveLength(1);
   });

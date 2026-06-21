@@ -42,7 +42,9 @@ The zone is an optional optimisation, not required markup.
      {% form "rename_board_form" zone="rename-board" %}…{% endform %}
    {% endzone %}
 
-The ``zone="rename-board"`` argument on the tag compiles to ``data-next-target`` on the ``<form>``, so the runtime sends the zone name with the submission and the server re-renders only that zone with the bound form.
+The ``zone="rename-board"`` argument on the tag compiles to ``data-next-target`` on the
+``<form>``, so the runtime sends the zone name with the submission and the server
+re-renders only that zone with the bound form.
 
 Submitting an empty title posts to the form endpoint with the partial switch set.
 

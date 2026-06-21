@@ -115,7 +115,7 @@ describe("createPartial surface", () => {
     });
     partial.setCsrf({ header: "X-CSRFToken", token: "tok" });
     await partial.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
-    expect((calls[0].headers as Record<string, string>)["X-CSRFToken"]).toBe("tok");
+    expect((calls[0]!.headers as Record<string, string>)["X-CSRFToken"]).toBe("tok");
   });
 
   it("a csrf meta in an applied envelope rotates the token for the next mutation", async () => {
@@ -139,7 +139,9 @@ describe("createPartial surface", () => {
     partial.setCsrf({ header: "X-CSRFToken", token: "old" });
     await partial.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
     await partial.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
-    expect((calls[1].headers as Record<string, string>)["X-CSRFToken"]).toBe("rotated");
+    expect((calls[1]!.headers as Record<string, string>)["X-CSRFToken"]).toBe(
+      "rotated",
+    );
   });
 
   it("parseHook reaches the applier for a foreign content-type", async () => {
@@ -292,7 +294,7 @@ describe("createPartial surface", () => {
     partial.ready();
     await Promise.resolve();
     expect(calls).toHaveLength(1);
-    expect((calls[0].init.headers as Record<string, string>)["X-Next-Zone"]).toBe(
+    expect((calls[0]!.init.headers as Record<string, string>)["X-Next-Zone"]).toBe(
       "a,b",
     );
   });
@@ -316,7 +318,7 @@ describe("createPartial surface", () => {
     });
     await Promise.resolve();
     expect(calls).toHaveLength(1);
-    expect((calls[0].init.headers as Record<string, string>)["X-Next-Zone"]).toBe(
+    expect((calls[0]!.init.headers as Record<string, string>)["X-Next-Zone"]).toBe(
       "poll",
     );
   });
@@ -391,7 +393,7 @@ describe("createPartial surface", () => {
     });
     partial.sse.scan(document);
     expect(source.opened).toHaveLength(1);
-    source.opened[0].message(
+    source.opened[0]!.message(
       JSON.stringify({
         version: "v1",
         ops: [{ op: "inner", target: { zone: "z" }, html: "live" }],
@@ -420,7 +422,7 @@ describe("createPartial surface", () => {
     });
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
     partial.sse.scan(document);
-    source.opened[0].message(
+    source.opened[0]!.message(
       JSON.stringify({
         version: "v1",
         ops: [{ op: "refresh", zone: "poll" }],
@@ -494,7 +496,7 @@ describe("createPartial surface", () => {
     });
     await Promise.resolve();
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe(document.location.pathname);
+    expect(calls[0]!.url).toBe(document.location.pathname);
   });
 });
 

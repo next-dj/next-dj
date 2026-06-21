@@ -10,6 +10,7 @@ from .headers import (
 from .origin import OriginSource, resolve_partial_origin
 from .patches import (
     Asset,
+    DynamicForeignPageError,
     Envelope,
     ForeignPageNotAuthorizedError,
     FormMeta,
@@ -26,6 +27,7 @@ from .sse import PatchEventStream
 __all__ = [
     "REQUEST_ID",
     "Asset",
+    "DynamicForeignPageError",
     "Envelope",
     "ForeignPageNotAuthorizedError",
     "FormMeta",

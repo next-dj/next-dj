@@ -110,6 +110,25 @@ class ForeignPageNotAuthorizedError(PermissionError):
         )
 
 
+class DynamicForeignPageError(ValueError):
+    """Raised when an OOB morph names a foreign page with a `render()` body.
+
+    A `render()` string body never reaches the composed-template cache, so
+    it has no compiled source to render a standalone zone against. The OOB
+    view branch refuses the same shape with a 400, so the builder refuses
+    it here rather than morphing the page's stale static template.
+    """
+
+    def __init__(self, page_path: "Path") -> None:
+        """Store the page path and build a readable message."""
+        self.page_path = page_path
+        super().__init__(
+            f"Page {page_path} resolves a dynamic render() body, which has no "
+            "zone to morph out of band. A foreign zone morph needs a page "
+            "whose body is a static template."
+        )
+
+
 class UnknownContextNameError(LookupError):
     """Raised when `context()` names a value that is not a serialize provider.
 
@@ -348,16 +367,20 @@ class Patches:
         resolved through the URLconf to the page that serves it. The
         foreign page's body resolution runs first, so a redirect or a
         denial short-circuits before any zone renders and raises instead
-        of morphing an empty body. With the page authorized, the named
-        zone renders standalone with the foreign page's URL kwargs and
-        morphs in place addressed by zone name.
+        of morphing an empty body. A `render()` string body has no zone to
+        render standalone, so it is refused the same way the OOB view
+        branch refuses it. With the page authorized, the named zone renders
+        standalone with the foreign page's URL kwargs and morphs in place
+        addressed by zone name.
         """
         request = self._require_request()
         foreign_path = self._foreign_page_path(page)
         kwargs = dict(url_kwargs or {})
-        denial = self._foreign_authorization(foreign_path, request, kwargs)
+        denial, dynamic = self._foreign_authorization(foreign_path, request, kwargs)
         if denial is not None:
             raise ForeignPageNotAuthorizedError(foreign_path, denial.status_code)
+        if dynamic:
+            raise DynamicForeignPageError(foreign_path)
         result = self._render_foreign_zone(foreign_path, zone, request, kwargs)
         self._collect_assets(result)
         return self._append_morph({"zone": zone}, result.html[zone], extract=False)
@@ -381,9 +404,13 @@ class Patches:
         foreign_path: "Path",
         request: HttpRequest,
         url_kwargs: dict[str, Any],
-    ) -> "HttpResponseBase | None":
-        """Re-run the foreign page's body resolution and return its short-circuit."""
-        return page.authorization_response(foreign_path, request, **url_kwargs)
+    ) -> "tuple[HttpResponseBase | None, bool]":
+        """Re-run the foreign page's body resolution once for guard and kind.
+
+        The short-circuit response and the dynamic-body flag come from one
+        resolution so the foreign page's `render()` runs exactly once.
+        """
+        return page.authorization_outcome(foreign_path, request, **url_kwargs)
 
     def _render_foreign_zone(
         self,
@@ -595,8 +622,21 @@ class Patches:
             return PatchResponse(
                 body, content_type=backend.content_type, version=self._version
             )
-        target = fallback if fallback is not None else self._origin_path()
+        target = self._fallback_target(fallback)
         return HttpResponseRedirect(target, status=_SEE_OTHER)
+
+    def _fallback_target(self, fallback: str | None) -> str:
+        """Return the validated no-runtime redirect target.
+
+        A bound request validates the fallback against its host like every
+        other href sink. A request-free builder has no host to validate
+        against, so the server-authored fallback passes through.
+        """
+        if fallback is None:
+            return self._origin_path()
+        if self._request is None:
+            return fallback
+        return self._safe_url(fallback)
 
     def _origin_path(self) -> str:
         """Return the path the no-runtime fallback redirects to."""
@@ -703,6 +743,7 @@ class PatchResponse(HttpResponse):
 __all__ = [
     "Asset",
     "BuiltinPatchOpError",
+    "DynamicForeignPageError",
     "Envelope",
     "ForeignPageNotAuthorizedError",
     "FormMeta",

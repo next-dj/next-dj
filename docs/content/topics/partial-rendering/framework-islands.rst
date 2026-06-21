@@ -22,7 +22,9 @@ The Mount and Unmount Pair
 ``next:removed`` fires on a node just before it detaches, for every detach the runtime performs.
 Both bubble to the document, so one delegated listener catches every island, and the pair brackets the life of a node inside the document.
 
-Mount through :ref:`Next.partial.onMount <topics-partial-rendering-co-located-js>`, which runs its callback over the matching elements present at load and over every matching element a later patch inserts, descendants included.
+Mount through :ref:`Next.partial.onMount <topics-partial-rendering-co-located-js>`, which
+runs its callback over the matching elements present at load and over every matching
+element a later patch inserts, descendants included.
 Unmount through ``next:removed``, walking the detached subtree for islands, because the event fires on the detached root rather than on each descendant.
 
 A React Island

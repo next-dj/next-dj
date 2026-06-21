@@ -2,7 +2,8 @@ import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
-from django.test import RequestFactory, override_settings
+from django.core.exceptions import ImproperlyConfigured
+from django.test import AsyncRequestFactory, RequestFactory, override_settings
 
 from next.partial import Patches, PatchEventStream
 from next.partial.manager import partial_backend_manager
@@ -12,8 +13,18 @@ from next.partial.sse import _heartbeat_seconds, _retry_ms
 
 @pytest.fixture()
 def request_obj() -> object:
-    """Return a bare GET request to bind the stream to."""
+    """Return a bare WSGI GET request to bind a sync stream to."""
     return RequestFactory().get("/polls/7/stream/")
+
+
+@pytest.fixture()
+def async_request_obj() -> object:
+    """Return a bare ASGI GET request to bind an async stream to.
+
+    Django buffers an async iterator under WSGI, so an async source needs
+    an ASGI request to pass the source-kind guard.
+    """
+    return AsyncRequestFactory().get("/polls/7/stream/")
 
 
 def _consume(response: PatchEventStream) -> list[bytes]:
@@ -263,17 +274,19 @@ async def _heartbeat_then_event(request_obj: object) -> list[bytes]:
 class TestAsyncHeartbeat:
     """An async source under a zero heartbeat interleaves comment frames."""
 
-    def test_pending_pull_emits_heartbeat_then_event(self, request_obj: object) -> None:
-        frames = asyncio.run(_heartbeat_then_event(request_obj))
+    def test_pending_pull_emits_heartbeat_then_event(
+        self, async_request_obj: object
+    ) -> None:
+        frames = asyncio.run(_heartbeat_then_event(async_request_obj))
         assert frames[0].startswith(b"retry: ")
         assert frames[1] == b": heartbeat\n\n"
         assert frames[2].startswith(b"event: next-patches")
 
-    def test_async_close_counts_only_events(self, request_obj: object) -> None:
+    def test_async_close_counts_only_events(self, async_request_obj: object) -> None:
         closed = _Recorder()
         sse_stream_closed.connect(closed, weak=False)
         try:
-            asyncio.run(_heartbeat_then_event(request_obj))
+            asyncio.run(_heartbeat_then_event(async_request_obj))
             assert closed.events[0]["envelopes_sent"] == 1
         finally:
             sse_stream_closed.disconnect(closed)
@@ -287,10 +300,73 @@ class TestSourceKindDetection:
         assert response.is_async is False
         _consume(response)
 
-    def test_async_iterable_is_async(self, request_obj: object) -> None:
+    def test_async_iterable_is_async(self, async_request_obj: object) -> None:
         async def source() -> AsyncIterator[Patches]:
             yield _patches()
 
-        response = PatchEventStream(request_obj, source())
+        response = PatchEventStream(async_request_obj, source())
         assert response.is_async is True
         asyncio.run(_aconsume(response))
+
+
+class TestSourceServerKindGuard:
+    """A source kind the server kind would buffer is refused at construction."""
+
+    def test_async_source_under_wsgi_raises(self, request_obj: object) -> None:
+        async def source() -> AsyncIterator[Patches]:
+            yield _patches()
+
+        with pytest.raises(ImproperlyConfigured, match="async source under a WSGI"):
+            PatchEventStream(request_obj, source())
+
+    def test_sync_source_under_asgi_raises(self, async_request_obj: object) -> None:
+        with pytest.raises(ImproperlyConfigured, match="sync source under an ASGI"):
+            PatchEventStream(async_request_obj, [_patches()])
+
+
+class _FinalizedSource:
+    """Async source that records its generator finalization in a flag."""
+
+    def __init__(self) -> None:
+        """Start unreleased and unfinalized."""
+        self.gate = asyncio.Event()
+        self.finalized = False
+
+    def __aiter__(self) -> AsyncIterator[Patches]:
+        """Return the async iterator over the gated single item."""
+        return self._iterate()
+
+    async def _iterate(self) -> AsyncIterator[Patches]:
+        """Block on the gate, marking finalized in the closing finally."""
+        try:
+            await self.gate.wait()
+            yield _patches()
+        finally:
+            self.finalized = True
+
+
+async def _disconnect_midpull(async_request_obj: object) -> _FinalizedSource:
+    """Drive a stream into a pending pull, then disconnect by closing it."""
+    source = _FinalizedSource()
+    response = PatchEventStream(async_request_obj, source, heartbeat_seconds=0)
+    stream = response.streaming_content
+    await stream.__anext__()
+    await stream.__anext__()
+    await stream.aclose()
+    return source
+
+
+class TestAsyncDisconnectCleanup:
+    """A disconnect mid-pull cancels the task and finalizes the source."""
+
+    def test_pending_pull_is_cleaned_up_on_disconnect(
+        self, async_request_obj: object
+    ) -> None:
+        closed = _Recorder()
+        sse_stream_closed.connect(closed, weak=False)
+        try:
+            source = asyncio.run(_disconnect_midpull(async_request_obj))
+        finally:
+            sse_stream_closed.disconnect(closed)
+        assert source.finalized is True
+        assert closed.events[0]["envelopes_sent"] == 0

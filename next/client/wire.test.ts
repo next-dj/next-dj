@@ -47,7 +47,7 @@ describe("Wire headers", () => {
   it("sends the intent headers on a GET", async () => {
     const h: Harness = makeWire(async () => envelopeResponse(ENVELOPE));
     await h.wire.fetch({ url: "/list/", zone: "request-list" });
-    const headers = h.calls[0].init.headers as Record<string, string>;
+    const headers = h.calls[0]!.init.headers as Record<string, string>;
     expect(headers[REQUEST_FLAG]).toBe("1");
     expect(headers.Accept).toBe(ACCEPT);
     expect(headers["X-Next-Version"]).toBe("v1");
@@ -57,7 +57,7 @@ describe("Wire headers", () => {
   it("omits the version header before the client has learned one", async () => {
     const h = makeWire(async () => envelopeResponse(ENVELOPE), { version: "" });
     await h.wire.fetch({ url: "/list/", zone: "request-list" });
-    const headers = h.calls[0].init.headers as Record<string, string>;
+    const headers = h.calls[0]!.init.headers as Record<string, string>;
     expect("X-Next-Version" in headers).toBe(false);
   });
 
@@ -66,7 +66,7 @@ describe("Wire headers", () => {
       csrf: { header: "X-CSRFToken", token: "tok" },
     });
     await h.wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
-    const headers = h.calls[0].init.headers as Record<string, string>;
+    const headers = h.calls[0]!.init.headers as Record<string, string>;
     expect(headers["X-CSRFToken"]).toBe("tok");
   });
 
@@ -75,7 +75,7 @@ describe("Wire headers", () => {
       csrf: { header: "X-CSRFToken", token: "tok" },
     });
     await h.wire.fetch({ url: "/list/", zone: "z" });
-    const headers = h.calls[0].init.headers as Record<string, string>;
+    const headers = h.calls[0]!.init.headers as Record<string, string>;
     expect(headers["X-CSRFToken"]).toBeUndefined();
   });
 });
@@ -91,7 +91,7 @@ describe("Wire request body", () => {
       uid: "u1",
       body: "name=alice",
     });
-    expect(h.calls[0].init.body).toBe("name=alice");
+    expect(h.calls[0]!.init.body).toBe("name=alice");
   });
 });
 
@@ -245,7 +245,7 @@ describe("Wire safe-GET queue", () => {
     });
     const first = h.wire.fetch({ url: "/p1/", zone: "list" });
     const second = h.wire.fetch({ url: "/p2/", zone: "list" });
-    expect(signals[0].aborted).toBe(true);
+    expect(signals[0]!.aborted).toBe(true);
     resolveFirst(envelopeResponse(ENVELOPE));
     await Promise.all([first, second]);
     // Only the latest response is applied, the stale one is dropped.
@@ -306,7 +306,7 @@ describe("Wire abortable validation", () => {
       zone: "validate:u",
       abortable: true,
     });
-    expect(signals[0].aborted).toBe(true);
+    expect(signals[0]!.aborted).toBe(true);
     resolveFirst(envelopeResponse(ENVELOPE));
     await Promise.all([first, second]);
     expect(h.envelopes).toHaveLength(1);
@@ -366,7 +366,7 @@ describe("Wire echo request id", () => {
   }
 
   function header(calls: { init: RequestInit }[], name: string): string | undefined {
-    return (calls[0].init.headers as Record<string, string>)[name];
+    return (calls[0]!.init.headers as Record<string, string>)[name];
   }
 
   it("stamps a request id on a mutation and reports it to the ring", async () => {

@@ -43,6 +43,9 @@ _MESSAGE_VARIANTS: dict[str, str] = {
     "error": "error",
 }
 
+# Django private META key its CsrfViewMiddleware sets when a rotated token
+# needs writing back. Stable across 4.2 to 6.0. A canary test fails loudly if a
+# future Django renames it, so rotated tokens never silently stop being stamped.
 _CSRF_ROTATED_FLAG = "CSRF_COOKIE_NEEDS_UPDATE"
 _PUSH_WIZARD_STEPS_OPTION = "PUSH_WIZARD_STEPS"
 

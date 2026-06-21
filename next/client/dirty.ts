@@ -74,6 +74,10 @@ export function createDirtyTracker(deps: DirtyDeps = {}): DirtyTracker {
     },
     install,
     _reset() {
+      // A clean slate also drops the capture-phase input/change/toggle
+      // listeners install bound, so a reset between tests leaves nothing on the
+      // document.
+      detach();
       stamps = new WeakMap();
       counter = 0;
       last = 0;

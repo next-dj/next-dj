@@ -102,8 +102,8 @@ describe("morph node reuse", () => {
   it("syncs text and comment nodeValue by nodeType", () => {
     const target = mount("<div>old<!--c--></div>");
     morph(target, "<div>new<!--d--></div>");
-    expect(target.childNodes[0].nodeValue).toBe("new");
-    expect(target.childNodes[1].nodeValue).toBe("d");
+    expect(target.childNodes[0]!.nodeValue).toBe("new");
+    expect(target.childNodes[1]!.nodeValue).toBe("d");
   });
 });
 
@@ -225,7 +225,7 @@ describe("morph modes and root", () => {
     const target = mount('<ul id="l"><li id="a">a</li></ul>');
     const row = target.querySelector("#a");
     morph(target, 'lead<li id="a">a2</li>', { mode: "children" });
-    expect(target.childNodes[0].nodeValue).toBe("lead");
+    expect(target.childNodes[0]!.nodeValue).toBe("lead");
     expect(target.querySelector("#a")).toBe(row);
     expect(row!.textContent).toBe("a2");
   });
@@ -304,9 +304,9 @@ describe("morph next:removed before detach", () => {
     fireRemoved(node);
     stop();
     expect(seen).toHaveLength(1);
-    expect(seen[0].target).toBe(node);
-    expect(seen[0].bubbles).toBe(true);
-    expect(seen[0].cancelable).toBe(false);
+    expect(seen[0]!.target).toBe(node);
+    expect(seen[0]!.bubbles).toBe(true);
+    expect(seen[0]!.cancelable).toBe(false);
   });
 
   it("fires on a discarded trailing child while it is still connected", () => {
@@ -316,10 +316,10 @@ describe("morph next:removed before detach", () => {
     morph(target, '<ul id="l"><li id="a">a</li></ul>');
     stop();
     expect(seen).toHaveLength(1);
-    expect(seen[0].target).toBe(tail);
-    expect(seen[0].connected).toBe(true);
-    expect(seen[0].bubbles).toBe(true);
-    expect(seen[0].cancelable).toBe(false);
+    expect(seen[0]!.target).toBe(tail);
+    expect(seen[0]!.connected).toBe(true);
+    expect(seen[0]!.bubbles).toBe(true);
+    expect(seen[0]!.cancelable).toBe(false);
   });
 
   it("does not fire when onDiscard keeps a node", () => {
@@ -336,10 +336,10 @@ describe("morph next:removed before detach", () => {
     morph(target, '<section id="r">x</section>');
     stop();
     expect(seen).toHaveLength(1);
-    expect(seen[0].target).toBe(target);
-    expect(seen[0].connected).toBe(true);
-    expect(seen[0].bubbles).toBe(true);
-    expect(seen[0].cancelable).toBe(false);
+    expect(seen[0]!.target).toBe(target);
+    expect(seen[0]!.connected).toBe(true);
+    expect(seen[0]!.bubbles).toBe(true);
+    expect(seen[0]!.cancelable).toBe(false);
   });
 });
 

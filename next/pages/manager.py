@@ -420,25 +420,27 @@ class Page:
         template = self.composed_template_for(file_path)
         return self._render_template_str(file_path, template, start, request, **kwargs)
 
-    def authorization_response(
+    def authorization_outcome(
         self,
         file_path: Path,
         request: HttpRequest,
         **kwargs: object,
-    ) -> HttpResponseBase | None:
-        """Re-run the body resolution of a page and return its short-circuit.
+    ) -> tuple[HttpResponseBase | None, bool]:
+        """Re-run a page's body resolution once, reporting short-circuit and kind.
 
         The page module is loaded and its `render()` runs under the same
         dependency injection as the unified view, so guards, denials, and
-        redirects fire exactly as they would on the page's own request.
-        A short-circuit `HttpResponseBase` such as a redirect or a denial
-        is returned for the caller to honour. `None` means the body
-        resolved to renderable content, so a standalone zone of the page
-        may be rendered on the caller's behalf.
+        redirects fire exactly as they would on the page's own request. The
+        first element is a short-circuit `HttpResponseBase` such as a
+        redirect or a denial, or `None` when the body resolved to renderable
+        content. The boolean is True when the body came from a `render()`
+        string, which has no composed template to render a standalone zone
+        against. An out-of-band zone morph reads both from one resolution so
+        the foreign page's `render()` runs exactly once.
         """
         module = _load_python_module_memo(file_path)
         resolution = self._resolve_page_body(file_path, module, request, **kwargs)
-        return resolution.http_response
+        return resolution.http_response, resolution.dynamic
 
     def _create_unified_view(
         self,

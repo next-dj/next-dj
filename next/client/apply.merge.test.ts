@@ -58,7 +58,7 @@ describe("append and prepend dedup", () => {
     );
     const rows = document.querySelectorAll("li");
     expect(rows).toHaveLength(1);
-    expect(rows[0].textContent).toBe("new");
+    expect(rows[0]!.textContent).toBe("new");
   });
 
   it("falls back to id when no data-next-key is set", () => {

@@ -94,7 +94,7 @@ describe("createSse", () => {
       document,
       source,
       visibility,
-      now,
+      ...(now !== undefined ? { now } : {}),
     });
   }
 
@@ -104,8 +104,8 @@ describe("createSse", () => {
     const sse = makeSse(adapter, mockVisibility().adapter);
     sse.scan(document);
     expect(opened).toHaveLength(1);
-    expect(opened[0].url).toBe("/stream/");
-    opened[0].message(envelope([{ op: "refresh", zone: "poll" }]));
+    expect(opened[0]!.url).toBe("/stream/");
+    opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }]));
     expect(applied).toHaveLength(1);
   });
 
@@ -125,9 +125,9 @@ describe("createSse", () => {
     const sse = makeSse(adapter, mockVisibility().adapter);
     sse.scan(document);
     sse.remember("r1");
-    opened[0].message(envelope([{ op: "refresh", zone: "poll" }], "r1"));
+    opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }], "r1"));
     expect(applied).toHaveLength(0);
-    opened[0].message(envelope([{ op: "refresh", zone: "poll" }], "r2"));
+    opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }], "r2"));
     expect(applied).toHaveLength(1);
   });
 
@@ -137,9 +137,9 @@ describe("createSse", () => {
     const sse = makeSse(adapter, mockVisibility().adapter);
     sse.scan(document);
     for (let i = 0; i < 26; i += 1) sse.remember(`r${i}`);
-    opened[0].message(envelope([], "r0"));
+    opened[0]!.message(envelope([], "r0"));
     expect(applied).toHaveLength(1);
-    opened[0].message(envelope([], "r25"));
+    opened[0]!.message(envelope([], "r25"));
     expect(applied).toHaveLength(1);
   });
 
@@ -164,10 +164,10 @@ describe("createSse", () => {
       rememberRequestId: (id) => sse.remember(id),
     });
     await wire.fetch({ url: "/_next/form/u1/", method: "POST", uid: "u1" });
-    const echoed = sent[0].headers[HEADER_REQUEST_ID];
-    opened[0].message(envelope([{ op: "refresh", zone: "poll" }], echoed));
+    const echoed = sent[0]!.headers[HEADER_REQUEST_ID];
+    opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }], echoed));
     expect(applied).toHaveLength(0);
-    opened[0].message(envelope([{ op: "refresh", zone: "poll" }], "other"));
+    opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }], "other"));
     expect(applied).toHaveLength(1);
   });
 
@@ -176,9 +176,9 @@ describe("createSse", () => {
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, mockVisibility().adapter);
     sse.scan(document);
-    opened[0].message("{not json");
+    opened[0]!.message("{not json");
     expect(dispatched.some((d) => d.event === "partial:error")).toBe(true);
-    opened[0].message(envelope([{ op: "refresh", zone: "poll" }]));
+    opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }]));
     expect(applied).toHaveLength(1);
   });
 
@@ -187,8 +187,8 @@ describe("createSse", () => {
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, mockVisibility().adapter);
     sse.scan(document);
-    opened[0].error(true);
-    expect(opened[0].closed).toBe(true);
+    opened[0]!.error(true);
+    expect(opened[0]!.closed).toBe(true);
     expect(sse.size()).toBe(0);
     expect(dispatched.some((d) => d.event === "partial:error")).toBe(true);
   });
@@ -198,8 +198,8 @@ describe("createSse", () => {
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, mockVisibility().adapter);
     sse.scan(document);
-    opened[0].error(false);
-    expect(opened[0].closed).toBe(false);
+    opened[0]!.error(false);
+    expect(opened[0]!.closed).toBe(false);
     expect(sse.size()).toBe(1);
     expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
   });
@@ -210,7 +210,7 @@ describe("createSse", () => {
     const visibility = mockVisibility();
     const sse = makeSse(adapter, visibility.adapter);
     sse.scan(document);
-    opened[0].error(true);
+    opened[0]!.error(true);
     expect(sse.size()).toBe(0);
     visibility.set(true);
     visibility.set(false);
@@ -225,22 +225,41 @@ describe("createSse", () => {
     let clock = 0;
     const sse = makeSse(adapter, visibility.adapter, () => clock);
     sse.scan(document);
-    opened[0].message(
+    opened[0]!.message(
       envelope([
         { op: "refresh", zone: "poll" },
         { op: "morph", target: { zone: "list" } },
       ]),
     );
     visibility.set(true);
-    expect(opened[0].closed).toBe(true);
+    expect(opened[0]!.closed).toBe(true);
     // A pause longer than the revalidate threshold may have missed events, so
     // resume re-GETs every bound zone.
     clock = 5000;
     visibility.set(false);
     expect(opened).toHaveLength(2);
-    expect(opened[1].closed).toBe(false);
+    expect(opened[1]!.closed).toBe(false);
     expect(sse.size()).toBe(1);
     expect(fetched.map((f) => f.zone).sort()).toEqual(["list", "poll"]);
+  });
+
+  it("re-GETs bound zones against the path and query open captured", () => {
+    window.history.replaceState(null, "", "/catalog/?q=novel");
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const visibility = mockVisibility();
+    let clock = 0;
+    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    sse.scan(document);
+    opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }]));
+    visibility.set(true);
+    // The address bar moved while the tab was hidden, so resume must still
+    // target the page the stream subscribed from, query filters and all.
+    window.history.replaceState(null, "", "/catalog/?q=other");
+    clock = 5000;
+    visibility.set(false);
+    expect(fetched.find((f) => f.zone === "poll")?.url).toBe("/catalog/?q=novel");
+    window.history.replaceState(null, "", "/");
   });
 
   it("reconnects without a re-GET when the tab flickers briefly", () => {
@@ -250,7 +269,7 @@ describe("createSse", () => {
     let clock = 0;
     const sse = makeSse(adapter, visibility.adapter, () => clock);
     sse.scan(document);
-    opened[0].message(
+    opened[0]!.message(
       envelope([
         { op: "refresh", zone: "poll" },
         { op: "morph", target: { zone: "list" } },
@@ -262,7 +281,7 @@ describe("createSse", () => {
     clock = 500;
     visibility.set(false);
     expect(opened).toHaveLength(2);
-    expect(opened[1].closed).toBe(false);
+    expect(opened[1]!.closed).toBe(false);
     expect(sse.size()).toBe(1);
     expect(fetched).toHaveLength(0);
   });
@@ -272,7 +291,7 @@ describe("createSse", () => {
     const { adapter, opened } = mockSource();
     const sse = makeSse(adapter, mockVisibility().adapter);
     sse.scan(document);
-    opened[0].message("[1,2,3]");
+    opened[0]!.message("[1,2,3]");
     expect(applied).toEqual([[1, 2, 3]]);
   });
 
@@ -283,7 +302,7 @@ describe("createSse", () => {
     let clock = 0;
     const sse = makeSse(adapter, visibility.adapter, () => clock);
     sse.scan(document);
-    opened[0].message('{"ops":"nope"}');
+    opened[0]!.message('{"ops":"nope"}');
     visibility.set(true);
     clock = 5000;
     visibility.set(false);
@@ -297,7 +316,7 @@ describe("createSse", () => {
     let clock = 0;
     const sse = makeSse(adapter, visibility.adapter, () => clock);
     sse.scan(document);
-    opened[0].message(
+    opened[0]!.message(
       JSON.stringify({
         version: "v1",
         ops: [42, { op: "event", name: "ping" }, { op: "refresh", zone: "poll" }],
@@ -334,7 +353,7 @@ describe("createSse", () => {
     });
     sse.scan(document);
     sse._reset();
-    expect(opened[0].closed).toBe(true);
+    expect(opened[0]!.closed).toBe(true);
     expect(sse.size()).toBe(0);
     expect(detach).toHaveBeenCalledOnce();
   });

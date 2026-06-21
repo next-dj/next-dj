@@ -180,8 +180,8 @@ const bugTable: BugCase[] = [
       const refs = (target as Element & { _refs?: Record<string, Element> })._refs!;
       expect(result.querySelector('[id="123"]')).toBe(refs.n123);
       expect(result.querySelector('[id="0"]')).toBe(refs.n0);
-      expect(refs.n123.textContent).toBe("a2");
-      expect(refs.n0.textContent).toBe("b2");
+      expect(refs.n123!.textContent).toBe("a2");
+      expect(refs.n0!.textContent).toBe("b2");
     },
   },
   {

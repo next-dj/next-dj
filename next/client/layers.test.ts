@@ -114,7 +114,7 @@ describe("layer stack", () => {
 
   it("a browser dismiss gesture rejects the layer with its reason", async () => {
     await layers.open(null, "/w/", "z");
-    dismissed[0]("escape");
+    dismissed[0]!("escape");
     const event = dispatched.find((d) => d.event === "partial:layer-dismissed");
     expect(event?.detail.reason).toBe("escape");
     expect(layers.size()).toBe(0);
@@ -165,6 +165,40 @@ describe("layer stack", () => {
     expect(document.querySelector("dialog")).toBeNull();
   });
 
+  it("_reset tears down the delegated click and popstate listeners", () => {
+    let popstateDetached = 0;
+    const popstate: PopStateAdapter = {
+      listen: () => () => {
+        popstateDetached += 1;
+      },
+    };
+    const local = createLayers({
+      dispatch: () => undefined,
+      fetch: async () => undefined,
+      document,
+      dialog: mockDialog().adapter,
+      popstate,
+    });
+    local.install(document);
+    local._reset();
+    // The popstate detach ran exactly once, and a click on a layer link no
+    // longer opens a layer: the delegated handler came off the document.
+    expect(popstateDetached).toBe(1);
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/wizard/");
+    opener.setAttribute("data-next-layer", "z");
+    document.body.append(opener);
+    opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(local.size()).toBe(0);
+
+    // A fresh install after the reset rebinds the handler, so the click opens
+    // again.
+    local.install(document);
+    opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(local.size()).toBe(1);
+    local._reset();
+  });
+
   it("close on an empty stack is a no-op", () => {
     layers.close({ result: 1 });
     expect(dispatched.some((d) => d.event === "partial:layer-accepted")).toBe(false);
@@ -180,11 +214,11 @@ describe("layer stack", () => {
 
   it("a second browser dismiss on an already-closed dialog is a no-op", async () => {
     await layers.open(null, "/w/", "z");
-    dismissed[0]("escape");
+    dismissed[0]!("escape");
     const before = dispatched.filter(
       (d) => d.event === "partial:layer-dismissed",
     ).length;
-    dismissed[0]("escape");
+    dismissed[0]!("escape");
     const after = dispatched.filter(
       (d) => d.event === "partial:layer-dismissed",
     ).length;
@@ -212,7 +246,7 @@ describe("layer stack", () => {
     layers.toast("two", "info");
     const hosts = document.querySelectorAll("[data-next-toasts]");
     expect(hosts).toHaveLength(1);
-    expect(hosts[0].children).toHaveLength(2);
+    expect(hosts[0]!.children).toHaveLength(2);
   });
 
   it("rebuilds the toast host once it is detached from the document", () => {
@@ -221,8 +255,8 @@ describe("layer stack", () => {
     layers.toast("two", "info");
     const hosts = document.querySelectorAll("[data-next-toasts]");
     expect(hosts).toHaveLength(1);
-    expect(hosts[0].children).toHaveLength(1);
-    expect(hosts[0].textContent).toBe("two");
+    expect(hosts[0]!.children).toHaveLength(1);
+    expect(hosts[0]!.textContent).toBe("two");
   });
 
   it("ignores a click whose target is not an Element", () => {
@@ -306,8 +340,8 @@ describe("layer requests carry the host origin", () => {
   it("stamps X-Next-Origin with the host page on the body GET", async () => {
     const { layers, requests } = makeOriginStack();
     await layers.open(null, "/wizard/identity/", "access-wizard");
-    expect(requests[0].headers?.[HEADER_ORIGIN]).toBe("/host/page/");
-    expect(requests[0].headers?.[HEADER_ZONE]).toBe("access-wizard");
+    expect(requests[0]!.headers?.[HEADER_ORIGIN]).toBe("/host/page/");
+    expect(requests[0]!.headers?.[HEADER_ZONE]).toBe("access-wizard");
     layers._reset();
   });
 
@@ -320,9 +354,9 @@ describe("layer requests carry the host origin", () => {
     await layers.open(opener, "/wizard/identity/", "access-wizard");
     requests.length = 0;
     layers.close({ result: { id: 7 } });
-    expect(requests[0].url).toBe("/host/page/");
-    expect(requests[0].headers?.[HEADER_ORIGIN]).toBe("/host/page/");
-    expect(requests[0].headers?.[HEADER_ZONE]).toBe("request-list");
+    expect(requests[0]!.url).toBe("/host/page/");
+    expect(requests[0]!.headers?.[HEADER_ORIGIN]).toBe("/host/page/");
+    expect(requests[0]!.headers?.[HEADER_ZONE]).toBe("request-list");
     layers._reset();
   });
 
@@ -336,8 +370,8 @@ describe("layer requests carry the host origin", () => {
     window.history.replaceState(null, "", "/moved/elsewhere/");
     requests.length = 0;
     layers.close({ result: { id: 7 } });
-    expect(requests[0].url).toBe("/host/page/");
-    expect(requests[0].headers?.[HEADER_ORIGIN]).toBe("/host/page/");
+    expect(requests[0]!.url).toBe("/host/page/");
+    expect(requests[0]!.headers?.[HEADER_ORIGIN]).toBe("/host/page/");
     layers._reset();
   });
 });

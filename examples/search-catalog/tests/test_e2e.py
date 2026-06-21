@@ -259,7 +259,7 @@ class TestResultsZone:
         self, client, catalog_db
     ) -> None:
         body = client.get("/catalog/").content.decode()
-        assert 'data-next-target="catalog-results"' in body
+        assert 'data-next-target="catalog-results,catalog-more"' in body
         assert 'data-next-trigger="input"' in body
         assert 'data-next-debounce="300"' in body
         assert 'data-next-trigger="change"' in body
@@ -298,20 +298,45 @@ class TestInfiniteScrollAppend:
         assert 'id="results-sentinel"' in body
         assert 'data-next-merge="append"' in body
         assert 'data-next-lazy="revealed"' in body
+        assert 'data-next-target="catalog-results,catalog-more"' in body
         assert "page=2" in body
 
-    def test_append_merge_grows_the_zone_without_replacing_it(
+    def test_sentinel_lives_outside_the_results_zone(self, client, catalog_db) -> None:
+        body = client.get("/catalog/").content.decode()
+        results = body.split('data-next-zone="catalog-results"', 1)[1]
+        zone_body = results.split("</ul>", 1)[0]
+        assert "results-sentinel" not in zone_body
+        assert 'data-next-zone="catalog-more"' in body
+
+    def test_append_grows_results_and_replaces_the_sentinel(
         self, client, catalog_db
     ) -> None:
         response = client.get_zones(
             "/catalog/?page=2",
-            "catalog-results",
+            "catalog-results,catalog-more",
             HTTP_X_NEXT_MERGE="append",
         )
         assert response.status_code == 200
         envelope = envelope_of(response)
-        assert envelope.op_verbs() == ["append"]
-        assert envelope.zone_targets() == ["catalog-results"]
+        assert envelope.op_verbs() == ["append", "append"]
+        assert envelope.zone_targets() == ["catalog-results", "catalog-more"]
+
+    def test_append_to_results_carries_rows_only_not_the_sentinel(
+        self, client, catalog_db
+    ) -> None:
+        envelope = envelope_of(
+            client.get_zones(
+                "/catalog/?page=2",
+                "catalog-results,catalog-more",
+                HTTP_X_NEXT_MERGE="append",
+            )
+        )
+        results_html = envelope.html_for_zone("catalog-results")
+        assert "results-sentinel" not in results_html
+        assert KEY_PATTERN.findall(results_html)
+        more_html = envelope.html_for_zone("catalog-more")
+        assert 'id="results-sentinel"' in more_html
+        assert "page=3" in more_html
 
     def test_appended_rows_do_not_overlap_the_first_page(
         self, client, catalog_db
@@ -336,6 +361,18 @@ class TestInfiniteScrollAppend:
         body = client.get("/catalog/?page=999").content.decode()
         assert "results-sentinel" not in body
 
-    def test_changing_the_query_re_morphs_the_zone(self, client, catalog_db) -> None:
-        envelope = envelope_of(client.get_zones("/catalog/?q=novel", "catalog-results"))
-        assert envelope.op_verbs() == ["morph"]
+    def test_last_page_append_empties_the_more_zone(self, client, catalog_db) -> None:
+        envelope = envelope_of(
+            client.get_zones(
+                "/catalog/?page=999",
+                "catalog-results,catalog-more",
+                HTTP_X_NEXT_MERGE="append",
+            )
+        )
+        assert "results-sentinel" not in envelope.html_for_zone("catalog-more")
+
+    def test_changing_the_query_re_morphs_both_zones(self, client, catalog_db) -> None:
+        envelope = envelope_of(
+            client.get_zones("/catalog/?q=novel", "catalog-results,catalog-more")
+        )
+        assert envelope.op_verbs() == ["morph", "morph"]

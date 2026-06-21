@@ -89,7 +89,9 @@ The asset URL is already in the runtime's loaded registry from the first open, s
 
 Migrate a module-load scan to one of the three idioms above.
 A search catalogue's minimum-length hint and a wiki's markdown preview both moved from a load-time scan to ``onMount`` for exactly this reason.
-In a development build the runtime prints a ``console.warn`` for every inline ``<script>`` it neutralises out of a patch, which surfaces a widget that died silently rather than letting it fail in quiet.
+In a development build the runtime prints a ``console.warn`` for every inline
+``<script>`` it neutralises out of a patch, which surfaces a widget that died silently
+rather than letting it fail in quiet.
 
 Scripts in Patches Never Run
 ----------------------------

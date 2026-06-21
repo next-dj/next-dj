@@ -156,6 +156,8 @@ SSE Stream
 
 ``PatchEventStream`` is a :class:`~django.http.StreamingHttpResponse` that serialises each
 ``Patches`` from a sync or async source as one ``next-patches`` event.
+An async source requires ASGI and a sync source requires WSGI, and a mismatch raises
+:exc:`~django.core.exceptions.ImproperlyConfigured` when the response is built.
 See :doc:`/content/topics/partial-rendering/sse` for the WSGI and ASGI contract.
 
 .. autoclass:: next.partial.PatchEventStream
@@ -210,7 +212,7 @@ System Checks
 -------------
 
 See :doc:`system-checks` for the zone-placement and custom-verb checks
-(``next.E060`` through ``next.E066``, ``next.W067`` through ``next.W069``).
+(``next.E060`` through ``next.E066``, ``next.W067`` through ``next.W070``).
 
 See Also
 --------

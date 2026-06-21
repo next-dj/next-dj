@@ -89,6 +89,11 @@ export interface Sse {
 interface Connection {
   url: string;
   control: SourceControl;
+  // The page path and query the stream subscribed from, captured at open and
+  // carried across a pause so resume re-GETs the bound zones against the page
+  // they were rendered for, query filters and all, not whatever the location
+  // reads at resume time.
+  pageUrl: string;
   // The zones this stream addressed with operations since subscribing, the
   // registry re-GET on resume so events missed while hidden converge.
   bound: Set<string>;
@@ -161,11 +166,16 @@ export function createSse(deps: SseDeps): Sse {
     deps.dispatch("partial:error", { status: 0, body: "", error: null });
   }
 
-  // Open a stream to a url, carrying over the bound zones of a paused
-  // predecessor so resume knows what to revalidate.
-  function openConnection(url: string, bound?: Set<string>): void {
+  // Open a stream to a url, carrying over the bound zones and page URL of a
+  // paused predecessor so resume knows what to revalidate and where.
+  function openConnection(url: string, previous?: Connection): void {
     if (connections.has(url) || paused) return;
-    const connection: Connection = { url, control: NOOP, bound: bound ?? new Set() };
+    const connection: Connection = {
+      url,
+      control: NOOP,
+      pageUrl: previous?.pageUrl ?? doc.location.pathname + doc.location.search,
+      bound: previous?.bound ?? new Set(),
+    };
     connections.set(url, connection);
     connection.control = source.open(
       url,
@@ -199,11 +209,11 @@ export function createSse(deps: SseDeps): Sse {
     const pending = [...connections.values()];
     connections.clear();
     for (const previous of pending) {
-      openConnection(previous.url, previous.bound);
+      openConnection(previous.url, previous);
       if (!revalidate) continue;
       for (const zone of previous.bound) {
         deps.fetch({
-          url: doc.location.pathname,
+          url: previous.pageUrl,
           zone,
           headers: { [HEADER_ZONE]: zone },
         });

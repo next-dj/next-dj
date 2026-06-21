@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from next.partial import (
+    DynamicForeignPageError,
     ForeignPageNotAuthorizedError,
     OriginSource,
     Patches,
@@ -14,6 +15,7 @@ from tests.support import partial_request
 _PAGES_ROOT = Path(__file__).resolve().parent.parent / "site_pages"
 _ZONED_PAGE = _PAGES_ROOT / "zoned" / "page.py"
 _REDIRECTING_PAGE = _PAGES_ROOT / "redirecting" / "page.py"
+_DYNAMIC_PAGE = _PAGES_ROOT / "dynamic" / "page.py"
 
 
 class TestForeignZoneByPath:
@@ -66,6 +68,25 @@ class TestForeignZoneAuthorization:
         patches = Patches(partial_request())
         with pytest.raises(ForeignPageNotAuthorizedError):
             patches.morph(zone="alpha", page=_REDIRECTING_PAGE)
+        assert patches.envelope().ops == ()
+
+
+class TestForeignZoneDynamicBody:
+    """A foreign page with a render() body has no zone to morph out of band."""
+
+    def test_dynamic_page_by_path_raises(self) -> None:
+        with pytest.raises(DynamicForeignPageError) as exc:
+            Patches(partial_request()).morph(zone="ghost", page=_DYNAMIC_PAGE)
+        assert exc.value.page_path == _DYNAMIC_PAGE
+
+    def test_dynamic_page_by_url_raises(self) -> None:
+        with pytest.raises(DynamicForeignPageError):
+            Patches(partial_request()).morph(zone="ghost", page="/dynamic/")
+
+    def test_no_op_is_recorded_on_dynamic_refusal(self) -> None:
+        patches = Patches(partial_request())
+        with pytest.raises(DynamicForeignPageError):
+            patches.morph(zone="ghost", page=_DYNAMIC_PAGE)
         assert patches.envelope().ops == ()
 
 

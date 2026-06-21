@@ -98,8 +98,8 @@ describe("layer flow through the partial surface", () => {
     )!;
     expect(container).not.toBeNull();
     expect(container.textContent).toBe("step");
-    expect(calls[0].url).toBe("/request/identity/");
-    expect(headerOf(calls[0], "X-Next-Zone")).toBe("access-wizard");
+    expect(calls[0]!.url).toBe("/request/identity/");
+    expect(headerOf(calls[0]!, "X-Next-Zone")).toBe("access-wizard");
   });
 
   it("resolves a same-named zone in the top layer before the one beneath it", async () => {
@@ -131,8 +131,8 @@ describe("layer flow through the partial surface", () => {
     const dialogs = document.querySelectorAll('dialog [data-next-zone="dup"]');
     // The last-opened (upper) layer's container is the second dialog, and the
     // top-down resolve addresses it, leaving the lower layer untouched.
-    expect(dialogs[0].textContent).toBe("layer");
-    expect(dialogs[1].textContent).toBe("top");
+    expect(dialogs[0]!.textContent).toBe("layer");
+    expect(dialogs[1]!.textContent).toBe("top");
   });
 
   it("a server-initiated layer.open verb opens a layer through the stack", async () => {
@@ -267,7 +267,7 @@ describe("layer flow through the partial surface", () => {
     respond = () =>
       envelopeResponse(zoneMorphBody("z", '<div data-next-zone="z">step</div>'));
     await partial.layers.open(null, "/w/", "z");
-    dismissers[dismissers.length - 1]("escape");
+    dismissers[dismissers.length - 1]!("escape");
     const dismissed = dispatched.find((d) => d.event === "partial:layer-dismissed");
     expect(dismissed?.detail.reason).toBe("escape");
     expect(partial.layers.size()).toBe(0);

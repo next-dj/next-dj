@@ -17,6 +17,7 @@ import {
   defaultNavigate,
   defaultSession,
 } from "./adapters";
+import { isAsset } from "./apply";
 import type { Asset } from "./apply";
 import type { Clock, Navigate } from "./wire";
 
@@ -79,14 +80,6 @@ export interface Assets {
   // since a matching version means the deploy settled.
   acceptVersion(envelopeVersion: string): void;
   _reset(): void;
-}
-
-function isAsset(value: unknown): value is Asset {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as Asset).url === "string"
-  );
 }
 
 export function createAssets(deps: AssetsDeps): Assets {

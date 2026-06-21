@@ -29,7 +29,9 @@ _STEP_PAGE_PATH = (
 
 
 def _load_step_page():
-    spec = importlib.util.spec_from_file_location("audit_step_page_e2e", _STEP_PAGE_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "audit_step_page_e2e", _STEP_PAGE_PATH
+    )
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -314,7 +316,7 @@ class TestCacheBackedDrafts:
         session_key_seen.append(client.session.session_key)
         _post_step(client, "scope", SCOPE)
         response = _post_step(client, "approval", APPROVAL)
-        assert response.status_code == 302
+        assert response.status_code == 303
         assert AccessRequest.objects.count() == 1
         assert _cached_draft(session_key_seen[0]) == {}
 

@@ -6,9 +6,7 @@
   }
 }
 
-/* The zone wrapper renders as a bare <ul>, so the grid lives here rather */
-/* than on a utility class the zone tag cannot emit. The same rule styles */
-/* the list whether it renders inline or arrives as a morphed zone patch. */
+/* The zone wrapper renders as a bare <ul>, so the grid lives here rather than on a utility class the zone tag cannot emit, styling the list whether it renders inline or arrives as a morphed zone patch. */
 ul[data-next-zone="catalog-results"] {
   display: grid;
   gap: 1rem;

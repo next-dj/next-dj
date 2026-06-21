@@ -80,4 +80,15 @@ describe("createDirtyTracker", () => {
     expect(tracker.snapshot()).toBe(0);
     expect(tracker.isDirtySince(0)(el)).toBe(false);
   });
+
+  it("_reset detaches the capture-phase listeners", () => {
+    const tracker = createDirtyTracker();
+    tracker.install(document);
+    tracker._reset();
+    const input = document.createElement("input");
+    document.body.append(input);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    // The listener came off in _reset, so the event stamps nothing.
+    expect(tracker.isDirtySince(0)(input)).toBe(false);
+  });
 });

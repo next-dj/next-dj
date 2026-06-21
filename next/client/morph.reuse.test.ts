@@ -112,7 +112,7 @@ describe("middle insertion into a keyless list shifts the tail onto the wrong ro
         "</ul>",
     );
     const items = [...target.querySelectorAll("li")];
-    const tail = items[2];
+    const tail = items[2]!;
     const tailInput = tail.querySelector<HTMLInputElement>("input")!;
     tailInput.value = "typed-into-tail";
     const { move, moved } = recordingMove();
@@ -150,7 +150,7 @@ describe("middle insertion into a keyless list shifts the tail onto the wrong ro
     // The new last row is a fresh node carrying the clean server default, the
     // user's input no longer lives on the row they edited.
     expect(after[3]).not.toBe(tail);
-    expect(after[3].querySelector<HTMLInputElement>("input")!.value).toBe("vc");
+    expect(after[3]!.querySelector<HTMLInputElement>("input")!.value).toBe("vc");
     expect(after.map((li) => li.querySelector("input")!.value)).toEqual([
       "va",
       "vx",
@@ -173,9 +173,9 @@ describe("middle insertion into a keyless list shifts the tail onto the wrong ro
     expect(rows[3]).not.toBe(oldA);
     expect(rows[3]).not.toBe(oldB);
     expect(rows[3]).not.toBe(oldC);
-    expect(oldA.isConnected).toBe(true);
-    expect(oldB.isConnected).toBe(true);
-    expect(oldC.isConnected).toBe(true);
+    expect(oldA!.isConnected).toBe(true);
+    expect(oldB!.isConnected).toBe(true);
+    expect(oldC!.isConnected).toBe(true);
     expect(rows.map((r) => r.textContent)).toEqual(["A", "X", "B", "C"]);
   });
 });

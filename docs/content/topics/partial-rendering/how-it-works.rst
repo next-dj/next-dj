@@ -24,7 +24,9 @@ The Request
 
 An interaction issues a partial request instead of a full navigation.
 A form submit, an auto-submitting filter, a paginating link, a lazy zone scrolling into view, and a Server-Sent Events message each reach the same pipeline.
-The request carries an ``Accept`` of the patch media type, which doubles as the switch the server reads to choose a partial response over a full page, and ``X-Next-*`` headers that name the zone, the origin page, and the asset version.
+The request carries an ``Accept`` of the patch media type, which doubles as the switch
+the server reads to choose a partial response over a full page, and ``X-Next-*`` headers
+that name the zone, the origin page, and the asset version.
 
 The Envelope
 ------------

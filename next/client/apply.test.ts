@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Applier, parseEnvelope } from "./apply";
-import type { Envelope } from "./apply";
+import type { Asset, AssetBridge, Envelope } from "./apply";
 
 type Dispatched = { event: string; detail: Record<string, unknown> };
 
@@ -85,6 +85,24 @@ describe("parseEnvelope", () => {
     const parsed = parseEnvelope({ version: "v1", form: { valid: true } });
     expect(parsed.form).toEqual({ uid: "", valid: true, errors: {} });
   });
+
+  it("drops a malformed asset rather than carrying it past the boundary", () => {
+    const parsed = parseEnvelope({
+      version: "v1",
+      assets: [
+        { kind: "css", url: "/ok.css" },
+        null,
+        { kind: "js" },
+        { url: "/no-kind.js" },
+        "nope",
+        { kind: "css", url: "/also-ok.css" },
+      ],
+    });
+    expect(parsed.assets).toEqual([
+      { kind: "css", url: "/ok.css" },
+      { kind: "css", url: "/also-ok.css" },
+    ]);
+  });
 });
 
 describe("Applier verbs", () => {
@@ -154,7 +172,7 @@ describe("Applier verbs", () => {
       envelope([{ op: "event", name: "request-created", detail: { id: 42 } }]),
     );
     expect(onDoc).toHaveBeenCalledOnce();
-    expect((onDoc.mock.calls[0][0] as CustomEvent).detail).toEqual({ id: 42 });
+    expect((onDoc.mock.calls[0]![0] as CustomEvent).detail).toEqual({ id: 42 });
     expect(dispatched).toContainEqual({
       event: "request-created",
       detail: { id: 42 },
@@ -218,7 +236,7 @@ describe("Applier verbs", () => {
     const onDoc = vi.fn();
     document.addEventListener("ping", onDoc);
     applier.apply(envelope([{ op: "event", name: "ping", detail: "scalar" }]));
-    expect((onDoc.mock.calls[0][0] as CustomEvent).detail).toEqual({});
+    expect((onDoc.mock.calls[0]![0] as CustomEvent).detail).toEqual({});
     expect(dispatched).toContainEqual({ event: "ping", detail: {} });
     document.removeEventListener("ping", onDoc);
   });
@@ -405,10 +423,10 @@ describe("Applier next:removed before detach", () => {
     );
     stop();
     expect(seen).toHaveLength(1);
-    expect(seen[0].target).toBe(old);
-    expect(seen[0].connected).toBe(true);
-    expect(seen[0].bubbles).toBe(true);
-    expect(seen[0].cancelable).toBe(false);
+    expect(seen[0]!.target).toBe(old);
+    expect(seen[0]!.connected).toBe(true);
+    expect(seen[0]!.bubbles).toBe(true);
+    expect(seen[0]!.cancelable).toBe(false);
   });
 
   it("inner fires next:removed on each old child before the swap", () => {
@@ -433,8 +451,8 @@ describe("Applier next:removed before detach", () => {
     applier.apply(envelope([{ op: "remove", target: { css: "#row-42" } }]));
     stop();
     expect(seen).toHaveLength(1);
-    expect(seen[0].target).toBe(node);
-    expect(seen[0].connected).toBe(true);
+    expect(seen[0]!.target).toBe(node);
+    expect(seen[0]!.connected).toBe(true);
   });
 
   it("merge fires next:removed on a deduped node it replaces in place", () => {
@@ -454,9 +472,9 @@ describe("Applier next:removed before detach", () => {
     );
     stop();
     expect(seen).toHaveLength(1);
-    expect(seen[0].target).toBe(old);
-    expect(seen[0].connected).toBe(true);
-    expect(seen[0].cancelable).toBe(false);
+    expect(seen[0]!.target).toBe(old);
+    expect(seen[0]!.connected).toBe(true);
+    expect(seen[0]!.cancelable).toBe(false);
   });
 
   it("morph fires next:removed on a discarded trailing child", () => {
@@ -618,8 +636,8 @@ describe("Applier morph verb", () => {
       "b",
     );
     const forms = document.querySelectorAll('[data-next-action="u1"]');
-    expect(forms[0].textContent).toBe("A");
-    expect(forms[1].textContent).toBe("hit");
+    expect(forms[0]!.textContent).toBe("A");
+    expect(forms[1]!.textContent).toBe("hit");
   });
 
   it("resolves a form target to the first match when no request key is set", () => {
@@ -631,8 +649,8 @@ describe("Applier morph verb", () => {
       envelope([{ op: "inner", target: { form: "u1" }, html: "<i>hit</i>" }]),
     );
     const forms = document.querySelectorAll('[data-next-action="u1"]');
-    expect(forms[0].textContent).toBe("hit");
-    expect(forms[1].textContent).toBe("B");
+    expect(forms[0]!.textContent).toBe("hit");
+    expect(forms[1]!.textContent).toBe("B");
   });
 
   it("falls back to the first uid match when the key is absent from the root", () => {
@@ -662,8 +680,8 @@ describe("Applier morph verb", () => {
       "b",
     );
     const forms = document.querySelectorAll('[data-next-action="u1"]');
-    expect(forms[0].textContent).toBe("A");
-    expect(forms[1].textContent).toBe("B-fresh");
+    expect(forms[0]!.textContent).toBe("A");
+    expect(forms[1]!.textContent).toBe("B-fresh");
   });
 
   it("morph is a no-op when the target is missing", () => {
@@ -906,12 +924,21 @@ describe("Applier layer, toast, and url verbs", () => {
     expect(calls).toEqual([]);
   });
 
-  it("layer.close carries result, dismiss, and reason to the stack", () => {
+  it("layer.close carries result and dismiss, omitting an absent reason", () => {
     const { applier, calls } = makeLayerApplier();
     applier.apply(envelope([{ op: "layer.close", result: { id: 7 }, dismiss: false }]));
     expect(calls[0]).toEqual({
       verb: "close",
-      args: [{ result: { id: 7 }, dismiss: false, reason: undefined }],
+      args: [{ result: { id: 7 }, dismiss: false }],
+    });
+  });
+
+  it("layer.close threads an explicit reason to the stack", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(envelope([{ op: "layer.close", dismiss: true, reason: "escape" }]));
+    expect(calls[0]).toEqual({
+      verb: "close",
+      args: [{ result: undefined, dismiss: true, reason: "escape" }],
     });
   });
 
@@ -989,5 +1016,110 @@ describe("Applier visit verb", () => {
     });
     expect(() => applier.apply(envelope([{ op: "visit", href: "/x/" }]))).not.toThrow();
     expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
+  });
+});
+
+describe("Applier keeps overlapping applies apart across the CSS gate", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  // An asset bridge whose loadCss defers done whenever the manifest ships CSS,
+  // so a test resumes the gated apply by hand. With no CSS the gate is
+  // straight-through, the path a same-tick second apply takes.
+  function deferringAssets(): { bridge: AssetBridge; flush: () => void } {
+    const pending: (() => void)[] = [];
+    const bridge: AssetBridge = {
+      loadCss(manifest: Asset[], done: () => void) {
+        if (manifest.some((a) => a.kind === "css")) pending.push(done);
+        else done();
+      },
+      loadJs: () => undefined,
+      versionMismatch: () => false,
+      acceptVersion: () => undefined,
+    };
+    return {
+      bridge,
+      flush: () => {
+        for (const done of pending.splice(0)) done();
+      },
+    };
+  }
+
+  it("binds each envelope's dirty predicate, request key, and touched set to its own apply", () => {
+    document.body.innerHTML =
+      '<form data-next-action="u1" data-next-key="a"><input name="f" value="server-a"></form>' +
+      '<form data-next-action="u1" data-next-key="b"><input name="f" value="server-b"></form>';
+    const forms = document.querySelectorAll<HTMLFormElement>('[data-next-action="u1"]');
+    const inputA = forms[0]!.querySelector<HTMLInputElement>('[name="f"]')!;
+    const inputB = forms[1]!.querySelector<HTMLInputElement>('[name="f"]')!;
+    inputA.value = "typed-a";
+    inputB.value = "typed-b";
+    const { bridge, flush } = deferringAssets();
+    // The snapshot picks which field the apply protects, so a predicate leaked
+    // from the other apply would protect the wrong form's input. Apply A
+    // (snapshot 1) protects its own input a, apply B (snapshot 2) input b.
+    const applier = new Applier({
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+      document,
+      assets: bridge,
+      dirtySince: (snapshot) => (field) =>
+        snapshot === 1 ? field === inputA : field === inputB,
+    });
+    const mounted: string[] = [];
+    const onMount = (event: Event): void => {
+      const form = (event.target as Element).closest("form");
+      mounted.push(form?.getAttribute("data-next-key") ?? "");
+    };
+    document.addEventListener("next:mounted", onMount);
+
+    // Apply A ships CSS so its ops defer. It carries key a and a marker on its
+    // morph html, so a leaked key would land this marker on form b.
+    applier.apply(
+      envelope(
+        [
+          {
+            op: "morph",
+            target: { form: "u1" },
+            html: '<form data-next-action="u1" data-next-key="a" data-from="A"><input name="f" value="server-a-fresh"></form>',
+          },
+        ],
+        { assets: [{ kind: "css", url: "/a.css" }] },
+      ),
+      1,
+      "a",
+    );
+    // Apply B runs to completion in the same tick: no CSS, straight-through
+    // gate. It carries key b and snapshot 2.
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { form: "u1" },
+          html: '<form data-next-action="u1" data-next-key="b" data-from="B"><input name="f" value="server-b-fresh"></form>',
+        },
+      ]),
+      2,
+      "b",
+    );
+
+    // B already ran against its own form: marker on form b, its dirty input b
+    // kept its typed value, and only form b mounted.
+    expect(forms[1]!.getAttribute("data-from")).toBe("B");
+    expect(inputB.value).toBe("typed-b");
+    expect(forms[0]!.hasAttribute("data-from")).toBe(false);
+    expect(mounted).toEqual(["b"]);
+
+    // Resume A. With the per-apply state bound, A lands on form a (its key), A's
+    // marker is on form a not b, A's predicate protects input a, and the mount
+    // pass fires on form a.
+    flush();
+    expect(forms[0]!.getAttribute("data-from")).toBe("A");
+    expect(forms[1]!.getAttribute("data-from")).toBe("B");
+    expect(inputA.value).toBe("typed-a");
+    expect(mounted).toEqual(["b", "a"]);
+
+    document.removeEventListener("next:mounted", onMount);
   });
 });

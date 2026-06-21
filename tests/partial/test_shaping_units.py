@@ -1,6 +1,7 @@
 import pytest
 from django import forms
 from django.http import HttpResponse, HttpResponseRedirect
+from django.middleware.csrf import rotate_token
 from django.test import RequestFactory
 from django.urls import set_script_prefix
 
@@ -8,6 +9,7 @@ from next.forms.dispatch import ActionOutcome, ActionOutcomeKind
 from next.forms.manager import form_action_manager
 from next.partial import Patches, shape_partial, shaping as shaping_module
 from next.partial.shaping import (
+    _CSRF_ROTATED_FLAG,
     ActionRef,
     _csrf_rotated,
     _error_count,
@@ -189,6 +191,21 @@ class TestCsrfRotation:
         patches = Patches("1")
         _stamp_csrf(request, patches, rotated=False)
         assert "csrf" not in patches.envelope().as_dict()
+
+
+class TestCsrfRotationFlagCanary:
+    """Django still sets the private rotation marker `_csrf_rotated` reads.
+
+    The flag is a private Django META key. If a Django bump renames it the
+    rotated token would silently stop being stamped, so this asserts the
+    marker the live middleware sets is the one the constant names.
+    """
+
+    def test_rotate_token_sets_the_named_meta_flag(self) -> None:
+        request = RequestFactory().post("/")
+        rotate_token(request)
+        assert request.META.get(_CSRF_ROTATED_FLAG) is True
+        assert _csrf_rotated(request) is True
 
 
 class TestResultRichResponseFallThrough:

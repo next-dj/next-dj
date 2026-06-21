@@ -6,7 +6,7 @@
   "headers": {
     "Content-Type": "application/vnd.next.patches+json",
     "X-Next-Version": "9f3c2e1b",
-    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge"
+    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version"
   },
   "envelope_file": "context_merge.envelope.json"
 }

@@ -18,7 +18,9 @@ It walks six concrete tasks from markup to handler, and the rest of the section 
 .. rubric:: The tutorial
 
 :doc:`scenarios`
-   Six scenarios from task to markup to handler: neighbouring forms, inline validation, an auto-submitting filter, pagination and infinite scroll, a live stream, and a modal wizard that refreshes a list.
+   Six scenarios from task to markup to handler: neighbouring forms, inline validation,
+   an auto-submitting filter, pagination and infinite scroll, a live stream, and a modal
+   wizard that refreshes a list.
 
 .. rubric:: Concepts
 

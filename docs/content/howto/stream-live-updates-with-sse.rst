@@ -13,7 +13,9 @@ Solution
 
 Return a ``PatchEventStream`` from a page module's ``render`` escape hatch and drive it from an in-process broker.
 The stream carries patch envelopes as ``next-patches`` events, the same envelope an HTTP partial response carries.
-Each event uses the ``refresh`` verb so every tab re-fetches the stale zone with its own cookies through the page view, which keeps authorization in the subscriber's own view and never broadcasts one user's HTML to another.
+Each event uses the ``refresh`` verb so every tab re-fetches the stale zone with its own
+cookies through the page view, which keeps authorization in the subscriber's own view and
+never broadcasts one user's HTML to another.
 A full implementation lives under ``examples/live-polls/``. See :doc:`/content/misc/examples`.
 
 This page is a quick recipe.
@@ -119,8 +121,11 @@ See :doc:`/content/topics/dependency-injection` for how to define custom markers
        return PatchEventStream(request, patch_source(request, poll.pk))
 
 ``PatchEventStream`` sets ``Cache-Control: no-cache, no-transform`` and ``X-Accel-Buffering: no`` on construction so a proxy or ``GZipMiddleware`` does not eat the flush.
-The endpoint stays sync because the broker waits on :class:`threading.Condition`.
+The endpoint stays sync because the broker waits on :class:`threading.Condition`, and a sync source requires WSGI.
 An ASGI deployment swaps the wake primitive for an :class:`asyncio.Condition` and passes an async source, which earns a heartbeat, without touching the page or the signal layer.
+The pairing is a contract.
+An async source requires ASGI and a sync source requires WSGI.
+A mismatch raises :exc:`~django.core.exceptions.ImproperlyConfigured` rather than silently hanging the stream.
 
 Fan Out From the Vote Signal
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

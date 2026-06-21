@@ -160,6 +160,18 @@ export interface Asset {
   url: string;
 }
 
+// Narrow an unknown wire entry to an Asset. The manifest crosses the wire
+// boundary like the ops do, so a malformed entry is dropped here rather than
+// cast blind into envelope.assets and the event details. Only the two kinds the
+// loader acts on pass, so a junk kind never rides into the event details.
+export function isAsset(value: unknown): value is Asset {
+  return (
+    isRecord(value) &&
+    (value.kind === "css" || value.kind === "js") &&
+    typeof value.url === "string"
+  );
+}
+
 export interface FormMeta {
   uid: string;
   valid: boolean;
@@ -239,6 +251,18 @@ export type ZoneFetch = (request: {
   headers?: Record<string, string>;
 }) => void;
 
+// The mutable state of a single apply, captured once per envelope and threaded
+// through the ops rather than stored on the applier. When an envelope ships new
+// CSS its ops defer behind loadCss, so a second apply (an SSE event takes no
+// lock) can start before the first resumes. A per-apply struct keeps each
+// envelope's dirty predicate, request key, and touched set bound to its own run
+// instead of letting the later apply clobber the earlier one's instance fields.
+interface ApplyState {
+  isDirty: (field: Element) => boolean;
+  requestKey: string | undefined;
+  touched: Element[];
+}
+
 export interface ApplyDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   mergeContext: (data: Record<string, unknown>) => void;
@@ -315,7 +339,7 @@ export function parseEnvelope(raw: unknown): Envelope {
   // rather than a poison that throws mid-apply over a half-mutated DOM. Each op
   // still carries an unknown op name, narrowed by isBuiltin at apply time.
   const ops = Array.isArray(wire.ops) ? (wire.ops.filter(isRecord) as Patch[]) : [];
-  const assets = Array.isArray(wire.assets) ? (wire.assets as Asset[]) : [];
+  const assets = Array.isArray(wire.assets) ? wire.assets.filter(isAsset) : [];
   const form = parseFormMeta(wire.form);
   const envelope: Envelope = { version, ops, assets, form };
   if (isRecord(raw.csrf)) {
@@ -346,18 +370,6 @@ export class Applier {
   readonly #refresh: ZoneFetch | undefined;
   readonly #here: () => string;
   #dev: boolean;
-  // The morph dirty predicate for the envelope in flight, built from the wire
-  // snapshot and reset once the envelope is fully applied. apply always reassigns
-  // this before any morph reads it, so the field initialiser body never runs.
-  /* v8 ignore start */
-  #isDirty: (field: Element) => boolean = () => false;
-  /* v8 ignore stop */
-  // The initiator's data-next-key, so a form-uid target resolves to the
-  // submitted instance rather than the first match. Reset each apply.
-  #requestKey: string | undefined = undefined;
-  // The nodes a single envelope touched, collected so next:mounted and the
-  // mount registry only see what actually changed.
-  #touched: Element[] = [];
   // Monotonic apply counter per zone. The lazy-zone triggers read it so a zone
   // whose ancestor was re-created mid-flight does not enqueue a stale second GET.
   readonly #applied: Map<string, number> = new Map();
@@ -410,10 +422,15 @@ export class Applier {
     }
     const beforeApply = this.#emit("partial:before-apply", { envelope }, true);
     if (beforeApply.defaultPrevented) return envelope;
-    this.#isDirty = snapshot === undefined ? () => false : this.#dirtySince(snapshot);
-    this.#requestKey = key;
-    this.#touched = [];
-    const runOps = (): void => this.#runOps(envelope);
+    // The per-apply state is captured here and threaded through the ops so two
+    // overlapping applies (the second arriving while the first defers behind
+    // loadCss) keep their dirty predicate, request key, and touched set apart.
+    const state: ApplyState = {
+      isDirty: snapshot === undefined ? () => false : this.#dirtySince(snapshot),
+      requestKey: key,
+      touched: [],
+    };
+    const runOps = (): void => this.#runOps(envelope, state);
     if (this.#assets !== undefined) {
       this.#assets.loadCss(envelope.assets, runOps);
     } else {
@@ -422,13 +439,13 @@ export class Applier {
     return envelope;
   }
 
-  #runOps(envelope: Envelope): void {
+  #runOps(envelope: Envelope, state: ApplyState): void {
     for (const op of envelope.ops) {
       // A single failing op is contained so it never poisons the envelope: the
       // remaining ops still apply, the failure surfaces as partial:error, and
       // mount and partial:applied still run over what did change.
       try {
-        this.#applyOp(op);
+        this.#applyOp(op, state);
       } catch (error) {
         this.#emit("partial:error", { status: 0, body: "", error }, false);
       }
@@ -437,28 +454,28 @@ export class Applier {
     // JS after the ops: the target DOM is in place, each URL runs once.
     this.#assets?.loadJs(envelope.assets);
     this.#assets?.acceptVersion(envelope.version);
-    this.#runMount();
+    this.#runMount(state);
     this.#emit("partial:applied", { envelope }, false);
   }
 
   // next:mounted on each touched node and a mount-registry pass over each, so
   // "behaviour, revive what was inserted" gets the DOM and the code together.
-  #runMount(): void {
-    for (const node of this.#touched) {
+  #runMount(state: ApplyState): void {
+    for (const node of state.touched) {
       if (!node.isConnected) continue;
       node.dispatchEvent(new CustomEvent("next:mounted", { bubbles: true }));
       this.#mount?.run(node);
     }
   }
 
-  #applyOp(patch: Patch): void {
+  #applyOp(patch: Patch, state: ApplyState): void {
     // A built-in verb dispatches through a typed switch, where narrowing on op
     // gives each verb its own variant without re-deriving fields from unknown.
     // Checking built-ins first also narrows the remaining patch to CustomPatch,
     // so a custom handler reads its own server-authored fields off the open
     // shape with no cast at the call site.
     if (isBuiltin(patch)) {
-      this.#applyBuiltin(patch);
+      this.#applyBuiltin(patch, state);
       return;
     }
     // A custom op registered through defineOp shares this apply path and the
@@ -479,25 +496,25 @@ export class Applier {
   // The built-in verbs ride the same apply path and ApplyContext as the custom
   // ops, the core eating its own dog food, but their static variants dispatch
   // through this switch rather than a registry that would erase the shape.
-  #applyBuiltin(patch: BuiltinPatch): void {
+  #applyBuiltin(patch: BuiltinPatch, state: ApplyState): void {
     switch (patch.op) {
       case "morph":
-        this.#morph(patch);
+        this.#morph(patch, state);
         return;
       case "replace":
-        this.#replace(patch);
+        this.#replace(patch, state);
         return;
       case "inner":
-        this.#inner(patch);
+        this.#inner(patch, state);
         return;
       case "append":
-        this.#merge(patch, "append");
+        this.#merge(patch, "append", state);
         return;
       case "prepend":
-        this.#merge(patch, "prepend");
+        this.#merge(patch, "prepend", state);
         return;
       case "remove":
-        this.#remove(patch);
+        this.#remove(patch, state);
         return;
       case "refresh":
         this.#refreshOp(patch);
@@ -546,7 +563,7 @@ export class Applier {
     this.#layers?.close({
       result: patch.result,
       dismiss: patch.dismiss === true,
-      reason: patch.reason,
+      ...(patch.reason !== undefined ? { reason: patch.reason } : {}),
     });
   }
 
@@ -581,17 +598,17 @@ export class Applier {
   // The default verb. The new content is parsed and script-neutralised, then the
   // morph engine brings the live target up to it with the dirty predicate of the
   // envelope in flight. extract carves the target node out of a full document.
-  #morph(patch: MorphPatch): void {
-    const node = this.#resolve(patch.target);
+  #morph(patch: MorphPatch, state: ApplyState): void {
+    const node = this.#resolve(patch.target, state);
     if (node === null) return;
     const html = patch.html ?? "";
     const content =
       patch.extract === true
-        ? this.#extract(html, node, patch.target)
+        ? this.#extract(html, node, patch.target, state)
         : this.#fragment(html, patch.target);
     if (content === null) return;
-    morph(node, content, { isDirty: this.#isDirty });
-    this.#mark(node, patch.target);
+    morph(node, content, { isDirty: state.isDirty });
+    this.#mark(node, patch.target, state);
   }
 
   // Parse a full document and carve out the node matching the target, the path
@@ -601,16 +618,18 @@ export class Applier {
     html: string,
     target: Element,
     patchTarget: Target | undefined,
+    state: ApplyState,
   ): Element | null {
     const parsed = new DOMParser().parseFromString(html, "text/html");
-    const found = this.#resolveIn(parsed, patchTarget) ?? matchByTag(parsed, target);
+    const found =
+      this.#resolveIn(parsed, patchTarget, state) ?? matchByTag(parsed, target);
     if (found === null) return null;
     this.#neutraliseScripts(found, patchTarget);
     return found;
   }
 
-  #replace(patch: ReplacePatch): void {
-    const node = this.#resolve(patch.target);
+  #replace(patch: ReplacePatch, state: ApplyState): void {
+    const node = this.#resolve(patch.target, state);
     if (node === null) return;
     const fragment = this.#fragment(patch.html ?? "", patch.target);
     // The first child is the new live node, captured before the fragment is
@@ -618,25 +637,25 @@ export class Applier {
     const inserted = fragment.firstElementChild;
     fireRemoved(node);
     node.replaceWith(fragment);
-    this.#mark(inserted ?? null, patch.target);
+    this.#mark(inserted ?? null, patch.target, state);
   }
 
-  #inner(patch: InnerPatch): void {
-    const node = this.#resolve(patch.target);
+  #inner(patch: InnerPatch, state: ApplyState): void {
+    const node = this.#resolve(patch.target, state);
     if (node === null) return;
     const fragment = this.#fragment(patch.html ?? "", patch.target);
     // Each old child detaches when the contents swap, so each child element
     // gets its own next:removed while it is still connected.
     for (const child of Array.from(node.children)) fireRemoved(child);
     node.replaceChildren(fragment);
-    this.#mark(node, patch.target);
+    this.#mark(node, patch.target, state);
   }
 
   // append and prepend dedupe by data-next-key, falling back to id: an existing
   // node with the same key is replaced in place, not duplicated, so a re-fetched
   // page of a paginated list cannot double its rows.
-  #merge(patch: MergePatch, side: "append" | "prepend"): void {
-    const node = this.#resolve(patch.target);
+  #merge(patch: MergePatch, side: "append" | "prepend", state: ApplyState): void {
+    const node = this.#resolve(patch.target, state);
     if (node === null) return;
     const fragment = this.#fragment(patch.html ?? "", patch.target);
     const incoming = Array.from(fragment.children);
@@ -655,12 +674,12 @@ export class Applier {
     }
     if (side === "append") node.append(fresh);
     else node.prepend(fresh);
-    this.#mark(node, patch.target);
-    for (const child of incoming) this.#touched.push(child);
+    this.#mark(node, patch.target, state);
+    for (const child of incoming) state.touched.push(child);
   }
 
-  #remove(patch: RemovePatch): void {
-    const node = this.#resolve(patch.target);
+  #remove(patch: RemovePatch, state: ApplyState): void {
+    const node = this.#resolve(patch.target, state);
     if (node === null) return;
     fireRemoved(node);
     node.remove();
@@ -711,8 +730,8 @@ export class Applier {
 
   // Record a node as touched for the mount pass and bump the zone's apply
   // counter, the generation the lazy triggers read.
-  #mark(node: Element | null, target: Target | undefined): void {
-    if (node !== null) this.#touched.push(node);
+  #mark(node: Element | null, target: Target | undefined, state: ApplyState): void {
+    if (node !== null) state.touched.push(node);
     const zone = target?.zone;
     if (zone !== undefined) this.#applied.set(zone, this.generation(zone) + 1);
   }
@@ -720,27 +739,31 @@ export class Applier {
   // Resolve against the live document. A zone is asked of the layer stack
   // first, top layer down, so a zone inside the upper modal wins over the
   // same-named page zone beneath it.
-  #resolve(target: Target | undefined): Element | null {
+  #resolve(target: Target | undefined, state: ApplyState): Element | null {
     if (target?.zone !== undefined && this.#layers !== undefined) {
       return this.#layers.resolveZone(target.zone, this.#document);
     }
-    return this.#resolveIn(this.#document, target);
+    return this.#resolveIn(this.#document, target, state);
   }
 
   // Resolve a target against any root, the live document for the verbs or the
   // parsed document for extract. The layer-aware zone resolve lives in #resolve,
   // so the parsed extract document never consults the stack.
-  #resolveIn(root: Document, target: Target | undefined): Element | null {
+  #resolveIn(
+    root: Document,
+    target: Target | undefined,
+    state: ApplyState,
+  ): Element | null {
     if (target === undefined) return null;
     if (target.zone !== undefined) {
       return root.querySelector(`[${ATTR_ZONE}="${cssEscape(target.zone)}"]`);
     }
     if (target.form !== undefined) {
-      return this.#resolveForm(root, target.form);
+      return this.#resolveForm(root, target.form, state);
     }
     if (target.field !== undefined) {
       const [uid, name] = target.field;
-      const form = this.#resolveForm(root, uid);
+      const form = this.#resolveForm(root, uid, state);
       if (form === null) return null;
       return form.querySelector(`[name="${cssEscape(name)}"]`);
     }
@@ -752,8 +775,8 @@ export class Applier {
 
   // A repeated form shares one action uid across rows, so an in-flight key picks
   // the submitted row; a keyless request falls back to the first uid match.
-  #resolveForm(root: Document, uid: string): Element | null {
-    const key = this.#requestKey;
+  #resolveForm(root: Document, uid: string, state: ApplyState): Element | null {
+    const key = state.requestKey;
     if (key !== undefined) {
       const scoped = root.querySelector(
         `[${ATTR_ACTION}="${cssEscape(uid)}"][${ATTR_KEY}="${cssEscape(key)}"]`,

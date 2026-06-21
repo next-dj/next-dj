@@ -89,6 +89,12 @@ WSGI and ASGI
 
 A stream holds a connection open, and how it stays alive when idle depends on the source and the server.
 
+The source kind and the server are paired by contract.
+An async patch source requires ASGI and a sync source requires WSGI.
+A mismatch raises :exc:`~django.core.exceptions.ImproperlyConfigured` when the response is built.
+Without the guard the wrong-kind iterator buffers in full and hangs the stream before the first byte.
+Pair an async source with ASGI and a sync source with WSGI.
+
 A sync source under WSGI sends no heartbeat.
 A blocked ``next()`` on a sync iterator has nothing to interrupt it without a thread, so a quiet sync stream stays quiet.
 A keepalive on a sync source is the source's own responsibility, for example a comment frame on a wait timeout.

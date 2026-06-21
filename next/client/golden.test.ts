@@ -75,8 +75,8 @@ describe("golden fixtures apply to the DOM", () => {
     applier.apply(JSON.parse(readEnvelopeBytes(meta.envelope_file)));
     const zones = document.querySelectorAll('[data-next-zone="request-list"]');
     expect(zones).toHaveLength(1);
-    expect(zones[0].querySelector("ul")).not.toBeNull();
-    expect(zones[0].querySelector("span")).toBeNull();
+    expect(zones[0]!.querySelector("ul")).not.toBeNull();
+    expect(zones[0]!.querySelector("span")).toBeNull();
   });
 
   it("inner_zone replaces only the contents of the zone", () => {
@@ -108,7 +108,7 @@ describe("golden fixtures apply to the DOM", () => {
     applier.apply(JSON.parse(readEnvelopeBytes(meta.envelope_file)));
     document.removeEventListener("request-created", onDoc);
     expect(onDoc).toHaveBeenCalledOnce();
-    expect((onDoc.mock.calls[0][0] as CustomEvent).detail).toEqual({ id: 42 });
+    expect((onDoc.mock.calls[0]![0] as CustomEvent).detail).toEqual({ id: 42 });
     expect(dispatched).toContainEqual({
       event: "request-created",
       detail: { id: 42 },

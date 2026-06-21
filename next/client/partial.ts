@@ -94,6 +94,14 @@ export interface PartialSurface {
   _reset(): void;
 }
 
+// An optional dep entry: an absent adapter contributes no key at all, so the
+// built deps object never carries an explicit undefined. This honours
+// exactOptionalPropertyTypes, where an optional `key?: T` field rejects an
+// assigned undefined.
+function opt<K extends string, V>(key: K, value: V | undefined): { [P in K]?: V } {
+  return value === undefined ? {} : ({ [key]: value } as { [P in K]: V });
+}
+
 export function createPartial(deps: PartialDeps): PartialSurface {
   let csrf: CsrfPayload | undefined;
 
@@ -136,12 +144,12 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   function assetsDeps(adapters?: PartialAdapters) {
     return {
       dispatch: deps.dispatch,
-      document: adapters?.document,
-      clock: adapters?.clock,
-      loadLink: adapters?.loadLink,
-      navigate: adapters?.navigate,
-      session: adapters?.session,
-      cssTimeoutMs: adapters?.cssTimeoutMs,
+      ...opt("document", adapters?.document),
+      ...opt("clock", adapters?.clock),
+      ...opt("loadLink", adapters?.loadLink),
+      ...opt("navigate", adapters?.navigate),
+      ...opt("session", adapters?.session),
+      ...opt("cssTimeoutMs", adapters?.cssTimeoutMs),
     };
   }
 
@@ -149,8 +157,8 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     return {
       dispatch: deps.dispatch,
       mergeContext: deps.mergeContext,
-      document: adapters?.document,
-      dev: adapters?.dev,
+      ...opt("document", adapters?.document),
+      ...opt("dev", adapters?.dev),
       dirtySince: (snapshot) => dirty.isDirtySince(snapshot),
       // The stack satisfies the bridge: the applier resolves zone targets top
       // layer down and routes the layer and toast verbs into it. _configure
@@ -171,12 +179,12 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   function layerDeps(adapters?: PartialAdapters) {
     return {
       dispatch: deps.dispatch,
-      document: adapters?.document,
-      dialog: adapters?.dialog,
+      ...opt("document", adapters?.document),
+      ...opt("dialog", adapters?.dialog),
       // The layer stack shares the applier's history seam so a modal pushes its
       // honest URL and a close replaces it back through the same channel.
       history,
-      popstate: adapters?.popstate,
+      ...opt("popstate", adapters?.popstate),
       fetch: (request: { url: string; zone: string }) => wire.fetch(request),
     };
   }
@@ -186,10 +194,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       fetch: (request: WireRequest) => void wire.fetch(request),
       abort: (zone: string) => wire.abort(zone),
       version: () => assets.version(),
-      document: adapters?.document,
-      clock: adapters?.clock,
-      observer: adapters?.observer,
-      confirm: adapters?.confirm,
+      ...opt("document", adapters?.document),
+      ...opt("clock", adapters?.clock),
+      ...opt("observer", adapters?.observer),
+      ...opt("confirm", adapters?.confirm),
     };
   }
 
@@ -200,16 +208,16 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       apply: (raw: unknown) => void applier.apply(raw),
       fetch: (request: WireRequest) => void wire.fetch(request),
       dispatch: deps.dispatch,
-      document: adapters?.document,
-      source: adapters?.source,
-      visibility: adapters?.visibility,
+      ...opt("document", adapters?.document),
+      ...opt("source", adapters?.source),
+      ...opt("visibility", adapters?.visibility),
     };
   }
 
   function wireDeps(adapters?: PartialAdapters) {
     return {
-      fetch: adapters?.fetch,
-      navigate: adapters?.navigate,
+      ...opt("fetch", adapters?.fetch),
+      ...opt("navigate", adapters?.navigate),
       dispatch: deps.dispatch,
       onEnvelope: (
         raw: unknown,

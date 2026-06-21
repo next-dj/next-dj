@@ -26,7 +26,7 @@ RESPONSE_ACTION = "X-Next-Action"
 CONTENT_TYPE = "application/vnd.next.patches+json"
 ACCEPT = "application/vnd.next.patches+json, text/html;q=0.9"
 
-VARY_HEADERS: tuple[str, ...] = (REQUEST_FLAG, ZONE, MERGE)
+VARY_HEADERS: tuple[str, ...] = (REQUEST_FLAG, ZONE, MERGE, VERSION)
 
 _INTENT_ATTR = "_next_partial_intent"
 _UNSET = object()

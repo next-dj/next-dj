@@ -81,7 +81,7 @@ describe("trigger delegation", () => {
     detach = triggers.install(document);
     triggers.ready();
     expect(requests).toHaveLength(1);
-    expect(requests[0].headers?.["X-Next-Zone"]).toBe("a,b");
+    expect(requests[0]!.headers?.["X-Next-Zone"]).toBe("a,b");
   });
 
   it("does not re-fire a load zone re-scanned by a parent morph", () => {
@@ -106,7 +106,7 @@ describe("trigger delegation", () => {
     expect(requests).toHaveLength(0);
     clock.run();
     expect(requests).toHaveLength(1);
-    expect(requests[0].zone).toBe("results");
+    expect(requests[0]!.zone).toBe("results");
   });
 
   it("reveals through the observer adapter", () => {
@@ -119,7 +119,7 @@ describe("trigger delegation", () => {
     expect(requests).toHaveLength(0);
     observer.reveal();
     expect(requests).toHaveLength(1);
-    expect(requests[0].zone).toBe("late");
+    expect(requests[0]!.zone).toBe("late");
   });
 
   it("blocks a request when confirm is cancelled", () => {
@@ -143,7 +143,7 @@ describe("trigger delegation", () => {
       .querySelector("a")!
       .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(requests).toHaveLength(1);
-    expect(requests[0].headers?.["X-Next-Merge"]).toBe("append");
+    expect(requests[0]!.headers?.["X-Next-Merge"]).toBe("append");
   });
 
   it("validates on blur with a field header and no file fields", () => {
@@ -156,10 +156,10 @@ describe("trigger delegation", () => {
     const input = document.querySelector("input")!;
     input.dispatchEvent(new FocusEvent("blur"));
     expect(requests).toHaveLength(1);
-    expect(requests[0].method).toBe("POST");
-    expect(requests[0].headers?.["X-Next-Validate"]).toBe("email");
-    expect(requests[0].zone).toBe("validate:u");
-    expect(requests[0].abortable).toBe(true);
+    expect(requests[0]!.method).toBe("POST");
+    expect(requests[0]!.headers?.["X-Next-Validate"]).toBe("email");
+    expect(requests[0]!.zone).toBe("validate:u");
+    expect(requests[0]!.abortable).toBe(true);
   });
 
   it("aborts the in-flight validation when the form submits", () => {
@@ -189,10 +189,10 @@ describe("trigger delegation", () => {
     form.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
     expect(requests).toHaveLength(1);
-    expect(requests[0].method).toBe("POST");
-    expect(requests[0].uid).toBe("u");
-    expect(requests[0].zone).toBe("wizard");
-    const body = requests[0].body as FormData;
+    expect(requests[0]!.method).toBe("POST");
+    expect(requests[0]!.uid).toBe("u");
+    expect(requests[0]!.zone).toBe("wizard");
+    const body = requests[0]!.body as FormData;
     expect(body.get("email")).toBe("a@b.c");
     expect(body.get("advance")).toBe("next");
   });
@@ -206,7 +206,7 @@ describe("trigger delegation", () => {
     document
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    expect(requests[0].key).toBe("row-7");
+    expect(requests[0]!.key).toBe("row-7");
   });
 
   it("omits the key for a form without one", () => {
@@ -217,7 +217,7 @@ describe("trigger delegation", () => {
     document
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    expect(requests[0].key).toBeUndefined();
+    expect(requests[0]!.key).toBeUndefined();
   });
 
   it("leaves a form without a next action to submit natively", () => {
@@ -241,7 +241,7 @@ describe("trigger delegation", () => {
     expect(requests).toHaveLength(0);
     observer.reveal();
     expect(requests).toHaveLength(1);
-    expect(requests[0].headers?.["X-Next-Merge"]).toBe("append");
+    expect(requests[0]!.headers?.["X-Next-Merge"]).toBe("append");
   });
 
   it("ignores an input event whose trigger names a different type", () => {
@@ -279,7 +279,7 @@ describe("trigger delegation", () => {
       .querySelector("input")!
       .dispatchEvent(new Event("input", { bubbles: true }));
     expect(requests).toHaveLength(1);
-    expect(requests[0].url).toBe("/c/?q=x");
+    expect(requests[0]!.url).toBe("/c/?q=x");
   });
 
   it("syncs the address bar with replaceState, not a history entry", () => {
@@ -311,7 +311,7 @@ describe("trigger delegation", () => {
     document
       .querySelector("input")!
       .dispatchEvent(new Event("input", { bubbles: true }));
-    expect(requests[0].url).toBe("/catalog/?q=z");
+    expect(requests[0]!.url).toBe("/catalog/?q=z");
   });
 
   it("skips a blur with no field name", () => {
@@ -336,7 +336,7 @@ describe("trigger delegation", () => {
     document
       .querySelector('input[name="email"]')!
       .dispatchEvent(new FocusEvent("blur"));
-    const body = requests[0].body as FormData;
+    const body = requests[0]!.body as FormData;
     expect(body.has("doc")).toBe(false);
     expect(body.get("email")).toBe("a@b.c");
   });
@@ -456,7 +456,7 @@ describe("trigger delegation", () => {
     const { triggers, requests } = makeTriggers();
     detach = triggers.install(document);
     document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
-    expect(requests[0].zone).toBe("validate:");
+    expect(requests[0]!.zone).toBe("validate:");
   });
 
   it("falls back to the current path when a validate form has no action", () => {
@@ -468,7 +468,7 @@ describe("trigger delegation", () => {
     const { triggers, requests } = makeTriggers();
     detach = triggers.install(document);
     document.querySelector("input")!.dispatchEvent(new FocusEvent("blur"));
-    expect(requests[0].url).toBe("/here/");
+    expect(requests[0]!.url).toBe("/here/");
   });
 
   it("submits a filter to the bare action when the query is empty", () => {
@@ -481,7 +481,7 @@ describe("trigger delegation", () => {
     document
       .querySelector("input")!
       .dispatchEvent(new Event("input", { bubbles: true }));
-    expect(requests[0].url).toBe("/c/");
+    expect(requests[0]!.url).toBe("/c/");
   });
 
   it("appends an empty submitter value when the pressed button has none", () => {
@@ -497,7 +497,7 @@ describe("trigger delegation", () => {
       value: form.querySelector("button"),
     });
     form.dispatchEvent(event);
-    const body = requests[0].body as FormData;
+    const body = requests[0]!.body as FormData;
     expect(body.get("advance")).toBe("");
   });
 
@@ -511,7 +511,7 @@ describe("trigger delegation", () => {
     document
       .querySelector("input")!
       .dispatchEvent(new Event("input", { bubbles: true }));
-    expect(requests[0].url).toBe("/c/");
+    expect(requests[0]!.url).toBe("/c/");
   });
 
   it("skips a pagination link whose target zone is empty", () => {

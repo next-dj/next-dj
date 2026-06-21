@@ -131,6 +131,9 @@ class TestVaryHeaders:
         assert "X-Next-Request" in VARY_HEADERS
         assert "X-Next-Zone" in VARY_HEADERS
 
+    def test_vary_includes_version(self) -> None:
+        assert "X-Next-Version" in VARY_HEADERS
+
     def test_set_partial_vary_adds_all(self) -> None:
         response = HttpResponse()
         set_partial_vary(response)
@@ -138,6 +141,7 @@ class TestVaryHeaders:
         assert "X-Next-Request" in vary
         assert "X-Next-Zone" in vary
         assert "X-Next-Merge" in vary
+        assert "X-Next-Version" in vary
 
     def test_set_partial_vary_preserves_existing(self) -> None:
         response = HttpResponse()

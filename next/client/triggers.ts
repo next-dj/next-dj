@@ -140,7 +140,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       if (typeof value === "string") pairs.push([name, value]);
     }
     const query = new URLSearchParams(pairs).toString();
-    const action = form.getAttribute("action") || here().split("?")[0];
+    const action = form.getAttribute("action") || here().replace(/\?.*$/, "");
     const url = query === "" ? action : `${action}?${query}`;
     doc.defaultView?.history.replaceState(null, "", url);
     deps.fetch({ url, zone, headers: versionHeaders({ [HEADER_ZONE]: zone }) });
@@ -236,13 +236,15 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     // The zone the form declares travels as the morph target, so an invalid
     // submit repaints that zone and a wizard step advances it in place. Without
     // one the server falls back to the form by uid.
+    const zone = targetZone(form);
+    // The form's own key, so the response morphs this instance.
+    const key = form.getAttribute(ATTR_KEY);
     deps.fetch({
       url: form.getAttribute("action") ?? here(),
       method: "POST",
       uid,
-      zone: targetZone(form) ?? undefined,
-      // The form's own key, so the response morphs this instance.
-      key: form.getAttribute(ATTR_KEY) ?? undefined,
+      ...(zone !== null ? { zone } : {}),
+      ...(key !== null ? { key } : {}),
       body,
     });
   }

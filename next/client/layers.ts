@@ -134,8 +134,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
     // Top layer down: a zone inside the upper modal is found before the
     // same-named page zone beneath it. The layer's own container carries the
     // zone, so it is matched directly, not only its descendants.
-    for (let i = stack.length - 1; i >= 0; i -= 1) {
-      const container = stack[i].root;
+    for (const layer of Array.from(stack).reverse()) {
+      const container = layer.root;
       if (container.matches(selector)) return container;
       const found = container.querySelector(selector);
       if (found !== null) return found;
@@ -325,6 +325,13 @@ export function createLayers(deps: LayerDeps): LayerStack {
       if (toastHost !== null) {
         toastHost.remove();
         toastHost = null;
+      }
+      // A clean slate also drops the delegated click and popstate listeners
+      // install bound, so a reset between tests leaves nothing on the document
+      // or the window.
+      if (detach !== null) {
+        detach();
+        detach = null;
       }
     },
   };

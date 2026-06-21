@@ -75,7 +75,9 @@ The server is the only author of a target, the client never names one.
      - accept, no result
    * - ``url``
      - ``push_url()``
-     - Push or replace browser history. The href is validated by the server.
+     - Push browser history. The href is validated by the server. The client also honours
+       ``action: "replace"``, reachable only from a raw or backend-authored envelope, the
+       ``push_url()`` builder always pushes.
      - ``action: "push"``
    * - ``visit``
      - ``redirect()``
@@ -202,7 +204,9 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from Python 
      - The zone address, written by the ``{% zone %}`` tag.
    * - ``data-next-lazy``
      - Lazy zone wrapper, infinite-scroll sentinel
-     - ``load`` or ``revealed``, the materialisation trigger. ``load`` fetches on ``ready``, ``revealed`` waits for the viewport. On a pagination sentinel ``revealed`` arms the observer that fires the merge GET.
+     - ``load`` or ``revealed``, the materialisation trigger. ``load`` fetches on
+       ``ready``, ``revealed`` waits for the viewport. On a pagination sentinel
+       ``revealed`` arms the observer that fires the merge GET.
    * - ``data-next-action``
      - ``<form>``
      - The action uid, written by ``{% form %}``, enables submit interception.
@@ -235,7 +239,9 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from Python 
      - The morph leaves the node untouched, paired by id when present and by position otherwise.
    * - ``data-next-key``
      - List rows, repeated ``<form>``
-     - The match key for the morph and for ``append`` dedup, falling back to ``id``. On a repeated form it names the instance, written by the ``key=`` tag parameter, so a partial morph lands on the submitted form rather than the first.
+     - The match key for the morph and for ``append`` dedup, falling back to ``id``.
+       On a repeated form it names the instance, written by the ``key=`` tag parameter,
+       so a partial morph lands on the submitted form rather than the first.
    * - ``data-next-sse``
      - A container
      - Subscribe to a patch stream at the URL.
@@ -304,7 +310,9 @@ The ``partial:*``, ``ready``, ``context-updated``, and ``next:toast`` events als
      - Fired on the old node before a pair morphs. Detail ``{newNode}``. ``preventDefault()`` skips the morph of this node and its subtree.
    * - ``next:morph-attribute``
      - Yes
-     - Fired on the old element before one attribute changes. Detail ``{name, mutationType}``, where ``mutationType`` is ``"update"`` or ``"remove"``. ``preventDefault()`` skips that one attribute mutation.
+     - Fired on the old element before one attribute changes. Detail
+       ``{name, mutationType}``, where ``mutationType`` is ``"update"`` or ``"remove"``.
+       ``preventDefault()`` skips that one attribute mutation.
    * - ``next:toast``
      - No
      - Detail ``{text, variant}``. The ``toast`` verb fires it on the document and the ``Next.on`` bus alongside building the toast.
@@ -389,7 +397,9 @@ The list holds the protocol backends, with the first one active.
      - Meaning
    * - ``VERSION``
      - ``"manifest"``
-     - The source of ``X-Next-Version``. The sentinel hashes the staticfiles manifest when the active storage hashes its files, an explicit string overrides it, and without a manifest the version guard stays silent.
+     - The source of ``X-Next-Version``. The sentinel hashes the staticfiles manifest
+       when the active storage hashes its files, an explicit string overrides it, and
+       without a manifest the version guard stays silent.
    * - ``PUSH_WIZARD_STEPS``
      - ``False``
      - The global default for pushing wizard steps to history. A wizard's ``Meta.push_steps`` overrides it per wizard.
