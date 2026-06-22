@@ -20,7 +20,7 @@ import contextlib
 import importlib.util
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, override
 
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
@@ -136,11 +136,13 @@ class PythonTemplateLoader(TemplateLoader):
 
     source_name: ClassVar[str] = "template"
 
+    @override
     def can_load(self, file_path: Path) -> bool:
         """Return whether the module loads and defines `template`."""
         module = _load_python_module_memo(file_path)
         return module is not None and hasattr(module, "template")
 
+    @override
     def load_template(self, file_path: Path) -> str | None:
         """Return `module.template` if the module exposes it."""
         module = _load_python_module_memo(file_path)
@@ -152,10 +154,12 @@ class DjxTemplateLoader(TemplateLoader):
 
     source_name: ClassVar[str] = "template.djx"
 
+    @override
     def can_load(self, file_path: Path) -> bool:
         """Return whether sibling `template.djx` exists."""
         return (file_path.parent / "template.djx").exists()
 
+    @override
     def load_template(self, file_path: Path) -> str | None:
         """Return the file contents of `template.djx`."""
         djx_file = file_path.parent / "template.djx"
@@ -164,6 +168,7 @@ class DjxTemplateLoader(TemplateLoader):
         except (OSError, UnicodeDecodeError):
             return None
 
+    @override
     def source_path(self, file_path: Path) -> Path | None:
         """Return the sibling `template.djx` path for stale-cache detection."""
         djx_file = file_path.parent / "template.djx"
@@ -173,10 +178,12 @@ class DjxTemplateLoader(TemplateLoader):
 class LayoutTemplateLoader(TemplateLoader):
     """Compose nested `layout.djx` wrappers around the page template."""
 
+    @override
     def can_load(self, file_path: Path) -> bool:
         """Return whether at least one `layout.djx` exists on the path."""
         return self._find_layout_files(file_path) is not None
 
+    @override
     def load_template(self, file_path: Path) -> str | None:
         """Return the composed template with the page inside the innermost slot."""
         layout_files = self._find_layout_files(file_path)

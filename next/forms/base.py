@@ -4,7 +4,7 @@ import inspect
 import re
 import sys
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, override
 
 from django import forms as django_forms
 from django.conf import settings
@@ -270,6 +270,7 @@ class _PermissionHooks:
     _has_check_permissions: bool = False
     _has_object_permission: bool = False
 
+    @override
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Stamp the per-subclass hook-presence flags via __func__ identity."""
         super().__init_subclass__(**kwargs)
@@ -295,6 +296,7 @@ class BaseForm(_PermissionHooks, DjangoBaseForm):
 
     default_renderer = _div_form_renderer
 
+    @override
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)
@@ -323,6 +325,7 @@ class BaseModelForm(_PermissionHooks, DjangoBaseModelForm):
 
     default_renderer = _div_form_renderer
 
+    @override
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)

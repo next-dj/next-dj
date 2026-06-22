@@ -82,7 +82,7 @@ class TestMorphFacadeUnknownKeys:
 
     def test_zone_rejects_a_misspelled_overrides_keyword(self) -> None:
         with pytest.raises(TypeError, match="unexpected keyword"):
-            Patches(partial_request()).morph(zone="alpha", overrides={"x": 1})
+            Patches(partial_request()).morph(zone="alpha", overide={"x": 1})
 
     def test_zone_lists_the_accepted_keywords(self) -> None:
         with pytest.raises(TypeError, match="overrides"):

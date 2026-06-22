@@ -1,6 +1,6 @@
 """Zone template tag, its node, and the standalone zone-body renderable."""
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, override
 
 from django.template import Library, TemplateSyntaxError
 from django.template.base import Node, NodeList, Template
@@ -124,6 +124,7 @@ class ZoneNode(Node):
         self.lazy = lazy
         self.placeholder = placeholder if placeholder is not None else NodeList()
 
+    @override
     def render(self, context: "Context") -> SafeString:
         """Render the zone inline on a full page render."""
         if self.lazy is None:

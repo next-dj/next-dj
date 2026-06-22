@@ -5,7 +5,7 @@ import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast, override
 from weakref import WeakSet
 
 from django.core.exceptions import ImproperlyConfigured
@@ -96,12 +96,14 @@ class FormActionNotFoundError(LookupError):
             )
         return self._suggestions
 
+    @override
     def __str__(self) -> str:
         """Render the message, composing and caching it on first access."""
         if not self.args:
             self.args = (self._compose(),)
         return str(self.args[0])
 
+    @override
     def __reduce__(self) -> "tuple[Any, ...]":
         """Pickle the rendered message and drop the live candidates source."""
         state = {
@@ -386,6 +388,7 @@ class RegistryFormActionBackend(FormActionBackend):
         self._name_index = dict(snapshot.name_index)
         self._url_cache = {}
 
+    @override
     def register_action(self, registration: ActionRegistration) -> None:
         """Store handler, form_class, or wizard_class and a stable uid for the name."""
         name = registration.name
@@ -469,6 +472,7 @@ class RegistryFormActionBackend(FormActionBackend):
             return None
         return meta
 
+    @override
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
         """Return the reverse URL for a registered action name."""
         meta: ActionMeta | None = None
@@ -500,6 +504,7 @@ class RegistryFormActionBackend(FormActionBackend):
             registry_empty=not self._registry,
         )
 
+    @override
     def generate_urls(self) -> "list[URLPattern]":
         """Return one catch-all route when at least one action is registered."""
         if not self._registry:
@@ -507,6 +512,7 @@ class RegistryFormActionBackend(FormActionBackend):
         view = require_http_methods(["GET", "POST"])(self.dispatch)
         return [path("_next/form/<str:uid>/", view, name=URL_NAME_FORM_ACTION)]
 
+    @override
     def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponse":
         """Forward a POST request to `FormActionDispatch.dispatch`."""
         key = self._uid_to_name.get(uid)
@@ -519,6 +525,7 @@ class RegistryFormActionBackend(FormActionBackend):
         meta = self._registry[key]
         return FormActionDispatch.dispatch(self, request, key[1], meta)
 
+    @override
     def get_meta(
         self,
         action_name: str,
@@ -533,10 +540,12 @@ class RegistryFormActionBackend(FormActionBackend):
 
         return self._fallback_meta(action_name, scoped=page_path is not None)
 
+    @override
     def iter_actions(self) -> "Iterable[ActionMeta]":
         """Yield every stored `ActionMeta` in registration order."""
         yield from self._registry.values()
 
+    @override
     def render_invalid_page(
         self,
         request: "HttpRequest",

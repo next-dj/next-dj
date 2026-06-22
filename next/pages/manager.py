@@ -13,7 +13,7 @@ import inspect
 import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast, overload
 
 from django.http import HttpRequest, HttpResponse
 from django.http.response import HttpResponseBase
@@ -115,6 +115,17 @@ class Page:
             skip_while_filename_endswith=("manager.py",),
         )
 
+    @overload
+    def context[C: Callable[..., Any]](self, func_or_key: C, /) -> C: ...
+    @overload
+    def context[C: Callable[..., Any]](
+        self,
+        func_or_key: str | None = None,
+        *,
+        inherit_context: bool = False,
+        serialize: bool = False,
+        serializer: JsContextSerializer | None = None,
+    ) -> Callable[[C], C]: ...
     def context(
         self,
         func_or_key: Callable[..., Any] | str | None = None,
@@ -122,7 +133,7 @@ class Page:
         inherit_context: bool = False,
         serialize: bool = False,
         serializer: JsContextSerializer | None = None,
-    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    ) -> Callable[..., Any]:
         """Register a keyed or dict-merge `@context` for the caller file.
 
         Pass `serialize=True` to include the return value in

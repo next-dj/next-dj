@@ -12,7 +12,7 @@ protocol.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, override, runtime_checkable
 
 from django.core.serializers.json import DjangoJSONEncoder
 
@@ -88,6 +88,7 @@ def _make_pydantic_encoder(module: ModuleType) -> type[DjangoJSONEncoder]:
     class _PydanticAwareEncoder(DjangoJSONEncoder):
         """Fallback encoder that unwraps pydantic `BaseModel` instances."""
 
+        @override
         def default(self, o: object) -> object:
             """Dump `BaseModel` subclasses via `model_dump` before deferring."""
             if isinstance(o, base_model):

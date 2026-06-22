@@ -13,7 +13,7 @@ every URL.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, overload
+from typing import TYPE_CHECKING, Literal, overload, override
 
 from django.contrib.staticfiles.finders import BaseFinder
 from django.contrib.staticfiles.utils import matches_patterns
@@ -118,6 +118,7 @@ class _MappedSourceStorage(Storage):
             raise FileNotFoundError(msg)
         return self._mapping[name]
 
+    @override
     def exists(self, name: str) -> bool:
         """Return True when the logical name has a mapping and the file exists."""
         try:
@@ -125,11 +126,13 @@ class _MappedSourceStorage(Storage):
         except FileNotFoundError:
             return False
 
+    @override
     def open(self, name: str, mode: str = "rb") -> File:
         """Open the file behind the logical name for reading."""
         path = self._resolve(name)
         return File(path.open(mode))
 
+    @override
     def path(self, name: str) -> str:
         """Return the absolute filesystem path behind the logical name."""
         return str(self._resolve(name))
@@ -167,10 +170,11 @@ class NextStaticFilesFinder(BaseFinder):
         self, path: str, *, all: Literal[True]
     ) -> list[str]: ...  # pragma: no cover
 
+    @override
     def find(
         self,
         path: str,
-        find_all: bool = False,  # noqa: FBT001, FBT002
+        find_all: bool = False,
         **kwargs: bool,
     ) -> str | list[str] | None:
         """Resolve the logical path to an absolute filesystem path or list."""
@@ -184,6 +188,7 @@ class NextStaticFilesFinder(BaseFinder):
         resolved = str(source)
         return [resolved] if find_all else resolved
 
+    @override
     def list(
         self,
         ignore_patterns: Iterable[str] | None,

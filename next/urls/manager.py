@@ -11,7 +11,7 @@ time.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, SupportsIndex, overload
+from typing import TYPE_CHECKING, Any, SupportsIndex, overload, override
 
 from django.urls import clear_url_caches
 
@@ -40,6 +40,7 @@ class RouterManager:
         self._backends: list[RouterBackend] = []
         self._config_cache: list[dict[str, Any]] | None = None
 
+    @override
     def __repr__(self) -> str:
         """Debug representation with backend count."""
         return f"<{self.__class__.__name__} backends={len(self._backends)}>"
@@ -73,8 +74,7 @@ class RouterManager:
         configs = self._get_next_pages_config()
         for config in configs:
             try:
-                if backend := RouterFactory.create_backend(config):
-                    self._backends.append(backend)
+                self._backends.append(RouterFactory.create_backend(config))
             except Exception:
                 logger.exception("error creating router from config %s", config)
 
@@ -121,12 +121,15 @@ class _LazyUrlPatterns(list):
             *list(form_action_manager),
         ]
 
+    @override
     def __iter__(self) -> Iterator[URLPattern | URLResolver]:
         return iter(self._patterns())
 
+    @override
     def __reversed__(self) -> Iterator[URLPattern | URLResolver]:
         return reversed(self._patterns())
 
+    @override
     def __len__(self) -> int:
         return len(self._patterns())
 
@@ -138,6 +141,7 @@ class _LazyUrlPatterns(list):
     def __getitem__(self, key: slice, /) -> list[URLPattern | URLResolver]:
         raise NotImplementedError
 
+    @override
     def __getitem__(
         self, key: SupportsIndex | slice, /
     ) -> URLPattern | URLResolver | list[URLPattern | URLResolver]:

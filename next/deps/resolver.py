@@ -10,7 +10,7 @@ Providers register by simply importing their module, which runs the
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, cast, get_type_hints
+from typing import TYPE_CHECKING, Any, ClassVar, cast, get_type_hints
 
 from .cache import _CACHE_MISS, _IN_PROGRESS, DependencyCache, DependencyCycleError
 from .context import RESERVED_KEYS, ResolutionContext
@@ -23,11 +23,10 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
 
 
-T = TypeVar("T")
-
-
 # Memoise per-callable introspection. A bound method is recreated each access, so
-# key by its stable `__func__` (never the instance) plus a bound flag.
+# key by its stable `__func__` (never the instance) plus a bound flag. Keys are the
+# framework's page, component, and action callables, declared once at import, so the
+# unbounded dicts stay finite over a process lifetime.
 _signature_cache: dict[Any, inspect.Signature] = {}
 _type_hints_cache: dict[Any, dict[str, Any]] = {}
 
@@ -179,7 +178,7 @@ class DependencyResolver:
         self.add_provider(provider)
         return provider
 
-    def resolve(
+    def resolve[T](
         self, func: Callable[..., T], context: ResolutionContext
     ) -> dict[str, Any]:
         """Return keyword arguments ready to call `func` with the given context."""

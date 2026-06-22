@@ -48,8 +48,8 @@ Modules
    Like ``resolve_dependencies``, it strips ``EXPLICIT_RESOLVE_KEYS`` from the injectable context so a context key cannot shadow a dedicated provider such as ``request`` or ``form``.
 
 ``next.deps.providers``.
-   The ``ParameterProvider`` protocol, the ``RegisteredParameterProvider`` base class, and the ``ProviderRegistry`` list-style helper.
-   ``ProviderRegistry`` is kept for tests and external consumers and is not used by the resolver, which reads the auto-registry on ``RegisteredParameterProvider._registry`` instead.
+   The ``ParameterProvider`` protocol and the ``RegisteredParameterProvider`` base class.
+   The resolver reads the auto-registry on ``RegisteredParameterProvider._registry`` to instantiate the built-in providers on first use.
 
 ``next.deps.cache``.
    ``DependencyCache`` accumulator, the ``REQUEST_DEP_CACHE_ATTR`` constant, the ``DependencyCycleError`` exception, and the ``get_request_dep_cache`` accessor.

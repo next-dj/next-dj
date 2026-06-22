@@ -11,7 +11,7 @@ handles the `Depends` marker and registers itself through
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from .providers import RegisteredParameterProvider
 
@@ -51,11 +51,12 @@ class DependsProvider(RegisteredParameterProvider):
         """Store the resolver used for nested dependency calls."""
         self._resolver = resolver
 
-    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
+    @override
+    def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
         """Return True when the parameter default is a `Depends` marker."""
-        _: ResolutionContext = context
         return isinstance(param.default, Depends)
 
+    @override
     def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Resolve a `Depends` marker by name, callable, or constant."""
         marker = param.default

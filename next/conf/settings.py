@@ -10,7 +10,7 @@ reset their own state.
 from __future__ import annotations
 
 import copy
-from typing import Any, ClassVar
+from typing import Any, ClassVar, override
 
 from django.conf import settings
 
@@ -117,6 +117,7 @@ class NextFrameworkSettings:
         self._attr_value_cache[attr] = val
         return val
 
+    @override
     def __setattr__(self, name: str, value: object) -> None:
         """Allow only internal cache attributes and raise for declared keys."""
         if name in {"_merged_cache", "_attr_value_cache"}:

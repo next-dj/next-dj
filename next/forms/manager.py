@@ -2,7 +2,7 @@
 
 import logging
 import types
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -35,6 +35,7 @@ class FormActionManager:
         """Initialise with explicit backends or defer loading to settings."""
         self._backends: list[FormActionBackend] = list(backends) if backends else []
 
+    @override
     def __repr__(self) -> str:
         """Return a debug representation showing the number of backends."""
         return f"<{self.__class__.__name__} backends={len(self._backends)}>"

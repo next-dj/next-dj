@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, override
 
 from django.conf import settings
 
@@ -108,6 +108,7 @@ class FileRouterBackend(RouterBackend):
             raise KeyError(_components_key)
         return str(cb0[_components_key])
 
+    @override
     def __repr__(self) -> str:
         """Debug representation."""
         return (
@@ -115,6 +116,7 @@ class FileRouterBackend(RouterBackend):
             f"app_dirs={self.app_dirs}>"
         )
 
+    @override
     def __eq__(self, other: object) -> bool:
         """Return True when the other backend has the same pages configuration."""
         if not isinstance(other, FileRouterBackend):
@@ -128,6 +130,7 @@ class FileRouterBackend(RouterBackend):
             and self._components_folder_name == other._components_folder_name
         )
 
+    @override
     def __hash__(self) -> int:
         """Hash from pages config including extra roots and skip names."""
         cp = self.options.get("context_processors")
@@ -143,6 +146,7 @@ class FileRouterBackend(RouterBackend):
             ),
         )
 
+    @override
     def generate_urls(self) -> list[URLPattern | URLResolver]:
         """Yield app routes first when `app_dirs` is set, then root `pages` dirs."""
         if self.app_dirs:

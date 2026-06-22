@@ -21,7 +21,7 @@ new template tags.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from django import template
 from django.template.base import Node, NodeList
@@ -109,6 +109,7 @@ class _InlineAssetNode(Node):
         self.kind = kind
         self.nodelist = nodelist
 
+    @override
     def render(self, context: template.Context) -> str:
         """Render the body, register the HTML on the collector, and emit nothing."""
         collector = context.get("_static_collector")

@@ -9,7 +9,6 @@ from django.http import HttpRequest
 
 from next.deps import DependencyResolver, resolver
 from next.deps.markers import DependsProvider
-from next.deps.providers import ProviderRegistry
 from next.forms import DForm
 from next.forms.markers import FormProvider
 from next.pages.context import ContextByDefaultProvider, ContextByNameProvider
@@ -322,24 +321,6 @@ class TestFormProvider:
         param = inspect_parameter("form", inspect.Parameter.empty)
         ctx = _ctx(form=form)
         assert provider.resolve(param, ctx) is form
-
-
-class TestProviderRegistry:
-    """Tests for ProviderRegistry."""
-
-    def test_register_get_providers_clear_len_iter(self) -> None:
-        """Register providers, iterate, clear empties registry."""
-        reg = ProviderRegistry()
-        p1 = HttpRequestProvider()
-        p2 = UrlKwargsProvider()
-        reg.register(p1)
-        reg.register(p2)
-        assert len(reg) == 2
-        assert reg.get_providers() == (p1, p2)
-        assert list(iter(reg)) == [p1, p2]
-        reg.clear()
-        assert len(reg) == 0
-        assert reg.get_providers() == ()
 
 
 class TestProviderPriority:

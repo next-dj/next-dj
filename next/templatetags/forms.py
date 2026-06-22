@@ -1,6 +1,6 @@
 """Template tags for rendering next.forms form blocks."""
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, override
 
 from django import template
 from django.core.exceptions import ImproperlyConfigured
@@ -215,6 +215,7 @@ class FormNode(template.Node):
         )
         return " ".join(bits) + ">"
 
+    @override
     def render(self, context: template.Context) -> str:
         """Render form tag with action URL, method=post, CSRF, and content."""
         request = self._get_request(context)

@@ -21,7 +21,7 @@ construction.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, override
 
 from django.contrib.staticfiles.storage import staticfiles_storage
 
@@ -113,6 +113,7 @@ class StaticFilesBackend(StaticBackend):
     def _logical_static_path(self, logical_name: str, suffix: str) -> str:
         return f"{StaticNamespace.NEXT}/{logical_name}{suffix}"
 
+    @override
     def register_file(
         self,
         source_path: Path,

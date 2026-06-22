@@ -11,7 +11,7 @@ JavaScript-serializable subset.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 from next.deps import DependencyResolver, RegisteredParameterProvider
 
@@ -19,6 +19,7 @@ from next.deps import DependencyResolver, RegisteredParameterProvider
 if TYPE_CHECKING:
     import inspect
 
+    from next.deps import ResolutionContext
     from next.static.serializers import JsContextSerializer
 
 
@@ -67,18 +68,20 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
         """Store the dependency resolver used for callable context sources."""
         self._resolver = resolver
 
-    def can_handle(self, param: inspect.Parameter, _context: object) -> bool:
+    @override
+    def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
         """Return True when the parameter default is a `Context` instance."""
         return isinstance(param.default, Context)
 
-    def resolve(self, param: inspect.Parameter, context: object) -> object:
+    @override
+    def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Resolve the value from context_data, a callable, or a constant."""
         marker = param.default
         if not isinstance(marker, Context):
             return None
 
         source = marker.source
-        context_data = getattr(context, "context_data", {}) or {}
+        context_data = context.context_data
         default_value: object = (
             None if marker.default is _CONTEXT_DEFAULT_UNSET else marker.default
         )
@@ -90,15 +93,7 @@ class ContextByDefaultProvider(RegisteredParameterProvider):
             return context_data.get(source, default_value)
 
         if callable(source):
-            inner_ctx: dict[str, object] = {
-                "request": getattr(context, "request", None),
-                "form": getattr(context, "form", None),
-                **(getattr(context, "url_kwargs", {}) or {}),
-                "_cache": getattr(context, "cache", None),
-                "_stack": getattr(context, "stack", None),
-                "_context_data": context_data,
-            }
-            resolved = self._resolver.resolve_dependencies(source, **inner_ctx)
+            resolved = self._resolver.resolve(source, context)
             return source(**resolved)
 
         return source
@@ -109,12 +104,12 @@ class ContextByNameProvider(RegisteredParameterProvider):
 
     priority = 30
 
-    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+    @override
+    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Return True when context_data already contains this parameter name."""
-        context_data = getattr(context, "context_data", {}) or {}
-        return param.name in context_data
+        return param.name in context.context_data
 
-    def resolve(self, param: inspect.Parameter, context: object) -> object:
+    @override
+    def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Return the value stored under the parameter name in context_data."""
-        context_data = getattr(context, "context_data", {}) or {}
-        return context_data[param.name]
+        return context.context_data[param.name]

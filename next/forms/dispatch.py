@@ -6,7 +6,7 @@ import types
 import warnings
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, TypeGuard, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from django.conf import settings
@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from typing import Protocol
 
     from django import forms as django_forms
+    from django.db.models import Model
     from django.http import HttpRequest
 
     from .backends import ActionGuard, ActionMeta, FormActionBackend
@@ -64,6 +65,11 @@ if TYPE_CHECKING:
 
         def has_object_permission(self) -> "PermissionOutcome": ...
 
+    class _SuccessMessageSource(Protocol):
+        """A form or wizard exposing a get_success_message hook."""
+
+        def get_success_message(self, cleaned_data: dict[str, Any]) -> str | None: ...
+
 
 _FACTORY_TUPLE_LEN = 2
 _HTTP_ERROR_FLOOR = 400
@@ -71,7 +77,7 @@ _HTTP_ERROR_FLOOR = 400
 type _DepsState = tuple[dict[str, Any], list[str]]
 
 
-def _is_model_instance(obj: object) -> bool:
+def _is_model_instance(obj: object) -> "TypeGuard[Model]":
     """Return True when `obj` quacks like a Django model instance."""
     meta = getattr(obj, "_meta", None)
     return meta is not None and hasattr(meta, "model")
@@ -116,10 +122,9 @@ def _send_success_message(
     cleaned_data: dict[str, Any],
 ) -> None:
     """Flash the declared success message through django.contrib.messages."""
-    get_message = getattr(source, "get_success_message", None)
-    if get_message is None:
+    if not hasattr(source, "get_success_message"):
         return
-    message = get_message(cleaned_data)
+    message = cast("_SuccessMessageSource", source).get_success_message(cleaned_data)
     if message:
         messages.success(request, message)
 

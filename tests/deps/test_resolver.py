@@ -144,6 +144,22 @@ class TestDependencyResolver:
         result = r.resolve_dependencies(fn)
         assert result == {"x": 100}
 
+    def test_resolve_dependencies_reuses_passed_dependency_cache(self) -> None:
+        """A pre-built `DependencyCache` passed as `_cache` is reused as-is."""
+        r = DependencyResolver()
+        cache = DependencyCache()
+
+        @r.dependency("token")
+        def token() -> str:
+            return "abc"
+
+        def fn(token: str = Depends("token")) -> str:
+            return token
+
+        result = r.resolve_dependencies(fn, _cache=cache)
+        assert result == {"token": "abc"}
+        assert "token" in cache
+
     def test_resolve_dependencies_invalid_signature_returns_empty(self) -> None:
         """Non-callable or invalid signature yields empty dict."""
         r = _minimal_resolver()
