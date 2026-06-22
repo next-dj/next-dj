@@ -43,7 +43,12 @@ class TestZoneGetBadRequests:
     def test_unknown_zone_is_bad_request(self) -> None:
         response = NextClient().get_zones("/zoned/", "ghost")
         assert response.status_code == 400
-        assert b"ghost" in response.content
+        assert response.content == b"unknown zone"
+
+    def test_unknown_zone_body_hides_declared_zones(self) -> None:
+        response = NextClient().get_zones("/zoned/", "ghost")
+        assert b"ghost" not in response.content
+        assert b"alpha" not in response.content
 
     def test_zone_in_dynamic_body_is_bad_request(self) -> None:
         response = NextClient().get_zones("/dynamic/", "ghost")

@@ -50,8 +50,8 @@ def zone_response(
         return _conflict()
     try:
         result = render_zone(page_path, intent.zones, request, url_kwargs=url_kwargs)
-    except UnknownZoneError as exc:
-        return _bad_request(str(exc))
+    except UnknownZoneError:
+        return _bad_request("unknown zone")
     envelope = _build_envelope(result, intent, version)
     body = backend.serialize_envelope(envelope)
     return PatchResponse(body, content_type=backend.content_type, version=version)

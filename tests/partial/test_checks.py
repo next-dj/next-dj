@@ -413,10 +413,14 @@ class TestManifestVersionStorageCheck:
         ):
             assert checks.check_manifest_version_has_manifest_storage() == []
 
-    def test_legacy_manifest_storage_is_silent(self) -> None:
+    def test_legacy_manifest_storage_is_silent(self, tmp_path: Path) -> None:
         with (
             _partial_version("manifest"),
-            override_settings(STORAGES={}, STATICFILES_STORAGE=_MANIFEST_STORAGE),
+            override_settings(
+                STORAGES={},
+                STATICFILES_STORAGE=_MANIFEST_STORAGE,
+                STATIC_ROOT=str(tmp_path),
+            ),
         ):
             assert checks.check_manifest_version_has_manifest_storage() == []
 
