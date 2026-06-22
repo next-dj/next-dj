@@ -6,7 +6,7 @@ Testing and Autoreload
 Goal
 ----
 
-This final part covers the development workflow.
+This part covers the development workflow.
 You install pytest and write end-to-end tests against the Notes application with ``NextClient`` and ``SignalRecorder``.
 You also learn how the autoreloader picks up file router changes without a server restart.
 
@@ -267,10 +267,12 @@ Autoreloader does not pick up a change.
 Next Steps
 ----------
 
-The tutorial is complete.
+The Notes application works and is tested.
+The next part makes the index live with partial rendering, without leaving the patterns this tutorial already built.
 
 .. seealso::
 
+   :doc:`tutorial06` wraps the list in a zone and updates it in place, with a no-JavaScript fallback.
    :doc:`whatsnext` lists where to go next, by topic.
    :doc:`/content/topics/testing` covers the full testing surface.
    :doc:`/content/internals/autoreload` explains how the reloader watches the filesystem.

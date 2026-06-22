@@ -4,7 +4,7 @@ What to Read Next
 =================
 
 The tutorial covers the core flow.
-After :doc:`tutorial05`, read the topics, then the how-to guides, then the reference, then the internals when you need depth beyond the Notes walkthrough.
+After :doc:`tutorial06`, read the topics, then the how-to guides, then the reference, then the internals when you need depth beyond the Notes walkthrough.
 
 The hubs below replace long subsystem-by-subsystem lists.
 
@@ -22,12 +22,13 @@ First Full-Stack App
 ~~~~~~~~~~~~~~~~~~~~
 
 1. :doc:`install`
-2. :doc:`tutorial01` through :doc:`tutorial05`
+2. :doc:`tutorial01` through :doc:`tutorial06`
 3. :doc:`/content/topics/file-router`
 4. :doc:`/content/topics/context` and :doc:`/content/topics/dependency-injection`
 5. :doc:`/content/topics/forms/index`
-6. :doc:`/content/topics/static-assets/index`
-7. :doc:`/content/deployment/checklist`
+6. :doc:`/content/topics/partial-rendering/index`
+7. :doc:`/content/topics/static-assets/index`
+8. :doc:`/content/deployment/checklist`
 
 Customize the Pipeline
 ~~~~~~~~~~~~~~~~~~~~~~
