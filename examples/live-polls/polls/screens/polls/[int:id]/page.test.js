@@ -1,16 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let mountChart;
+let contextUpdated;
 
 beforeEach(async () => {
   vi.resetModules();
   mountChart = null;
+  contextUpdated = null;
   window.Next = {
+    context: {},
     partial: {
       onMount: (selector, callback) => {
         expect(selector).toBe("[data-poll-chart]");
         mountChart = callback;
       },
+    },
+    on: (event, callback) => {
+      expect(event).toBe("context-updated");
+      contextUpdated = callback;
     },
   };
   await import("./page.vue");
@@ -80,5 +87,37 @@ describe("poll chart mount", () => {
     const root = chartRoot();
     root.querySelector("[data-poll-chart-app]").remove();
     expect(() => mountChart(root)).not.toThrow();
+  });
+
+  it("applies the pushed snapshot to mounted charts on context-updated", async () => {
+    const root = chartRoot();
+    document.body.append(root);
+    mountChart(root);
+    await Promise.resolve();
+    window.Next.context.live_results = {
+      poll_id: 1,
+      total_votes: 12,
+      choices: [
+        { id: 10, text: "Tabs", votes: 9 },
+        { id: 11, text: "Spaces", votes: 3 },
+      ],
+    };
+    contextUpdated();
+    await Promise.resolve();
+    const app = root.querySelector("[data-poll-chart-app]");
+    expect(app.querySelector("[data-poll-chart-total]").textContent).toBe("12");
+    expect(
+      app.querySelector('[data-choice-id="10"] [data-poll-chart-votes]').textContent,
+    ).toBe("9");
+    root.remove();
+  });
+
+  it("ignores context-updated when no snapshot is present", () => {
+    const root = chartRoot();
+    document.body.append(root);
+    mountChart(root);
+    window.Next.context.live_results = undefined;
+    expect(() => contextUpdated()).not.toThrow();
+    root.remove();
   });
 });

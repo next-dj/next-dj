@@ -55,7 +55,7 @@ class FileRouterBackend(RouterBackend):
 
     DEFAULT_COMPONENTS_FOLDER_NAME: ClassVar[str] = "_components"
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         pages_dir: str | None = None,
         *,

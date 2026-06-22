@@ -354,7 +354,7 @@ Warnings
      - A partial backend sets ``VERSION: "manifest"`` while the staticfiles storage does not hash files, so the version guard stays silent.
      - ``next.partial.checks``
    * - ``next.W070``
-     - A ``{% form %}`` renders inside a ``{% for %}`` without a ``key=`` or a ``zone=``, so a partial morph cannot tell the repeated instances apart.
+     - A ``{% form %}`` renders directly inside a ``{% for %}`` of a composed page without a ``key=`` or a ``zone=``, so a partial morph cannot tell the repeated instances apart. The check does not descend into a component template, so a looped ``{% component %}`` that holds the form is not flagged. Thread a ``key=`` into the form to keep the repeated morph correct.
      - ``next.partial.checks``
 
 .. note::

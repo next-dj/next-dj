@@ -1,27 +1,3 @@
-"""LocMemCache-backed counter store used by every receiver.
-
-Two parallel hierarchies live under one cache namespace.
-
-The cumulative side is the one the per-page tables read from.
-`incr(kind, key)` bumps a single value per `(kind, key)` pair so
-`/stats/pages/`, `/stats/components/`, `/stats/forms/`, and
-`/stats/static/` keep growing across the lifetime of the process.
-
-The bucketed side carries the same events sliced by minute. Each
-`incr` also bumps a key whose tail is the minute-floor of `_now()`.
-`read_window(kind, minutes)` sums every bucket that falls inside
-`[now - minutes, now]`, which is what the live page on `/stats/`
-renders through its `?window=1m|5m|1h` querystring.
-
-Atomicity matters even with `LocMemCache` because a threaded ASGI
-worker can run two `incr` calls concurrently. Both branches use
-`cache.add` to seed and `cache.incr` to accumulate, both of which the
-Django cache contract documents as atomic.
-
-`flush()` drains both hierarchies in one pass and clears the index.
-The next `incr` starts from zero.
-"""
-
 from datetime import UTC, datetime, timedelta
 
 from django.core.cache import cache

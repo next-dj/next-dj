@@ -309,6 +309,8 @@ class Page:
         rendering pass. Suitable for the canonical page render path
         and for partial paths such as form-error rerenders.
         """
+        # next.static imports next.pages.manager, so the static manager import
+        # is deferred here to break the next.pages <-> next.static cycle.
         from next.static import default_manager  # noqa: PLC0415
 
         collector = default_manager.create_collector()

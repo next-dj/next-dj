@@ -11,6 +11,14 @@ import type { Envelope } from "./apply";
 // csrf meta merge into.
 export type NextContext = Readonly<Record<string, unknown>>;
 
+// The nature of a partial:error, so a listener branches on the cause rather than
+// sniffing status and body. network is a fetch reject, an abort neighbour, or a
+// dropped SSE connection (status 0). http is a 4xx/5xx or a mutating reply that
+// is not an envelope. parse is a malformed JSON body. op is a thrown or unknown
+// verb mid-apply. asset is a stylesheet that failed to load or a version
+// mismatch surviving a reload.
+export type PartialErrorKind = "network" | "http" | "parse" | "op" | "asset";
+
 // The payload of every runtime event reaching the Next.on bus, keyed by event
 // name, so a known event types its listener argument. This is only the bus
 // channel: the next:* DOM events (next:mounted, next:removed) fire on the
@@ -25,8 +33,15 @@ export interface NextEventMap {
     intent: { zone?: string; uid?: string };
   };
   "partial:before-apply": { envelope: Envelope };
-  "partial:applied": { envelope: Envelope };
-  "partial:error": { status: number; body: string; error: unknown };
+  // ok is false when any op threw or was an unknown verb, so a listener can tell
+  // a clean apply from a degraded one that still mounted what did change.
+  "partial:applied": { envelope: Envelope; ok: boolean };
+  "partial:error": {
+    status: number;
+    body: string;
+    error: unknown;
+    kind: PartialErrorKind;
+  };
   "partial:layer-opened": { opener: HTMLElement | null };
   "partial:layer-accepted": { result: unknown };
   "partial:layer-dismissed": { reason: string };

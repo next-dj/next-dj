@@ -132,6 +132,7 @@ describe("Wire classification", () => {
     expect(h.navigated).toEqual([]);
     const err = h.dispatched.find((d) => d.event === "partial:error");
     expect(err!.detail.status).toBe(403);
+    expect(err!.detail.kind).toBe("http");
   });
 
   it("navigates on 409 on a safe method", async () => {
@@ -179,6 +180,7 @@ describe("Wire classification", () => {
     const err = h.dispatched.find((d) => d.event === "partial:error");
     expect(err!.detail.status).toBe(500);
     expect(err!.detail.body).toBe("boom");
+    expect(err!.detail.kind).toBe("http");
   });
 
   it("emits partial:error when the fetch itself rejects", async () => {
@@ -189,12 +191,14 @@ describe("Wire classification", () => {
     const err = h.dispatched.find((d) => d.event === "partial:error");
     expect(err!.detail.status).toBe(0);
     expect(err!.detail.error).toBeInstanceOf(TypeError);
+    expect(err!.detail.kind).toBe("network");
   });
 
   it("emits partial:error on malformed JSON", async () => {
     const h = makeWire(async () => envelopeResponse("{not json"));
     await h.wire.fetch({ url: "/list/", zone: "z" });
-    expect(h.dispatched.some((d) => d.event === "partial:error")).toBe(true);
+    const err = h.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("parse");
     expect(h.envelopes).toEqual([]);
   });
 

@@ -42,13 +42,13 @@ class TestDependencyResolver:
     ) -> None:
         """Request and url_kwargs (id) are injected."""
 
-        def fn(request: HttpRequest, id: int) -> None:  # noqa: A002
+        def fn(request: HttpRequest, obj_id: int) -> None:
             pass
 
         r = _minimal_resolver()
         request = mock_http_request()
-        result = r.resolve_dependencies(fn, request=request, id=42)
-        assert result == {"request": request, "id": 42}
+        result = r.resolve_dependencies(fn, request=request, obj_id=42)
+        assert result == {"request": request, "obj_id": 42}
 
     def test_resolve_dependencies_injects_form(self, mock_http_request) -> None:
         """Request and form are injected when both in context."""
@@ -90,14 +90,14 @@ class TestDependencyResolver:
 
         class C:
             @classmethod
-            def get_initial(cls, request: HttpRequest, id: int) -> dict:  # noqa: A002
+            def get_initial(cls, request: HttpRequest, obj_id: int) -> dict:
                 return {}
 
         r = _minimal_resolver()
         request = mock_http_request()
-        result = r.resolve_dependencies(C.get_initial, request=request, id=1)
+        result = r.resolve_dependencies(C.get_initial, request=request, obj_id=1)
         assert "cls" not in result
-        assert result == {"request": request, "id": 1}
+        assert result == {"request": request, "obj_id": 1}
 
     def test_resolve_dependencies_unknown_param_without_default_gets_none(
         self,

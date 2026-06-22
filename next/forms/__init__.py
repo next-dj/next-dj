@@ -29,7 +29,7 @@ from .backends import (
     ActionGuard,
     ActionRegistration,
     FormActionBackend,
-    FormActionNotFound,
+    FormActionNotFoundError,
     RegistryBackendSnapshot,
     RegistryFormActionBackend,
 )
@@ -163,7 +163,7 @@ __all__ = [
     "FloatField",
     "Form",
     "FormActionBackend",
-    "FormActionNotFound",
+    "FormActionNotFoundError",
     "FormSectionSpec",
     "FormSpec",
     "FormWizard",

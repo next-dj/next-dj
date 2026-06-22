@@ -30,7 +30,10 @@ class NoteCreateForm(Form):
             body=self.cleaned_data.get("body", ""),
         )
         return HttpResponseRedirect(
-            reverse("next:page_notes_int_id_edit", kwargs={"id": note_obj.pk}),
+            reverse(
+                "next:page_notes_int_note_id_edit",
+                kwargs={"note_id": note_obj.pk},
+            ),
         )
 
 

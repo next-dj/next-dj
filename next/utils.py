@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
+
+
+if TYPE_CHECKING:
+    from types import FrameType
 
 
 def resolve_base_dir() -> Path | None:
@@ -71,7 +75,10 @@ def classify_dirs_entries(
     return path_roots, frozenset(segments)
 
 
-def caller_source_path(  # noqa: C901, PLR0912
+_CALLER_PATH_ERROR = "Could not determine caller file path"
+
+
+def caller_source_path(
     *,
     back_count: int = 1,
     max_walk: int = 15,
@@ -98,30 +105,50 @@ def caller_source_path(  # noqa: C901, PLR0912
         msg = "Specify skip_while_filename_endswith or skip_framework_file"
         raise ValueError(msg)
 
-    frame = inspect.currentframe()
-    err_plain = "Could not determine caller file path"
-    err_components = f"{err_plain}: no __file__ in caller frames"
+    frame = _walk_back(inspect.currentframe(), back_count)
+    if skip_while_filename_endswith is not None:
+        return _scan_by_suffix(frame, skip_while_filename_endswith, max_walk)
+    if skip_framework_file is None:  # pragma: no cover
+        raise RuntimeError(_CALLER_PATH_ERROR)
+    return _scan_framework_file(frame, skip_framework_file, max_walk)
 
+
+def _walk_back(frame: FrameType | None, back_count: int) -> FrameType | None:
+    """Step up ``back_count`` frames before scanning, raising when they run out."""
     for _ in range(back_count):
         if not frame or not frame.f_back:
-            raise RuntimeError(err_plain)
+            raise RuntimeError(_CALLER_PATH_ERROR)
         frame = frame.f_back
+    return frame
 
-    if skip_while_filename_endswith is not None:
-        suffixes = skip_while_filename_endswith
-        for _ in range(max_walk):
-            if not frame:
-                break
-            raw = frame.f_globals.get("__file__")
-            if raw and isinstance(raw, str):
-                if any(raw.endswith(sfx) for sfx in suffixes):
-                    frame = frame.f_back
-                    continue
-                return Path(raw)
-            frame = frame.f_back
-        raise RuntimeError(err_plain)
 
-    base, parent = skip_framework_file  # type: ignore[misc]
+def _scan_by_suffix(
+    frame: FrameType | None,
+    suffixes: tuple[str, ...],
+    max_walk: int,
+) -> Path:
+    """Return the first caller frame whose ``__file__`` is not a framework suffix."""
+    for _ in range(max_walk):
+        if not frame:
+            break
+        raw = frame.f_globals.get("__file__")
+        if raw and isinstance(raw, str):
+            if any(raw.endswith(sfx) for sfx in suffixes):
+                frame = frame.f_back
+                continue
+            return Path(raw)
+        frame = frame.f_back
+    raise RuntimeError(_CALLER_PATH_ERROR)
+
+
+def _scan_framework_file(
+    frame: FrameType | None,
+    skip_framework_file: tuple[str, str],
+    max_walk: int,
+) -> Path:
+    """Return the first caller frame outside the named framework module file."""
+    base, parent = skip_framework_file
+    err_components = f"{_CALLER_PATH_ERROR}: no __file__ in caller frames"
     for _ in range(max_walk):
         if not frame:
             break

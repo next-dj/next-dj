@@ -21,8 +21,17 @@ from next.server import NextStatReloader, iter_all_autoreload_watch_specs
 
 logger = logging.getLogger(__name__)
 
-_ORIGINAL_STAT_RELOADER: type[StatReloader] | None = None
-_WATCHER_CONNECTED = False
+
+class _PatchState:
+    """Install-time state mutated in place so the swap never rebinds a global."""
+
+    def __init__(self) -> None:
+        """Start with no recorded reloader and the watcher disconnected."""
+        self.original_reloader: type[StatReloader] | None = None
+        self.watcher_connected = False
+
+
+_state = _PatchState()
 
 
 def install() -> None:
@@ -32,13 +41,11 @@ def install() -> None:
     current `autoreload.StatReloader` is already our subclass or one of
     its descendants.
     """
-    global _ORIGINAL_STAT_RELOADER, _WATCHER_CONNECTED  # noqa: PLW0603
-
     current = autoreload.StatReloader
     if issubclass(current, NextStatReloader):
         pass
     elif issubclass(current, StatReloader):
-        _ORIGINAL_STAT_RELOADER = current
+        _state.original_reloader = current
         autoreload.StatReloader = NextStatReloader  # type: ignore[misc]
     else:
         logger.warning(
@@ -47,21 +54,19 @@ def install() -> None:
             current,
         )
 
-    if not _WATCHER_CONNECTED:
+    if not _state.watcher_connected:
         autoreload_started.connect(_watch_next_filesystem)
-        _WATCHER_CONNECTED = True
+        _state.watcher_connected = True
 
 
 def uninstall() -> None:
     """Restore the previous `StatReloader` class if `install()` swapped it."""
-    global _ORIGINAL_STAT_RELOADER, _WATCHER_CONNECTED  # noqa: PLW0603
-
-    if _ORIGINAL_STAT_RELOADER is not None:
-        autoreload.StatReloader = _ORIGINAL_STAT_RELOADER  # type: ignore[misc]
-        _ORIGINAL_STAT_RELOADER = None
-    if _WATCHER_CONNECTED:
+    if _state.original_reloader is not None:
+        autoreload.StatReloader = _state.original_reloader  # type: ignore[misc]
+        _state.original_reloader = None
+    if _state.watcher_connected:
         autoreload_started.disconnect(_watch_next_filesystem)
-        _WATCHER_CONNECTED = False
+        _state.watcher_connected = False
 
 
 def _watch_next_filesystem(sender: object, **_: object) -> None:

@@ -15,7 +15,7 @@ from next.forms import (
     ActionRegistration,
     Form,
     FormActionBackend,
-    FormActionNotFound,
+    FormActionNotFoundError,
     RegistryFormActionBackend,
 )
 from next.forms.manager import form_action_manager
@@ -470,9 +470,9 @@ class TestFormTagRender:
     def test_unknown_action_raises_form_action_not_found(
         self, form_engine, csrf_request
     ) -> None:
-        """Unknown action lets FormActionNotFound propagate at render time."""
+        """Unknown action lets FormActionNotFoundError propagate at render time."""
         t = form_engine.from_string('{% form "nonexistent_action_xyz" %}z{% endform %}')
-        with pytest.raises(FormActionNotFound, match="Unknown form action"):
+        with pytest.raises(FormActionNotFoundError, match="Unknown form action"):
             t.render(
                 Context(
                     {
@@ -488,7 +488,7 @@ class TestFormTagRender:
         """An unquoted action token names itself and suggests the quoted literal."""
         t = form_engine.from_string("{% form simple_form %}x{% endform %}")
         with pytest.raises(
-            FormActionNotFound, match=r'write \{% form "simple_form" %\}'
+            FormActionNotFoundError, match=r'write \{% form "simple_form" %\}'
         ):
             t.render(
                 Context(
@@ -701,7 +701,7 @@ class TestActionUrlTag:
         page_b = str(tmp_path / "b" / "page.py")
         self._register_page_action("tag_scoped_action", page_a)
         t = form_engine.from_string('{% action_url "tag_scoped_action" %}')
-        with pytest.raises(FormActionNotFound, match="Unknown form action"):
+        with pytest.raises(FormActionNotFoundError, match="Unknown form action"):
             t.render(Context({"current_page_module_path": page_b}))
 
     def test_resolves_shared_action_without_page_path(self, form_engine) -> None:
@@ -721,15 +721,15 @@ class TestActionUrlTag:
         assert out == f"[{expected}]"
 
     def test_unknown_action_raises_form_action_not_found(self, form_engine) -> None:
-        """An unknown name lets FormActionNotFound propagate."""
+        """An unknown name lets FormActionNotFoundError propagate."""
         t = form_engine.from_string('{% action_url "nonexistent_action_xyz" %}')
-        with pytest.raises(FormActionNotFound, match="Unknown form action"):
+        with pytest.raises(FormActionNotFoundError, match="Unknown form action"):
             t.render(Context({}))
 
     def test_unquoted_action_name_raises_with_quoting_hint(self, form_engine) -> None:
         """An empty resolved name points at the unresolved-variable cause."""
         t = form_engine.from_string("{% action_url save_note %}")
-        with pytest.raises(FormActionNotFound, match="empty action name"):
+        with pytest.raises(FormActionNotFoundError, match="empty action name"):
             t.render(Context({}))
 
 

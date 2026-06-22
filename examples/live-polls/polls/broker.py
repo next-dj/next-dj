@@ -1,23 +1,3 @@
-"""In-process pub/sub for live poll changes.
-
-The broker holds a `threading.Condition` and a monotonic revision
-counter per poll. Publishers update the LocMemCache snapshot, record the
-mutation's request id, bump the counter, and `notify_all` so every
-subscriber wakes from `wait_for`. Each subscriber tracks its own
-last-seen revision so a fan-out to N tabs is race-free regardless of
-whether one subscriber clears state faster than another.
-
-The broker yields `Change` value objects, not wire bytes. The framework
-`PatchEventStream` owns the SSE framing, so the broker stays a plain
-pub/sub of domain events. Each change carries the request id of the
-mutation that produced it so the stream page can echo it and let the
-initiator suppress its own update.
-
-The pattern is single-process by design. A multi-process deployment
-should swap this module for Redis Pub/Sub or Postgres LISTEN without
-touching the page or signal layers.
-"""
-
 from __future__ import annotations
 
 import threading

@@ -1,12 +1,3 @@
-"""Custom dedup strategy that records every filtered duplicate.
-
-`InstrumentedDedup` reuses the URL-based dedup logic of the framework
-default and bumps a counter every time a key collides with one
-already in the collector. Plugged in through
-`STATIC_BACKENDS[0]["OPTIONS"]["DEDUP_STRATEGY"]` in
-`config/settings.py`.
-"""
-
 from collections.abc import Hashable
 
 from next.static import StaticAsset

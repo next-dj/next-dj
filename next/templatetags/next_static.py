@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 from django import template
 from django.template.base import Node, NodeList
-from django.utils.safestring import mark_safe
+from django.utils.safestring import SafeString
 
 from next.static import StaticAsset, StaticCollector, default_placeholders
 
@@ -49,15 +49,15 @@ def _slot_token(name: str) -> str:
 
 
 @register.simple_tag
-def collect_styles() -> str:
+def collect_styles() -> SafeString:
     """Mark where collected CSS link tags will be injected after rendering."""
-    return mark_safe(_slot_token("styles"))  # noqa: S308
+    return SafeString(_slot_token("styles"))
 
 
 @register.simple_tag
-def collect_scripts() -> str:
+def collect_scripts() -> SafeString:
     """Mark where collected JS script tags will be injected after rendering."""
-    return mark_safe(_slot_token("scripts"))  # noqa: S308
+    return SafeString(_slot_token("scripts"))
 
 
 @register.simple_tag(takes_context=True)

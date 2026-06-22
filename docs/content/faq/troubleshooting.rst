@@ -90,7 +90,7 @@ Rename one of them or move one to a different scope to avoid the collision.
 Unknown Form Action
 ~~~~~~~~~~~~~~~~~~~
 
-``{% form "name" %}``, ``{% action_url "name" %}``, ``NextClient.post_action``, ``resolve_action_url``, and ``build_form_for`` raise ``next.forms.FormActionNotFound`` when no registered action matches the name.
+``{% form "name" %}``, ``{% action_url "name" %}``, ``NextClient.post_action``, ``resolve_action_url``, and ``build_form_for`` raise ``next.forms.FormActionNotFoundError`` when no registered action matches the name.
 The message ends with ``Closest matches: ...`` listing the nearest registered names, so a typo is usually visible in the error itself.
 Check the name against the suggestions, confirm the declaring module was imported before the lookup, and remember that a page-scoped action resolves only from its own page.
 

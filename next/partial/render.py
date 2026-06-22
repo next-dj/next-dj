@@ -26,13 +26,20 @@ class UnknownZoneError(LookupError):
     """Raised when a partial request names a zone the page does not declare.
 
     The unified view turns this into a 400 before any zone renders, so a
-    typo or a stale client never trips a partial render.
+    typo or a stale client never trips a partial render. The message names
+    the declared zones so a builder-path typo points at what is available.
     """
 
-    def __init__(self, zone_name: str) -> None:
-        """Store the unknown zone name and build a readable message."""
+    def __init__(self, zone_name: str, declared: tuple[str, ...] = ()) -> None:
+        """Store the unknown zone name and the declared zone names available."""
         self.zone_name = zone_name
-        super().__init__(f'Unknown zone "{zone_name}".')
+        self.declared = declared
+        if declared:
+            names = ", ".join(repr(name) for name in declared)
+            message = f'Unknown zone "{zone_name}". Declared zones: {names}.'
+        else:
+            message = f'Unknown zone "{zone_name}".'
+        super().__init__(message)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +77,7 @@ def render_zone(
     zones = zones_of(template)
     for name in zone_names:
         if name not in zones:
-            raise UnknownZoneError(name)
+            raise UnknownZoneError(name, tuple(sorted(zones)))
 
     context_data = page.build_render_context(page_path, request, **kwargs)
     if overrides:

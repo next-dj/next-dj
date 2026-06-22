@@ -50,8 +50,8 @@ Forms
    Use it for hand-written forms and client-side requests that post outside the ``{% form %}`` tag.
    Such a request supplies the CSRF token and the hidden ``_next_form_origin`` field itself, see the manual-form notes in :doc:`/content/topics/forms/templates`.
 
-   An unknown name raises ``FormActionNotFound`` at render time, with the closest registered names in the message.
-   An argument that resolves to an empty string raises ``FormActionNotFound`` with a hint to quote the literal name, since an unquoted name is read as a template variable.
+   An unknown name raises ``FormActionNotFoundError`` at render time, with the closest registered names in the message.
+   An argument that resolves to an empty string raises ``FormActionNotFoundError`` with a hint to quote the literal name, since an unquoted name is read as a template variable.
 
 Components
 ----------

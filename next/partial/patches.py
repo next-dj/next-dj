@@ -3,7 +3,7 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -36,6 +36,18 @@ if TYPE_CHECKING:
 
 _SEE_OTHER = 303
 _RESERVED_PATCH_KEYS: frozenset[str] = frozenset({"op", "target", "html"})
+
+# Each morph() route owns its selector keywords, so a stray key is refused.
+_ZONE_MORPH_KEYS: frozenset[str] = frozenset({"zone", "overrides"})
+_FOREIGN_ZONE_MORPH_KEYS: frozenset[str] = frozenset({"zone", "page", "url_kwargs"})
+_FORM_MORPH_KEYS: frozenset[str] = frozenset({"form"})
+
+# Framework-owned bus events, refused to event() so an app cannot forge one.
+_RESERVED_EVENT_NAMES: frozenset[str] = frozenset({"ready", "context-updated"})
+_RESERVED_EVENT_PREFIXES: tuple[str, ...] = ("partial:", "next:")
+
+DedupeMode = Literal["key", "id"]
+_DEDUPE_MODES: frozenset[str] = frozenset({"key", "id"})
 
 
 class UnknownPatchOpError(LookupError):
@@ -88,6 +100,23 @@ class BuiltinPatchOpError(ValueError):
         )
 
 
+class ReservedEventNameError(ValueError):
+    """Raised when `event()` names a framework-owned client-bus event.
+
+    The `ready` and `context-updated` events and the `partial:` and
+    `next:` prefixes belong to the runtime lifecycle, so an app event under
+    one of those names is refused rather than forging a framework signal.
+    """
+
+    def __init__(self, name: str) -> None:
+        """Store the reserved name and build a readable message."""
+        self.name = name
+        super().__init__(
+            f'Event name "{name}" is reserved by the framework client bus. '
+            "Use your own application event name instead."
+        )
+
+
 class ForeignPageNotAuthorizedError(PermissionError):
     """Raised when an OOB morph names a foreign page that denies the request.
 
@@ -134,17 +163,63 @@ class UnknownContextNameError(LookupError):
 
     Only the names of registered `serialize=True` context providers may
     travel in a context patch, so an arbitrary mapping is rejected at the
-    builder rather than serialized blind.
+    builder rather than serialized blind. The message names the available
+    providers so a typo points at what is registered.
     """
 
-    def __init__(self, name: str) -> None:
-        """Store the rejected name and build a readable message."""
+    def __init__(self, name: str, available: tuple[str, ...] = ()) -> None:
+        """Store the rejected name and the available serialize provider names."""
         self.name = name
-        super().__init__(
+        self.available = available
+        message = (
             f'Context name "{name}" is not a registered serialize=True '
             "provider on the origin page. Mark its @context provider "
             "serialize=True or drop it from the patch."
         )
+        if available:
+            names = ", ".join(repr(provider) for provider in available)
+            message = f"{message} Available serialize providers: {names}."
+        super().__init__(message)
+
+
+class UnknownDedupeError(ValueError):
+    """Raised when a merge op names a dedupe strategy the client cannot apply.
+
+    The client keys a merge row by `data-next-key` then `id`, so only
+    `key` and `id` mean anything on the wire, an unknown value is refused
+    at the builder rather than dropped to a silent no-dedup downstream.
+    """
+
+    def __init__(self, dedupe: str) -> None:
+        """Store the rejected dedupe value and build a readable message."""
+        self.dedupe = dedupe
+        super().__init__(
+            f'Dedupe strategy "{dedupe}" is not supported, use "key" or "id".'
+        )
+
+
+class CrossSiteHrefError(ValueError):
+    """Raised when a builder href sink names a cross-site URL.
+
+    The `push_url`, `layer_open(href=)`, and internal `redirect` sinks
+    author an in-app navigation, so a cross-site href is a caller bug
+    refused at the builder rather than masked as a fallback to the origin
+    path. A server-authored external destination travels through
+    `redirect(external=True)` instead.
+    """
+
+    def __init__(self, href: str) -> None:
+        """Store the rejected href and build a readable message."""
+        self.href = href
+        super().__init__(
+            f'href "{href}" is not same-site, for a server-authored external '
+            "destination use redirect(external=True)."
+        )
+
+
+def _is_reserved_event(name: str) -> bool:
+    """Return True when the name belongs to the framework client-bus channel."""
+    return name in _RESERVED_EVENT_NAMES or name.startswith(_RESERVED_EVENT_PREFIXES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,19 +390,49 @@ class Patches:
         if len(chosen) > 1:
             msg = f"morph() got conflicting selector keywords {chosen}."
             raise TypeError(msg)
-        if isinstance(zone, str) and "page" in select:
+        if isinstance(zone, str):
+            return self._dispatch_zone_morph(zone, select)
+        if isinstance(form, str):
+            self._reject_extra_morph_keys(select, _FORM_MORPH_KEYS)
+            return self.morph_form(form, html or "")
+        msg = f"morph() got unexpected selector keywords {sorted(select)}."
+        raise TypeError(msg)
+
+    def _dispatch_zone_morph(
+        self,
+        zone: str,
+        select: "Mapping[str, object]",
+    ) -> "Patches":
+        """Route a zone-selected morph to its local or foreign per-verb method.
+
+        A `url_kwargs` without a `page` names a foreign page's URL with no
+        page to render, so it is refused rather than dropped into a local
+        zone render that ignores it.
+        """
+        if "page" in select:
+            self._reject_extra_morph_keys(select, _FOREIGN_ZONE_MORPH_KEYS)
             return self.morph_foreign_zone(
                 zone,
                 cast("Path | str", select["page"]),
                 url_kwargs=cast("Mapping[str, Any] | None", select.get("url_kwargs")),
             )
-        if isinstance(zone, str):
-            overrides = cast("Mapping[str, Any] | None", select.get("overrides"))
-            return self.morph_zone(zone, overrides=overrides)
-        if isinstance(form, str):
-            return self.morph_form(form, html or "")
-        msg = f"morph() got unexpected selector keywords {sorted(select)}."
-        raise TypeError(msg)
+        self._reject_extra_morph_keys(select, _ZONE_MORPH_KEYS)
+        overrides = cast("Mapping[str, Any] | None", select.get("overrides"))
+        return self.morph_zone(zone, overrides=overrides)
+
+    @staticmethod
+    def _reject_extra_morph_keys(
+        select: "Mapping[str, object]",
+        allowed: frozenset[str],
+    ) -> None:
+        """Raise when the selector mapping carries keys the route does not own."""
+        extra = sorted(select.keys() - allowed)
+        if extra:
+            msg = (
+                f"morph() got unexpected keyword(s) {extra}, "
+                f"this route accepts {sorted(allowed)}."
+            )
+            raise TypeError(msg)
 
     def _append_morph(
         self,
@@ -441,7 +546,7 @@ class Patches:
         target: "Mapping[str, Any]",
         html: str,
         *,
-        dedupe: str = "key",
+        dedupe: DedupeMode = "key",
     ) -> "Patches":
         """Append children to the target, deduplicating by key or id."""
         return self._merge("append", target, html, dedupe)
@@ -451,7 +556,7 @@ class Patches:
         target: "Mapping[str, Any]",
         html: str,
         *,
-        dedupe: str = "key",
+        dedupe: DedupeMode = "key",
     ) -> "Patches":
         """Prepend children to the target, deduplicating by key or id."""
         return self._merge("prepend", target, html, dedupe)
@@ -461,9 +566,11 @@ class Patches:
         op: str,
         target: "Mapping[str, Any]",
         html: str,
-        dedupe: str,
+        dedupe: DedupeMode,
     ) -> "Patches":
         """Record a merge op appending or prepending deduplicated children."""
+        if dedupe not in _DEDUPE_MODES:
+            raise UnknownDedupeError(dedupe)
         self._ops.append(
             Patch(
                 op=op,
@@ -496,7 +603,7 @@ class Patches:
         data: dict[str, Any] = {}
         for name, value in names.items():
             if name not in allowed:
-                raise UnknownContextNameError(name)
+                raise UnknownContextNameError(name, tuple(sorted(allowed)))
             data[name] = json.loads(serializer.dumps(value))
         self._ops.append(Patch(op="context", extras={"data": data}))
         return self
@@ -507,12 +614,16 @@ class Patches:
         zone: str | None = None,
         href: str | None = None,
     ) -> "Patches":
-        """Open a server-initiated layer, optionally seeding a zone or href."""
+        """Open a server-initiated layer, optionally seeding a zone or href.
+
+        A seeded href must be same-site, a cross-site value raises
+        `CrossSiteHrefError` rather than being masked as the origin path.
+        """
         extras: dict[str, Any] = {}
         if zone is not None:
             extras["zone"] = zone
         if href is not None:
-            extras["href"] = self._safe_url(href)
+            extras["href"] = self._require_same_site(href)
         self._ops.append(Patch(op="layer.open", extras=extras))
         return self
 
@@ -537,26 +648,39 @@ class Patches:
         return self
 
     def event(self, name: str, detail: "Mapping[str, Any] | None" = None) -> "Patches":
-        """Dispatch a CustomEvent on document and the `Next.on` bus."""
+        """Dispatch a CustomEvent on document and the `Next.on` bus.
+
+        A framework-owned event name raises `ReservedEventNameError` so an
+        app cannot forge a runtime lifecycle event.
+        """
+        if _is_reserved_event(name):
+            raise ReservedEventNameError(name)
         self._ops.append(
             Patch(op="event", extras={"name": name, "detail": dict(detail or {})})
         )
         return self
 
     def push_url(self, href: str) -> "Patches":
-        """Push the validated href onto the browser history."""
+        """Push the validated href onto the browser history.
+
+        The href must be same-site, a cross-site value raises
+        `CrossSiteHrefError` rather than being masked as the origin path.
+        """
         self._ops.append(
-            Patch(op="url", extras={"action": "push", "href": self._safe_url(href)})
+            Patch(
+                op="url",
+                extras={"action": "push", "href": self._require_same_site(href)},
+            )
         )
         return self
 
     def redirect(self, href: str, *, external: bool = False) -> "Patches":
         """Drive a full client navigation to a server-authored href.
 
-        An internal href is validated against the request host. An
-        external href is sent with a full-navigation marker so a
-        server-authored redirect like OAuth or a payment gateway is not
-        rejected by the same-host validator.
+        An internal href must be same-site, a cross-site value raises
+        `CrossSiteHrefError`. An external href is sent with a
+        full-navigation marker so a server-authored redirect like OAuth or
+        a payment gateway is not rejected by the same-host validator.
 
         The `external=True` escape hatch bypasses same-host validation, so
         the href must be server authored. Never pass user-supplied input
@@ -565,7 +689,9 @@ class Patches:
         if external:
             self._ops.append(Patch(op="visit", extras={"href": href, "external": True}))
         else:
-            self._ops.append(Patch(op="visit", extras={"href": self._safe_url(href)}))
+            self._ops.append(
+                Patch(op="visit", extras={"href": self._require_same_site(href)})
+            )
         return self
 
     def op(self, name: str, **payload: object) -> "Patches":
@@ -705,15 +831,29 @@ class Patches:
                 if static_asset.url:
                     self.add_asset(static_asset.kind, static_asset.url)
 
-    def _safe_url(self, href: str) -> str:
-        """Return `href` if it is same-site, else fall back to the origin path."""
+    def _is_same_site(self, href: str) -> bool:
+        """Return True when `href` targets the bound request's host and scheme."""
         request = self._require_request()
         allowed = {request.get_host()}
-        if url_has_allowed_host_and_scheme(
+        return url_has_allowed_host_and_scheme(
             href, allowed_hosts=allowed, require_https=request.is_secure()
-        ):
+        )
+
+    def _safe_url(self, href: str) -> str:
+        """Return `href` if it is same-site, else fall back to the origin path."""
+        if self._is_same_site(href):
             return href
         return self._origin_path()
+
+    def _require_same_site(self, href: str) -> str:
+        """Return `href` if it is same-site, else raise for the caller bug.
+
+        Used by the in-app navigation sinks where a cross-site href is a
+        caller mistake rather than the no-runtime defense-in-depth fallback.
+        """
+        if self._is_same_site(href):
+            return href
+        raise CrossSiteHrefError(href)
 
 
 class PatchResponse(HttpResponse):
@@ -743,6 +883,8 @@ class PatchResponse(HttpResponse):
 __all__ = [
     "Asset",
     "BuiltinPatchOpError",
+    "CrossSiteHrefError",
+    "DedupeMode",
     "DynamicForeignPageError",
     "Envelope",
     "ForeignPageNotAuthorizedError",
@@ -750,7 +892,9 @@ __all__ = [
     "Patch",
     "PatchResponse",
     "Patches",
+    "ReservedEventNameError",
     "ReservedPatchKeyError",
     "UnknownContextNameError",
+    "UnknownDedupeError",
     "UnknownPatchOpError",
 ]

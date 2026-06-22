@@ -39,6 +39,8 @@ def errors_for_unknown_keys(
 
 def get_router_manager() -> tuple[RouterManager | None, list[CheckMessage]]:
     """Return a fresh `RouterManager` or initialisation errors."""
+    # next.urls.checks imports next.checks.common, so the manager import is
+    # deferred here to break the next.checks.common <-> next.urls cycle.
     from next.urls import RouterManager  # noqa: PLC0415
 
     try:

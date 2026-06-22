@@ -179,6 +179,8 @@ def register_components_folder_from_router_walk(
     scope_relative: str,
 ) -> None:
     """Register components for one folder discovered during the URL tree walk."""
+    # next.components.manager imports this backends module, so the manager
+    # import is deferred here to break the backends <-> manager cycle.
     from .manager import components_manager  # noqa: PLC0415
 
     key = folder.resolve()

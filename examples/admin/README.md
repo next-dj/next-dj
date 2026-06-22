@@ -103,11 +103,11 @@ The single template file [`admin_form/component.djx`](shadcn_admin/_panels/admin
 
 The **add view** binds its related rows in one batch. `build_inline_formsets(spec)` in [`shadcn_admin/forms.py`](shadcn_admin/forms.py) walks `model_admin.get_inline_instances(request, obj)`, calls `inline.get_formset(request, obj)`, and binds the resulting formset to `request.POST` when its management form is present. For empty extra rows (`form.empty_permitted and not form.instance.pk`) it drops `form.initial` and each `field.initial`, so the rendered inputs are blank and `has_changed()` stays `False` when the user submits an unfilled row. Without the reset, Django would treat the model-default values (for example `Chapter.word_count=0`) as `initial`, see them differ from the submitted empty string, mark the form as changed, and run required validation on the row. Inline validation runs **inside the main form's `clean()`**: a broken row raises `ValidationError`, so `form.is_valid()` returns `False` and the framework re-renders the origin page with the inputs populated and the row errors shown.
 
-The **change view** edits each existing related row on its own. `AdminInlineSpec` wraps one inline of the parent admin and renders every child as a keyed form, so a chapter saves without touching its siblings:
+The **change view** edits each existing related row on its own. `AdminInlineSpec` wraps one inline of the parent admin and renders every child as a keyed [`inline_row`](shadcn_admin/_panels/inline_row/component.djx) form, so a chapter saves without touching its siblings:
 
 ```djx
 {% form "admin:inline_change" key=row.pk %}
-  <input type="hidden" name="_inline" value="{{ section.token }}">
+  <input type="hidden" name="_inline" value="{{ token }}">
   <input type="hidden" name="_inline_pk" value="{{ row.pk }}">
   {% for info in row.fields %}{% component "form_field" info=info %}{% endfor %}
   {% component "button" type="submit" text="Save" %}
@@ -116,7 +116,12 @@ The **change view** edits each existing related row on its own. `AdminInlineSpec
 
 The form repeats once per row, so every instance shares one action UID. `key=` writes `data-next-key`, so an invalid submit re-renders the submitted row rather than the first. A looped `{% form %}` with neither a `key=` nor a wrapping `zone=` raises the `next.W070` system check.
 
-`admin:inline_change` resolves the child model from the parent admin's inlines (`_inline` on the wire), the row by primary key (`_inline_pk`), and saves just that row. A trailing `{% form "admin:inline_add" %}` creates a new row through the same inline form class. Both redirect back to the change view on success and re-render the page with the bad row's errors on failure, the rest of the rows untouched.
+`admin:inline_change` resolves the child model from the parent admin's inlines (`_inline` on the wire), the row by primary key (`_inline_pk`), and saves just that row. A trailing `{% form "admin:inline_add" %}` creates a new row through the same inline form class. On a partial request both author patch envelopes through `Patches(request)`:
+
+- **change** → `replace` swaps the keyed row form wholesale for the freshly rendered saved form, and `inner` updates the section's `data-inline-count` badge in place.
+- **add** → `layer_open(href=...)` opens the parent change view in a server-initiated result layer, and `inner` refreshes the same count badge.
+
+Both reuse the `inline_row` component for the swapped form so the live markup never drifts from the page render. Without a runtime each falls back to a redirect to the change view, and an invalid submit still re-renders the page with the bad row's errors, the rest untouched.
 
 ### 6. Save and continue / Save and add another
 

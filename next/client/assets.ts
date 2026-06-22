@@ -143,6 +143,7 @@ export function createAssets(deps: AssetsDeps): Assets {
           status: 0,
           body: "",
           error: new Error("a stylesheet failed to load"),
+          kind: "asset",
         });
       }
       done();
@@ -178,6 +179,7 @@ export function createAssets(deps: AssetsDeps): Assets {
         status: 0,
         body: "",
         error: new Error("asset version mismatch after reload"),
+        kind: "asset",
       });
       return true;
     }

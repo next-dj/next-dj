@@ -376,3 +376,81 @@ class TestInfiniteScrollAppend:
             client.get_zones("/catalog/?q=novel", "catalog-results,catalog-more")
         )
         assert envelope.op_verbs() == ["morph", "morph"]
+
+
+class TestPresetFilterPushUrl:
+    """Applying a preset is a discrete jump that pushes a history entry."""
+
+    def test_listing_renders_the_preset_bar(self, client, catalog_db) -> None:
+        body = client.get("/catalog/").content.decode()
+        assert "data-preset-bar" in body
+        assert 'name="preset" value="cheapest"' in body
+
+    def test_partial_apply_pushes_url_and_morphs_both_zones(
+        self, client, catalog_db
+    ) -> None:
+        response = client.post_action(
+            "preset_filter_form",
+            {"preset": "cheapest"},
+            origin="/catalog/",
+            partial=True,
+            zones="catalog-results,catalog-more",
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["url", "morph", "morph"]
+        assert envelope.zone_targets() == ["catalog-results", "catalog-more"]
+
+    def test_url_op_pushes_the_canonical_same_site_href(
+        self, client, catalog_db
+    ) -> None:
+        envelope = envelope_of(
+            client.post_action(
+                "preset_filter_form",
+                {"preset": "cheapest"},
+                origin="/catalog/",
+                partial=True,
+                zones="catalog-results,catalog-more",
+            )
+        )
+        url_op = next(op for op in envelope.ops if op["op"] == "url")
+        assert url_op["action"] == "push"
+        assert url_op["href"] == "/catalog/?sort=price_asc"
+        assert url_op["href"].startswith("/catalog/")
+
+    def test_in_stock_preset_morph_drops_out_of_stock_products(
+        self, client, catalog_db
+    ) -> None:
+        envelope = envelope_of(
+            client.post_action(
+                "preset_filter_form",
+                {"preset": "in_stock"},
+                origin="/catalog/",
+                partial=True,
+                zones="catalog-results,catalog-more",
+            )
+        )
+        results = envelope.html_for_zone("catalog-results")
+        assert "out of stock" not in results.lower()
+
+    def test_morphed_sentinel_carries_the_preset_querystring(
+        self, client, catalog_db
+    ) -> None:
+        envelope = envelope_of(
+            client.post_action(
+                "preset_filter_form",
+                {"preset": "cheapest"},
+                origin="/catalog/",
+                partial=True,
+                zones="catalog-results,catalog-more",
+            )
+        )
+        more = envelope.html_for_zone("catalog-more")
+        assert "sort=price_asc" in more
+
+    def test_non_partial_apply_falls_back_to_a_redirect(
+        self, client, catalog_db
+    ) -> None:
+        response = client.post_action("preset_filter_form", {"preset": "newest"})
+        assert response.status_code == 302
+        assert response["Location"] == "/catalog/?sort=newest"

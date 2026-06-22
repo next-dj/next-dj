@@ -104,20 +104,20 @@ class TestAutoreloadInstallIdempotent:
 
         original = autoreload.StatReloader
         autoreload.StatReloader = Placeholder  # type: ignore[misc]
-        next_autoreload._ORIGINAL_STAT_RELOADER = None
-        next_autoreload._WATCHER_CONNECTED = False
+        next_autoreload._state.original_reloader = None
+        next_autoreload._state.watcher_connected = False
         try:
             next_autoreload.install()
             assert autoreload.StatReloader is NextStatReloader
-            assert next_autoreload._ORIGINAL_STAT_RELOADER is Placeholder
+            assert next_autoreload._state.original_reloader is Placeholder
             next_autoreload.uninstall()
             assert autoreload.StatReloader is Placeholder
             # Calling uninstall() a second time is a no-op (both guards fall through).
             next_autoreload.uninstall()
         finally:
             autoreload.StatReloader = original  # type: ignore[misc]
-            next_autoreload._ORIGINAL_STAT_RELOADER = None
-            next_autoreload._WATCHER_CONNECTED = False
+            next_autoreload._state.original_reloader = None
+            next_autoreload._state.watcher_connected = False
             next_autoreload.install()
 
 

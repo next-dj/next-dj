@@ -4,6 +4,8 @@ import pytest
 from admin_audit.models import AdminActivityLog
 from library.models import Author, Book, Chapter, Tag
 
+from next.testing import envelope_of
+
 
 pytestmark = pytest.mark.django_db
 
@@ -551,6 +553,35 @@ class TestLiveInlines:
         first.refresh_from_db()
         assert first.title == "Intro"
 
+    def test_invalid_partial_change_morphs_the_keyed_row_form(self, admin_client):
+        book, _first, second = self._book()
+        response = admin_client.post_action(
+            "admin:inline_change",
+            {
+                "_inline": "chapter",
+                "_inline_pk": str(second.pk),
+                "number": "2",
+                "title": "",
+                "word_count": "250",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+            partial=True,
+        )
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        meta = envelope.form_meta()
+        assert meta is not None
+        assert response["X-Next-Action"] == meta["uid"]
+        assert envelope.targets() == [{"form": meta["uid"]}]
+        assert meta["valid"] is False
+        assert meta["errors"]["title"] == ["This field is required."]
+        html = envelope.ops[0]["html"]
+        assert f'data-next-key="{second.pk}"' in html
+        second.refresh_from_db()
+        assert second.title == "Rising"
+
     @pytest.mark.parametrize("action", _INLINE_ACTIONS)
     def test_unknown_inline_token_404(self, admin_client, action):
         book, first, _ = self._book()
@@ -595,6 +626,67 @@ class TestLiveInlines:
         first.refresh_from_db()
         assert first.title == "Intro"
         assert not Chapter.objects.filter(title="Sneaky").exists()
+
+
+class TestInlinePartialPatches:
+    """Inline saves author replace, inner, and server-opened layer patches."""
+
+    def _book(self):
+        author = Author.objects.create(full_name="A. Author")
+        book = Book.objects.create(title="Book", author=author)
+        chapter = Chapter.objects.create(
+            book=book, number=1, title="Intro", word_count=100
+        )
+        return book, chapter
+
+    def test_partial_inline_change_replaces_row_and_inners_count(self, admin_client):
+        book, chapter = self._book()
+        response = admin_client.post_action(
+            "admin:inline_change",
+            {
+                "_inline": "chapter",
+                "_inline_pk": str(chapter.pk),
+                "number": "1",
+                "title": "Introduction",
+                "word_count": "120",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+            partial=True,
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["replace", "inner"]
+        assert envelope.targets() == [
+            {"css": f'form[data-next-key="{chapter.pk}"]'},
+            {"css": '[data-inline-count="chapter"]'},
+        ]
+        assert f'data-next-key="{chapter.pk}"' in envelope.ops[0]["html"]
+        assert 'value="Introduction"' in envelope.ops[0]["html"]
+        assert "1 saved" in envelope.ops[1]["html"]
+        chapter.refresh_from_db()
+        assert chapter.title == "Introduction"
+        assert chapter.word_count == 120
+
+    def test_partial_inline_add_opens_layer_and_inners_count(self, admin_client):
+        book, _chapter = self._book()
+        response = admin_client.post_action(
+            "admin:inline_add",
+            {
+                "_inline": "chapter",
+                "number": "2",
+                "title": "Rising",
+                "word_count": "200",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+            partial=True,
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["layer.open", "inner"]
+        assert envelope.ops[0]["href"] == f"/admin/library/book/{book.pk}/change/"
+        assert envelope.targets()[1] == {"css": '[data-inline-count="chapter"]'}
+        assert "2 saved" in envelope.ops[1]["html"]
+        assert Chapter.objects.filter(book=book, number=2, title="Rising").exists()
 
 
 class TestHistoryView:

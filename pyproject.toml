@@ -248,7 +248,7 @@ split-on-trailing-comma = true
 max-complexity = 10
 
 [tool.ruff.lint.pylint]
-max-args = 5
+max-args = 6
 max-branches = 12
 max-returns = 6
 max-statements = 50

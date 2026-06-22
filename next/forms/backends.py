@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from .wizard import FormWizard
 
 
-class FormActionNotFound(LookupError):  # noqa: N818
+class FormActionNotFoundError(LookupError):
     """No registered form action matches the requested name."""
 
     _suggestions: "tuple[str, ...] | None" = None
@@ -359,7 +359,7 @@ class RegistryFormActionBackend(FormActionBackend):
         """Drop every registered action and reset the UID index. For test isolation.
 
         Rebinding beats clearing four populated dicts, and an escaped
-        FormActionNotFound keeps its raise-time candidates view.
+        FormActionNotFoundError keeps its raise-time candidates view.
         """
         self._registry = {}
         self._uid_to_name = {}
@@ -493,7 +493,7 @@ class RegistryFormActionBackend(FormActionBackend):
                     self._url_cache[cache_key] = url
                 return url
 
-        raise FormActionNotFound(
+        raise FormActionNotFoundError(
             name=action_name,
             page_path=page_path,
             candidates=self._name_index.keys(),
@@ -573,7 +573,7 @@ __all__ = [
     "ActionRegistration",
     "FormActionBackend",
     "FormActionFactory",
-    "FormActionNotFound",
+    "FormActionNotFoundError",
     "RegistryBackendSnapshot",
     "RegistryFormActionBackend",
     "build_action_guard",

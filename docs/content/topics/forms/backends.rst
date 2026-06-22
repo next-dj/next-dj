@@ -96,7 +96,7 @@ The base implementation returns ``None``.
 
 ``get_meta`` is the routing key for the namespace build and the uid stamping when more than one backend is configured.
 ``FormActionManager`` asks each backend's ``get_meta`` in order and routes those two concerns to the first backend that answers with a non-``None`` meta.
-The URL reverse takes a different path: the manager calls each backend's ``get_action_url`` in order and returns the first answer, collecting ``FormActionNotFound`` suggestions along the way, so ``get_meta`` plays no part in it.
+The URL reverse takes a different path: the manager calls each backend's ``get_action_url`` in order and returns the first answer, collecting ``FormActionNotFoundError`` suggestions along the way, so ``get_meta`` plays no part in it.
 The proxy method ``FormActionManager.get_action_meta`` exposes the meta resolution, and the ``{% form %}`` tag calls it to stamp the meta's ``uid`` key onto the ``data-next-action`` attribute of the rendered ``<form>`` element.
 A backend whose meta omits ``uid`` therefore renders forms without that attribute, and the dispatch-time signals carry ``uid=None`` for its actions.
 A custom backend whose ``get_meta`` returns ``None`` for its own actions still resolves their URLs through ``get_action_url``, so the ``{% form %}`` tag renders the form element.

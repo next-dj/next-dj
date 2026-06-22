@@ -12,6 +12,7 @@ export default tseslint.config(
       ".venv/**",
       ".uv-cache/**",
       "htmlcov/**",
+      "**/coverage/**",
       "dist/**",
       "docs/_build/**",
       "**/*.min.js",

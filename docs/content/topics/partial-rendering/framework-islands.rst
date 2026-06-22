@@ -19,7 +19,7 @@ The Mount and Unmount Pair
 --------------------------
 
 ``next:mounted`` fires on every node a patch touches, after the operations apply.
-``next:removed`` fires on a node just before it detaches, for every detach the runtime performs.
+``next:removed`` fires on a node immediately before it detaches, for every detach the runtime performs.
 Both bubble to the document, so one delegated listener catches every island, and the pair brackets the life of a node inside the document.
 
 Mount through :ref:`Next.partial.onMount <topics-partial-rendering-co-located-js>`, which
@@ -108,6 +108,32 @@ With an id the child walk pairs it by hard match, without one it pairs by positi
 
 For a node the runtime should reconcile in some cases and not others, the per-node ``next:morph-element`` event carries a veto.
 A listener that calls ``preventDefault`` on it skips the morph of that node and its subtree, which lets a framework apply its own diff while the runtime stays out of the way.
+
+Two Kinds of Atomicity
+----------------------
+
+The runtime treats two markers as morph boundaries, and they differ.
+
+A ``data-next-keep`` node is fully opaque.
+The morph syncs no attributes and walks none of its children, so a framework that owns both the attributes and the subtree keeps total control.
+
+A custom element, a tag with a hyphen, and any node carrying a shadow root are atomic in a narrower sense.
+The morph still syncs their attributes, then stops at the boundary and never enters the children or the shadow tree.
+The attribute sync is the point: a server re-render that ships a stale attribute on a custom element overwrites the live one the framework was managing.
+
+Use ``data-next-keep`` for an island whose attributes the framework drives after mount.
+Lean on the built-in custom-element atomicity only when the server attributes and the framework attributes never disagree, for example a web component the server seeds once and never re-authors.
+
+The Island Needs Stable Identity
+--------------------------------
+
+An island must carry a stable ``data-next-key`` or ``id``, or ``data-next-keep``, on its own root.
+Without one the morph pairs it by position, and a keyless re-sort of its siblings reuses a different node for it.
+
+The cost is a silent lost mount.
+A morph that drops the old island node fires ``next:removed`` on it, so the unmount runs, but the node the morph inserts in another position is not in the touched set, so ``next:mounted`` never fires for it and the mount never runs.
+The island unmounts and never comes back.
+A stable key pins the island to its data so the morph reuses the same node, and ``data-next-keep`` pins it by leaving it untouched.
 
 See Also
 --------

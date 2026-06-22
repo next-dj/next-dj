@@ -100,4 +100,6 @@ def __getattr__(name: str) -> object:
     return getattr(importlib.import_module(module_name), name)
 
 
-__all__ = ["register_all", *sorted(_LAZY_ATTRIBUTES)]  # noqa: PLE0604
+def __dir__() -> list[str]:
+    """List the eager `register_all` plus every lazily resolved re-export."""
+    return ["register_all", *sorted(_LAZY_ATTRIBUTES)]

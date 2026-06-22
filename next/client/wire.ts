@@ -213,7 +213,7 @@ export class Wire {
     } catch (error) {
       // AbortError is never an error: the user moved on, no toast, no event.
       if (isAbortError(error)) return;
-      this.#dispatch("partial:error", { status: 0, body: "", error });
+      this.#dispatch("partial:error", { status: 0, body: "", error, kind: "network" });
       return;
     }
     // A stale safe-GET response that lost its race is dropped silently.
@@ -237,7 +237,12 @@ export class Wire {
     }
     if (response.status >= 500) {
       const body = await this.#text(response);
-      this.#dispatch("partial:error", { status: response.status, body, error: null });
+      this.#dispatch("partial:error", {
+        status: response.status,
+        body,
+        error: null,
+        kind: "http",
+      });
       return;
     }
     const contentType = response.headers.get("content-type") ?? "";
@@ -260,7 +265,12 @@ export class Wire {
         return;
       }
       const body = await this.#text(response);
-      this.#dispatch("partial:error", { status: response.status, body, error: null });
+      this.#dispatch("partial:error", {
+        status: response.status,
+        body,
+        error: null,
+        kind: "http",
+      });
       return;
     }
     const body = await this.#text(response);
@@ -268,7 +278,12 @@ export class Wire {
     try {
       raw = JSON.parse(body);
     } catch (error) {
-      this.#dispatch("partial:error", { status: response.status, body, error });
+      this.#dispatch("partial:error", {
+        status: response.status,
+        body,
+        error,
+        kind: "parse",
+      });
       return;
     }
     this.#onEnvelope(raw, response, snapshot, request.key);

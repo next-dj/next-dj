@@ -7,7 +7,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.middleware.csrf import get_token
 from django.utils.html import format_html
 
-from next.forms.backends import FormActionNotFound
+from next.forms.backends import FormActionNotFoundError
 from next.forms.manager import _build_form_namespace_from_meta, form_action_manager
 from next.forms.uid import (
     FORM_ORIGIN_OVERRIDE_KEY,
@@ -91,7 +91,7 @@ def action_url(context: template.Context, action_name: str) -> str:
             "An unquoted name is looked up as a template variable, quote the "
             "action name to pass it as a literal."
         )
-        raise FormActionNotFound(msg)
+        raise FormActionNotFoundError(msg)
     return form_action_manager.get_action_url(
         name, page_path=_page_path_from_context(context)
     )
@@ -228,7 +228,7 @@ class FormNode(template.Node):
                 f'write {{% form "{token}" %}} to pass the action name as '
                 "a literal."
             )
-            raise FormActionNotFound(msg, name=token)
+            raise FormActionNotFoundError(msg, name=token)
 
         page_path = _page_path_from_context(context)
 

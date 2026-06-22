@@ -213,16 +213,17 @@ await navigator.clipboard.writeText(`${post.title} — ${location.href}`);
 [`blog/context_processors.py`](blog/context_processors.py) is a standard Django context processor. It receives `request` and returns a dict that is merged into every template context:
 
 ```python
-def site_nav(request: HttpRequest) -> dict[str, object]:  # noqa: ARG001
+def site_nav(request: HttpRequest) -> dict[str, object]:
     return {
         "site_tagline": SITE_TAGLINE,
         "site_year": datetime.now(tz=UTC).year,
+        "site_path": request.path,
     }
 ```
 
 Wired under `NEXT_FRAMEWORK["PAGE_BACKENDS"][0]["OPTIONS"]["context_processors"]`. The framework's [`next.E040`](../../docs/content/reference/system-checks.rst) check fails at `manage.py check` time if the processor signature does not accept `request`.
 
-`request` is not used here (the processor returns constants), but the signature is fixed by the Django contract. We explicitly allow the unused argument with `# noqa: ARG001` so the rule that _actual_ unused params are dropped still holds everywhere else.
+The processor reads `request.path` and exposes it as `site_path`, which the footer renders. Using the argument keeps the signature honest — there is no unused parameter to suppress, and the `request`-named parameter still satisfies the `next.E040` contract.
 
 ### 10. Shared `nav_link` component
 

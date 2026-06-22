@@ -8,7 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from next.conf import next_framework_settings
 
-from .backends import FormActionFactory, FormActionNotFound
+from .backends import FormActionFactory, FormActionNotFoundError
 from .dispatch import _form_action_context_callable
 from .origin import _url_kwargs_for_request
 
@@ -93,13 +93,13 @@ class FormActionManager:
         self._ensure_backends()
         if len(self._backends) == 1:
             return self._backends[0].get_action_url(action_name, page_path=page_path)
-        caught: list[FormActionNotFound] = []
+        caught: list[FormActionNotFoundError] = []
         for backend in self._backends:
             try:
                 return backend.get_action_url(action_name, page_path=page_path)
-            except FormActionNotFound as exc:
+            except FormActionNotFoundError as exc:
                 caught.append(exc)
-        raise FormActionNotFound(
+        raise FormActionNotFoundError(
             name=action_name,
             page_path=page_path,
             candidates=tuple(name for exc in caught for name in exc.candidates),
@@ -126,7 +126,7 @@ class FormActionManager:
         *,
         page_path: str | None = None,
     ) -> "ActionMeta":
-        """Return the action meta or raise FormActionNotFound with close matches."""
+        """Return the action meta or raise with close matches when none exists."""
         meta = self.get_action_meta(action_name, page_path=page_path)
         if meta is not None:
             return meta
@@ -136,7 +136,7 @@ class FormActionManager:
             for registered in backend.iter_actions()
             if (registered_name := registered.get("name")) is not None
         }
-        raise FormActionNotFound(
+        raise FormActionNotFoundError(
             name=action_name,
             page_path=page_path,
             candidates=tuple(known),

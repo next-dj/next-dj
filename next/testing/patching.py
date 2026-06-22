@@ -23,6 +23,8 @@ from next.static.manager import default_manager
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
+    from django import forms as django_forms
+
     from next.deps.providers import ParameterProvider
     from next.static.collector import StaticCollector
 
@@ -31,7 +33,7 @@ _MISSING: Any = object()
 
 
 @contextlib.contextmanager
-def override_next_settings(**overrides: Any) -> Iterator[None]:  # noqa: ANN401
+def override_next_settings(**overrides: object) -> Iterator[None]:
     """Merge `overrides` into `NEXT_FRAMEWORK` for the duration of the block.
 
     The merge is shallow: top-level keys supplied as kwargs replace any
@@ -47,7 +49,7 @@ def override_next_settings(**overrides: Any) -> Iterator[None]:  # noqa: ANN401
 
 
 @contextlib.contextmanager
-def override_dependency(name: str, value: Any) -> Iterator[None]:  # noqa: ANN401
+def override_dependency(name: str, value: object) -> Iterator[None]:
     """Bind `Depends(name)` to `value` for the block.
 
     Any previous dependency registered under `name` is restored on exit.
@@ -84,7 +86,7 @@ def override_form_action(
     name: str,
     handler: Callable[..., Any],
     *,
-    form_class: Any = None,  # noqa: ANN401
+    form_class: type[django_forms.Form] | Callable[..., Any] | None = None,
 ) -> Iterator[None]:
     """Register `handler` as the named form action for the block.
 

@@ -5,18 +5,18 @@ from next.pages import context
 
 
 @context("access_request")
-def access_request(id: int) -> AccessRequest:  # noqa: A002
+def access_request(request_id: int) -> AccessRequest:
     """Resolve the `AccessRequest` for the URL kwarg or 404."""
     try:
-        return AccessRequest.objects.get(pk=id)
+        return AccessRequest.objects.get(pk=request_id)
     except AccessRequest.DoesNotExist as exc:
         raise Http404 from exc
 
 
 @context("entries")
-def entries(id: int) -> list[AuditEntry]:  # noqa: A002
+def entries(request_id: int) -> list[AuditEntry]:
     """Return audit rows linked to this request, newest-first."""
-    return list(AuditEntry.objects.filter(request_id=id))
+    return list(AuditEntry.objects.filter(request_id=request_id))
 
 
 @context("just_submitted")

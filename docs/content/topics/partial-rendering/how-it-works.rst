@@ -41,7 +41,8 @@ The Apply
 
 The client narrows the envelope and runs each operation against the addressed zone, resolving a layer zone before the same-named page zone.
 The built-in verbs are ``morph``, ``replace``, ``inner``, ``append``, ``prepend``, ``remove``, ``refresh``, ``event``, ``toast``, ``url``, ``visit``, ``layer.open``, ``layer.close``, and ``context``.
-``morph`` is the default, reconciling the live subtree in place against the new markup so focus, scroll, and a field the user is editing survive the update.
+``morph`` is the default, reconciling the live subtree in place against the new markup so focus, the caret, and a field the user is editing survive the update.
+A reused node keeps its own state, scroll position included, because it never leaves the document.
 ``append`` and ``prepend`` dedupe by key so a re-fetched page of a list cannot double its rows.
 
 The morph engine protects a focused input and a dirty field from the server value, leaves a ``data-next-keep`` node untouched, and treats a custom element or a shadow root as atomic.

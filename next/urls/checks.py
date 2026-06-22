@@ -83,109 +83,17 @@ def _validate_config_structure(
     return errors
 
 
-def _validate_file_router_backend_fields(  # noqa: C901, PLR0912
+def _validate_file_router_backend_fields(
     config: dict[str, Any],
     index: int,
 ) -> list[CheckMessage]:
     """Validate `DIRS`, `PAGES_DIR`, `APP_DIRS`, `OPTIONS` for the file router."""
-    errors: list[CheckMessage] = []
     rf_routers = f"NEXT_FRAMEWORK['{_PAGE_BACKEND_SETTINGS_KEY}'][{index}]"
-    if "DIRS" in config and not isinstance(config["DIRS"], list):
-        errors.append(
-            Error(
-                f"{rf_routers}.DIRS must be a list.",
-                obj=settings,
-                id="next.E006",
-            ),
-        )
-
-    if "PAGES_DIR" not in config:
-        errors.append(
-            Error(
-                f"{rf_routers} must specify PAGES_DIR when using FileRouterBackend.",
-                obj=settings,
-                id="next.E024",
-            ),
-        )
-    elif not isinstance(config["PAGES_DIR"], str):
-        errors.append(
-            Error(
-                f"{rf_routers}.PAGES_DIR must be a string.",
-                obj=settings,
-                id="next.E027",
-            ),
-        )
-
-    if "APP_DIRS" not in config:
-        errors.append(
-            Error(
-                f"{rf_routers} must specify APP_DIRS when using FileRouterBackend.",
-                obj=settings,
-                id="next.E025",
-            ),
-        )
-    elif not isinstance(config["APP_DIRS"], bool):
-        errors.append(
-            Error(
-                f"{rf_routers}.APP_DIRS must be a boolean.",
-                obj=settings,
-                id="next.E005",
-            ),
-        )
-
-    if "OPTIONS" not in config:
-        errors.append(
-            Error(
-                f"{rf_routers} must specify OPTIONS when using FileRouterBackend.",
-                obj=settings,
-                id="next.E026",
-            ),
-        )
-    elif not isinstance(config["OPTIONS"], dict):
-        errors.append(
-            Error(
-                f"{rf_routers}.OPTIONS must be a dictionary.",
-                obj=settings,
-                id="next.E006",
-            ),
-        )
-    else:
-        opts = config["OPTIONS"]
-        cp = opts.get("context_processors")
-        if cp is not None and not isinstance(cp, list):
-            errors.append(
-                Error(
-                    f"{rf_routers}.OPTIONS['context_processors'] must be a list.",
-                    obj=settings,
-                    id="next.E006",
-                ),
-            )
-        elif isinstance(cp, list):
-            for item in cp:
-                if not isinstance(item, str):
-                    errors.append(
-                        Error(
-                            f"{rf_routers}.OPTIONS['context_processors'] must contain "
-                            "only strings.",
-                            obj=settings,
-                            id="next.E006",
-                        ),
-                    )
-                    break
-        for key in opts:
-            if key == "context_processors":
-                continue
-            errors.append(
-                Error(
-                    f"{rf_routers}.OPTIONS contains unknown key {key!r}. "
-                    "OPTIONS only supports context_processors. "
-                    "Use top-level DIRS for extra page roots.",
-                    obj=settings,
-                    id="next.E006",
-                ),
-            )
-            break
-
+    errors: list[CheckMessage] = []
+    errors.extend(_validate_dirs_field(config, rf_routers))
+    errors.extend(_validate_pages_dir_field(config, rf_routers))
+    errors.extend(_validate_app_dirs_field(config, rf_routers))
+    errors.extend(_validate_options_field(config, rf_routers))
     errors.extend(
         errors_for_unknown_keys(
             config,
@@ -194,6 +102,130 @@ def _validate_file_router_backend_fields(  # noqa: C901, PLR0912
         ),
     )
     return errors
+
+
+def _validate_dirs_field(config: dict[str, Any], prefix: str) -> list[CheckMessage]:
+    """Validate that `DIRS`, when present, is a list."""
+    if "DIRS" in config and not isinstance(config["DIRS"], list):
+        return [Error(f"{prefix}.DIRS must be a list.", obj=settings, id="next.E006")]
+    return []
+
+
+def _validate_pages_dir_field(
+    config: dict[str, Any],
+    prefix: str,
+) -> list[CheckMessage]:
+    """Validate that `PAGES_DIR` is present and a string."""
+    if "PAGES_DIR" not in config:
+        return [
+            Error(
+                f"{prefix} must specify PAGES_DIR when using FileRouterBackend.",
+                obj=settings,
+                id="next.E024",
+            ),
+        ]
+    if not isinstance(config["PAGES_DIR"], str):
+        return [
+            Error(
+                f"{prefix}.PAGES_DIR must be a string.",
+                obj=settings,
+                id="next.E027",
+            ),
+        ]
+    return []
+
+
+def _validate_app_dirs_field(
+    config: dict[str, Any],
+    prefix: str,
+) -> list[CheckMessage]:
+    """Validate that `APP_DIRS` is present and a boolean."""
+    if "APP_DIRS" not in config:
+        return [
+            Error(
+                f"{prefix} must specify APP_DIRS when using FileRouterBackend.",
+                obj=settings,
+                id="next.E025",
+            ),
+        ]
+    if not isinstance(config["APP_DIRS"], bool):
+        return [
+            Error(
+                f"{prefix}.APP_DIRS must be a boolean.",
+                obj=settings,
+                id="next.E005",
+            ),
+        ]
+    return []
+
+
+def _validate_options_field(
+    config: dict[str, Any],
+    prefix: str,
+) -> list[CheckMessage]:
+    """Validate that `OPTIONS` is present, a dict, and only names known keys."""
+    if "OPTIONS" not in config:
+        return [
+            Error(
+                f"{prefix} must specify OPTIONS when using FileRouterBackend.",
+                obj=settings,
+                id="next.E026",
+            ),
+        ]
+    if not isinstance(config["OPTIONS"], dict):
+        return [
+            Error(
+                f"{prefix}.OPTIONS must be a dictionary.", obj=settings, id="next.E006"
+            ),
+        ]
+    opts = config["OPTIONS"]
+    errors = _validate_context_processors(opts, prefix)
+    errors.extend(_validate_options_unknown_keys(opts, prefix))
+    return errors
+
+
+def _validate_context_processors(
+    opts: dict[str, Any],
+    prefix: str,
+) -> list[CheckMessage]:
+    """Validate the `context_processors` option as a list of strings."""
+    cp = opts.get("context_processors")
+    if cp is not None and not isinstance(cp, list):
+        return [
+            Error(
+                f"{prefix}.OPTIONS['context_processors'] must be a list.",
+                obj=settings,
+                id="next.E006",
+            ),
+        ]
+    if isinstance(cp, list) and any(not isinstance(item, str) for item in cp):
+        return [
+            Error(
+                f"{prefix}.OPTIONS['context_processors'] must contain only strings.",
+                obj=settings,
+                id="next.E006",
+            ),
+        ]
+    return []
+
+
+def _validate_options_unknown_keys(
+    opts: dict[str, Any],
+    prefix: str,
+) -> list[CheckMessage]:
+    """Report the first `OPTIONS` key that is not `context_processors`."""
+    unknown = next((key for key in opts if key != "context_processors"), None)
+    if unknown is None:
+        return []
+    return [
+        Error(
+            f"{prefix}.OPTIONS contains unknown key {unknown!r}. "
+            "OPTIONS only supports context_processors. "
+            "Use top-level DIRS for extra page roots.",
+            obj=settings,
+            id="next.E006",
+        ),
+    ]
 
 
 def _validate_config_fields(

@@ -50,6 +50,13 @@ Subscribe to it for initialisation that needs a specific element the moment it l
 The event bubbles, so a single document listener that checks ``event.target`` catches every mounted node.
 This is the idiom for behaviour that owns one element and needs to run when that element appears.
 
+``next:mounted`` fires on the touched nodes of a patch, the roots an op replaces or morphs and the rows a merge brings, not on every descendant of a morphed zone.
+A deeply nested element that the morph reconciles in place is not a touched node, so ``event.target`` is the touched root above it and ``event.target.matches("[data-chart]")`` never matches the inner element.
+For an element that lands deep inside a morphed subtree reach for ``Next.partial.onMount``, which scans the inserted subtree with ``querySelectorAll`` and runs for every match, descendants included.
+
+The ``next:mounted`` event lives only on ``document.addEventListener``.
+It never reaches the ``Next.on`` bus, so ``Next.on("next:mounted")`` is a silent no-op, as are ``Next.on("next:removed")``, ``Next.on("next:morph-element")``, and ``Next.on("next:morph-attribute")``.
+
 Register With Next.partial.onMount
 ----------------------------------
 

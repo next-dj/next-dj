@@ -2,6 +2,7 @@ import importlib
 from decimal import Decimal
 
 import pytest
+from catalog.forms import PRESETS, PresetFilterForm
 from catalog.models import Category, Product
 from catalog.providers import (
     Filters,
@@ -154,6 +155,36 @@ class TestPageProvider:
             annotation = None
 
         assert provider.resolve(Param(), ctx).per_page == 6
+
+
+class TestPresetFilterForm:
+    """Cover the preset choices and the canonical URL each maps to."""
+
+    def test_choices_match_the_preset_table(self) -> None:
+        """Expose exactly the registered preset names as choices."""
+        form = PresetFilterForm()
+        names = [value for value, _ in form.fields["preset"].choices]
+        assert names == list(PRESETS)
+
+    @pytest.mark.django_db()
+    @pytest.mark.parametrize(
+        ("preset", "expected"),
+        [
+            ("in_stock", "/catalog/?in_stock=1"),
+            ("cheapest", "/catalog/?sort=price_asc"),
+            ("newest", "/catalog/?sort=newest"),
+        ],
+    )
+    def test_target_maps_preset_to_canonical_url(self, preset, expected) -> None:
+        """Build the canonical listing URL for each preset."""
+        form = PresetFilterForm(data={"preset": preset})
+        assert form.is_valid()
+        assert form._target() == expected
+
+    def test_unknown_preset_fails_validation(self) -> None:
+        """Reject a preset name that is not in the table."""
+        form = PresetFilterForm(data={"preset": "nonsense"})
+        assert not form.is_valid()
 
 
 class TestQuerystringTemplateTag:

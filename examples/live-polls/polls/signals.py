@@ -1,14 +1,3 @@
-"""Signal wiring for the polls app.
-
-Two listeners live here. The first broadcasts a fresh snapshot to the
-in-process broker after every successful vote. It is enabled by the
-`form`, `request`, and `url_kwargs` fields the framework added to
-`action_dispatched` so the receiver knows which poll changed and which
-request changed it without re-querying state. The second injects the
-Vite dev client into pages that carry Vue assets when DEBUG is true so
-HMR works during local development.
-"""
-
 from django import forms as django_forms
 from django.conf import settings
 from django.dispatch import receiver

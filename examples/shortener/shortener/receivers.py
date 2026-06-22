@@ -1,10 +1,3 @@
-"""Signal receivers that count form-action dispatches into the shared cache.
-
-Hooked on `action_dispatched` so every form dispatch bumps a per-action
-counter keyed by the form's auto-name. The admin "Stats" page reads the
-counters to show how often each form has been submitted this process.
-"""
-
 from __future__ import annotations
 
 import threading
@@ -35,11 +28,7 @@ def _remember(action_name: str) -> None:
 
 
 @receiver(action_dispatched)
-def _on_action_dispatched(
-    sender: object,  # noqa: ARG001 — signal receivers take `sender` by contract
-    action_name: str,
-    **_kwargs: object,
-) -> None:
+def _on_action_dispatched(action_name: str, **_kwargs: object) -> None:
     """Bump the counter for `action_name` and track the name for readout."""
     key = _key(action_name)
     cache.add(key, 0)

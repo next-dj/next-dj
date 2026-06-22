@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from django import forms as django_forms
@@ -15,13 +16,27 @@ from django.http import (
     HttpResponseRedirect,
     QueryDict,
 )
+from django.template import Context, Template
 
 from next.deps import Depends, resolver
 from next.forms import BaseModelForm, action, cleanup_extra_initial, form_spec
+from next.partial import Patches, is_partial_request
 from shadcn_admin import utils
 
 
 _LOG_CHANGE_MESSAGE = "Changed via shadcn-admin form"
+
+_CHANGE_TEMPLATE_PATH = (
+    Path(__file__).resolve().parent
+    / "surfaces"
+    / "[str:app_label]"
+    / "[str:model_name]"
+    / "[int:pk]"
+    / "change"
+    / "template.djx"
+)
+_ROW_TEMPLATE = Template('{% component "inline_row" row=row token=token %}')
+_COUNT_TEMPLATE = Template("{{ count }} saved")
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +146,7 @@ class RelatedSection:
     rows: tuple[RelatedRow, ...]
     add_fields: tuple[Any, ...]
     add_errors: tuple[str, ...]
+    count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,6 +280,7 @@ class AdminInlineSpec:
             rows=rows,
             add_fields=add_spec.sections[0].fields,
             add_errors=add_spec.non_field_errors,
+            count=len(rows),
         )
 
 
@@ -406,18 +423,36 @@ def admin_inline_add_form_factory(
     return inline(inline.blank())
 
 
-def _save_inline(
-    form: django_forms.ModelForm,
-    spec: AdminFormSpec,
-    *,
-    verb: str,
-) -> HttpResponse:
-    obj = form.save()
+def _render_inline_row(inline: AdminInlineSpec, obj: Model) -> str:
+    """Render one clean keyed inline row form for a replace patch.
+
+    The change template path travels as `current_template_path` so the
+    `inline_row` component resolves the same way the change view render
+    does.
+    """
+    row = inline._row(obj, None)
+    return _ROW_TEMPLATE.render(
+        Context(
+            {
+                "row": row,
+                "token": inline.token,
+                "request": inline.spec.request,
+                "current_template_path": _CHANGE_TEMPLATE_PATH,
+            }
+        )
+    )
+
+
+def _count_badge(inline: AdminInlineSpec) -> str:
+    """Render the live row-count text for an inner patch into the badge."""
+    return _COUNT_TEMPLATE.render(Context({"count": inline.children().count()}))
+
+
+def _flash_save(spec: AdminFormSpec, obj: Model, *, verb: str) -> None:
     messages.success(
         spec.request,
         f"The {obj._meta.verbose_name} was {verb} successfully.",
     )
-    return HttpResponseRedirect(spec.change_url(spec.instance))
 
 
 @action(
@@ -426,13 +461,35 @@ def _save_inline(
     login_required=True,
 )
 def handle_inline_change(
+    request: HttpRequest,
     form: django_forms.ModelForm,
     spec: AdminFormSpec = Depends("admin_spec"),
 ) -> HttpResponse:
-    """Save one edited inline row, then redirect back to the parent change view."""
-    if not AdminInlineSpec.for_request(spec).has_change_permission():
+    """Save one edited inline row and swap it in place for the new values.
+
+    A live runtime replaces the keyed row form with the clean saved form
+    and refreshes the row-count badge in place. Without the runtime the
+    builder falls back to the parent change view.
+    """
+    inline = AdminInlineSpec.for_request(spec)
+    if not inline.has_change_permission():
         raise PermissionDenied
-    return _save_inline(form, spec, verb="updated")
+    obj = form.save()
+    _flash_save(spec, obj, verb="updated")
+    if not is_partial_request(request):
+        return HttpResponseRedirect(spec.change_url(spec.instance))
+    return (
+        Patches(request)
+        .replace(
+            {"css": f'form[data-next-key="{obj.pk}"]'},
+            _render_inline_row(inline, obj),
+        )
+        .inner(
+            {"css": f'[data-inline-count="{inline.token}"]'},
+            _count_badge(inline),
+        )
+        .response()
+    )
 
 
 @action(
@@ -441,13 +498,32 @@ def handle_inline_change(
     login_required=True,
 )
 def handle_inline_add(
+    request: HttpRequest,
     form: django_forms.ModelForm,
     spec: AdminFormSpec = Depends("admin_spec"),
 ) -> HttpResponse:
-    """Create one inline row under the parent, then redirect back to its change view."""
-    if not AdminInlineSpec.for_request(spec).has_add_permission():
+    """Create one inline row and confirm it in a server-opened result layer.
+
+    A live runtime opens the saved row's parent change view in a result
+    layer and refreshes the row-count badge in place. Without the runtime
+    the builder falls back to the parent change view.
+    """
+    inline = AdminInlineSpec.for_request(spec)
+    if not inline.has_add_permission():
         raise PermissionDenied
-    return _save_inline(form, spec, verb="added")
+    obj = form.save()
+    _flash_save(spec, obj, verb="added")
+    if not is_partial_request(request):
+        return HttpResponseRedirect(spec.change_url(spec.instance))
+    return (
+        Patches(request)
+        .layer_open(href=spec.change_url(spec.instance))
+        .inner(
+            {"css": f'[data-inline-count="{inline.token}"]'},
+            _count_badge(inline),
+        )
+        .response()
+    )
 
 
 @action("admin:logout")

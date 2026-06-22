@@ -181,7 +181,8 @@ declare, surfacing as a 400 before any render.
 ``ForeignPageNotAuthorizedError`` is raised when an out-of-band morph of a foreign page
 fails that page's own authorisation, so a zone never travels in a response the page would
 have denied.
-The remaining four guard the custom-verb contract and live in ``next.partial.patches``.
+The remaining eight guard the custom-verb contract, the event-name and dedupe
+vocabularies, and the foreign-page and href rules, and live in ``next.partial.patches``.
 
 .. autoexception:: next.partial.UnknownZoneError
    :members:
@@ -199,6 +200,18 @@ The remaining four guard the custom-verb contract and live in ``next.partial.pat
    :members:
 
 .. autoexception:: next.partial.patches.UnknownContextNameError
+   :members:
+
+.. autoexception:: next.partial.patches.ReservedEventNameError
+   :members:
+
+.. autoexception:: next.partial.patches.DynamicForeignPageError
+   :members:
+
+.. autoexception:: next.partial.patches.UnknownDedupeError
+   :members:
+
+.. autoexception:: next.partial.patches.CrossSiteHrefError
    :members:
 
 Signals

@@ -562,3 +562,64 @@ describe("trigger delegation", () => {
     expect(requests).toHaveLength(0);
   });
 });
+
+describe("dev attribute validation", () => {
+  let detach: () => void;
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  afterEach(() => {
+    detach?.();
+  });
+
+  it("warns on an out-of-set data-next-lazy value in dev", () => {
+    document.body.innerHTML = '<div data-next-zone="z" data-next-lazy="loaded"></div>';
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { triggers } = makeTriggers({ dev: true });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toContain('data-next-lazy="loaded"');
+    expect(warn.mock.calls[0]![0]).toContain("load, revealed");
+    warn.mockRestore();
+  });
+
+  it("warns on an out-of-set data-next-merge value in dev", () => {
+    document.body.innerHTML =
+      '<a href="/p2/" data-next-merge="add" data-next-target="list">more</a>';
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { triggers } = makeTriggers({ dev: true });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toContain('data-next-merge="add"');
+    expect(warn.mock.calls[0]![0]).toContain("append, prepend");
+    warn.mockRestore();
+  });
+
+  it("stays silent on recognised values in dev", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="z" data-next-lazy="load"></div>' +
+      '<a href="/p2/" data-next-merge="append" data-next-target="list">more</a>';
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { triggers } = makeTriggers({ dev: true });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("stays silent on an out-of-set value when dev is off", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="z" data-next-lazy="loaded"></div>' +
+      '<a href="/p2/" data-next-merge="add" data-next-target="list">more</a>';
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { triggers } = makeTriggers();
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});

@@ -18,7 +18,7 @@ from next.forms import (
     ActionOutcomeKind,
     ActionRegistration,
     FormActionBackend,
-    FormActionNotFound,
+    FormActionNotFoundError,
     RegistryFormActionBackend,
 )
 from next.forms.backends import (
@@ -34,23 +34,23 @@ _FAKE_FILE = "/fake/myapp/forms.py"
 _FAKE_FILE_PAGE = "/fake/myapp/page.py"
 
 
-class TestFormActionNotFound:
-    """FormActionNotFound carries the failing name and lookup context."""
+class TestFormActionNotFoundError:
+    """FormActionNotFoundError carries the failing name and lookup context."""
 
     def test_is_a_lookup_error(self) -> None:
         """The exception subclasses LookupError, not KeyError."""
-        exc = FormActionNotFound("Unknown form action 'x'.", name="x")
+        exc = FormActionNotFoundError("Unknown form action 'x'.", name="x")
         assert isinstance(exc, LookupError)
         assert not isinstance(exc, KeyError)
 
     def test_explicit_message_is_kept_verbatim(self) -> None:
         """str() returns an explicitly passed message unchanged."""
-        exc = FormActionNotFound("Unknown form action 'x'.", name="x")
+        exc = FormActionNotFoundError("Unknown form action 'x'.", name="x")
         assert str(exc) == "Unknown form action 'x'."
 
     def test_default_context_fields(self) -> None:
         """page_path defaults to None and suggestions to an empty tuple."""
-        exc = FormActionNotFound(name="missing_action")
+        exc = FormActionNotFoundError(name="missing_action")
         assert exc.name == "missing_action"
         assert exc.page_path is None
         assert exc.suggestions == ()
@@ -58,7 +58,7 @@ class TestFormActionNotFound:
 
     def test_context_fields_are_stored(self) -> None:
         """name, page_path, and close matches are exposed as attributes."""
-        exc = FormActionNotFound(
+        exc = FormActionNotFoundError(
             name="missing_action",
             page_path="/app/pages/page.py",
             candidates=["missing_actions"],
@@ -75,7 +75,7 @@ class TestFormActionNotFound:
             calls.append(1)
             return ["vote"]
 
-        exc = FormActionNotFound(name="vot", candidates=provider)
+        exc = FormActionNotFoundError(name="vot", candidates=provider)
         assert calls == []
         assert "Closest matches: 'vote'." in str(exc)
         assert exc.suggestions == ("vote",)
@@ -83,27 +83,27 @@ class TestFormActionNotFound:
 
     def test_candidates_materialize_from_callable(self) -> None:
         """The candidates property snapshots the callable source."""
-        exc = FormActionNotFound(name="vot", candidates=lambda: iter(["vote"]))
+        exc = FormActionNotFoundError(name="vot", candidates=lambda: iter(["vote"]))
         assert exc.candidates == ("vote",)
 
     def test_catchable_by_type(self) -> None:
         """The exception can be caught by its own type."""
-        with pytest.raises(FormActionNotFound):
-            raise FormActionNotFound(name="missing_action")
+        with pytest.raises(FormActionNotFoundError):
+            raise FormActionNotFoundError(name="missing_action")
 
     def test_reduce_round_trip_keeps_message(self) -> None:
         """Pickle and deepcopy carry the rendered message and drop the source."""
-        exc = FormActionNotFound(
+        exc = FormActionNotFoundError(
             name="vote",
             page_path="/app/page.py",
             candidates=lambda: ["votes"],
         )
         revived = copy.deepcopy(exc)
-        assert isinstance(revived, FormActionNotFound)
+        assert isinstance(revived, FormActionNotFoundError)
         assert str(revived) == str(exc)
         assert revived.suggestions == ("votes",)
         assert revived.candidates == ()
-        assert str(FormActionNotFound(*exc.args)) == str(exc)
+        assert str(FormActionNotFoundError(*exc.args)) == str(exc)
 
     @pytest.mark.parametrize(
         ("kwargs", "expected"),
@@ -148,7 +148,7 @@ class TestFormActionNotFound:
     )
     def test_composed_message(self, kwargs: dict[str, object], expected: str) -> None:
         """The message renders the lookup context, hints, and registry state."""
-        assert str(FormActionNotFound(**kwargs)) == expected
+        assert str(FormActionNotFoundError(**kwargs)) == expected
 
 
 class TestFormActionManager:
@@ -166,8 +166,10 @@ class TestFormActionManager:
         assert "_next/form/" in url
 
     def test_get_action_url_raises_for_unknown_action(self) -> None:
-        """Raise FormActionNotFound for unknown action name."""
-        with pytest.raises(FormActionNotFound, match="Unknown form action") as excinfo:
+        """Raise FormActionNotFoundError for unknown action name."""
+        with pytest.raises(
+            FormActionNotFoundError, match="Unknown form action"
+        ) as excinfo:
             form_action_manager.get_action_url("nonexistent_action_xyz")
         assert excinfo.value.name == "nonexistent_action_xyz"
         assert excinfo.value.page_path is None
@@ -221,8 +223,8 @@ class TestFormActionManager:
         assert meta["uid"]
 
     def test_require_action_meta_raises_with_suggestions(self) -> None:
-        """Raise FormActionNotFound carrying close matches for a near miss."""
-        with pytest.raises(FormActionNotFound, match="Closest matches") as excinfo:
+        """Raise FormActionNotFoundError carrying close matches for a near miss."""
+        with pytest.raises(FormActionNotFoundError, match="Closest matches") as excinfo:
             form_action_manager.require_action_meta("simple_frm")
         assert "simple_form" in excinfo.value.suggestions
         assert excinfo.value.registry_empty is False
@@ -230,7 +232,7 @@ class TestFormActionManager:
     def test_require_action_meta_reports_empty_registry(self) -> None:
         """An empty backend list surfaces the registry-empty diagnosis."""
         manager = FormActionManager(backends=[RegistryFormActionBackend()])
-        with pytest.raises(FormActionNotFound, match="No form actions") as excinfo:
+        with pytest.raises(FormActionNotFoundError, match="No form actions") as excinfo:
             manager.require_action_meta("anything")
         assert excinfo.value.registry_empty is True
         assert excinfo.value.suggestions == ()
@@ -269,10 +271,10 @@ class TestRegistryFormActionBackend:
     """RegistryFormActionBackend registers, looks up, and routes actions."""
 
     def test_get_action_url_raises_for_unknown(self) -> None:
-        """Backend raises FormActionNotFound for unknown action."""
+        """Backend raises FormActionNotFoundError for unknown action."""
         backend = form_action_manager.default_backend
         assert isinstance(backend, RegistryFormActionBackend)
-        with pytest.raises(FormActionNotFound, match="Unknown form action"):
+        with pytest.raises(FormActionNotFoundError, match="Unknown form action"):
             backend.get_action_url("nonexistent_xyz")
 
     def test_generate_urls_empty_when_no_actions(self) -> None:
@@ -496,10 +498,10 @@ class TestRegistryFormActionBackend:
         assert backend.get_meta("ghost") is None
 
     def test_get_action_url_tolerates_dangling_name_index_entry(self) -> None:
-        """A name index entry without a registry record raises FormActionNotFound."""
+        """A name index entry without a registry record raises FormActionNotFoundError."""
         backend = RegistryFormActionBackend()
         backend._name_index["ghost"] = ("ghost_scope", "ghost")
-        with pytest.raises(FormActionNotFound, match="Unknown form action"):
+        with pytest.raises(FormActionNotFoundError, match="Unknown form action"):
             backend.get_action_url("ghost")
 
     def test_dispatch_unknown_uid_raises_http404(self) -> None:
@@ -550,7 +552,9 @@ class TestNameIndexScopeFilter:
         page_b = str(tmp_path / "b" / "page.py")
         self._register(backend, "note_form", page_a, "page")
         assert backend.get_meta("note_form", page_b) is None
-        with pytest.raises(FormActionNotFound, match="Unknown form action") as excinfo:
+        with pytest.raises(
+            FormActionNotFoundError, match="Unknown form action"
+        ) as excinfo:
             backend.get_action_url("note_form", page_path=page_b)
         assert excinfo.value.name == "note_form"
         assert excinfo.value.page_path == page_b
@@ -628,7 +632,7 @@ class TestUnknownActionSuggestions:
         """The lookup error carries close matches and renders them last."""
         backend = RegistryFormActionBackend()
         self._register(backend, "delete_note")
-        with pytest.raises(FormActionNotFound) as excinfo:
+        with pytest.raises(FormActionNotFoundError) as excinfo:
             backend.get_action_url(lookup_name)
         assert excinfo.value.suggestions == expected_suggestions
         assert str(excinfo.value).endswith(message_tail)
@@ -641,7 +645,7 @@ class TestUnknownActionSuggestions:
         self._register(second, "delete_note")
         self._register(second, "delete_card")
         manager = FormActionManager(backends=[first, second])
-        with pytest.raises(FormActionNotFound) as excinfo:
+        with pytest.raises(FormActionNotFoundError) as excinfo:
             manager.get_action_url("delete_not")
         assert excinfo.value.suggestions == ("delete_note", "delete_card")
         assert "Closest matches: 'delete_note', 'delete_card'." in str(excinfo.value)
@@ -664,7 +668,7 @@ class TestEmptyRegistryDiagnosis:
     def test_backend_empty_registry_mentions_autodiscover(self) -> None:
         """An empty backend names the import miss instead of a bare typo message."""
         backend = RegistryFormActionBackend()
-        with pytest.raises(FormActionNotFound) as excinfo:
+        with pytest.raises(FormActionNotFoundError) as excinfo:
             backend.get_action_url("save_note")
         assert excinfo.value.registry_empty is True
         assert "No form actions are registered" in str(excinfo.value)
@@ -674,7 +678,7 @@ class TestEmptyRegistryDiagnosis:
         """A populated backend reports a plain unknown-action failure."""
         backend = RegistryFormActionBackend()
         self._register(backend, "delete_note")
-        with pytest.raises(FormActionNotFound) as excinfo:
+        with pytest.raises(FormActionNotFoundError) as excinfo:
             backend.get_action_url("zzzzzz")
         assert excinfo.value.registry_empty is False
         assert "No form actions are registered" not in str(excinfo.value)
@@ -682,7 +686,7 @@ class TestEmptyRegistryDiagnosis:
     def test_manager_empty_backends_mention_autodiscover(self) -> None:
         """The manager keeps the diagnosis when every backend is empty."""
         manager = FormActionManager(backends=[RegistryFormActionBackend()])
-        with pytest.raises(FormActionNotFound) as excinfo:
+        with pytest.raises(FormActionNotFoundError) as excinfo:
             manager.get_action_url("save_note")
         assert excinfo.value.registry_empty is True
         assert "No form actions are registered" in str(excinfo.value)
@@ -693,7 +697,7 @@ class TestEmptyRegistryDiagnosis:
         second = RegistryFormActionBackend()
         self._register(second, "delete_note")
         manager = FormActionManager(backends=[first, second])
-        with pytest.raises(FormActionNotFound) as excinfo:
+        with pytest.raises(FormActionNotFoundError) as excinfo:
             manager.get_action_url("zzzzzz")
         assert excinfo.value.registry_empty is False
         assert "No form actions are registered" not in str(excinfo.value)

@@ -94,7 +94,7 @@ class PageContextRegistry:
             return self._resolver
         return resolver
 
-    def register_context(  # noqa: PLR0913
+    def register_context(
         self,
         file_path: Path,
         key: str | None,

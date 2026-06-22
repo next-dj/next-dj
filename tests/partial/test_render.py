@@ -80,6 +80,17 @@ class TestRenderZoneUnknown:
         with pytest.raises(UnknownZoneError):
             render_zone(ZONED_PAGE, ("alpha", "ghost"), _request())
 
+    def test_unknown_zone_message_lists_declared_zones(self) -> None:
+        with pytest.raises(UnknownZoneError) as exc:
+            render_zone(ZONED_PAGE, ("ghost",), _request())
+        assert "alpha" in exc.value.declared
+        assert "Declared zones" in str(exc.value)
+
+    def test_unknown_zone_without_declared_names_stays_terse(self) -> None:
+        error = UnknownZoneError("ghost")
+        assert error.declared == ()
+        assert str(error) == 'Unknown zone "ghost".'
+
 
 class TestRenderZoneCollector:
     """The collector travels outward so its assets become a manifest."""

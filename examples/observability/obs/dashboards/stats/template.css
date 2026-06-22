@@ -1,0 +1,15 @@
+/* Flash applied by the `metric-pulse` custom verb handler in template.js
+ * when the window filter re-aggregates the live totals. Co-located so it
+ * loads only on the live page that owns the zone. */
+@keyframes metric-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(2, 132, 199, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgba(2, 132, 199, 0);
+  }
+}
+
+.metric-pulse {
+  animation: metric-pulse 600ms ease-out;
+}

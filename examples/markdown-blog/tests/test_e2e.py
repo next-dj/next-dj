@@ -19,6 +19,7 @@ class TestIndex:
         body = response.content.decode()
         assert "Small posts, plain Markdown" in body
         assert "© " in body
+        assert "you are at <code>/</code>" in body
 
 
 class TestPost:

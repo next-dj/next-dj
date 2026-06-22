@@ -100,9 +100,13 @@ The wrapper carries ``data-next-zone`` regardless of the tag, so the zone stays 
 Key Your Dynamic List Rows
 --------------------------
 
-The morph engine matches old nodes to new ones to preserve identity, focus, and scroll position.
-For a list of rows it needs a stable key.
+The morph engine matches old nodes to new ones to preserve identity, focus, and the caret.
+A node it reuses keeps its own state, scroll position included, because the node never leaves the document.
+A node it replaces wholesale loses that state, so matching is what keeps a row stable.
+For a list of rows the engine needs a stable key.
 Give every row of a dynamic list a ``data-next-key`` or an ``id``.
+The engine reads identity from ``data-next-key`` first and falls back to ``id`` when no key is present.
+A row that carries both earns a console warning, and the key wins.
 
 .. code-block:: jinja
    :caption: keyed rows
@@ -119,10 +123,22 @@ This is a documented limitation of a keyless morph, and the fix is one attribute
 ``data-next-key`` also drives the dedup of ``append`` and ``prepend``.
 A merge that brings a row whose key already exists replaces the existing row rather than duplicating it, which is what keeps infinite scroll free of duplicate rows under a race.
 
+The morph leaves an ``<input type="file">`` untouched, so a file the user already chose survives a morph of the surrounding zone.
+A multipart selection is never reset by a re-render of the form around it.
+
+A ``<details>`` the user toggled keeps its open state across a morph, because a ``toggle`` event stamps the element dirty and the morph then skips its ``open`` attribute.
+A ``<details>`` the user never touched takes whatever ``open`` state the server sends.
+An element the server renders open on the first paint and closed on a later morph collapses, since no toggle ever stamped it.
+Render the same ``open`` state the client should keep, or let a real toggle carry the state forward.
+
 A repeated form needs the same key.
 A ``{% form %}`` rendered inside a ``{% for %}`` produces one instance per iteration, all sharing the action uid the morph addresses.
 Give each instance a ``key=`` with a stable per-row value, ``{% form "rename_item" key=item.pk %}``, so an invalid submit re-renders the submitted instance rather than the first one on the page.
 A wrapping ``zone=`` is the alternative, and a looped form with neither raises ``next.W070`` at ``manage.py check``.
+
+``next.W070`` catches a ``{% form %}`` written directly inside a ``{% for %}`` of a composed page.
+It does not descend into a component template, so a form inside a ``{% component %}`` that a loop renders is not flagged.
+The remedy is the same either way: thread a ``key=`` with a stable per-row value into the form, and the repeated morph lands on the submitted instance even when the form lives inside a looped component.
 
 Zone Rules the Checks Enforce
 -----------------------------

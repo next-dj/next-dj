@@ -46,8 +46,8 @@ class TestRegisterDependency:
         request = mock_http_request()
 
         @resolver.dependency("product")
-        def get_product(request: HttpRequest, id: int) -> str:  # noqa: A002
-            return f"product-{id}"
+        def get_product(request: HttpRequest, obj_id: int) -> str:
+            return f"product-{obj_id}"
 
         def page(product: str = Depends("product")) -> str:
             return product
@@ -56,7 +56,7 @@ class TestRegisterDependency:
             cache: dict = {}
             stack: list[str] = []
             result = resolver.resolve_dependencies(
-                page, request=request, id=3, _cache=cache, _stack=stack
+                page, request=request, obj_id=3, _cache=cache, _stack=stack
             )
             assert result["product"] == "product-3"
         finally:
@@ -67,14 +67,14 @@ class TestRegisterDependency:
     ) -> None:
         """Depends(callable) resolves callable args and calls it."""
 
-        def build_value(request: HttpRequest, id: int) -> str:  # noqa: A002
-            return f"{getattr(request, 'path', '')}:{id}"
+        def build_value(request: HttpRequest, obj_id: int) -> str:
+            return f"{getattr(request, 'path', '')}:{obj_id}"
 
         def view(value: str = Depends(build_value)) -> str:
             return value
 
         request = mock_http_request(path="/x/")
-        resolved = resolver.resolve_dependencies(view, request=request, id=7)
+        resolved = resolver.resolve_dependencies(view, request=request, obj_id=7)
         assert resolved["value"] == "/x/:7"
         assert view(**resolved) == "/x/:7"
 
@@ -121,16 +121,16 @@ class TestRegisterDependency:
         assert provider.resolve(param, ctx) is None
 
     def test_registered_dependency_not_used_if_url_kwargs_same_name(self) -> None:
-        """URL kwargs take precedence: param 'id' gets url value, not a dependency."""
+        """URL kwargs take precedence so param 'obj_id' gets the url value, not a dependency."""
         r = _minimal_resolver()
 
-        @r.dependency("id")
-        def get_id() -> int:
+        @r.dependency("obj_id")
+        def get_obj_id() -> int:
             return 999
 
-        def fn(id: object) -> object:  # noqa: A002
-            return id
+        def fn(obj_id: object) -> object:
+            return obj_id
 
         cache: dict = {}
-        result = r.resolve_dependencies(fn, id="from_url", _cache=cache)
-        assert result["id"] == "from_url"  # dependency returning 999 is not used
+        result = r.resolve_dependencies(fn, obj_id="from_url", _cache=cache)
+        assert result["obj_id"] == "from_url"  # dependency returning 999 is not used

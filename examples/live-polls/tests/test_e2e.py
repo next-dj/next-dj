@@ -21,6 +21,7 @@ from next.testing import (
     NextClient,
     SignalRecorder,
     build_form_for,
+    envelope_of,
     resolve_action_url,
 )
 
@@ -274,6 +275,101 @@ class TestVoteAction:
     def test_namespaced_action_url_resolves(self) -> None:
         url = resolve_action_url("vote_form")
         assert url.startswith("/_next/form/")
+
+
+class TestPartialVote:
+    """A partial vote answers the voter, the zone re-renders on a bad choice."""
+
+    def test_valid_partial_vote_morphs_the_zone_and_pushes_context(
+        self, client: NextClient, poll: Poll
+    ) -> None:
+        choice = poll.choices.get(text="Tabs")
+        response = client.post_action(
+            "vote_form",
+            {"poll": poll.pk, "choice": choice.pk},
+            origin=f"/polls/{poll.pk}/",
+            partial=True,
+            zones="poll-results",
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph", "context"]
+        assert envelope.zone_targets() == ["poll-results"]
+        choice.refresh_from_db()
+        assert choice.votes == 1
+
+    def test_valid_partial_vote_context_op_carries_fresh_counts(
+        self, client: NextClient, poll: Poll
+    ) -> None:
+        choice = poll.choices.get(text="Tabs")
+        response = client.post_action(
+            "vote_form",
+            {"poll": poll.pk, "choice": choice.pk},
+            origin=f"/polls/{poll.pk}/",
+            partial=True,
+            zones="poll-results",
+        )
+        envelope = envelope_of(response)
+        context_op = next(op for op in envelope.ops if op["op"] == "context")
+        snapshot = context_op["data"]["live_results"]
+        assert snapshot["poll_id"] == poll.pk
+        assert snapshot["total_votes"] == 1
+        votes_by_text = {row["text"]: row["votes"] for row in snapshot["choices"]}
+        assert votes_by_text["Tabs"] == 1
+        assert votes_by_text["Spaces"] == 0
+
+    def test_pushed_context_name_is_a_serialize_provider_of_the_origin(
+        self, client: NextClient, poll: Poll
+    ) -> None:
+        body = _detail_html(client, poll)
+        payload = _next_init_payload(body)
+        assert "live_results" in payload
+        assert payload["live_results"]["poll_id"] == poll.pk
+
+    def test_invalid_partial_vote_morphs_the_results_zone(
+        self, client: NextClient, poll: Poll, second_poll: Poll
+    ) -> None:
+        foreign_choice = second_poll.choices.first()
+        response = client.post_action(
+            "vote_form",
+            {"poll": poll.pk, "choice": foreign_choice.pk},
+            origin=f"/polls/{poll.pk}/",
+            partial=True,
+            zones="poll-results",
+        )
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["poll-results"]
+        meta = envelope.form_meta()
+        assert meta is not None
+        assert meta["valid"] is False
+        assert "choice" in meta["errors"]
+        html = envelope.html_for_zone("poll-results")
+        assert 'data-poll-chart-data data-total-votes="0"' in html
+        assert "Cast your vote" in html
+        foreign_choice.refresh_from_db()
+        assert foreign_choice.votes == 0
+
+    def test_winning_choice_count_rides_the_zone_morph(
+        self, client: NextClient, poll: Poll, second_poll: Poll
+    ) -> None:
+        Choice.objects.filter(poll=poll, text="Tabs").update(votes=4)
+        foreign_choice = second_poll.choices.first()
+        response = client.post_action(
+            "vote_form",
+            {"poll": poll.pk, "choice": foreign_choice.pk},
+            origin=f"/polls/{poll.pk}/",
+            partial=True,
+            zones="poll-results",
+        )
+        envelope = envelope_of(response)
+        html = envelope.html_for_zone("poll-results")
+        tabs = poll.choices.get(text="Tabs")
+        assert 'data-poll-chart-data data-total-votes="4"' in html
+        assert f'data-choice-id="{tabs.pk}"' in html
+        assert 'data-choice-votes="4"' in html
 
 
 class TestBroadcastReceiver:

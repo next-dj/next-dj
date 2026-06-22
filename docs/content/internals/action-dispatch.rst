@@ -83,7 +83,7 @@ Modules
    Manages the bound form, the dependency cache reuse, and the response selection.
 
 ``next.forms.backends``.
-   ``FormActionBackend`` abstract contract, ``RegistryFormActionBackend`` default implementation, ``FormActionFactory``, and the ``FormActionNotFound`` exception.
+   ``FormActionBackend`` abstract contract, ``RegistryFormActionBackend`` default implementation, ``FormActionFactory``, and the ``FormActionNotFoundError`` exception.
 
 ``next.forms.uid``.
    ``redirect_to_origin``, ``reverse_form_action``, and ``validated_origin_path`` helpers for the origin page round trip, plus the ``ORIGIN_FIELD_NAME`` wire constant.

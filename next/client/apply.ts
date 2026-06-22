@@ -440,14 +440,19 @@ export class Applier {
   }
 
   #runOps(envelope: Envelope, state: ApplyState): void {
+    // ok stays true only while every op applies clean. A contained op failure or
+    // an unknown verb flips it, so partial:applied carries an honest degraded
+    // signal even though mount and the event still run over what did change.
+    let ok = true;
     for (const op of envelope.ops) {
       // A single failing op is contained so it never poisons the envelope: the
       // remaining ops still apply, the failure surfaces as partial:error, and
       // mount and partial:applied still run over what did change.
       try {
-        this.#applyOp(op, state);
+        if (!this.#applyOp(op, state)) ok = false;
       } catch (error) {
-        this.#emit("partial:error", { status: 0, body: "", error }, false);
+        ok = false;
+        this.#emit("partial:error", { status: 0, body: "", error, kind: "op" }, false);
       }
     }
     if (envelope.csrf) this.#rotateCsrf(envelope.csrf);
@@ -455,7 +460,7 @@ export class Applier {
     this.#assets?.loadJs(envelope.assets);
     this.#assets?.acceptVersion(envelope.version);
     this.#runMount(state);
-    this.#emit("partial:applied", { envelope }, false);
+    this.#emit("partial:applied", { envelope, ok }, false);
   }
 
   // next:mounted on each touched node and a mount-registry pass over each, so
@@ -468,7 +473,10 @@ export class Applier {
     }
   }
 
-  #applyOp(patch: Patch, state: ApplyState): void {
+  // Returns true when the op dispatched to a known verb, false when it was an
+  // unknown verb the envelope is degraded by. A thrown op is caught by the
+  // caller, which records the same failure.
+  #applyOp(patch: Patch, state: ApplyState): boolean {
     // A built-in verb dispatches through a typed switch, where narrowing on op
     // gives each verb its own variant without re-deriving fields from unknown.
     // Checking built-ins first also narrows the remaining patch to CustomPatch,
@@ -476,21 +484,22 @@ export class Applier {
     // shape with no cast at the call site.
     if (isBuiltin(patch)) {
       this.#applyBuiltin(patch, state);
-      return;
+      return true;
     }
     // A custom op registered through defineOp shares this apply path and the
     // same ApplyContext as the built-ins, the core eating its own dog food.
     const handler = this.#ops.get(patch.op);
     if (handler !== undefined) {
       handler(patch, this.#context());
-      return;
+      return true;
     }
     // An unknown verb is a single skipped op, never a poisoned envelope.
     this.#emit(
       "partial:error",
-      { status: 0, body: "", error: new Error(`unknown op ${patch.op}`) },
+      { status: 0, body: "", error: new Error(`unknown op ${patch.op}`), kind: "op" },
       false,
     );
+    return false;
   }
 
   // The built-in verbs ride the same apply path and ApplyContext as the custom

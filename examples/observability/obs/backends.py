@@ -1,17 +1,3 @@
-"""Custom backends used by the observability example.
-
-`CountingComponentsBackend` extends the framework filesystem
-component backend and bumps a counter inside `get_component`. Every
-successful lookup contributes one event to the dashboard.
-
-`BabelJsxBackend` extends the framework static backend with a
-`render_babel_script_tag` method, paired with a `jsx` asset kind
-registered in `apps.py`. The browser parses `<script type="text/babel">`
-tags through Babel-standalone loaded from a CDN, so a `.jsx` file co-
-located next to a component travels through the same dedup and
-collection pipeline as a regular `.js` asset, no npm build step.
-"""
-
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 

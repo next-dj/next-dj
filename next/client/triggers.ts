@@ -34,6 +34,13 @@ const VALIDATE_ATTR = "data-next-validate";
 // the shared protocol vocabulary.
 const HEADER_VALIDATE = "X-Next-Validate";
 
+// The closed value sets of the hand-written attributes the dev warning guards.
+// A lazy value outside the set is silently dropped client-side. A merge value is
+// forwarded to the server, whose accepted vocabulary this set mirrors, so a typo
+// is caught at authoring time rather than failing quietly downstream.
+const LAZY_VALUES = new Set(["load", "revealed"]);
+const MERGE_VALUES = new Set(["append", "prepend"]);
+
 // The geometry seam: real IntersectionObserver behind a mock the harness drives
 // by calling the callback, since jsdom reports no intersections.
 export interface IntersectionAdapter {
@@ -69,6 +76,10 @@ export interface TriggerDeps {
   // The confirm gate. Absent, the default calls window.confirm. Injectable so
   // tests drive accept and cancel without a real dialog.
   confirm?: ConfirmAdapter;
+  // Dev builds warn on a hand-written data-next-* value outside its closed set,
+  // which the runtime would otherwise drop in silence. Injectable so tests
+  // assert both the warn-on and the silent-off behaviour.
+  dev?: boolean;
 }
 
 export interface Triggers {
@@ -87,6 +98,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   const clock = deps.clock ?? defaultClock();
   const observer = deps.observer ?? defaultObserver();
   const confirm = deps.confirm ?? defaultConfirm();
+  const dev = deps.dev ?? false;
   // Per-element debounce handles, keyed by the element itself.
   const timers = new WeakMap<Element, number>();
   // Lazy zones already activated, so a parent morph that re-inserts the same
@@ -329,7 +341,30 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     });
   }
 
+  // Warn on a hand-written attribute value outside its closed set, which the
+  // runtime drops without acting on it. Dev-only, by the same shape as the
+  // script-neutralisation warning: prefix, attribute, value, and allowed set.
+  function validateAttrs(root: ParentNode): void {
+    if (!dev) return;
+    for (const el of Array.from(root.querySelectorAll(`[${LAZY_ATTR}]`))) {
+      const value = el.getAttribute(LAZY_ATTR)!;
+      if (!LAZY_VALUES.has(value)) warnAttr(LAZY_ATTR, value, LAZY_VALUES);
+    }
+    for (const el of Array.from(root.querySelectorAll(`[${MERGE_ATTR}]`))) {
+      const value = el.getAttribute(MERGE_ATTR)!;
+      if (!MERGE_VALUES.has(value)) warnAttr(MERGE_ATTR, value, MERGE_VALUES);
+    }
+  }
+
+  function warnAttr(attr: string, value: string, allowed: Set<string>): void {
+    const set = Array.from(allowed).join(", ");
+    console.warn(
+      `[next.partial] ${attr}="${value}" is not a recognised value and is ignored. Use one of: ${set}.`,
+    );
+  }
+
   function scan(root: ParentNode): void {
+    validateAttrs(root);
     for (const el of Array.from(root.querySelectorAll(`[${LAZY_ATTR}="revealed"]`))) {
       activate(el);
     }

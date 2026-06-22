@@ -20,6 +20,7 @@ from django.contrib.staticfiles.utils import matches_patterns
 from django.core.files import File
 from django.core.files.storage import Storage
 
+from next.components import get_component_paths_for_watch
 from next.pages.registry import (
     get_layout_djx_paths_for_watch,
     get_template_djx_paths_for_watch,
@@ -89,10 +90,6 @@ def discover_colocated_static_assets() -> dict[str, Path]:
         _collect_stem_static_files(
             out, layout_dir, logical_name, "layout", default_stems
         )
-
-    # next.components relies on the Django app registry being ready. A top-level
-    # import would load it before AppConfig.ready() completes, so we defer here.
-    from next.components import get_component_paths_for_watch  # noqa: PLC0415
 
     seen_component_dirs: set[Path] = set()
     for component_source in get_component_paths_for_watch():  # pragma: no cover
@@ -177,8 +174,8 @@ class NextStaticFilesFinder(BaseFinder):
         **kwargs: bool,
     ) -> str | list[str] | None:
         """Resolve the logical path to an absolute filesystem path or list."""
-        # django-stubs still models the deprecated `all` keyword on BaseFinder,
-        # so the override must accept it. Normalise it back to find_all.
+        # Django's BaseFinder.find dictates a positional bool and a deprecated
+        # `all` keyword, so the override matches it and normalises `all` back.
         find_all = kwargs.get("all", find_all)
         self._refresh()
         source = self._mapping.get(path)

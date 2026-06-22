@@ -10,7 +10,7 @@ template class. The keyword arguments are `template`, `zone_name`, and
 `lazy`.
 
 The `zone_rendered` signal fires after a zone body renders for a
-partial request. The sender is the zone manager class. The keyword
+partial request. The sender is the `ZoneRenderResult` class. The keyword
 arguments are `zone_name`, `page_path`, `request`, and `duration_ms`.
 
 The `patch_op_registered` signal fires after a custom patch verb is

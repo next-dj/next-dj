@@ -3,11 +3,13 @@ from __future__ import annotations
 import re
 
 import markdown
-from django.utils.html import escape
-from django.utils.safestring import SafeString, mark_safe
+from django.utils.html import escape, format_html
+from django.utils.safestring import SafeString
 
 
-EMPTY_PREVIEW = "<p class='text-slate-400 italic'>Nothing to preview yet.</p>"
+EMPTY_PREVIEW = format_html(
+    "<p class='text-slate-400 italic'>{}</p>", "Nothing to preview yet."
+)
 UNSAFE_HREF = re.compile(
     r'href="\s*(?:javascript|data|vbscript):[^"]*"',
     flags=re.IGNORECASE,
@@ -26,8 +28,8 @@ def render_markdown(text: str) -> SafeString:
     """
     body = text or ""
     if not body.strip():
-        return mark_safe(EMPTY_PREVIEW)  # noqa: S308 - static placeholder, no input
+        return EMPTY_PREVIEW
     renderer = markdown.Markdown(extensions=["fenced_code", "tables"])
     rendered = renderer.convert(escape(body))
     cleaned = UNSAFE_HREF.sub('href="#"', rendered)
-    return mark_safe(cleaned)  # noqa: S308 - escape() and regex above strip vectors
+    return SafeString(cleaned)

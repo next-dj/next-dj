@@ -1,5 +1,7 @@
 import pytest
 
+import next.partial
+import next.partial.patches
 from next.partial import (
     Asset,
     Envelope,
@@ -192,3 +194,24 @@ class TestPatchResponse:
     def test_custom_status(self) -> None:
         response = PatchResponse(b"{}", status=409)
         assert response.status_code == 409
+
+
+class TestBuilderExceptionSurface:
+    """Every public builder exception reaches the package facade."""
+
+    builder_exceptions = (
+        "BuiltinPatchOpError",
+        "CrossSiteHrefError",
+        "DynamicForeignPageError",
+        "ForeignPageNotAuthorizedError",
+        "ReservedEventNameError",
+        "ReservedPatchKeyError",
+        "UnknownContextNameError",
+        "UnknownDedupeError",
+        "UnknownPatchOpError",
+    )
+
+    @pytest.mark.parametrize("name", builder_exceptions)
+    def test_exception_is_exported_and_identical(self, name: str) -> None:
+        assert name in next.partial.__all__
+        assert getattr(next.partial, name) is getattr(next.partial.patches, name)

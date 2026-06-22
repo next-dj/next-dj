@@ -67,7 +67,7 @@ DEMO_BOARDS = [
 ]
 
 
-def seed(apps, schema_editor):  # noqa: ARG001
+def seed(apps, _schema_editor):
     """Insert two active demo boards plus one archived board."""
     board_model = apps.get_model("kanban", "Board")
     column_model = apps.get_model("kanban", "Column")
@@ -98,7 +98,7 @@ def seed(apps, schema_editor):  # noqa: ARG001
                 )
 
 
-def unseed(apps, schema_editor):  # noqa: ARG001
+def unseed(apps, _schema_editor):
     """Remove demo boards on rollback (cascade clears columns and cards)."""
     board_model = apps.get_model("kanban", "Board")
     board_model.objects.filter(

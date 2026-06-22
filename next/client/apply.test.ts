@@ -190,7 +190,16 @@ describe("Applier verbs", () => {
       ]),
     );
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
-    expect(dispatched.some((d) => d.event === "partial:error")).toBe(true);
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("op");
+  });
+
+  it("marks partial:applied as degraded when an unknown op is skipped", () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const { applier, dispatched } = makeApplier();
+    applier.apply(envelope([{ op: "frobnicate", target: { zone: "z" } }]));
+    const applied = dispatched.find((d) => d.event === "partial:applied");
+    expect(applied!.detail.ok).toBe(false);
   });
 
   it("skips a non-record op without poisoning the rest of the envelope", () => {
@@ -207,7 +216,8 @@ describe("Applier verbs", () => {
     expect(document.querySelector('[data-next-zone="a"]')!.textContent).toBe("fresh");
     expect(document.querySelector('[data-next-zone="b"]')!.textContent).toBe("fresh");
     expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
-    expect(dispatched.some((d) => d.event === "partial:applied")).toBe(true);
+    const applied = dispatched.find((d) => d.event === "partial:applied");
+    expect(applied!.detail.ok).toBe(true);
   });
 
   it("is a no-op when the target is absent from the document", () => {
@@ -249,7 +259,9 @@ describe("Applier verbs", () => {
     applier.apply(envelope([{ op: "boom" }]));
     const err = dispatched.find((d) => d.event === "partial:error");
     expect((err!.detail.error as Error).message).toBe("op blew up");
-    expect(dispatched.some((d) => d.event === "partial:applied")).toBe(true);
+    expect(err!.detail.kind).toBe("op");
+    const applied = dispatched.find((d) => d.event === "partial:applied");
+    expect(applied!.detail.ok).toBe(false);
   });
 
   it("url without an href is a no-op", () => {
@@ -367,6 +379,8 @@ describe("Applier lifecycle events", () => {
     applier.apply(envelope([]));
     const names = dispatched.map((d) => d.event);
     expect(names).toEqual(["partial:before-apply", "partial:applied"]);
+    const applied = dispatched.find((d) => d.event === "partial:applied");
+    expect(applied!.detail.ok).toBe(true);
   });
 
   it("a cancelled before-apply skips the ops", () => {

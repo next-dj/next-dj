@@ -1,0 +1,1 @@
+<li data-next-key="{{ link.slug }}" class="mt-2 first:mt-0">{% component "link_card" link=link %}</li>

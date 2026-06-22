@@ -10,7 +10,7 @@ A polling app where the results on every open tab refresh the moment someone vot
 | `/polls/` | Server-rendered list of polls. Each card shows choice count and total votes. |
 | `/polls/<id>/` | Vote page with the live chart, a button-per-choice form, and a `data-next-sse` element. |
 | `/polls/<id>/stream/` | The patch event stream. Each poll change emits a `next-patches` event carrying a `refresh` of the `poll-results` zone. |
-| `POST vote_form` | Atomically increments a choice via `F("votes") + 1`, publishes a fresh snapshot to the broker with the request id, and answers the partial. |
+| `POST vote_form` | Atomically increments a choice via `F("votes") + 1`, then morphs the `poll-results` zone and pushes the fresh counts to `window.Next.context.live_results`. A signal receiver publishes the change to the broker with the request id. |
 
 Two demo polls seed via a data migration (`tabs-or-spaces` and `vim-or-emacs`) so the index page is never empty on a fresh database.
 
@@ -27,7 +27,7 @@ The vote page wraps its results in a zone and connects the stream with one eleme
 
 The runtime opens one `EventSource` on the `data-next-sse` URL and routes each `next-patches` event into the same apply pipeline an HTTP partial response uses. There is no hand-written `EventSource` code.
 
-A vote posts with `X-Next-Request-Id`. The dispatcher answers the voter with a morph of the `poll-results` zone, then a signal receiver publishes the change to the broker carrying that request id. The stream page yields one `refresh` envelope per change, stamped with the request id as the echo.
+A vote posts with `X-Next-Request-Id`. A valid partial vote answers the voter's own tab with two ops on one envelope, a morph of the `poll-results` zone with the fresh server-rendered bars and a `context` patch that pushes the new snapshot into `window.Next.context.live_results`. The `live_results` name is a page-level `serialize=True` provider on `[int:id]/page.py`, so `Patches(request).context(live_results=...)` resolves it against the origin page the vote posted from. The Vue island reads the pushed snapshot on `context-updated` and rebinds without re-reading the DOM. A signal receiver then publishes the change to the broker carrying the request id. The stream page yields one `refresh` envelope per change, stamped with the request id as the echo. A bad choice never reaches the handler, so the dispatcher auto-morphs the `poll-results` zone in place because the vote form lives inside it, and the voter keeps the rest of the page. Without the runtime the vote falls back to a redirect to the poll page.
 
 ```python
 def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches]:
@@ -37,7 +37,7 @@ def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches]:
 
 Every subscriber receives the same envelope. The voter's own tab finds the request id in its echo ring buffer and drops the event, its POST already brought the fresh zone. Every other tab executes the `refresh` and re-fetches `poll-results` with its own cookies through the poll page view, so authorization is re-checked per subscriber and the server-rendered bars come back current.
 
-The fan-out is built on `refresh` rather than a context patch on purpose. A context patch carries a serialize provider's value read from the origin page of the request that builds it, and a stream source has no page-render origin to read from. A stream that needs fresh data drives a `refresh`, and the re-fetched zone delivers the new state through its own render. The chart updates by re-rendering the server-side bars in the `poll-results` zone.
+The fan-out is built on `refresh` rather than a context patch on purpose. A context patch carries a serialize provider's value read from the origin page of the request that builds it, and a stream source has no page-render origin to read from. A stream that needs fresh data drives a `refresh`, and the re-fetched zone delivers the new state through its own render. The vote handler, by contrast, runs on a real page-render origin, so it can pair its zone morph with a `context` patch that hands the voter's own tab the snapshot directly. So two update paths coexist, a `context` patch on the voter's own response and a `refresh` for every other tab, and the chart updates by re-rendering the server-side bars in the `poll-results` zone either way.
 
 ## How to run
 
@@ -198,7 +198,7 @@ def results(poll: Poll) -> dict[str, object]:
     }
 ```
 
-`serialize=True` injects this dict into `window.Next.context.results` at page load through the `_init` payload. Voting stays server-side through the `{% form %}` tag in the component template, so the payload carries no vote URL or CSRF token. `page.vue` registers a `Next.partial.onMount("[data-poll-chart]", ...)` handler that the runtime runs over the initial DOM and over the morphed zone after every `refresh`. Each pass reads the fresh per-choice counts from the `data-poll-chart-data` block the server embeds in the zone and pushes the snapshot into the Vue instance through its `applySnapshot` method, so the chart tracks the same `refresh` that re-renders the bars, across tabs. The visible bars live in a `data-next-keep` container the Vue app owns, so the zone morph never fights Vue for those nodes. The stream sends a `refresh`, not a context patch, so the island never depends on `context-updated` after the first paint. The SSR bars in `component.djx` are the no-JavaScript fallback, so the page degrades to plain server-rendered bars when scripting is off.
+`serialize=True` injects this dict into `window.Next.context.results` at page load through the `_init` payload. Voting stays server-side through the `{% form %}` tag in the component template, so the payload carries no vote URL or CSRF token. `page.vue` registers a `Next.partial.onMount("[data-poll-chart]", ...)` handler that the runtime runs over the initial DOM and over the morphed zone after every `refresh`. Each pass reads the fresh per-choice counts from the `data-poll-chart-data` block the server embeds in the zone and pushes the snapshot into the Vue instance through its `applySnapshot` method, so the chart tracks the same `refresh` that re-renders the bars, across tabs. The visible bars live in a `data-next-keep` container the Vue app owns, so the zone morph never fights Vue for those nodes. `page.vue` also subscribes to `context-updated`, which the voter's own response fires through its `context` patch, and pushes `window.Next.context.live_results` straight into the live instance without re-reading the DOM. The SSR bars in `component.djx` are the no-JavaScript fallback, so the page degrades to plain server-rendered bars when scripting is off.
 
 ### 7. Inherit context across the layout chain
 

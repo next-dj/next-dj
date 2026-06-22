@@ -89,7 +89,9 @@ describe("assets registry and delta", () => {
     settlers[0]!(false);
     settlers[1]!(false);
     expect(done).toHaveBeenCalledTimes(1);
-    expect(dispatched.filter((d) => d.event === "partial:error")).toHaveLength(1);
+    const errors = dispatched.filter((d) => d.event === "partial:error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.detail.kind).toBe("asset");
   });
 
   it("calls done synchronously when nothing is missing", () => {
@@ -179,7 +181,8 @@ describe("version safeguard and reload-once", () => {
     const second = makeAssets({ navigate, session });
     second.assets.versionMismatch("v1", "/here/");
     expect(second.assets.versionMismatch("v2", "/here/")).toBe(true);
-    expect(second.dispatched.some((d) => d.event === "partial:error")).toBe(true);
+    const err = second.dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("asset");
     expect(navigate).toHaveBeenCalledTimes(1);
   });
 

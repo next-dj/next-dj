@@ -1,14 +1,20 @@
 import pytest
 from django.test import RequestFactory
 
-from next.partial import Patches, PatchResponse, register_patch_op
-from next.partial.headers import CONTENT_TYPE
-from next.partial.patches import (
+from next.partial import (
     BuiltinPatchOpError,
+    CrossSiteHrefError,
+    Patches,
+    PatchResponse,
+    ReservedEventNameError,
     ReservedPatchKeyError,
     UnknownContextNameError,
+    UnknownDedupeError,
     UnknownPatchOpError,
+    UnknownZoneError,
+    register_patch_op,
 )
+from next.partial.headers import CONTENT_TYPE
 from next.partial.registry import patch_op_registry
 from tests.support import partial_request, plain_request
 
@@ -46,6 +52,12 @@ class TestMorphZone:
         )
         assert "swapped" in envelope.ops[0].html
 
+    def test_unknown_zone_names_the_declared_zones(self) -> None:
+        with pytest.raises(UnknownZoneError) as exc:
+            Patches(partial_request()).morph(zone="opechatka")
+        assert exc.value.zone_name == "opechatka"
+        assert "alpha" in exc.value.declared
+
 
 class TestMorphFormAndHtml:
     """`morph(form=)` extract-morphs and `morph(html=)` morphs ready HTML."""
@@ -63,6 +75,32 @@ class TestMorphFormAndHtml:
             "target": {"zone": "list"},
             "html": "<ul></ul>",
         }
+
+
+class TestMorphFacadeUnknownKeys:
+    """The morph() facade refuses a stray or misspelled selector keyword."""
+
+    def test_zone_rejects_a_misspelled_overrides_keyword(self) -> None:
+        with pytest.raises(TypeError, match="unexpected keyword"):
+            Patches(partial_request()).morph(zone="alpha", overrides={"x": 1})
+
+    def test_zone_lists_the_accepted_keywords(self) -> None:
+        with pytest.raises(TypeError, match="overrides"):
+            Patches(partial_request()).morph(zone="alpha", bogus=1)
+
+    def test_zone_url_kwargs_without_page_is_refused(self) -> None:
+        with pytest.raises(TypeError, match="unexpected keyword"):
+            Patches(partial_request()).morph(zone="alpha", url_kwargs={"pk": 1})
+
+    def test_foreign_zone_rejects_an_unknown_keyword(self) -> None:
+        with pytest.raises(TypeError, match="unexpected keyword"):
+            Patches(partial_request()).morph(
+                zone="alpha", page="/zoned/", overrides={"x": 1}
+            )
+
+    def test_form_rejects_any_extra_keyword(self) -> None:
+        with pytest.raises(TypeError, match="unexpected keyword"):
+            Patches("v1").morph(form="ab12", html="<form></form>", dedupe="key")
 
 
 class TestStandaloneVerbs:
@@ -98,6 +136,15 @@ class TestStandaloneVerbs:
         )
         assert envelope.ops[0].as_dict()["dedupe"] == "id"
 
+    def test_append_rejects_an_unknown_dedupe(self) -> None:
+        with pytest.raises(UnknownDedupeError, match='"key" or "id"') as exc:
+            Patches("v1").append({"zone": "feed"}, "<li></li>", dedupe="kee")
+        assert exc.value.dedupe == "kee"
+
+    def test_prepend_rejects_an_unknown_dedupe(self) -> None:
+        with pytest.raises(UnknownDedupeError):
+            Patches("v1").prepend({"zone": "feed"}, "<li></li>", dedupe="bogus")
+
     def test_refresh_names_the_zone(self) -> None:
         envelope = Patches("v1").refresh(zone="results").envelope()
         assert envelope.ops[0].as_dict() == {"op": "refresh", "zone": "results"}
@@ -124,13 +171,10 @@ class TestStandaloneVerbs:
         envelope = Patches("v1").layer_open(zone="cart").envelope()
         assert envelope.ops[0].as_dict() == {"op": "layer.open", "zone": "cart"}
 
-    def test_layer_open_validates_the_href_same_site(self) -> None:
-        envelope = (
-            Patches(partial_request())
-            .layer_open(href="https://evil.example.com/x")
-            .envelope()
-        )
-        assert envelope.ops[0].as_dict() == {"op": "layer.open", "href": "/zoned/"}
+    def test_layer_open_raises_on_a_cross_site_href(self) -> None:
+        with pytest.raises(CrossSiteHrefError) as exc:
+            Patches(partial_request()).layer_open(href="https://evil.example.com/x")
+        assert exc.value.href == "https://evil.example.com/x"
 
     def test_toast_default_variant(self) -> None:
         envelope = Patches("v1").toast("Saved").envelope()
@@ -152,15 +196,18 @@ class TestStandaloneVerbs:
             "href": "/next/",
         }
 
-    def test_push_url_falls_back_for_external_host(self) -> None:
-        envelope = (
-            Patches(partial_request()).push_url("https://evil.example.com/x").envelope()
-        )
-        assert envelope.ops[0].as_dict()["href"] == "/zoned/"
+    def test_push_url_raises_on_a_cross_site_host(self) -> None:
+        with pytest.raises(CrossSiteHrefError) as exc:
+            Patches(partial_request()).push_url("https://evil.example.com/x")
+        assert "redirect(external=True)" in str(exc.value)
 
     def test_redirect_internal_is_validated(self) -> None:
         envelope = Patches(partial_request()).redirect("/safe/").envelope()
         assert envelope.ops[0].as_dict() == {"op": "visit", "href": "/safe/"}
+
+    def test_redirect_internal_raises_on_a_cross_site_href(self) -> None:
+        with pytest.raises(CrossSiteHrefError):
+            Patches(partial_request()).redirect("https://evil.example.com/x")
 
     def test_redirect_external_carries_marker(self) -> None:
         envelope = (
@@ -173,6 +220,31 @@ class TestStandaloneVerbs:
             "href": "https://oauth.example.com/x",
             "external": True,
         }
+
+
+class TestReservedEventNames:
+    """`event()` refuses framework-owned client-bus event names."""
+
+    def test_ready_is_reserved(self) -> None:
+        with pytest.raises(ReservedEventNameError, match="reserved") as exc:
+            Patches("v1").event("ready")
+        assert exc.value.name == "ready"
+
+    def test_context_updated_is_reserved(self) -> None:
+        with pytest.raises(ReservedEventNameError):
+            Patches("v1").event("context-updated")
+
+    def test_partial_prefix_is_reserved(self) -> None:
+        with pytest.raises(ReservedEventNameError):
+            Patches("v1").event("partial:before-apply")
+
+    def test_next_prefix_is_reserved(self) -> None:
+        with pytest.raises(ReservedEventNameError):
+            Patches("v1").event("next:mounted")
+
+    def test_an_application_name_is_accepted(self) -> None:
+        envelope = Patches("v1").event("cart:updated").envelope()
+        assert envelope.ops[0].as_dict()["name"] == "cart:updated"
 
 
 class TestCustomOp:
@@ -215,6 +287,12 @@ class TestContextPatch:
         with pytest.raises(UnknownContextNameError) as exc:
             Patches(partial_request()).context(secret="leak")
         assert exc.value.name == "secret"
+
+    def test_unknown_context_lists_the_available_providers(self) -> None:
+        with pytest.raises(UnknownContextNameError) as exc:
+            Patches(partial_request()).context(secret="leak")
+        assert "flag" in exc.value.available
+        assert "flag" in str(exc.value)
 
 
 class TestResponse:

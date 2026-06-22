@@ -25,7 +25,7 @@ def import_class_cached(dotted_path: str) -> type[Any]:
     return _import_class_cache[dotted_path]
 
 
-def perform_import(val: Any, setting_name: str) -> Any:  # noqa: ANN401
+def perform_import(val: object, setting_name: str) -> object:
     """Resolve a dotted import path through the cache when the value is a string."""
     if val is None or not isinstance(val, str):
         return val

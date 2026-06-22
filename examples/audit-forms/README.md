@@ -149,7 +149,7 @@ The example ships three composite components that demonstrate two different ways
 
 ### 6. Per-request audit trail (`AuditEntry.request` FK)
 
-The audit log can be read globally at `/admin/audit/` or per-request at `/request/<id>/audit/`. The router walks the file tree and emits both patterns from one app — `views/request/[step]/page.py` becomes `request/<str:step>/`, `views/request/[int:id]/audit/page.py` becomes `request/<int:id>/audit/`. Django's URL resolver picks the int variant first, so `/request/5/audit/` reaches the per-request page even though `5` would also be a valid `<str:step>`.
+The audit log can be read globally at `/admin/audit/` or per-request at `/request/<request_id>/audit/`. The router walks the file tree and emits both patterns from one app — `views/request/[step]/page.py` becomes `request/<str:step>/`, `views/request/[int:request_id]/audit/page.py` becomes `request/<int:request_id>/audit/`. Django's URL resolver picks the int variant first, so `/request/5/audit/` reaches the per-request page even though `5` would also be a valid `<str:step>`.
 
 The correlation column on `AuditEntry.request` is **only** populated by the backend channel, on the **dispatched** row of the final step. The wizard's `done` stores `request.session["access_request_just_created"]` right after `AccessRequest.objects.create(...)`, and `AuditedFormActionBackend.dispatch` pops that key after `super()` returns. Signal-channel rows stay unlinked by design — that is a teaching point in itself: the signal channel sees only the kwargs the signal ships, and `AccessRequest.id` is not among them.
 

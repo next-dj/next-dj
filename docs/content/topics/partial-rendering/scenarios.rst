@@ -30,7 +30,7 @@ The ``{% form %}`` tag already emits ``data-next-action="<uid>"`` and the hidden
 The default shape of an invalid submission is an extract-morph of the failed form addressed by its uid.
 The server re-renders the whole origin page and the client trims out the one form by ``data-next-action``.
 The neighbouring forms are named by no operation, so the runtime never touches them.
-This costs a full page render on the server, which the next page explains and how to avoid.
+This costs a full page render on the server, which :doc:`zones` explains and shows how to avoid.
 
 Wrapping a form in a zone trades the full render for a single-zone render.
 The zone is an optional optimisation, not required markup.
@@ -114,13 +114,15 @@ The response is always 200 to an authorised caller.
    {
      "version": "9f3c2e1b",
      "ops": [
-       {"op": "morph", "target": {"form": "7c1de982aa341f05"},
-        "html": "<form data-next-action=\"7c1de982aa341f05\"…>…</form>"}
+       {"op": "morph", "target": {"form": "7c1de982aa341f05"}, "extract": true,
+        "html": "<!doctype html>…the whole step page…"}
      ],
      "form": {"uid": "7c1de982aa341f05", "valid": false,
               "errors": {"email": ["Enter a valid email address."]}}
    }
 
+The form here carries no ``zone=``, so the validate response is an extract-morph of the whole step page addressed by the form uid, the same default :doc:`zones` describes.
+Wrapping the form in a zone trades that full render for a single-zone render.
 Errors are filtered to the field the request named, so the empty ``team`` field does not earn a premature required error.
 Cross-field non-field errors are always dropped, because a ``clean()`` belongs to the submit, not to a per-field blur.
 A file field is excluded from a validate request so a multipart upload is not re-sent on every blur.
@@ -265,7 +267,7 @@ The server reads the merge intent and answers with an ``append`` patch instead o
    }
 
 Dedup by ``data-next-key`` and ``id`` replaces the old sentinel with the new one and guards against duplicate rows under a race.
-The response carries ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge`` so a shared cache never hands an append envelope to a client that asked for a morph.
+The response carries ``Vary: X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version`` so a shared cache never hands an append envelope to a client that asked for a morph.
 Changing the search query is the morph of the same zone from the previous scenario, which resets the accumulated list on its own.
 Dropping the ``data-next-lazy="revealed"`` attribute leaves the same link click-driven, which gives button pagination from the same code.
 
@@ -325,7 +327,8 @@ A vote from the initiating tab posts with a request id.
    X-Next-Request: 1
    X-Next-Request-Id: 1c9f…-r1
 
-The initiator gets a morph of its zone in the POST response.
+The vote handler here returns ``None``, so the dispatcher funnels the POST into a morph of the initiator's zone and the tab stays in place.
+A handler that redirects on success would full-navigate the initiator instead.
 Then every subscriber receives the same envelope over the stream.
 
 .. code-block:: text
@@ -505,7 +508,8 @@ Guard the expensive data with ``zone_requested`` so the query runs only when the
        return list(AuditEntry.objects.all()[:100])
 
 The context collector is all-or-nothing, so the laziness of the data is manual but honest.
-A forgotten guard means an extra query, which the :doc:`zones` page calls out.
+A forgotten ``zone_requested`` guard runs the expensive provider on every full render even though the lazy body is never painted, which defeats the point of marking the zone lazy.
+The :doc:`zones` page calls out the same trap.
 
 A ``lazy="load"`` zone is batched into one GET on ``ready``.
 A ``lazy="revealed"`` zone waits for the viewport.

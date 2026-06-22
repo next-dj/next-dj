@@ -177,7 +177,8 @@ describe("createSse", () => {
     const sse = makeSse(adapter, mockVisibility().adapter);
     sse.scan(document);
     opened[0]!.message("{not json");
-    expect(dispatched.some((d) => d.event === "partial:error")).toBe(true);
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("parse");
     opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }]));
     expect(applied).toHaveLength(1);
   });
@@ -190,7 +191,8 @@ describe("createSse", () => {
     opened[0]!.error(true);
     expect(opened[0]!.closed).toBe(true);
     expect(sse.size()).toBe(0);
-    expect(dispatched.some((d) => d.event === "partial:error")).toBe(true);
+    const err = dispatched.find((d) => d.event === "partial:error");
+    expect(err!.detail.kind).toBe("network");
   });
 
   it("leaves a transient error to the native reconnect without a toast", () => {

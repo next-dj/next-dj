@@ -50,7 +50,7 @@ class TestDiscoverColocatedAssets:
                 return_value={pages_tree / "layout.djx"},
             ),
             mock.patch(
-                "next.components.get_component_paths_for_watch",
+                "next.static.finders.get_component_paths_for_watch",
                 return_value=set(),
             ),
         ):
@@ -82,7 +82,7 @@ class TestDiscoverColocatedAssets:
                 "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
-                "next.components.get_component_paths_for_watch",
+                "next.static.finders.get_component_paths_for_watch",
                 return_value=set(),
             ),
         ):
@@ -106,7 +106,7 @@ class TestNextStaticFilesFinderFind:
                 "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
-                "next.components.get_component_paths_for_watch",
+                "next.static.finders.get_component_paths_for_watch",
                 return_value=set(),
             ),
         ):
@@ -129,7 +129,7 @@ class TestNextStaticFilesFinderFind:
                 "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
-                "next.components.get_component_paths_for_watch",
+                "next.static.finders.get_component_paths_for_watch",
                 return_value=set(),
             ),
         ):
@@ -150,7 +150,7 @@ class TestNextStaticFilesFinderFind:
                 "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
-                "next.components.get_component_paths_for_watch",
+                "next.static.finders.get_component_paths_for_watch",
                 return_value=set(),
             ),
         ):
@@ -173,7 +173,7 @@ class TestNextStaticFilesFinderFind:
                 "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
-                "next.components.get_component_paths_for_watch",
+                "next.static.finders.get_component_paths_for_watch",
                 return_value=set(),
             ),
         ):
@@ -199,7 +199,7 @@ class TestNextStaticFilesFinderList:
                 return_value={pages_tree / "layout.djx"},
             ),
             mock.patch(
-                "next.components.get_component_paths_for_watch",
+                "next.static.finders.get_component_paths_for_watch",
                 return_value=set(),
             ),
         ):
@@ -223,7 +223,7 @@ class TestNextStaticFilesFinderList:
                 "next.static.finders.get_layout_djx_paths_for_watch", return_value=set()
             ),
             mock.patch(
-                "next.components.get_component_paths_for_watch",
+                "next.static.finders.get_component_paths_for_watch",
                 return_value=set(),
             ),
         ):
@@ -285,7 +285,7 @@ class TestCollectstaticIntegration:
                 return_value={pages_tree / "layout.djx"},
             ),
             mock.patch(
-                "next.components.get_component_paths_for_watch",
+                "next.static.finders.get_component_paths_for_watch",
                 return_value=set(),
             ),
         ):

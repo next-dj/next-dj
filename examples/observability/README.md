@@ -15,9 +15,9 @@ The page tree is `dashboards/`. The components live next to the pages that use t
 | `/stats/components/` | Per-component render counts. |
 | `/stats/forms/` | Action dispatch and validation-failure counts. |
 | `/stats/static/` | Asset, dedup, and HTML-injection totals. |
-| `POST` to `window_filter_form` | Persists the chosen window via querystring and redirects back. |
+| `POST` to `window_filter_form` | Re-aggregates under the chosen window. A partial apply from `/stats/` morphs the `live-totals` zone and emits the custom `metric-pulse` verb, otherwise it redirects with `?window=...`. |
 
-The filter form uses the framework `{% form "window_filter_form" %}` tag. Submitting it fires `forms.action_dispatched` so the example exercises the full form path without adding a model write.
+The filter form uses the framework `{% form "window_filter_form" %}` tag. Submitting it fires `forms.action_dispatched` so the example exercises the full form path without adding a model write. From the live page the form targets the `live-totals` zone, so the apply rides the partial protocol and ships a project-defined verb beside the built-in morph.
 
 ## How to run
 
@@ -43,9 +43,9 @@ Tailwind loads from a CDN in `obs/dashboards/layout.djx`. Chart.js arrives throu
 
 ```
 obs/
-├── apps.py                   <- imports receivers and registers the jsx kind
+├── apps.py                   <- imports receivers, registers the jsx kind and the metric-pulse verb
 ├── models.py                 <- MetricSnapshot persisted by flush_metrics
-├── forms.py                  <- WindowFilterForm
+├── forms.py                  <- WindowFilterForm, partial apply emits metric-pulse
 ├── metrics.py                <- LocMemCache counter API, bucketed and cumulative
 ├── backends.py               <- CountingComponentsBackend, BabelJsxBackend
 ├── static_policies.py        <- InstrumentedDedup
@@ -65,8 +65,10 @@ obs/
     │   └── sparkline/        <- React + JSX sparkline, scripts=[react, babel cdn]
     └── stats/
         ├── layout.djx        <- nested layout, tabs, filter form chrome
-        ├── page.py           <- @context live_stats with WrappedJsContextSerializer
-        ├── template.djx
+        ├── page.py           <- @context live_stats, live_zone names the morph target
+        ├── template.djx      <- live-totals zone
+        ├── template.js       <- defineOp("metric-pulse") flash handler, co-located
+        ├── template.css      <- metric-pulse keyframe, co-located
         ├── pages/
         ├── components/
         ├── forms/
@@ -175,13 +177,25 @@ Every group has at least one receiver. The bundled signal-group test proves it b
 
 ### 6. The filter form, time-bucketing, and `action_dispatched`
 
-`WindowFilterForm` carries one `ChoiceField`. Subclassing `next.forms.Form` in [obs/forms.py](obs/forms.py) auto-registers the action as `window_filter_form`. Its `on_valid` method redirects with `?window=...` and returns a `HttpResponseRedirect` so subsequent renders inherit the new window through the `@context("window", inherit_context=True)` callable in `obs/dashboards/stats/page.py`.
+`WindowFilterForm` carries one `ChoiceField`. Subclassing `next.forms.Form` in [obs/forms.py](obs/forms.py) auto-registers the action as `window_filter_form`. Its `on_valid` reads `is_partial_request`. A non-partial apply returns a `HttpResponseRedirect` with `?window=...` so subsequent full renders inherit the new window through the `@context("window", inherit_context=True)` callable in `obs/dashboards/stats/page.py`. The `window` callable reads the posted value first, so a partial apply re-aggregates without a context override the provider chain would ignore.
 
 Behind the form, `metrics.incr` writes both a cumulative counter and a minute-floor bucket key. `metrics.read_window(kind, minutes)` sums every bucket whose timestamp is inside `[now - minutes, now]`. The `live_stats` page-level context calls `read_window` so the chosen window narrows the aggregation in real time. The four cumulative sub-pages (`/stats/pages/`, `/stats/components/`, `/stats/forms/`, `/stats/static/`) keep using `read_kind` for the lifetime totals.
 
 The form component lives under [`_widgets/filter_window/`](obs/dashboards/_widgets/filter_window/). It uses `{% form "window_filter_form" %}` so submission goes through the framework dispatcher and `forms.action_dispatched` fires end to end, not only in tests. Inside the block the template renders the bound field as `{{ form.window }}` — the styled `Select` widget declared on the form — and `WindowFilterForm.get_initial(request)` seeds it with the window currently on the query string, so the select always shows the active choice.
 
-### 7. The flush command
+### 7. A project-defined patch verb, `metric-pulse`
+
+The live page on `/stats/` wraps its totals in a `{% zone "live-totals" %}` and passes the index-only `live_zone` context to the filter form, so the form there carries `data-next-target="live-totals"` and applies as a partial. `ObsConfig.ready` calls `register_patch_op("metric-pulse")`, which clears the `next.E066` check and earns the generic `op()` channel on the builder. A partial apply returns
+
+```python
+Patches(request).morph(zone="live-totals").op(
+    "metric-pulse", window=chosen, selector="[data-metric-pulse-target]"
+).response()
+```
+
+so the envelope carries the re-aggregated zone beside the custom verb with a payload the server authored. The client side is supplied by a co-located [`stats/template.js`](obs/dashboards/stats/template.js) that calls `window.Next.partial.defineOp("metric-pulse", ...)` to flash the refreshed numbers, paired with a [`stats/template.css`](obs/dashboards/stats/template.css) keyframe. Both load only on the live page because they are co-located with its template. The verb is an enhancement, the no-JavaScript path still redirects with `?window=...`.
+
+### 8. The flush command
 
 ```python
 def handle(self, *_args, **_options):

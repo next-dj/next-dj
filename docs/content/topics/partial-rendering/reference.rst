@@ -89,6 +89,9 @@ A verb beyond this set is registered on both sides.
 ``Next.partial.defineOp("confetti", handler)`` on the client supplies the handler.
 See :doc:`extending` for the end-to-end recipe, the ``context`` and ``event`` seams, and the custom-verb exceptions.
 
+An event name that starts with ``partial:`` or ``next:``, or equals ``ready`` or ``context-updated``, is reserved for the runtime lifecycle.
+``Patches.event()`` rejects such a name with ``ReservedEventNameError``, symmetric to ``op()`` rejecting a built-in verb on the generic channel, so an application cannot forge a lifecycle event.
+
 Request Headers
 ---------------
 
@@ -147,7 +150,7 @@ Server to client.
      - ``application/vnd.next.patches+json``, the marker the runtime keys on.
    * - ``Vary``
      - Every partial-capable path
-     - ``X-Next-Request, X-Next-Zone, X-Next-Merge``, set by the framework, so a shared cache is not poisoned.
+     - ``X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version``, set by the framework, so a shared cache is not poisoned.
    * - ``X-Next-Version``
      - Every envelope
      - The current asset version.
@@ -264,6 +267,7 @@ Lifecycle Events
 The runtime fires events on the document and the ``Next.on`` bus.
 The ``next:*`` node events fire on the element as a bubbling ``CustomEvent`` caught with ``addEventListener``.
 The ``partial:*``, ``ready``, ``context-updated``, and ``next:toast`` events also reach the ``Next.on`` bus.
+The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live only on ``document.addEventListener`` and never reach the bus, so ``Next.on("next:mounted")`` is a silent no-op.
 
 .. list-table::
    :header-rows: 1
@@ -279,17 +283,25 @@ The ``partial:*``, ``ready``, ``context-updated``, and ``next:toast`` events als
      - No
      - Read context through ``Next.context``.
    * - ``partial:before-request``
-     - Yes
-     - ``{url, method, intent}``
+     - No
+     - ``{url, method, intent}``, where ``intent`` is ``{zone?, uid?}``. The runtime fires this through the bus before the fetch leaves, so a listener observes the request rather than vetoing it.
    * - ``partial:before-apply``
      - Yes
      - ``{envelope}``, the op list is mutable.
    * - ``partial:applied``
      - No
-     - ``{envelope}``
+     - ``{envelope, ok}``. ``ok`` is ``false`` when any op threw or named an
+       unknown verb, so a listener tells a clean apply from a degraded one that
+       still mounted what did change. Observe ``ok``, not the bare fact of apply.
    * - ``partial:error``
      - No
-     - ``{status, body, error}``. An ``AbortError`` does not reach it.
+     - ``{status, body, error, kind}``, where ``kind`` is one of ``network``,
+       ``http``, ``parse``, ``op``, ``asset``. ``network`` is a fetch reject, an
+       aborted neighbour, or a dropped stream connection. ``http`` is a 4xx or
+       5xx or a mutating reply that is not an envelope. ``parse`` is a malformed
+       JSON body. ``op`` is a thrown or unknown verb mid-apply. ``asset`` is a
+       stylesheet that failed to load or a version mismatch surviving a reload.
+       An ``AbortError`` does not reach it.
    * - ``partial:layer-opened``
      - No
      - ``{opener}``
@@ -304,7 +316,7 @@ The ``partial:*``, ``ready``, ``context-updated``, and ``next:toast`` events als
      - Fired on each touched node, bubbles. The node is the event target. Pairs with ``next:removed`` as the mount half of a framework island lifecycle.
    * - ``next:removed``
      - No
-     - Fired on a node just before it detaches, bubbles, no detail. The unmount half of the island lifecycle, the place to tear down a mounted root or a timer.
+     - Fired on a node immediately before it detaches, bubbles, no detail. The unmount half of the island lifecycle, the place to tear down a mounted root or a timer.
    * - ``next:morph-element``
      - Yes
      - Fired on the old node before a pair morphs. Detail ``{newNode}``. ``preventDefault()`` skips the morph of this node and its subtree.
@@ -357,6 +369,12 @@ The pushed URL is the real address of the body rather than a masked URL of the p
 A refresh or a shared link resolves that URL as its own standalone page through its own ``page.py``, and Back closes the top layer.
 There is no client router and no URL masking.
 A single ``popstate`` handler closes the layer whose pushed URL the browser moved past.
+
+``data-next-confirm`` and ``data-next-layer`` combine on one link.
+The confirm gate is a capture-phase click handler, the layer opener is a bubble-phase one, so the confirm runs first regardless of install order.
+A cancelled confirm stops the click before it reaches the opener, so the layer never opens.
+An accepted confirm lets the click through and the layer opens.
+The same gate protects every click-driven trigger, so a prompt fronts a layer open the same way it fronts a pagination merge.
 
 Foreign-Zone Authorisation
 --------------------------

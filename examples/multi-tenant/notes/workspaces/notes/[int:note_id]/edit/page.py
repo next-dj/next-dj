@@ -33,9 +33,9 @@ class NoteEditForm(ModelForm):
         return tenant.is_active
 
     @classmethod
-    def get_initial(cls, request: HttpRequest, id: int | None = None) -> object:  # noqa: A002
+    def get_initial(cls, request: HttpRequest, note_id: int | None = None) -> object:
         """Load the tenant-owned note addressed by the URL, or raise 404."""
-        return get_owned_note(get_active_tenant(request), id)
+        return get_owned_note(get_active_tenant(request), note_id)
 
     def has_object_permission(self) -> PermissionOutcome:
         """Object-level gate. A locked note is read-only even for its tenant."""
@@ -45,14 +45,17 @@ class NoteEditForm(ModelForm):
         """Persist edits and redirect back to the note editor."""
         self.save()
         return HttpResponseRedirect(
-            reverse("next:page_notes_int_id_edit", kwargs={"id": self.instance.pk}),
+            reverse(
+                "next:page_notes_int_note_id_edit",
+                kwargs={"note_id": self.instance.pk},
+            ),
         )
 
 
 @context("note")
-def note(active_tenant: DTenant, id: int) -> Note:  # noqa: A002
+def note(active_tenant: DTenant, note_id: int) -> Note:
     """Return the note iff it belongs to the active tenant."""
-    return get_owned_note(active_tenant, id)
+    return get_owned_note(active_tenant, note_id)
 
 
 @context("preview_html")

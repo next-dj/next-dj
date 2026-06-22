@@ -80,13 +80,14 @@ def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
     return module
 
 
-_ADDITIONAL_LAYOUTS_CACHE: list[Path] | None = None
+# A single-slot holder mutated in place so cache invalidation never rebinds a
+# module global, which keeps the reset and read paths free of `global`.
+_ADDITIONAL_LAYOUTS_CACHE: dict[str, list[Path] | None] = {"value": None}
 
 
 def _reset_additional_layouts_cache(**_kwargs: object) -> None:
     """Drop cached root-level `layout.djx` paths on settings reload."""
-    global _ADDITIONAL_LAYOUTS_CACHE  # noqa: PLW0603
-    _ADDITIONAL_LAYOUTS_CACHE = None
+    _ADDITIONAL_LAYOUTS_CACHE["value"] = None
 
 
 settings_reloaded.connect(_reset_additional_layouts_cache)
@@ -228,9 +229,9 @@ class LayoutTemplateLoader(TemplateLoader):
 
     def _get_additional_layout_files(self) -> list[Path]:
         """Return root-level `layout.djx` files from each page backend `DIRS`."""
-        global _ADDITIONAL_LAYOUTS_CACHE  # noqa: PLW0603
-        if _ADDITIONAL_LAYOUTS_CACHE is not None:
-            return _ADDITIONAL_LAYOUTS_CACHE
+        cached = _ADDITIONAL_LAYOUTS_CACHE["value"]
+        if cached is not None:
+            return cached
         configs = next_framework_settings.PAGE_BACKENDS or []
         if not isinstance(configs, list):
             configs = []
@@ -242,7 +243,7 @@ class LayoutTemplateLoader(TemplateLoader):
             if d.exists() and (layout := d / "layout.djx").exists()
         )
         result = list(dict.fromkeys(candidates))
-        _ADDITIONAL_LAYOUTS_CACHE = result
+        _ADDITIONAL_LAYOUTS_CACHE["value"] = result
         return result
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
@@ -314,7 +315,9 @@ class LayoutManager:
         self._layout_registry.clear()
 
 
-_REGISTERED_LOADERS_CACHE: list[TemplateLoader] | None = None
+# A single-slot holder mutated in place so cache invalidation never rebinds a
+# module global, which keeps the reset and read paths free of `global`.
+_REGISTERED_LOADERS_CACHE: dict[str, list[TemplateLoader] | None] = {"value": None}
 
 
 def build_registered_loaders() -> list[TemplateLoader]:
@@ -325,9 +328,9 @@ def build_registered_loaders() -> list[TemplateLoader]:
     user-visible report for the same misconfigurations. The result is
     memoised and reset on `settings_reloaded`.
     """
-    global _REGISTERED_LOADERS_CACHE  # noqa: PLW0603
-    if _REGISTERED_LOADERS_CACHE is not None:
-        return _REGISTERED_LOADERS_CACHE
+    cached = _REGISTERED_LOADERS_CACHE["value"]
+    if cached is not None:
+        return cached
 
     configured = next_framework_settings.TEMPLATE_LOADERS
     seen: set[type[TemplateLoader]] = set()
@@ -353,14 +356,13 @@ def build_registered_loaders() -> list[TemplateLoader]:
         seen.add(cls)
         instances.append(cls())
 
-    _REGISTERED_LOADERS_CACHE = instances
-    return _REGISTERED_LOADERS_CACHE
+    _REGISTERED_LOADERS_CACHE["value"] = instances
+    return instances
 
 
 def _reset_registered_loaders_cache(**_kwargs: object) -> None:
     """Drop cached loader instances on settings reload."""
-    global _REGISTERED_LOADERS_CACHE  # noqa: PLW0603
-    _REGISTERED_LOADERS_CACHE = None
+    _REGISTERED_LOADERS_CACHE["value"] = None
 
 
 settings_reloaded.connect(_reset_registered_loaders_cache)

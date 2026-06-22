@@ -10,6 +10,8 @@ from .headers import (
 from .origin import OriginSource, resolve_partial_origin
 from .patches import (
     Asset,
+    BuiltinPatchOpError,
+    CrossSiteHrefError,
     DynamicForeignPageError,
     Envelope,
     ForeignPageNotAuthorizedError,
@@ -17,6 +19,11 @@ from .patches import (
     Patch,
     Patches,
     PatchResponse,
+    ReservedEventNameError,
+    ReservedPatchKeyError,
+    UnknownContextNameError,
+    UnknownDedupeError,
+    UnknownPatchOpError,
 )
 from .registry import ZoneInfo, register_patch_op, zone_requested, zones_of
 from .render import UnknownZoneError, ZoneRenderResult, render_zone
@@ -27,6 +34,8 @@ from .sse import PatchEventStream
 __all__ = [
     "REQUEST_ID",
     "Asset",
+    "BuiltinPatchOpError",
+    "CrossSiteHrefError",
     "DynamicForeignPageError",
     "Envelope",
     "ForeignPageNotAuthorizedError",
@@ -37,6 +46,11 @@ __all__ = [
     "PatchEventStream",
     "PatchResponse",
     "Patches",
+    "ReservedEventNameError",
+    "ReservedPatchKeyError",
+    "UnknownContextNameError",
+    "UnknownDedupeError",
+    "UnknownPatchOpError",
     "UnknownZoneError",
     "ZoneInfo",
     "ZoneRenderResult",

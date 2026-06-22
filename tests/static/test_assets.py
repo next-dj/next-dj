@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from typing import TYPE_CHECKING
 
 import pytest
@@ -31,7 +32,7 @@ class TestStaticAsset:
 
     def test_is_frozen(self) -> None:
         asset = StaticAsset(url=CSS_URL, kind="css")
-        with pytest.raises(Exception):  # noqa: B017, PT011
+        with pytest.raises(FrozenInstanceError, match="cannot assign to field 'url'"):
             asset.url = "mutated"  # type: ignore[misc]
 
 

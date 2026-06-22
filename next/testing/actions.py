@@ -15,7 +15,7 @@ def resolve_action_url(action_name: str) -> str:
     """Return the reverse URL for a registered form action by name.
 
     Wraps `form_action_manager.get_action_url` so tests do not need to
-    import the manager singleton directly. Raises `FormActionNotFound`
+    import the manager singleton directly. Raises `FormActionNotFoundError`
     for unknown actions.
     """
     return form_action_manager.get_action_url(action_name)
@@ -24,12 +24,12 @@ def resolve_action_url(action_name: str) -> str:
 def build_form_for(
     action_name: str,
     data: dict[str, Any] | None = None,
-    **form_kwargs: Any,  # noqa: ANN401
+    **form_kwargs: object,
 ) -> django_forms.Form:
     """Instantiate the form class registered for `action_name`.
 
     Useful for unit-testing form validation without dispatching an HTTP
-    request. Raises `FormActionNotFound` with close-match suggestions when
+    request. Raises `FormActionNotFoundError` with close-match suggestions when
     the action is unknown and `LookupError` when the action is registered
     without a form class.
     """
@@ -43,7 +43,8 @@ def build_form_for(
             f"({action_name!r}) with the test client instead."
         )
         raise LookupError(msg)
-    return cast("django_forms.Form", form_class(data=data, **form_kwargs))
+    kwargs = cast("dict[str, Any]", form_kwargs)
+    return cast("django_forms.Form", form_class(data=data, **kwargs))
 
 
 __all__ = ["build_form_for", "resolve_action_url"]

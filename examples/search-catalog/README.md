@@ -38,7 +38,7 @@ Tailwind loads via the Play CDN in [`catalog/storefront/layout.djx`](catalog/sto
 
 ### 1. Why search is plain HTML, not `@action`
 
-Search is idempotent. A bookmark of `?q=iphone&brand=Acme&page=2` should reproduce the same listing. That is the natural shape of `<form method="get">` posting back to the same page. `@action` is for POST side effects such as creating, updating, or deleting rows. [`catalog/storefront/catalog/_cards/filter_panel/component.djx`](catalog/storefront/catalog/_cards/filter_panel/component.djx) renders a regular HTML form. The `submit_url` value comes from [`catalog/storefront/catalog/_cards/filter_panel/component.py`](catalog/storefront/catalog/_cards/filter_panel/component.py) which reverses the current category page when scoped, otherwise the all-products listing. Pagination uses [`catalog/templatetags/catalog_qs.py`](catalog/templatetags/catalog_qs.py) to keep every other query parameter intact.
+Search is idempotent. A bookmark of `?q=iphone&brand=Acme&page=2` should reproduce the same listing. That is the natural shape of `<form method="get">` posting back to the same page, so the live filter stays plain HTML. A form action earns its place only for a discrete jump that should sit in browser history, which is exactly the preset filter in section 8. [`catalog/storefront/catalog/_cards/filter_panel/component.djx`](catalog/storefront/catalog/_cards/filter_panel/component.djx) renders a regular HTML form. The `submit_url` value comes from [`catalog/storefront/catalog/_cards/filter_panel/component.py`](catalog/storefront/catalog/_cards/filter_panel/component.py) which reverses the current category page when scoped, otherwise the all-products listing. Pagination uses [`catalog/templatetags/catalog_qs.py`](catalog/templatetags/catalog_qs.py) to keep every other query parameter intact.
 
 ### 2. The new `DQuery[T]` provider
 
@@ -135,11 +135,26 @@ Without the runtime the form is a plain `<form method="get">` and the sentinel i
 
 [`catalog/layout.css`](catalog/storefront/catalog/layout.css) is a co-located layout stylesheet. It applies `position: sticky; top: 1rem` to the sidebar on large screens, keeping the filter panel in view as the product grid scrolls. This style belongs in `layout.css` rather than a utility class because the `top` offset must be a concrete pixel value that Tailwind's `top-*` utilities do not express cleanly. The file is injected automatically for every page in the `catalog/` subtree through the layout chain and is absent on the landing page, as the [`test_catalog_layout_css_absent_on_landing`](tests/test_e2e.py) test verifies.
 
-### 8. `cached_search` and the LocMem hit path
+### 8. Preset filters that push history
+
+The live filter syncs the query string with `replaceState`, the right choice for a value that changes on every keystroke. A preset filter is the opposite, a single deliberate jump to a named view, so it earns a real history entry the back button can return from. That is the one place the catalog reaches for a POST `@action`. [`catalog/forms.py`](catalog/forms.py) registers `preset_filter_form`, a `Form` whose `preset` field maps to a canonical querystring such as `?sort=price_asc`. The preset bar in [`catalog/storefront/catalog/template.djx`](catalog/storefront/catalog/template.djx) renders the form with `zone="catalog-results,catalog-more"` so it applies as a partial.
+
+```python
+request.GET = QueryDict(mutable=False).copy()
+request.GET.update(params)
+patches = Patches(request).push_url(target)
+for zone in RESULT_ZONES:
+    patches.morph(zone=zone)
+return patches.response()
+```
+
+The handler points `request.GET` at the preset's params before morphing, so the cached search, the active-filter chips, and the pagination sentinel all agree with the URL `push_url` writes to history. `push_url` validates the href against the request host, so the envelope carries a `url` op with `action: "push"` and a same-site target. Without the runtime the apply falls back to a redirect to the same canonical URL, so the preset stays a plain link.
+
+### 9. `cached_search` and the LocMem hit path
 
 [`catalog/queries.py`](catalog/queries.py) materialises the page slice into a list so the cached payload does not depend on a queryset closure that can grow stale across requests. The cache key is a stable blake2b hash of a sorted JSON encoding of the filter set, page number, page size, and category PK. Two identical GETs produce one cache key and serve the second request from memory, which the [`tests/test_e2e.py::TestCacheHit`](tests/test_e2e.py) tests verify through the cache backend's internal map.
 
-### 9. Active filter chips
+### 10. Active filter chips
 
 [`catalog/context_processors.py`](catalog/context_processors.py) returns a `chips` list and a `drop_filter_qs` map keyed by `"key=value"`. The map stores the query string with that one pair removed, which the layout consumes through the `kv` template filter. Clicking a chip drops one filter at a time without disturbing the rest.
 

@@ -9,9 +9,12 @@ import PollChart from "./_widgets/poll_chart/component.vue";
 // app owns, so the morph never fights Vue for those nodes. The fresh
 // per-choice counts ride in the sibling `data-poll-chart-data` block the
 // morph does update, and each pass reads them and pushes the snapshot
-// into the live instance. There is no module-load scan a partial
-// insertion would strand, and no dead `context-updated` path, because a
-// stream refresh carries no context patch.
+// into the live instance.
+//
+// The voter's own tab takes a shorter path. Its vote response carries a
+// `context` patch beside the zone morph, so `context-updated` fires with
+// `window.Next.context.live_results` already holding the fresh snapshot.
+// The listener pushes that straight into the live instance, no DOM re-read.
 
 const instances = new WeakMap();
 
@@ -44,7 +47,17 @@ function mountChart(root) {
   instances.set(root, vm);
 }
 
+function applyContextSnapshot() {
+  const snapshot = window.Next?.context?.live_results;
+  if (!snapshot) return;
+  for (const root of document.querySelectorAll("[data-poll-chart]")) {
+    const vm = instances.get(root);
+    if (vm) vm.applySnapshot(snapshot);
+  }
+}
+
 window.Next?.partial?.onMount("[data-poll-chart]", mountChart);
+window.Next?.on?.("context-updated", applyContextSnapshot);
 
 export default {};
 </script>

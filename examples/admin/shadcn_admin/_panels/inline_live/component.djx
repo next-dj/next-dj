@@ -1,27 +1,16 @@
 <section class="rounded-lg border border-border bg-card p-6 space-y-4">
-  <header>
-    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{{ section.verbose_name_plural }}</h3>
-    <p class="text-xs text-muted-foreground">Each row saves on its own, keyed by primary key.</p>
+  <header class="flex items-center justify-between">
+    <div>
+      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{{ section.verbose_name_plural }}</h3>
+      <p class="text-xs text-muted-foreground">Each row saves on its own, keyed by primary key.</p>
+    </div>
+    <span data-inline-count="{{ section.token }}" class="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+      {{ section.count }} saved
+    </span>
   </header>
   <div class="space-y-3">
     {% for row in section.rows %}
-      {% form "admin:inline_change" key=row.pk class="rounded-md border border-border p-3 space-y-3" %}
-        <input type="hidden" name="_inline" value="{{ section.token }}">
-        <input type="hidden" name="_inline_pk" value="{{ row.pk }}">
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-          {% for info in row.fields %}
-            {% component "form_field" info=info %}
-          {% endfor %}
-        </div>
-        {% if row.errors %}
-          <ul class="space-y-0.5 text-xs text-destructive">
-            {% for err in row.errors %}<li>{{ err }}</li>{% endfor %}
-          </ul>
-        {% endif %}
-        <div class="flex justify-end">
-          {% component "button" type="submit" text="Save" variant="outline" %}
-        </div>
-      {% endform %}
+      {% component "inline_row" row=row token=section.token %}
     {% endfor %}
   </div>
   {% form "admin:inline_add" key=section.token class="rounded-md border border-dashed border-border p-3 space-y-3" %}

@@ -1,9 +1,21 @@
-{% form "window_filter_form" %}
-  <div class="flex items-center gap-2">
-    <label for="{{ form.window.id_for_label }}" class="text-xs uppercase tracking-wide text-slate-500">Window</label>
-    {{ form.window }}
-    <button type="submit" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700">
-      Apply
-    </button>
-  </div>
-{% endform %}
+{% if live_zone %}
+  {% form "window_filter_form" zone=live_zone %}
+    <div class="flex items-center gap-2">
+      <label for="{{ form.window.id_for_label }}" class="text-xs uppercase tracking-wide text-slate-500">Window</label>
+      {{ form.window }}
+      <button type="submit" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+        Apply
+      </button>
+    </div>
+  {% endform %}
+{% else %}
+  {% form "window_filter_form" %}
+    <div class="flex items-center gap-2">
+      <label for="{{ form.window.id_for_label }}" class="text-xs uppercase tracking-wide text-slate-500">Window</label>
+      {{ form.window }}
+      <button type="submit" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700">
+        Apply
+      </button>
+    </div>
+  {% endform %}
+{% endif %}

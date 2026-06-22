@@ -7,7 +7,7 @@ from access.models import AccessRequest, AuditEntry
 from django.core.cache import caches
 from django.http import HttpRequest
 
-from next.forms import FormActionNotFound
+from next.forms import FormActionNotFoundError
 from next.forms.signals import (
     action_dispatched,
     form_access_denied,
@@ -71,6 +71,17 @@ def _post_step_partial(client, step: str, data: dict[str, str]):
         origin=f"/request/{step}/",
         partial=True,
         zones="access-wizard",
+    )
+
+
+def _validate_field(client, step: str, field: str, data: dict[str, str]):
+    return client.post_action(
+        WIZARD_ACTION,
+        dict(data),
+        origin=f"/request/{step}/",
+        partial=True,
+        zones="access-wizard",
+        HTTP_X_NEXT_VALIDATE=field,
     )
 
 
@@ -339,7 +350,7 @@ class TestNamespacedAction:
         assert url.startswith("/_next/form/")
 
     def test_namespaced_name_does_not_resolve(self) -> None:
-        with pytest.raises(FormActionNotFound):
+        with pytest.raises(FormActionNotFoundError):
             resolve_action_url("access:access_request_wizard")
 
 
@@ -606,3 +617,42 @@ class TestModalWizardFlagship:
             request_id=ar.pk,
         )
         assert attached.count() == 1
+
+
+class TestBlurValidation:
+    """A blur probe surfaces one field's error and binds no data."""
+
+    def test_bad_email_blur_morphs_the_zone_with_the_field_error(self, client) -> None:
+        before = AccessRequest.objects.count()
+        response = _validate_field(
+            client, "identity", "email", {**IDENTITY, "email": "not-an-email"}
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["access-wizard"]
+        meta = envelope.form_meta()
+        assert meta is not None
+        assert meta["valid"] is False
+        assert list(meta["errors"]) == ["email"]
+        assert AccessRequest.objects.count() == before == 0
+
+    def test_blur_probe_writes_no_request_and_emits_no_redirect_ops(
+        self, client
+    ) -> None:
+        response = _validate_field(
+            client, "identity", "email", {**IDENTITY, "email": "broken"}
+        )
+        envelope = envelope_of(response)
+        assert "layer.close" not in envelope.op_verbs()
+        assert "visit" not in envelope.op_verbs()
+        assert "redirect" not in envelope.op_verbs()
+        assert AccessRequest.objects.exists() is False
+
+    def test_blur_probe_isolates_the_named_field(self, client) -> None:
+        response = _validate_field(
+            client, "identity", "email", {"full_name": "", "email": "bad", "team": ""}
+        )
+        meta = envelope_of(response).form_meta()
+        assert meta is not None
+        assert list(meta["errors"]) == ["email"]
