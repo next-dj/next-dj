@@ -239,11 +239,10 @@ def _auto_register_form_class(cls: type) -> None:
 
 
 class _DivFormRenderer(DjangoTemplates):
-    """Renderer pinning the div template so `{{ form }}` is stable across versions."""
+    """Renderer pinning the div template so `{{ form }}` ignores FORM_RENDERER."""
 
-    # The transitional default renderer on Django 4.2 proxies to the deprecated
-    # table layout and warns. Pinning the div template matches the Django 5.0+
-    # default and keeps bare `{{ form }}` output warning-free on every version.
+    # Pinning the div template keeps bare `{{ form }}` output stable regardless
+    # of the project's FORM_RENDERER setting.
     form_template_name = "django/forms/div.html"
 
 

@@ -4,7 +4,7 @@ Guidelines for code, tests, and pull requests. Read this before opening a PR.
 
 ## Prerequisites
 
-- Python 3.12+. See `requires-python` in `pyproject.toml`. CI runs Python 3.12–3.14 against Django 4.2, 5.0, 5.1, 5.2, 6.0 (with matrix exclusions — 3.13 drops 4.2/5.0, 3.14 is 6.0-only).
+- Python 3.12+. See `requires-python` in `pyproject.toml`. CI runs Python 3.12–3.14 against Django 5.2 and 6.0 (with matrix exclusions — 3.14 is 6.0-only).
 - [uv](https://docs.astral.sh/uv/) for Python dependencies.
 - Node.js 24 + npm for the TypeScript bundle. The client runtime sources live in [next/client/](next/client/) and esbuild emits the bundle to `next/static/next/next.min.js`. CI uses Node 24.
 - Git.
@@ -97,7 +97,7 @@ Run **`make ci`**. It runs, in order: `lint`, `type-check`, `build-js`, `lint-js
 
 GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) additionally:
 
-- Builds the wheel in a dedicated `build` job, then runs the test matrix against the installed wheel (not `uv run`). See [.github/workflows/test-matrix.yml](.github/workflows/test-matrix.yml). Python 3.12–3.14 × Django 4.2–6.0 with matrix exclusions.
+- Builds the wheel in a dedicated `build` job, then runs the test matrix against the installed wheel (not `uv run`). See [.github/workflows/test-matrix.yml](.github/workflows/test-matrix.yml). Python 3.12–3.14 × Django 5.2–6.0 with matrix exclusions.
 - Builds docs with warnings as errors (`sphinx-build -W --keep-going`) and runs linkcheck.
 - Runs the `security` job: typos and `uv-lock` via pre-commit.
 - On pull requests: dependency review (`dependency-review` job).

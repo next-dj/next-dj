@@ -10,7 +10,6 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 from next.forms.origin import resolve_origin, resolve_url_to_page
 from next.pages import page
-from next.static.collector import default_placeholders
 from next.static.serializers import resolve_serializer
 
 from .headers import (
@@ -385,10 +384,8 @@ class Patches:
         """Route a keyword-selected morph to its typed per-verb method."""
         zone = select.get("zone")
         form = select.get("form")
-        selectors = {"zone": zone, "form": form}
-        chosen = [name for name, value in selectors.items() if isinstance(value, str)]
-        if len(chosen) > 1:
-            msg = f"morph() got conflicting selector keywords {chosen}."
+        if isinstance(zone, str) and isinstance(form, str):
+            msg = "morph() got conflicting selector keywords ['zone', 'form']."
             raise TypeError(msg)
         if isinstance(zone, str):
             return self._dispatch_zone_morph(zone, select)
@@ -826,10 +823,8 @@ class Patches:
 
     def _collect_assets(self, result: "ZoneRenderResult") -> None:
         """Record the assets a rendered zone body collected on the envelope."""
-        for slot in default_placeholders:
-            for static_asset in result.collector.assets_in_slot(slot.name):
-                if static_asset.url:
-                    self.add_asset(static_asset.kind, static_asset.url)
+        for kind, url in result.url_assets():
+            self.add_asset(kind, url)
 
     def _is_same_site(self, href: str) -> bool:
         """Return True when `href` targets the bound request's host and scheme."""

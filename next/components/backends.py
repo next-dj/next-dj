@@ -189,11 +189,8 @@ def register_components_folder_from_router_walk(
     # import is deferred here to break the backends <-> manager cycle.
     from .manager import components_manager  # noqa: PLC0415
 
-    key = folder.resolve()
-    seen = components_manager._walk_registered_folders
-    if key in seen:
+    if not components_manager._claim_router_walk_folder(folder):
         return
-    seen.add(key)
     components_manager._ensure_backends()
     for backend in components_manager._backends:
         if isinstance(backend, FileComponentsBackend):

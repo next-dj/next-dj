@@ -1,6 +1,5 @@
 import copy
 
-import django
 from django.conf import settings
 from django.test import Client, override_settings
 
@@ -76,8 +75,7 @@ class TestInvalidFormPostWithoutPartialSwitch:
         body = response.content.decode()
         assert "test page" in body
         assert "This field is required." in body
-        if django.VERSION >= (5, 0):
-            assert 'aria-invalid="true"' in body
+        assert 'aria-invalid="true"' in body
 
     def test_content_type_is_html_not_envelope(self, next_client: NextClient) -> None:
         response = _invalid_form_post(next_client)

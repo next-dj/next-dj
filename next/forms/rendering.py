@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 def _form_fallback_html(form: "BaseForm | BaseFormSet | None") -> str:
-    """Render a bare form without tripping the Django 4.2 default-renderer warning."""
+    """Render a bare form through its pinned div renderer."""
     if form is None:
         return ""
     return str(form.render(form.template_name_p))

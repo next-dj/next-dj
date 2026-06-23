@@ -555,10 +555,7 @@ def _staticfiles_storage_is_manifest() -> bool:
 
     The storage class is read from its dotted path rather than the resolved
     `staticfiles_storage` proxy, so the check stays side-effect-free and
-    never fails on a project that has not set STATIC_ROOT. Both the modern
-    `STORAGES["staticfiles"]` mapping and the legacy `STATICFILES_STORAGE`
-    string resolve, since Django folds the legacy setting into STORAGES on
-    the versions that still accept it.
+    never fails on a project that has not set STATIC_ROOT.
     """
     backend_path = _staticfiles_storage_path()
     if backend_path is None:
@@ -580,8 +577,7 @@ def _staticfiles_storage_path() -> str | None:
         if isinstance(entry, dict):
             backend = entry.get("BACKEND")
             return backend if isinstance(backend, str) else None
-    legacy = getattr(settings, "STATICFILES_STORAGE", None)
-    return legacy if isinstance(legacy, str) else None
+    return None
 
 
 __all__ = [

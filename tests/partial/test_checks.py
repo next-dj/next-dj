@@ -398,29 +398,10 @@ class TestManifestVersionStorageCheck:
             ids = [m.id for m in checks.check_manifest_version_has_manifest_storage()]
         assert ids == [checks.W_MANIFEST_VERSION_NO_STORAGE]
 
-    def test_legacy_storage_setting_without_manifest_warns(self) -> None:
-        with (
-            _partial_version("manifest"),
-            override_settings(STORAGES={}, STATICFILES_STORAGE=_PLAIN_STORAGE),
-        ):
-            ids = [m.id for m in checks.check_manifest_version_has_manifest_storage()]
-        assert ids == [checks.W_MANIFEST_VERSION_NO_STORAGE]
-
     def test_manifest_storage_is_silent(self) -> None:
         with (
             _partial_version("manifest"),
             override_settings(STORAGES={"staticfiles": {"BACKEND": _MANIFEST_STORAGE}}),
-        ):
-            assert checks.check_manifest_version_has_manifest_storage() == []
-
-    def test_legacy_manifest_storage_is_silent(self, tmp_path: Path) -> None:
-        with (
-            _partial_version("manifest"),
-            override_settings(
-                STORAGES={},
-                STATICFILES_STORAGE=_MANIFEST_STORAGE,
-                STATIC_ROOT=str(tmp_path),
-            ),
         ):
             assert checks.check_manifest_version_has_manifest_storage() == []
 

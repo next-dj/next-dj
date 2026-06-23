@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from django.template import Context as DjangoTemplateContext
 
 from next.pages.manager import page
+from next.static.collector import default_placeholders
 from next.static.manager import default_manager
 
 from .registry import zones_of
@@ -15,6 +16,7 @@ from .zone import render_zone_standalone
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from django.http import HttpRequest
@@ -53,6 +55,13 @@ class ZoneRenderResult:
 
     html: dict[str, str]
     collector: "StaticCollector"
+
+    def url_assets(self) -> "Iterator[tuple[str, str]]":
+        """Yield the (kind, url) pair of each collected asset that has a URL."""
+        for slot in default_placeholders:
+            for static_asset in self.collector.assets_in_slot(slot.name):
+                if static_asset.url:
+                    yield static_asset.kind, static_asset.url
 
 
 def render_zone(

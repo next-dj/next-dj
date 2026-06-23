@@ -89,9 +89,9 @@ def _manifest_version() -> str:
     """Return a stable version hash from the staticfiles manifest.
 
     The active staticfiles storage is read through the same proxy the
-    static backend uses, so a legacy `STATICFILES_STORAGE` and a modern
-    `STORAGES["staticfiles"]` both resolve. A manifest storage exposes a
-    precomputed `manifest_hash` and the `hashed_files` mapping it loaded.
+    static backend uses, so the `STORAGES["staticfiles"]` backend resolves.
+    A manifest storage exposes a precomputed `manifest_hash` and the
+    `hashed_files` mapping it loaded.
     The precomputed hash wins when present, otherwise the mapping is
     hashed so a storage with no recorded hash still yields a stable
     version. A non-manifest storage or one that fails to resolve has no

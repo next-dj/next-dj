@@ -369,7 +369,7 @@ export class Applier {
   readonly #mount: MountRegistry | undefined;
   readonly #refresh: ZoneFetch | undefined;
   readonly #here: () => string;
-  #dev: boolean;
+  readonly #dev: boolean;
   // Monotonic apply counter per zone. The lazy-zone triggers read it so a zone
   // whose ancestor was re-created mid-flight does not enqueue a stale second GET.
   readonly #applied: Map<string, number> = new Map();

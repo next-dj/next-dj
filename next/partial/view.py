@@ -4,8 +4,6 @@ from typing import TYPE_CHECKING
 
 from django.http import HttpResponse
 
-from next.static.collector import default_placeholders
-
 from .headers import MergeMode, set_partial_vary
 from .manager import partial_backend_manager
 from .patches import Asset, Envelope, Patches, PatchResponse
@@ -106,12 +104,7 @@ def _patch_zone(
 
 def _collected_assets(result: "ZoneRenderResult") -> list[Asset]:
     """Return the URL-form assets the rendered zone bodies collected."""
-    return [
-        Asset(kind=static_asset.kind, url=static_asset.url)
-        for slot in default_placeholders
-        for static_asset in result.collector.assets_in_slot(slot.name)
-        if static_asset.url
-    ]
+    return [Asset(kind=kind, url=url) for kind, url in result.url_assets()]
 
 
 def _bad_request(reason: str) -> HttpResponse:

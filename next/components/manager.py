@@ -100,6 +100,18 @@ class ComponentsManager:
         if not self._backends:
             self._reload_config()
 
+    def _claim_router_walk_folder(self, folder: Path) -> bool:
+        """Return True the first time a router-walk folder is claimed.
+
+        Owns the dedup set so a repeated walk over the same folder
+        registers its components only once.
+        """
+        key = folder.resolve()
+        if key in self._walk_registered_folders:
+            return False
+        self._walk_registered_folders.add(key)
+        return True
+
     def get_component(
         self,
         name: str,
