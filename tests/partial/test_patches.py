@@ -1,5 +1,6 @@
 import pytest
 
+import next.pages
 import next.partial
 import next.partial.patches
 from next.partial import (
@@ -9,8 +10,12 @@ from next.partial import (
     Patch,
     Patches,
     PatchResponse,
+    register_patch_op,
 )
 from next.partial.headers import CONTENT_TYPE
+from next.partial.patches import ReservedPatchKeyError
+from next.partial.registry import patch_op_registry
+from tests.support import partial_request
 
 
 class TestPatchAsDict:
@@ -197,13 +202,12 @@ class TestPatchResponse:
 
 
 class TestBuilderExceptionSurface:
-    """Every public builder exception reaches the package facade."""
+    """Demoted builder exceptions live only on the submodule, not the facade."""
 
-    builder_exceptions = (
+    demoted_exceptions = (
         "BuiltinPatchOpError",
         "CrossSiteHrefError",
         "DynamicForeignPageError",
-        "ForeignPageNotAuthorizedError",
         "ReservedEventNameError",
         "ReservedPatchKeyError",
         "UnknownContextNameError",
@@ -211,7 +215,82 @@ class TestBuilderExceptionSurface:
         "UnknownPatchOpError",
     )
 
-    @pytest.mark.parametrize("name", builder_exceptions)
-    def test_exception_is_exported_and_identical(self, name: str) -> None:
-        assert name in next.partial.__all__
-        assert getattr(next.partial, name) is getattr(next.partial.patches, name)
+    @pytest.mark.parametrize("name", demoted_exceptions)
+    def test_demoted_exception_not_on_facade(self, name: str) -> None:
+        assert name not in next.partial.__all__
+        assert not hasattr(next.partial, name)
+        assert isinstance(getattr(next.partial.patches, name), type)
+
+    def test_foreign_page_error_stays_on_facade(self) -> None:
+        assert "ForeignPageNotAuthorizedError" in next.partial.__all__
+        assert (
+            next.partial.ForeignPageNotAuthorizedError
+            is next.partial.patches.ForeignPageNotAuthorizedError
+        )
+
+
+@pytest.fixture()
+def custom_op():
+    """Register a custom patch verb for the test and drop it afterwards."""
+    register_patch_op("confetti")
+    yield "confetti"
+    patch_op_registry._ops.discard("confetti")
+    patch_op_registry._custom.discard("confetti")
+
+
+class TestReservedPatchKey:
+    """A reserved structural key in a payload is refused at build time."""
+
+    def test_constructor_refuses_reserved_extras_key(self) -> None:
+        with pytest.raises(ReservedPatchKeyError) as exc:
+            Patch(op="x", extras={"target": 1})
+        assert exc.value.keys == frozenset({"target"})
+
+    def test_op_frame_refuses_reserved_payload_key(self, custom_op: str) -> None:
+        with pytest.raises(ReservedPatchKeyError) as exc:
+            Patches("v1").op(custom_op, op="boom")
+        assert exc.value.keys == frozenset({"op"})
+
+    def test_valid_patch_as_dict_does_not_raise(self) -> None:
+        patch = Patch(op="event", extras={"name": "ping"})
+        assert patch.as_dict() == {"op": "event", "name": "ping"}
+
+    def test_multiple_reserved_keys_are_sorted_in_message(self) -> None:
+        with pytest.raises(ReservedPatchKeyError) as exc:
+            Patch(op="x", extras={"target": 1, "op": 2, "html": 3})
+        assert exc.value.keys == frozenset({"op", "target", "html"})
+        assert "html, op, target" in str(exc.value)
+
+
+class TestOriginRenderContextMemoised:
+    """The origin render context is built once per builder."""
+
+    def test_context_then_morph_builds_render_context_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = 0
+        original = next.pages.page.build_render_context
+
+        def _counting(*args: object, **kwargs: object) -> object:
+            nonlocal calls
+            calls += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(next.pages.page, "build_render_context", _counting)
+        Patches(partial_request()).context(flag=True).morph(zone="alpha").envelope()
+        assert calls == 1
+
+    def test_context_only_builds_render_context_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = 0
+        original = next.pages.page.build_render_context
+
+        def _counting(*args: object, **kwargs: object) -> object:
+            nonlocal calls
+            calls += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(next.pages.page, "build_render_context", _counting)
+        Patches(partial_request()).context(flag=True).envelope()
+        assert calls == 1

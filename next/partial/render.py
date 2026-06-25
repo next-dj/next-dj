@@ -70,15 +70,19 @@ def render_zone(
     request: "HttpRequest",
     url_kwargs: dict[str, object] | None = None,
     overrides: dict[str, object] | None = None,
+    *,
+    context_data: dict[str, object] | None = None,
 ) -> ZoneRenderResult:
     """Render the named zones of a page with the full page context.
 
     The context is collected once for the whole batch of names through
     `build_render_context` and a fresh collector is seeded by the same
     convention as the canonical render path, so co-located assets of the
-    zone bodies are gathered. The manifest travels outward in the result
-    rather than through inject, which is a no-op for fragments. An
-    unknown zone name raises before any body renders.
+    zone bodies are gathered. A caller that already built the origin context
+    passes it as `context_data` so it is reused rather than rebuilt. The
+    manifest travels outward in the result rather than through inject, which
+    is a no-op for fragments. An unknown zone name raises before any body
+    renders.
     """
     start = time.perf_counter()
     kwargs = url_kwargs or {}
@@ -88,7 +92,8 @@ def render_zone(
         if name not in zones:
             raise UnknownZoneError(name, tuple(sorted(zones)))
 
-    context_data = page.build_render_context(page_path, request, **kwargs)
+    if context_data is None:
+        context_data = page.build_render_context(page_path, request, **kwargs)
     if overrides:
         context_data.update(overrides)
 

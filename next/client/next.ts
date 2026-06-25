@@ -11,13 +11,23 @@ import type { Envelope } from "./apply";
 // csrf meta merge into.
 export type NextContext = Readonly<Record<string, unknown>>;
 
-// The nature of a partial:error, so a listener branches on the cause rather than
-// sniffing status and body. network is a fetch reject, an abort neighbour, or a
-// dropped SSE connection (status 0). http is a 4xx/5xx or a mutating reply that
-// is not an envelope. parse is a malformed JSON body. op is a thrown or unknown
-// verb mid-apply. asset is a stylesheet that failed to load or a version
-// mismatch surviving a reload.
-export type PartialErrorKind = "network" | "http" | "parse" | "op" | "asset";
+// A partial:error as a discriminated union on kind, so a listener branches on
+// the cause and reads only the fields that cause carries. network is a fetch
+// reject or a dropped SSE connection, with no status or body to report. http is
+// a 5xx or a mutating reply that is not an envelope, carrying the status and
+// body. parse is a malformed JSON body. op is a thrown or unknown verb mid-apply,
+// naming the verb. asset is a stylesheet that failed to load or a version
+// mismatch surviving a reload, optionally naming the url.
+export type PartialError =
+  | { kind: "network"; error: unknown }
+  | { kind: "http"; status: number; body: string }
+  | { kind: "parse"; body: string; error: unknown }
+  | { kind: "op"; op: string; error: unknown }
+  | { kind: "asset"; url?: string; error: unknown };
+
+// The discriminant of PartialError, kept as a named alias for listeners that
+// switch on the kind before reading the cause-specific fields.
+export type PartialErrorKind = PartialError["kind"];
 
 // The payload of every runtime event reaching the Next.on bus, keyed by event
 // name, so a known event types its listener argument. This is only the bus
@@ -36,12 +46,7 @@ export interface NextEventMap {
   // ok is false when any op threw or was an unknown verb, so a listener can tell
   // a clean apply from a degraded one that still mounted what did change.
   "partial:applied": { envelope: Envelope; ok: boolean };
-  "partial:error": {
-    status: number;
-    body: string;
-    error: unknown;
-    kind: PartialErrorKind;
-  };
+  "partial:error": PartialError;
   "partial:layer-opened": { opener: HTMLElement | null };
   "partial:layer-accepted": { result: unknown };
   "partial:layer-dismissed": { reason: string };

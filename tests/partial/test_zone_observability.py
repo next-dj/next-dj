@@ -11,8 +11,8 @@ from django.test import RequestFactory
 
 from next.pages import Page
 from next.pages.loaders import _load_python_module_memo
-from next.partial import zone_requested, zones_of
-from next.partial.registry import _zone_cache
+from next.partial import zone_requested
+from next.partial.registry import _zone_cache, zones_of
 from next.partial.zone import ZONE_ATTR, ZoneNode
 
 

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from django.http import HttpResponse
 
+from . import keys
 from .headers import MergeMode, set_partial_vary
 from .manager import partial_backend_manager
 from .patches import Asset, Envelope, Patches, PatchResponse
@@ -93,7 +94,7 @@ def _patch_zone(
     merge: "MergeMode | None",
 ) -> None:
     """Patch one zone in place, morphing it or merging deduplicated children."""
-    target = {"zone": name}
+    target = {keys.ZONE: name}
     if merge is MergeMode.APPEND:
         patches.append(target, html)
     elif merge is MergeMode.PREPEND:

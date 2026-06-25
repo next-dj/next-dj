@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 from django.test import Client
 
 from next.forms.uid import ORIGIN_FIELD_NAME
+from next.partial import keys
 from next.partial.headers import CONTENT_TYPE, REQUEST_FLAG, VERSION, ZONE
 
 from .actions import resolve_action_url
@@ -37,56 +38,57 @@ class PartialEnvelope:
     @property
     def version(self) -> str:
         """Return the asset version stamped in the envelope."""
-        return cast("str", self.data["version"])
+        return cast("str", self.data[keys.VERSION])
 
     @property
     def ops(self) -> list[dict[str, Any]]:
         """Return the ordered list of op objects."""
-        return cast("list[dict[str, Any]]", self.data.get("ops", []))
+        return cast("list[dict[str, Any]]", self.data.get(keys.OPS, []))
 
     @property
     def assets(self) -> list[dict[str, Any]]:
         """Return the asset manifest entries."""
-        return cast("list[dict[str, Any]]", self.data.get("assets", []))
+        return cast("list[dict[str, Any]]", self.data.get(keys.ASSETS, []))
 
     def op_verbs(self) -> list[str]:
         """Return the verb of every op in order."""
-        return [op["op"] for op in self.ops]
+        return [op[keys.OP] for op in self.ops]
 
     def targets(self) -> list[dict[str, Any] | None]:
         """Return the target object of every op in order."""
-        return [op.get("target") for op in self.ops]
+        return [op.get(keys.TARGET) for op in self.ops]
 
     def zone_targets(self) -> list[str]:
         """Return the zone name of every op that addresses a zone, in order."""
         return [
-            op["target"]["zone"]
+            op[keys.TARGET][keys.ZONE]
             for op in self.ops
-            if isinstance(op.get("target"), dict) and "zone" in op["target"]
+            if isinstance(op.get(keys.TARGET), dict) and keys.ZONE in op[keys.TARGET]
         ]
 
     def form_targets(self) -> list[str]:
         """Return the form uid of every op that addresses a form, in order."""
         return [
-            op["target"]["form"]
+            op[keys.TARGET][keys.FORM_SELECTOR]
             for op in self.ops
-            if isinstance(op.get("target"), dict) and "form" in op["target"]
+            if isinstance(op.get(keys.TARGET), dict)
+            and keys.FORM_SELECTOR in op[keys.TARGET]
         ]
 
     def form_meta(self) -> dict[str, Any] | None:
         """Return the machine-readable form meta object of the envelope."""
-        return cast("dict[str, Any] | None", self.data.get("form"))
+        return cast("dict[str, Any] | None", self.data.get(keys.FORM))
 
     def toasts(self) -> list[dict[str, Any]]:
         """Return the payload of every toast op in order."""
-        return [op for op in self.ops if op.get("op") == "toast"]
+        return [op for op in self.ops if op.get(keys.OP) == "toast"]
 
     def html_for_zone(self, zone: str) -> str:
         """Return the HTML payload of the op morphing the named zone."""
         for op in self.ops:
-            target = op.get("target")
-            if isinstance(target, dict) and target.get("zone") == zone:
-                return cast("str", op.get("html", ""))
+            target = op.get(keys.TARGET)
+            if isinstance(target, dict) and target.get(keys.ZONE) == zone:
+                return cast("str", op.get(keys.HTML, ""))
         msg = f"no op targets zone {zone!r}"
         raise AssertionError(msg)
 

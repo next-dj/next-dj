@@ -22,20 +22,27 @@ The autodoc blocks under `Public API`_ are the exhaustive surface.
 
 Stable.
    ``Patches``, ``PatchResponse``, ``PatchEventStream``, ``render_zone``,
-   ``zone_requested``, ``is_partial_request``, ``partial_intent``,
-   ``resolve_partial_origin``, ``register_patch_op``, ``UnknownZoneError``, and
-   ``ForeignPageNotAuthorizedError``.
-   Use these in page modules, action handlers, and stream sources.
+   ``ZoneRenderResult``, ``zone_requested``, ``is_partial_request``, ``partial_intent``,
+   ``register_patch_op``, ``UnknownZoneError``, and ``ForeignPageNotAuthorizedError``.
+   ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta`` are the frozen value objects of
+   the wire contract.
+   Import all of these from ``next.partial``.
+   Use them in page modules, action handlers, and stream sources.
 
 Advanced.
-   ``shape_partial``, ``PartialProtocolBackend``, ``Envelope``, ``Patch``, ``Asset``,
-   ``FormMeta``, ``OriginSource``, ``ZoneInfo``, ``ZoneRenderResult``, ``zones_of``,
-   the custom-verb exceptions in ``next.partial.patches``, and the ``signals`` and
-   ``checks`` submodules.
+   ``shape_partial`` and ``PartialProtocolBackend`` are imported from ``next.partial``.
+   ``resolve_partial_origin`` stays in ``next.partial`` as a thin helper that reads the
+   host page out of the ``X-Next-Origin`` header so a ``done`` step can pass it to
+   ``morph(page=)``.
+   ``OriginSource`` lives in ``next.partial.origin``.
+   ``ZoneInfo`` and ``zones_of`` live in ``next.partial.registry``.
+   The custom-verb exceptions live in ``next.partial.patches``.
+   The ``signals`` and ``checks`` submodules carry the partial telemetry.
    Use these when writing a custom protocol backend, a wire-format plugin, or telemetry.
 
 Framework machinery.
-   ``REQUEST_ID`` is the ``X-Next-Request-Id`` header name.
+   ``REQUEST_ID`` is the ``X-Next-Request-Id`` header name and lives in
+   ``next.partial.headers``.
    ``PartialIntent`` and ``MergeMode`` live in ``next.partial.headers``.
    ``PartialOrigin`` lives in ``next.partial.origin``.
    ``shape_validate`` and ``drain_messages`` live in ``next.partial.shaping``.
@@ -113,29 +120,32 @@ Zones
 
 ``render_zone`` renders one or more zones of a page standalone with the full page context,
 returning a ``ZoneRenderResult`` that carries the wrapped HTML and the collected assets.
-``zones_of`` returns the compiled zones of a template as a mapping of ``ZoneInfo``.
+``zones_of`` returns the compiled zones of a template as a mapping of ``ZoneInfo``, both
+reached through ``next.partial.registry``.
 
 .. autofunction:: next.partial.render_zone
 
 .. autoclass:: next.partial.ZoneRenderResult
    :members:
 
-.. autoclass:: next.partial.ZoneInfo
+.. autoclass:: next.partial.registry.ZoneInfo
    :members:
 
-.. autofunction:: next.partial.zones_of
+.. autofunction:: next.partial.registry.zones_of
 
 Origin and Authorisation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``resolve_partial_origin`` resolves the host page that owns a zone for an out-of-band
-morph, reading the same-site ``X-Next-Origin`` header and falling back to the posted form
-origin.
-``OriginSource`` discriminates the two.
+``resolve_partial_origin`` is a thin helper that reads the host page that owns a zone out
+of the same-site ``X-Next-Origin`` header, falling back to the posted form origin, so a
+``done`` step can hand the path to ``morph(page=)`` for a server out-of-band swap.
+It stays importable from ``next.partial`` but sits in the Advanced tier, the canonical
+done choreography addresses the foreign zone through ``morph(page=, url_kwargs=)``.
+``OriginSource``, which discriminates the two sources, lives in ``next.partial.origin``.
 
 .. autofunction:: next.partial.resolve_partial_origin
 
-.. autoclass:: next.partial.OriginSource
+.. autoclass:: next.partial.origin.OriginSource
    :members:
 
 .. autoclass:: next.partial.origin.PartialOrigin
@@ -176,13 +186,16 @@ Subclass it and serialise a different envelope shape to support another wire for
 Exceptions
 ~~~~~~~~~~
 
+``UnknownZoneError`` and ``ForeignPageNotAuthorizedError`` are curated ``next.partial``
+exceptions.
 ``UnknownZoneError`` is raised when a partial request names a zone the template does not
 declare, surfacing as a 400 before any render.
 ``ForeignPageNotAuthorizedError`` is raised when an out-of-band morph of a foreign page
 fails that page's own authorisation, so a zone never travels in a response the page would
 have denied.
-The remaining eight guard the custom-verb contract, the event-name and dedupe
-vocabularies, and the foreign-page and href rules, and live in ``next.partial.patches``.
+The remaining eight are rarely caught and stay out of the curated surface.
+They guard the custom-verb contract, the event-name and dedupe vocabularies, and the
+foreign-page and href rules, and live in ``next.partial.patches``.
 
 .. autoexception:: next.partial.UnknownZoneError
    :members:

@@ -42,7 +42,11 @@ class PartialProtocolFactory:
 
 
 class PartialBackendManager:
-    """Lazily instantiates the first configured protocol backend."""
+    """Lazily instantiates the single configured protocol backend.
+
+    Only the first valid PARTIAL_BACKENDS entry is used, a second entry is
+    reported by next.W071.
+    """
 
     def __init__(self) -> None:
         """Initialise an empty backend cache."""

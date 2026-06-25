@@ -2,8 +2,14 @@ from django.template import Context
 from django.template.base import Template
 from django.test import RequestFactory
 
-from next.partial import ZoneInfo, register_patch_op, zone_requested, zones_of
-from next.partial.registry import BUILTIN_OPS, PatchOpRegistry, patch_op_registry
+from next.partial import register_patch_op, zone_requested
+from next.partial.registry import (
+    BUILTIN_OPS,
+    PatchOpRegistry,
+    ZoneInfo,
+    patch_op_registry,
+    zones_of,
+)
 from next.partial.signals import patch_op_registered, zone_registered
 
 

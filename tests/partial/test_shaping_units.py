@@ -8,6 +8,7 @@ from django.urls import set_script_prefix
 from next.forms.dispatch import ActionOutcome, ActionOutcomeKind
 from next.forms.manager import form_action_manager
 from next.partial import Patches, shape_partial, shaping as shaping_module
+from next.partial.headers import VARY_HEADERS
 from next.partial.shaping import (
     _CSRF_ROTATED_FLAG,
     ActionRef,
@@ -45,6 +46,16 @@ def _bound_formset():
     return formset
 
 
+def _assert_partial_vary(response: HttpResponse) -> None:
+    """Assert the response carries the four partial Vary header names."""
+    varied = {part.strip() for part in response.get("Vary", "").split(",")}
+    assert set(VARY_HEADERS) <= varied
+    assert "X-Next-Request" in varied
+    assert "X-Next-Zone" in varied
+    assert "X-Next-Merge" in varied
+    assert "X-Next-Version" in varied
+
+
 class _PushWizard:
     class Meta:
         push_steps = True
@@ -66,6 +77,7 @@ class TestAdvanceWithoutAResolvableTarget:
         backend = form_action_manager.default_backend
         response = shape_partial(backend, partial_request(origin=None), outcome)
         assert response.status_code == 204
+        _assert_partial_vary(response)
 
     def test_missing_wizard_returns_the_step_redirect(self) -> None:
         outcome = ActionOutcome(
@@ -77,6 +89,7 @@ class TestAdvanceWithoutAResolvableTarget:
         response = shape_partial(backend, partial_request(origin=None), outcome)
         assert isinstance(response, HttpResponseRedirect)
         assert response["Location"] == "/wizard/scope/"
+        _assert_partial_vary(response)
 
     def test_unresolvable_target_returns_the_step_redirect(self) -> None:
         outcome = ActionOutcome(
@@ -89,6 +102,7 @@ class TestAdvanceWithoutAResolvableTarget:
         response = shape_partial(backend, partial_request(origin=None), outcome)
         assert isinstance(response, HttpResponseRedirect)
         assert response["Location"] == "/no/such/route/"
+        _assert_partial_vary(response)
 
 
 class TestPushStepsGate:

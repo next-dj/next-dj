@@ -424,6 +424,47 @@ class TestManifestVersionStorageCheck:
             assert checks.check_manifest_version_has_manifest_storage() == []
 
 
+@contextmanager
+def _partial_backends(configs: object) -> Iterator[None]:
+    """Point the W071 check at the given PARTIAL_BACKENDS config value."""
+    settings_ns = MagicMock()
+    settings_ns.PARTIAL_BACKENDS = configs
+    with patch("next.partial.checks.next_framework_settings", settings_ns):
+        yield
+
+
+_BACKEND_DICT = {"BACKEND": "next.partial.PartialProtocolBackend"}
+
+
+class TestSinglePartialBackendCheck:
+    """`next.W071` warns on more than one valid PARTIAL_BACKENDS entry."""
+
+    def test_two_valid_dicts_warn(self) -> None:
+        with _partial_backends([_BACKEND_DICT, dict(_BACKEND_DICT)]):
+            ids = [m.id for m in checks.check_single_partial_backend()]
+        assert ids == [checks.W_TOO_MANY_BACKENDS]
+
+    def test_one_dict_is_silent(self) -> None:
+        with _partial_backends([_BACKEND_DICT]):
+            assert checks.check_single_partial_backend() == []
+
+    def test_no_backends_is_silent(self) -> None:
+        with _partial_backends([]):
+            assert checks.check_single_partial_backend() == []
+
+    def test_only_invalid_entries_are_silent(self) -> None:
+        with _partial_backends([1, "x"]):
+            assert checks.check_single_partial_backend() == []
+
+    def test_one_dict_one_non_dict_is_silent(self) -> None:
+        with _partial_backends([_BACKEND_DICT, "x"]):
+            assert checks.check_single_partial_backend() == []
+
+    def test_non_list_config_is_silent(self) -> None:
+        with _partial_backends("not-a-list"):
+            assert checks.check_single_partial_backend() == []
+
+
 class TestChecksSilentOnValidComposite:
     """A page with well-formed zones triggers none of the zone checks."""
 

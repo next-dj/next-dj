@@ -3,12 +3,12 @@ from pathlib import Path
 import pytest
 
 from next.partial import (
-    DynamicForeignPageError,
     ForeignPageNotAuthorizedError,
-    OriginSource,
     Patches,
     resolve_partial_origin,
 )
+from next.partial.origin import OriginSource
+from next.partial.patches import DynamicForeignPageError
 from tests.support import partial_request
 
 

@@ -16,7 +16,7 @@ from polls.broker import (
 from polls.models import Choice, Poll
 
 from next.forms.signals import action_dispatched, form_validation_failed
-from next.partial import REQUEST_ID
+from next.partial.headers import REQUEST_ID
 from next.testing import (
     NextClient,
     SignalRecorder,
