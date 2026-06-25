@@ -258,11 +258,13 @@ export function createLayers(deps: LayerDeps): LayerStack {
   // Splice the layer out, end its dialog, and return focus to the opener.
   function remove(layer: Layer): void {
     const index = stack.indexOf(layer);
-    // The miss arm is a defensive guard: every caller (close, dismissFrom,
-    // _reset) hands remove a layer that is still on the stack, so indexOf never
-    // returns -1 through the public surface.
-    /* v8 ignore next */
-    if (index !== -1) stack.splice(index, 1);
+    // remove can land twice on one layer: a dismiss gesture (Esc, backdrop)
+    // tears it down while open's fetch is still in flight, then that fetch
+    // rejects and the catch arm calls remove again on the already-spliced
+    // layer. The early return makes the second call a true no-op so close,
+    // dialog.remove, focus, and the history rollback never run twice.
+    if (index === -1) return;
+    stack.splice(index, 1);
     layer.close();
     layer.dialog.remove();
     if (layer.returnFocus instanceof HTMLElement) layer.returnFocus.focus();

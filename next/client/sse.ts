@@ -25,6 +25,8 @@ const RESUME_REVALIDATE_MS = 3000;
 // lets the registry grow unbounded, and resume would re-GET every accumulated
 // zone at once, a thundering herd on the server. Past the cap a new zone is
 // dropped, so resume revalidates a bounded slice rather than the whole backlog.
+// This keeps the earliest bound zones, not the freshest: it is a plain cap, not
+// an LRU, since any bounded slice serves the anti-thundering-herd goal.
 const MAX_BOUND = 64;
 // The transient placeholder control between openConnection setting it and the
 // synchronous source.open returning the real one. Its close is never reached:

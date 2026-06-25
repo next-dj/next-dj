@@ -538,4 +538,38 @@ describe("layer open is single-flight and rolls back on failure", () => {
     expect(opener.hasAttribute("data-next-busy")).toBe(false);
     expect(opener.hasAttribute("aria-busy")).toBe(false);
   });
+
+  it("a dismiss during an in-flight open then a fetch reject tears down once", async () => {
+    const { history, replaced } = makeHistory();
+    const { adapter, dismissed } = mockDialog();
+    let rejectFetch: ((reason: Error) => void) | undefined;
+    layers = createLayers({
+      dispatch: () => undefined,
+      fetch: () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectFetch = reject;
+        }),
+      document,
+      dialog: adapter,
+      history,
+    });
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/photos/1/");
+    document.body.append(opener);
+    const pending = layers.open(opener, "/photos/1/", "photo");
+    // Dismiss the dialog (Esc, backdrop) while the body fetch is still in
+    // flight, the first remove that splices the layer and rolls the URL back.
+    dismissed[0]?.("escape");
+    expect(layers.size()).toBe(0);
+    expect(replaced).toEqual(["/feed/"]);
+    rejectFetch?.(new Error("boom"));
+    await expect(pending).rejects.toThrow("boom");
+    // The catch arm hands remove the already-spliced layer, so the index===-1
+    // early return makes the second teardown a no-op: no second URL rollback.
+    expect(replaced).toEqual(["/feed/"]);
+    expect(document.querySelector("[data-next-dialog]")).toBeNull();
+    expect(layers.size()).toBe(0);
+    expect(opener.hasAttribute("data-next-busy")).toBe(false);
+    expect(opener.hasAttribute("aria-busy")).toBe(false);
+  });
 });
