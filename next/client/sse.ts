@@ -11,7 +11,7 @@
 // the stream lives on.
 
 import { defaultEventSource, defaultVisibility } from "./adapters";
-import { HEADER_ZONE, asString, isRecord } from "./protocol";
+import { HEADER_ZONE, asString, currentUrl, isRecord } from "./protocol";
 
 const SSE_ATTR = "data-next-sse";
 // The ring holds the last 25 own request ids, matching the server-side echo
@@ -21,6 +21,11 @@ const ECHO_LIMIT = 25;
 // reconnects the stream but skips the zone re-GET, so flicking between tabs does
 // not storm the server. A longer pause may have missed events, so it converges.
 const RESUME_REVALIDATE_MS = 3000;
+// The cap on bound zones a connection tracks. Without it a long background sleep
+// lets the registry grow unbounded, and resume would re-GET every accumulated
+// zone at once, a thundering herd on the server. Past the cap a new zone is
+// dropped, so resume revalidates a bounded slice rather than the whole backlog.
+const MAX_BOUND = 64;
 // The transient placeholder control between openConnection setting it and the
 // synchronous source.open returning the real one. Its close is never reached:
 // nothing closes a connection between those two statements in the same tick.
@@ -148,7 +153,11 @@ export function createSse(deps: SseDeps): Sse {
       if (!isRecord(op)) continue;
       const target = isRecord(op.target) ? op.target : undefined;
       const zone = asString(op.zone) ?? asString(target?.zone);
-      if (zone !== undefined) connection.bound.add(zone);
+      if (zone === undefined) continue;
+      if (connection.bound.size >= MAX_BOUND && !connection.bound.has(zone)) {
+        continue;
+      }
+      connection.bound.add(zone);
     }
   }
 
@@ -173,8 +182,11 @@ export function createSse(deps: SseDeps): Sse {
     const connection: Connection = {
       url,
       control: NOOP,
-      pageUrl: previous?.pageUrl ?? doc.location.pathname + doc.location.search,
-      bound: previous?.bound ?? new Set(),
+      pageUrl: previous?.pageUrl ?? currentUrl(doc),
+      // An independent copy per connection, never the predecessor's Set by
+      // reference, so a mutation on the resumed stream cannot leak back into a
+      // paused one that was never re-GET.
+      bound: new Set(previous?.bound),
     };
     connections.set(url, connection);
     connection.control = source.open(

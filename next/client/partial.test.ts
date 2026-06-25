@@ -478,7 +478,7 @@ describe("createPartial surface", () => {
     made.partial._reset();
   });
 
-  it("a refresh op falls back to the global document path when none is injected", async () => {
+  it("a refresh op falls back to the global document path and query when none is injected", async () => {
     document.body.innerHTML = '<div data-next-zone="poll">old</div>';
     const calls: { url: string }[] = [];
     partial._configure({
@@ -496,7 +496,7 @@ describe("createPartial surface", () => {
     });
     await Promise.resolve();
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toBe(document.location.pathname);
+    expect(calls[0]!.url).toBe(document.location.pathname + document.location.search);
   });
 });
 

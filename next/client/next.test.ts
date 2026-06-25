@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "./next";
 
 type NextStatic = {
@@ -160,6 +160,34 @@ describe("Next.on", () => {
     win.Next._init({});
     expect(a).toBe(1);
     expect(b).toBe(1);
+  });
+
+  it("isolates a throwing listener so the rest still receive the payload", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const seen: string[] = [];
+    win.Next.on("context-updated", () => seen.push("first"));
+    win.Next.on("context-updated", () => {
+      throw new Error("boom");
+    });
+    win.Next.on("context-updated", () => seen.push("third"));
+    win.Next._init({});
+    expect(seen).toEqual(["first", "third"]);
+    expect(error).toHaveBeenCalledWith("[next] listener threw", expect.any(Error));
+    error.mockRestore();
+  });
+
+  it("snapshots the bucket so a listener subscribing mid-dispatch waits a round", () => {
+    let lateCalls = 0;
+    const late = (): void => {
+      lateCalls += 1;
+    };
+    win.Next.on("context-updated", () => {
+      win.Next.on("context-updated", late);
+    });
+    win.Next._init({});
+    expect(lateCalls).toBe(0);
+    win.Next._init({});
+    expect(lateCalls).toBeGreaterThan(0);
   });
 
   it("returns an unsubscribe function that stops future dispatches", () => {

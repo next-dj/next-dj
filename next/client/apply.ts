@@ -10,6 +10,7 @@ import {
   HEADER_ZONE,
   asString,
   cssEscape,
+  currentUrl,
   isRecord,
 } from "./protocol";
 import type { Navigate } from "./wire";
@@ -386,7 +387,7 @@ export class Applier {
     this.#assets = deps.assets;
     this.#mount = deps.mount;
     this.#refresh = deps.refresh;
-    this.#here = deps.here ?? (() => this.#document.location.pathname);
+    this.#here = deps.here ?? (() => currentUrl(this.#document));
   }
 
   // Drop every custom op so vitest files do not leak registrations into one

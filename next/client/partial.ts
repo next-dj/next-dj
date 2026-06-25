@@ -30,6 +30,7 @@ import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import { createSse } from "./sse";
 import type { EventSourceAdapter, Sse, VisibilityAdapter } from "./sse";
 import { defaultHistory, defaultNavigate } from "./adapters";
+import { currentUrl } from "./protocol";
 
 export interface PartialDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
@@ -172,7 +173,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       assets,
       mount: { run: runMount },
       refresh: (request) => void wire.fetch(request),
-      here: () => (adapters?.document ?? document).location.pathname,
+      here: () => currentUrl(adapters?.document ?? document),
     };
   }
 

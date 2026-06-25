@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
@@ -78,6 +78,10 @@ describe("layer flow through the partial surface", () => {
         return respond(call);
       },
     });
+  });
+
+  afterEach(() => {
+    partial._reset();
   });
 
   function headerOf(call: Call, name: string): string | undefined {

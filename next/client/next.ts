@@ -122,8 +122,15 @@ class Next {
   static #dispatch(event: string, payload: Record<string, unknown>): void {
     const bucket = Next.#listeners.get(event);
     if (bucket === undefined) return;
-    for (const listener of bucket) {
-      listener(payload);
+    // Snapshot so a listener that subscribes or unsubscribes mid-fan-out cannot
+    // mutate the Set under iteration, and isolate each call so one throwing
+    // plugin does not abort delivery to the rest.
+    for (const listener of [...bucket]) {
+      try {
+        listener(payload);
+      } catch (e) {
+        console.error("[next] listener threw", e);
+      }
     }
   }
 }

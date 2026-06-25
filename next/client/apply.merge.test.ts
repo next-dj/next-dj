@@ -19,6 +19,19 @@ function envelope(ops: unknown[], extra: Record<string, unknown> = {}): unknown 
   return { version: "v1", ops, assets: [], form: null, ...extra };
 }
 
+// A document whose location is overridden but whose DOM surface delegates to the
+// real jsdom document, so the default #here reads our pathname and search while
+// the apply pipeline keeps a working createElement and dispatchEvent.
+function docAt(pathname: string, search: string): Document {
+  return new Proxy(document, {
+    get(target, prop, receiver) {
+      if (prop === "location") return { pathname, search } as Location;
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 describe("append and prepend dedup", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
@@ -198,6 +211,30 @@ describe("refresh verb", () => {
     const { applier } = makeApplier({ refresh });
     applier.apply(envelope([{ op: "refresh" }]));
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("default here keeps the query of the current URL on a re-GET", () => {
+    const refresh = vi.fn<ZoneFetch>();
+    const doc = docAt("/feed", "?q=foo");
+    const { applier } = makeApplier({ refresh, document: doc });
+    applier.apply(envelope([{ op: "refresh", zone: "feed" }]));
+    expect(refresh).toHaveBeenCalledWith({
+      url: "/feed?q=foo",
+      zone: "feed",
+      headers: { "X-Next-Zone": "feed" },
+    });
+  });
+
+  it("default here is the bare path when there is no query", () => {
+    const refresh = vi.fn<ZoneFetch>();
+    const doc = docAt("/feed", "");
+    const { applier } = makeApplier({ refresh, document: doc });
+    applier.apply(envelope([{ op: "refresh", zone: "feed" }]));
+    expect(refresh).toHaveBeenCalledWith({
+      url: "/feed",
+      zone: "feed",
+      headers: { "X-Next-Zone": "feed" },
+    });
   });
 });
 
