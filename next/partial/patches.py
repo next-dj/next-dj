@@ -235,12 +235,7 @@ class Patch:
     extras: "Mapping[str, Any]" = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Refuse an extras payload that names a structural wire key.
-
-        The `op`, `target`, and `html` keys carry the patch structure, so a
-        payload that names one of them is refused at construction rather than
-        silently overwriting the structural key on serialization.
-        """
+        """Refuse an extras payload that names a structural wire key."""
         collision = keys.RESERVED_PATCH_KEYS & self.extras.keys()
         if collision:
             raise ReservedPatchKeyError(self.op, frozenset(collision))

@@ -31,12 +31,10 @@ export const ATTR_ZONE = "data-next-zone";
 export const ATTR_ACTION = "data-next-action";
 export const ATTR_KEY = "data-next-key";
 
-// The wire-body keys the envelope parser reads (version, ops, assets, op, target,
-// html, kind, url, and the rest) mirror next/partial/keys.py, the server-side
-// source of truth. They are inlined as string literals at their read sites rather
-// than centralised here because moving them into shared constants is the 0.9 sync
-// step, not this freeze. A rename on either side is a wire break and the two must
-// move in lockstep.
+// The wire-body keys the envelope parser reads mirror next/partial/keys.py, the
+// server-side source of truth, so a rename on either side is a wire break and the
+// two move in lockstep. They stay inlined as string literals here rather than
+// shared constants until the 0.9 sync step.
 
 // The boundary predicates the wire parsers share. Several modules narrow an
 // unknown JSON value the same way, so the checks live here next to the wire
