@@ -128,8 +128,10 @@ class TestEnvelopeHelpers:
         envelope = envelope_of(NextClient().get_zones("/zoned/", ("alpha", "beta")))
         assert isinstance(envelope, PartialEnvelope)
         assert envelope.version == "0"
-        assert envelope.op_verbs() == ["morph", "morph"]
-        assert envelope.targets() == [{"zone": "alpha"}, {"zone": "beta"}]
+        # The zoned page registers a serialize=True provider, so the batch
+        # ends with the context op carrying its js-context delta.
+        assert envelope.op_verbs() == ["morph", "morph", "context"]
+        assert envelope.targets() == [{"zone": "alpha"}, {"zone": "beta"}, None]
 
     def test_assets_manifest_lists_co_located_css(self) -> None:
         envelope = envelope_of(NextClient().get_zones("/zoned/", "alpha"))

@@ -113,6 +113,9 @@ export function createAssets(deps: AssetsDeps): Assets {
     const urls: string[] = [];
     for (const asset of manifest) {
       if (!isAsset(asset) || asset.kind !== kind) continue;
+      // An inline asset rides the inline path, never this URL delta: its empty
+      // url would otherwise collapse every inline body onto one "" key.
+      if (asset.inline !== undefined) continue;
       if (loaded.has(asset.url)) continue;
       // Mark loaded eagerly so a manifest that names the same URL twice, or a
       // re-entrant apply, inserts it exactly once.
@@ -122,7 +125,30 @@ export function createAssets(deps: AssetsDeps): Assets {
     return urls;
   }
 
+  // The inline bodies of a manifest, deduped by body under a kind-scoped key so
+  // the same inline asset inserts once per page and never clashes with a URL.
+  function missingInline(manifest: Asset[], kind: string): string[] {
+    const bodies: string[] = [];
+    for (const asset of manifest) {
+      if (!isAsset(asset) || asset.kind !== kind) continue;
+      if (asset.inline === undefined) continue;
+      const key = `inline:${kind}:${asset.inline}`;
+      if (loaded.has(key)) continue;
+      loaded.add(key);
+      bodies.push(asset.inline);
+    }
+    return bodies;
+  }
+
   function loadCss(manifest: Asset[], done: () => void): void {
+    // Inline styles insert synchronously and need no load gate, so they go in
+    // before the URL delta whose loads the done callback waits on.
+    for (const body of missingInline(manifest, "css")) {
+      const style = doc.createElement("style");
+      style.textContent = body;
+      if (nonce !== undefined) style.nonce = nonce;
+      doc.head.append(style);
+    }
     const urls = missing(manifest, "css");
     if (urls.length === 0) {
       done();
@@ -152,6 +178,12 @@ export function createAssets(deps: AssetsDeps): Assets {
   }
 
   function loadJs(manifest: Asset[]): void {
+    for (const body of missingInline(manifest, "js")) {
+      const script = doc.createElement("script");
+      script.textContent = body;
+      if (nonce !== undefined) script.nonce = nonce;
+      doc.head.append(script);
+    }
     for (const url of missing(manifest, "js")) {
       const script = doc.createElement("script");
       script.src = url;

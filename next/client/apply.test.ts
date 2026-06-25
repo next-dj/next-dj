@@ -103,6 +103,21 @@ describe("parseEnvelope", () => {
       { kind: "css", url: "/also-ok.css" },
     ]);
   });
+
+  it("keeps an inline asset carrying a body but no url", () => {
+    const parsed = parseEnvelope({
+      version: "v1",
+      assets: [
+        { kind: "css", url: "", inline: ".z{color:red}" },
+        { kind: "js", inline: "console.log(1)" },
+        { kind: "css" },
+      ],
+    });
+    expect(parsed.assets).toEqual([
+      { kind: "css", url: "", inline: ".z{color:red}" },
+      { kind: "js", inline: "console.log(1)" },
+    ]);
+  });
 });
 
 describe("Applier verbs", () => {

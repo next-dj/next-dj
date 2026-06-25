@@ -7,7 +7,7 @@ from django.http import HttpResponse
 from . import keys
 from .headers import MergeMode, set_partial_vary
 from .manager import partial_backend_manager
-from .patches import Asset, Envelope, Patches, PatchResponse
+from .patches import Envelope, Patches, PatchResponse
 from .render import UnknownZoneError, render_zone
 
 
@@ -82,8 +82,10 @@ def _build_envelope(
     patches = Patches(version)
     for name in intent.zones:
         _patch_zone(patches, name, result.html[name], intent.merge)
-    for asset in _collected_assets(result):
-        patches.add_asset(asset.kind, asset.url)
+    patches.collect_zone_assets(result)
+    delta = result.js_context_delta()
+    if delta:
+        patches.add_context(delta)
     return patches.envelope()
 
 
@@ -101,11 +103,6 @@ def _patch_zone(
         patches.prepend(target, html)
     else:
         patches.morph(target, html)
-
-
-def _collected_assets(result: "ZoneRenderResult") -> list[Asset]:
-    """Return the URL-form assets the rendered zone bodies collected."""
-    return [Asset(kind=kind, url=url) for kind, url in result.url_assets()]
 
 
 def _bad_request(reason: str) -> HttpResponse:

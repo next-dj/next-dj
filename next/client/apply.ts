@@ -159,17 +159,22 @@ function isBuiltin(patch: Patch): patch is BuiltinPatch {
 export interface Asset {
   kind: string;
   url: string;
+  // The body of a co-located inline asset, absent on a URL-form asset. The
+  // server collects a zone's inline styles and scripts that have no URL, so the
+  // loader inserts the body itself rather than a <link>/<script src>.
+  inline?: string;
 }
 
 // Narrow an unknown wire entry to an Asset. The manifest crosses the wire
 // boundary like the ops do, so a malformed entry is dropped here rather than
 // cast blind into envelope.assets and the event details. Only the two kinds the
-// loader acts on pass, so a junk kind never rides into the event details.
+// loader acts on pass, so a junk kind never rides into the event details. A
+// URL-form asset carries a url string, an inline asset carries an inline body.
 export function isAsset(value: unknown): value is Asset {
   return (
     isRecord(value) &&
     (value.kind === "css" || value.kind === "js") &&
-    typeof value.url === "string"
+    (typeof value.url === "string" || typeof value.inline === "string")
   );
 }
 

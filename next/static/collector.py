@@ -21,6 +21,7 @@ dictionary on the collector. There is no built-in knowledge of `css`,
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -319,6 +320,7 @@ class StaticCollector:
         self._prepend_idx: dict[str, int] = {}
         self._js_context: dict[str, Any] = {}
         self._js_context_serializers: dict[str, JsContextSerializer] = {}
+        self._js_context_encoded: dict[str, str] = {}
 
     def add(self, asset: StaticAsset, *, prepend: bool = False) -> None:
         """Add the asset unless its dedup key was already recorded.
@@ -379,11 +381,15 @@ class StaticCollector:
         """
         active = serializer if serializer is not None else self._get_js_serializer()
         try:
-            active.dumps(value)
+            encoded = active.dumps(value)
         except (TypeError, ValueError) as e:
             msg = f"JS context value for key {key!r} is not serialisable: {e}"
             raise TypeError(msg) from e
         self._js_context = self._js_policy.merge(self._js_context, key, value)
+        if self._js_context.get(key) is value:
+            self._js_context_encoded[key] = encoded
+        else:
+            self._js_context_encoded.pop(key, None)
         if serializer is not None:
             self._js_context_serializers[key] = serializer
 
@@ -401,3 +407,19 @@ class StaticCollector:
         serializer. Callers must not mutate it.
         """
         return self._js_context_serializers
+
+    def js_context_wire(self) -> dict[str, Any]:
+        """Return the merged js-context as wire-ready JSON values.
+
+        Reuses the fragment cached at registration when present so the context
+        patch does not re-encode what add_js_context already validated.
+        """
+        default = self._get_js_serializer()
+        wire: dict[str, Any] = {}
+        for key, value in self._js_context.items():
+            encoded = self._js_context_encoded.get(key)
+            if encoded is None:
+                serializer = self._js_context_serializers.get(key, default)
+                encoded = serializer.dumps(value)
+            wire[key] = json.loads(encoded)
+        return wire
