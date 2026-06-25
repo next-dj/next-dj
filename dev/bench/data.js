@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1782161998492,
+  "lastUpdate": 1782373395751,
   "repoUrl": "https://github.com/next-dj/next-dj",
   "entries": {
     "next-dj benchmarks": [
@@ -22721,6 +22721,940 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.000002140517640526492",
             "extra": "mean: 36.26874910600593 usec\nrounds: 27968"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "zebartcoc@gmail.com",
+            "name": "Pavel Kutsenko",
+            "username": "paqstd-dev"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0e9281f33c3f3a62de3318b6a32c4e2bd9b28a76",
+          "message": "feat(partial): native partial rendering (#128)\n\n* feat(partial): wire protocol scaffold, envelope backend, client runtime\n\nEstablish the load-bearing structure of the partial-rendering protocol on\nboth sides of the wire, with zero new public endpoints and byte-identical\nbehaviour when no partial request header is present.\n\nServer. New next/partial package: PartialIntent header parsing memoised on\nthe request, a Vary stamper covering the intent headers, the patch envelope\nvalue objects and minimal builder, PartialProtocolBackend serialising one\nJSON envelope for HTTP and SSE, the seven package signals, the patch-verb\nregistry, and the reserved check-id registry. PARTIAL_BACKENDS default added\nto conf, signals re-exported from the aggregate. The CSRF header name and\ntoken now ride in the Next._init payload and are seeded only for real\nrequests so unintercepted renders stay byte-identical.\n\nClient. wire.ts fetches with intent and CSRF headers, classifies any\nnon-envelope response as a full navigation, locks mutating requests against\ndouble submit, and runs latest-wins aborts on safe GETs. apply.ts parses the\nenvelope, applies the replace, inner, remove, and event verbs, neutralises\nscript elements structurally before insertion, and exposes a custom-op\nregistry. The runtime stays one bundled next.min.js.\n\nTests. Golden fixtures bridge the two toolchains: pytest writes the exact\nenvelope bytes, vitest reads the same files and asserts the resulting DOM. A\nregression suite proves pages and invalid-form posts are byte-identical\nwithout the partial switch. Full coverage holds at 100 percent on next.\n\nGates. Bundle-size budget enforced inline in CI as a hard 15 KB minified\nbyte check on next.min.js, and v8 TypeScript coverage thresholds on the\nruntime.\n\n* feat(partial): zone tag, standalone zone partials, and the zone registry\n\nAdd the {% zone \"name\" %} template tag and its partial-as-template object,\nthe derived zone registry, and the zone system checks. A page region wrapped\nin a zone renders inline today and becomes an addressable target for partial\nupdates, with no change to a zone-less page render.\n\nMarkers. {% zone %} compiles its body into a standalone ZonePartial that\nrenders inside its own template state via push_state and bind_template, so\nthe same body can be re-rendered on its own later. The partial implements\nget_exception_info and delegates to the page template, which keeps DEBUG\ntracebacks honest on the standalone render path where the partial is the\nrender-context template. These are the stable template-engine primitives,\nidentical across the supported Django range. A non-lazy zone wraps its body\nin a div data-next-zone element, tag= swaps the wrapper for table, list, and\nselect contexts, and a lazy zone emits only its placeholder branch.\n\nRegistry. The zones of a page are derived from the compiled composed\ntemplate through get_nodes_by_type and memoised in a WeakKeyDictionary keyed\non the template object. A recompiled page gets a fresh entry while the stale\nobject is collected, and the per-request compile path never writes to the\nregistry, so there is no per-request noise and no recompile-versus-duplicate\nproblem by construction. The first read announces a template's zones through\nzone_registered.\n\nChecks. Seven system checks read the same compiled page templates the\nrenderer uses: a duplicate or non-slug zone name, a zone nested in a for or\nif block, a lazy zone without a placeholder, a zone in a component template,\nand a with block directly over a zone.\n\n* feat(partial): morph engine as the default patch verb\n\nAdd a purpose-built morph engine that drives a target's old DOM to the\ndelivered HTML by reusing live nodes, so a form submit survives focus, the\ncaret, typed values, open details, playing media, and scroll position. Morph\nis the default verb of the applier, with replace and inner as explicit\nopt-outs.\n\nEngine. Matching is built on id-sets read through getAttribute(\"id\") and\nstored in a Map keyed on the element, so numeric and clobbering-prone ids\nare safe. A hard match shares the tag and a non-empty id-set intersection,\nwhich lets an unnamed wrapper match its new version through its children's\nids. A soft match falls back to nodeType and tag. The child walk reuses,\nmoves, or creates nodes and discards the tail. Attribute sync is three-phase\nand leaves matching attributes untouched so CSS animations are not\nrestarted, every attribute change passes a cancelable next:morph-attribute\nevent, and invalid attribute names are skipped rather than thrown. Live\nproperties are split from their attribute twins: value, checked, and\nselected sync the server default always but the live property only when the\nfield is neither active nor dirty, a file input is never touched, and a\nmatched custom element or shadow host is atomic.\n\nDirty tracking. A runtime registry holds delegated input, change, and\ntoggle listeners that stamp touched fields with a monotonic counter. The\nwire layer snapshots the counter when a request leaves and threads it to the\napplier, so a validation reply for one field never wipes another field typed\nduring the round-trip. The engine owns no global state and consults an\nisDirty predicate.\n\nMoves go through an injectable adapter whose default feature-detects\nmoveBefore and falls back to insertBefore, kept in the platform-adapter\nmodule behind the test seam.\n\n* feat(partial): render zones over the full page context, zones view branch\n\nRender named page zones on demand and answer a zone GET with a patch\nenvelope instead of a full page. A page region wrapped in a zone is now an\naddressable target served over its own URL with the page's own\nauthorisation.\n\nRender. render_zone compiles the cached composed page template, builds the\nfull page context once per batch of requested names, seeds a fresh static\ncollector through the same convoy the canonical render uses, and renders each\nzone standalone reusing the wrapper the inline render already emits. The\nassets a zone body collects travel out in the envelope manifest rather than\nthrough the placeholder inject, which is a no-op on a token-less fragment.\noverrides let a caller supply a bound form into the zone context.\n\nView. The zones branch sits in the unified view strictly after body\nresolution and after the verbatim early-response return, so a render()\nredirect or an authorisation short-circuit passes through as navigation. A\nzone in a dynamically produced body answers 400 before any render, an\nunknown zone answers 400 before context is gathered, and a stale version\nanswers 409 only on a safe method while a mutating request always executes.\nWithout the partial switch the page path is byte-for-byte unchanged.\n\nTesting client. NextClient gains a zones GET helper and structural envelope\nassertions that parse the JSON envelope rather than matching HTML, and that\nrefuse a non-envelope response so a navigation can never pass as success.\n\n* feat(partial): shape form outcomes as patch envelopes, full builder\n\nRoute every form action outcome through one delegation point so a partial\nrequest answers with a patch envelope while a plain request stays\nbyte-for-byte unchanged. The shape_response hook checks the request and\nhands a partial request to the shaper, otherwise calls the existing default.\n\nInvalid. A failed submission answers HTTP 200 carrying the existing\ninvalid-form headers and a single morph that addresses only the failing\nform. With a zone on the form the zone is morphed with the bound form in\ncontext, without one the whole origin page is rendered and the patch marks\nextract so the client trims it to the form by its action id. Neighbouring\nforms are named by no operation, so their unsent input cannot be touched by\nconstruction rather than by discipline. The machine-readable form meta comes\nfrom the field specs.\n\nResult. A handler redirect becomes a visit with the URL validated against\nthe allowed hosts, an external authored redirect travels as a full\nnavigation so an OAuth or gateway hop survives, an authored envelope passes\nthrough, and a None return morphs the form zone instead of repainting the\norigin. Each partial success drains the pending messages into toast patches.\n\nBuilder. Patches is now the request-bound public builder with the full verb\nset: morph by zone, form, component, or html, append, refresh, context\nlimited to registered serialisable names, layer close, toast, event, url\npush, redirect, and custom ops. response falls back to a 303 to the origin\nwhen no runtime is present. Two checks guard an unregistered custom verb and\na form backend that overrides shaping without partial awareness.\n\n* feat(partial): inline field validation and wizard advance without 302\n\nAdd a validate-only branch to form dispatch and turn a wizard step advance\ninto a patch envelope, so a wizard steps in place and a field validates on\nblur without a full navigation.\n\nValidate. When a request names fields to validate, the pipeline binds the\nform with the same factory the invalid path uses, runs is_valid, and shapes\nthe result as a form morph carrying machine-readable errors, without calling\nthe handler, touching wizard storage, or sending success signals. Errors are\nfiltered to the named fields so an untouched field shows no premature\nrequired, non-field errors are always dropped because cross-field cleaning\nbelongs to submit, formset member errors are scrubbed by prefix, and file\nfields are removed. The branch sits after every authorization layer the\naction carries, the action guard, the form-class view permission, and the\nobject permission, so a guarded validator can never become an anonymous\noracle, and the validated signal never fires on a denial. A token rotation\nin the request stamps the fresh csrf into the envelope.\n\nWizard advance. A valid non-final step builds the next step's wizard and\nunbound form by resolving the next URL through the URLconf, renders the\nwizard zone, and morphs it, leaving the drafts in storage untouched. A\nhistory push is emitted only when the wizard opts in, the storage clear gate\nis left alone because the envelope is a 200, and a step costs one storage\nround trip while a blur costs none.\n\nForm tag. The tag gains validate, trigger, debounce, and zone parameters\nthat render as data-next attributes for the client half to read.\n\n* feat(partial): dialog layers, flagship modal wizard, page=-OOB addressing\n\nAdd the layer primitive over native dialog with accept and dismiss\nsemantics, wire the four layer verbs, and land the modal-wizard flagship in\nthe audit-forms example. The page-addressed out-of-band morph ships as the\nsecond tool for refreshing a foreign page's zone in one response.\n\nClient. A click on a layer link opens a dialog and seeds its zone container\nbefore the request, so the first morph lands by the ordinary resolve. The\napplier resolves a zone from the top layer down, so a master zone inside the\nmodal is found before a same-named zone on the page beneath it. Close carries\nan accept result or a dismiss reason, a browser gesture dismisses with its\nreason, and focus returns to the opener. On accept the runtime re-GETs the\nhost zone named by the opener, so the list under the modal refreshes while\nthe master and the list stay decoupled. Toasts render their text as text,\nbusy marks the initiator and target, and the dialog modality lives behind\nthe test seam. The layer.open, layer.close, toast, and url verbs ride the\nsame op registry as custom verbs.\n\nServer. The builder morph gains page and url_kwargs so a handler can address\na foreign page's zone. The out-of-band render repeats that page's body\nresolution to authorize it, and a denial or redirect raises rather than\nemitting a silent empty morph. Origin resolution prefers the request origin\nheader and falls back to the form origin under a same-site guard.\n\nFlagship. The audit-forms example opens its wizard in a modal, steps in\nplace, refreshes the request list on done through the default accept and\nre-GET choreography, and degrades to plain redirects without the runtime.\n\nBuild. The bundle budget moves from a minified-byte ceiling to a gzip\nceiling, the size that actually travels, with comfortable headroom.\n\n* feat(partial): client triggers, asset loader, zone merge and lazy zones\n\nAdd the client trigger layer, the asset loader, the append and prepend\nmerge, the refresh and defer verbs, and the lazy-zone primitive, so a filter\nauto-submits, a list paginates and infinite-scrolls, a zone materialises on\nreveal, and co-located behaviour re-arms on every insertion.\n\nClient. Delegated trigger listeners bind once and the lazy scan runs per\ninserted subtree, never on module load. A field validates on blur with a\ndebounced request stripped of file fields, its own submit cancels the\nin-flight validation, and a stale answer is dropped by the queue. Lazy load\nzones batch into one request on ready, a revealed zone waits for the\nobserver, and a confirm gates the click. The asset loader settles stylesheets\nbefore applying ops with a bounded wait so a stale 404 cannot freeze a\nresponse, runs scripts after with the remembered nonce, and a version\nmismatch full-visits once behind a reload-once guard rather than looping. The\napplier dedupes appended rows by key or id, re-requests a zone on refresh,\nqueues deferred zones, fires mounted and runs the mount registry, and a\nper-zone counter stops a re-created lazy zone from spawning a second request.\n\nServer. A zone GET with a merge intent answers with an append or prepend\npatch carrying key dedup, and the Vary covers the merge header. The asset\nversion derives from the staticfiles manifest hash with a stable fallback,\nand a check warns when the manifest version is asked for without manifest\nstorage. A missing list key that silently dropped a user PARTIAL_BACKENDS\noverride is fixed.\n\nExamples. search-catalog auto-submits its filter and infinite-scrolls its\nresults, wiki auto-submits search and re-arms its markdown preview through\nthe mount registry, and audit-forms defers its audit table behind a\nreveal-triggered lazy zone.\n\n* feat(partial): SSE bridge, context verb, uniform csrf, docs\n\nAdd the server-sent-events bridge and its client, wire the context verb,\nmake the csrf rotation meta ride every shaped envelope, finish the layer\norigin header, and document the whole subsystem from its scenarios.\n\nSSE. PatchEventStream emits each envelope as a next-patches event over the\npage render escape hatch with no new endpoint, sets the polite headers and\nthe retry frame in its constructor, and interleaves heartbeats only for an\nasync source under ASGI where a blocked pull can be raced, a sync source\nunder WSGI documents that it cannot. The fan-out default is the refresh\npatch, so each tab revalidates the zone with its own cookies and no foreign\nHTML travels. The client subscribes by data-next-sse, drops the echo of its\nown request ids from a ring buffer, pauses in a background tab and re-GETs\nthe zones the stream addressed on return, and keeps the stream alive through\na parse error.\n\nVerbs and meta. The context verb merges server-serialised provider values\ninto the client context and fires context-updated, which was emittable by\nthe builder but unhandled by the client until now. The csrf rotation meta\nmoves to the shared envelope exit so an invalid, result, advance, or\nvalidate response all carry a fresh token when the request rotated it. A\nlayer remembers its host and sends the origin header, so the page-addressed\nout-of-band morph resolves the host end to end.\n\nExamples. live-polls streams through PatchEventStream and its chart re-reads\nthe refreshed zone through the mount registry rather than a context event\nthe stream does not send.\n\nDocs. A partial-rendering topic teaches from the six scenarios with pages on\nzones, done choreographies, co-located JS, SSE under WSGI and ASGI, a CSP and\nnonce guide, and reference tables built from the code.\n\n* fix(partial): do not conflict on the first partial request of a page\n\nA page that opens a zone before the client has learned a version sent an\nempty X-Next-Version, which the server read as a version assertion and\nanswered 409, so the runtime fell back to a full navigation and the modal\nnever opened as a partial.\n\nThe server now treats an absent or empty client version as asserting\nnothing, so only a known, differing version conflicts. The client omits the\nversion header until it has learned one from an envelope. A regression test\ndrives the empty-header browser flow that the previous tests, which sent a\nmatching or absent version, missed.\n\n* fix(partial): let validation probes through the wizard guard, no 405 on denial\n\nThe flagship wizard guards each binding step on a retention acknowledgement,\nbut a blur validation probe carries no acknowledgement and is denied, so the\nmodal could not validate a field. The guard now lets a validation probe\nthrough because it binds no data and asks only whether one field is well\nformed, while a real binding submission still requires the acknowledgement.\n\nThe runtime also turned any non-envelope response into a navigation to the\nfinal URL, which on a denied form POST is the action endpoint, not a page, so\nthe browser GET it 405s. A redirect and a safe GET still navigate, but a\nnon-redirect denial of a mutation now surfaces as an error and leaves the\npage in place.\n\n* fix(partial): intercept form submits as partial mutations carrying the zone\n\nThe runtime listened for form submits only to cancel an in-flight\nvalidation, so the submit itself posted natively and the browser followed\nthe redirect to a full page. A wizard step in a modal could never advance in\nplace. The handler now intercepts a submit of a form that carries an action\nuid, posts it under the mutation lock with the form data and the pressed\nbutton, and travels the zone the form declares so the server morphs that zone\nrather than answering an empty envelope. A form without an action still\nsubmits natively for the no-runtime cycle.\n\nThe bundle gzip budget moves to 12 KB. The full runtime with the form-submit\npath is about 10.2 KB gzip, and the earlier 10 KB ceiling left no working\nheadroom against gzip-version drift in CI.\n\n* feat(partial): toast and dialog styles, wizard form-error fix, advance origin\n\nStyle the runtime toast container and layer dialog with CSS hooks on\n[data-next-toasts] and [data-next-dialog] across all shared examples.\nFix a wizard step validation bug where _form_overrides passed the bare\nform as the action-name override, causing the FormNode to fall back to\ncurrent_form() (unbound), so errors never rendered in the zone.\n\n- shaping.py: wrap form + wizard in SimpleNamespace when outcome.wizard\n  is set, so {% form %} receives the bound form without rebuilding\n- uid.py: add ADVANCE_ORIGIN_ATTR constant for the step-advance origin protocol\n- forms.py: _origin_path checks ADVANCE_ORIGIN_ATTR first to stamp the\n  next-step origin into the re-rendered zone\n- layers.ts: stamp data-next-dialog on every runtime dialog element\n- base.css: [data-next-dialog] + backdrop, [data-next-toasts] + variants\n- reference.rst: data-next-dialog attribute row + Styling Layers and Toasts section\n- test_wizard_advance.py: regression for bound-form-in-zone and advance origin\n\n* build(js): add tsc --noEmit type-check gate for the client runtime\n\nOne tsconfig.json under strict mode type-checks all 27 runtime and test\nsources. Add typescript and @types/node as direct devDeps, a typecheck:ts\nnpm script, a type-check-js make target wired into make ci, and a tsc step in\nthe test-js CI job. The lone source fix derives the captured request type in\ntriggers.test.ts from the runtime fetch seam instead of a hand-rolled local\ntype that shadowed DOM Request and lacked the abortable flag.\n\n* feat(partial): runtime visit verb, next:removed signal, SSE 4xx eviction\n\nRegister the visit verb on the applier so a server redirect rides the\nnavigate seam (location.assign), which the history push seam would reject\nfor a cross-origin target. Emit a non-cancelable, bubbling next:removed\nevent before every node detach (morph discard and trailing sweep, replace,\ninner, remove, merge) so a framework island can unmount before its DOM\nleaves the tree. On a fatal SSE error the bridge now evicts the dead\nconnection instead of leaving a zombie that resume would reopen, while a\ntransient error keeps relying on the native reconnect. Also split a prose\nsemicolon in a layers comment.\n\n* fix(partial): drop dead signal and constants, read SSE heartbeat from settings\n\nRemove the patches_shaped signal that nothing ever sent, along with the\nunused HTML_VERBS and TARGET_KEYS constants. Resolve SSE HEARTBEAT_SECONDS\nfrom the framework settings in the stream constructor, mirroring how RETRY_MS\nis already read through a shared options helper, so the configured value is\nno longer ignored.\n\n* fix(apps): install template builtins into every DjangoTemplates engine\n\nIterate settings.TEMPLATES and match the DjangoTemplates backend instead of\nassuming it sits at index 0, so a project that puts Jinja2 first or runs\nseveral engines still gets the next-dj tags. A new system check warns when no\nDjangoTemplates backend is configured at all.\n\n* refactor(examples): share the markdown preview script across apps\n\nThe byte-identical preview script in the wiki and multi-tenant examples now\nlives once under the shared static tree, referenced by both components, which\nmakes the READMEs that already claimed it was shared true. Each app keeps its\nown server-side render in component.py.\n\n* docs(partial): document the infinite-scroll sentinel as data-next-lazy\n\nThe sentinel arms the IntersectionObserver through data-next-lazy, not\ndata-next-trigger, which only wires input and change events. Fix the\nscenario, the reference table, and the search-catalog readme to match the\nruntime.\n\n* refactor(partial): morph verbs, manager facade, origin via context, drop defer\n\nSplit Patches.morph into typed per-verb methods behind a thin dispatch\nfacade, which drops the PLR0913 suppression and the silent unknown-kwarg\nswallow. Move the backend manager, factory, and asset-version resolution out\nof the wire-format backend into a new partial manager module, matching the\nmanager and backends split every other area uses. Carry the wizard advance\norigin through a render-context override instead of a request attribute\nmonkey-patch, and fold the duplicated origin unpacking into one helper. Drop\nthe never-sent defer_zone builder and the defer envelope field, leaving the\nlazy zone tag as the only defer spelling. Give the patch-op registry a\n__contains__ and drop the test-only names helper.\n\n* refactor(partial): drop the defer field from the client envelope\n\nRemove the DeferZone interface, the defer envelope field, its parse, and the\ndead client defer loop now that the server no longer emits defer. The refresh\nverb and its fetch seam are untouched. The lazy zone trigger is a separate\nmechanism and stays.\n\n* docs(partial): document the morph and removal lifecycle events\n\nAdd next:removed, next:morph-element, and next:morph-attribute to the\nlifecycle events table with their cancelable semantics and payloads, so the\nmount and unmount pair an island adapter relies on is written down.\n\n* refactor(partial): rename the zone tag module from markers to zone\n\nThe partial tag library lived in markers.py, a name the deps, urls, and\nforms areas reserve for DI annotation markers and frozen value objects, so\na reader opening partial/markers.py met a full template-tag library\ninstead. Rename it to zone.py and repoint the importers and the templatetags\nshim. Add a system check that warns when a next-dj tag library is not\nregistered as a builtin, so a registered-but-unlisted library no longer\nfails silently.\n\n* refactor(client): relocate the runtime to next/client and type the wire\n\nMove the TypeScript sources and their tests out of next/static/next into a\nnew next/client tree, so the staticfiles finders no longer enumerate source\ninto collectstatic and only the built bundle ships under static. esbuild\nstill emits the bundle to next/static/next/next.min.js, the wheel excludes\nthe source tree, and the sdist carries sources without tests. Model the\npatch wire as a discriminated union narrowed on the handler side behind the\ntsc gate, extract the shared protocol constants into protocol.ts, type the\nevent bus through a NextEventMap, and drop the unknown-cast escapes. The\nwire boundary stays unknown.\n\n* fix(partial): keep a data-next-keep node without requiring an id\n\nA framework root the server renders with no stable id is now preserved\nacross a morph. The child walk pairs a keep node by id when it has one and by\nposition when it does not, so an island marked data-next-keep survives the\nreconciliation either way.\n\n* feat(partial): push an honest URL for an intercepting modal\n\nA data-next-layer modal now pushes the real URL of its body, so the modal is\nshareable and a refresh resolves the URL as its own standalone page, while a\nsingle popstate handler closes the top layer when Back moves past its pushed\nURL. A programmatic close replaces the URL back to the host. There is no\nclient router and no URL masking.\n\n* docs(partial): framework islands, the request flow, and the client runtime\n\nAdd a framework-islands recipe page for mounting and unmounting a Vue or\nReact root through next:mounted and next:removed, a how-it-works page that\nfollows one partial update end to end, and a client runtime section in the\nreference covering window.Next, the intercepting modal URL, and foreign-zone\nauthorisation.\n\n* fix(partial): raise on conflicting morph selectors\n\nThe morph facade docstring promised that a conflicting selector raises\nrather than being silently dropped, but the dispatch cascade took the first\nmatch and ignored the rest. Detect more than one of zone, component, and\nform and raise, so the behaviour matches the contract.\n\n* fix(examples): arm the search-catalog sentinel with data-next-lazy\n\nThe infinite-scroll sentinel carried data-next-trigger, which the runtime\narms only for input and change events, so the observer never fired and the\ndemo never appended. Switch the sentinel to data-next-lazy, the attribute\nthat arms the IntersectionObserver, and assert the working form.\n\n* docs(partial): correct the data-next-keep id note\n\nA keep node no longer requires an id. Note that the morph pairs it by id\nwhen present and by position otherwise, matching the runtime and the\nframework-islands page.\n\n* docs(partial): distinguish the document node events from the Next.on bus\n\nThe next:* node events fire on the element and are caught with\naddEventListener, while the partial:* and context events also reach the\nNext.on bus. Spell out the split so a reader does not subscribe to a node\nevent through the bus.\n\n* docs: fix the builtin-op comment and stale CONTRIBUTING paths\n\nCorrect the BUILTIN_OPS comment in the applier, which claimed a custom op\nshadowing a built-in name reaches the registry first when the isBuiltin\ncheck actually claims the name for the built-in switch. Repoint the\nCONTRIBUTING references that still named next/static/next for the TypeScript\nsources to next/client after the relocation, and update the make ci command\norder to include type-check-js and test-js-coverage.\n\n* test(partial): drop the residual defer field from client test fixtures\n\nThe defer field is gone from the envelope and parseEnvelope ignores it, so\nthe leftover defer literals in the client test fixtures described a wire\nshape that no longer exists. Remove them so the fixtures match the format.\n\n* test(partial): pin that morph rejects a none-valued selector\n\nThe split facade treats a selector keyword whose value is None as an unknown\nselector and raises, rather than silently morphing the default target. Pin\nthat contract so the behaviour is intentional and covered.\n\n* fix(partial): bind a late-registered onMount over the current document\n\nA co-located or page script loads after the inline Next._init call that runs\nthe initial mount pass, so an onMount registered by that script missed the\nmarkup already in the document and only caught later inserted subtrees. The\nlive markdown preview, for one, stayed dead until the first partial\nre-render. Run a callback registered after ready at once over the current\ndocument, mirroring how a late ready listener fires immediately, so the\ninitial markup binds without a double run.\n\n* test(partial): write golden fixtures atomically to survive xdist\n\nThe golden writer tests are parametrised across xdist workers that rewrite\nthe same fixture files in parallel, and the plain write_bytes and write_text\ntruncate a file before refilling it, so a reader on another worker could\ncatch a partial file and fail intermittently under make test with -n auto.\nWrite through a pid-unique temp and an atomic replace so a concurrent reader\nalways sees a whole file. The serial CI run was never affected.\n\n* refactor(partial): canonicalize origin and harden core per design audit\n\nRoute every partial origin lookup through a single public resolve_origin in next.forms, fold the triple deferred forms.origin imports into a memoised _origin_match, and keep resolve_partial_origin public over the shared resolver. Re-export REQUEST_ID and trim the public surface. Gate Patches.op against builtin and unknown ops, raise on reserved patch keys, move FORM_ORIGIN_OVERRIDE_KEY into forms.uid, and drop the dead DEFAULT_SWAP setting. Narrow the validate-path casts, switch MergeMode and OriginSource to StrEnum, add public form backend snapshot and restore, and clear the noqa debt across next.partial. Tests move the counting wizard backend into tests/support, pin golden bytes against drift, and share the client and partial-request fixtures.\n\n* fix(client): honest wire guards and lifecycle fixes per design audit\n\nMake isBuiltin a real type predicate and filter parseEnvelope through isRecord so a broken op is skipped instead of poisoning the envelope. Rebuild a multiline prepend through a fragment in source order, gate the SSE resume revalidation against a storm, and give onMount a teardown. Dedupe the record and string predicates into protocol, drop the test-only re-export shims, and remove the FormData cast.\n\n* docs(partial): server-authored redirect note and audit prose fixes\n\nDocument the external redirect escape hatch in the security overview, drop the dead DEFAULT_SWAP reference, restore the lost howto annotations, and clear the placeholder and em-dash prose flagged by the audit.\n\n* fix(examples): public REQUEST_ID path and typed receiver\n\nSwitch live-polls to the public next.partial REQUEST_ID export, type the StaticCollector receiver to drop the two ignores, and refresh the wiki search placeholder.\n\n* refactor(partial): trim the public __all__ to its real consumers\n\nDrop ActionRef, PartialIntent, PartialOrigin, partial_backend_manager, and shape_validate from the package facade. Each stays reachable through its home submodule, and none is imported through next.partial or documented as public, so the re-export was dead surface.\n\n* test(forms): isolate the origin resolver bench from the live urlconf\n\nThe cold origin bench resolved the posted URL against the live file-router urlconf, so its median scaled with the number of test site pages rather than the resolver code. Adding pages tripped the median:99% gate on a non-perf change. Pin both origin benches to a dedicated minimal urlconf so they measure the resolver itself. The cold median drops from roughly 1.2ms to 7us and stops drifting with fixture growth.\n\n* test(client): close the runtime suite to full coverage and gate at 100%\n\nAdd targeted tests for the uncovered client branches — form-error parsing edge cases, the broken-op containment path, missing merge targets, the refresh and layer guards, the SSE non-record paths, and the trigger narrowing. Mark eight genuinely unreachable or browser-only sites with a justified v8 ignore each, the same standard as a Python pragma no cover. Raise the vitest thresholds to 100 on all four metrics so the runtime matches the Python 100 percent gate.\n\n* refactor(examples): promote markdown_preview to a shared component\n\nReplace the loose _shared static markdown_preview.js and the two duplicated _blocks/markdown_preview blocks with one shared _shared/_components/markdown_preview that co-locates its djx, css, and mjs. The shell is pure presentation — it takes rendered_html and a label, the framework auto-discovers the co-located module and styles, and each app keeps its own server render and injects the HTML through the prop. wiki renders through its render_markdown helper, multi-tenant gains a notes/markdown_render module. The edit preview depends on the existing note context so it neither re-fetches the note nor needs an id parameter.\n\n* fix(docs): rewrite some blocks\n\n* feat(partial): morph a repeated form by its key, drop dead component morph\n\nA {% form %} rendered inside a {% for %} produces one instance per row, all sharing the action uid the morph addresses. The client resolved a form-uid target by first match, so an invalid submit re-rendered the wrong instance. The initiating form's data-next-key now threads from the wire through apply, and a form-uid target resolves by action and key on both the live document and the parsed extract. The {% form %} tag gains a key= param, and a new next.W070 check warns on a looped form with neither a key= nor a zone=.\n\nDrop the dead morph(component=) path. The builder emitted a {component} target the client runtime never resolved and no rendered markup carried, a vestige of the rejected components-first design. Zones cover the cases it aimed at.\n\n* feat(examples): inline keyed edit forms in the shortener admin list\n\nEach link in the admin list carries its own inline edit form for the destination URL. The form renders once per row, all instances sharing the action uid, so each carries key=link.slug. An invalid submit re-renders the submitted row rather than the first. EditLinkForm is a ModelForm whose get_initial resolves the link from the posted slug, and the looped form is keyed so the next.W070 check stays quiet.\n\n* refactor(partial): trim key= docstrings and comments to terse style\n\n* feat(examples): live keyed inline editing in the admin change view\n\n* feat(partial): harden the client and server under strict typing\n\n* refactor(next): harden the tree under strict lint and extend the partial error taxonomy\n\n* fix(types): override/overload/di\n\n* feat(docs): updated landing & added tutorial6\n\n* fix(tests): added django 4.2 assert condition\n\n* refactor(next): drop Django <5.2 support and tidy the partial internals\n\nNarrow the support surface to Django 5.2 and 6.0 across the CI matrix, the\ndependency floor, the classifiers, and the docs, then strip the\nversion-conditional code the older releases needed. The legacy\nSTATICFILES_STORAGE fallback, the transitional 4.2 form-renderer rationale,\nand the django.VERSION branch in the no-header regression test all go.\n\nFold in the cleanups the same pass surfaced. The zone asset collection is\ndeduped behind ZoneRenderResult.url_assets, the router-walk dedup set is\nencapsulated on ComponentsManager, the morph selector dispatch drops its\nredundant double check, and the client applier dev flag is marked readonly.",
+          "timestamp": "2026-06-25T10:35:26+03:00",
+          "tree_id": "cb5ef9bcea1b4936a8cc3cb47542dac261906e67",
+          "url": "https://github.com/next-dj/next-dj/commit/0e9281f33c3f3a62de3318b6a32c4e2bd9b28a76"
+        },
+        "date": 1782373394684,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/benchmarks/apps/test_bench_autoreload.py::TestBenchAppsAutoreload::test_install_uninstall_cycle",
+            "value": 160820.35410564087,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00000949788509547321",
+            "extra": "mean: 6.218118381601825 usec\nrounds: 182216"
+          },
+          {
+            "name": "tests/benchmarks/apps/test_bench_autoreload.py::TestBenchAppsAutoreload::test_install_idempotent",
+            "value": 9459351.0641389,
+            "unit": "iter/sec",
+            "range": "stddev: 1.0989888579837164e-8",
+            "extra": "mean: 105.7154971011779 nsec\nrounds: 97324"
+          },
+          {
+            "name": "tests/benchmarks/components/test_bench_backends.py::TestBenchComponentScanner::test_scan_small",
+            "value": 3219.422570319078,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00000743225996648747",
+            "extra": "mean: 310.61470750044765 usec\nrounds: 3306"
+          },
+          {
+            "name": "tests/benchmarks/components/test_bench_backends.py::TestBenchComponentScanner::test_scan_large",
+            "value": 66.15275200253433,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00006273930375717661",
+            "extra": "mean: 15.116529089548532 msec\nrounds: 67"
+          },
+          {
+            "name": "tests/benchmarks/components/test_bench_facade.py::TestBenchComponentRenderedSignal::test_send_no_receiver",
+            "value": 3098686.9404502343,
+            "unit": "iter/sec",
+            "range": "stddev: 5.716524368844465e-8",
+            "extra": "mean: 322.7173377684619 nsec\nrounds: 189502"
+          },
+          {
+            "name": "tests/benchmarks/components/test_bench_facade.py::TestBenchComponentRenderedSignal::test_send_with_one_receiver",
+            "value": 564188.8297637089,
+            "unit": "iter/sec",
+            "range": "stddev: 1.551552786482901e-7",
+            "extra": "mean: 1.7724562189911055 usec\nrounds: 59720"
+          },
+          {
+            "name": "tests/benchmarks/components/test_bench_registry.py::TestBenchComponentRegistry::test_register_bulk",
+            "value": 17289.661555256476,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000029264056895784526",
+            "extra": "mean: 57.838032098203556 usec\nrounds: 17633"
+          },
+          {
+            "name": "tests/benchmarks/components/test_bench_registry.py::TestBenchComponentRegistry::test_lookup_by_name_hit",
+            "value": 9168402.023344267,
+            "unit": "iter/sec",
+            "range": "stddev: 1.1577471400337532e-8",
+            "extra": "mean: 109.07026082122432 nsec\nrounds: 90943"
+          },
+          {
+            "name": "tests/benchmarks/components/test_bench_registry.py::TestBenchComponentRegistry::test_lookup_miss",
+            "value": 9147581.55433271,
+            "unit": "iter/sec",
+            "range": "stddev: 1.1190043600672028e-8",
+            "extra": "mean: 109.31851157165738 nsec\nrounds: 91862"
+          },
+          {
+            "name": "tests/benchmarks/components/test_bench_registry.py::TestBenchComponentVisibility::test_visibility_resolve_cold",
+            "value": 2236.0986083957705,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000014077525382121818",
+            "extra": "mean: 447.2074694046804 usec\nrounds: 2386"
+          },
+          {
+            "name": "tests/benchmarks/components/test_bench_registry.py::TestBenchComponentVisibility::test_visibility_resolve_cached",
+            "value": 1822448.5355462146,
+            "unit": "iter/sec",
+            "range": "stddev: 8.111849518087353e-8",
+            "extra": "mean: 548.7123397425789 nsec\nrounds: 190223"
+          },
+          {
+            "name": "tests/benchmarks/components/test_bench_registry.py::TestBenchComponentVisibility::test_version_bump_invalidation",
+            "value": 371.3396803602664,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0004970109702728278",
+            "extra": "mean: 2.6929521752962673 msec\nrounds: 2453"
+          },
+          {
+            "name": "tests/benchmarks/conf/test_bench_helpers.py::TestBenchExtendDefaultBackend::test_extend_single_override",
+            "value": 162089.46439980826,
+            "unit": "iter/sec",
+            "range": "stddev: 9.839665941105981e-7",
+            "extra": "mean: 6.169432440922933 usec\nrounds: 175809"
+          },
+          {
+            "name": "tests/benchmarks/conf/test_bench_helpers.py::TestBenchExtendDefaultBackend::test_extend_nested_options_merge",
+            "value": 151317.23015490524,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000011509605284346514",
+            "extra": "mean: 6.608632731224913 usec\nrounds: 159262"
+          },
+          {
+            "name": "tests/benchmarks/conf/test_bench_settings.py::TestBenchSettingsMerge::test_merge_cold",
+            "value": 29001.325382162147,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00000226868433407233",
+            "extra": "mean: 34.48118273294745 usec\nrounds: 30416"
+          },
+          {
+            "name": "tests/benchmarks/conf/test_bench_settings.py::TestBenchSettingsMerge::test_merge_warm_cached",
+            "value": 10924482.717668349,
+            "unit": "iter/sec",
+            "range": "stddev: 1.0191224598775174e-8",
+            "extra": "mean: 91.5375149417998 nsec\nrounds: 112448"
+          },
+          {
+            "name": "tests/benchmarks/conf/test_bench_settings.py::TestBenchSettingsMerge::test_attribute_access_cached",
+            "value": 5901333.636762752,
+            "unit": "iter/sec",
+            "range": "stddev: 1.7425763305705987e-8",
+            "extra": "mean: 169.45322219547683 nsec\nrounds: 59295"
+          },
+          {
+            "name": "tests/benchmarks/conf/test_bench_settings.py::TestBenchSettingsMerge::test_reload_cycle",
+            "value": 9872.502510913979,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000014375218180084485",
+            "extra": "mean: 101.2914404320999 usec\nrounds: 10467"
+          },
+          {
+            "name": "tests/benchmarks/conf/test_bench_settings.py::TestBenchSettingsMerge::test_merge_with_user_form_action_backends",
+            "value": 30147.194588995073,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000021888627161054897",
+            "extra": "mean: 33.17058232559523 usec\nrounds: 31175"
+          },
+          {
+            "name": "tests/benchmarks/deps/test_bench_resolver.py::TestBenchDependencyResolver::test_resolve_simple",
+            "value": 118775.62666753765,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000011245945087948642",
+            "extra": "mean: 8.419235730905287 usec\nrounds: 122220"
+          },
+          {
+            "name": "tests/benchmarks/deps/test_bench_resolver.py::TestBenchDependencyResolver::test_resolve_five_params",
+            "value": 64225.52191535062,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000014234419983503558",
+            "extra": "mean: 15.57013427338126 usec\nrounds: 65523"
+          },
+          {
+            "name": "tests/benchmarks/deps/test_bench_resolver.py::TestBenchDependencyResolver::test_resolve_mixed_markers",
+            "value": 112469.92948528503,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000001312366509908203",
+            "extra": "mean: 8.891265466035831 usec\nrounds: 116659"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_backends.py::TestBenchFormActionBackend::test_register_bulk",
+            "value": 2689.784870685241,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000011324566146697594",
+            "extra": "mean: 371.7769442822553 usec\nrounds: 2764"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_backends.py::TestBenchFormActionBackend::test_register_bulk_with_receiver",
+            "value": 1772.9180142530895,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000009330783240026619",
+            "extra": "mean: 564.0418744469065 usec\nrounds: 1800"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_backends.py::TestBenchFormActionBackend::test_get_meta_hit",
+            "value": 4634880.8513801815,
+            "unit": "iter/sec",
+            "range": "stddev: 1.8331344761254676e-8",
+            "extra": "mean: 215.75527657894776 nsec\nrounds: 46532"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_backends.py::TestBenchFormActionBackend::test_get_meta_miss",
+            "value": 5916095.662265741,
+            "unit": "iter/sec",
+            "range": "stddev: 1.4366548991178202e-8",
+            "extra": "mean: 169.03039725646033 nsec\nrounds: 60263"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_backends.py::TestBenchFormActionBackend::test_generate_urls_with_actions",
+            "value": 220028.96027315073,
+            "unit": "iter/sec",
+            "range": "stddev: 4.977271673264177e-7",
+            "extra": "mean: 4.544856271458853 usec\nrounds: 113857"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_backends.py::TestBenchScopedLookup::test_get_meta_scoped_hit",
+            "value": 4368038.847173791,
+            "unit": "iter/sec",
+            "range": "stddev: 1.7035151355749118e-8",
+            "extra": "mean: 228.93569287897247 nsec\nrounds: 44777"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_backends.py::TestBenchScopedLookup::test_get_meta_scoped_miss",
+            "value": 2840320.4584417623,
+            "unit": "iter/sec",
+            "range": "stddev: 5.554974168245083e-8",
+            "extra": "mean: 352.0729490321713 nsec\nrounds: 192753"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_checks.py::TestBenchFormActionBackendsCheck::test_check_clean",
+            "value": 580070.9591429135,
+            "unit": "iter/sec",
+            "range": "stddev: 1.487782119347604e-7",
+            "extra": "mean: 1.7239270200279546 usec\nrounds: 59974"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_checks.py::TestBenchFormActionBackendsCheck::test_check_e044_unimportable",
+            "value": 13520.854708357769,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000042105321050827005",
+            "extra": "mean: 73.95982144396989 usec\nrounds: 13906"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_checks.py::TestBenchFormActionBackendsCheck::test_check_e045_wrong_subclass",
+            "value": 426925.20309404447,
+            "unit": "iter/sec",
+            "range": "stddev: 1.7124153198360238e-7",
+            "extra": "mean: 2.342330677019592 usec\nrounds: 43720"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_dispatch.py::TestBenchDispatchHelpers::test_normalize_none",
+            "value": 13186795.010610597,
+            "unit": "iter/sec",
+            "range": "stddev: 9.418777406192481e-9",
+            "extra": "mean: 75.83343785926468 nsec\nrounds: 135852"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_dispatch.py::TestBenchDispatchHelpers::test_normalize_httpresponse",
+            "value": 8441584.494129734,
+            "unit": "iter/sec",
+            "range": "stddev: 1.1725970293362242e-8",
+            "extra": "mean: 118.46117286338821 nsec\nrounds: 84119"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_dispatch.py::TestBenchDispatchHelpers::test_normalize_str",
+            "value": 6971932.520746785,
+            "unit": "iter/sec",
+            "range": "stddev: 1.43312342854722e-8",
+            "extra": "mean: 143.43225454696267 nsec\nrounds: 69779"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_dispatch.py::TestBenchDispatchHelpers::test_normalize_redirect_duck",
+            "value": 165226.7730399014,
+            "unit": "iter/sec",
+            "range": "stddev: 7.837335224617425e-7",
+            "extra": "mean: 6.0522879046878515 usec\nrounds: 170678"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_dispatch.py::TestBenchDispatchHelpers::test_filter_reserved_url_kwargs",
+            "value": 498137.75254486914,
+            "unit": "iter/sec",
+            "range": "stddev: 1.5870840431335635e-7",
+            "extra": "mean: 2.0074768372628538 usec\nrounds: 52442"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_dispatch.py::TestBenchDispatchHelpers::test_resolve_origin_cold",
+            "value": 72555.66059846048,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000013395849773058514",
+            "extra": "mean: 13.782522159562813 usec\nrounds: 75994"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_dispatch.py::TestBenchDispatchHelpers::test_resolve_origin_memoised",
+            "value": 6617812.961012631,
+            "unit": "iter/sec",
+            "range": "stddev: 1.365967196982451e-8",
+            "extra": "mean: 151.10732290127828 nsec\nrounds: 66658"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_dispatch.py::TestBenchDispatchEndToEnd::test_dispatch_valid_form",
+            "value": 6746.058209507199,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000014989872139417817",
+            "extra": "mean: 148.23471261939352 usec\nrounds: 7377"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_dispatch.py::TestBenchDispatchEndToEnd::test_dispatch_invalid_form",
+            "value": 6709.165870249697,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000019626411197116685",
+            "extra": "mean: 149.04982517041014 usec\nrounds: 7922"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_dispatch.py::TestBenchDispatchEndToEnd::test_dispatch_unguarded_form_no_hook_overhead",
+            "value": 6835.668899464325,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00002493219151687523",
+            "extra": "mean: 146.29146243147684 usec\nrounds: 8265"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_dispatch.py::TestBenchDispatchEndToEnd::test_dispatch_through_subclassed_backend",
+            "value": 6964.5103337643595,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000012241680911563961",
+            "extra": "mean: 143.58511253144974 usec\nrounds: 8140"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_factory.py::TestBenchFormActionFactory::test_create_backend_cached",
+            "value": 2347132.6537268395,
+            "unit": "iter/sec",
+            "range": "stddev: 6.544088550459639e-8",
+            "extra": "mean: 426.051760820665 nsec\nrounds: 189108"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_factory.py::TestBenchFormActionFactory::test_create_backend_cold",
+            "value": 921433.93633467,
+            "unit": "iter/sec",
+            "range": "stddev: 3.481390323594635e-7",
+            "extra": "mean: 1.0852649990056307 usec\nrounds: 200"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_manager.py::TestBenchEnsureBackends::test_ensure_backends_warm",
+            "value": 10539533.835861389,
+            "unit": "iter/sec",
+            "range": "stddev: 2.5363668080098792e-8",
+            "extra": "mean: 94.88085674125745 nsec\nrounds: 109975"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_manager.py::TestBenchEnsureBackends::test_reload_config_cold",
+            "value": 1186151.7422439305,
+            "unit": "iter/sec",
+            "range": "stddev: 1.23356719283231e-7",
+            "extra": "mean: 843.0624551528513 nsec\nrounds: 123732"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_manager.py::TestBenchRegisterThroughManager::test_register_bulk_via_manager",
+            "value": 2556.2566802908636,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000020548764197997604",
+            "extra": "mean: 391.1970216880626 usec\nrounds: 2628"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_manager.py::TestBenchManagerLookups::test_meta_lookup_through_manager",
+            "value": 3722251.721579878,
+            "unit": "iter/sec",
+            "range": "stddev: 3.7225449620642e-8",
+            "extra": "mean: 268.6545872764238 nsec\nrounds: 190549"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_manager.py::TestBenchManagerLookups::test_get_action_url_miss_raise",
+            "value": 756370.3254605172,
+            "unit": "iter/sec",
+            "range": "stddev: 2.868233548326216e-7",
+            "extra": "mean: 1.322103692250418 usec\nrounds: 72151"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_manager.py::TestBenchManagerLookups::test_get_action_url_miss_rendered",
+            "value": 6987.192087875748,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000005032755864692719",
+            "extra": "mean: 143.11900795388334 usec\nrounds: 7166"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_manager.py::TestBenchManagerLookups::test_default_backend_property",
+            "value": 5729390.93367749,
+            "unit": "iter/sec",
+            "range": "stddev: 1.5718247472782274e-8",
+            "extra": "mean: 174.5386222682026 nsec\nrounds: 58531"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_manager.py::TestBenchManagerLookups::test_iter_url_patterns",
+            "value": 193822.2725819344,
+            "unit": "iter/sec",
+            "range": "stddev: 5.344826283376225e-7",
+            "extra": "mean: 5.159365777105262 usec\nrounds: 100251"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_manager.py::TestBenchClearRegistries::test_clear_registries",
+            "value": 125613.54369321416,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000011583723043497354",
+            "extra": "mean: 7.9609249974055265 usec\nrounds: 200"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_namespace.py::TestBenchBuildFormNamespace::test_build_form_namespace_form_class",
+            "value": 37782.89887747161,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000021340534214166355",
+            "extra": "mean: 26.467000407855387 usec\nrounds: 39252"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_registration.py::TestBenchFormRegistration::test_define_form_subclasses",
+            "value": 77.58768860637484,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00008474886672567666",
+            "extra": "mean: 12.888642746831833 msec\nrounds: 79"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_rendering.py::TestBenchRenderInvalidPage::test_render_invalid_page_with_errors",
+            "value": 1543.8605803560429,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00002556145127397662",
+            "extra": "mean: 647.726882028027 usec\nrounds: 1619"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_rendering.py::TestBenchErrorRerenderWithLayouts::test_error_rerender_with_layouts",
+            "value": 1305.7839790624084,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00001642901576191033",
+            "extra": "mean: 765.8234562795215 usec\nrounds: 1361"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_rendering.py::TestBenchPageGetRender::test_page_render_warm_cache",
+            "value": 1427.8063420689139,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000020258991952892512",
+            "extra": "mean: 700.3750932713916 usec\nrounds: 1501"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_rendering.py::TestBenchPageGetRender::test_page_render_cold_cache",
+            "value": 824.6640979738472,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00015328331352561467",
+            "extra": "mean: 1.2126149331066345 msec\nrounds: 882"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_rendering.py::TestBenchFormTag::test_form_tag_full_render",
+            "value": 1132.7170372303276,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00008361594100275418",
+            "extra": "mean: 882.8330175426321 usec\nrounds: 1140"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_widgets.py::TestBenchComponentWidgetRender::test_render_cold_lookup",
+            "value": 11672.040581732528,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000064989937463683415",
+            "extra": "mean: 85.67482206710815 usec\nrounds: 12263"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_widgets.py::TestBenchComponentWidgetRender::test_render_warm_request_cache",
+            "value": 13657.686385091782,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000053664867441868855",
+            "extra": "mean: 73.2188433534074 usec\nrounds: 14255"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_widgets.py::TestBenchBindComponentWidgets::test_bind_multi_field_form",
+            "value": 90229.9833802164,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000011284941129545186",
+            "extra": "mean: 11.082790470947348 usec\nrounds: 95457"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_wizard.py::TestBenchWizardNavigation::test_current_step",
+            "value": 2022432.6934034207,
+            "unit": "iter/sec",
+            "range": "stddev: 7.638195369627423e-8",
+            "extra": "mean: 494.4540321473763 nsec\nrounds: 191278"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_wizard.py::TestBenchWizardNavigation::test_step_names",
+            "value": 4248881.013909811,
+            "unit": "iter/sec",
+            "range": "stddev: 1.695815708044354e-8",
+            "extra": "mean: 235.3560847494296 nsec\nrounds: 45121"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_wizard.py::TestBenchWizardNavigation::test_next_step",
+            "value": 1143946.6639894976,
+            "unit": "iter/sec",
+            "range": "stddev: 3.237816017110289e-7",
+            "extra": "mean: 874.1666298606217 nsec\nrounds: 121330"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_wizard.py::TestBenchWizardNavigation::test_goto",
+            "value": 869043.7172620121,
+            "unit": "iter/sec",
+            "range": "stddev: 1.1436107534897274e-7",
+            "extra": "mean: 1.150690097789989 usec\nrounds: 90687"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_wizard.py::TestBenchWizardNavigation::test_current_form",
+            "value": 68382.52648799063,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000013366333906083059",
+            "extra": "mean: 14.623618800858733 usec\nrounds: 71582"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_wizard.py::TestBenchWizardDispatch::test_dispatch_wizard_step_submit",
+            "value": 21395.531354904924,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000006683102020715112",
+            "extra": "mean: 46.738731719824756 usec\nrounds: 22730"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_wizard.py::TestBenchCacheWizardBackend::test_save_step",
+            "value": 79138.8928806275,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000012804926910608757",
+            "extra": "mean: 12.63601199865649 usec\nrounds: 83009"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_wizard.py::TestBenchCacheWizardBackend::test_load",
+            "value": 164096.61622715127,
+            "unit": "iter/sec",
+            "range": "stddev: 8.183739814479134e-7",
+            "extra": "mean: 6.09397087515654 usec\nrounds: 168379"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_wizard.py::TestBenchSessionWizardBackend::test_save_step",
+            "value": 296781.17631843686,
+            "unit": "iter/sec",
+            "range": "stddev: 4.2138070373167197e-7",
+            "extra": "mean: 3.3694859370967363 usec\nrounds: 152208"
+          },
+          {
+            "name": "tests/benchmarks/forms/test_bench_wizard.py::TestBenchSessionWizardBackend::test_load",
+            "value": 558683.7348911203,
+            "unit": "iter/sec",
+            "range": "stddev: 1.7473950094069804e-7",
+            "extra": "mean: 1.7899214484826305 usec\nrounds: 52442"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchPythonModuleLoader::test_python_load_cold",
+            "value": 12683.023964265121,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000023667507341633987",
+            "extra": "mean: 78.84554999009197 usec\nrounds: 20"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchPythonModuleLoader::test_python_load_warm_mtime_hit",
+            "value": 300906.2757720765,
+            "unit": "iter/sec",
+            "range": "stddev: 3.966332733653196e-7",
+            "extra": "mean: 3.323293930756887 usec\nrounds: 154584"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchPythonModuleLoader::test_python_template_loader_can_load",
+            "value": 279587.28488420625,
+            "unit": "iter/sec",
+            "range": "stddev: 4.3582604407234874e-7",
+            "extra": "mean: 3.5767005656718602 usec\nrounds: 147276"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchDjxLoader::test_djx_can_load_hit",
+            "value": 95654.31806607566,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000011498104578549628",
+            "extra": "mean: 10.454311109188238 usec\nrounds: 98377"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchDjxLoader::test_djx_can_load_miss",
+            "value": 98989.30487450611,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000010955495769629708",
+            "extra": "mean: 10.102101446896226 usec\nrounds: 102418"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchDjxLoader::test_djx_load_template",
+            "value": 45069.38563527847,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000001881684979461583",
+            "extra": "mean: 22.188010462189236 usec\nrounds: 46166"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchLayoutLoader::test_ancestor_walk_no_layouts",
+            "value": 5007.37848420746,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000005440503069546523",
+            "extra": "mean: 199.70529552616281 usec\nrounds: 5096"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchLayoutLoader::test_ancestor_walk_with_layouts",
+            "value": 4950.2527685566165,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000006326325931554789",
+            "extra": "mean: 202.0098865156693 usec\nrounds: 5058"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchLoaderChain::test_build_registered_loaders_warm",
+            "value": 10460434.620073842,
+            "unit": "iter/sec",
+            "range": "stddev: 9.773552121863905e-9",
+            "extra": "mean: 95.59832228012539 nsec\nrounds: 107366"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchLoaderChain::test_chain_first_hit_wins",
+            "value": 30390.020772672196,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000023478386747058225",
+            "extra": "mean: 32.90553854768129 usec\nrounds: 31273"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchLoaderChain::test_chain_miss_then_hit",
+            "value": 95578.38444742435,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000010869252503814499",
+            "extra": "mean: 10.462616686622056 usec\nrounds: 99266"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchComposeLayoutHierarchy::test_compose[3]",
+            "value": 21518.35531868292,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000022651636085856535",
+            "extra": "mean: 46.471953139084384 usec\nrounds: 21980"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_loaders.py::TestBenchComposeLayoutHierarchy::test_compose[10]",
+            "value": 6398.126463849654,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000004816612782549509",
+            "extra": "mean: 156.29575402270424 usec\nrounds: 6525"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_manager.py::TestBenchPageRender::test_render_simple",
+            "value": 4943.571652310305,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000009816909547963652",
+            "extra": "mean: 202.28289793931978 usec\nrounds: 5193"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_manager.py::TestBenchPageRender::test_render_heavy_context",
+            "value": 3028.0318767269896,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000011110548776356872",
+            "extra": "mean: 330.2475141314904 usec\nrounds: 3149"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_manager.py::TestBenchPageRender::test_build_render_context",
+            "value": 9968.986919239289,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000004681528166843405",
+            "extra": "mean: 100.31109561093776 usec\nrounds: 10208"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_registry.py::TestBenchPageContextRegistry::test_register_context",
+            "value": 41136.46288835725,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000017498657997635842",
+            "extra": "mean: 24.30933361271145 usec\nrounds: 42948"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_registry.py::TestBenchPageContextRegistry::test_collect_context_single",
+            "value": 15847.221151817119,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000004461966342623569",
+            "extra": "mean: 63.10254589242829 usec\nrounds: 16179"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_registry.py::TestBenchPageContextRegistry::test_collect_context_keyed_many",
+            "value": 7097.482892749169,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000061017044930306055",
+            "extra": "mean: 140.89502082796224 usec\nrounds: 7250"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_render_context.py::TestBenchBuildRenderContext::test_build_context[small]",
+            "value": 7458.490759433506,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000006279265894046041",
+            "extra": "mean: 134.07538230642695 usec\nrounds: 7732"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_render_context.py::TestBenchBuildRenderContext::test_build_context[large]",
+            "value": 4292.0269711337105,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000009286355588909328",
+            "extra": "mean: 232.99014818069904 usec\nrounds: 4400"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_render_context.py::TestBenchPageRenderedSignal::test_render_no_receiver",
+            "value": 4862.137957165369,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000013657054358273135",
+            "extra": "mean: 205.67084044299745 usec\nrounds: 5133"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_render_context.py::TestBenchPageRenderedSignal::test_render_with_receiver",
+            "value": 4706.8083303812855,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000009978871353099622",
+            "extra": "mean: 212.45819455728565 usec\nrounds: 4960"
+          },
+          {
+            "name": "tests/benchmarks/pages/test_bench_render_context.py::TestBenchPageRenderedSignal::test_render_with_receiver_large_context",
+            "value": 2730.0562815307712,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000013459694291138969",
+            "extra": "mean: 366.29281482771825 usec\nrounds: 2873"
+          },
+          {
+            "name": "tests/benchmarks/partial/test_bench_envelope.py::TestBenchEnvelopeBuild::test_build_and_serialise",
+            "value": 58164.45283894043,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000014710659714489922",
+            "extra": "mean: 17.192631430214565 usec\nrounds: 60260"
+          },
+          {
+            "name": "tests/benchmarks/partial/test_bench_envelope.py::TestBenchShapeInvalid::test_shape_invalid_outcome",
+            "value": 1549.0463379902526,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000025648847601782302",
+            "extra": "mean: 645.5584803856865 usec\nrounds: 1657"
+          },
+          {
+            "name": "tests/benchmarks/partial/test_bench_zones.py::TestBenchFiveZonePageAgainstBaseline::test_render_plain",
+            "value": 4584.484225871282,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000012038515104410571",
+            "extra": "mean: 218.1270456460017 usec\nrounds: 4776"
+          },
+          {
+            "name": "tests/benchmarks/partial/test_bench_zones.py::TestBenchFiveZonePageAgainstBaseline::test_render_five_zones",
+            "value": 4131.359357001813,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000011903631718128347",
+            "extra": "mean: 242.0510813965393 usec\nrounds: 4300"
+          },
+          {
+            "name": "tests/benchmarks/partial/test_bench_zones.py::TestBenchSingleZoneRender::test_render_one_zone",
+            "value": 5072.433387668117,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000009828398433231982",
+            "extra": "mean: 197.14403789533387 usec\nrounds: 5304"
+          },
+          {
+            "name": "tests/benchmarks/server/test_bench_autoreload.py::TestBenchTreeSignature::test_signature[small]",
+            "value": 1995.6290795400273,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000075519727175779525",
+            "extra": "mean: 501.09512346377016 usec\nrounds: 2033"
+          },
+          {
+            "name": "tests/benchmarks/server/test_bench_autoreload.py::TestBenchTreeSignature::test_signature[large]",
+            "value": 99.71396880201635,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00006384666381332345",
+            "extra": "mean: 10.02868516832898 msec\nrounds: 101"
+          },
+          {
+            "name": "tests/benchmarks/server/test_bench_autoreload.py::TestBenchCollectRoutes::test_collect_routes_cached",
+            "value": 934.4038221528643,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000012319103133676888",
+            "extra": "mean: 1.0702011018062856 msec\nrounds: 943"
+          },
+          {
+            "name": "tests/benchmarks/server/test_bench_autoreload.py::TestBenchCollectRoutes::test_collect_routes_fresh",
+            "value": 150.37290382843574,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00004749526338295536",
+            "extra": "mean: 6.650134263157713 msec\nrounds: 152"
+          },
+          {
+            "name": "tests/benchmarks/static/test_bench_collector.py::TestBenchStaticCollector::test_add_unique_urls",
+            "value": 23783.0957468385,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000002476614264151329",
+            "extra": "mean: 42.04667090628564 usec\nrounds: 24607"
+          },
+          {
+            "name": "tests/benchmarks/static/test_bench_collector.py::TestBenchStaticCollector::test_add_dedup_hit",
+            "value": 54506.462121567434,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000001480526229835575",
+            "extra": "mean: 18.346448495770453 usec\nrounds: 55782"
+          },
+          {
+            "name": "tests/benchmarks/static/test_bench_collector.py::TestBenchStaticCollector::test_add_inline_unique",
+            "value": 21458.954276784705,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00000248490854887783",
+            "extra": "mean: 46.600593258258 usec\nrounds: 22813"
+          },
+          {
+            "name": "tests/benchmarks/static/test_bench_collector.py::TestBenchStaticCollector::test_add_js_context_many",
+            "value": 3750.0670090371655,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000006586298860457278",
+            "extra": "mean: 266.6619016647255 usec\nrounds: 3783"
+          },
+          {
+            "name": "tests/benchmarks/static/test_bench_discovery.py::TestBenchPathResolver::test_find_page_root_hit_cached",
+            "value": 6148929.2621499235,
+            "unit": "iter/sec",
+            "range": "stddev: 1.3593800206126071e-8",
+            "extra": "mean: 162.62994049314497 nsec\nrounds: 62681"
+          },
+          {
+            "name": "tests/benchmarks/static/test_bench_discovery.py::TestBenchPathResolver::test_logical_name_for_template_deep",
+            "value": 1597031.2403626833,
+            "unit": "iter/sec",
+            "range": "stddev: 8.714455694069638e-8",
+            "extra": "mean: 626.1618274748974 nsec\nrounds: 161577"
+          },
+          {
+            "name": "tests/benchmarks/static/test_bench_discovery.py::TestBenchPathResolver::test_logical_name_for_layout_deep",
+            "value": 1380086.4311037124,
+            "unit": "iter/sec",
+            "range": "stddev: 8.956792535121521e-8",
+            "extra": "mean: 724.5922990491679 nsec\nrounds: 145138"
+          },
+          {
+            "name": "tests/benchmarks/static/test_bench_serializers.py::TestBenchResolveSerializer::test_resolve_default",
+            "value": 5250240.883264601,
+            "unit": "iter/sec",
+            "range": "stddev: 1.513063107337539e-8",
+            "extra": "mean: 190.46745134828933 nsec\nrounds: 53542"
+          },
+          {
+            "name": "tests/benchmarks/static/test_bench_serializers.py::TestBenchJsonJsContextSerializer::test_dumps_small_dict",
+            "value": 416288.7035083433,
+            "unit": "iter/sec",
+            "range": "stddev: 1.675993734179052e-7",
+            "extra": "mean: 2.4021790444283764 usec\nrounds: 42948"
+          },
+          {
+            "name": "tests/benchmarks/static/test_bench_serializers.py::TestBenchJsonJsContextSerializer::test_dumps_wide_dict",
+            "value": 207598.87678206596,
+            "unit": "iter/sec",
+            "range": "stddev: 5.434682724770605e-7",
+            "extra": "mean: 4.816981746244149 usec\nrounds: 106225"
+          },
+          {
+            "name": "tests/benchmarks/static/test_bench_serializers.py::TestBenchJsonJsContextSerializer::test_dumps_nested_dict",
+            "value": 182444.47300685453,
+            "unit": "iter/sec",
+            "range": "stddev: 7.51517269017738e-7",
+            "extra": "mean: 5.481119726561569 usec\nrounds: 185598"
+          },
+          {
+            "name": "tests/benchmarks/static/test_bench_serializers.py::TestBenchPydanticJsContextSerializer::test_dumps_model",
+            "value": 233005.98193633178,
+            "unit": "iter/sec",
+            "range": "stddev: 5.006948285988644e-7",
+            "extra": "mean: 4.291735309496247 usec\nrounds: 121625"
+          },
+          {
+            "name": "tests/benchmarks/templatetags/test_bench_template_tags.py::TestBenchStaticTags::test_use_script_dedup",
+            "value": 59334.96591424073,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000014902580739812307",
+            "extra": "mean: 16.853468854188627 usec\nrounds: 61260"
+          },
+          {
+            "name": "tests/benchmarks/templatetags/test_bench_template_tags.py::TestBenchStaticTags::test_inline_script_block",
+            "value": 113437.29727757127,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000010146932914565354",
+            "extra": "mean: 8.815442751188671 usec\nrounds: 120020"
+          },
+          {
+            "name": "tests/benchmarks/templatetags/test_bench_template_tags.py::TestBenchStaticTags::test_collect_placeholders",
+            "value": 125212.97317519621,
+            "unit": "iter/sec",
+            "range": "stddev: 9.93290895429209e-7",
+            "extra": "mean: 7.986392900365159 usec\nrounds: 129837"
+          },
+          {
+            "name": "tests/benchmarks/testing/test_bench_isolation.py::TestBenchResetFormActions::test_reset_form_actions_only",
+            "value": 197021.04177453805,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0000022342083560895635",
+            "extra": "mean: 5.075600001873681 usec\nrounds: 200"
+          },
+          {
+            "name": "tests/benchmarks/urls/test_bench_backends.py::TestBenchFileRouter::test_filerouter_generate_small",
+            "value": 532.6672840713587,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000024563372989105695",
+            "extra": "mean: 1.8773445073567447 msec\nrounds: 544"
+          },
+          {
+            "name": "tests/benchmarks/urls/test_bench_backends.py::TestBenchFileRouter::test_filerouter_generate_medium",
+            "value": 132.33951860711284,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00004660359072051376",
+            "extra": "mean: 7.556321879700816 msec\nrounds: 133"
+          },
+          {
+            "name": "tests/benchmarks/urls/test_bench_backends.py::TestBenchFileRouter::test_filerouter_generate_large",
+            "value": 11.553819664330748,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0009822725941073698",
+            "extra": "mean: 86.55146341665916 msec\nrounds: 12"
+          },
+          {
+            "name": "tests/benchmarks/urls/test_bench_parser.py::TestBenchURLParser::test_parse_simple_segment",
+            "value": 1995382.9865062896,
+            "unit": "iter/sec",
+            "range": "stddev: 7.138271116508624e-8",
+            "extra": "mean: 501.1569241406118 nsec\nrounds: 182216"
+          },
+          {
+            "name": "tests/benchmarks/urls/test_bench_parser.py::TestBenchURLParser::test_parse_typed_converter",
+            "value": 293955.51574281126,
+            "unit": "iter/sec",
+            "range": "stddev: 4.2769248061596457e-7",
+            "extra": "mean: 3.401875271750043 usec\nrounds: 152231"
+          },
+          {
+            "name": "tests/benchmarks/urls/test_bench_parser.py::TestBenchURLParser::test_prepare_url_name",
+            "value": 775374.0500649496,
+            "unit": "iter/sec",
+            "range": "stddev: 1.2508741741397556e-7",
+            "extra": "mean: 1.2897001130180132 usec\nrounds: 76104"
+          },
+          {
+            "name": "tests/benchmarks/urls/test_bench_parser.py::TestBenchURLParser::test_regex_compile_many",
+            "value": 25147.337206469627,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000002595553607286712",
+            "extra": "mean: 39.76564165778677 usec\nrounds: 25191"
           }
         ]
       }
