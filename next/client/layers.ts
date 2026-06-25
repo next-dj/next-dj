@@ -13,7 +13,12 @@
 
 import { defaultDialog, defaultHistory, defaultPopState } from "./adapters";
 import type { HistoryAdapter } from "./apply";
-import { HEADER_ORIGIN, HEADER_ZONE, cssEscape } from "./protocol";
+import {
+  HEADER_ORIGIN,
+  HEADER_ZONE,
+  cssEscape,
+  currentUrl as pageUrl,
+} from "./protocol";
 
 const LAYER_ATTR = "data-next-layer";
 const ACCEPTED_ATTR = "data-next-accepted";
@@ -126,7 +131,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
   }
 
   function currentUrl(): string {
-    return doc.location.pathname + doc.location.search;
+    return pageUrl(doc);
   }
 
   function resolveZone(name: string, root: ParentNode): Element | null {
@@ -164,6 +169,14 @@ export function createLayers(deps: LayerDeps): LayerStack {
     href: string,
     zone: string,
   ): Promise<void> {
+    // Mark the opener busy before any dialog or history mutation, the single
+    // source of truth the double-click guard reads. A second open for the same
+    // opener is dropped here too, so neither path stacks a second modal.
+    if (opener !== null) {
+      if (opener.hasAttribute(BUSY_ATTR)) return;
+      opener.setAttribute(BUSY_ATTR, "");
+      opener.setAttribute("aria-busy", "true");
+    }
     const dialog = doc.createElement("dialog");
     dialog.setAttribute("data-next-dialog", "");
     const root = doc.createElement("div");
@@ -187,15 +200,27 @@ export function createLayers(deps: LayerDeps): LayerStack {
     history.push(href);
     layer.pushedUrl = currentUrl();
     emit("partial:layer-opened", { opener });
-    const release = busy(opener, root);
+    // The opener already carries busy, so only the target zone is marked here.
+    const release = busy(null, root);
     try {
       await deps.fetch({
         url: href,
         zone,
         headers: { [HEADER_ZONE]: zone, [HEADER_ORIGIN]: host },
       });
+    } catch (e) {
+      // The request died after the URL was pushed and the dialog opened. Tear
+      // down the orphaned layer: remove already rolls the URL back through
+      // history.replace(host) while the current URL still equals pushedUrl, so
+      // Back does not land on a dead modal URL.
+      remove(layer);
+      throw e;
     } finally {
       release();
+      if (opener !== null) {
+        opener.removeAttribute(BUSY_ATTR);
+        opener.removeAttribute("aria-busy");
+      }
     }
   }
 
@@ -233,11 +258,13 @@ export function createLayers(deps: LayerDeps): LayerStack {
   // Splice the layer out, end its dialog, and return focus to the opener.
   function remove(layer: Layer): void {
     const index = stack.indexOf(layer);
-    // The miss arm is a defensive guard: every caller (close, dismissFrom,
-    // _reset) hands remove a layer that is still on the stack, so indexOf never
-    // returns -1 through the public surface.
-    /* v8 ignore next */
-    if (index !== -1) stack.splice(index, 1);
+    // remove can land twice on one layer: a dismiss gesture (Esc, backdrop)
+    // tears it down while open's fetch is still in flight, then that fetch
+    // rejects and the catch arm calls remove again on the already-spliced
+    // layer. The early return makes the second call a true no-op so close,
+    // dialog.remove, focus, and the history rollback never run twice.
+    if (index === -1) return;
+    stack.splice(index, 1);
     layer.close();
     layer.dialog.remove();
     if (layer.returnFocus instanceof HTMLElement) layer.returnFocus.focus();
@@ -297,6 +324,9 @@ export function createLayers(deps: LayerDeps): LayerStack {
     // No zone or no href is a plain navigation: the no-JS path is untouched.
     if (zone === null || zone === "" || href === null || href === "") return;
     event.preventDefault();
+    // A second click while the first request is in flight is dropped, so a
+    // double click stacks neither a second dialog nor a second history entry.
+    if (opener.hasAttribute(BUSY_ATTR)) return;
     void open(opener, href, zone);
   }
 

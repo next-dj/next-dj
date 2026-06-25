@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLayers } from "./layers";
 import type { DialogAdapter, LayerStack, PopStateAdapter } from "./layers";
 import { HEADER_ORIGIN, HEADER_ZONE } from "./protocol";
@@ -405,6 +405,10 @@ describe("layer intercepting URL lifecycle", () => {
     fire = () => handler?.();
   });
 
+  afterEach(() => {
+    layers._reset();
+  });
+
   it("pushes the honest URL of the layer body on open", async () => {
     await layers.open(null, "/photos/1/", "photo");
     expect(window.location.pathname).toBe("/photos/1/");
@@ -451,5 +455,121 @@ describe("layer intercepting URL lifecycle", () => {
     expect(layers.size()).toBe(0);
     fire();
     expect(layers.size()).toBe(0);
+  });
+});
+
+describe("layer open is single-flight and rolls back on failure", () => {
+  function makeHistory() {
+    const pushed: string[] = [];
+    const replaced: string[] = [];
+    const history = {
+      push: (href: string) => pushed.push(href),
+      replace: (href: string) => replaced.push(href),
+    };
+    return { history, pushed, replaced };
+  }
+
+  let layers: LayerStack;
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    window.history.replaceState(null, "", "/feed/");
+  });
+
+  afterEach(() => {
+    layers._reset();
+  });
+
+  it("a double click opens one dialog and pushes history once", () => {
+    const { history, pushed } = makeHistory();
+    layers = createLayers({
+      dispatch: () => undefined,
+      fetch: () => new Promise<void>(() => undefined),
+      document,
+      dialog: mockDialog().adapter,
+      history,
+    });
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/photos/1/");
+    opener.setAttribute("data-next-layer", "photo");
+    document.body.append(opener);
+    layers.install(document);
+    opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(document.querySelectorAll("[data-next-dialog]")).toHaveLength(1);
+    expect(pushed).toEqual(["/photos/1/"]);
+    expect(layers.size()).toBe(1);
+  });
+
+  it("a second open for a busy opener is dropped before any mutation", async () => {
+    const { history, pushed } = makeHistory();
+    layers = createLayers({
+      dispatch: () => undefined,
+      fetch: () => new Promise<void>(() => undefined),
+      document,
+      dialog: mockDialog().adapter,
+      history,
+    });
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/photos/1/");
+    document.body.append(opener);
+    void layers.open(opener, "/photos/1/", "photo");
+    await layers.open(opener, "/photos/1/", "photo");
+    expect(document.querySelectorAll("[data-next-dialog]")).toHaveLength(1);
+    expect(pushed).toEqual(["/photos/1/"]);
+  });
+
+  it("a fetch failure tears down the orphan and rolls the URL back to the host", async () => {
+    const { history, replaced } = makeHistory();
+    layers = createLayers({
+      dispatch: () => undefined,
+      fetch: () => Promise.reject(new Error("boom")),
+      document,
+      dialog: mockDialog().adapter,
+      history,
+    });
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/photos/1/");
+    document.body.append(opener);
+    await expect(layers.open(opener, "/photos/1/", "photo")).rejects.toThrow("boom");
+    expect(document.querySelector("[data-next-dialog]")).toBeNull();
+    expect(layers.size()).toBe(0);
+    expect(replaced).toEqual(["/feed/"]);
+    expect(opener.hasAttribute("data-next-busy")).toBe(false);
+    expect(opener.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("a dismiss during an in-flight open then a fetch reject tears down once", async () => {
+    const { history, replaced } = makeHistory();
+    const { adapter, dismissed } = mockDialog();
+    let rejectFetch: ((reason: Error) => void) | undefined;
+    layers = createLayers({
+      dispatch: () => undefined,
+      fetch: () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectFetch = reject;
+        }),
+      document,
+      dialog: adapter,
+      history,
+    });
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/photos/1/");
+    document.body.append(opener);
+    const pending = layers.open(opener, "/photos/1/", "photo");
+    // Dismiss the dialog (Esc, backdrop) while the body fetch is still in
+    // flight, the first remove that splices the layer and rolls the URL back.
+    dismissed[0]?.("escape");
+    expect(layers.size()).toBe(0);
+    expect(replaced).toEqual(["/feed/"]);
+    rejectFetch?.(new Error("boom"));
+    await expect(pending).rejects.toThrow("boom");
+    // The catch arm hands remove the already-spliced layer, so the index===-1
+    // early return makes the second teardown a no-op: no second URL rollback.
+    expect(replaced).toEqual(["/feed/"]);
+    expect(document.querySelector("[data-next-dialog]")).toBeNull();
+    expect(layers.size()).toBe(0);
+    expect(opener.hasAttribute("data-next-busy")).toBe(false);
+    expect(opener.hasAttribute("aria-busy")).toBe(false);
   });
 });

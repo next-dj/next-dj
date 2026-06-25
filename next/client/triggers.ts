@@ -20,6 +20,7 @@ import {
   HEADER_MERGE,
   HEADER_VERSION,
   HEADER_ZONE,
+  currentUrl,
 } from "./protocol";
 import type { Clock } from "./wire";
 
@@ -109,7 +110,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   let detach: (() => void) | null = null;
 
   function here(): string {
-    return doc.location.pathname + doc.location.search;
+    return currentUrl(doc);
   }
 
   // The abortable zone key of a form's inline validation, shared by the sender

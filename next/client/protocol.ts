@@ -53,3 +53,10 @@ export function asString(value: unknown): string | undefined {
 export function cssEscape(value: string): string {
   return value.replace(/["\\]/g, "\\$&");
 }
+
+// The one canon for "the URL the page is on": pathname plus search. Refresh
+// re-GETs, SSE resume revalidation, and the layer history seam all key off this,
+// so a query filter survives a re-GET instead of collapsing to the bare path.
+export function currentUrl(doc: Document): string {
+  return doc.location.pathname + doc.location.search;
+}

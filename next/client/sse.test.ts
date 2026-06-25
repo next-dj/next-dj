@@ -332,6 +332,46 @@ describe("createSse", () => {
     expect(fetched.map((f) => f.zone)).toEqual(["poll"]);
   });
 
+  it("resume copies bound zones so a late event on the paused stream does not leak", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const visibility = mockVisibility();
+    let clock = 0;
+    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    sse.scan(document);
+    opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }]));
+    visibility.set(true);
+    clock = 5000;
+    visibility.set(false);
+    fetched.length = 0;
+    // The paused predecessor still holds its message closure. A stray event on
+    // it must not bind into the resumed connection, which carries its own copy.
+    opened[0]!.message(envelope([{ op: "refresh", zone: "stale" }]));
+    clock = 10000;
+    visibility.set(true);
+    clock = 15000;
+    visibility.set(false);
+    expect(fetched.map((f) => f.zone)).toEqual(["poll"]);
+  });
+
+  it("caps the bound registry so a long sleep does not re-GET an unbounded set", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const visibility = mockVisibility();
+    let clock = 0;
+    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    sse.scan(document);
+    const ops = Array.from({ length: 100 }, (_, i) => ({
+      op: "refresh",
+      zone: `zone-${i}`,
+    }));
+    opened[0]!.message(envelope(ops));
+    visibility.set(true);
+    clock = 5000;
+    visibility.set(false);
+    expect(fetched).toHaveLength(64);
+  });
+
   it("ignores a data-next-sse container with an empty url", () => {
     document.body.innerHTML = '<div data-next-sse=""></div>';
     const { adapter, opened } = mockSource();
