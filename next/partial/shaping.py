@@ -16,6 +16,7 @@ from next.forms.uid import FORM_ORIGIN_OVERRIDE_KEY
 from next.pages import page
 from next.static.scripts import csrf_payload
 
+from . import keys
 from .headers import RESPONSE_ACTION, RESPONSE_FORM, partial_intent, set_partial_vary
 from .manager import partial_backend_manager
 from .patches import FormMeta, Patches, PatchResponse
@@ -120,7 +121,7 @@ def shape_validate(
             page_path,
             url_kwargs,
         )
-        patches.morph({"form": uid}, html, extract=True)
+        patches.morph({keys.FORM_SELECTOR: uid}, html, extract=True)
     patches.set_form(_form_meta(uid, form))
     _stamp_csrf(request, patches, rotated=rotated)
     _emit_field_validated(request, action, requested, form)
@@ -170,7 +171,7 @@ def _shape_invalid(
             outcome.page_path,
             outcome.url_kwargs,
         )
-        patches.morph({"form": uid}, html, extract=True)
+        patches.morph({keys.FORM_SELECTOR: uid}, html, extract=True)
     if form is not None:
         patches.set_form(_form_meta(uid, form))
     response = _envelope_response(patches, request=request, rotated=rotated)
@@ -231,7 +232,7 @@ def _shape_advance(
         result = render_zone(
             page_path, (zone,), request, url_kwargs=url_kwargs, overrides=overrides
         )
-        patches.morph({"zone": zone}, result.html[zone])
+        patches.morph({keys.ZONE: zone}, result.html[zone])
     if _should_push_steps(wizard):
         patches.push_url(redirect_to)
     return _envelope_response(patches, request=request, rotated=rotated)
@@ -310,7 +311,7 @@ def _success_funnel(
             page_path,
             url_kwargs,
         )
-        patches.morph({"form": uid}, html, extract=True)
+        patches.morph({keys.FORM_SELECTOR: uid}, html, extract=True)
     drain_messages(request, patches)
     return _envelope_response(patches, request=request, rotated=rotated)
 

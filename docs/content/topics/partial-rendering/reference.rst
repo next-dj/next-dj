@@ -295,13 +295,21 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
        still mounted what did change. Observe ``ok``, not the bare fact of apply.
    * - ``partial:error``
      - No
-     - ``{status, body, error, kind}``, where ``kind`` is one of ``network``,
-       ``http``, ``parse``, ``op``, ``asset``. ``network`` is a fetch reject, an
-       aborted neighbour, or a dropped stream connection. ``http`` is a 4xx or
-       5xx or a mutating reply that is not an envelope. ``parse`` is a malformed
-       JSON body. ``op`` is a thrown or unknown verb mid-apply. ``asset`` is a
-       stylesheet that failed to load or a version mismatch surviving a reload.
-       An ``AbortError`` does not reach it.
+     - A discriminated union on ``kind``, where each cause carries only its own
+       fields.
+       ``{kind: "network", error}`` is a fetch reject or a dropped stream
+       connection, with no status or body to report.
+       ``{kind: "http", status, body}`` is a 5xx or a mutating reply that is not
+       an envelope.
+       ``{kind: "parse", body, error}`` is a malformed JSON body.
+       ``{kind: "op", op, error}`` is a thrown or unknown verb mid-apply, where
+       ``op`` names the verb.
+       ``{kind: "asset", error, url?}`` is a stylesheet that failed to load or a
+       version mismatch surviving a reload, where ``url`` is present only on a
+       version mismatch.
+       The ``status`` and ``body`` fields belong to ``http`` alone, and ``body``
+       also to ``parse``, so a listener branches on ``kind`` before reading them.
+       An ``AbortError`` never reaches this event.
    * - ``partial:layer-opened``
      - No
      - ``{opener}``

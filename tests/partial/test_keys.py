@@ -1,4 +1,5 @@
-from next.partial import Asset, Envelope, FormMeta, Patch, keys
+from next.partial import Asset, Envelope, FormMeta, Patch, Patches, keys
+from next.partial.view import _patch_zone
 from next.testing.client import PartialEnvelope
 
 
@@ -70,3 +71,25 @@ class TestSerializerEnvelopeShareKeys:
         data = Envelope(version="v1", csrf={"token": "t"}, request_id="r1").as_dict()
         assert data[keys.CSRF] == {"token": "t"}
         assert data[keys.REQUEST_ID] == "r1"
+
+
+class TestProducersWriteTargetSelectorKeys:
+    """Every target/extras producer writes the wire keys from keys.py."""
+
+    def test_view_zone_patch_targets_zone_key(self) -> None:
+        patches = Patches("v1")
+        _patch_zone(patches, "list", "<ul></ul>", None)
+        view = PartialEnvelope(patches.envelope().as_dict())
+        assert view.zone_targets() == ["list"]
+        assert view.targets() == [{keys.ZONE: "list"}]
+
+    def test_morph_form_targets_form_selector_key(self) -> None:
+        patches = Patches("v1").morph_form("ab12", "<form></form>")
+        view = PartialEnvelope(patches.envelope().as_dict())
+        assert view.form_targets() == ["ab12"]
+        assert view.targets() == [{keys.FORM_SELECTOR: "ab12"}]
+
+    def test_layer_open_seeds_zone_extras_key(self) -> None:
+        patches = Patches("v1").layer_open(zone="cart")
+        view = PartialEnvelope(patches.envelope().as_dict())
+        assert view.ops[0][keys.ZONE] == "cart"

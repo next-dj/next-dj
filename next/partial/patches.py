@@ -72,11 +72,11 @@ class ReservedPatchKeyError(ValueError):
     payload that names one of them is refused rather than overwriting it.
     """
 
-    def __init__(self, op: str, keys: frozenset[str]) -> None:
+    def __init__(self, op: str, reserved: frozenset[str]) -> None:
         """Store the offending verb and the reserved keys it collided with."""
         self.op = op
-        self.keys = keys
-        names = ", ".join(sorted(keys))
+        self.keys = reserved
+        names = ", ".join(sorted(reserved))
         super().__init__(
             f'Patch op "{op}" payload names the reserved wire key(s) {names}. '
             "Use a different payload key, op/target/html are structural."
@@ -622,7 +622,7 @@ class Patches:
         """
         extras: dict[str, Any] = {}
         if zone is not None:
-            extras["zone"] = zone
+            extras[keys.ZONE] = zone
         if href is not None:
             extras["href"] = self._require_same_site(href)
         self._ops.append(Patch(op="layer.open", extras=extras))
