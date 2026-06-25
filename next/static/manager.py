@@ -236,7 +236,10 @@ class StaticManager:
         request: HttpRequest | None,
     ) -> str:
         if asset.inline is not None:
-            return asset.inline
+            tag = default_kinds.inline_tag(asset.kind)
+            if tag is None:
+                return asset.inline
+            return f"<{tag}>{asset.inline}</{tag}>"
         renderer_name = default_kinds.renderer(asset.kind)
         renderer = getattr(backend, renderer_name)
         return cast("str", renderer(asset.url, request=request))

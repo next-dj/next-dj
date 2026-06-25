@@ -67,6 +67,30 @@ describe("assets registry and delta", () => {
     ).toHaveLength(1);
   });
 
+  it("seeds an inline style so the inline css delta skips it", () => {
+    document.head.innerHTML = "<style>.z{}</style>";
+    const { assets } = makeAssets();
+    assets.seed();
+    assets.loadCss([{ kind: "css", url: "", inline: ".z{}" }], () => undefined);
+    expect(document.head.querySelectorAll("style")).toHaveLength(1);
+  });
+
+  it("seeds an inline script so the inline js delta does not re-execute it", () => {
+    document.head.innerHTML = "<script>void 0</script>";
+    const { assets } = makeAssets();
+    assets.seed();
+    assets.loadJs([{ kind: "js", url: "", inline: "void 0" }]);
+    expect(document.head.querySelectorAll("script:not([src])")).toHaveLength(1);
+  });
+
+  it("still inserts an inline body that differs from the seeded one", () => {
+    document.head.innerHTML = "<style>.z{}</style>";
+    const { assets } = makeAssets();
+    assets.seed();
+    assets.loadCss([{ kind: "css", url: "", inline: ".y{}" }], () => undefined);
+    expect(document.head.querySelectorAll("style")).toHaveLength(2);
+  });
+
   it("gates the done callback until the last of several sheets settles", () => {
     const settlers: ((ok: boolean) => void)[] = [];
     const loadLink: LinkLoader = (_url, _nonce, done) => settlers.push(done);

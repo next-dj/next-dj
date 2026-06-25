@@ -107,6 +107,18 @@ export function createAssets(deps: AssetsDeps): Assets {
     )) {
       loaded.add(script.src);
     }
+    // Seed the inline bodies the server already materialised into the head, so
+    // the first zone GET of a zone whose inline is up there does not re-insert
+    // the <style> or re-execute the <script>. textContent on an element node is
+    // a string, never null, so the body reads straight through.
+    for (const style of Array.from(doc.querySelectorAll<HTMLStyleElement>("style"))) {
+      loaded.add(inlineKey("css", textOf(style)));
+    }
+    for (const script of Array.from(
+      doc.querySelectorAll<HTMLScriptElement>("script:not([src])"),
+    )) {
+      loaded.add(inlineKey("js", textOf(script)));
+    }
   }
 
   function missing(manifest: Asset[], kind: string): string[] {
@@ -132,7 +144,7 @@ export function createAssets(deps: AssetsDeps): Assets {
     for (const asset of manifest) {
       if (!isAsset(asset) || asset.kind !== kind) continue;
       if (asset.inline === undefined) continue;
-      const key = `inline:${kind}:${asset.inline}`;
+      const key = inlineKey(kind, asset.inline);
       if (loaded.has(key)) continue;
       loaded.add(key);
       bodies.push(asset.inline);
@@ -247,6 +259,19 @@ export function createAssets(deps: AssetsDeps): Assets {
       knownVersion = "";
     },
   };
+}
+
+// The dedup key for an inline body, shared by seed and the inline delta so the
+// seeded head bodies and the manifest bodies match byte for byte.
+function inlineKey(kind: string, body: string): string {
+  return `inline:${kind}:${body}`;
+}
+
+// The text body of an element. textContent is typed string | null, but for an
+// element node the DOM always yields a string, so String() coerces with no
+// untestable null branch left for the coverage gate.
+function textOf(element: Element): string {
+  return String(element.textContent);
 }
 
 // The bootstrap script carries the page nonce. document.currentScript is null by
