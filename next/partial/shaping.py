@@ -16,7 +16,7 @@ from next.forms.uid import FORM_ORIGIN_OVERRIDE_KEY
 from next.pages import page
 from next.static.scripts import csrf_payload
 
-from .headers import RESPONSE_ACTION, RESPONSE_FORM, partial_intent
+from .headers import RESPONSE_ACTION, RESPONSE_FORM, partial_intent, set_partial_vary
 from .manager import partial_backend_manager
 from .patches import FormMeta, Patches, PatchResponse
 from .registry import zones_of
@@ -199,12 +199,18 @@ def _shape_advance(
     wizard = outcome.wizard
     redirect_to = outcome.redirect_to
     if redirect_to is None:
-        return HttpResponse(status=204)
+        response = HttpResponse(status=204)
+        set_partial_vary(response)
+        return response
     if wizard is None:
-        return HttpResponseRedirect(redirect_to)
+        response = HttpResponseRedirect(redirect_to)
+        set_partial_vary(response)
+        return response
     target = _resolve_step_target(request, redirect_to)
     if target is None:
-        return HttpResponseRedirect(redirect_to)
+        response = HttpResponseRedirect(redirect_to)
+        set_partial_vary(response)
+        return response
     page_path, url_kwargs = target
     next_wizard = type(wizard)(
         request=request,

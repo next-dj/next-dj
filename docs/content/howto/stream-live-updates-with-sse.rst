@@ -142,7 +142,7 @@ The signal carries the bound form after validation and the request, so the recei
    from django.http import HttpRequest
 
    from next.forms.signals import action_dispatched
-   from next.partial import REQUEST_ID
+   from next.partial.headers import REQUEST_ID
    from polls.broker import broker, build_snapshot
 
    VOTE_ACTION_NAME = "vote_form"

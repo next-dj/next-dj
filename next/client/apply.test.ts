@@ -192,6 +192,8 @@ describe("Applier verbs", () => {
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
     const err = dispatched.find((d) => d.event === "partial:error");
     expect(err!.detail.kind).toBe("op");
+    expect(err!.detail.op).toBe("frobnicate");
+    expect((err!.detail.error as Error).message).toBe("unknown op frobnicate");
   });
 
   it("marks partial:applied as degraded when an unknown op is skipped", () => {
@@ -260,6 +262,7 @@ describe("Applier verbs", () => {
     const err = dispatched.find((d) => d.event === "partial:error");
     expect((err!.detail.error as Error).message).toBe("op blew up");
     expect(err!.detail.kind).toBe("op");
+    expect(err!.detail.op).toBe("boom");
     const applied = dispatched.find((d) => d.event === "partial:applied");
     expect(applied!.detail.ok).toBe(false);
   });

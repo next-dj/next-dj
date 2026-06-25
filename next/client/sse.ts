@@ -131,7 +131,7 @@ export function createSse(deps: SseDeps): Sse {
     try {
       raw = JSON.parse(data);
     } catch (error) {
-      deps.dispatch("partial:error", { status: 0, body: data, error, kind: "parse" });
+      deps.dispatch("partial:error", { kind: "parse", body: data, error });
       return;
     }
     if (isRecord(raw)) {
@@ -163,12 +163,7 @@ export function createSse(deps: SseDeps): Sse {
     if (!fatal) return;
     connection.control.close();
     connections.delete(connection.url);
-    deps.dispatch("partial:error", {
-      status: 0,
-      body: "",
-      error: null,
-      kind: "network",
-    });
+    deps.dispatch("partial:error", { kind: "network", error: null });
   }
 
   // Open a stream to a url, carrying over the bound zones and page URL of a

@@ -56,6 +56,7 @@ W_WITH_OVER_ZONE: Final = "next.W067"
 W_FORM_BACKEND_NOT_AWARE: Final = "next.W068"
 W_MANIFEST_VERSION_NO_STORAGE: Final = "next.W069"
 W_FORM_IN_FOR_NO_KEY: Final = "next.W070"
+W_TOO_MANY_BACKENDS: Final = "next.W071"
 
 _MIN_DUPLICATE_COUNT: Final = 2
 _FORM_TARGET_ATTR: Final = "data-next-target"
@@ -74,6 +75,7 @@ CHECK_IDS: Final = (
     W_FORM_BACKEND_NOT_AWARE,
     W_MANIFEST_VERSION_NO_STORAGE,
     W_FORM_IN_FOR_NO_KEY,
+    W_TOO_MANY_BACKENDS,
 )
 
 
@@ -500,6 +502,33 @@ def _partial_backends_active() -> bool:
     )
 
 
+@register(Tags.compatibility)
+def check_single_partial_backend(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Warn when more than one partial protocol backend is configured (`next.W071`).
+
+    Partial rendering uses a single protocol backend. Only the first valid
+    PARTIAL_BACKENDS entry is instantiated, so a second entry is dead config
+    that silently never runs.
+    """
+    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", [])
+    if not isinstance(configs, list):
+        return []
+    valid = [config for config in configs if isinstance(config, dict)]
+    if len(valid) <= 1:
+        return []
+    return [
+        DjangoWarning(
+            "PARTIAL_BACKENDS has more than one backend entry, but partial "
+            "rendering uses a single protocol backend. Only the first entry "
+            "runs, the rest are ignored. Keep one PARTIAL_BACKENDS entry.",
+            id=W_TOO_MANY_BACKENDS,
+        )
+    ]
+
+
 _VERSION_OPTION: Final = "VERSION"
 _MANIFEST_VERSION: Final = "manifest"
 _STATICFILES_ALIAS: Final = "staticfiles"
@@ -592,6 +621,7 @@ __all__ = [
     "W_FORM_BACKEND_NOT_AWARE",
     "W_FORM_IN_FOR_NO_KEY",
     "W_MANIFEST_VERSION_NO_STORAGE",
+    "W_TOO_MANY_BACKENDS",
     "W_WITH_OVER_ZONE",
     "check_custom_patch_ops_well_formed",
     "check_duplicate_zone_names",
@@ -600,6 +630,7 @@ __all__ = [
     "check_manifest_version_has_manifest_storage",
     "check_no_zone_in_component",
     "check_repeated_form_has_key",
+    "check_single_partial_backend",
     "check_with_directly_over_zone",
     "check_zone_name_is_slug",
     "check_zone_not_in_if",

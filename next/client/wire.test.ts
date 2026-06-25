@@ -189,9 +189,10 @@ describe("Wire classification", () => {
     });
     await h.wire.fetch({ url: "/list/", zone: "z" });
     const err = h.dispatched.find((d) => d.event === "partial:error");
-    expect(err!.detail.status).toBe(0);
-    expect(err!.detail.error).toBeInstanceOf(TypeError);
     expect(err!.detail.kind).toBe("network");
+    expect(err!.detail.error).toBeInstanceOf(TypeError);
+    expect(err!.detail.status).toBeUndefined();
+    expect(err!.detail.body).toBeUndefined();
   });
 
   it("emits partial:error on malformed JSON", async () => {

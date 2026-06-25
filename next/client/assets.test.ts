@@ -183,6 +183,7 @@ describe("version safeguard and reload-once", () => {
     expect(second.assets.versionMismatch("v2", "/here/")).toBe(true);
     const err = second.dispatched.find((d) => d.event === "partial:error");
     expect(err!.detail.kind).toBe("asset");
+    expect(err!.detail.url).toBe("/here/");
     expect(navigate).toHaveBeenCalledTimes(1);
   });
 

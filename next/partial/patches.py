@@ -12,6 +12,7 @@ from next.forms.origin import resolve_origin, resolve_url_to_page
 from next.pages import page
 from next.static.serializers import resolve_serializer
 
+from . import keys
 from .headers import (
     CONTENT_TYPE,
     RESPONSE_VERSION,
@@ -34,7 +35,6 @@ if TYPE_CHECKING:
 
 
 _SEE_OTHER = 303
-_RESERVED_PATCH_KEYS: frozenset[str] = frozenset({"op", "target", "html"})
 
 # Each morph() route owns its selector keywords, so a stray key is refused.
 _ZONE_MORPH_KEYS: frozenset[str] = frozenset({"zone", "overrides"})
@@ -234,21 +234,24 @@ class Patch:
     html: str | None = None
     extras: "Mapping[str, Any]" = field(default_factory=dict)
 
-    def as_dict(self) -> dict[str, Any]:
-        """Return the wire form of the patch as an ordered mapping.
+    def __post_init__(self) -> None:
+        """Refuse an extras payload that names a structural wire key.
 
-        The `op`, `target`, and `html` keys are reserved for the structural
-        wire fields, so an extras payload that names one of them is refused
-        rather than silently overwriting the structural key.
+        The `op`, `target`, and `html` keys carry the patch structure, so a
+        payload that names one of them is refused at construction rather than
+        silently overwriting the structural key on serialization.
         """
-        collision = _RESERVED_PATCH_KEYS & self.extras.keys()
+        collision = keys.RESERVED_PATCH_KEYS & self.extras.keys()
         if collision:
             raise ReservedPatchKeyError(self.op, frozenset(collision))
-        data: dict[str, Any] = {"op": self.op}
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the wire form of the patch as an ordered mapping."""
+        data: dict[str, Any] = {keys.OP: self.op}
         if self.target is not None:
-            data["target"] = dict(self.target)
+            data[keys.TARGET] = dict(self.target)
         if self.html is not None:
-            data["html"] = self.html
+            data[keys.HTML] = self.html
         data.update(self.extras)
         return data
 
@@ -262,7 +265,7 @@ class Asset:
 
     def as_dict(self) -> dict[str, str]:
         """Return the wire form of the asset entry."""
-        return {"kind": self.kind, "url": self.url}
+        return {keys.KIND: self.kind, keys.URL: self.url}
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,9 +279,9 @@ class FormMeta:
     def as_dict(self) -> dict[str, Any]:
         """Return the wire form of the form meta object."""
         return {
-            "uid": self.uid,
-            "valid": self.valid,
-            "errors": {name: list(msgs) for name, msgs in self.errors.items()},
+            keys.UID: self.uid,
+            keys.VALID: self.valid,
+            keys.ERRORS: {name: list(msgs) for name, msgs in self.errors.items()},
         }
 
 
@@ -301,15 +304,15 @@ class Envelope:
     def as_dict(self) -> dict[str, Any]:
         """Return the wire form of the envelope as an ordered mapping."""
         data: dict[str, Any] = {
-            "version": self.version,
-            "ops": [op.as_dict() for op in self.ops],
-            "assets": [asset.as_dict() for asset in self.assets],
-            "form": self.form.as_dict() if self.form is not None else None,
+            keys.VERSION: self.version,
+            keys.OPS: [op.as_dict() for op in self.ops],
+            keys.ASSETS: [asset.as_dict() for asset in self.assets],
+            keys.FORM: self.form.as_dict() if self.form is not None else None,
         }
         if self.csrf is not None:
-            data["csrf"] = dict(self.csrf)
+            data[keys.CSRF] = dict(self.csrf)
         if self.request_id is not None:
-            data["request_id"] = self.request_id
+            data[keys.REQUEST_ID] = self.request_id
         return data
 
 
@@ -351,6 +354,7 @@ class Patches:
         self._request_id: str | None = echo_of
         self._origin: OriginMatch | None = None
         self._origin_resolved = False
+        self._render_context: dict[str, object] | None = None
 
     @property
     def version(self) -> str:
@@ -454,7 +458,7 @@ class Patches:
         """Render the named zone of the origin page and morph it in place."""
         result = self._render_zone(zone, overrides)
         self._collect_assets(result)
-        return self._append_morph({"zone": zone}, result.html[zone], extract=False)
+        return self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
 
     def morph_foreign_zone(
         self,
@@ -485,7 +489,7 @@ class Patches:
             raise DynamicForeignPageError(foreign_path)
         result = self._render_foreign_zone(foreign_path, zone, request, kwargs)
         self._collect_assets(result)
-        return self._append_morph({"zone": zone}, result.html[zone], extract=False)
+        return self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
 
     def _foreign_page_path(self, page: "Path | str") -> "Path":
         """Return the page path named by a path or a URL of the foreign page."""
@@ -526,7 +530,7 @@ class Patches:
 
     def morph_form(self, uid: str, html: str) -> "Patches":
         """Extract-morph the form addressed by its uid into the given HTML."""
-        return self._append_morph({"form": uid}, html, extract=True)
+        return self._append_morph({keys.FORM_SELECTOR: uid}, html, extract=True)
 
     def replace(self, target: "Mapping[str, Any]", html: str) -> "Patches":
         """Replace the target node wholesale with the given HTML."""
@@ -585,7 +589,7 @@ class Patches:
 
     def refresh(self, *, zone: str) -> "Patches":
         """Ask the client to refetch the named zone with its own cookies."""
-        self._ops.append(Patch(op="refresh", extras={"zone": zone}))
+        self._ops.append(Patch(op="refresh", extras={keys.ZONE: zone}))
         return self
 
     def context(self, **names: object) -> "Patches":
@@ -798,6 +802,21 @@ class Patches:
         match = self._origin_match()
         return dict(match.url_kwargs) if match is not None else {}
 
+    def _origin_render_context(self) -> dict[str, object]:
+        """Return the origin page render context, built once per builder.
+
+        A handler that pairs `context()` with `morph(zone=...)` resolves the
+        origin context through both paths, so the build is memoised and a
+        fresh copy is handed out because consumers mutate the mapping.
+        """
+        if self._render_context is None:
+            self._render_context = page.build_render_context(
+                self._resolve_page_path(),
+                self._require_request(),
+                **self._origin_url_kwargs(),
+            )
+        return dict(self._render_context)
+
     def _render_zone(
         self,
         zone: str,
@@ -810,15 +829,12 @@ class Patches:
             self._require_request(),
             url_kwargs=self._origin_url_kwargs(),
             overrides=dict(overrides) if overrides else None,
+            context_data=self._origin_render_context(),
         )
 
     def _serializable_names(self) -> frozenset[str]:
         """Return the serialize=True provider names of the origin page."""
-        request = self._require_request()
-        context_data = page.build_render_context(
-            self._resolve_page_path(), request, **self._origin_url_kwargs()
-        )
-        js_context = context_data.get("_next_js_context", {})
+        js_context = self._origin_render_context().get("_next_js_context", {})
         return frozenset(js_context) if isinstance(js_context, dict) else frozenset()
 
     def _collect_assets(self, result: "ZoneRenderResult") -> None:

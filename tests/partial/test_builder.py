@@ -2,19 +2,21 @@ import pytest
 from django.test import RequestFactory
 
 from next.partial import (
-    BuiltinPatchOpError,
-    CrossSiteHrefError,
     Patches,
     PatchResponse,
+    UnknownZoneError,
+    register_patch_op,
+)
+from next.partial.headers import CONTENT_TYPE
+from next.partial.patches import (
+    BuiltinPatchOpError,
+    CrossSiteHrefError,
     ReservedEventNameError,
     ReservedPatchKeyError,
     UnknownContextNameError,
     UnknownDedupeError,
     UnknownPatchOpError,
-    UnknownZoneError,
-    register_patch_op,
 )
-from next.partial.headers import CONTENT_TYPE
 from next.partial.registry import patch_op_registry
 from tests.support import partial_request, plain_request
 
@@ -269,7 +271,7 @@ class TestCustomOp:
 
     def test_payload_naming_a_reserved_wire_key_raises(self, custom_op: str) -> None:
         with pytest.raises(ReservedPatchKeyError) as exc:
-            Patches("v1").op(custom_op, target="spoof").envelope().ops[0].as_dict()
+            Patches("v1").op(custom_op, target="spoof")
         assert exc.value.keys == frozenset({"target"})
 
 

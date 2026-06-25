@@ -140,10 +140,8 @@ export function createAssets(deps: AssetsDeps): Assets {
       // ops still run, partial:error reports the styling gap.
       if (errored) {
         deps.dispatch("partial:error", {
-          status: 0,
-          body: "",
-          error: new Error("a stylesheet failed to load"),
           kind: "asset",
+          error: new Error("a stylesheet failed to load"),
         });
       }
       done();
@@ -176,10 +174,9 @@ export function createAssets(deps: AssetsDeps): Assets {
       // CDN is serving the old bundle. Degrade to plain navigation, no loop.
       clearFlag();
       deps.dispatch("partial:error", {
-        status: 0,
-        body: "",
-        error: new Error("asset version mismatch after reload"),
         kind: "asset",
+        url,
+        error: new Error("asset version mismatch after reload"),
       });
       return true;
     }

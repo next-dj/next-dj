@@ -452,7 +452,7 @@ export class Applier {
         if (!this.#applyOp(op, state)) ok = false;
       } catch (error) {
         ok = false;
-        this.#emit("partial:error", { status: 0, body: "", error, kind: "op" }, false);
+        this.#emit("partial:error", { kind: "op", op: op.op, error }, false);
       }
     }
     if (envelope.csrf) this.#rotateCsrf(envelope.csrf);
@@ -496,7 +496,7 @@ export class Applier {
     // An unknown verb is a single skipped op, never a poisoned envelope.
     this.#emit(
       "partial:error",
-      { status: 0, body: "", error: new Error(`unknown op ${patch.op}`), kind: "op" },
+      { kind: "op", op: patch.op, error: new Error(`unknown op ${patch.op}`) },
       false,
     );
     return false;
