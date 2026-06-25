@@ -1,0 +1,12 @@
+{
+  "name": "validate_form",
+  "description": "An inline validate pass: one form morph by uid carrying only the blurred field's error, no invalid-submission headers.",
+  "content_type": "application/vnd.next.patches+json",
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/vnd.next.patches+json",
+    "X-Next-Version": "9f3c2e1b",
+    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version"
+  },
+  "envelope_file": "validate_form.envelope.json"
+}

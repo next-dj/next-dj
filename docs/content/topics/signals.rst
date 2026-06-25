@@ -105,6 +105,24 @@ each signal.
    * - ``backend_loaded``
      - Static
      - After the static factory instantiates a backend.
+   * - ``zone_registered``
+     - Partial
+     - When a compiled page template's named zones are first read.
+   * - ``zone_rendered``
+     - Partial
+     - After a zone body renders for a partial request.
+   * - ``patch_op_registered``
+     - Partial
+     - After a custom patch verb is registered through ``register_patch_op``.
+   * - ``field_validated``
+     - Partial
+     - After a validate-only blur pass runs, always behind the action guard.
+   * - ``sse_stream_opened``
+     - Partial
+     - When a patch event stream starts.
+   * - ``sse_stream_closed``
+     - Partial
+     - When a patch event stream ends.
    * - ``watch_specs_ready``
      - Server
      - After the reloader resolves the full list of watch specs.
@@ -115,6 +133,8 @@ each signal.
 The forms and static signals have dedicated topic pages with worked receiver
 examples: :doc:`/content/topics/forms/signals` and
 :doc:`/content/topics/static-assets/signals`.
+The partial-rendering stream signals appear in context in
+:doc:`/content/topics/partial-rendering/sse`.
 
 Receiver Patterns
 -----------------

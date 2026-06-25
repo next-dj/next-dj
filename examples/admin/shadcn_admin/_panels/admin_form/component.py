@@ -1,7 +1,11 @@
 from typing import Any
 
 from django.http import HttpRequest
-from shadcn_admin.forms import AdminFormSpec, build_inline_formsets
+from shadcn_admin.forms import (
+    AdminFormSpec,
+    AdminInlineSpec,
+    build_inline_formsets,
+)
 
 from next.components import component
 from next.deps import Depends
@@ -24,10 +28,16 @@ def form_state(
     else:
         bound = form_cls(instance=spec.instance)
     fieldsets = spec.model_admin.get_fieldsets(spec.request, spec.instance)
-    formsets = build_inline_formsets(spec)
-    if request.method == "POST":  # pragma: no cover
-        for fs in formsets:
-            fs.is_valid()
+    if spec.is_change:
+        inlines: list[Any] = []
+        related_sections = AdminInlineSpec.build_sections(spec)
+    else:
+        formsets = build_inline_formsets(spec)
+        if request.method == "POST":  # pragma: no cover
+            for fs in formsets:
+                fs.is_valid()
+        inlines = [formset_spec(fs) for fs in formsets]
+        related_sections = []
     return {
         "app_label": spec.app_label,
         "model_name": spec.model_name,
@@ -36,7 +46,8 @@ def form_state(
         "verbose_name": str(spec.model._meta.verbose_name),
         "form": bound,
         "form_spec": form_spec(bound, fieldsets=fieldsets),
-        "inlines": [formset_spec(fs) for fs in formsets],
+        "inlines": inlines,
+        "related_sections": related_sections,
         "action_name": "admin:change" if spec.is_change else "admin:add",
         "title": "Edit" if spec.is_change else "Add",
         "changelist_url": spec.changelist_url,

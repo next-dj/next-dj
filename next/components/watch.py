@@ -56,6 +56,8 @@ def _collect_paths_for_one_pages_root(
 
 def _collect_component_paths_under_page_trees() -> set[Path]:
     """Collect component paths from page backends without mutating registries."""
+    # next.urls imports next.components for its walk registration, so the router
+    # import is deferred here to break the next.components <-> next.urls cycle.
     from next.urls import RouterFactory  # noqa: PLC0415
 
     result: set[Path] = set()

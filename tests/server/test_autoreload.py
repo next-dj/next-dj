@@ -101,12 +101,12 @@ class TestTreeDirSignature:
 
         def raising_scandir(path):
             class _CM:
-                def __enter__(_self) -> object:  # noqa: N805
+                def __enter__(self) -> object:
                     entry = MagicMock()
                     entry.is_dir.side_effect = OSError
                     return iter([entry])
 
-                def __exit__(_self, *_: object) -> bool:  # noqa: N805
+                def __exit__(self, *_: object) -> bool:
                     return False
 
             return _CM()

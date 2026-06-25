@@ -4,9 +4,16 @@ import json
 from decimal import Decimal
 
 import pytest
+from django.test import RequestFactory, override_settings
 
 from next.static import NextScriptBuilder, ScriptInjectionPolicy
-from next.static.scripts import NEXT_JS_STATIC_PATH
+from next.static.scripts import (
+    CSRF_PAYLOAD_KEY,
+    NEXT_JS_STATIC_PATH,
+    csrf_header_name,
+    csrf_payload,
+    csrf_payload_for,
+)
 
 
 URL = "/static/next/next.min.js"
@@ -137,3 +144,45 @@ class TestNextJsStaticPath:
     def test_namespace_prefix(self) -> None:
         assert NEXT_JS_STATIC_PATH.startswith("next/")
         assert NEXT_JS_STATIC_PATH.endswith(".js")
+
+
+class TestCsrfPayload:
+    """CSRF header name and token feed the `$csrf` payload of `Next._init`."""
+
+    def test_payload_key_is_dollar_csrf(self) -> None:
+        assert CSRF_PAYLOAD_KEY == "$csrf"
+
+    def test_header_name_is_http_wire_form(self) -> None:
+        with override_settings(CSRF_HEADER_NAME="HTTP_X_CSRFTOKEN"):
+            assert csrf_header_name() == "X-Csrftoken"
+
+    def test_header_name_honours_custom_setting(self) -> None:
+        with override_settings(CSRF_HEADER_NAME="HTTP_X_MY_TOKEN"):
+            assert csrf_header_name() == "X-My-Token"
+
+    def test_header_name_unmangles_unprefixed_setting(self) -> None:
+        with override_settings(CSRF_HEADER_NAME="X_MY_TOKEN"):
+            assert csrf_header_name() == "X-My-Token"
+
+    def test_payload_carries_header_and_token(self) -> None:
+        request = RequestFactory().get("/")
+        payload = csrf_payload(request)
+        assert payload["header"] == csrf_header_name()
+        assert isinstance(payload["token"], str)
+        assert payload["token"]
+
+    def test_payload_for_real_request_returns_payload(self) -> None:
+        request = RequestFactory().get("/")
+        payload = csrf_payload_for(request)
+        assert payload is not None
+        assert "header" in payload
+        assert "token" in payload
+
+    def test_payload_for_none_request_returns_none(self) -> None:
+        assert csrf_payload_for(None) is None
+
+    def test_payload_for_request_without_meta_mapping_returns_none(self) -> None:
+        class FakeRequest:
+            META = object()
+
+        assert csrf_payload_for(FakeRequest()) is None  # type: ignore[arg-type]

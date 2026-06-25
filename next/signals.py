@@ -28,6 +28,14 @@ from next.pages.signals import (
     page_rendered,
     template_loaded,
 )
+from next.partial.signals import (
+    field_validated,
+    patch_op_registered,
+    sse_stream_closed,
+    sse_stream_opened,
+    zone_registered,
+    zone_rendered,
+)
 from next.server.signals import watch_specs_ready
 from next.static.signals import (
     asset_registered,
@@ -49,16 +57,22 @@ __all__ = [
     "component_rendered",
     "components_registered",
     "context_registered",
+    "field_validated",
     "form_access_denied",
     "form_validation_failed",
     "html_injected",
     "page_rendered",
+    "patch_op_registered",
     "provider_registered",
     "route_registered",
     "router_reloaded",
     "settings_reloaded",
+    "sse_stream_closed",
+    "sse_stream_opened",
     "template_loaded",
     "watch_specs_ready",
     "wizard_completed",
     "wizard_step_submitted",
+    "zone_registered",
+    "zone_rendered",
 ]

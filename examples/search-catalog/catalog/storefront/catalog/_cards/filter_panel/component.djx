@@ -1,5 +1,7 @@
 <aside data-filter-panel class="space-y-4 rounded-md border border-border bg-card p-4 shadow-sm">
-  <form method="get" action="{{ submit_url }}" class="space-y-4" data-filter-form>
+  <form method="get" action="{{ submit_url }}" class="space-y-4"
+        data-next-target="catalog-results,catalog-more"
+        data-next-trigger="input" data-next-debounce="300">
     <div>
       <label class="block text-xs uppercase text-muted-foreground" for="filter-q">Search</label>
       <input id="filter-q" name="q" type="search" value="{{ current_filters.q }}"
@@ -41,7 +43,7 @@
       In stock only
     </label>
 
-    <select name="sort" class="w-full rounded-md border border-input bg-background px-2 py-1">
+    <select name="sort" data-next-trigger="change" class="w-full rounded-md border border-input bg-background px-2 py-1">
       <option value="newest" {% if current_filters.sort == "newest" %}selected{% endif %}>Newest</option>
       <option value="price_asc" {% if current_filters.sort == "price_asc" %}selected{% endif %}>Price ascending</option>
       <option value="price_desc" {% if current_filters.sort == "price_desc" %}selected{% endif %}>Price descending</option>

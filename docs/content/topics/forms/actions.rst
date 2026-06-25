@@ -62,7 +62,7 @@ The conversion collapses consecutive uppercase runs, so an acronym stays a singl
 .. warning::
 
    Renaming a form class changes its action name.
-   Any ``{% form "old_name" %}`` tag or reverse URL that used the old name will fail at render time with ``FormActionNotFound``.
+   Any ``{% form "old_name" %}`` tag or reverse URL that used the old name will fail at render time with ``FormActionNotFoundError``.
    The exception message lists the closest registered names, so a rename typo is usually visible in the error itself.
    Update every template and reverse call when renaming a class.
 

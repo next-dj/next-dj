@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import pytest
 from django import forms as django_forms
@@ -15,12 +15,11 @@ from next.forms.dispatch import FormActionDispatch
 from next.forms.manager import form_action_manager
 from next.forms.wizard import (
     FormWizard,
-    FormWizardBackend,
     SessionFormWizardBackend,
     wizard_backend_manager,
 )
 from tests.forms.actions import SimpleForm
-from tests.support import GuardedTenantForm, build_post_request
+from tests.support import CountingWizardBackend, GuardedTenantForm, build_post_request
 
 
 class BudgetIdentityStep(Form):
@@ -80,39 +79,10 @@ class ConditionalBudgetWizard(FormWizard):
         return HttpResponseRedirect("/thanks/")
 
 
-class _CountingWizardBackend(FormWizardBackend):
-    """Counts backend round-trips while delegating to a real backend."""
-
-    def __init__(self, inner: FormWizardBackend) -> None:
-        self.inner = inner
-        self.loads = 0
-        self.saves = 0
-        self.clears = 0
-
-    def reset_counts(self) -> None:
-        self.loads = 0
-        self.saves = 0
-        self.clears = 0
-
-    def load(self, request: HttpRequest, storage_id: str) -> dict[str, Any]:
-        self.loads += 1
-        return self.inner.load(request, storage_id)
-
-    def save_step(
-        self, request: HttpRequest, storage_id: str, step: str, data: dict[str, Any]
-    ) -> None:
-        self.saves += 1
-        self.inner.save_step(request, storage_id, step, data)
-
-    def clear(self, request: HttpRequest, storage_id: str) -> None:
-        self.clears += 1
-        self.inner.clear(request, storage_id)
-
-
 @pytest.fixture()
 def counting_backend():
     """Install a counting wizard backend for the duration of the test."""
-    counting = _CountingWizardBackend(SessionFormWizardBackend({}))
+    counting = CountingWizardBackend(SessionFormWizardBackend({}))
     wizard_backend_manager._backend = counting
     yield counting
     wizard_backend_manager.reset()

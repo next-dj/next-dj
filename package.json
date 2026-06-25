@@ -1,14 +1,17 @@
 {
   "scripts": {
-    "build:next": "esbuild next/static/next/next.ts --bundle --minify --target=es2020 --outfile=next/static/next/next.min.js",
+    "build:next": "esbuild next/client/next.ts --bundle --minify --target=es2020 --outfile=next/static/next/next.min.js",
     "test:js": "vitest run",
+    "test:js:coverage": "vitest run --coverage",
     "lint:js": "eslint \"{next,examples}/**/*.{mjs,ts,js,css}\"",
     "lint:js:fix": "eslint --fix \"{next,examples}/**/*.{mjs,ts,js,css}\"",
     "format": "prettier --write \"{next,examples}/**/*.{mjs,ts,js,css}\" \"{next,examples}/**/README.md\" \"vitest.config.ts\" \"eslint.config.mjs\"",
-    "format:check": "prettier --check \"{next,examples}/**/*.{mjs,ts,js,css}\" \"{next,examples}/**/README.md\" \"vitest.config.ts\" \"eslint.config.mjs\""
+    "format:check": "prettier --check \"{next,examples}/**/*.{mjs,ts,js,css}\" \"{next,examples}/**/README.md\" \"vitest.config.ts\" \"eslint.config.mjs\"",
+    "typecheck:ts": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.4",
     "@vitest/eslint-plugin": "^1.6.16",
     "esbuild": "^0.28",
@@ -16,6 +19,7 @@
     "eslint-config-prettier": "^10.1.8",
     "jsdom": "^29.0.2",
     "prettier": "^3.8.3",
+    "typescript": "^6.0.3",
     "typescript-eslint": "^8.58.2",
     "vitest": "^4.1.4"
   }

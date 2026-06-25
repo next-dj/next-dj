@@ -1,0 +1,12 @@
+{
+  "name": "zone_get",
+  "description": "A batched zone GET morphing two zones with an asset manifest.",
+  "content_type": "application/vnd.next.patches+json",
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/vnd.next.patches+json",
+    "X-Next-Version": "9f3c2e1b",
+    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version"
+  },
+  "envelope_file": "zone_get.envelope.json"
+}

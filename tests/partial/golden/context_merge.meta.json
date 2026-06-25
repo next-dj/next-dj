@@ -1,0 +1,12 @@
+{
+  "name": "context_merge",
+  "description": "A context patch merging serialized provider values into the client context so islands react through context-updated.",
+  "content_type": "application/vnd.next.patches+json",
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/vnd.next.patches+json",
+    "X-Next-Version": "9f3c2e1b",
+    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version"
+  },
+  "envelope_file": "context_merge.envelope.json"
+}

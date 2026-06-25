@@ -1,8 +1,10 @@
-from importlib import import_module
-
 from django.apps import AppConfig
 
+from next.partial import register_patch_op
 from next.static import default_kinds
+
+
+METRIC_PULSE_OP = "metric-pulse"
 
 
 class ObsConfig(AppConfig):
@@ -10,11 +12,12 @@ class ObsConfig(AppConfig):
     name = "obs"
 
     def ready(self) -> None:
-        """Connect signal receivers and register the JSX asset kind."""
+        """Register asset kinds, the custom patch verb, and signal receivers."""
         default_kinds.register(
             "jsx",
             extension=".jsx",
             slot="scripts",
             renderer="render_babel_script_tag",
         )
-        import_module(f"{self.name}.receivers")
+        register_patch_op(METRIC_PULSE_OP)
+        from obs import receivers  # noqa: F401, PLC0415

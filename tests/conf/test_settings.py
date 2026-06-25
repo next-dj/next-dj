@@ -310,3 +310,29 @@ class TestNextFrameworkChecksUnknownKeys:
         finally:
             RouterFactory._backends.pop(backend_path, None)
         assert any(e.id == "next.E035" for e in errors)
+
+
+class TestPartialBackendsDefault:
+    """The default PARTIAL_BACKENDS names the protocol backend with OPTIONS."""
+
+    def test_default_lists_protocol_backend(self) -> None:
+        entry = NextFrameworkSettings.DEFAULTS["PARTIAL_BACKENDS"][0]
+        assert entry["BACKEND"] == "next.partial.PartialProtocolBackend"
+
+    def test_default_options(self) -> None:
+        options = NextFrameworkSettings.DEFAULTS["PARTIAL_BACKENDS"][0]["OPTIONS"]
+        assert options["VERSION"] == "manifest"
+        assert options["PUSH_WIZARD_STEPS"] is False
+
+    def test_default_sse_options(self) -> None:
+        options = NextFrameworkSettings.DEFAULTS["PARTIAL_BACKENDS"][0]["OPTIONS"]
+        assert options["SSE"]["HEARTBEAT_SECONDS"] == 25
+        assert options["SSE"]["RETRY_MS"] == 3000
+
+    def test_accessible_via_settings(self) -> None:
+        assert next_framework_settings.PARTIAL_BACKENDS[0]["BACKEND"] == (
+            "next.partial.PartialProtocolBackend"
+        )
+
+    def test_is_known_top_level_key(self) -> None:
+        assert "PARTIAL_BACKENDS" in NextFrameworkSettings.DEFAULTS

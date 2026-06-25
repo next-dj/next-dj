@@ -13,7 +13,7 @@ import inspect
 import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast, overload
 
 from django.http import HttpRequest, HttpResponse
 from django.http.response import HttpResponseBase
@@ -65,10 +65,15 @@ class _BodyResolution:
     escape hatch for redirects, streaming responses, JSON, and anything
     else. The type is `HttpResponseBase` so `StreamingHttpResponse` and
     `FileResponse` flow through unchanged alongside `HttpResponse`.
+
+    `dynamic` marks a body produced by a `render()` function returning a
+    string. Such a body never reaches the composed-template cache, so a
+    zone in it has no compiled source to render standalone.
     """
 
     body: str | None = None
     http_response: HttpResponseBase | None = None
+    dynamic: bool = False
 
 
 class Page:
@@ -110,6 +115,17 @@ class Page:
             skip_while_filename_endswith=("manager.py",),
         )
 
+    @overload
+    def context[C: Callable[..., Any]](self, func_or_key: C, /) -> C: ...
+    @overload
+    def context[C: Callable[..., Any]](
+        self,
+        func_or_key: str | None = None,
+        *,
+        inherit_context: bool = False,
+        serialize: bool = False,
+        serializer: JsContextSerializer | None = None,
+    ) -> Callable[[C], C]: ...
     def context(
         self,
         func_or_key: Callable[..., Any] | str | None = None,
@@ -117,7 +133,7 @@ class Page:
         inherit_context: bool = False,
         serialize: bool = False,
         serializer: JsContextSerializer | None = None,
-    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    ) -> Callable[..., Any]:
         """Register a keyed or dict-merge `@context` for the caller file.
 
         Pass `serialize=True` to include the return value in
@@ -273,7 +289,7 @@ class Page:
         if isinstance(result, HttpResponseBase):
             return _BodyResolution(http_response=result)
         if isinstance(result, str):
-            return _BodyResolution(body=result)
+            return _BodyResolution(body=result, dynamic=True)
         msg = (
             f"page.py render() at {file_path} must return str or "
             f"HttpResponseBase, got {type(result).__name__}."
@@ -304,6 +320,8 @@ class Page:
         rendering pass. Suitable for the canonical page render path
         and for partial paths such as form-error rerenders.
         """
+        # next.static imports next.pages.manager, so the static manager import
+        # is deferred here to break the next.pages <-> next.static cycle.
         from next.static import default_manager  # noqa: PLC0415
 
         collector = default_manager.create_collector()
@@ -415,6 +433,28 @@ class Page:
         template = self.composed_template_for(file_path)
         return self._render_template_str(file_path, template, start, request, **kwargs)
 
+    def authorization_outcome(
+        self,
+        file_path: Path,
+        request: HttpRequest,
+        **kwargs: object,
+    ) -> tuple[HttpResponseBase | None, bool]:
+        """Re-run a page's body resolution once, reporting short-circuit and kind.
+
+        The page module is loaded and its `render()` runs under the same
+        dependency injection as the unified view, so guards, denials, and
+        redirects fire exactly as they would on the page's own request. The
+        first element is a short-circuit `HttpResponseBase` such as a
+        redirect or a denial, or `None` when the body resolved to renderable
+        content. The boolean is True when the body came from a `render()`
+        string, which has no composed template to render a standalone zone
+        against. An out-of-band zone morph reads both from one resolution so
+        the foreign page's `render()` runs exactly once.
+        """
+        module = _load_python_module_memo(file_path)
+        resolution = self._resolve_page_body(file_path, module, request, **kwargs)
+        return resolution.http_response, resolution.dynamic
+
     def _create_unified_view(
         self,
         file_path: Path,
@@ -432,6 +472,22 @@ class Page:
             resolution = self._resolve_page_body(file_path, module, request, **kwargs)
             if resolution.http_response is not None:
                 return resolution.http_response
+            # next.partial imports next.pages, so the zone branch defers
+            # its imports to break the cycle. Without the partial switch the
+            # intent carries no zones and the full render path below runs
+            # byte-for-byte the same as before.
+            from next.partial import partial_intent  # noqa: PLC0415
+            from next.partial.view import zone_response  # noqa: PLC0415
+
+            intent = partial_intent(request)
+            if intent.zones:
+                return zone_response(
+                    file_path,
+                    intent,
+                    request,
+                    dynamic_body=resolution.dynamic,
+                    url_kwargs=dict(kwargs),
+                )
             body = resolution.body if resolution.body is not None else ""
             content = self._render_composed(file_path, body, request, **kwargs)
             return HttpResponse(content)

@@ -6,7 +6,7 @@ Testing and Autoreload
 Goal
 ----
 
-This final part covers the development workflow.
+This part covers the development workflow.
 You install pytest and write end-to-end tests against the Notes application with ``NextClient`` and ``SignalRecorder``.
 You also learn how the autoreloader picks up file router changes without a server restart.
 
@@ -73,7 +73,7 @@ Database access uses the standard ``db`` fixture from pytest-django, no extra fi
 
    Do not call ``reset_registries()`` in an autouse fixture for this project.
    It rebuilds the form-action backend from settings and drops every form registered at import.
-   Re-importing ``notes/forms.py`` will not re-register them because Python caches the module, so the next ``post_action`` raises ``FormActionNotFound``.
+   Re-importing ``notes/forms.py`` will not re-register them because Python caches the module, so the next ``post_action`` raises ``FormActionNotFoundError``.
    Reach for ``reset_registries()`` only in a test that deliberately swaps ``NEXT_FRAMEWORK`` backends, and re-register the affected forms inside that test.
 
 Write the First End-to-End Test
@@ -251,7 +251,7 @@ The development server reloads page and component changes without a manual resta
 Common Pitfalls
 ---------------
 
-``post_action`` raises ``FormActionNotFound``.
+``post_action`` raises ``FormActionNotFoundError``.
    A form class registers only when its module is imported.
    Call ``eager_load_pages`` in the test setup so every form and handler registers before the first dispatch.
    For forms in ``forms.py``, also import that module explicitly or rely on ``autodiscover_forms()``.
@@ -267,10 +267,12 @@ Autoreloader does not pick up a change.
 Next Steps
 ----------
 
-The tutorial is complete.
+The Notes application works and is tested.
+The next part makes the index live with partial rendering, without leaving the patterns this tutorial already built.
 
 .. seealso::
 
+   :doc:`tutorial06` wraps the list in a zone and updates it in place, with a no-JavaScript fallback.
    :doc:`whatsnext` lists where to go next, by topic.
    :doc:`/content/topics/testing` covers the full testing surface.
    :doc:`/content/internals/autoreload` explains how the reloader watches the filesystem.

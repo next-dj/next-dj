@@ -11,7 +11,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 from next.deps import resolver
 from next.utils import caller_source_path
@@ -125,13 +125,23 @@ class ComponentContextManager:
             skip_framework_file=("context.py", "components"),
         )
 
+    @overload
+    def context[C: Callable[..., Any]](self, func_or_key: C, /) -> C: ...
+    @overload
+    def context[C: Callable[..., Any]](
+        self,
+        func_or_key: str | None = None,
+        *,
+        serialize: bool = False,
+        serializer: JsContextSerializer | None = None,
+    ) -> Callable[[C], C]: ...
     def context(
         self,
         func_or_key: Callable[..., Any] | str | None = None,
         *,
         serialize: bool = False,
         serializer: JsContextSerializer | None = None,
-    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    ) -> Callable[..., Any]:
         """Mark a function so it fills template variables for this component module.
 
         Pass `serialize=True` to include the return value in

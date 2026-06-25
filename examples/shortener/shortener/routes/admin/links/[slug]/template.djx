@@ -1,7 +1,15 @@
 <div class="space-y-4">
   <a href="{% url 'next:page_admin' %}" class="text-sm text-muted-foreground hover:underline">← Back to links</a>
 
-  {% component "page_header" title=link.slug description=link.url %}
+  {% #component "page_header" title=link.slug description=link.url %}
+    {% #slot "actions" %}
+      {% form "reset_clicks" class="inline" %}
+        <button type="submit" class="rounded border border-border px-3 py-1.5 text-sm hover:bg-muted">
+          Reset cached clicks
+        </button>
+      {% endform %}
+    {% /slot %}
+  {% /component %}
 
   {% component "link_card" %}
 

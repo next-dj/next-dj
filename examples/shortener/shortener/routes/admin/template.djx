@@ -4,11 +4,30 @@
       {% if recent_links %}
         <ul class="space-y-2">
           {% for link in recent_links %}
-            <li class="space-y-1">
+            <li data-next-key="{{ link.slug }}" class="space-y-1">
               {% component "link_card" %}
-              <a href="{% url 'next:page_admin_links_slug' slug=link.slug %}" class="ml-1 text-xs text-muted-foreground hover:underline">
-                View details →
-              </a>
+              {% form "edit_link_form" key=link.slug class="mt-1 flex items-center gap-2" %}
+                <input type="hidden" name="slug" value="{{ link.slug }}">
+                <input name="url" type="url" value="{{ link.url }}"
+                  class="flex-1 rounded border border-border bg-background px-2 py-1 text-xs">
+                <button type="submit" class="rounded border border-border px-2 py-1 text-xs hover:bg-muted">
+                  Save
+                </button>
+                {% if form.url.errors %}
+                  <span class="text-xs text-destructive">{{ form.url.errors|join:", " }}</span>
+                {% endif %}
+              {% endform %}
+              <div class="flex items-center gap-3">
+                <a href="{% url 'next:page_admin_links_slug' slug=link.slug %}" class="text-xs text-muted-foreground hover:underline">
+                  View details →
+                </a>
+                {% form "delete_link" key=link.slug class="inline" %}
+                  <input type="hidden" name="slug" value="{{ link.slug }}">
+                  <button type="submit" class="rounded border border-destructive px-2 py-1 text-xs text-destructive hover:bg-destructive hover:text-destructive-foreground">
+                    Delete
+                  </button>
+                {% endform %}
+              </div>
             </li>
           {% endfor %}
         </ul>

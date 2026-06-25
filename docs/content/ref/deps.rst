@@ -32,12 +32,6 @@ Subclasses join the resolver's registry through ``__init_subclass__``, so the re
 
 .. automodule:: next.deps.providers
    :members:
-   :exclude-members: ProviderRegistry
-
-.. note::
-
-   ``ProviderRegistry`` is internal.
-   It is absent from ``next.deps.__all__`` and carries no compatibility promise.
 
 Markers
 ~~~~~~~

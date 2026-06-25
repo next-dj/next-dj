@@ -1,53 +1,59 @@
 <div class="space-y-6">
   {% component "page_header" title="Search" %}
 
-  <form method="get" class="space-y-2">
+  <form method="get" action="{% url 'next:page_search' %}" class="space-y-2"
+        data-next-target="search-results"
+        data-next-trigger="input" data-next-debounce="300">
     <label class="text-xs font-medium uppercase tracking-wide text-muted-foreground" for="id_q">
       Query
     </label>
     <div class="flex gap-2">
       <input id="id_q" type="text" name="q" value="{{ query }}"
-             placeholder="Type at least two letters"
+             placeholder="Search file docs and articles"
              class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm">
       {% component "button" type="submit" text="Search" variant="default" %}
     </div>
   </form>
 
-  {% if query %}
-    {% #component "section" title="File-backed results" %}
-      {% #slot "content" %}
-        {% if results.file_pages %}
-          <ul class="space-y-2">
-            {% for entry in results.file_pages %}
-              <li class="rounded-md border border-border bg-card p-3 shadow-sm">
-                <a href="{{ entry.href }}" class="text-sm font-medium text-foreground hover:underline">
-                  {{ entry.title }}
-                </a>
-              </li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <p class="text-sm text-muted-foreground">No file pages match.</p>
-        {% endif %}
-      {% /slot %}
-    {% /component %}
+  {% zone "search-results" %}
+    {% if query %}
+      {% #component "section" title="File-backed results" %}
+        {% #slot "content" %}
+          {% if results.file_pages %}
+            <ul class="space-y-2">
+              {% for entry in results.file_pages %}
+                <li class="rounded-md border border-border bg-card p-3 shadow-sm">
+                  <a href="{{ entry.href }}" class="text-sm font-medium text-foreground hover:underline">
+                    {{ entry.title }}
+                  </a>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="text-sm text-muted-foreground">No file pages match.</p>
+          {% endif %}
+        {% /slot %}
+      {% /component %}
 
-    {% #component "section" title="Article results" %}
-      {% #slot "content" %}
-        {% if results.articles %}
-          <ul class="space-y-2">
-            {% for article in results.articles %}
-              <li class="rounded-md border border-border bg-card p-3 shadow-sm">
-                <a href="{{ article.url }}" class="text-sm font-medium text-foreground hover:underline">
-                  {{ article.title }}
-                </a>
-              </li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <p class="text-sm text-muted-foreground">No articles match.</p>
-        {% endif %}
-      {% /slot %}
-    {% /component %}
-  {% endif %}
+      {% #component "section" title="Article results" %}
+        {% #slot "content" %}
+          {% if results.articles %}
+            <ul class="space-y-2">
+              {% for article in results.articles %}
+                <li class="rounded-md border border-border bg-card p-3 shadow-sm">
+                  <a href="{{ article.url }}" class="text-sm font-medium text-foreground hover:underline">
+                    {{ article.title }}
+                  </a>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="text-sm text-muted-foreground">No articles match.</p>
+          {% endif %}
+        {% /slot %}
+      {% /component %}
+    {% else %}
+      <p class="text-sm text-muted-foreground">Type a query to search file docs and articles.</p>
+    {% endif %}
+  {% endzone %}
 </div>

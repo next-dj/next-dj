@@ -106,8 +106,13 @@ class IdentityDedup:
         """Initialise the monotonically increasing counter."""
         self._counter = 0
 
-    def key(self, asset: StaticAsset) -> Hashable:  # noqa: ARG002
-        """Return a unique incrementing key so dedup never triggers."""
+    def key(self, asset: StaticAsset) -> Hashable:
+        """Return a unique incrementing key so dedup never triggers.
+
+        The `asset` is part of the dedup contract and ignored here, the
+        monotonic counter alone keeps every key distinct.
+        """
+        del asset
         self._counter += 1
         return ("unique", self._counter)
 
@@ -120,7 +125,7 @@ class JsContextPolicy(Protocol):
         self,
         existing: dict[str, Any],
         key: str,
-        value: Any,  # noqa: ANN401
+        value: object,
     ) -> dict[str, Any]:
         """Merge a new entry into the existing mapping and return it."""
         raise NotImplementedError
@@ -137,7 +142,7 @@ class FirstWinsPolicy:
         self,
         existing: dict[str, Any],
         key: str,
-        value: Any,  # noqa: ANN401
+        value: object,
     ) -> dict[str, Any]:
         """Write the value only when the key is absent from existing."""
         if key not in existing:
@@ -152,7 +157,7 @@ class LastWinsPolicy:
         self,
         existing: dict[str, Any],
         key: str,
-        value: Any,  # noqa: ANN401
+        value: object,
     ) -> dict[str, Any]:
         """Assign the value under the key, overwriting any existing entry."""
         existing[key] = value
@@ -166,7 +171,7 @@ class RaiseOnConflictPolicy:
         self,
         existing: dict[str, Any],
         key: str,
-        value: Any,  # noqa: ANN401
+        value: object,
     ) -> dict[str, Any]:
         """Assign the value or raise when the key already exists."""
         if key in existing:
@@ -183,7 +188,7 @@ class DeepMergePolicy:
         self,
         existing: dict[str, Any],
         key: str,
-        value: Any,  # noqa: ANN401
+        value: object,
     ) -> dict[str, Any]:
         """Recursively merge dict values or assign the new one otherwise."""
         current = existing.get(key)
@@ -358,7 +363,7 @@ class StaticCollector:
     def add_js_context(
         self,
         key: str,
-        value: Any,  # noqa: ANN401
+        value: object,
         *,
         serializer: JsContextSerializer | None = None,
     ) -> None:

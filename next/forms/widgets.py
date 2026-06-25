@@ -2,7 +2,7 @@
 
 import difflib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, override
 
 from django import forms as django_forms
 from django.conf import settings
@@ -81,6 +81,7 @@ class ComponentWidget(django_forms.Widget):
             cache[key] = info
         return info
 
+    @override
     def render(
         self,
         name: str,

@@ -1,6 +1,8 @@
 from django import forms as django_forms
 from django.http import HttpRequest, HttpResponseRedirect
 from django.urls import reverse
+from django.utils.safestring import SafeString
+from notes.markdown_render import render_markdown
 from notes.models import Note
 from notes.providers import DTenant
 
@@ -28,11 +30,14 @@ class NoteCreateForm(Form):
             body=self.cleaned_data.get("body", ""),
         )
         return HttpResponseRedirect(
-            reverse("next:page_notes_int_id_edit", kwargs={"id": note_obj.pk}),
+            reverse(
+                "next:page_notes_int_note_id_edit",
+                kwargs={"note_id": note_obj.pk},
+            ),
         )
 
 
-@context("draft_body")
-def draft_body() -> str:
-    """Seed an empty body so the markdown preview pane renders on first paint."""
-    return ""
+@context("preview_html")
+def preview_html() -> SafeString:
+    """Render the empty draft so the preview pane has its first-paint placeholder."""
+    return render_markdown("")

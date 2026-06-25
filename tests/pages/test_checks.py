@@ -233,8 +233,9 @@ class TestCheckTemplateLoaders:
         return list(check_template_loaders())
 
     def _reset_loader_cache(self) -> None:
-
-        loaders_module._REGISTERED_LOADERS_CACHE = None
+        # the cache is a single-slot holder mutated in place, never rebound,
+        # so a stale None on this worker cannot break the production reads
+        loaders_module._REGISTERED_LOADERS_CACHE["value"] = None
 
     @override_settings(
         NEXT_FRAMEWORK={

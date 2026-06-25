@@ -7,7 +7,7 @@ from django.urls import URLPattern
 from next.forms import (
     ActionRegistration,
     FormActionBackend,
-    FormActionNotFound,
+    FormActionNotFoundError,
     RegistryFormActionBackend,
 )
 from next.forms.backends import ActionMeta
@@ -24,7 +24,7 @@ class TestResolveActionUrl:
         assert "_next/form/" in url
 
     def test_raises_for_unknown_action(self) -> None:
-        with pytest.raises(FormActionNotFound, match="Unknown form action"):
+        with pytest.raises(FormActionNotFoundError, match="Unknown form action"):
             resolve_action_url("nonexistent_zz")
 
 
@@ -57,13 +57,15 @@ class TestBuildFormFor:
         assert form.is_valid()
 
     def test_raises_for_unknown_action(self) -> None:
-        with pytest.raises(FormActionNotFound, match="Unknown form action") as excinfo:
+        with pytest.raises(
+            FormActionNotFoundError, match="Unknown form action"
+        ) as excinfo:
             build_form_for("nonexistent_zz")
         assert excinfo.value.suggestions == ()
         assert "Closest matches" not in str(excinfo.value)
 
     def test_unknown_action_carries_close_match_suggestions(self) -> None:
-        with pytest.raises(FormActionNotFound) as excinfo:
+        with pytest.raises(FormActionNotFoundError) as excinfo:
             build_form_for("simple_frm")
         assert "simple_form" in excinfo.value.suggestions
         assert "Closest matches" in str(excinfo.value)
@@ -81,7 +83,7 @@ class TestBuildFormFor:
         monkeypatch.setattr(
             form_action_manager, "_backends", [_NamelessMetaBackend(), registry]
         )
-        with pytest.raises(FormActionNotFound) as excinfo:
+        with pytest.raises(FormActionNotFoundError) as excinfo:
             build_form_for("delete_not")
         assert excinfo.value.suggestions == ("delete_note",)
 

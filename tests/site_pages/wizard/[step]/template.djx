@@ -1,0 +1,4 @@
+<h1>wizard</h1>
+{% zone "wizard-zone" %}
+{% form "step_wizard" zone="wizard-zone" %}<div>{% if form.name %}{{ form.name }}{% endif %}{% if form.scope %}{{ form.scope }}{% endif %}</div>{% endform %}
+{% endzone %}

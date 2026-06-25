@@ -36,6 +36,9 @@ Read the topic that matches the part you are touching, then jump to the referenc
 :doc:`static-assets/index`
    Co-located files, deduplication, asset kinds, backends, JS context.
 
+:doc:`partial-rendering/index`
+   Zones, patches, forms, the modal wizard, lazy zones, co-located JavaScript, and the SSE bridge.
+
 .. rubric:: Cross-Cutting Concerns
 
 :doc:`dependency-injection`
@@ -70,6 +73,7 @@ Read the topic that matches the part you are touching, then jump to the referenc
    components
    forms/index
    static-assets/index
+   partial-rendering/index
    dependency-injection
    signals
    testing

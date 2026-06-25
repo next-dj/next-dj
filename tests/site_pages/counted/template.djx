@@ -1,0 +1,5 @@
+<h1>counted page</h1>
+{% zone "alpha" %}<p>{{ alpha_marker }}</p>{% endzone %}
+{% zone "beta" %}<p>{{ beta_marker }}</p>{% endzone %}
+{% zone "gamma" %}<p>{{ gamma_marker }}</p>{% endzone %}
+{% zone "report" lazy="load" %}<table>{{ report }}</table>{% placeholder %}<p>loading report</p>{% endzone %}

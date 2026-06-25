@@ -18,16 +18,58 @@ import enum
 import json
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
+from django.conf import settings
+from django.http.request import HttpHeaders
+from django.middleware.csrf import get_token
+
 from .serializers import resolve_serializer
 
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from django.http import HttpRequest
+
     from .serializers import JsContextSerializer
 
 
 NEXT_JS_STATIC_PATH: Final = "next/next.min.js"
+
+CSRF_PAYLOAD_KEY: Final = "$csrf"
+
+
+def csrf_header_name() -> str:
+    """Return the CSRF header name in HTTP wire form from Django settings.
+
+    Django stores `CSRF_HEADER_NAME` in WSGI `request.META` form, for
+    example `HTTP_X_CSRFTOKEN`. The runtime sends the header by its HTTP
+    name, so the META form is unmangled with the same rule Django uses
+    to expose headers. The cookie is never read.
+    """
+    raw = settings.CSRF_HEADER_NAME
+    name = HttpHeaders.parse_header_name(raw)
+    if name is not None:
+        return name
+    return raw.removeprefix(HttpHeaders.HTTP_PREFIX).replace("_", "-").title()
+
+
+def csrf_payload(request: HttpRequest) -> dict[str, str]:
+    """Return the `$csrf` payload of header name and token for `Next._init`."""
+    return {"header": csrf_header_name(), "token": get_token(request)}
+
+
+def csrf_payload_for(request: HttpRequest | None) -> dict[str, str] | None:
+    """Return the `$csrf` payload, or None when the request cannot mint a token.
+
+    A request whose `META` is not a real mapping (a unit-test stand-in or
+    a non-CSRF-capable request) yields no payload, so the rendered page
+    stays byte-identical to the pre-partial output for those renders. A
+    real request always yields the header name and token the runtime
+    needs to submit partial mutations.
+    """
+    if request is None or not isinstance(getattr(request, "META", None), dict):
+        return None
+    return csrf_payload(request)
 
 
 class ScriptInjectionPolicy(enum.Enum):

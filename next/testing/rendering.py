@@ -27,7 +27,7 @@ def render_page(
     file_path: Path | str,
     request: HttpRequest | None = None,
     /,
-    **url_kwargs: Any,  # noqa: ANN401
+    **url_kwargs: object,
 ) -> str:
     """Render the page at `file_path` and return its HTML string.
 

@@ -52,9 +52,13 @@ The next request observes the fresh URL tree without a process restart. Tests co
 
 `wiki.providers.ArticleProvider` claims any parameter annotated as `DArticle[Article]`. It reads `context.url_kwargs["slug"]` and either returns the matching row or raises `Http404`. The catchall page, the edit form, and the preview context all use the same provider, so the slug-to-row lookup lives in one place.
 
-### 4. Live preview through parent context
+### 4. Live preview through the shared component
 
-`articles/new/page.py` and `articles/edit/[slug]/page.py` both register a context entry named `body`. The `markdown_preview` component reads `body` from the parent template context, runs it through `render_markdown`, and emits the safe HTML. No explicit prop is needed because the parent context flows into the component scope. The JavaScript layer wires the textarea to the preview pane for keystroke updates without round-tripping the server.
+`articles/new/page.py` and `articles/edit/[slug]/page.py` both register a context entry named `preview_html` that runs the form body through `render_markdown` and returns the safe HTML. The template passes it to the shared `markdown_preview` component as `rendered_html=preview_html`, so the preview pane is filled server-side on first paint and on every re-render after a failed submission. The JavaScript layer then wires the textarea to the pane for keystroke updates without round-tripping the server.
+
+`markdown_preview` lives in [`examples/_shared/_components/markdown_preview/`](../_shared/_components/markdown_preview/) as a pure presentation shell. Its `component.py` declares only the `marked` CDN, its co-located `component.mjs` ships the client behaviour, and its `component.css` styles code and pre blocks. The framework auto-discovers the co-located assets and dedupes them into the page slots, so this example never names a static path. Only the server-side render stays local — this example reuses its own `render_markdown` helper and injects the result through the prop.
+
+The script registers its work through `Next.partial.onMount("[data-markdown-preview]", ...)` rather than a `document.querySelectorAll` scan at load. The runtime runs the callback over the initial DOM and over every subtree it later inserts, so a preview pane that re-renders inside a morphed form is rebound the same way the first render was, with no stale listener left behind by a swap. The callback walks up to the enclosing `<form>` to find its textarea, so the one shell powers both the wiki form and the near-identical multi-tenant note form without hardcoding a field name.
 
 ### 5. Slug reservations
 
@@ -62,7 +66,9 @@ The next request observes the fresh URL tree without a process restart. Tests co
 
 ### 6. LIKE search across two stores
 
-`wiki/routes/search/page.py` runs two scans for each query. A literal substring match against a curated catalogue surfaces matching file pages. A `Q(title__icontains) | Q(body_md__icontains)` query against `Article` surfaces matching rows. The same template renders both lists side by side.
+`wiki/routes/search/page.py` runs two scans for each query. A literal substring match against a curated catalogue surfaces matching file pages. A `Q(title__icontains) | Q(body_md__icontains)` query against `Article` surfaces matching rows. The same template renders both lists side by side inside a `search-results` zone.
+
+The search form carries `data-next-target="search-results"`, `data-next-trigger="input"`, and `data-next-debounce="300"`, so the runtime debounces keystrokes, issues a GET for the `search-results` zone, and morphs the two result lists in place. `page.py` does not change: the same view answers the full page and the zone request, reading `?q=` from `request.GET` either way. Without the runtime the form is a plain `<form method="get">` and the Search button reloads the page, so a bookmark of `/search/?q=routing` still reproduces the listing.
 
 ### 7. Object-level edit permission
 

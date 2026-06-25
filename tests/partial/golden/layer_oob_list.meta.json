@@ -1,0 +1,12 @@
+{
+  "name": "layer_oob_list",
+  "description": "The page=-OOB done: one envelope closing the layer, morphing the host page's foreign zone, and toasting, applied in a single pass.",
+  "content_type": "application/vnd.next.patches+json",
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/vnd.next.patches+json",
+    "X-Next-Version": "9f3c2e1b",
+    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version"
+  },
+  "envelope_file": "layer_oob_list.envelope.json"
+}

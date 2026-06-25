@@ -1,23 +1,16 @@
-/* Wire up native <dialog> elements to open/close triggers.
-   Open: <button data-ui-dialog-open="<dialog-id>">.
-   Close: any button inside the dialog with data-ui-dialog-close,
-   or pressing Esc, or clicking the backdrop. */
+/* Styling shell over a native <dialog>. The framework's layer runtime owns
+   opening a dialog from a data-next-layer link and closing it on accept or
+   dismiss, so this component ships no open trigger of its own.
+
+   What stays is the document-delegation idiom: a single listener on document
+   survives a morph that replaces the dialog markup, where a per-element
+   listener would be lost. It closes a standalone styled dialog from its
+   close button or a backdrop click, for the cases that mount a <dialog>
+   directly without going through a layer. */
 
 document.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
-
-  const opener = target.closest("[data-ui-dialog-open]");
-  if (opener instanceof HTMLElement) {
-    const id = opener.dataset.uiDialogOpen;
-    if (id) {
-      const dialog = document.getElementById(id);
-      if (dialog instanceof HTMLDialogElement) {
-        dialog.showModal();
-      }
-    }
-    return;
-  }
 
   const closer = target.closest("[data-ui-dialog-close]");
   if (closer) {

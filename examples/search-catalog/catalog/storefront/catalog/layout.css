@@ -5,3 +5,25 @@
     align-self: start;
   }
 }
+
+/* The zone wrapper renders as a bare <ul>, so the grid lives here rather than on a utility class the zone tag cannot emit, styling the list whether it renders inline or arrives as a morphed zone patch. */
+ul[data-next-zone="catalog-results"] {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+@media (min-width: 640px) {
+  ul[data-next-zone="catalog-results"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  ul[data-next-zone="catalog-results"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

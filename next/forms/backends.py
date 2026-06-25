@@ -5,7 +5,7 @@ import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast, override
 from weakref import WeakSet
 
 from django.core.exceptions import ImproperlyConfigured
@@ -27,13 +27,14 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from django import forms as django_forms
+    from django.forms import BaseForm, BaseFormSet
     from django.http import HttpRequest, HttpResponse
     from django.urls import URLPattern
 
     from .wizard import FormWizard
 
 
-class FormActionNotFound(LookupError):  # noqa: N818
+class FormActionNotFoundError(LookupError):
     """No registered form action matches the requested name."""
 
     _suggestions: "tuple[str, ...] | None" = None
@@ -95,12 +96,14 @@ class FormActionNotFound(LookupError):  # noqa: N818
             )
         return self._suggestions
 
+    @override
     def __str__(self) -> str:
         """Render the message, composing and caching it on first access."""
         if not self.args:
             self.args = (self._compose(),)
         return str(self.args[0])
 
+    @override
     def __reduce__(self) -> "tuple[Any, ...]":
         """Pickle the rendered message and drop the live candidates source."""
         state = {
@@ -230,6 +233,15 @@ class ActionMeta(TypedDict, total=False):
     guard: ActionGuard | None
 
 
+@dataclass(frozen=True, slots=True)
+class RegistryBackendSnapshot:
+    """An immutable copy of a registry backend's action maps for rollback."""
+
+    registry: "dict[tuple[str, str], ActionMeta]"
+    uid_to_name: "dict[str, tuple[str, str]]"
+    name_index: "dict[str, tuple[str, str]]"
+
+
 @dataclass(frozen=True)
 class ActionRegistration:
     """A form action to register: its name, declaration site, and target.
@@ -284,7 +296,7 @@ class FormActionBackend(ABC):
         self,
         request: "HttpRequest",
         action_name: str,
-        form: "django_forms.Form | None",
+        form: "BaseForm | BaseFormSet | None",
         page_file_path: "Path | None" = None,
         url_kwargs: dict[str, object] | None = None,
     ) -> str:
@@ -297,7 +309,21 @@ class FormActionBackend(ABC):
         request: "HttpRequest",
         outcome: ActionOutcome,
     ) -> "HttpResponse":
-        """Turn one pipeline outcome into the HTTP response. Default envelope."""
+        """Turn one pipeline outcome into the HTTP response.
+
+        A partial request routes through `shape_partial` for a patch
+        envelope. A plain request keeps the default full-page path
+        byte-for-byte.
+        """
+        # Deferred to break the next.forms <-> next.partial import cycle:
+        # partial shaping imports the form dispatch and origin helpers.
+        from next.partial import (  # noqa: PLC0415
+            is_partial_request,
+            shape_partial,
+        )
+
+        if is_partial_request(request):
+            return shape_partial(self, request, outcome)
         return FormActionDispatch.shape_response(self, request, outcome)
 
 
@@ -335,13 +361,34 @@ class RegistryFormActionBackend(FormActionBackend):
         """Drop every registered action and reset the UID index. For test isolation.
 
         Rebinding beats clearing four populated dicts, and an escaped
-        FormActionNotFound keeps its raise-time candidates view.
+        FormActionNotFoundError keeps its raise-time candidates view.
         """
         self._registry = {}
         self._uid_to_name = {}
         self._name_index = {}
         self._url_cache = {}
 
+    def snapshot(self) -> "RegistryBackendSnapshot":
+        """Capture the registered actions so a later `restore` rolls them back.
+
+        A test that registers extra actions takes a snapshot first and
+        restores it afterwards, so a later suite sees the registry exactly
+        as it was without reaching into the backend's private maps.
+        """
+        return RegistryBackendSnapshot(
+            registry=dict(self._registry),
+            uid_to_name=dict(self._uid_to_name),
+            name_index=dict(self._name_index),
+        )
+
+    def restore(self, snapshot: "RegistryBackendSnapshot") -> None:
+        """Restore the registered actions captured by `snapshot`."""
+        self._registry = dict(snapshot.registry)
+        self._uid_to_name = dict(snapshot.uid_to_name)
+        self._name_index = dict(snapshot.name_index)
+        self._url_cache = {}
+
+    @override
     def register_action(self, registration: ActionRegistration) -> None:
         """Store handler, form_class, or wizard_class and a stable uid for the name."""
         name = registration.name
@@ -425,6 +472,7 @@ class RegistryFormActionBackend(FormActionBackend):
             return None
         return meta
 
+    @override
     def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
         """Return the reverse URL for a registered action name."""
         meta: ActionMeta | None = None
@@ -449,13 +497,14 @@ class RegistryFormActionBackend(FormActionBackend):
                     self._url_cache[cache_key] = url
                 return url
 
-        raise FormActionNotFound(
+        raise FormActionNotFoundError(
             name=action_name,
             page_path=page_path,
             candidates=self._name_index.keys(),
             registry_empty=not self._registry,
         )
 
+    @override
     def generate_urls(self) -> "list[URLPattern]":
         """Return one catch-all route when at least one action is registered."""
         if not self._registry:
@@ -463,6 +512,7 @@ class RegistryFormActionBackend(FormActionBackend):
         view = require_http_methods(["GET", "POST"])(self.dispatch)
         return [path("_next/form/<str:uid>/", view, name=URL_NAME_FORM_ACTION)]
 
+    @override
     def dispatch(self, request: "HttpRequest", uid: str) -> "HttpResponse":
         """Forward a POST request to `FormActionDispatch.dispatch`."""
         key = self._uid_to_name.get(uid)
@@ -475,6 +525,7 @@ class RegistryFormActionBackend(FormActionBackend):
         meta = self._registry[key]
         return FormActionDispatch.dispatch(self, request, key[1], meta)
 
+    @override
     def get_meta(
         self,
         action_name: str,
@@ -489,15 +540,17 @@ class RegistryFormActionBackend(FormActionBackend):
 
         return self._fallback_meta(action_name, scoped=page_path is not None)
 
+    @override
     def iter_actions(self) -> "Iterable[ActionMeta]":
         """Yield every stored `ActionMeta` in registration order."""
         yield from self._registry.values()
 
+    @override
     def render_invalid_page(
         self,
         request: "HttpRequest",
         action_name: str,
-        form: "django_forms.Form | None",
+        form: "BaseForm | BaseFormSet | None",
         page_file_path: "Path | None" = None,
         url_kwargs: dict[str, object] | None = None,
     ) -> str:
@@ -529,7 +582,8 @@ __all__ = [
     "ActionRegistration",
     "FormActionBackend",
     "FormActionFactory",
-    "FormActionNotFound",
+    "FormActionNotFoundError",
+    "RegistryBackendSnapshot",
     "RegistryFormActionBackend",
     "build_action_guard",
     "file_to_dotted_module",

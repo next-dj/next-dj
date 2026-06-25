@@ -21,7 +21,7 @@ The autodoc blocks under `Public API`_ are the exhaustive surface.
 
 Stable.
    ``Form``, ``ModelForm``, ``BaseForm``, ``BaseModelForm``, ``@action``, ``redirect_to_origin``,
-   ``FormWizard``, ``DForm``, ``FormActionNotFound``, and ``autodiscover_forms``.
+   ``FormWizard``, ``DForm``, ``FormActionNotFoundError``, and ``autodiscover_forms``.
    Use these in application code.
    Form classes self-register, so reach for ``@action`` only for form-less handlers.
 
@@ -83,14 +83,14 @@ Decorator
 Exceptions
 ~~~~~~~~~~
 
-``FormActionNotFound`` is raised when no registered action matches a requested name.
+``FormActionNotFoundError`` is raised when no registered action matches a requested name.
 ``FormActionManager.get_action_url``, the ``{% form %}`` and ``{% action_url %}`` tags, and the testing helpers ``resolve_action_url`` and ``build_form_for`` all raise it.
 It subclasses ``LookupError`` and carries the failing ``name``, the ``page_path`` that was searched, the close-match ``suggestions`` tuple, and the ``registry_empty`` flag.
 Every raising surface renders the suggestions into the message as ``Closest matches: 'x', 'y'``, computed by close-match comparison against the registered names.
 The comparison and the message run on first render, so probing for an action by catching the exception costs no close-match work.
 When ``registry_empty`` is true the message also explains that no actions are registered at all and points at autodiscovery.
 
-.. autoexception:: next.forms.FormActionNotFound
+.. autoexception:: next.forms.FormActionNotFoundError
    :members:
 
 Form Base Classes
@@ -203,7 +203,7 @@ Manager
 ``FormActionManager`` holds the configured backends behind the module-level ``form_action_manager`` instance.
 ``build_form_namespace_for_action`` builds the ``{form, wizard}`` namespace the ``{% form %}`` tag consumes, for code rendering that namespace by hand outside the tag.
 All three import from ``next.forms.manager``.
-``FormActionManager.require_action_meta`` returns the resolved ``ActionMeta`` or raises ``FormActionNotFound`` with close-match suggestions, for callers that cannot proceed without the meta.
+``FormActionManager.require_action_meta`` returns the resolved ``ActionMeta`` or raises ``FormActionNotFoundError`` with close-match suggestions, for callers that cannot proceed without the meta.
 
 .. automodule:: next.forms.manager
    :members:

@@ -13,9 +13,6 @@ keywords = ["django", "framework", "low-code", "frontend", "full-stack framework
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: Django",
-    "Framework :: Django :: 4.2",
-    "Framework :: Django :: 5.0",
-    "Framework :: Django :: 5.1",
     "Framework :: Django :: 5.2",
     "Framework :: Django :: 6.0",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -28,7 +25,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "django>=4.2,<6.1",
+    "django>=5.2,<6.1",
 ]
 
 [project.urls]
@@ -89,8 +86,8 @@ path = "build_hooks.py"
 packages = ["next"]
 artifacts = ["next/static/next/next.min.js"]
 exclude = [
-    "next/static/next/next.ts",
-    "next/static/next/next.test.ts",
+    "next/client/",
+    "next/static/next/next.meta.json",
 ]
 
 [tool.hatch.build.targets.sdist]
@@ -106,7 +103,8 @@ include = [
 ]
 artifacts = ["next/static/next/next.min.js"]
 exclude = [
-    "next/static/next/next.test.ts",
+    "next/client/*.test.ts",
+    "next/static/next/next.meta.json",
     "examples/",
     "docs/",
     "tests/",
@@ -152,6 +150,8 @@ omit = [
     "*/next/forms/checks.py",
     "*/next/deps/checks.py",
     "*/next/server/checks.py",
+    "*/next/partial/checks.py",
+    "*/next/apps/checks.py",
 ]
 
 # Collapse source-tree and site-packages paths so coverage reports, omits, and
@@ -245,7 +245,7 @@ split-on-trailing-comma = true
 max-complexity = 10
 
 [tool.ruff.lint.pylint]
-max-args = 5
+max-args = 6
 max-branches = 12
 max-returns = 6
 max-statements = 50
@@ -300,6 +300,13 @@ warn_no_return = true
 warn_unreachable = true
 strict_equality = true
 show_error_codes = true
+enable_error_code = [
+    "explicit-override",
+    "ignore-without-code",
+    "redundant-self",
+    "possibly-undefined",
+    "truthy-bool",
+]
 
 # only check next folder
 packages = ["next"]

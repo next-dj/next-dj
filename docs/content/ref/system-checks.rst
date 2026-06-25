@@ -14,7 +14,7 @@ Check Registration
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.conf.checks``, ``next.pages.checks``, ``next.urls.checks``, ``next.components.checks``, ``next.forms.checks``, ``next.server.checks``, and ``next.static.checks``.
+The imported modules are ``next.conf.checks``, ``next.pages.checks``, ``next.urls.checks``, ``next.components.checks``, ``next.forms.checks``, ``next.server.checks``, ``next.static.checks``, ``next.partial.checks``, and ``next.apps.checks``.
 
 Most of these modules register checks. ``next.server.checks`` registers no Django system checks.
 The dependency injection layer contributes no Django system checks.
@@ -58,6 +58,18 @@ Static
 ~~~~~~
 
 .. automodule:: next.static.checks
+   :members:
+
+Partial Rendering
+~~~~~~~~~~~~~~~~~
+
+.. automodule:: next.partial.checks
+   :members:
+
+Apps
+~~~~
+
+.. automodule:: next.apps.checks
    :members:
 
 Configuration
@@ -250,6 +262,27 @@ Errors
    * - ``next.E054``
      - A page-scoped ``FormWizard`` is declared on a page whose route lacks the ``[url_param]`` segment, so the wizard can never advance past its first step.
      - ``next.forms.checks``
+   * - ``next.E060``
+     - A zone name is declared more than once in a page's composed template, the layout chain plus the page body.
+     - ``next.partial.checks``
+   * - ``next.E061``
+     - A zone name is not an ASCII slug, so it cannot travel in the latin-1 ``X-Next-Zone`` header.
+     - ``next.partial.checks``
+   * - ``next.E062``
+     - A ``{% zone %}`` sits inside a ``{% for %}`` loop, which a standalone zone render cannot reproduce.
+     - ``next.partial.checks``
+   * - ``next.E063``
+     - A ``{% zone %}`` sits inside an ``{% if %}`` block, whose condition a standalone zone render cannot evaluate.
+     - ``next.partial.checks``
+   * - ``next.E064``
+     - A ``lazy=`` zone declares no ``{% placeholder %}`` branch to show until its body arrives.
+     - ``next.partial.checks``
+   * - ``next.E065``
+     - A component template declares a ``{% zone %}`` tag, which belongs to a page or layout.
+     - ``next.partial.checks``
+   * - ``next.E066``
+     - A custom patch op shadows a built-in verb or uses a name that is not a valid verb token.
+     - ``next.partial.checks``
 
 A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
 
@@ -305,6 +338,24 @@ Warnings
    * - ``next.W061``
      - A form action declares ``Meta.success_message`` while the messages framework is not fully installed, so a valid submission raises ``MessageFailure``.
      - ``next.forms.checks``
+   * - ``next.W062``
+     - No ``DjangoTemplates`` engine is configured, so the framework ``{% %}`` tags cannot install.
+     - ``next.apps.checks``
+   * - ``next.W063``
+     - A tag library under ``next.templatetags`` is not listed as a builtin, so its tags never install.
+     - ``next.apps.checks``
+   * - ``next.W067``
+     - A ``{% zone %}`` is a direct child of a ``{% with %}`` block, whose bindings a standalone zone render cannot see.
+     - ``next.partial.checks``
+   * - ``next.W068``
+     - A form action backend overrides ``shape_response`` while ``PARTIAL_BACKENDS`` is configured, so it may drop the patch envelope.
+     - ``next.partial.checks``
+   * - ``next.W069``
+     - A partial backend sets ``VERSION: "manifest"`` while the staticfiles storage does not hash files, so the version guard stays silent.
+     - ``next.partial.checks``
+   * - ``next.W070``
+     - A ``{% form %}`` renders directly inside a ``{% for %}`` of a composed page without a ``key=`` or a ``zone=``, so a partial morph cannot tell the repeated instances apart. The check does not descend into a component template, so a looped ``{% component %}`` that holds the form is not flagged. Thread a ``key=`` into the form to keep the repeated morph correct.
+     - ``next.partial.checks``
 
 .. note::
 

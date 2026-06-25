@@ -9,6 +9,7 @@ from django.http import HttpRequest, QueryDict
 from django.test import override_settings
 from notes.backends import TenantPrefixStaticBackend
 from notes.context_processors import tenant_theme
+from notes.markdown_render import render_markdown
 from notes.middleware import TenantMiddleware
 from notes.models import Note, Tenant
 from notes.providers import DTenant, TenantProvider
@@ -31,10 +32,6 @@ def _load(path: Path, name: str) -> ModuleType:
 _note_card = _load(
     PAGES_ROOT / "notes" / "_blocks" / "note_card" / "component.py",
     "mt_note_card",
-)
-_markdown_preview = _load(
-    PAGES_ROOT / "notes" / "_blocks" / "markdown_preview" / "component.py",
-    "mt_markdown_preview",
 )
 
 
@@ -279,36 +276,34 @@ class TestFormAccessDeniedReceiver:
         assert "tenant=unknown" in caplog.records[0].getMessage()
 
 
-class TestMarkdownPreviewComponent:
-    """`markdown_preview` renders markdown to HTML for the form preview pane."""
+class TestMarkdownRender:
+    """`render_markdown` produces safe preview HTML for the note form pane."""
 
     def test_empty_body_returns_placeholder(self) -> None:
-        rendered = _markdown_preview.render_html("")
+        rendered = render_markdown("")
         assert "Nothing to preview yet" in str(rendered)
 
     def test_body_renders_to_html(self) -> None:
-        rendered = str(_markdown_preview.render_html("# Heading\n\nbody"))
+        rendered = str(render_markdown("# Heading\n\nbody"))
         assert "<h1>Heading</h1>" in rendered
         assert "<p>body</p>" in rendered
 
     def test_inline_html_is_escaped(self) -> None:
         """Raw `<script>` survives only as escaped text, never as a live tag."""
-        rendered = str(_markdown_preview.render_html("<script>alert(1)</script>"))
+        rendered = str(render_markdown("<script>alert(1)</script>"))
         assert "<script>" not in rendered
         assert "&lt;script&gt;" in rendered
 
     def test_javascript_href_is_neutralised(self) -> None:
         """Markdown auto-links to `javascript:` URLs lose their target."""
-        rendered = str(
-            _markdown_preview.render_html("[click](javascript:alert(1))"),
-        )
+        rendered = str(render_markdown("[click](javascript:alert(1))"))
         assert "javascript:" not in rendered
         assert 'href="#"' in rendered
 
     def test_safe_markdown_features_still_work(self) -> None:
         """Headings, fenced code, and ordinary links keep working."""
         rendered = str(
-            _markdown_preview.render_html(
+            render_markdown(
                 "# Heading\n\n```py\nprint(1)\n```\n\n[ok](https://example.com)"
             ),
         )

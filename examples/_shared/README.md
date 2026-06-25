@@ -22,10 +22,12 @@ examples/_shared/
 │   ├── page_header/    container.djx    section/    separator.djx
 │   ├── empty_state/    skeleton/    avatar/    stat_card/
 │   ├── dropdown/{component.djx,component.mjs}
-│   └── dialog/{component.djx,component.mjs}
-└── static/shared/css/
-    ├── tokens.css         # CSS custom properties (--background, --primary, --radius, …)
-    └── base.css           # body backdrop, focus rings, font stack
+│   ├── dialog/{component.djx,component.mjs}
+│   └── markdown_preview/{component.djx,component.py,component.css,component.mjs}
+└── static/shared/
+    └── css/
+        ├── tokens.css     # CSS custom properties (--background, --primary, --radius, …)
+        └── base.css       # body backdrop, focus rings, font stack
 ```
 
 ## Wiring it into a project
@@ -55,6 +57,10 @@ NEXT_FRAMEWORK = {
 The `DIRS` entry registers `_shared/_components` as a **global** root. Components inside resolve at the empty route scope and become callable from every template (see the [components topic](../../docs/content/topics/components.rst), "Component Scope" section).
 
 `STATICFILES_DIRS` adds the shared static tree so `tokens.css` and `base.css` resolve under `/static/shared/...`.
+
+## Shared client behaviour
+
+The `markdown_preview` component is the one place the live Markdown preview behaviour lives. It is a pure presentation shell — its `component.djx` draws a labelled pane around a `{{ rendered_html }}` slot, its co-located `component.mjs` keeps the pane in sync with the surrounding textarea, and its `component.py` declares only the `marked` CDN under `scripts`. The framework auto-discovers the co-located `component.mjs` (emitted as `<script type="module">`) and `component.css` and dedupes them into the page slots, so no manual static path is needed. The script registers through `Next.partial.onMount("[data-markdown-preview]", ...)` and walks up to the enclosing `<form>` to find its textarea, so it binds the same way for both apps without hardcoding a field name. Each app keeps its own server-side render and injects the HTML through the `rendered_html` prop — [`wiki`](../wiki/) reuses its `render_markdown` helper, [`multi-tenant`](../multi-tenant/) renders through the `markdown` package — while the shell and the client behaviour stay shared.
 
 Each example houses the shared HTML envelope in a project-level page root listed under `PAGE_BACKENDS["DIRS"]` — `chrome/`, `host/`, `site/`, `frame/`, `shell/`, `portal/`, `instrument/`, `marketplace/`, `cockpit/`, `studio/`, or `root_pages/` depending on the project. The dir contains a single `layout.djx` (and optionally `_<components-dir>/` for project-shared components) that wraps every page rendered by the per-app `PAGES_DIR` tree:
 
@@ -161,6 +167,7 @@ Every entry below is a void call (`{% component "name" prop=value %}`) or a bloc
 | `app_shell` | `brand`, `brand_href`, `brand_icon`, `main_extra`, `header_visible` | `brand` (falls back to brand text + icon + href chrome), `nav`, `actions`, `content`, `page_footer` |
 | `dropdown` | `label`, `extra` | `trigger`, `items` |
 | `dialog` | `id`, `title`, `description`, `extra` | `content`, `footer` |
+| `markdown_preview` | `rendered_html` (server-rendered safe HTML for first paint), `label` (defaults to `Live preview`) | — |
 
 The `input` and `textarea` primitives double as `ComponentWidget` targets: `next.forms.ComponentWidget("input")` renders the bound field through the component, filling `name`, `id`, `value`, `errors`, `aria_invalid`, and `aria_describedby` from the field's state on every render and re-render. The forms examples (shortener, wiki, multi-tenant, kanban, audit-forms) all bind their fields this way. The contract is documented in [`docs/content/topics/forms/field-components.rst`](../../docs/content/topics/forms/field-components.rst).
 

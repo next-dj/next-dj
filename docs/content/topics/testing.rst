@@ -212,7 +212,7 @@ A value already present in ``data`` under ``_next_form_origin`` wins over the ke
 
 ``NextClient.get_action_url`` returns the dispatch URL without posting, for tests that need the URL itself.
 Both methods resolve the name through ``resolve_action_url`` from ``next.testing.actions``.
-An unknown name raises ``FormActionNotFound`` from ``next.forms``.
+An unknown name raises ``FormActionNotFoundError`` from ``next.forms``.
 
 Render a Page
 -------------
@@ -319,7 +319,7 @@ Action Helpers
 ``next.testing.actions`` exposes ``resolve_action_url`` and ``build_form_for``.
 ``resolve_action_url`` turns an action name into its dispatch URL.
 ``build_form_for`` builds a bound form for an action so a unit test can assert validation without HTTP.
-Both raise ``FormActionNotFound`` from ``next.forms`` for an unknown action name, with the closest registered names rendered into the message, and ``build_form_for`` raises ``LookupError`` for an action registered without a form class.
+Both raise ``FormActionNotFoundError`` from ``next.forms`` for an unknown action name, with the closest registered names rendered into the message, and ``build_form_for`` raises ``LookupError`` for an action registered without a form class.
 
 .. code-block:: python
    :caption: tests/test_action_helpers.py

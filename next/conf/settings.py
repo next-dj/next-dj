@@ -10,7 +10,7 @@ reset their own state.
 from __future__ import annotations
 
 import copy
-from typing import Any, ClassVar
+from typing import Any, ClassVar, override
 
 from django.conf import settings
 
@@ -39,6 +39,9 @@ class NextFrameworkSettings:
         self._merged_cache = None
         self._attr_value_cache.clear()
         clear_import_cache()
+        # next.conf.signals imports this settings module, so the signal import
+        # is deferred here to break the next.conf.settings <-> next.conf.signals
+        # cycle.
         from .signals import settings_reloaded  # noqa: PLC0415
 
         settings_reloaded.send(sender=type(self))
@@ -62,6 +65,7 @@ class NextFrameworkSettings:
             "COMPONENT_BACKENDS",
             "STATIC_BACKENDS",
             "FORM_ACTION_BACKENDS",
+            "PARTIAL_BACKENDS",
             "TEMPLATE_LOADERS",
             "FORM_ANCHOR_FILES",
         }
@@ -113,7 +117,8 @@ class NextFrameworkSettings:
         self._attr_value_cache[attr] = val
         return val
 
-    def __setattr__(self, name: str, value: Any) -> None:  # noqa: ANN401
+    @override
+    def __setattr__(self, name: str, value: object) -> None:
         """Allow only internal cache attributes and raise for declared keys."""
         if name in {"_merged_cache", "_attr_value_cache"}:
             super().__setattr__(name, value)

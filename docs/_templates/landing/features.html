@@ -100,6 +100,39 @@
 
       <article class="ndj-feature">
         <div class="ndj-feature-text">
+          <span class="ndj-feature-kicker">Partial rendering</span>
+          <h3 class="ndj-feature-title">Update a slice, not the page</h3>
+          <p>
+            Wrap a region in <code>{% raw %}{% zone %}{% endraw %}</code> and
+            point a form, filter, or link at it. The server re-renders only that
+            slice and ships the DOM patches the client applies. No endpoint, no
+            JavaScript, and a full page load as the fallback.
+          </p>
+          <ul class="ndj-feature-bullets">
+            <li>{{ check() }} <code>data-next-trigger</code> auto-submits, <code>morph</code> keeps focus and caret</li>
+            <li>{{ check() }} The server authors every patch, selectors never cross the wire</li>
+            <li>{{ check() }} Modals, toasts, and an SSE stream ride the same protocol</li>
+            <li>{{ check() }} Every interaction degrades to a plain request without JS</li>
+          </ul>
+        </div>
+        <div class="ndj-mock">
+          {{ mockbar("wiki/routes/search/template.djx") }}
+          <pre class="ndj-mock-body ndj-code">{% raw %}&lt;form method=<span class="c-str">"get"</span>
+      <span class="c-deco">data-next-target</span>=<span class="c-str">"search-results"</span>
+      <span class="c-deco">data-next-trigger</span>=<span class="c-str">"input"</span> <span class="c-deco">data-next-debounce</span>=<span class="c-str">"300"</span>&gt;
+  &lt;input name=<span class="c-str">"q"</span> value=<span class="c-tag">{{ query }}</span>&gt;
+&lt;/form&gt;
+
+<span class="c-tag">{% zone</span> <span class="c-str">"search-results"</span> <span class="c-tag">%}</span>
+  <span class="c-tag">{% for hit in results %}</span>
+    &lt;a href=<span class="c-tag">{{ hit.url }}</span>&gt;<span class="c-tag">{{ hit.title }}</span>&lt;/a&gt;
+  <span class="c-tag">{% endfor %}</span>
+<span class="c-tag">{% endzone %}</span>{% endraw %}</pre>
+        </div>
+      </article>
+
+      <article class="ndj-feature">
+        <div class="ndj-feature-text">
           <span class="ndj-feature-kicker">Static assets</span>
           <h3 class="ndj-feature-title">Assets next to pages</h3>
           <p>

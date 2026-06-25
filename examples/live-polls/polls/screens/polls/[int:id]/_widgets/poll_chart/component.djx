@@ -1,6 +1,13 @@
 <div data-poll-chart="{{ results.poll_id }}"
      class="poll-chart space-y-4 rounded-md border border-border bg-card p-5 shadow-sm">
-  <div data-poll-chart-app>
+  <div data-poll-chart-data data-total-votes="{{ results.total_votes }}" hidden>
+    {% for choice in results.choices %}
+      <span data-choice-id="{{ choice.id }}"
+            data-choice-text="{{ choice.text }}"
+            data-choice-votes="{{ choice.votes }}"></span>
+    {% endfor %}
+  </div>
+  <div data-poll-chart-app id="poll-chart-app" data-next-keep>
     <ul class="space-y-3">
       {% for choice in results.choices %}
         <li class="poll-chart-row" data-choice-id="{{ choice.id }}">

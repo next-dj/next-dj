@@ -313,15 +313,15 @@ class TestComponentContextManagerFrames:
 class TestContextFunctionSerialize:
     """ContextFunction.serialize controls JavaScript context exposure."""
 
-    @pytest.mark.parametrize(
-        "serialize",
-        [True, False],
-        ids=["serialize_true", "serialize_false"],
-    )
-    def test_serialize_field_stored(self, serialize: bool) -> None:  # noqa: FBT001
-        """The serialize flag is preserved on the dataclass."""
-        fn = ContextFunction(func=dict, key=None, serialize=serialize)
-        assert fn.serialize == serialize
+    def test_serialize_true_field_stored(self) -> None:
+        """The serialize flag is preserved when set true."""
+        fn = ContextFunction(func=dict, key=None, serialize=True)
+        assert fn.serialize is True
+
+    def test_serialize_false_field_stored(self) -> None:
+        """The serialize flag is preserved when set false."""
+        fn = ContextFunction(func=dict, key=None, serialize=False)
+        assert fn.serialize is False
 
     def test_serialize_defaults_to_false(self) -> None:
         """When omitted, serialize defaults to False."""

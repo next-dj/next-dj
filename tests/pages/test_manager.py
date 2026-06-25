@@ -562,12 +562,26 @@ class TestGlobalPageInstance:
 
     @pytest.fixture(autouse=True)
     def clear_global_state(self):
-        """Clear global page state before each test."""
+        """Give each test a clean global page state, then restore the baseline.
+
+        The global `page` singleton holds the context providers every page
+        registered at URL-conf build time. A bare clear would strip those
+        from whatever worker runs this class under xdist, so a later page
+        render on the same worker would find no providers. Snapshotting and
+        restoring keeps the suite order-independent.
+        """
+        template_snapshot = dict(page._template_registry)
+        context_snapshot = {
+            path: dict(entries)
+            for path, entries in page._context_manager._context_registry.items()
+        }
         page._template_registry.clear()
         page._context_manager._context_registry.clear()
         yield
         page._template_registry.clear()
+        page._template_registry.update(template_snapshot)
         page._context_manager._context_registry.clear()
+        page._context_manager._context_registry.update(context_snapshot)
 
     def test_global_page_instance(self) -> None:
         """Test that global page instance is properly initialized."""
@@ -1202,12 +1216,13 @@ class TestCustomTemplateLoaderIntegration:
 
     @pytest.fixture(autouse=True)
     def _install_md_loader(self):
-
-        loaders_module._REGISTERED_LOADERS_CACHE = [_MdLoader()]
+        # the cache is a single-slot holder mutated in place, never rebound,
+        # so a stale value on this worker cannot break the production reads
+        loaders_module._REGISTERED_LOADERS_CACHE["value"] = [_MdLoader()]
         page._template_registry.clear()
         page._template_source_mtimes.clear()
         yield
-        loaders_module._REGISTERED_LOADERS_CACHE = None
+        loaders_module._REGISTERED_LOADERS_CACHE["value"] = None
         page._template_registry.clear()
         page._template_source_mtimes.clear()
 

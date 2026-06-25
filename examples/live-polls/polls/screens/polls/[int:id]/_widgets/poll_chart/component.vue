@@ -1,10 +1,12 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 
-const ctx = window.Next?.context?.results ?? null;
+const props = defineProps({
+  snapshot: { type: Object, default: null },
+});
 
-const choices = ref(ctx ? [...ctx.choices] : []);
-const totalVotes = ref(ctx ? ctx.total_votes : 0);
+const choices = ref(props.snapshot ? [...props.snapshot.choices] : []);
+const totalVotes = ref(props.snapshot ? props.snapshot.total_votes : 0);
 const lastChangedId = ref(null);
 
 const rows = computed(() => {
@@ -15,8 +17,6 @@ const rows = computed(() => {
     justUpdated: choice.id === lastChangedId.value,
   }));
 });
-
-let source = null;
 
 function applySnapshot(payload) {
   if (!payload) return;
@@ -34,26 +34,7 @@ function applySnapshot(payload) {
   lastChangedId.value = changed;
 }
 
-onMounted(() => {
-  if (!ctx?.stream_url) return;
-  source = new EventSource(ctx.stream_url);
-  for (const type of ["snapshot", "update"]) {
-    source.addEventListener(type, (event) => {
-      applySnapshot(JSON.parse(event.data));
-    });
-  }
-  source.onerror = () => {
-    source.close();
-    source = null;
-  };
-});
-
-onBeforeUnmount(() => {
-  if (source) {
-    source.close();
-    source = null;
-  }
-});
+defineExpose({ applySnapshot });
 </script>
 
 <template>

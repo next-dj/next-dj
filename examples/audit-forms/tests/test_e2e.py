@@ -7,13 +7,13 @@ from access.models import AccessRequest, AuditEntry
 from django.core.cache import caches
 from django.http import HttpRequest
 
-from next.forms import FormActionNotFound
+from next.forms import FormActionNotFoundError
 from next.forms.signals import (
     action_dispatched,
     form_access_denied,
     form_validation_failed,
 )
-from next.testing import SignalRecorder, resolve_action_url
+from next.testing import SignalRecorder, envelope_of, resolve_action_url
 
 
 WIZARD_ACTION = "access_request_wizard"
@@ -29,7 +29,9 @@ _STEP_PAGE_PATH = (
 
 
 def _load_step_page():
-    spec = importlib.util.spec_from_file_location("audit_step_page_e2e", _STEP_PAGE_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "audit_step_page_e2e", _STEP_PAGE_PATH
+    )
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -59,6 +61,28 @@ def _post_step(client, step: str, data: dict[str, str]):
 
 def _post_step_unacknowledged(client, step: str, data: dict[str, str]):
     return client.post_action(WIZARD_ACTION, dict(data), origin=f"/request/{step}/")
+
+
+def _post_step_partial(client, step: str, data: dict[str, str]):
+    payload = {**data, "policy_acknowledged": "on"}
+    return client.post_action(
+        WIZARD_ACTION,
+        payload,
+        origin=f"/request/{step}/",
+        partial=True,
+        zones="access-wizard",
+    )
+
+
+def _validate_field(client, step: str, field: str, data: dict[str, str]):
+    return client.post_action(
+        WIZARD_ACTION,
+        dict(data),
+        origin=f"/request/{step}/",
+        partial=True,
+        zones="access-wizard",
+        HTTP_X_NEXT_VALIDATE=field,
+    )
 
 
 def _walk_three_steps(client) -> None:
@@ -99,9 +123,11 @@ class TestFullSubmission:
         assert ar.reason == "Need read access for analysis."
         assert ar.expires_in_days == 14
 
-        assert len(recorder.events_for(action_dispatched)) == 3
-        for event in recorder:
-            assert event.kwargs["response_status"] == 302
+        events = recorder.events_for(action_dispatched)
+        assert len(events) == 3
+        statuses = [event.kwargs["response_status"] for event in events]
+        assert statuses == [302, 302, 303]
+        for event in events:
             assert event.kwargs["duration_ms"] >= 0
 
     def test_three_steps_log_both_audit_channels(self, client) -> None:
@@ -146,7 +172,7 @@ class TestFullSubmission:
         ).first()
         assert latest_signal is not None
         assert latest_signal.duration_ms is not None
-        assert latest_signal.response_status == 302
+        assert latest_signal.response_status == 303
 
 
 class TestValidationFailure:
@@ -301,18 +327,20 @@ class TestCacheBackedDrafts:
         session_key_seen.append(client.session.session_key)
         _post_step(client, "scope", SCOPE)
         response = _post_step(client, "approval", APPROVAL)
-        assert response.status_code == 302
+        assert response.status_code == 303
         assert AccessRequest.objects.count() == 1
         assert _cached_draft(session_key_seen[0]) == {}
 
 
 class TestSuccessRedirect:
-    def test_final_step_redirects_to_per_request_page(self, client) -> None:
+    def test_final_step_without_runtime_redirects_to_per_request_page(
+        self, client
+    ) -> None:
         _post_step(client, "identity", IDENTITY)
         _post_step(client, "scope", SCOPE)
         response = _post_step(client, "approval", APPROVAL)
         ar = AccessRequest.objects.get()
-        assert response.status_code == 302
+        assert response.status_code == 303
         assert response["Location"] == f"/request/{ar.pk}/audit/?just=1"
 
 
@@ -322,34 +350,51 @@ class TestNamespacedAction:
         assert url.startswith("/_next/form/")
 
     def test_namespaced_name_does_not_resolve(self) -> None:
-        with pytest.raises(FormActionNotFound):
+        with pytest.raises(FormActionNotFoundError):
             resolve_action_url("access:access_request_wizard")
 
 
 class TestAdminAuditPage:
-    def test_admin_lists_both_sources(self, client) -> None:
+    def test_admin_full_render_shows_only_the_skeleton(self, client) -> None:
         _post_step(client, "identity", IDENTITY)
-        _post_step(client, "identity", {**IDENTITY, "email": ""})
 
         response = client.get("/admin/audit/")
         assert response.status_code == 200
         body = response.content.decode()
 
-        assert 'data-source="backend"' in body
-        assert 'data-source="signal"' in body
-        assert 'data-kind="dispatched"' in body
-        assert 'data-kind="validation_failed"' in body
-        assert "data-audit-table" in body
+        assert 'data-next-zone="audit-table"' in body
+        assert 'data-next-lazy="revealed"' in body
+        assert "data-audit-skeleton" in body
+        assert "data-audit-table" not in body
+        assert 'data-source="backend"' not in body
+
+    def test_zone_request_morphs_the_audit_table(self, client) -> None:
+        _post_step(client, "identity", IDENTITY)
+        _post_step(client, "identity", {**IDENTITY, "email": ""})
+
+        response = client.get_zones("/admin/audit/", "audit-table")
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["audit-table"]
+        html = envelope.html_for_zone("audit-table")
+        assert 'data-source="backend"' in html
+        assert 'data-source="signal"' in html
+        assert 'data-kind="dispatched"' in html
+        assert 'data-kind="validation_failed"' in html
+        assert "data-audit-table" in html
 
     def test_admin_filter_narrows_to_one_kind(self, client) -> None:
         _post_step(client, "identity", IDENTITY)
         _post_step(client, "identity", {**IDENTITY, "email": ""})
 
-        response = client.get("/admin/audit/?kind=validation_failed")
-        body = response.content.decode()
-        assert 'data-kind="validation_failed"' in body
-        assert 'data-kind="dispatched"' not in body
-        assert 'data-kind="request_started"' not in body
+        response = client.get_zones(
+            "/admin/audit/?kind=validation_failed", "audit-table"
+        )
+        html = envelope_of(response).html_for_zone("audit-table")
+        assert 'data-kind="validation_failed"' in html
+        assert 'data-kind="dispatched"' not in html
+        assert 'data-kind="request_started"' not in html
         assert (
             AuditEntry.objects.filter(kind=AuditEntry.KIND_VALIDATION_FAILED).count()
             == 1
@@ -358,11 +403,11 @@ class TestAdminAuditPage:
     def test_admin_surfaces_access_denied_rows(self, client) -> None:
         _post_step_unacknowledged(client, "identity", IDENTITY)
 
-        response = client.get("/admin/audit/?kind=access_denied")
-        body = response.content.decode()
-        assert 'data-kind="access_denied"' in body
-        assert "view/denied" in body
-        assert 'data-kind="dispatched"' not in body
+        response = client.get_zones("/admin/audit/?kind=access_denied", "audit-table")
+        html = envelope_of(response).html_for_zone("audit-table")
+        assert 'data-kind="access_denied"' in html
+        assert "view/denied" in html
+        assert 'data-kind="dispatched"' not in html
 
 
 class TestUnknownUid:
@@ -457,3 +502,157 @@ class TestStepSection:
         assert "Confirm and submit" in body
         assert "Ada Lovelace" in body
         assert "engine" in body
+
+
+class TestModalWizardFlagship:
+    def test_landing_links_open_a_layer_around_the_request_list(self, client) -> None:
+        body = client.get("/").content.decode()
+        assert 'data-next-layer="access-wizard"' in body
+        assert 'data-next-accepted="request-list"' in body
+        assert 'href="/request/identity/"' in body
+        assert 'data-next-zone="request-list"' in body
+
+    def test_landing_request_list_marks_each_row_with_its_key(self, client) -> None:
+        ar = AccessRequest.objects.create(
+            full_name="Grace Hopper",
+            email="grace@example.com",
+            team="Compilers",
+            project_slug="compilers",
+            reason="docs",
+            expires_in_days=3,
+        )
+        body = client.get("/").content.decode()
+        assert f'data-next-key="{ar.pk}"' in body
+
+    def test_opening_the_layer_fetches_the_wizard_zone_alone(self, client) -> None:
+        response = client.get_zones("/request/identity/", "access-wizard")
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["access-wizard"]
+        html = envelope.html_for_zone("access-wizard")
+        assert 'data-next-validate="blur"' in html
+        assert 'data-step-section="identity" data-state="active"' in html
+
+    def test_invalid_step_morphs_the_wizard_zone_and_leaves_the_layer(
+        self, client
+    ) -> None:
+        response = _post_step_partial(client, "identity", {**IDENTITY, "email": ""})
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        envelope = envelope_of(response)
+        assert envelope.zone_targets() == ["access-wizard"]
+        assert "layer.close" not in envelope.op_verbs()
+        meta = envelope.form_meta()
+        assert meta is not None
+        assert meta["valid"] is False
+        assert "email" in meta["errors"]
+        assert AccessRequest.objects.exists() is False
+
+    def test_valid_non_final_step_advances_the_zone_without_a_redirect(
+        self, client
+    ) -> None:
+        response = _post_step_partial(client, "identity", IDENTITY)
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["access-wizard"]
+        html = envelope.html_for_zone("access-wizard")
+        assert 'data-step-section="scope" data-state="active"' in html
+
+    def test_final_step_closes_the_layer_with_a_result_and_a_toast(
+        self, client
+    ) -> None:
+        _post_step_partial(client, "identity", IDENTITY)
+        _post_step_partial(client, "scope", SCOPE)
+        response = _post_step_partial(client, "approval", APPROVAL)
+        assert response.status_code == 200
+        ar = AccessRequest.objects.get()
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["layer.close", "toast"]
+        close_op = envelope.ops[0]
+        assert close_op["result"] == {"id": ar.pk}
+        toast = envelope.toasts()[0]
+        assert toast["variant"] == "success"
+        assert toast["text"] == "Access request submitted"
+
+    def test_accept_re_get_morphs_the_request_list_with_the_new_row(
+        self, client
+    ) -> None:
+        _post_step_partial(client, "identity", IDENTITY)
+        _post_step_partial(client, "scope", SCOPE)
+        _post_step_partial(client, "approval", APPROVAL)
+        ar = AccessRequest.objects.get()
+        response = client.get_zones("/", "request-list")
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.zone_targets() == ["request-list"]
+        html = envelope.html_for_zone("request-list")
+        assert f'data-next-key="{ar.pk}"' in html
+        assert "Ada Lovelace" in html
+
+    def test_unacknowledged_partial_step_is_denied_without_an_envelope(
+        self, client
+    ) -> None:
+        response = client.post_action(
+            WIZARD_ACTION,
+            dict(IDENTITY),
+            origin="/request/identity/",
+            partial=True,
+            zones="access-wizard",
+        )
+        assert response.status_code == 403
+        assert AccessRequest.objects.exists() is False
+
+    def test_partial_done_still_links_the_backend_row_to_the_request(
+        self, client
+    ) -> None:
+        _post_step_partial(client, "identity", IDENTITY)
+        _post_step_partial(client, "scope", SCOPE)
+        _post_step_partial(client, "approval", APPROVAL)
+        ar = AccessRequest.objects.get()
+        attached = AuditEntry.objects.filter(
+            source=AuditEntry.SOURCE_BACKEND,
+            kind=AuditEntry.KIND_DISPATCHED,
+            request_id=ar.pk,
+        )
+        assert attached.count() == 1
+
+
+class TestBlurValidation:
+    """A blur probe surfaces one field's error and binds no data."""
+
+    def test_bad_email_blur_morphs_the_zone_with_the_field_error(self, client) -> None:
+        before = AccessRequest.objects.count()
+        response = _validate_field(
+            client, "identity", "email", {**IDENTITY, "email": "not-an-email"}
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["access-wizard"]
+        meta = envelope.form_meta()
+        assert meta is not None
+        assert meta["valid"] is False
+        assert list(meta["errors"]) == ["email"]
+        assert AccessRequest.objects.count() == before == 0
+
+    def test_blur_probe_writes_no_request_and_emits_no_redirect_ops(
+        self, client
+    ) -> None:
+        response = _validate_field(
+            client, "identity", "email", {**IDENTITY, "email": "broken"}
+        )
+        envelope = envelope_of(response)
+        assert "layer.close" not in envelope.op_verbs()
+        assert "visit" not in envelope.op_verbs()
+        assert "redirect" not in envelope.op_verbs()
+        assert AccessRequest.objects.exists() is False
+
+    def test_blur_probe_isolates_the_named_field(self, client) -> None:
+        response = _validate_field(
+            client, "identity", "email", {"full_name": "", "email": "bad", "team": ""}
+        )
+        meta = envelope_of(response).form_meta()
+        assert meta is not None
+        assert list(meta["errors"]) == ["email"]

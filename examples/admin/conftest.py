@@ -5,6 +5,7 @@ from pathlib import Path
 import django
 import pytest
 from django.conf import settings
+from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 
@@ -22,9 +23,6 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
 if not settings.configured:
     django.setup()
-
-from django.contrib import admin as django_admin  # noqa: E402
-
 
 django_admin.autodiscover()
 

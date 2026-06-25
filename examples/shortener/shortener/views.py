@@ -6,7 +6,7 @@ from .cache import increment_clicks
 from .models import Link
 
 
-def redirect_slug(request: HttpRequest, slug: str) -> HttpResponseRedirect:  # noqa: ARG001
+def redirect_slug(_request: HttpRequest, slug: str) -> HttpResponseRedirect:
     """Bump the click counter in LocMemCache and redirect to the target URL."""
     try:
         link = Link.objects.get(slug=slug)

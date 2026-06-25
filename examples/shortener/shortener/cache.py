@@ -28,6 +28,11 @@ def pending_clicks() -> dict[str, int]:
     return {k.removeprefix(CLICK_PREFIX): int(v) for k, v in snapshot.items() if v}
 
 
+def reset_clicks(slug: str) -> None:
+    """Drop the hot click counter for `slug` from LocMemCache."""
+    cache.delete(_key(slug))
+
+
 def flush_clicks() -> int:
     """Transfer cached counters into the database and reset the cache.
 

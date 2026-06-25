@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 def get_pages_directories_for_watch() -> list[Path]:
     """Return absolute page roots that the autoreloader should observe."""
+    # next.urls imports next.pages, so the router import is deferred here to
+    # break the next.pages <-> next.urls cycle.
     from next.urls import RouterFactory  # noqa: PLC0415
 
     configs = next_framework_settings.PAGE_BACKENDS
@@ -59,6 +61,8 @@ def get_pages_directories_for_watch() -> list[Path]:
 
 def iter_pages_roots_with_components_folder_names() -> list[tuple[Path, str]]:
     """Return distinct page-root and components-folder-name pairs."""
+    # next.urls imports next.pages, so the router import is deferred here to
+    # break the next.pages <-> next.urls cycle.
     from next.urls import RouterFactory  # noqa: PLC0415
 
     configs = next_framework_settings.PAGE_BACKENDS

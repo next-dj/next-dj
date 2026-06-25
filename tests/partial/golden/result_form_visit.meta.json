@@ -1,0 +1,12 @@
+{
+  "name": "result_form_visit",
+  "description": "A successful submission whose handler redirected: the redirect is packed into one internal visit the client navigates to.",
+  "content_type": "application/vnd.next.patches+json",
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/vnd.next.patches+json",
+    "X-Next-Version": "9f3c2e1b",
+    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version"
+  },
+  "envelope_file": "result_form_visit.envelope.json"
+}

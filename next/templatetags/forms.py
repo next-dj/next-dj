@@ -1,21 +1,36 @@
 """Template tags for rendering next.forms form blocks."""
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, override
 
 from django import template
 from django.core.exceptions import ImproperlyConfigured
 from django.middleware.csrf import get_token
 from django.utils.html import format_html
 
-from next.forms.backends import FormActionNotFound
+from next.forms.backends import FormActionNotFoundError
 from next.forms.manager import _build_form_namespace_from_meta, form_action_manager
-from next.forms.uid import ORIGIN_FIELD_NAME, validated_origin_path
+from next.forms.uid import (
+    FORM_ORIGIN_OVERRIDE_KEY,
+    ORIGIN_FIELD_NAME,
+    validated_origin_path,
+)
 from next.forms.widgets import bind_component_widgets
 
 
 _MIN_FORM_TAG_BITS = 2
 _RESERVED_FORM_ATTRS = frozenset({"action", "method"})
 _RESERVED_FORM_ATTR_PREFIX = "data-next-"
+
+# Python params of the tag that compile to client `data-next-*` attributes
+# on the form. The server authors these names, the client reads them, the
+# markup never carries a raw selector or swap mode.
+_PARTIAL_FORM_PARAMS: dict[str, str] = {
+    "validate": "data-next-validate",
+    "trigger": "data-next-trigger",
+    "debounce": "data-next-debounce",
+    "zone": "data-next-target",
+    "key": "data-next-key",
+}
 
 
 if TYPE_CHECKING:
@@ -29,16 +44,35 @@ register = template.Library()
 
 @register.tag(name="form")
 def do_form(parser: template.base.Parser, token: template.base.Token) -> "FormNode":
-    """Block tag accepting an action name plus optional HTML attributes."""
+    """Block tag accepting an action name plus optional HTML attributes.
+
+    The `validate`, `trigger`, `debounce`, `zone`, and `key` params compile
+    to client `data-next-*` attributes on the form, every other key="value"
+    pair stays a plain HTML attribute.
+    """
     bits = token.split_contents()
     if len(bits) < _MIN_FORM_TAG_BITS:
         msg = f"{bits[0]!r} tag requires the action name as its first argument"
         raise template.TemplateSyntaxError(msg)
     action_expr = parser.compile_filter(bits[1])
-    attrs = tuple(_parse_form_attr(parser, bits[0], bit) for bit in bits[2:])
+    attrs: list[tuple[str, FilterExpression]] = []
+    partial_attrs: list[tuple[str, FilterExpression]] = []
+    for bit in bits[2:]:
+        name, eq, value = bit.partition("=")
+        if eq and name in _PARTIAL_FORM_PARAMS:
+            partial_attrs.append(
+                (_PARTIAL_FORM_PARAMS[name], parser.compile_filter(value))
+            )
+            continue
+        attrs.append(_parse_form_attr(parser, bits[0], bit))
     nodelist = parser.parse(("endform",))
     parser.delete_first_token()
-    return FormNode(action_expr=action_expr, nodelist=nodelist, attrs=attrs)
+    return FormNode(
+        action_expr=action_expr,
+        nodelist=nodelist,
+        attrs=tuple(attrs),
+        partial_attrs=tuple(partial_attrs),
+    )
 
 
 def _page_path_from_context(context: template.Context) -> str | None:
@@ -57,7 +91,7 @@ def action_url(context: template.Context, action_name: str) -> str:
             "An unquoted name is looked up as a template variable, quote the "
             "action name to pass it as a literal."
         )
-        raise FormActionNotFound(msg)
+        raise FormActionNotFoundError(msg)
     return form_action_manager.get_action_url(
         name, page_path=_page_path_from_context(context)
     )
@@ -85,18 +119,20 @@ def _parse_form_attr(
 class FormNode(template.Node):
     """Render `<form>` with action URL, method=post, csrf_token."""
 
-    __slots__ = ("action_expr", "attrs", "nodelist")
+    __slots__ = ("action_expr", "attrs", "nodelist", "partial_attrs")
 
     def __init__(
         self,
         action_expr: "FilterExpression",
         nodelist: template.NodeList,
         attrs: "tuple[tuple[str, FilterExpression], ...]" = (),
+        partial_attrs: "tuple[tuple[str, FilterExpression], ...]" = (),
     ) -> None:
-        """Initialize with the action expression, nodelist, and HTML attributes."""
+        """Initialize with the action, nodelist, HTML attrs, and partial attrs."""
         self.action_expr = action_expr
         self.nodelist = nodelist
         self.attrs = attrs
+        self.partial_attrs = partial_attrs
 
     def _get_request(self, context: template.Context) -> "HttpRequest":
         """Extract request from context or raise ImproperlyConfigured."""
@@ -110,7 +146,9 @@ class FormNode(template.Node):
             raise ImproperlyConfigured(msg)
         return cast("HttpRequest", request)
 
-    def _build_hidden_inputs(self, request: "HttpRequest") -> str:
+    def _build_hidden_inputs(
+        self, context: template.Context, request: "HttpRequest"
+    ) -> str:
         """Build the CSRF and origin hidden inputs."""
         inputs = [
             format_html(
@@ -118,7 +156,7 @@ class FormNode(template.Node):
                 get_token(request),
             )
         ]
-        origin = self._origin_path(request)
+        origin = self._origin_path(context, request)
         if origin:
             inputs.append(
                 format_html(
@@ -131,13 +169,19 @@ class FormNode(template.Node):
         return "\n".join(inputs)
 
     @staticmethod
-    def _origin_path(request: "HttpRequest") -> str | None:
+    def _origin_path(context: template.Context, request: "HttpRequest") -> str | None:
         """Return the page path the form belongs to.
 
         On the validation-error re-render the request targets the action
         endpoint, so the posted origin of the original page wins over
-        `request.path`.
+        `request.path`. On a wizard advance the shaping layer merges the
+        next step URL under FORM_ORIGIN_OVERRIDE_KEY into the zone render
+        context, which wins over the submitted step origin so blur-validate
+        probes on the new step render from the correct page.
         """
+        override = context.get(FORM_ORIGIN_OVERRIDE_KEY)
+        if override is not None:
+            return str(override)
         if getattr(request, "method", None) == "POST":
             posted = validated_origin_path(request.POST.get(ORIGIN_FIELD_NAME))
             if posted is not None:
@@ -155,6 +199,10 @@ class FormNode(template.Node):
         bits: list[str] = [format_html('<form action="{}" method="post"', action_url)]
         if uid:
             bits.append(format_html('data-next-action="{}"', uid))
+        bits.extend(
+            format_html('{}="{}"', name, str(expr.resolve(context)))
+            for name, expr in self.partial_attrs
+        )
         if (
             form_instance is not None
             and form_instance.is_multipart()
@@ -167,6 +215,7 @@ class FormNode(template.Node):
         )
         return " ".join(bits) + ">"
 
+    @override
     def render(self, context: template.Context) -> str:
         """Render form tag with action URL, method=post, CSRF, and content."""
         request = self._get_request(context)
@@ -180,7 +229,7 @@ class FormNode(template.Node):
                 f'write {{% form "{token}" %}} to pass the action name as '
                 "a literal."
             )
-            raise FormActionNotFound(msg, name=token)
+            raise FormActionNotFoundError(msg, name=token)
 
         page_path = _page_path_from_context(context)
 
@@ -217,7 +266,7 @@ class FormNode(template.Node):
             meta.get("uid") if meta is not None else None,
             form_instance,
         )
-        hidden_inputs = self._build_hidden_inputs(request)
+        hidden_inputs = self._build_hidden_inputs(context, request)
 
         push_kwargs: dict[str, object] = {"form": form_instance}
         if wizard_instance is not None:

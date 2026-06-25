@@ -14,7 +14,7 @@ Solution
 Pass ``hx-*`` attributes through the ``{% form %}`` tag.
 The tag reserves only ``action``, ``method``, and the ``data-next-*`` prefix, so every htmx attribute lands on the ``<form>`` element unchanged.
 Boost the form with ``hx-boost`` and carve its region out of the response with ``hx-select``.
-Verified with django-htmx 1.19 and later on Django 4.2 through 6.0.
+Verified with django-htmx 1.19 and later on Django 5.2 through 6.0.
 
 The dispatcher answers an invalid submission with the complete origin page, not a fragment, so ``hx-select`` carves the form region out of it.
 

@@ -20,7 +20,7 @@ import contextlib
 import importlib.util
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, override
 
 from next.conf import next_framework_settings
 from next.conf.imports import import_class_cached
@@ -80,13 +80,14 @@ def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
     return module
 
 
-_ADDITIONAL_LAYOUTS_CACHE: list[Path] | None = None
+# A single-slot holder mutated in place so cache invalidation never rebinds a
+# module global, which keeps the reset and read paths free of `global`.
+_ADDITIONAL_LAYOUTS_CACHE: dict[str, list[Path] | None] = {"value": None}
 
 
 def _reset_additional_layouts_cache(**_kwargs: object) -> None:
     """Drop cached root-level `layout.djx` paths on settings reload."""
-    global _ADDITIONAL_LAYOUTS_CACHE  # noqa: PLW0603
-    _ADDITIONAL_LAYOUTS_CACHE = None
+    _ADDITIONAL_LAYOUTS_CACHE["value"] = None
 
 
 settings_reloaded.connect(_reset_additional_layouts_cache)
@@ -135,11 +136,13 @@ class PythonTemplateLoader(TemplateLoader):
 
     source_name: ClassVar[str] = "template"
 
+    @override
     def can_load(self, file_path: Path) -> bool:
         """Return whether the module loads and defines `template`."""
         module = _load_python_module_memo(file_path)
         return module is not None and hasattr(module, "template")
 
+    @override
     def load_template(self, file_path: Path) -> str | None:
         """Return `module.template` if the module exposes it."""
         module = _load_python_module_memo(file_path)
@@ -151,10 +154,12 @@ class DjxTemplateLoader(TemplateLoader):
 
     source_name: ClassVar[str] = "template.djx"
 
+    @override
     def can_load(self, file_path: Path) -> bool:
         """Return whether sibling `template.djx` exists."""
         return (file_path.parent / "template.djx").exists()
 
+    @override
     def load_template(self, file_path: Path) -> str | None:
         """Return the file contents of `template.djx`."""
         djx_file = file_path.parent / "template.djx"
@@ -163,6 +168,7 @@ class DjxTemplateLoader(TemplateLoader):
         except (OSError, UnicodeDecodeError):
             return None
 
+    @override
     def source_path(self, file_path: Path) -> Path | None:
         """Return the sibling `template.djx` path for stale-cache detection."""
         djx_file = file_path.parent / "template.djx"
@@ -172,10 +178,12 @@ class DjxTemplateLoader(TemplateLoader):
 class LayoutTemplateLoader(TemplateLoader):
     """Compose nested `layout.djx` wrappers around the page template."""
 
+    @override
     def can_load(self, file_path: Path) -> bool:
         """Return whether at least one `layout.djx` exists on the path."""
         return self._find_layout_files(file_path) is not None
 
+    @override
     def load_template(self, file_path: Path) -> str | None:
         """Return the composed template with the page inside the innermost slot."""
         layout_files = self._find_layout_files(file_path)
@@ -228,9 +236,9 @@ class LayoutTemplateLoader(TemplateLoader):
 
     def _get_additional_layout_files(self) -> list[Path]:
         """Return root-level `layout.djx` files from each page backend `DIRS`."""
-        global _ADDITIONAL_LAYOUTS_CACHE  # noqa: PLW0603
-        if _ADDITIONAL_LAYOUTS_CACHE is not None:
-            return _ADDITIONAL_LAYOUTS_CACHE
+        cached = _ADDITIONAL_LAYOUTS_CACHE["value"]
+        if cached is not None:
+            return cached
         configs = next_framework_settings.PAGE_BACKENDS or []
         if not isinstance(configs, list):
             configs = []
@@ -242,7 +250,7 @@ class LayoutTemplateLoader(TemplateLoader):
             if d.exists() and (layout := d / "layout.djx").exists()
         )
         result = list(dict.fromkeys(candidates))
-        _ADDITIONAL_LAYOUTS_CACHE = result
+        _ADDITIONAL_LAYOUTS_CACHE["value"] = result
         return result
 
     def _get_pages_dirs_for_config(self, config: dict) -> list[Path]:
@@ -314,7 +322,9 @@ class LayoutManager:
         self._layout_registry.clear()
 
 
-_REGISTERED_LOADERS_CACHE: list[TemplateLoader] | None = None
+# A single-slot holder mutated in place so cache invalidation never rebinds a
+# module global, which keeps the reset and read paths free of `global`.
+_REGISTERED_LOADERS_CACHE: dict[str, list[TemplateLoader] | None] = {"value": None}
 
 
 def build_registered_loaders() -> list[TemplateLoader]:
@@ -325,9 +335,9 @@ def build_registered_loaders() -> list[TemplateLoader]:
     user-visible report for the same misconfigurations. The result is
     memoised and reset on `settings_reloaded`.
     """
-    global _REGISTERED_LOADERS_CACHE  # noqa: PLW0603
-    if _REGISTERED_LOADERS_CACHE is not None:
-        return _REGISTERED_LOADERS_CACHE
+    cached = _REGISTERED_LOADERS_CACHE["value"]
+    if cached is not None:
+        return cached
 
     configured = next_framework_settings.TEMPLATE_LOADERS
     seen: set[type[TemplateLoader]] = set()
@@ -353,14 +363,13 @@ def build_registered_loaders() -> list[TemplateLoader]:
         seen.add(cls)
         instances.append(cls())
 
-    _REGISTERED_LOADERS_CACHE = instances
-    return _REGISTERED_LOADERS_CACHE
+    _REGISTERED_LOADERS_CACHE["value"] = instances
+    return instances
 
 
 def _reset_registered_loaders_cache(**_kwargs: object) -> None:
     """Drop cached loader instances on settings reload."""
-    global _REGISTERED_LOADERS_CACHE  # noqa: PLW0603
-    _REGISTERED_LOADERS_CACHE = None
+    _REGISTERED_LOADERS_CACHE["value"] = None
 
 
 settings_reloaded.connect(_reset_registered_loaders_cache)

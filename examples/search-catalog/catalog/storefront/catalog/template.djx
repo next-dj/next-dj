@@ -1,12 +1,42 @@
+{% load catalog_qs %}
 <header class="flex items-baseline justify-between">
   <h1 class="text-2xl font-semibold">All products</h1>
   <p class="text-sm text-muted-foreground">{{ page_obj.total }} products</p>
 </header>
 
-<ul class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+{% form "preset_filter_form" zone="catalog-results,catalog-more" %}
+  <div class="flex flex-wrap gap-2" data-preset-bar>
+    <button type="submit" name="preset" value="in_stock"
+            class="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium hover:bg-accent">
+      In stock
+    </button>
+    <button type="submit" name="preset" value="cheapest"
+            class="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium hover:bg-accent">
+      Cheapest first
+    </button>
+    <button type="submit" name="preset" value="newest"
+            class="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium hover:bg-accent">
+      Newest
+    </button>
+  </div>
+{% endform %}
+
+{% zone "catalog-results" tag="ul" %}
   {% for product in page_obj.products %}
-    <li>{% component "product_card" %}</li>
+    <li data-next-key="{{ product.pk }}">{% component "product_card" %}</li>
   {% endfor %}
-</ul>
+{% endzone %}
+
+{% zone "catalog-more" %}
+  {% if page_obj.has_next %}
+    <a id="results-sentinel"
+       href="?{% querystring page=page_obj.page|add:'1' %}"
+       data-next-target="catalog-results,catalog-more" data-next-merge="append"
+       data-next-lazy="revealed"
+       class="block rounded-md border border-dashed border-border px-3 py-2 text-center text-sm text-muted-foreground hover:bg-accent">
+      Show more
+    </a>
+  {% endif %}
+{% endzone %}
 
 {% component "pagination" %}

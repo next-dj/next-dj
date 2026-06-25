@@ -34,11 +34,7 @@ def _detect_source(file_path: Path) -> str:
 
 
 @receiver(template_loaded)
-def _on_template_loaded(
-    sender: object,  # noqa: ARG001 — signal receivers take `sender` by contract
-    file_path: Path,
-    **_kwargs: object,
-) -> None:
+def _on_template_loaded(file_path: Path, **_kwargs: object) -> None:
     """Record which source type won the loader race for `file_path`."""
     with _lock:
         _loader_hits[str(file_path)] = _detect_source(file_path)

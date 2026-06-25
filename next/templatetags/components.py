@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, override
 
 from django import template
 from django.template import base as template_base
@@ -116,6 +116,7 @@ class SlotNode(Node):
         self.name = name
         self.nodelist = nodelist
 
+    @override
     def render(self, context: template.Context) -> str:
         """Render the body and write into ``_component_slots`` when that dict exists."""
         body = self.nodelist.render(context)
@@ -173,6 +174,7 @@ class ComponentNode(Node):
             return None
         return path.resolve()
 
+    @override
     def render(self, context: template.Context) -> str:
         """Merge props, slots, and children, then render the component."""
         path = self._template_path_from_context(context)
@@ -225,6 +227,7 @@ class SetSlotNode(Node):
         self.name = name
         self.nodelist = nodelist
 
+    @override
     def render(self, context: template.Context) -> str:
         """Render injected slot HTML when present, otherwise the fallback body.
 

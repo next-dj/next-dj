@@ -38,6 +38,11 @@ Form actions.
    Plain functions with no form can also register as actions with ``@action("name")``.
    This is useful for logout buttons and simple confirmations.
 
+Partial rendering.
+   A ``{% zone %}`` block names a slice of a page the server can re-render on its own.
+   A form, filter, or link targets a zone, and the server ships the DOM patches the client applies, so a selector or swap strategy never crosses the wire.
+   Every interaction degrades to a full page cycle when JavaScript is off.
+
 .. _intro-overview-django-unchanged:
 
 What next.dj Does Not Replace

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from django.utils.autoreload import StatReloader
 
@@ -98,6 +98,7 @@ class NextStatReloader(StatReloader):
         self._cached_routes = routes
         return routes
 
+    @override
     def tick(self) -> Generator[None, None, None]:
         """Recompute routes, compare to the previous tick, then delegate."""
         parent_ticker = super().tick()

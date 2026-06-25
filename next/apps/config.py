@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import override
+
 from django.apps import AppConfig
 
 from next.checks import register_all as _register_checks
@@ -16,6 +18,7 @@ class NextFrameworkConfig(AppConfig):
     name = "next"
     verbose_name = "Next Django Framework"
 
+    @override
     def ready(self) -> None:
         """Register checks and install every startup hook."""
         _register_checks()

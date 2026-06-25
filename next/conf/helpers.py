@@ -16,6 +16,7 @@ _BACKEND_LIST_KEYS = frozenset(
         "COMPONENT_BACKENDS",
         "STATIC_BACKENDS",
         "FORM_ACTION_BACKENDS",
+        "PARTIAL_BACKENDS",
     }
 )
 
@@ -24,7 +25,7 @@ def extend_default_backend(
     key: str,
     *,
     index: int = 0,
-    **overrides: Any,  # noqa: ANN401
+    **overrides: object,
 ) -> list[dict[str, Any]]:
     """Return a `NEXT_FRAMEWORK[key]` list with one backend entry patched.
 

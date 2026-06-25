@@ -35,6 +35,9 @@ REQUEST_CONTEXT_PROCESSOR = "django.template.context_processors.request"
 
 EXPECTED_PARAMETER_PARTS = 2
 
+# A page declares a body-source conflict only when two or more sources claim it.
+_MIN_CONFLICTING_BODY_SOURCES = 2
+
 
 @register(Tags.templates)
 def check_request_in_context(
@@ -429,7 +432,7 @@ def _active_body_sources(page_file: Path) -> list[str]:
 def _check_body_source_conflicts(page_file: Path) -> CheckMessage | None:
     """Warn (`next.W043`) when more than one body source is declared for `page_file`."""
     sources = _active_body_sources(page_file)
-    if len(sources) < 2:  # noqa: PLR2004
+    if len(sources) < _MIN_CONFLICTING_BODY_SOURCES:
         return None
     winner = sources[0]
     shadowed = ", ".join(sources[1:])

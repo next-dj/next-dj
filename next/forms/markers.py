@@ -1,9 +1,13 @@
 """Dependency injection markers and provider for form parameters."""
 
 import inspect
-from typing import get_args, get_origin
+from typing import get_args, get_origin, override
 
-from next.deps import DDependencyBase, RegisteredParameterProvider
+from next.deps import (
+    DDependencyBase,
+    RegisteredParameterProvider,
+    ResolutionContext,
+)
 
 
 class DForm[FormT](DDependencyBase[FormT]):
@@ -20,9 +24,10 @@ class FormProvider(RegisteredParameterProvider):
 
     priority = 40
 
-    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+    @override
+    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Return True when context carries a form compatible with `param`."""
-        form = getattr(context, "form", None)
+        form = context.form
         if form is None:
             return False
         if param.name == "form":
@@ -40,9 +45,10 @@ class FormProvider(RegisteredParameterProvider):
             return False
         return isinstance(ann, type) and isinstance(form, ann)
 
-    def resolve(self, _param: inspect.Parameter, context: object) -> object:
+    @override
+    def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> object:
         """Return the form instance from context."""
-        return getattr(context, "form", None)
+        return context.form
 
 
 class CleanedDataProvider(RegisteredParameterProvider):
@@ -50,15 +56,17 @@ class CleanedDataProvider(RegisteredParameterProvider):
 
     priority = 40
 
-    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+    @override
+    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Return True when context carries cleaned data and the name matches."""
         if param.name != "cleaned_data":
             return False
-        return getattr(context, "cleaned_data", None) is not None
+        return context.cleaned_data is not None
 
-    def resolve(self, _param: inspect.Parameter, context: object) -> object:
+    @override
+    def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> object:
         """Return the cleaned data mapping from context."""
-        return getattr(context, "cleaned_data", None)
+        return context.cleaned_data
 
 
 __all__ = ["CleanedDataProvider", "DForm", "FormProvider"]

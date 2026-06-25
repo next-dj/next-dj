@@ -12,14 +12,14 @@ Templates therefore use them without an explicit ``{% load %}`` statement.
 Forms
 -----
 
-.. describe:: {% form "<name>" key="value" ... %}...{% endform %}
+.. describe:: {% form "<name>" attr="value" ... %}...{% endform %}
 
    Renders a form bound to a registered action.
    The first argument is the action name, a quoted string or a context variable that resolves to a string.
    Injects two hidden inputs: the ``csrfmiddlewaretoken`` CSRF field and the ``_next_form_origin`` field carrying the URL path of the rendering page.
    The block body has access to the bound or unbound form through ``{{ form }}``.
 
-   Optional ``key="value"`` arguments after the action name render as HTML attributes on the ``<form>`` element, for example ``{% form "upload_form" class="stack" %}``.
+   Optional ``attr="value"`` arguments after the action name render as HTML attributes on the ``<form>`` element, for example ``{% form "upload_form" class="stack" %}``.
    Attribute values are escaped, and an unquoted value resolves as a context variable.
 
    The opening tag emits its attributes in a fixed order: ``action`` with the dispatch URL, ``method="post"``, ``data-next-action`` with the action UID when the registry meta is available, ``enctype="multipart/form-data"`` when the form is multipart, then the attributes passed to the tag.
@@ -29,6 +29,9 @@ Forms
    The HTTP method is always ``post``.
    The tag owns the ``action`` and ``method`` attributes plus every attribute starting with ``data-next-``, and passing any of them raises ``TemplateSyntaxError`` at parse time.
    ``data-next-*`` is the single framework namespace in rendered markup.
+
+   The ``validate``, ``trigger``, ``debounce``, ``zone``, and ``key`` params compile to the matching ``data-next-*`` attributes, the authored seam for partial behaviour.
+   ``key`` distinguishes one instance of a repeated form, rendered in a loop, so a partial morph lands on the submitted instance rather than the first, see :doc:`/content/topics/partial-rendering/scenarios`.
 
    Captured URL parameters travel inside the origin path, the dispatcher recovers them by resolving ``_next_form_origin`` against the URLconf.
 
@@ -47,8 +50,8 @@ Forms
    Use it for hand-written forms and client-side requests that post outside the ``{% form %}`` tag.
    Such a request supplies the CSRF token and the hidden ``_next_form_origin`` field itself, see the manual-form notes in :doc:`/content/topics/forms/templates`.
 
-   An unknown name raises ``FormActionNotFound`` at render time, with the closest registered names in the message.
-   An argument that resolves to an empty string raises ``FormActionNotFound`` with a hint to quote the literal name, since an unquoted name is read as a template variable.
+   An unknown name raises ``FormActionNotFoundError`` at render time, with the closest registered names in the message.
+   An argument that resolves to an empty string raises ``FormActionNotFoundError`` with a hint to quote the literal name, since an unquoted name is read as a template variable.
 
 Components
 ----------
@@ -127,6 +130,31 @@ Static Pipeline
    Inline JS block.
    The body is rendered with the template context and deduplicated by content.
 
+Partial Rendering
+-----------------
+
+.. describe:: {% zone "<name>" tag="<element>" lazy="<trigger>" %}...{% placeholder %}...{% endzone %}
+
+   Marks a named slice of a page template the server can re-render on its own.
+   The first argument is the quoted zone name, an ASCII slug that must be unique across the composed template, the layout chain plus the page body.
+   On a full page render the body is wrapped in ``<div data-next-zone="<name>">`` so the client can address it, and a partial request re-renders only the body.
+
+   ``tag="<element>"`` names the wrapper element, defaulting to ``div``.
+   Use it where a ``<div>`` is invalid, for example ``tag="ul"`` inside a list or ``tag="tbody"`` inside a table.
+   The wrapper carries ``data-next-zone`` whatever the tag.
+
+   ``lazy="load"`` or ``lazy="revealed"`` defers the body.
+   A lazy zone renders only its ``{% placeholder %}`` branch up front and fetches the body on ``ready`` for ``load`` or when it scrolls into view for ``revealed``.
+   Any other ``lazy`` value raises ``TemplateSyntaxError`` at parse time.
+
+.. describe:: {% placeholder %}
+
+   Opens the placeholder branch of a lazy ``{% zone %}``, shown until the deferred body arrives.
+   It is valid only between a ``{% zone %}`` and its ``{% endzone %}``, and a lazy zone without it raises ``next.E064``.
+
+A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}``, an ``{% if %}``, or directly inside a ``{% with %}``.
+The :doc:`zone placement checks </content/ref/system-checks>` enforce each rule at ``manage.py check`` time.
+
 Layouts
 -------
 
@@ -156,3 +184,4 @@ See Also
    :doc:`/content/topics/forms/templates` for the ``{% form %}`` tag.
    :doc:`/content/topics/components` for ``{% component %}`` and slots.
    :doc:`/content/topics/static-assets/template-tags` for the static tags.
+   :doc:`/content/topics/partial-rendering/zones` for the ``{% zone %}`` tag.

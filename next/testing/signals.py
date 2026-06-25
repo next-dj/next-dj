@@ -65,9 +65,9 @@ class SignalRecorder:
 
     def _receiver(
         self,
-        sender: Any,  # noqa: ANN401
+        sender: object,
         signal: Signal,
-        **kwargs: Any,  # noqa: ANN401
+        **kwargs: object,
     ) -> None:
         self.events.append(
             SignalEvent(signal=signal, sender=sender, kwargs=dict(kwargs))

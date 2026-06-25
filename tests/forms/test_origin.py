@@ -10,10 +10,10 @@ from next.forms import Form, origin
 from next.forms.dispatch import _form_action_context_callable
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
-    _OriginMatch,
+    OriginMatch,
     _page_path_from_view,
-    _resolve_origin,
     _url_kwargs_for_request,
+    resolve_origin,
 )
 
 
@@ -27,11 +27,11 @@ def _origin_post(value: str) -> QueryDict:
 
 
 class TestResolveOrigin:
-    """`_resolve_origin` turns the posted origin into a typed page identity."""
+    """`resolve_origin` turns the posted origin into a typed page identity."""
 
     def test_root_origin_resolves_to_page_source(self, mock_http_request) -> None:
         req = mock_http_request(method="POST", POST=_origin_post("/"))
-        match = _resolve_origin(req)
+        match = resolve_origin(req)
         assert match is not None
         assert match.page_path == SITE_PAGES / "page.py"
         assert match.url_kwargs == {}
@@ -39,7 +39,7 @@ class TestResolveOrigin:
 
     def test_typed_kwargs_come_from_url_converters(self, mock_http_request) -> None:
         req = mock_http_request(method="POST", POST=_origin_post("/items/42/"))
-        match = _resolve_origin(req)
+        match = resolve_origin(req)
         assert match is not None
         assert match.url_kwargs == {"id": 42}
         assert match.page_path == SITE_PAGES / "items" / "[int:id]" / "page.py"
@@ -48,7 +48,7 @@ class TestResolveOrigin:
         self, mock_http_request
     ) -> None:
         req = mock_http_request(method="POST", POST=_origin_post("/items/7/?q=x"))
-        match = _resolve_origin(req)
+        match = resolve_origin(req)
         assert match is not None
         assert match.origin == "/items/7/?q=x"
         assert match.url_kwargs == {"id": 7}
@@ -58,17 +58,17 @@ class TestResolveOrigin:
             pass
 
         req = NoPost()
-        assert _resolve_origin(req) is None
+        assert resolve_origin(req) is None
 
     def test_missing_origin_field_yields_none(self, mock_http_request) -> None:
         req = mock_http_request(method="POST", POST=QueryDict())
-        assert _resolve_origin(req) is None
+        assert resolve_origin(req) is None
 
     def test_unresolvable_origin_yields_none(self, mock_http_request) -> None:
         req = mock_http_request(
             method="POST", POST=_origin_post("/no/such/route/anywhere/")
         )
-        assert _resolve_origin(req) is None
+        assert resolve_origin(req) is None
 
     def test_result_is_memoised_on_the_request(
         self, mock_http_request, monkeypatch
@@ -82,23 +82,23 @@ class TestResolveOrigin:
 
         monkeypatch.setattr(origin, "resolve", counting_resolve)
         req = mock_http_request(method="POST", POST=_origin_post("/"))
-        first = _resolve_origin(req)
-        second = _resolve_origin(req)
+        first = resolve_origin(req)
+        second = resolve_origin(req)
         assert first is second
         assert calls["n"] == 1
         assert getattr(req, _ORIGIN_MATCH_ATTR) is first
 
     def test_none_result_is_memoised_too(self, mock_http_request) -> None:
         req = mock_http_request(method="POST", POST=QueryDict())
-        assert _resolve_origin(req) is None
+        assert resolve_origin(req) is None
         assert getattr(req, _ORIGIN_MATCH_ATTR) is None
-        assert _resolve_origin(req) is None
+        assert resolve_origin(req) is None
 
     def test_script_prefix_is_stripped_before_resolve(self, mock_http_request) -> None:
         set_script_prefix("/app/")
         try:
             req = mock_http_request(method="POST", POST=_origin_post("/app/items/3/"))
-            match = _resolve_origin(req)
+            match = resolve_origin(req)
         finally:
             clear_script_prefix()
         assert match is not None
@@ -111,7 +111,7 @@ class TestResolveOrigin:
             POST=_origin_post("/tenant/acme/"),
             urlconf="tests.forms.urls_tenant",
         )
-        match = _resolve_origin(req)
+        match = resolve_origin(req)
         assert match is not None
         assert match.url_kwargs == {"slug": "acme"}
         assert match.page_path == Path("/tenant/pages/page.py")
@@ -124,7 +124,7 @@ class TestResolveOrigin:
             POST=_origin_post("/en-us/docs/intro/"),
             urlconf="tests.forms.urls_i18n",
         )
-        match = _resolve_origin(req)
+        match = resolve_origin(req)
         assert match is not None
         assert match.url_kwargs == {"slug": "intro"}
         assert match.page_path == Path("/i18n/pages/page.py")
@@ -137,7 +137,7 @@ class TestResolveOrigin:
             POST=_origin_post("/fr/docs/intro/"),
             urlconf="tests.forms.urls_i18n",
         )
-        assert _resolve_origin(req) is None
+        assert resolve_origin(req) is None
 
     def test_view_without_page_path_attribute_yields_none_path(
         self, mock_http_request
@@ -147,7 +147,7 @@ class TestResolveOrigin:
             POST=_origin_post("/bare/"),
             urlconf="tests.forms.urls_tenant",
         )
-        match = _resolve_origin(req)
+        match = resolve_origin(req)
         assert match is not None
         assert match.page_path is None
         assert match.url_kwargs == {}
@@ -225,10 +225,10 @@ class TestUrlKwargsForRequest:
 
 
 class TestOriginMatchValue:
-    """`_OriginMatch` is a plain frozen value object."""
+    """`OriginMatch` is a plain frozen value object."""
 
     def test_fields_round_trip(self) -> None:
-        match = _OriginMatch(
+        match = OriginMatch(
             page_path=Path("/p/page.py"), url_kwargs={"id": 1}, origin="/p/1/"
         )
         assert match.page_path == Path("/p/page.py")

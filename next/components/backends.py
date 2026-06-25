@@ -11,7 +11,7 @@ through `import_class_cached`.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 from next.conf import import_class_cached, next_framework_settings
 
@@ -91,6 +91,7 @@ class FileComponentsBackend(ComponentsBackend):
         components = self._scanner.scan_directory(component_root, component_root, "")
         self._registry.register_many(components)
 
+    @override
     def get_component(
         self,
         name: str,
@@ -104,6 +105,7 @@ class FileComponentsBackend(ComponentsBackend):
             self._module_loader.load(info.module_path)
         return info
 
+    @override
     def collect_visible_components(
         self,
         template_path: Path,
@@ -121,6 +123,7 @@ class DummyBackend(ComponentsBackend):
         self.config = config
         self.created = True
 
+    @override
     def get_component(
         self,
         _name: str,
@@ -129,6 +132,7 @@ class DummyBackend(ComponentsBackend):
         """Return `None` to skip name resolution through this backend."""
         return None
 
+    @override
     def collect_visible_components(
         self,
         _template_path: Path,
@@ -146,6 +150,7 @@ class BoomBackend(ComponentsBackend):
         msg = "boom"
         raise RuntimeError(msg)
 
+    @override
     def get_component(
         self,
         _name: str,
@@ -154,6 +159,7 @@ class BoomBackend(ComponentsBackend):
         """Unreachable because construction always raises."""
         raise NotImplementedError
 
+    @override
     def collect_visible_components(
         self,
         _template_path: Path,
@@ -179,13 +185,12 @@ def register_components_folder_from_router_walk(
     scope_relative: str,
 ) -> None:
     """Register components for one folder discovered during the URL tree walk."""
+    # next.components.manager imports this backends module, so the manager
+    # import is deferred here to break the backends <-> manager cycle.
     from .manager import components_manager  # noqa: PLC0415
 
-    key = folder.resolve()
-    seen = components_manager._walk_registered_folders
-    if key in seen:
+    if not components_manager._claim_router_walk_folder(folder):
         return
-    seen.add(key)
     components_manager._ensure_backends()
     for backend in components_manager._backends:
         if isinstance(backend, FileComponentsBackend):

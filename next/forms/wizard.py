@@ -6,7 +6,7 @@ import types
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final, cast, override
 from uuid import UUID
 
 from django.apps import apps
@@ -38,6 +38,10 @@ if TYPE_CHECKING:
 
 
 _WIZARD_LOAD_CACHE_ATTR: Final[str] = "_next_wizard_load_cache"
+
+type _JSONValue = (
+    None | bool | int | float | str | list[_JSONValue] | dict[str, _JSONValue]
+)
 
 
 def _request_load_memo(request: "HttpRequest") -> dict[str, dict[str, Any]]:
@@ -104,6 +108,7 @@ class CacheFormWizardBackend(FormWizardBackend):
     def _key(self, session_key: str, storage_id: str) -> str:
         return f"next_wizard:{session_key}:{storage_id}"
 
+    @override
     def load(self, request: "HttpRequest", storage_id: str) -> dict[str, Any]:
         """Return the cached `{step: cleaned_data}` mapping for the visitor."""
         session_key = _ensure_session_key(request, create=False)
@@ -111,6 +116,7 @@ class CacheFormWizardBackend(FormWizardBackend):
             return {}
         return dict(self._cache().get(self._key(session_key, storage_id), {}))
 
+    @override
     def save_step(
         self, request: "HttpRequest", storage_id: str, step: str, data: dict[str, Any]
     ) -> None:
@@ -129,6 +135,7 @@ class CacheFormWizardBackend(FormWizardBackend):
         bucket[step] = dict(data)
         self._cache().set(key, bucket, self._timeout())
 
+    @override
     def clear(self, request: "HttpRequest", storage_id: str) -> None:
         """Drop the cached drafts for the visitor."""
         session_key = _ensure_session_key(request, create=False)
@@ -165,7 +172,7 @@ def _codec_error(value: object) -> ImproperlyConfigured:
     return ImproperlyConfigured(msg)
 
 
-def _encode_value(value: object) -> object:
+def _encode_value(value: object) -> "_JSONValue":
     """Encode one cleaned-data value into a JSON-safe tagged form."""
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -183,9 +190,9 @@ def _encode_value(value: object) -> object:
     raise _codec_error(value)
 
 
-def _encode_mapping(value: dict[Any, Any]) -> dict[str, Any]:
+def _encode_mapping(value: dict[Any, Any]) -> "dict[str, _JSONValue]":
     """Encode a mapping, escaping dicts that collide with the codec tag key."""
-    encoded: dict[str, Any] = {}
+    encoded: dict[str, _JSONValue] = {}
     for key, item in value.items():
         if not isinstance(key, str):
             raise _codec_error(key)
@@ -225,6 +232,7 @@ class SessionFormWizardBackend(FormWizardBackend):
     def _key(self, storage_id: str) -> str:
         return f"_next_wizard:{storage_id}"
 
+    @override
     def load(self, request: "HttpRequest", storage_id: str) -> dict[str, Any]:
         """Return the decoded `{step: cleaned_data}` mapping for the visitor."""
         session = getattr(request, "session", None)
@@ -233,6 +241,7 @@ class SessionFormWizardBackend(FormWizardBackend):
         raw = session.get(self._key(storage_id), {})
         return {step: _decode_value(data) for step, data in raw.items()}
 
+    @override
     def save_step(
         self, request: "HttpRequest", storage_id: str, step: str, data: dict[str, Any]
     ) -> None:
@@ -251,6 +260,7 @@ class SessionFormWizardBackend(FormWizardBackend):
         bucket[step] = _encode_value(dict(data))
         session[key] = bucket
 
+    @override
     def clear(self, request: "HttpRequest", storage_id: str) -> None:
         """Drop the stored drafts for the visitor."""
         session = getattr(request, "session", None)
@@ -342,6 +352,7 @@ class FormWizard:
         steps: ClassVar[list[tuple[str, "type[DjangoForm]"]]] = []
         url_param: str = "step"
 
+    @override
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Register the wizard subclass automatically and stamp the hook flag."""
         super().__init_subclass__(**kwargs)

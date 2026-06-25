@@ -15,6 +15,9 @@ This section covers how each surface protects against common attacks and how to 
 :doc:`static-assets`
    Origin, hash, and integrity for shipped CSS and JS.
 
+:doc:`csp-and-nonce`
+   Serving the partial runtime under a Content Security Policy.
+
 :doc:`di-and-untrusted-input`
    Treating URL, query, and form values as untrusted.
 
@@ -28,5 +31,6 @@ This section covers how each surface protects against common attacks and how to 
    overview
    csrf-and-forms
    static-assets
+   csp-and-nonce
    di-and-untrusted-input
    reporting

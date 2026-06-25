@@ -1,3 +1,4 @@
 <footer class="border-t border-border bg-background py-6 text-center text-xs text-muted-foreground">
   © {{ site_year }} next.dj blog
+  <span class="ml-2 opacity-60">· you are at <code>{{ site_path }}</code></span>
 </footer>

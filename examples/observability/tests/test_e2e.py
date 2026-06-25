@@ -27,7 +27,7 @@ from next.static.signals import (
     collector_finalized,
     html_injected,
 )
-from next.testing import SignalRecorder
+from next.testing import SignalRecorder, envelope_of
 from next.urls.signals import route_registered, router_reloaded
 
 
@@ -218,6 +218,74 @@ class TestFilterFormDispatch:
         events = recorder.events_for(action_dispatched)
         assert len(events) == 1
         assert events[0].kwargs["response_status"] == 302
+
+
+class TestMetricPulseVerb:
+    """A partial apply morphs the totals zone and emits the custom verb."""
+
+    def test_partial_apply_morphs_zone_and_emits_metric_pulse(self, client) -> None:
+        response = client.post_action(
+            "window_filter_form",
+            {"window": "1h"},
+            origin="/stats/",
+            partial=True,
+            zones="live-totals",
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph", "metric-pulse"]
+        assert envelope.zone_targets() == ["live-totals"]
+
+    def test_metric_pulse_op_carries_window_and_selector(self, client) -> None:
+        response = client.post_action(
+            "window_filter_form",
+            {"window": "1h"},
+            origin="/stats/",
+            partial=True,
+            zones="live-totals",
+        )
+        envelope = envelope_of(response)
+        pulse = next(op for op in envelope.ops if op["op"] == "metric-pulse")
+        assert pulse["window"] == "1h"
+        assert pulse["selector"] == "[data-metric-pulse-target]"
+
+    def test_partial_apply_reaggregates_under_the_chosen_window(
+        self, client, frozen_now
+    ) -> None:
+        with frozen_now("2026-05-08T12:00:00+00:00") as traveller:
+            metrics.incr("pages.rendered", "/old", by=40)
+            traveller.move_to("2026-05-08T12:30:00+00:00")
+            narrow = envelope_of(
+                client.post_action(
+                    "window_filter_form",
+                    {"window": "1m"},
+                    origin="/stats/",
+                    partial=True,
+                    zones="live-totals",
+                )
+            ).html_for_zone("live-totals")
+            wide = envelope_of(
+                client.post_action(
+                    "window_filter_form",
+                    {"window": "1h"},
+                    origin="/stats/",
+                    partial=True,
+                    zones="live-totals",
+                )
+            ).html_for_zone("live-totals")
+        assert "40" not in narrow
+        assert "40" in wide
+
+    def test_live_page_carries_the_pulse_target_and_handler(self, client) -> None:
+        body = client.get("/stats/").content.decode()
+        assert "data-metric-pulse-target" in body
+        assert 'data-next-zone="live-totals"' in body
+        assert "/static/next/stats.js" in body
+
+    def test_pulse_handler_is_scoped_to_the_live_page(self, client) -> None:
+        body = client.get("/stats/pages/").content.decode()
+        assert "/static/next/stats.js" not in body
+        assert "data-next-target" not in body
 
 
 class TestSignalGroupsCovered:

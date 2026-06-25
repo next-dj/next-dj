@@ -23,6 +23,9 @@ Each page lists the public surface plus configuration and signal entries that be
 :doc:`static`
    ``next.static`` for the static collector, asset kinds, and backends.
 
+:doc:`partial`
+   ``next.partial`` for the patch builder, zones, SSE streams, and the protocol backend.
+
 :doc:`deps`
    ``next.deps`` for the dependency resolver and providers.
 
@@ -69,6 +72,7 @@ Each page lists the public surface plus configuration and signal entries that be
    urls
    forms
    static
+   partial
    deps
    conf
    server

@@ -13,13 +13,14 @@ every URL.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, overload
+from typing import TYPE_CHECKING, Literal, overload, override
 
 from django.contrib.staticfiles.finders import BaseFinder
 from django.contrib.staticfiles.utils import matches_patterns
 from django.core.files import File
 from django.core.files.storage import Storage
 
+from next.components import get_component_paths_for_watch
 from next.pages.registry import (
     get_layout_djx_paths_for_watch,
     get_template_djx_paths_for_watch,
@@ -90,10 +91,6 @@ def discover_colocated_static_assets() -> dict[str, Path]:
             out, layout_dir, logical_name, "layout", default_stems
         )
 
-    # next.components relies on the Django app registry being ready. A top-level
-    # import would load it before AppConfig.ready() completes, so we defer here.
-    from next.components import get_component_paths_for_watch  # noqa: PLC0415
-
     seen_component_dirs: set[Path] = set()
     for component_source in get_component_paths_for_watch():  # pragma: no cover
         component_dir = component_source.parent.resolve()
@@ -121,6 +118,7 @@ class _MappedSourceStorage(Storage):
             raise FileNotFoundError(msg)
         return self._mapping[name]
 
+    @override
     def exists(self, name: str) -> bool:
         """Return True when the logical name has a mapping and the file exists."""
         try:
@@ -128,11 +126,13 @@ class _MappedSourceStorage(Storage):
         except FileNotFoundError:
             return False
 
+    @override
     def open(self, name: str, mode: str = "rb") -> File:
         """Open the file behind the logical name for reading."""
         path = self._resolve(name)
         return File(path.open(mode))
 
+    @override
     def path(self, name: str) -> str:
         """Return the absolute filesystem path behind the logical name."""
         return str(self._resolve(name))
@@ -170,15 +170,16 @@ class NextStaticFilesFinder(BaseFinder):
         self, path: str, *, all: Literal[True]
     ) -> list[str]: ...  # pragma: no cover
 
+    @override
     def find(
         self,
         path: str,
-        find_all: bool = False,  # noqa: FBT001, FBT002
+        find_all: bool = False,
         **kwargs: bool,
     ) -> str | list[str] | None:
         """Resolve the logical path to an absolute filesystem path or list."""
-        # django-stubs still models the deprecated `all` keyword on BaseFinder,
-        # so the override must accept it. Normalise it back to find_all.
+        # Django's BaseFinder.find dictates a positional bool and a deprecated
+        # `all` keyword, so the override matches it and normalises `all` back.
         find_all = kwargs.get("all", find_all)
         self._refresh()
         source = self._mapping.get(path)
@@ -187,6 +188,7 @@ class NextStaticFilesFinder(BaseFinder):
         resolved = str(source)
         return [resolved] if find_all else resolved
 
+    @override
     def list(
         self,
         ignore_patterns: Iterable[str] | None,

@@ -152,6 +152,27 @@ The `{% form "name" %}` tag resolves the form to its stable UID endpoint, inject
 
 > `{% form %}`, `{% component %}`, `{% collect_styles %}`, `{% url %}` etc. are all globally loaded template tags. **Do not** write `{% load forms components next_static %}` — `next.apps.templates.install()` registers them as Django builtins at startup.
 
+The admin list edits each link inline. The same form renders once per row, so each carries `key=link.slug` (`data-next-key`) and an invalid submit re-renders the submitted row, not the first:
+
+```djx
+{% form "edit_link_form" key=link.slug %}
+  <input type="hidden" name="slug" value="{{ link.slug }}">
+  <input name="url" value="{{ link.url }}" type="url">
+  {% if form.url.errors %}<span>{{ form.url.errors|join:", " }}</span>{% endif %}
+  <button type="submit">Save</button>
+{% endform %}
+```
+
+[`EditLinkForm`](shortener/routes/admin/page.py) resolves the link from the posted `slug` in `get_initial`. A looped `{% form %}` without `key=` or `zone=` raises `next.W070`.
+
+### 5a. Patch envelopes — `prepend`, `remove`, and an out-of-band foreign morph
+
+Three actions author their own patch envelopes through `Patches(request)` and fall back to a redirect when no runtime is present, so each works the same with or without JS.
+
+- **`prepend` with dedupe.** The home create form wraps its latest-links list in a `{% zone "latest-links" tag="ul" %}`. On a partial submit [`CreateLinkForm.on_valid`](shortener/routes/page.py) renders one keyed `link_row` and prepends it: `Patches(request).prepend({"zone": "latest-links"}, row, dedupe="key").response()`. Dedupe by `data-next-key` (the slug) means a resubmission replaces its row instead of doubling it. Without the runtime the form keeps its declared `Meta.success_url` redirect.
+- **`remove`.** Each admin row is a `<li data-next-key="{{ link.slug }}">`. The [`delete_link`](shortener/routes/admin/page.py) action drops the row in place: `Patches(request).remove({"css": 'li[data-next-key="..."]'}).response(fallback="/admin/")`.
+- **`morph_foreign_zone` (out of band).** The home page owns a `{% zone "links-badge" %}` that totals unflushed clicks. The [`reset_clicks`](shortener/routes/admin/links/[slug]/page.py) action on the detail page re-renders that zone of the _foreign_ home page out of band: `Patches(request).morph_foreign_zone("links-badge", "/")`. The home page's body resolution re-runs first, so the zone travels only when that page would have served the request.
+
 ### 6. Components — simple, composite, and shared
 
 A component lives in `_widgets/<name>/`:

@@ -15,7 +15,7 @@ from next.forms.dispatch import (
 from next.forms.origin import (
     _ORIGIN_MATCH_ATTR,
     _filter_reserved_url_kwargs,
-    _resolve_origin,
+    resolve_origin,
 )
 from tests.support.helpers import build_mock_http_request
 
@@ -54,14 +54,18 @@ class TestBenchDispatchHelpers:
 
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_resolve_origin_cold(self, benchmark) -> None:
+        # A fixed urlconf keeps this measuring the resolver itself rather
+        # than the live test site page count.
         request = build_mock_http_request(
-            method="POST", POST={"_next_form_origin": "/items/42/"}
+            method="POST",
+            POST={"_next_form_origin": "/items/42/"},
+            urlconf="tests.benchmarks.forms.urls_bench",
         )
 
         def run() -> object:
             if hasattr(request, _ORIGIN_MATCH_ATTR):
                 delattr(request, _ORIGIN_MATCH_ATTR)
-            return _resolve_origin(request)
+            return resolve_origin(request)
 
         match = benchmark(run)
         assert match is not None
@@ -70,10 +74,12 @@ class TestBenchDispatchHelpers:
     @pytest.mark.benchmark(group="forms.dispatch")
     def test_resolve_origin_memoised(self, benchmark) -> None:
         request = build_mock_http_request(
-            method="POST", POST={"_next_form_origin": "/items/42/"}
+            method="POST",
+            POST={"_next_form_origin": "/items/42/"},
+            urlconf="tests.benchmarks.forms.urls_bench",
         )
-        first = _resolve_origin(request)
-        match = benchmark(_resolve_origin, request)
+        first = resolve_origin(request)
+        match = benchmark(resolve_origin, request)
         assert match is first
 
 

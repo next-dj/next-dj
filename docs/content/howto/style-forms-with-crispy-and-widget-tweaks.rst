@@ -14,7 +14,7 @@ Solution
 The ``{% form %}`` tag publishes an ordinary bound form under the ``form`` variable, so every renderer that consumes a Django form works unchanged.
 Render the whole form through the ``|crispy`` filter, or restyle single fields with django-widget-tweaks filters.
 No compatibility code is involved on either side.
-Verified with django-crispy-forms 2.5 and later plus the crispy-bootstrap5 template pack, and django-widget-tweaks 1.5 and later, on Django 4.2 through 6.0.
+Verified with django-crispy-forms 2.5 and later plus the crispy-bootstrap5 template pack, and django-widget-tweaks 1.5 and later, on Django 5.2 through 6.0.
 
 Walkthrough
 -----------

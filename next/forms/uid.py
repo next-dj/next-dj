@@ -24,6 +24,11 @@ def reverse_form_action(uid: str) -> str:
 
 ORIGIN_FIELD_NAME = "_next_form_origin"
 
+# Render-context key the shaping layer sets on a wizard advance to override
+# the rendered form's _next_form_origin. The shaping layer merges it into the
+# zone render overrides instead of mutating a request attribute.
+FORM_ORIGIN_OVERRIDE_KEY = "form_origin_override"
+
 
 def validated_origin_path(raw: object) -> str | None:
     """Return `raw` as a same-site path or `None`."""
@@ -49,6 +54,7 @@ def redirect_to_origin(
 
 __all__ = [
     "FORM_ACTION_REVERSE_NAME",
+    "FORM_ORIGIN_OVERRIDE_KEY",
     "ORIGIN_FIELD_NAME",
     "URL_NAME_FORM_ACTION",
     "redirect_to_origin",

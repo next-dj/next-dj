@@ -4,6 +4,8 @@ import pytest
 from admin_audit.models import AdminActivityLog
 from library.models import Author, Book, Chapter, Tag
 
+from next.testing import envelope_of
+
 
 pytestmark = pytest.mark.django_db
 
@@ -400,15 +402,19 @@ class TestDeleteView:
 
 
 class TestInlines:
-    def test_change_book_renders_chapter_inlines(self, admin_client):
+    def test_change_book_renders_keyed_chapter_rows(self, admin_client):
         author = Author.objects.create(full_name="A. Author")
         book = Book.objects.create(title="With chapters", author=author)
-        Chapter.objects.create(book=book, number=1, title="Intro", word_count=100)
+        c1 = Chapter.objects.create(book=book, number=1, title="Intro", word_count=100)
+        c2 = Chapter.objects.create(book=book, number=2, title="Rising", word_count=200)
         r = admin_client.get(f"/admin/library/book/{book.pk}/change/")
         assert r.status_code == 200
         body = r.content.decode()
-        assert "Intro" in body
         assert "chapters" in body.lower()
+        assert f'data-next-key="{c1.pk}"' in body
+        assert f'data-next-key="{c2.pk}"' in body
+        assert 'value="Intro"' in body
+        assert "Add chapter" in body
 
     def test_change_book_autocomplete_field_renders_select(self, admin_client):
         author = Author.objects.create(full_name="A. Author")
@@ -451,29 +457,236 @@ class TestInlines:
         assert r.status_code == 302, r.content.decode()[:1500]
         assert Book.objects.filter(title="Browser-flow book").exists()
 
-    def test_change_book_with_inline_create(self, admin_client):
+    def test_change_book_main_save_ignores_absent_inlines(self, admin_client):
         author = Author.objects.create(full_name="A. Author")
         book = Book.objects.create(title="Book", author=author)
-        get = admin_client.get(f"/admin/library/book/{book.pk}/change/")
-        hiddens = _extract_form_hiddens(get.content.decode())
-        payload = {
-            **hiddens,
-            "title": "Book",
-            "author": str(author.pk),
-            "status": "draft",
-            "summary": "",
-            "price": "0",
-            "chapters-TOTAL_FORMS": "1",
-            "chapters-INITIAL_FORMS": "0",
-            "chapters-MIN_NUM_FORMS": "0",
-            "chapters-MAX_NUM_FORMS": "1000",
-            "chapters-0-number": "1",
-            "chapters-0-title": "Chapter one",
-            "chapters-0-word_count": "100",
-        }
-        r = admin_client.post_action("admin:change", payload)
+        Chapter.objects.create(book=book, number=1, title="Intro", word_count=100)
+        r = admin_client.post_action(
+            "admin:change",
+            {
+                "title": "Renamed",
+                "author": str(author.pk),
+                "status": "draft",
+                "summary": "",
+                "price": "0",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+        )
         assert r.status_code == 302
-        assert Chapter.objects.filter(book=book, number=1, title="Chapter one").exists()
+        book.refresh_from_db()
+        assert book.title == "Renamed"
+        assert Chapter.objects.filter(book=book).count() == 1
+
+
+_INLINE_ACTIONS = ("admin:inline_change", "admin:inline_add")
+
+
+class TestLiveInlines:
+    """Each existing related row is its own keyed `admin:inline_change` form."""
+
+    def _book(self):
+        author = Author.objects.create(full_name="A. Author")
+        book = Book.objects.create(title="Book", author=author)
+        first = Chapter.objects.create(
+            book=book, number=1, title="Intro", word_count=100
+        )
+        second = Chapter.objects.create(
+            book=book, number=2, title="Rising", word_count=200
+        )
+        return book, first, second
+
+    @staticmethod
+    def _payload(action: str, pk: object, **fields: str) -> dict[str, str]:
+        base = {"_inline": "chapter", "number": "9", "title": "X", "word_count": "10"}
+        if action == "admin:inline_change":
+            base["_inline_pk"] = str(pk)
+        return {**base, **fields}
+
+    def test_inline_change_saves_the_addressed_row(self, admin_client):
+        book, first, second = self._book()
+        r = admin_client.post_action(
+            "admin:inline_change",
+            {
+                "_inline": "chapter",
+                "_inline_pk": str(second.pk),
+                "number": "2",
+                "title": "Rising action",
+                "word_count": "250",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+        )
+        assert r.status_code == 302
+        assert r["Location"] == f"/admin/library/book/{book.pk}/change/"
+        first.refresh_from_db()
+        second.refresh_from_db()
+        assert second.title == "Rising action"
+        assert second.word_count == 250
+        assert first.title == "Intro"
+
+    def test_inline_add_creates_a_row(self, admin_client):
+        book, *_ = self._book()
+        r = admin_client.post_action(
+            "admin:inline_add",
+            {
+                "_inline": "chapter",
+                "number": "3",
+                "title": "Climax",
+                "word_count": "300",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+        )
+        assert r.status_code == 302
+        assert r["Location"] == f"/admin/library/book/{book.pk}/change/"
+        assert Chapter.objects.filter(book=book, number=3, title="Climax").exists()
+
+    @pytest.mark.parametrize("action", _INLINE_ACTIONS)
+    def test_invalid_submit_rerenders_and_persists_nothing(self, admin_client, action):
+        book, first, _ = self._book()
+        before = Chapter.objects.filter(book=book).count()
+        payload = self._payload(action, first.pk, title="")
+        r = admin_client.post_action(
+            action, payload, origin=f"/admin/library/book/{book.pk}/change/"
+        )
+        assert r.status_code == 200
+        assert "This field is required" in r.content.decode()
+        assert Chapter.objects.filter(book=book).count() == before
+        first.refresh_from_db()
+        assert first.title == "Intro"
+
+    def test_invalid_partial_change_morphs_the_keyed_row_form(self, admin_client):
+        book, _first, second = self._book()
+        response = admin_client.post_action(
+            "admin:inline_change",
+            {
+                "_inline": "chapter",
+                "_inline_pk": str(second.pk),
+                "number": "2",
+                "title": "",
+                "word_count": "250",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+            partial=True,
+        )
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        meta = envelope.form_meta()
+        assert meta is not None
+        assert response["X-Next-Action"] == meta["uid"]
+        assert envelope.targets() == [{"form": meta["uid"]}]
+        assert meta["valid"] is False
+        assert meta["errors"]["title"] == ["This field is required."]
+        html = envelope.ops[0]["html"]
+        assert f'data-next-key="{second.pk}"' in html
+        second.refresh_from_db()
+        assert second.title == "Rising"
+
+    @pytest.mark.parametrize("action", _INLINE_ACTIONS)
+    def test_unknown_inline_token_404(self, admin_client, action):
+        book, first, _ = self._book()
+        payload = self._payload(action, first.pk, _inline="nope")
+        r = admin_client.post_action(
+            action, payload, origin=f"/admin/library/book/{book.pk}/change/"
+        )
+        assert r.status_code == 404
+
+    def test_inline_change_unknown_pk_404(self, admin_client):
+        book, *_ = self._book()
+        payload = self._payload("admin:inline_change", "99999")
+        r = admin_client.post_action(
+            "admin:inline_change",
+            payload,
+            origin=f"/admin/library/book/{book.pk}/change/",
+        )
+        assert r.status_code == 404
+
+    @pytest.mark.parametrize("action", _INLINE_ACTIONS)
+    def test_anonymous_submit_redirects_to_login(self, client, action):
+        book, first, _ = self._book()
+        payload = self._payload(action, first.pk, title="Sneaky")
+        r = client.post_action(
+            action, payload, origin=f"/admin/library/book/{book.pk}/change/"
+        )
+        assert r.status_code == 302
+        assert r["Location"].startswith("/admin/login/")
+        first.refresh_from_db()
+        assert first.title == "Intro"
+        assert not Chapter.objects.filter(title="Sneaky").exists()
+
+    @pytest.mark.parametrize("action", _INLINE_ACTIONS)
+    def test_non_staff_submit_is_forbidden(self, client, django_user_model, action):
+        client.force_login(django_user_model.objects.create_user("intruder"))
+        book, first, _ = self._book()
+        payload = self._payload(action, first.pk, title="Sneaky")
+        r = client.post_action(
+            action, payload, origin=f"/admin/library/book/{book.pk}/change/"
+        )
+        assert r.status_code == 403
+        first.refresh_from_db()
+        assert first.title == "Intro"
+        assert not Chapter.objects.filter(title="Sneaky").exists()
+
+
+class TestInlinePartialPatches:
+    """Inline saves author replace, inner, and server-opened layer patches."""
+
+    def _book(self):
+        author = Author.objects.create(full_name="A. Author")
+        book = Book.objects.create(title="Book", author=author)
+        chapter = Chapter.objects.create(
+            book=book, number=1, title="Intro", word_count=100
+        )
+        return book, chapter
+
+    def test_partial_inline_change_replaces_row_and_inners_count(self, admin_client):
+        book, chapter = self._book()
+        response = admin_client.post_action(
+            "admin:inline_change",
+            {
+                "_inline": "chapter",
+                "_inline_pk": str(chapter.pk),
+                "number": "1",
+                "title": "Introduction",
+                "word_count": "120",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+            partial=True,
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["replace", "inner"]
+        assert envelope.targets() == [
+            {"css": f'form[data-next-key="{chapter.pk}"]'},
+            {"css": '[data-inline-count="chapter"]'},
+        ]
+        assert f'data-next-key="{chapter.pk}"' in envelope.ops[0]["html"]
+        assert 'value="Introduction"' in envelope.ops[0]["html"]
+        assert "1 saved" in envelope.ops[1]["html"]
+        chapter.refresh_from_db()
+        assert chapter.title == "Introduction"
+        assert chapter.word_count == 120
+
+    def test_partial_inline_add_opens_layer_and_inners_count(self, admin_client):
+        book, _chapter = self._book()
+        response = admin_client.post_action(
+            "admin:inline_add",
+            {
+                "_inline": "chapter",
+                "number": "2",
+                "title": "Rising",
+                "word_count": "200",
+            },
+            origin=f"/admin/library/book/{book.pk}/change/",
+            partial=True,
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["layer.open", "inner"]
+        assert envelope.ops[0]["href"] == f"/admin/library/book/{book.pk}/change/"
+        assert envelope.targets()[1] == {"css": '[data-inline-count="chapter"]'}
+        assert "2 saved" in envelope.ops[1]["html"]
+        assert Chapter.objects.filter(book=book, number=2, title="Rising").exists()
 
 
 class TestHistoryView:
@@ -496,7 +709,7 @@ class TestHistoryView:
 
 
 class TestInlineValidationFailure:
-    """Inline formset with a partially-filled row re-renders the form with errors.
+    """The add view's batch inline formset re-renders with errors on a bad row.
 
     Filling `chapters-0-number` makes the row "intent to save", so the empty
     required `chapters-0-title` flips the formset to invalid. `AdminForm.clean()`
@@ -504,22 +717,9 @@ class TestInlineValidationFailure:
     the bound form, so the user keeps their typed data and sees the row error.
     """
 
-    @pytest.mark.parametrize(
-        ("flow", "action_name"),
-        [("add", "admin:add"), ("change", "admin:change")],
-        ids=("add", "change"),
-    )
-    def test_inline_invalid_rerenders_with_errors(
-        self, admin_client, flow, action_name
-    ):
+    def test_inline_invalid_rerenders_with_errors(self, admin_client):
         author = Author.objects.create(full_name="A. Author")
-        if flow == "add":
-            get_url = "/admin/library/book/add/"
-        else:
-            book = Book.objects.create(title="Book", author=author)
-            get_url = f"/admin/library/book/{book.pk}/change/"
-
-        get = admin_client.get(get_url)
+        get = admin_client.get("/admin/library/book/add/")
         rendered = _extract_form_inputs(get.content.decode())
         payload = {
             **rendered,
@@ -532,12 +732,11 @@ class TestInlineValidationFailure:
             "chapters-0-title": "",
             "chapters-0-word_count": "10",
         }
-        r = admin_client.post_action(action_name, payload)
+        r = admin_client.post_action("admin:add", payload)
         assert r.status_code == 200
         body = r.content.decode()
         assert "Book with bad chapter" in body
-        if flow == "add":
-            assert not Book.objects.filter(title="Book with bad chapter").exists()
+        assert not Book.objects.filter(title="Book with bad chapter").exists()
 
 
 class TestSaveContinue:

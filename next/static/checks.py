@@ -133,10 +133,7 @@ def _check_single_backend(
 
 
 @register(Tags.compatibility)
-def check_static_backends(
-    app_configs: object,  # noqa: ARG001
-    **_kwargs: object,
-) -> list[CheckMessage]:
+def check_static_backends(**_kwargs: object) -> list[CheckMessage]:
     """Validate the structure of `NEXT_FRAMEWORK['STATIC_BACKENDS']`."""
     messages: list[CheckMessage] = []
     try:
@@ -173,39 +170,50 @@ def _w042(message: str) -> CheckMessage:
 
 
 @register(Tags.compatibility)
-def check_js_context_serializer(  # noqa: PLR0911
+def check_js_context_serializer(
     *_args: object,
     **_kwargs: object,
 ) -> list[CheckMessage]:
     """Validate that `JS_CONTEXT_SERIALIZER` resolves to a protocol implementation."""
+    message = _js_context_serializer_message()
+    return [message] if message is not None else []
+
+
+def _js_context_serializer_message() -> CheckMessage | None:
+    """Return the single configuration warning for `JS_CONTEXT_SERIALIZER`.
+
+    An unset option or a non-dict `NEXT_FRAMEWORK` is healthy and returns
+    None, so the registered check stays a thin list wrapper.
+    """
     raw_framework = getattr(settings, "NEXT_FRAMEWORK", {}) or {}
     if not isinstance(raw_framework, dict):
-        return []
+        return None
     path = raw_framework.get("JS_CONTEXT_SERIALIZER")
     if path is None or path == "":
-        return []
+        return None
     if not isinstance(path, str):
-        return [
-            _w042(
-                f"NEXT_FRAMEWORK['JS_CONTEXT_SERIALIZER'] must be a dotted path "
-                f"string, got {type(path).__name__!r}."
-            )
-        ]
+        return _w042(
+            f"NEXT_FRAMEWORK['JS_CONTEXT_SERIALIZER'] must be a dotted path "
+            f"string, got {type(path).__name__!r}."
+        )
+    return _js_context_serializer_instance_message(path)
+
+
+def _js_context_serializer_instance_message(path: str) -> CheckMessage | None:
+    """Import and instantiate the configured serializer, reporting any failure."""
     try:
         cls: Any = import_class_cached(path)
     except ImportError as e:
-        return [_w042(f"Cannot import JS_CONTEXT_SERIALIZER {path!r}: {e}")]
+        return _w042(f"Cannot import JS_CONTEXT_SERIALIZER {path!r}: {e}")
     if not isinstance(cls, type):
-        return [_w042(f"JS_CONTEXT_SERIALIZER {path!r} is not a class.")]
+        return _w042(f"JS_CONTEXT_SERIALIZER {path!r} is not a class.")
     try:
         instance = cls()
     except (TypeError, ImportError) as e:
-        return [_w042(f"JS_CONTEXT_SERIALIZER {path!r} cannot be instantiated: {e}")]
+        return _w042(f"JS_CONTEXT_SERIALIZER {path!r} cannot be instantiated: {e}")
     if not isinstance(instance, JsContextSerializer):
-        return [
-            _w042(
-                f"JS_CONTEXT_SERIALIZER {path!r} does not implement the "
-                "JsContextSerializer protocol (needs a `dumps(value) -> str` method)."
-            )
-        ]
-    return []
+        return _w042(
+            f"JS_CONTEXT_SERIALIZER {path!r} does not implement the "
+            "JsContextSerializer protocol (needs a `dumps(value) -> str` method)."
+        )
+    return None

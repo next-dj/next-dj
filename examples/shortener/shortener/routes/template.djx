@@ -1,7 +1,13 @@
 <div class="space-y-8">
-  {% component "page_header"
+  {% #component "page_header"
       title="Shrink a link"
       description="Paste a URL, get a short slug, and every visit to /s/<slug>/ is counted in LocMemCache. Run `manage.py flush_clicks` to persist the counters." %}
+    {% #slot "actions" %}
+      {% zone "links-badge" tag="span" %}
+        {% component "badge" text=pending_total_label variant="secondary" %}
+      {% endzone %}
+    {% /slot %}
+  {% /component %}
 
   {% for message in flash_messages %}
     {% component "alert" variant="success" text=message %}
@@ -24,13 +30,15 @@
   {% #component "section" title="Latest shortened links" %}
     {% #slot "content" %}
       {% if recent_links %}
-        <ul class="space-y-2">
+        {% zone "latest-links" tag="ul" %}
           {% for link in recent_links %}
-            <li>{% component "link_card" %}</li>
+            {% component "link_row" link=link %}
           {% endfor %}
-        </ul>
+        {% endzone %}
       {% else %}
-        {% component "empty_state" title="No links yet" description="Create one above to see it here." icon="🪄" %}
+        {% zone "latest-links" tag="ul" %}
+          {% component "empty_state" title="No links yet" description="Create one above to see it here." icon="🪄" %}
+        {% endzone %}
       {% endif %}
     {% /slot %}
   {% /component %}

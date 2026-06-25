@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from typing import Any
 
 import pytest
 from django.test import override_settings
@@ -55,17 +54,7 @@ class TestPydanticJsContextSerializer:
             serializer.dumps({"thing": object()})
 
     def test_raises_when_pydantic_missing(self, monkeypatch) -> None:
-        real_import = (
-            __builtins__["__import__"] if isinstance(__builtins__, dict) else __import__
-        )
-
-        def blocked(name, *args, **kwargs):  # noqa: ANN002, ANN003
-            if name == "pydantic":
-                msg = "No module named 'pydantic'"
-                raise ImportError(msg)
-            return real_import(name, *args, **kwargs)
-
-        monkeypatch.setattr("builtins.__import__", blocked)
+        monkeypatch.setattr("next.static.serializers.pydantic", None)
         with pytest.raises(ImportError, match="pydantic"):
             PydanticJsContextSerializer()
 
@@ -112,7 +101,7 @@ class TestCollectorUsesSerializer:
 
     def test_explicit_serializer_override(self) -> None:
         class TagSerializer:
-            def dumps(self, value: Any) -> str:  # noqa: ANN401
+            def dumps(self, value: object) -> str:
                 return json.dumps({"tagged": value})
 
         collector = StaticCollector(js_serializer=TagSerializer())

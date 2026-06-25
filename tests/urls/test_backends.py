@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+from django.test import RequestFactory
 
 from next.pages import page
 from next.urls import (
@@ -446,7 +447,7 @@ class TestFileRouterBackend:
         )
         assert pattern is not None
         assert pattern.callback is not None
-        response = pattern.callback(Mock(), args="arg1/arg2/arg3")
+        response = pattern.callback(RequestFactory().get("/"), args="arg1/arg2/arg3")
         assert response.content == b"response-arg1/arg2/arg3"
 
 

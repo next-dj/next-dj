@@ -43,7 +43,7 @@ A backend whose meta stores no ``uid`` renders the form without the attribute.
 A multipart form gets ``enctype="multipart/form-data"`` automatically.
 The tag asks the form instance through ``is_multipart()``, so a ``FileField`` rendered with a stock widget needs no extra argument.
 
-A name that is not in the registry raises ``FormActionNotFound`` at render time.
+A name that is not in the registry raises ``FormActionNotFoundError`` at render time.
 
 HTML Attributes
 ---------------
@@ -180,7 +180,7 @@ It also supports ``as`` assignment for reuse, see :doc:`/content/ref/template-ta
      <button type="submit">Send</button>
    </form>
 
-An unknown action name raises ``FormActionNotFound`` at render time, the same error the ``{% form %}`` tag raises.
+An unknown action name raises ``FormActionNotFoundError`` at render time, the same error the ``{% form %}`` tag raises.
 
 .. _topics-forms-templates-handwritten-views:
 

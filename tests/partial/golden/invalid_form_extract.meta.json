@@ -1,0 +1,14 @@
+{
+  "name": "invalid_form_extract",
+  "description": "The default invalid-form envelope: one extract-morph addressing the failed form by uid, the document trimmed to it by the client.",
+  "content_type": "application/vnd.next.patches+json",
+  "status": 200,
+  "headers": {
+    "Content-Type": "application/vnd.next.patches+json",
+    "X-Next-Version": "9f3c2e1b",
+    "Vary": "X-Next-Request, X-Next-Zone, X-Next-Merge, X-Next-Version",
+    "X-Next-Form": "invalid",
+    "X-Next-Action": "3f9ac21d75e04b88"
+  },
+  "envelope_file": "invalid_form_extract.envelope.json"
+}

@@ -5,7 +5,7 @@ Getting Started
 
 This section gets you from zero to a running next.dj project.
 Read the overview to learn the mental model, then install the package.
-The five tutorial parts build a small Notes application from there.
+The six tutorial parts build a small Notes application from there.
 
 .. rubric:: Read first
 
@@ -33,6 +33,9 @@ The five tutorial parts build a small Notes application from there.
 :doc:`tutorial05`
    Test pages end to end and use the development server.
 
+:doc:`tutorial06`
+   Make the index live with zones and partial rendering, with a no-JavaScript fallback.
+
 :doc:`whatsnext`
    Where to go for deeper topics, recipes, and reference material.
 
@@ -47,4 +50,5 @@ The five tutorial parts build a small Notes application from there.
    tutorial03
    tutorial04
    tutorial05
+   tutorial06
    whatsnext

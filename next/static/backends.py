@@ -21,7 +21,7 @@ construction.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, override
 
 from django.contrib.staticfiles.storage import staticfiles_storage
 
@@ -113,11 +113,12 @@ class StaticFilesBackend(StaticBackend):
     def _logical_static_path(self, logical_name: str, suffix: str) -> str:
         return f"{StaticNamespace.NEXT}/{logical_name}{suffix}"
 
+    @override
     def register_file(
         self,
         source_path: Path,
         logical_name: str,
-        kind: str,  # noqa: ARG002
+        kind: str,
     ) -> str:
         """Return the staticfiles URL for `next/<logical_name><suffix>`.
 
@@ -125,8 +126,11 @@ class StaticFilesBackend(StaticBackend):
         can serve multiple file extensions if a custom backend wishes
         to. Result is cached per `(logical_name, suffix)`. Missing
         entries in the staticfiles manifest are reported as
-        `RuntimeError` with a hint about running `collectstatic`.
+        `RuntimeError` with a hint about running `collectstatic`. The
+        `kind` argument is part of the contract and ignored here, the
+        suffix alone names the file.
         """
+        del kind
         suffix = source_path.suffix
         cache_key = (logical_name, suffix)
         cached = self._url_cache.get(cache_key)
@@ -149,39 +153,42 @@ class StaticFilesBackend(StaticBackend):
         self,
         url: str,
         *,
-        request: HttpRequest | None = None,  # noqa: ARG002
+        request: HttpRequest | None = None,
     ) -> str:
         """Return a link tag built from the configured css_tag template.
 
         The `request` argument is accepted for contract compatibility
         and ignored by the default backend.
         """
+        del request
         return self._css_tag.format(url=url)
 
     def render_script_tag(
         self,
         url: str,
         *,
-        request: HttpRequest | None = None,  # noqa: ARG002
+        request: HttpRequest | None = None,
     ) -> str:
         """Return a script tag built from the configured js_tag template.
 
         The `request` argument is accepted for contract compatibility
         and ignored by the default backend.
         """
+        del request
         return self._js_tag.format(url=url)
 
     def render_module_tag(
         self,
         url: str,
         *,
-        request: HttpRequest | None = None,  # noqa: ARG002
+        request: HttpRequest | None = None,
     ) -> str:
         """Return a module script tag built from the configured module_tag template.
 
         The `request` argument is accepted for contract compatibility
         and ignored by the default backend.
         """
+        del request
         return self._module_tag.format(url=url)
 
 

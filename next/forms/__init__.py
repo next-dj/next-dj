@@ -29,7 +29,8 @@ from .backends import (
     ActionGuard,
     ActionRegistration,
     FormActionBackend,
-    FormActionNotFound,
+    FormActionNotFoundError,
+    RegistryBackendSnapshot,
     RegistryFormActionBackend,
 )
 from .base import (
@@ -84,6 +85,12 @@ from .decorators import action
 from .dispatch import ActionOutcome, ActionOutcomeKind
 from .formsets import cleanup_extra_initial
 from .markers import DForm
+from .origin import (
+    OriginMatch,
+    resolve_origin,
+    resolve_url_to_match,
+    resolve_url_to_page,
+)
 from .serializers import (
     FieldKind,
     FieldSpec,
@@ -156,7 +163,7 @@ __all__ = [
     "FloatField",
     "Form",
     "FormActionBackend",
-    "FormActionNotFound",
+    "FormActionNotFoundError",
     "FormSectionSpec",
     "FormSpec",
     "FormWizard",
@@ -172,10 +179,12 @@ __all__ = [
     "ModelMultipleChoiceField",
     "MultipleChoiceField",
     "NumberInput",
+    "OriginMatch",
     "PasswordInput",
     "PermissionOutcome",
     "RadioSelect",
     "RegexField",
+    "RegistryBackendSnapshot",
     "RegistryFormActionBackend",
     "Select",
     "SelectMultiple",
@@ -202,5 +211,8 @@ __all__ = [
     "modelform_factory",
     "modelformset_factory",
     "redirect_to_origin",
+    "resolve_origin",
+    "resolve_url_to_match",
+    "resolve_url_to_page",
     "signals",
 ]

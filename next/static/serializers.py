@@ -12,11 +12,23 @@ protocol.
 from __future__ import annotations
 
 import json
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, override, runtime_checkable
 
 from django.core.serializers.json import DjangoJSONEncoder
 
 from next.conf import import_class_cached, next_framework_settings
+
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
+pydantic: ModuleType | None
+try:
+    import pydantic
+except ImportError:  # pragma: no cover - pydantic is installed in CI
+    # pydantic is an optional dependency. Its absence is reported when the
+    # pydantic serializer is constructed, never at module import.
+    pydantic = None
 
 
 @runtime_checkable
@@ -28,7 +40,7 @@ class JsContextSerializer(Protocol):
     without bolt-on Django encoder extensions.
     """
 
-    def dumps(self, value: Any) -> str:  # noqa: ANN401
+    def dumps(self, value: object) -> str:
         """Return a JSON string for `value`."""
         raise NotImplementedError
 
@@ -41,7 +53,7 @@ class JsonJsContextSerializer:
     uses compact separators so the inline init payload stays small.
     """
 
-    def dumps(self, value: Any) -> str:  # noqa: ANN401
+    def dumps(self, value: object) -> str:
         """Return a compact JSON string produced by `json.dumps`."""
         return json.dumps(value, cls=DjangoJSONEncoder, separators=(",", ":"))
 
@@ -55,32 +67,35 @@ class PydanticJsContextSerializer:
     """
 
     def __init__(self) -> None:
-        """Import pydantic lazily so tests without it keep working."""
-        try:
-            import pydantic  # noqa: PLC0415
-        except ImportError as e:
+        """Require the optional pydantic package, reporting its absence."""
+        if pydantic is None:
             msg = (
                 "PydanticJsContextSerializer requires the pydantic package. "
                 "Install it or switch JS_CONTEXT_SERIALIZER to another class."
             )
-            raise ImportError(msg) from e
-        self._pydantic = pydantic
+            raise ImportError(msg)
+        self._encoder = _make_pydantic_encoder(pydantic)
 
-    def dumps(self, value: Any) -> str:  # noqa: ANN401
+    def dumps(self, value: object) -> str:
         """Return a compact JSON string with pydantic models unwrapped."""
-        return json.dumps(value, cls=_PydanticAwareEncoder, separators=(",", ":"))
+        return json.dumps(value, cls=self._encoder, separators=(",", ":"))
 
 
-class _PydanticAwareEncoder(DjangoJSONEncoder):
-    """Fallback encoder that unwraps pydantic `BaseModel` instances."""
+def _make_pydantic_encoder(module: ModuleType) -> type[DjangoJSONEncoder]:
+    """Build an encoder that unwraps `BaseModel` via the validated module."""
+    base_model = module.BaseModel
 
-    def default(self, o: Any) -> Any:  # noqa: ANN401
-        """Dump `BaseModel` subclasses via `model_dump` before deferring."""
-        import pydantic  # noqa: PLC0415
+    class _PydanticAwareEncoder(DjangoJSONEncoder):
+        """Fallback encoder that unwraps pydantic `BaseModel` instances."""
 
-        if isinstance(o, pydantic.BaseModel):
-            return o.model_dump(mode="json")
-        return super().default(o)
+        @override
+        def default(self, o: object) -> object:
+            """Dump `BaseModel` subclasses via `model_dump` before deferring."""
+            if isinstance(o, base_model):
+                return o.model_dump(mode="json")
+            return super().default(o)
+
+    return _PydanticAwareEncoder
 
 
 _default_serializer: JsContextSerializer = JsonJsContextSerializer()

@@ -11,13 +11,15 @@ A poll page shows a vote chart and you want every open tab to update the moment 
 Solution
 --------
 
-next.dj adds no dedicated SSE module.
-The pieces you use are the usual page module, form actions, and signals such as ``action_dispatched`` for fan-out after dispatch.
+Return a ``PatchEventStream`` from a page module's ``render`` escape hatch and drive it from an in-process broker.
+The stream carries patch envelopes as ``next-patches`` events, the same envelope an HTTP partial response carries.
+Each event uses the ``refresh`` verb so every tab re-fetches the stale zone with its own
+cookies through the page view, which keeps authorization in the subscriber's own view and
+never broadcasts one user's HTML to another.
 A full implementation lives under ``examples/live-polls/``. See :doc:`/content/misc/examples`.
 
-Return a :class:`~django.http.StreamingHttpResponse` with the ``text/event-stream`` content type from a page module.
-Back the stream with an in-process broker built on :class:`threading.Condition` and a per-poll revision counter.
-Publish a fresh snapshot from an ``action_dispatched`` receiver so the vote handler stays a plain database write.
+This page is a quick recipe.
+For the WSGI and ASGI contract, the echo suppression, and why the fan-out uses ``refresh`` rather than a context patch, read :doc:`/content/topics/partial-rendering/sse`.
 
 Walkthrough
 -----------
@@ -26,11 +28,9 @@ Build the Broker
 ~~~~~~~~~~~~~~~~
 
 The broker keeps one :class:`threading.Condition` and one monotonic revision counter per poll.
-``publish`` stores the snapshot in the cache, bumps the revision, and wakes every subscriber.
-``subscribe`` is a generator that yields Server-Sent Events bytes.
-
-``Snapshot``, ``store_snapshot``, and ``read_snapshot`` are project-level helpers defined in the full example at ``examples/live-polls/polls/broker.py``.
-They wrap a plain cache key so the broker stays decoupled from the cache backend.
+``publish`` stores a fresh snapshot, records the originating request id, bumps the revision, and wakes every subscriber.
+``changes`` is a generator that yields a ``Change`` value object, the snapshot plus the request id of the mutation that produced it, not wire bytes.
+The framework owns the SSE framing, so the broker stays a plain pub/sub of domain events.
 
 .. code-block:: python
    :caption: polls/broker.py
@@ -38,7 +38,14 @@ They wrap a plain cache key so the broker stays decoupled from the cache backend
    import threading
    from collections import defaultdict
    from collections.abc import Iterator
-   from django.core.cache import cache
+   from dataclasses import dataclass
+
+
+   @dataclass(frozen=True)
+   class Change:
+       snapshot: dict[str, object]
+       request_id: str | None
+
 
    class PollBroker:
        def __init__(self) -> None:
@@ -46,91 +53,48 @@ They wrap a plain cache key so the broker stays decoupled from the cache backend
                threading.Condition
            )
            self._revisions: dict[int, int] = defaultdict(int)
+           self._request_ids: dict[int, str | None] = {}
 
-       def publish(self, snapshot: Snapshot) -> None:
+       def publish(self, snapshot: Snapshot, request_id: str | None = None) -> None:
            store_snapshot(snapshot)
            condition = self._conditions[snapshot.poll_id]
            with condition:
                self._revisions[snapshot.poll_id] += 1
+               self._request_ids[snapshot.poll_id] = request_id
                condition.notify_all()
 
    broker = PollBroker()
 
-Each subscriber captures its own ``last_revision`` before yielding the initial snapshot.
-A publish that lands while the consumer still holds that frame wakes the subscriber on the next ``next()`` instead of being lost.
-A :class:`threading.Event` with ``clear()`` would drop events under fan-out because the first subscriber clears the event before the other threads observe it.
-
-Yield SSE Frames
-~~~~~~~~~~~~~~~~
-
-The first frame is always the cached snapshot under the ``snapshot`` event so a fresh tab catches up immediately.
-Later frames are sent as ``update`` events.
-A 15-second timeout on ``wait_for`` produces a comment frame so idle connections stay open.
+Each subscriber captures its own ``last_revision`` before yielding, so a publish that lands while the consumer still holds a frame wakes it on the next ``next()`` instead of being lost.
+A :class:`threading.Event` with ``clear()`` would drop events under fan-out, because the first subscriber clears the event before the others observe it.
 
 .. code-block:: python
    :caption: polls/broker.py
 
-   def subscribe(self, poll_id: int) -> Iterator[bytes]:
+   def changes(self, poll_id: int) -> Iterator[Change]:
        condition = self._conditions[poll_id]
        last_revision = self._revisions[poll_id]
-       cached = read_snapshot(poll_id)
-       if cached is not None:
-           yield format_event(cached, event="snapshot")
        while True:
            current_revision = self._wait_for_new_revision(
                poll_id, condition, last_revision
            )
            if current_revision == last_revision:
-               yield format_keepalive()
                continue
            last_revision = current_revision
            payload = read_snapshot(poll_id)
            if payload is None:
                continue
-           yield format_event(payload, event="update")
+           yield Change(snapshot=payload, request_id=self._request_ids.get(poll_id))
 
-``_wait_for_new_revision`` wraps ``condition.wait_for`` with the 15-second timeout and returns the current revision.
-
-.. code-block:: python
-   :caption: polls/broker.py
-
-   def _wait_for_new_revision(
-       self,
-       poll_id: int,
-       condition: threading.Condition,
-       baseline: int,
-   ) -> int:
-       with condition:
-           condition.wait_for(
-               lambda: self._revisions[poll_id] != baseline,
-               timeout=15,
-           )
-           return self._revisions[poll_id]
-
-The byte formatter follows the WHATWG SSE spec, so each record ends with a blank line.
-Keepalive frames begin with ``:`` so clients ignore them while proxies still see traffic.
-
-.. code-block:: python
-   :caption: polls/broker.py
-
-   import json
-
-   def format_event(payload: dict[str, object], *, event: str) -> bytes:
-       body = json.dumps(payload, separators=(",", ":"))
-       lines = [f"event: {event}"]
-       lines.extend(f"data: {part}" for part in body.split("\n"))
-       return ("\n".join(lines) + "\n\n").encode("utf-8")
-
-   def format_keepalive() -> bytes:
-       return b": keepalive\n\n"
+A wake timeout loops without yielding.
+A sync source under WSGI sends no keepalive on its own, a documented limitation of the stream, so an idle keepalive is the source's job if a deployment needs one.
 
 Stream From a Page Module
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Place a page module at the ``stream/`` route and return the response from ``render``.
-When ``render`` returns a :class:`~django.http.HttpResponseBase` subclass such as :class:`~django.http.StreamingHttpResponse`, the framework passes it through unchanged.
-No ``layout.djx`` wrapping runs and the static collector does not rewrite the body.
-Assets referenced only inside a streaming endpoint must still be collected from a parent page.
+Place a page module at the ``stream/`` route and return a ``PatchEventStream`` from ``render``.
+The framework escape hatch returns any :class:`~django.http.HttpResponseBase` subclass verbatim, so no ``layout.djx`` wraps the response and the static collector does not run.
+Each ``Patches`` the source yields becomes one event, and ``echo_of`` carries the originating request id so the voter's own tab drops its echo.
 
 ``DPoll`` is a project-defined DI marker the example declares in ``polls/providers.py``.
 See :doc:`/content/topics/dependency-injection` for how to define custom markers.
@@ -138,45 +102,56 @@ See :doc:`/content/topics/dependency-injection` for how to define custom markers
 .. code-block:: python
    :caption: polls/screens/polls/[int:id]/stream/page.py
 
-   from django.http import StreamingHttpResponse
+   from collections.abc import Iterator
+
+   from django.http import HttpRequest
    from polls.broker import broker
    from polls.models import Poll
    from polls.providers import DPoll
 
-   def render(poll: DPoll[Poll]) -> StreamingHttpResponse:
-       return StreamingHttpResponse(
-           broker.subscribe(poll.pk),
-           content_type="text/event-stream",
-           headers={
-               "Cache-Control": "no-cache",
-               "X-Accel-Buffering": "no",
-           },
-       )
+   from next.partial import Patches, PatchEventStream
 
-The endpoint stays sync because the broker waits on :class:`threading.Condition`.
-An ASGI deployment swaps the wake primitive for an :class:`asyncio.Condition` and yields from an async generator without touching the page or the signal layer.
+
+   def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches]:
+       for change in broker.changes(poll_id):
+           yield Patches(request, echo_of=change.request_id).refresh(zone="poll-results")
+
+
+   def render(request: HttpRequest, poll: DPoll[Poll]) -> PatchEventStream:
+       return PatchEventStream(request, patch_source(request, poll.pk))
+
+``PatchEventStream`` sets ``Cache-Control: no-cache, no-transform`` and ``X-Accel-Buffering: no`` on construction so a proxy or ``GZipMiddleware`` does not eat the flush.
+The endpoint stays sync because the broker waits on :class:`threading.Condition`, and a sync source requires WSGI.
+An ASGI deployment swaps the wake primitive for an :class:`asyncio.Condition` and passes an async source, which earns a heartbeat, without touching the page or the signal layer.
+The pairing is a contract.
+An async source requires ASGI and a sync source requires WSGI.
+A mismatch raises :exc:`~django.core.exceptions.ImproperlyConfigured` rather than silently hanging the stream.
 
 Fan Out From the Vote Signal
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The vote handler runs the atomic ``UPDATE`` and returns the redirect.
+The vote handler runs the atomic ``UPDATE`` and returns its result.
 A receiver on ``action_dispatched`` is the single publish point for the broker.
-The signal carries the bound form after validation, so the receiver knows which poll changed.
+The signal carries the bound form after validation and the request, so the receiver knows which poll changed and which request changed it.
 
 .. code-block:: python
    :caption: polls/signals.py
 
    from django import forms as django_forms
    from django.dispatch import receiver
+   from django.http import HttpRequest
+
    from next.forms.signals import action_dispatched
+   from next.partial import REQUEST_ID
    from polls.broker import broker, build_snapshot
 
-   VOTE_ACTION_NAME = "polls:vote"
+   VOTE_ACTION_NAME = "vote_form"
 
    @receiver(action_dispatched)
    def broadcast_vote(
        action_name: str = "",
        form: django_forms.Form | None = None,
+       request: HttpRequest | None = None,
        **_: object,
    ) -> None:
        if action_name != VOTE_ACTION_NAME or form is None:
@@ -184,54 +159,27 @@ The signal carries the bound form after validation, so the receiver knows which 
        poll = form.cleaned_data.get("poll")
        if poll is None:
            return
-       snapshot = build_snapshot(poll)
-       broker.publish(snapshot)
+       request_id = request.headers.get(REQUEST_ID) if request is not None else None
+       broker.publish(build_snapshot(poll), request_id=request_id)
 
-Concentrating the publish in the receiver keeps the write path observable through one signal hook.
+Threading the mutation's ``X-Next-Request-Id`` to ``publish`` lets the stream echo it, so the voter's own tab drops the fan-out and applies only the morph from its own POST response.
 
-Subscribe From the Browser
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Connect From the Browser
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The detail component exposes the stream URL through ``@component.context`` with ``serialize=True``, which injects the dict into ``window.Next.context.results``.
-A co-located ``.vue`` single-file component reads it on mount and opens one ``EventSource``.
+The vote page wraps its results in a zone and connects the stream with a ``data-next-sse`` element.
+The runtime opens one ``EventSource`` and routes each ``next-patches`` event into the same apply pipeline an HTTP response uses, so no hand-written ``EventSource`` code is needed.
 
-.. code-block:: javascript
-   :caption: polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue
+.. code-block:: jinja
+   :caption: polls/screens/polls/[int:id]/template.djx
 
-   const ctx = window.Next?.context?.results ?? null;
+   {% zone "poll-results" %}
+     {% component "poll_chart" %}
+   {% endzone %}
+   <div data-next-sse="/polls/{{ poll.pk }}/stream/"></div>
 
-   onMounted(() => {
-     if (!ctx?.stream_url) return;
-     source = new EventSource(ctx.stream_url);
-     for (const type of ["snapshot", "update"]) {
-       source.addEventListener(type, (event) => {
-         applySnapshot(JSON.parse(event.data));
-       });
-     }
-   });
-
-Register the ``.vue`` extension as a custom asset kind from ``AppConfig.ready`` so discovery picks up the co-located file and emits a module script tag.
-A raw ``.vue`` file is not browser-loadable, so the ``vue`` kind needs a custom backend whose ``register_file`` resolves the compiled module rather than the source file, see :doc:`build-a-custom-asset-backend`.
-
-.. code-block:: python
-   :caption: polls/apps.py
-
-   from next.static import default_kinds
-   from next.static.discovery import default_stems
-
-   class PollsConfig(AppConfig):
-       name = "polls"
-
-       def ready(self) -> None:
-           default_kinds.register(
-               "vue",
-               extension=".vue",
-               slot="scripts",
-               renderer="render_module_tag",
-           )
-           default_stems.register("template", "page")
-
-The example uses ``.vue`` page bodies, so ``default_stems.register("template", "page")`` lets discovery recognise ``page`` as a template stem alongside the default ``template`` stem.
+When the stream signals a refresh, the runtime re-fetches the ``poll-results`` zone with its own cookies, and the page view re-renders it through its own authorization.
+A co-located Vue island that owns the chart re-reads ``window.Next.context`` on the zone morph and keeps its reactive state.
 
 Verification
 ------------
@@ -244,13 +192,13 @@ Peek at the stream from a second terminal while a server runs.
    curl -N http://127.0.0.1:8000/polls/1/stream/
 
 The ``-N`` flag disables curl output buffering so frames appear as the server flushes them.
-The first frame is the ``snapshot`` event.
-Vote in the browser and an ``update`` frame arrives within milliseconds, with every open tab updating its chart at the same time.
+Vote in the browser and a ``next-patches`` event arrives within milliseconds, with every open tab re-fetching its zone at the same time.
 
 See Also
 --------
 
 .. seealso::
 
+   :doc:`/content/topics/partial-rendering/sse` for the WSGI and ASGI contract, echo suppression, and the refresh fan-out.
    :doc:`/content/topics/signals` for the signal receiver pattern.
    :doc:`/content/topics/static-assets/asset-kinds` for registering a custom asset kind.

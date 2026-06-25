@@ -1,6 +1,6 @@
 # Live polls
 
-A polling app where the chart on every open tab updates the moment someone votes. Server-Sent Events stream snapshots out of an in-process broker. A locally bundled Vue 3 component subscribes through a single `EventSource` and reacts to each frame. The example demonstrates how a streaming endpoint, a signal-driven fan-out, and a Vite-bundled Vue layer compose into one cohesive feature without any ad-hoc plumbing in the framework core.
+A polling app where the results on every open tab refresh the moment someone votes. The framework SSE bridge streams patch envelopes out of an in-process broker. Each event is a `refresh` patch, so every tab re-fetches the results zone with its own cookies through the page view, and no foreign HTML ever travels on the stream. A locally bundled Vue 3 island sits on top of the server-rendered chart. The example demonstrates how a streaming endpoint, a signal-driven fan-out, and a Vite-bundled Vue layer compose into one feature without any ad-hoc plumbing in the framework core.
 
 ## What you will see
 
@@ -8,11 +8,36 @@ A polling app where the chart on every open tab updates the moment someone votes
 | --- | --- |
 | `/` | Redirects to `/polls/` so the bare site root is never empty. |
 | `/polls/` | Server-rendered list of polls. Each card shows choice count and total votes. |
-| `/polls/<id>/` | Vote page with the live chart and a button-per-choice form. Vue takes over the chart on mount. |
-| `/polls/<id>/stream/` | Server-Sent Events endpoint. First frame is the cached snapshot, then `update` frames flow on every vote. |
-| `POST vote_form` | Atomically increments a choice via `F("votes") + 1`, publishes a fresh snapshot to the broker, redirects to the poll page. |
+| `/polls/<id>/` | Vote page with the live chart, a button-per-choice form, and a `data-next-sse` element. |
+| `/polls/<id>/stream/` | The patch event stream. Each poll change emits a `next-patches` event carrying a `refresh` of the `poll-results` zone. |
+| `POST vote_form` | Atomically increments a choice via `F("votes") + 1`, then morphs the `poll-results` zone and pushes the fresh counts to `window.Next.context.live_results`. A signal receiver publishes the change to the broker with the request id. |
 
 Two demo polls seed via a data migration (`tabs-or-spaces` and `vim-or-emacs`) so the index page is never empty on a fresh database.
+
+## How the live update works
+
+The vote page wraps its results in a zone and connects the stream with one element.
+
+```jinja
+{% zone "poll-results" %}
+  {% component "poll_chart" %}
+{% endzone %}
+<div data-next-sse="/polls/{{ poll.pk }}/stream/"></div>
+```
+
+The runtime opens one `EventSource` on the `data-next-sse` URL and routes each `next-patches` event into the same apply pipeline an HTTP partial response uses. There is no hand-written `EventSource` code.
+
+A vote posts with `X-Next-Request-Id`. A valid partial vote answers the voter's own tab with two ops on one envelope, a morph of the `poll-results` zone with the fresh server-rendered bars and a `context` patch that pushes the new snapshot into `window.Next.context.live_results`. The `live_results` name is a page-level `serialize=True` provider on `[int:id]/page.py`, so `Patches(request).context(live_results=...)` resolves it against the origin page the vote posted from. The Vue island reads the pushed snapshot on `context-updated` and rebinds without re-reading the DOM. A signal receiver then publishes the change to the broker carrying the request id. The stream page yields one `refresh` envelope per change, stamped with the request id as the echo. A bad choice never reaches the handler, so the dispatcher auto-morphs the `poll-results` zone in place because the vote form lives inside it, and the voter keeps the rest of the page. Without the runtime the vote falls back to a redirect to the poll page.
+
+```python
+def patch_source(request: HttpRequest, poll_id: int) -> Iterator[Patches]:
+    for change in broker.changes(poll_id):
+        yield Patches(request, echo_of=change.request_id).refresh(zone="poll-results")
+```
+
+Every subscriber receives the same envelope. The voter's own tab finds the request id in its echo ring buffer and drops the event, its POST already brought the fresh zone. Every other tab executes the `refresh` and re-fetches `poll-results` with its own cookies through the poll page view, so authorization is re-checked per subscriber and the server-rendered bars come back current.
+
+The fan-out is built on `refresh` rather than a context patch on purpose. A context patch carries a serialize provider's value read from the origin page of the request that builds it, and a stream source has no page-render origin to read from. A stream that needs fresh data drives a `refresh`, and the re-fetched zone delivers the new state through its own render. The vote handler, by contrast, runs on a real page-render origin, so it can pair its zone morph with a `context` patch that hands the voter's own tab the snapshot directly. So two update paths coexist, a `context` patch on the voter's own response and a `refresh` for every other tab, and the chart updates by re-rendering the server-side bars in the `poll-results` zone either way.
 
 ## How to run
 
@@ -35,21 +60,21 @@ DJANGO_DEBUG=0 npm run build           # writes hashed bundles + manifest
 DJANGO_DEBUG=0 uv run python manage.py runserver
 ```
 
-With `DEBUG=False` (or `VITE_DEV_ORIGIN=` empty) the `ViteManifestBackend` reads `dist/.vite/manifest.json` and delegates URL resolution to Django staticfiles. If the manifest is missing the backend raises a clear error pointing at `npm run build`. The kanban example falls back to staticfiles instead because raw `.jsx` is at least loadable as plain JavaScript. A raw `.vue` file is unrenderable without compilation, so live-polls refuses to serve a broken bundle and tells the operator how to fix the deployment instead.
+With `DEBUG=False` (or `VITE_DEV_ORIGIN=` empty) the `ViteManifestBackend` reads `dist/.vite/manifest.json` and delegates URL resolution to Django staticfiles. If the manifest is missing the backend raises a clear error pointing at `npm run build`. A raw `.vue` file is unrenderable without compilation, so live-polls refuses to serve a broken bundle and tells the operator how to fix the deployment instead.
 
-The `runserver` command is a single-process toy in both modes. The SSE endpoint blocks one Django dev thread per open subscriber, which is fine for a demo or `pytest` and unsafe for any real workload. A production deployment runs an ASGI server with an async `subscribe` generator and an `asyncio` wake primitive.
+The `runserver` command is a single-process toy in both modes. The SSE endpoint blocks one Django dev thread per open subscriber, which is fine for a demo or `pytest` and unsafe for any real workload. The source is sync, so `PatchEventStream` sends no heartbeat, a documented limitation under WSGI. A production deployment runs an ASGI server with an async `changes` generator and an `asyncio` wake primitive, and passes an async source for heartbeat support.
 
 Override the Vite origin on either side with `VITE_DEV_ORIGIN=http://host:port` when the dev server runs on a non-default address.
 
-To peek at the SSE stream from a second terminal:
+To peek at the stream from a second terminal:
 
 ```bash
 curl -N http://127.0.0.1:8000/polls/1/stream/
 ```
 
-The `-N` flag disables curl output buffering so frames appear as the server flushes them. Vote in the browser, watch the curl output.
+The `-N` flag disables curl output buffering so frames appear as the server flushes them. Vote in the browser, watch the `next-patches` events arrive.
 
-Tests run on two stacks. `uv run pytest` exercises the page modules, the broker, the receiver-driven fan-out, and one frame off the actual `StreamingHttpResponse`. `npm test` runs the Vitest suite that mounts `poll_chart/component.vue` under `@vue/test-utils` and verifies the reactive update path against a stub `EventSource`.
+Tests run on two stacks. `uv run pytest` exercises the page modules, the broker, the receiver-driven fan-out, and one envelope off the actual `PatchEventStream`. `npm test` runs the Vitest suite that mounts `poll_chart/component.vue` under `@vue/test-utils`.
 
 ## Walking the code
 
@@ -65,9 +90,9 @@ polls/screens/
     ├── [int:id]/
     │   ├── layout.djx                <- nested layout, poll question header, back link
     │   ├── page.py                   <- @context poll inherit, vote action
-    │   ├── page.vue                  <- mount entry, calls createApp(PollChart).mount(...)
-    │   └── template.djx              <- renders {% component "poll_chart" %}
-    │   └── stream/page.py            <- StreamingHttpResponse over broker.subscribe(poll.pk)
+    │   ├── page.vue                  <- mount entry, registers Next.partial.onMount
+    │   ├── template.djx              <- poll-results zone + data-next-sse element
+    │   └── stream/page.py            <- PatchEventStream over broker.changes(poll.pk)
     └── _widgets/
         ├── poll_card/                <- index list composite (no Vue)
         │   ├── component.py
@@ -75,8 +100,8 @@ polls/screens/
         │   └── component.css
         └── poll_chart/               <- detail composite, owns the Vue layer
             ├── component.py          <- @component.context("results", serialize=True)
-            ├── component.djx         <- SSR chart bars + vote form
-            ├── component.vue         <- live chart SFC, reads window.Next.context.results
+            ├── component.djx         <- SSR bars, data-poll-chart-data block, vote form
+            ├── component.vue         <- live chart SFC, driven by a snapshot prop
             └── component.css
 ```
 
@@ -98,97 +123,82 @@ class PollsConfig(AppConfig):
         from polls import providers, signals  # noqa: F401, PLC0415
 ```
 
-The `vue` kind binds the `.vue` extension to the `scripts` slot and reuses the framework built-in `render_module_tag`. No custom renderer is needed because Vite emits standard ES modules. The `signals` import wires both the Vite dev-asset injector and the `action_dispatched` listener that drives the broker fan-out.
+The `vue` kind binds the `.vue` extension to the `scripts` slot and reuses the framework built-in `render_module_tag`. The `signals` import wires both the Vite dev-asset injector and the `action_dispatched` listener that drives the broker fan-out.
 
-### 3. SSE through the page escape hatch
+### 3. The stream through the page escape hatch
 
 ```python
-def render(poll: DPoll[Poll]) -> StreamingHttpResponse:
-    return StreamingHttpResponse(
-        broker.subscribe(poll.pk),
-        content_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+def render(request: HttpRequest, poll: DPoll[Poll]) -> PatchEventStream:
+    return PatchEventStream(request, patch_source(request, poll.pk))
 ```
 
-The page module returns a `StreamingHttpResponse` directly. The framework escape hatch in `next/pages/manager.py` returns any `HttpResponseBase` subclass verbatim, which means the layout chain and the static collector are bypassed for streaming endpoints. No template, no asset injection, no buffering.
+The page module returns a `PatchEventStream` directly. The framework escape hatch in `next/pages/manager.py` returns any `HttpResponseBase` subclass verbatim, so the layout chain and the static collector are bypassed for the streaming endpoint. `PatchEventStream` sets `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no` on construction so a proxy or `GZipMiddleware` does not eat the flush, and emits a leading `retry` hint from the `SSE.RETRY_MS` option.
 
-The endpoint stays sync because the broker waits on `threading.Condition` and the example targets `runserver` and `pytest`. An ASGI deployment swaps the wake primitive for an `asyncio.Condition` (or one `asyncio.Queue` per subscriber) and yields from an async generator without touching the page or the signal layer.
+The endpoint stays sync because the broker waits on `threading.Condition`. An ASGI deployment swaps the wake primitive for an `asyncio.Condition` and passes an async source for heartbeat support without touching the page or the signal layer.
 
 ### 4. Broker on `threading.Condition` and LocMemCache
 
 ```python
 class PollBroker:
-    def __init__(self) -> None:
-        self._conditions: dict[int, threading.Condition] = defaultdict(threading.Condition)
-        self._revisions: dict[int, int] = defaultdict(int)
-
-    def publish(self, snapshot: Snapshot) -> None:
+    def publish(self, snapshot, request_id=None):
         store_snapshot(snapshot)
         condition = self._conditions[snapshot.poll_id]
         with condition:
             self._revisions[snapshot.poll_id] += 1
+            self._request_ids[snapshot.poll_id] = request_id
             condition.notify_all()
 
-    def subscribe(self, poll_id: int) -> Iterator[bytes]:
+    def changes(self, poll_id):
         condition = self._conditions[poll_id]
         last_revision = self._revisions[poll_id]
-        cached = read_snapshot(poll_id)
-        if cached is not None:
-            yield format_event(cached, event="snapshot")
         while True:
-            with condition:
-                condition.wait_for(
-                    lambda b=last_revision: self._revisions[poll_id] != b,
-                    timeout=KEEPALIVE_SECONDS,
-                )
-                current_revision = self._revisions[poll_id]
+            current_revision = self._wait_for_new_revision(
+                poll_id, condition, last_revision
+            )
             if current_revision == last_revision:
-                yield format_keepalive()
                 continue
             last_revision = current_revision
             payload = read_snapshot(poll_id)
             if payload is None:
                 continue
-            yield format_event(payload, event="update")
+            yield Change(snapshot=payload, request_id=self._request_ids.get(poll_id))
 ```
 
-The cache holds the latest snapshot per poll. Each `publish` bumps a monotonic revision and `notify_all` wakes every subscriber. Each subscriber captures its own `last_revision` _before_ yielding the initial snapshot so a publish that lands while the consumer is still holding the snapshot frame still wakes the subscriber on the next `next()` instead of being absorbed silently. A 15-second timeout on `wait_for` produces an SSE comment frame (`: keepalive\n\n`) so proxies and the browser keep an idle connection open. The pattern is single-process by design. A multi-process deployment swaps the broker for Redis Pub/Sub or Postgres `LISTEN`/`NOTIFY` without touching the page or the signal layer.
+The cache holds the latest snapshot per poll. Each `publish` bumps a monotonic revision, records the mutation's request id, and `notify_all` wakes every subscriber. The broker yields `Change` value objects, the snapshot plus the request id, not wire bytes. The framework `PatchEventStream` owns the SSE framing, so the broker stays a plain pub/sub of domain events.
+
+Each subscriber captures its own `last_revision` _before_ yielding so a publish that lands while the consumer is still holding a frame wakes it on the next `next()` instead of being absorbed silently. A wake timeout loops without yielding. The sync source under WSGI sends no keepalive, the documented limitation the framework stream notes. The pattern is single-process by design. A multi-process deployment swaps the broker for Redis Pub/Sub or Postgres `LISTEN`/`NOTIFY` without touching the page or the signal layer.
 
 A naive `threading.Event` plus `clear()` looks attractive here but loses events under fan-out: the first subscriber to clear the flag hides the wake from the others. The condition + revision pair is the canonical fix and costs the same number of lines.
 
-### 5. Signal-driven fan-out using the bound form
+### 5. Signal-driven fan-out carrying the request id
 
 ```python
 @receiver(action_dispatched)
-def broadcast_vote(action_name="", form=None, **_):
+def broadcast_vote(action_name="", form=None, request=None, **_):
     if action_name != VOTE_ACTION_NAME or form is None:
         return
     poll = form.cleaned_data.get("poll")
     if poll is None:
         return
-    broker.publish(build_snapshot(poll))
+    request_id = request.headers.get(REQUEST_ID) if request is not None else None
+    broker.publish(build_snapshot(poll), request_id=request_id)
 ```
 
-The `action_dispatched` signal carries the bound form post-validation plus the resolved URL kwargs. Without those fields the receiver could not tell which poll changed without reissuing the query. The receiver is the _single_ publish point for the broker. The vote handler runs the atomic `UPDATE` and returns the redirect, then the dispatcher fires `action_dispatched` and the receiver builds the fresh snapshot and calls `broker.publish`. Every open SSE subscriber wakes within milliseconds. Concentrating the publish in the receiver keeps the write path observable through one signal hook and avoids the double cache write a handler-side `store_snapshot` would cause.
+The `action_dispatched` signal carries the bound form post-validation plus the request, so the receiver knows which poll changed and reads the mutation's `X-Next-Request-Id`. Threading that id to `broker.publish` lets the stream stamp it as the envelope echo, so the voter's own tab drops the fan-out. The receiver is the single publish point for the broker. Concentrating the publish here keeps the write path observable through one signal hook.
 
-### 6. Vue layer reads `window.Next.context.results`
+### 6. Vue layer driven by `Next.partial.onMount`
 
 ```python
 @component.context("results", serialize=True)
 def results(poll: Poll) -> dict[str, object]:
     return {
         "poll_id": poll.pk,
-        "stream_url": f"/polls/{poll.pk}/stream/",
-        "choices": [...],
         "total_votes": ...,
+        "choices": [...],
     }
 ```
 
-`serialize=True` injects this dict into `window.Next.context.results`. Voting itself stays server-side through the `{% form %}` tag in the component template, so the payload carries no vote URL or CSRF token. The Vue `<script setup>` block reads it on mount, opens a single `EventSource(stream_url)`, and binds `snapshot` and `update` listeners that swap a reactive `choices` ref. The chart renders bar widths from a `computed` percentage so the SFC has zero direct DOM work. `page.vue` mounts the SFC into the `[data-poll-chart-app]` hook the SSR template provides, so the page degrades to plain server-rendered bars when JavaScript is disabled.
+`serialize=True` injects this dict into `window.Next.context.results` at page load through the `_init` payload. Voting stays server-side through the `{% form %}` tag in the component template, so the payload carries no vote URL or CSRF token. `page.vue` registers a `Next.partial.onMount("[data-poll-chart]", ...)` handler that the runtime runs over the initial DOM and over the morphed zone after every `refresh`. Each pass reads the fresh per-choice counts from the `data-poll-chart-data` block the server embeds in the zone and pushes the snapshot into the Vue instance through its `applySnapshot` method, so the chart tracks the same `refresh` that re-renders the bars, across tabs. The visible bars live in a `data-next-keep` container the Vue app owns, so the zone morph never fights Vue for those nodes. `page.vue` also subscribes to `context-updated`, which the voter's own response fires through its `context` patch, and pushes `window.Next.context.live_results` straight into the live instance without re-reading the DOM. The SSR bars in `component.djx` are the no-JavaScript fallback, so the page degrades to plain server-rendered bars when scripting is off.
 
 ### 7. Inherit context across the layout chain
 
@@ -224,13 +234,12 @@ Page and component modules that use `DPoll[Poll]` do not import `from __future__
 
 - [`polls/apps.py`](polls/apps.py) — `PollsConfig.ready()` with the two registry calls.
 - [`polls/signals.py`](polls/signals.py) — `broadcast_vote` receiver plus the dev-mode Vite injector.
-- [`polls/broker.py`](polls/broker.py) — `PollBroker`, `Snapshot`, and SSE byte formatting.
+- [`polls/broker.py`](polls/broker.py) — `PollBroker`, `Snapshot`, and the `Change` value object.
 - [`polls/backends.py`](polls/backends.py) — `ViteManifestBackend` dev/prod URL routing.
-- [`polls/screens/polls/[int:id]/stream/page.py`](polls/screens/polls/[int:id]/stream/page.py) — SSE page module.
-- [`polls/screens/polls/_widgets/poll_chart/component.vue`](polls/screens/polls/_widgets/poll_chart/component.vue) — live-update Vue SFC.
-- [`vite.config.ts`](vite.config.ts) — glob multi-entry build that discovers every `.vue` file.
-- [`next/pages/manager.py`](../../next/pages/manager.py) — `_call_render_function` escape hatch that returns `HttpResponseBase` verbatim.
+- [`polls/screens/polls/[int:id]/stream/page.py`](polls/screens/polls/[int:id]/stream/page.py) — the `PatchEventStream` page module.
+- [`polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue`](polls/screens/polls/[int:id]/_widgets/poll_chart/component.vue) — the chart Vue SFC.
+- [`next/partial/sse.py`](../../next/partial/sse.py) — `PatchEventStream`, the politeness headers, and the heartbeat contract.
+- [`next/partial/patches.py`](../../next/partial/patches.py) — the `Patches` builder and the `refresh` verb.
 - [`next/forms/signals.py`](../../next/forms/signals.py) — `action_dispatched` payload contract used by the receiver.
-- [`next/forms/dispatch.py`](../../next/forms/dispatch.py) — dispatcher that attaches `form` and `url_kwargs` to the signal.
 - [`next/static/signals.py`](../../next/static/signals.py) — `collector_finalized` signal that drives the Vite dev preamble.
 - [`next/components/context.py`](../../next/components/context.py) — `@component.context` and the `serialize=True` flag.

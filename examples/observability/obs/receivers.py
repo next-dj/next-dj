@@ -1,10 +1,3 @@
-"""Receivers wiring every framework signal group to the metrics store.
-
-Each `@receiver` block owns one signal group and bumps one counter per
-event. The handlers are intentionally thin so the example reads as a
-map between signal names and metric keys.
-"""
-
 from django.dispatch import receiver
 
 from next.components.signals import (

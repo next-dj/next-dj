@@ -1,0 +1,1 @@
+{"version":"9f3c2e1b","ops":[{"op":"morph","target":{"zone":"alpha"},"html":"<div data-next-zone=\"alpha\"><p>alpha hi</p></div>"},{"op":"morph","target":{"zone":"beta"},"html":"<section data-next-zone=\"beta\"><p>beta hi</p></section>"}],"assets":[{"kind":"css","url":"/static/next/zoned.css"}],"form":null}

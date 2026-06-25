@@ -19,4 +19,4 @@ def excerpt(note: Note) -> str:
 @component.context("edit_url")
 def edit_url(note: Note) -> str:
     """Return the absolute edit URL for the note."""
-    return reverse("next:page_notes_int_id_edit", kwargs={"id": note.pk})
+    return reverse("next:page_notes_int_note_id_edit", kwargs={"note_id": note.pk})

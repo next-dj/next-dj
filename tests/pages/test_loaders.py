@@ -1114,8 +1114,9 @@ class TestBuildRegisteredLoaders:
     """`build_registered_loaders` reads `TEMPLATE_LOADERS` and caches."""
 
     def _reset_cache(self) -> None:
-
-        loaders_module._REGISTERED_LOADERS_CACHE = None
+        # the cache is a single-slot holder mutated in place, never rebound,
+        # so a stale None on this worker cannot break the production reads
+        loaders_module._REGISTERED_LOADERS_CACHE["value"] = None
 
     def setup_method(self) -> None:
         self._reset_cache()
@@ -1163,9 +1164,9 @@ class TestBuildRegisteredLoaders:
     def test_settings_reload_resets_cache(self) -> None:
         build_registered_loaders()
 
-        assert loaders_module._REGISTERED_LOADERS_CACHE is not None
+        assert loaders_module._REGISTERED_LOADERS_CACHE["value"] is not None
         next_framework_settings.reload()
-        assert loaders_module._REGISTERED_LOADERS_CACHE is None
+        assert loaders_module._REGISTERED_LOADERS_CACHE["value"] is None
 
     @override_settings(
         NEXT_FRAMEWORK={

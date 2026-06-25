@@ -7,7 +7,12 @@ from django.core.management import call_command
 from shortener.cache import CLICK_PREFIX, increment_clicks, pending_clicks
 from shortener.models import Link
 
-from next.testing import assert_has_class, assert_missing_class, find_anchor
+from next.testing import (
+    assert_has_class,
+    assert_missing_class,
+    envelope_of,
+    find_anchor,
+)
 
 
 class TestShorten:
@@ -172,3 +177,157 @@ class TestAdminSurface:
         assert "next.dj shortener" in body
         assert "data-next-link-card" in body
         assert "/s/home1/" in body
+
+
+class TestAdminInlineEdit:
+    """Each admin row carries a per-link inline edit form keyed by slug."""
+
+    def test_rows_render_edit_forms_keyed_by_slug(self, client) -> None:
+        Link.objects.create(slug="alpha", url="https://example.com/a")
+        Link.objects.create(slug="bravo", url="https://example.com/b")
+        body = client.get("/admin/").content.decode()
+        assert 'data-next-key="alpha"' in body
+        assert 'data-next-key="bravo"' in body
+        assert 'value="https://example.com/a"' in body
+
+    def test_inline_edit_saves_the_addressed_link(self, client) -> None:
+        Link.objects.create(slug="alpha", url="https://example.com/a")
+        Link.objects.create(slug="bravo", url="https://example.com/b")
+        response = client.post_action(
+            "edit_link_form",
+            {"slug": "bravo", "url": "https://example.com/updated"},
+            origin="/admin/",
+        )
+        assert response.status_code == 302
+        assert Link.objects.get(slug="bravo").url == "https://example.com/updated"
+        assert Link.objects.get(slug="alpha").url == "https://example.com/a"
+
+    def test_inline_edit_invalid_keeps_the_link(self, client) -> None:
+        Link.objects.create(slug="alpha", url="https://example.com/a")
+        response = client.post_action(
+            "edit_link_form",
+            {"slug": "alpha", "url": "not-a-url"},
+            origin="/admin/",
+        )
+        assert response.status_code == 200
+        assert b"Enter a valid URL" in response.content
+        assert Link.objects.get(slug="alpha").url == "https://example.com/a"
+
+    def test_invalid_partial_edit_morphs_the_keyed_row_form(self, client) -> None:
+        Link.objects.create(slug="alpha", url="https://example.com/a")
+        Link.objects.create(slug="bravo", url="https://example.com/b")
+        response = client.post_action(
+            "edit_link_form",
+            {"slug": "bravo", "url": "not-a-url"},
+            origin="/admin/",
+            partial=True,
+        )
+        assert response.status_code == 200
+        assert response["X-Next-Form"] == "invalid"
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        meta = envelope.form_meta()
+        assert meta is not None
+        assert response["X-Next-Action"] == meta["uid"]
+        assert envelope.targets() == [{"form": meta["uid"]}]
+        assert meta["valid"] is False
+        assert meta["errors"]["url"] == ["Enter a valid URL."]
+        html = envelope.ops[0]["html"]
+        assert 'data-next-key="bravo"' in html
+        assert Link.objects.get(slug="bravo").url == "https://example.com/b"
+
+
+class TestDeleteRemovesRow:
+    """Deleting an admin link patches its keyed row out of the list."""
+
+    def test_partial_delete_removes_the_addressed_row(self, client) -> None:
+        Link.objects.create(slug="alpha", url="https://example.com/a")
+        Link.objects.create(slug="bravo", url="https://example.com/b")
+        response = client.post_action(
+            "delete_link",
+            {"slug": "bravo"},
+            origin="/admin/",
+            partial=True,
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["remove"]
+        assert envelope.targets() == [{"css": 'li[data-next-key="bravo"]'}]
+        assert not Link.objects.filter(slug="bravo").exists()
+        assert Link.objects.filter(slug="alpha").exists()
+
+    def test_no_runtime_delete_redirects_to_admin(self, client) -> None:
+        Link.objects.create(slug="alpha", url="https://example.com/a")
+        response = client.post_action(
+            "delete_link", {"slug": "alpha"}, origin="/admin/"
+        )
+        assert response.status_code == 303
+        assert response["Location"] == "/admin/"
+        assert not Link.objects.filter(slug="alpha").exists()
+
+    def test_delete_unknown_slug_returns_404(self, client) -> None:
+        response = client.post_action(
+            "delete_link", {"slug": "ghost"}, origin="/admin/", partial=True
+        )
+        assert response.status_code == 404
+
+
+class TestCreatePrependsRow:
+    """Creating a link prepends its keyed row to the latest-links list."""
+
+    def test_partial_create_prepends_a_keyed_row(self, client) -> None:
+        response = client.post_action(
+            "create_link_form",
+            {"url": "https://example.com/new"},
+            origin="/",
+            partial=True,
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["prepend"]
+        op = envelope.ops[0]
+        assert op["target"] == {"zone": "latest-links"}
+        assert op["dedupe"] == "key"
+        link = Link.objects.get(url="https://example.com/new")
+        assert f'data-next-key="{link.slug}"' in op["html"]
+        assert "data-next-link-card" in op["html"]
+
+    def test_no_runtime_create_redirects_home(self, client) -> None:
+        response = client.post_action(
+            "create_link_form", {"url": "https://example.com/a"}, origin="/"
+        )
+        assert response.status_code == 302
+        assert response["Location"] == "/"
+        assert Link.objects.filter(url="https://example.com/a").exists()
+
+
+class TestResetClicksMorphsForeignBadge:
+    """Resetting clicks from the detail page morphs the home badge zone OOB."""
+
+    def test_partial_reset_morphs_the_home_links_badge_zone(self, client) -> None:
+        link = Link.objects.create(slug="hot", url="https://example.com/h")
+        Link.objects.create(slug="cold", url="https://example.com/c")
+        increment_clicks("hot")
+        increment_clicks("cold")
+        response = client.post_action(
+            "reset_clicks",
+            {},
+            origin=f"/admin/links/{link.slug}/",
+            partial=True,
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["links-badge"]
+        assert cache.get(f"{CLICK_PREFIX}hot") is None
+        assert "1 pending clicks" in envelope.html_for_zone("links-badge")
+
+    def test_no_runtime_reset_redirects_to_detail(self, client) -> None:
+        link = Link.objects.create(slug="hot", url="https://example.com/h")
+        increment_clicks("hot")
+        response = client.post_action(
+            "reset_clicks", {}, origin=f"/admin/links/{link.slug}/"
+        )
+        assert response.status_code == 303
+        assert response["Location"] == f"/admin/links/{link.slug}/"
+        assert cache.get(f"{CLICK_PREFIX}hot") is None

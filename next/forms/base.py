@@ -4,7 +4,7 @@ import inspect
 import re
 import sys
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, override
 
 from django import forms as django_forms
 from django.conf import settings
@@ -239,11 +239,10 @@ def _auto_register_form_class(cls: type) -> None:
 
 
 class _DivFormRenderer(DjangoTemplates):
-    """Renderer pinning the div template so `{{ form }}` is stable across versions."""
+    """Renderer pinning the div template so `{{ form }}` ignores FORM_RENDERER."""
 
-    # The transitional default renderer on Django 4.2 proxies to the deprecated
-    # table layout and warns. Pinning the div template matches the Django 5.0+
-    # default and keeps bare `{{ form }}` output warning-free on every version.
+    # Pinning the div template keeps bare `{{ form }}` output stable regardless
+    # of the project's FORM_RENDERER setting.
     form_template_name = "django/forms/div.html"
 
 
@@ -270,6 +269,7 @@ class _PermissionHooks:
     _has_check_permissions: bool = False
     _has_object_permission: bool = False
 
+    @override
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Stamp the per-subclass hook-presence flags via __func__ identity."""
         super().__init_subclass__(**kwargs)
@@ -295,6 +295,7 @@ class BaseForm(_PermissionHooks, DjangoBaseForm):
 
     default_renderer = _div_form_renderer
 
+    @override
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)
@@ -323,6 +324,7 @@ class BaseModelForm(_PermissionHooks, DjangoBaseModelForm):
 
     default_renderer = _div_form_renderer
 
+    @override
     def __init_subclass__(cls, **kwargs: object) -> None:
         """Register subclass in form_action_manager automatically."""
         super().__init_subclass__(**kwargs)

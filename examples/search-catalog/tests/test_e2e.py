@@ -4,9 +4,12 @@ import pytest
 from catalog import queries as catalog_queries
 from django.core.cache import cache
 
+from next.testing import envelope_of
+
 
 PRODUCT_CARD_PATTERN = re.compile(r"data-product-card[\s\S]*?</article>")
 PRODUCT_SLUG_PATTERN = re.compile(r'data-product-slug="([^"]+)"')
+KEY_PATTERN = re.compile(r'data-next-key="([^"]+)"')
 
 
 def _product_card_section(body: str) -> str:
@@ -242,3 +245,212 @@ class TestCacheHit:
         client.get("/catalog/?brand=Acme")
         client.get("/catalog/?brand=Globex")
         assert len(_cache_keys()) == 2
+
+
+class TestResultsZone:
+    """Cover the catalog-results zone that drives auto-submit and pagination."""
+
+    def test_listing_wraps_results_in_a_named_zone(self, client, catalog_db) -> None:
+        body = client.get("/catalog/").content.decode()
+        assert 'data-next-zone="catalog-results"' in body
+        assert '<ul data-next-zone="catalog-results"' in body
+
+    def test_filter_form_carries_auto_submit_attributes(
+        self, client, catalog_db
+    ) -> None:
+        body = client.get("/catalog/").content.decode()
+        assert 'data-next-target="catalog-results,catalog-more"' in body
+        assert 'data-next-trigger="input"' in body
+        assert 'data-next-debounce="300"' in body
+        assert 'data-next-trigger="change"' in body
+
+    def test_zone_request_morphs_only_the_results(self, client, catalog_db) -> None:
+        response = client.get_zones("/catalog/", "catalog-results")
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.zone_targets() == ["catalog-results"]
+        html = envelope.html_for_zone("catalog-results")
+        assert html.startswith('<ul data-next-zone="catalog-results">')
+        assert "All products" not in html
+
+    def test_zone_request_narrows_to_the_search_term(self, client, catalog_db) -> None:
+        envelope = envelope_of(
+            client.get_zones("/catalog/?q=iPhone", "catalog-results")
+        )
+        html = envelope.html_for_zone("catalog-results")
+        assert "iPhone 15" in html
+
+    def test_zone_request_stamps_the_partial_vary_headers(
+        self, client, catalog_db
+    ) -> None:
+        response = client.get_zones("/catalog/", "catalog-results")
+        vary = response["Vary"]
+        assert "X-Next-Zone" in vary
+        assert "X-Next-Merge" in vary
+
+
+class TestInfiniteScrollAppend:
+    """Cover the revealed sentinel and the append merge it drives."""
+
+    def test_first_page_renders_a_sentinel_link(self, client, catalog_db) -> None:
+        body = client.get("/catalog/").content.decode()
+        assert 'id="results-sentinel"' in body
+        assert 'data-next-merge="append"' in body
+        assert 'data-next-lazy="revealed"' in body
+        assert 'data-next-target="catalog-results,catalog-more"' in body
+        assert "page=2" in body
+
+    def test_sentinel_lives_outside_the_results_zone(self, client, catalog_db) -> None:
+        body = client.get("/catalog/").content.decode()
+        results = body.split('data-next-zone="catalog-results"', 1)[1]
+        zone_body = results.split("</ul>", 1)[0]
+        assert "results-sentinel" not in zone_body
+        assert 'data-next-zone="catalog-more"' in body
+
+    def test_append_grows_results_and_replaces_the_sentinel(
+        self, client, catalog_db
+    ) -> None:
+        response = client.get_zones(
+            "/catalog/?page=2",
+            "catalog-results,catalog-more",
+            HTTP_X_NEXT_MERGE="append",
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["append", "append"]
+        assert envelope.zone_targets() == ["catalog-results", "catalog-more"]
+
+    def test_append_to_results_carries_rows_only_not_the_sentinel(
+        self, client, catalog_db
+    ) -> None:
+        envelope = envelope_of(
+            client.get_zones(
+                "/catalog/?page=2",
+                "catalog-results,catalog-more",
+                HTTP_X_NEXT_MERGE="append",
+            )
+        )
+        results_html = envelope.html_for_zone("catalog-results")
+        assert "results-sentinel" not in results_html
+        assert KEY_PATTERN.findall(results_html)
+        more_html = envelope.html_for_zone("catalog-more")
+        assert 'id="results-sentinel"' in more_html
+        assert "page=3" in more_html
+
+    def test_appended_rows_do_not_overlap_the_first_page(
+        self, client, catalog_db
+    ) -> None:
+        first = client.get_zones("/catalog/", "catalog-results")
+        second = client.get_zones(
+            "/catalog/?page=2",
+            "catalog-results",
+            HTTP_X_NEXT_MERGE="append",
+        )
+        keys_one = set(
+            KEY_PATTERN.findall(envelope_of(first).html_for_zone("catalog-results"))
+        )
+        keys_two = set(
+            KEY_PATTERN.findall(envelope_of(second).html_for_zone("catalog-results"))
+        )
+        assert keys_one
+        assert keys_two
+        assert not keys_one & keys_two
+
+    def test_last_page_drops_the_sentinel(self, client, catalog_db) -> None:
+        body = client.get("/catalog/?page=999").content.decode()
+        assert "results-sentinel" not in body
+
+    def test_last_page_append_empties_the_more_zone(self, client, catalog_db) -> None:
+        envelope = envelope_of(
+            client.get_zones(
+                "/catalog/?page=999",
+                "catalog-results,catalog-more",
+                HTTP_X_NEXT_MERGE="append",
+            )
+        )
+        assert "results-sentinel" not in envelope.html_for_zone("catalog-more")
+
+    def test_changing_the_query_re_morphs_both_zones(self, client, catalog_db) -> None:
+        envelope = envelope_of(
+            client.get_zones("/catalog/?q=novel", "catalog-results,catalog-more")
+        )
+        assert envelope.op_verbs() == ["morph", "morph"]
+
+
+class TestPresetFilterPushUrl:
+    """Applying a preset is a discrete jump that pushes a history entry."""
+
+    def test_listing_renders_the_preset_bar(self, client, catalog_db) -> None:
+        body = client.get("/catalog/").content.decode()
+        assert "data-preset-bar" in body
+        assert 'name="preset" value="cheapest"' in body
+
+    def test_partial_apply_pushes_url_and_morphs_both_zones(
+        self, client, catalog_db
+    ) -> None:
+        response = client.post_action(
+            "preset_filter_form",
+            {"preset": "cheapest"},
+            origin="/catalog/",
+            partial=True,
+            zones="catalog-results,catalog-more",
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["url", "morph", "morph"]
+        assert envelope.zone_targets() == ["catalog-results", "catalog-more"]
+
+    def test_url_op_pushes_the_canonical_same_site_href(
+        self, client, catalog_db
+    ) -> None:
+        envelope = envelope_of(
+            client.post_action(
+                "preset_filter_form",
+                {"preset": "cheapest"},
+                origin="/catalog/",
+                partial=True,
+                zones="catalog-results,catalog-more",
+            )
+        )
+        url_op = next(op for op in envelope.ops if op["op"] == "url")
+        assert url_op["action"] == "push"
+        assert url_op["href"] == "/catalog/?sort=price_asc"
+        assert url_op["href"].startswith("/catalog/")
+
+    def test_in_stock_preset_morph_drops_out_of_stock_products(
+        self, client, catalog_db
+    ) -> None:
+        envelope = envelope_of(
+            client.post_action(
+                "preset_filter_form",
+                {"preset": "in_stock"},
+                origin="/catalog/",
+                partial=True,
+                zones="catalog-results,catalog-more",
+            )
+        )
+        results = envelope.html_for_zone("catalog-results")
+        assert "out of stock" not in results.lower()
+
+    def test_morphed_sentinel_carries_the_preset_querystring(
+        self, client, catalog_db
+    ) -> None:
+        envelope = envelope_of(
+            client.post_action(
+                "preset_filter_form",
+                {"preset": "cheapest"},
+                origin="/catalog/",
+                partial=True,
+                zones="catalog-results,catalog-more",
+            )
+        )
+        more = envelope.html_for_zone("catalog-more")
+        assert "sort=price_asc" in more
+
+    def test_non_partial_apply_falls_back_to_a_redirect(
+        self, client, catalog_db
+    ) -> None:
+        response = client.post_action("preset_filter_form", {"preset": "newest"})
+        assert response.status_code == 302
+        assert response["Location"] == "/catalog/?sort=newest"

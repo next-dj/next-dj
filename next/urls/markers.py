@@ -13,7 +13,7 @@ from __future__ import annotations
 import inspect
 import logging
 import types
-from typing import TYPE_CHECKING, TypeVar, get_args, get_origin
+from typing import TYPE_CHECKING, get_args, get_origin, override
 
 from django.http import HttpRequest
 
@@ -29,10 +29,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_T = TypeVar("_T")
 
-
-class DUrl(DDependencyBase[_T]):
+class DUrl[T](DDependencyBase[T]):
     """Annotation for a captured URL path parameter with optional type coercion.
 
     Use `DUrl[SomeType]` to read the captured segment that matches the
@@ -57,7 +55,7 @@ class DUrl(DDependencyBase[_T]):
         return super().__class_getitem__(item)  # type: ignore[misc]
 
 
-class DQuery(DDependencyBase[_T]):
+class DQuery[T](DDependencyBase[T]):
     """Annotation marker for a `request.GET` parameter.
 
     Use `DQuery[str]`, `DQuery[int]`, `DQuery[bool]`, or `DQuery[float]`
@@ -100,11 +98,12 @@ class HttpRequestProvider(RegisteredParameterProvider):
 
     priority = 50
 
-    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+    @override
+    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Return True when the parameter expects `HttpRequest` and a request exists."""
-        if getattr(context, "request", None) is None:
+        if context.request is None:
             return False
-        stack = getattr(self.resolver, "_resolve_call_stack", ())
+        stack = self.resolver._resolve_call_stack
         if stack:
             func = stack[-1]
             try:
@@ -121,9 +120,10 @@ class HttpRequestProvider(RegisteredParameterProvider):
                 )
         return _is_http_request_annotation(param.annotation)
 
-    def resolve(self, _param: inspect.Parameter, context: object) -> object:
+    @override
+    def resolve(self, _param: inspect.Parameter, context: ResolutionContext) -> object:
         """Return the request from the resolution context."""
-        return getattr(context, "request", None)
+        return context.request
 
 
 class UrlByAnnotationProvider(RegisteredParameterProvider):
@@ -131,15 +131,17 @@ class UrlByAnnotationProvider(RegisteredParameterProvider):
 
     priority = 60
 
-    def can_handle(self, param: inspect.Parameter, _context: object) -> bool:
+    @override
+    def can_handle(self, param: inspect.Parameter, _context: ResolutionContext) -> bool:
         """Return True when the parameter uses a `DUrl` annotation."""
         return get_origin(param.annotation) is DUrl
 
-    def resolve(self, param: inspect.Parameter, context: object) -> object:
+    @override
+    def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """URL value for the parameter, coerced when the annotation names a type."""
         args = get_args(param.annotation)
         key = args[0] if args and isinstance(args[0], str) else param.name
-        url_kwargs = getattr(context, "url_kwargs", {}) or {}
+        url_kwargs = context.url_kwargs
         raw = url_kwargs.get(key)
         if raw is None:
             return None
@@ -165,13 +167,15 @@ class UrlKwargsProvider(RegisteredParameterProvider):
 
     priority = 70
 
-    def can_handle(self, param: inspect.Parameter, context: object) -> bool:
+    @override
+    def can_handle(self, param: inspect.Parameter, context: ResolutionContext) -> bool:
         """Return True when `url_kwargs` contains this parameter name."""
-        return param.name in (getattr(context, "url_kwargs", {}) or {})
+        return param.name in context.url_kwargs
 
-    def resolve(self, param: inspect.Parameter, context: object) -> object:
+    @override
+    def resolve(self, param: inspect.Parameter, context: ResolutionContext) -> object:
         """Raw URL value for the parameter, coerced to the annotation when possible."""
-        url_kwargs = getattr(context, "url_kwargs", {}) or {}
+        url_kwargs = context.url_kwargs
         raw = url_kwargs.get(param.name)
         if raw is None:
             return None
@@ -186,6 +190,7 @@ class QueryParamProvider(RegisteredParameterProvider):
 
     priority = 80
 
+    @override
     def can_handle(
         self,
         param: inspect.Parameter,
@@ -196,6 +201,7 @@ class QueryParamProvider(RegisteredParameterProvider):
             return False
         return getattr(context, "request", None) is not None
 
+    @override
     def resolve(
         self,
         param: inspect.Parameter,

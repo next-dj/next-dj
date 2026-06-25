@@ -10,7 +10,7 @@ Requirements
 ------------
 
 - Python 3.12 or newer (3.12, 3.13, 3.14 tested).
-- Django 4.2 or newer (4.2, 5.0, 5.1, 5.2, 6.0 supported).
+- Django 5.2 or newer (5.2, 6.0 supported).
 - An ASGI or WSGI server compatible with the Django version in use.
 
 next.dj extends Django.

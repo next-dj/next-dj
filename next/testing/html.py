@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from html.parser import HTMLParser
+from typing import override
 
 
 _ANCHOR_RE = re.compile(r"<a\b[^>]*>[\s\S]*?</a\s*>", re.IGNORECASE)
@@ -25,6 +26,7 @@ class _FirstTagAttrs(HTMLParser):
         self.tag: str | None = None
         self.attrs: dict[str, str] = {}
 
+    @override
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         """Record the first start tag's name and attributes."""
         if self.tag is None:
@@ -43,6 +45,7 @@ class _TextOnly(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
 
+    @override
     def handle_data(self, data: str) -> None:
         """Append text data chunks."""
         self.parts.append(data)

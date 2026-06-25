@@ -17,14 +17,14 @@ from .assets import default_kinds
 from .collector import default_placeholders
 
 
-_STYLES_TOKEN = "<!-- next:styles -->"  # noqa: S105
-_SCRIPTS_TOKEN = "<!-- next:scripts -->"  # noqa: S105
+_STYLES_MARKER = "<!-- next:styles -->"
+_SCRIPTS_MARKER = "<!-- next:scripts -->"
 
 
 def register_defaults() -> None:
     """Register the built-in placeholder slots and asset kinds."""
-    default_placeholders.register("styles", token=_STYLES_TOKEN)
-    default_placeholders.register("scripts", token=_SCRIPTS_TOKEN)
+    default_placeholders.register("styles", token=_STYLES_MARKER)
+    default_placeholders.register("scripts", token=_SCRIPTS_MARKER)
     default_kinds.register(
         "css",
         extension=".css",

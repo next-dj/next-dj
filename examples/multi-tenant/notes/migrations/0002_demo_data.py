@@ -37,7 +37,7 @@ DEMO_TENANTS = [
 ]
 
 
-def seed(apps, schema_editor):  # noqa: ARG001
+def seed(apps, _schema_editor):
     """Insert demo tenants and notes for both browser and curl walkthroughs."""
     tenant_model = apps.get_model("notes", "Tenant")
     note_model = apps.get_model("notes", "Note")
@@ -57,7 +57,7 @@ def seed(apps, schema_editor):  # noqa: ARG001
             )
 
 
-def unseed(apps, schema_editor):  # noqa: ARG001
+def unseed(apps, _schema_editor):
     """Remove demo tenants on rollback (cascade clears their notes)."""
     tenant_model = apps.get_model("notes", "Tenant")
     tenant_model.objects.filter(

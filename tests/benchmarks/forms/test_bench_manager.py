@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from next.forms import FormActionNotFound, RegistryFormActionBackend
+from next.forms import FormActionNotFoundError, RegistryFormActionBackend
 from next.forms.backends import ActionRegistration
 from next.forms.manager import FormActionManager
 from tests.benchmarks.factories import noop_form_handler
@@ -93,7 +93,7 @@ class TestBenchManagerLookups:
         def run() -> None:
             try:
                 manager.get_action_url("nonexistent")
-            except FormActionNotFound:
+            except FormActionNotFoundError:
                 return
 
         benchmark(run)
@@ -106,7 +106,7 @@ class TestBenchManagerLookups:
         def run() -> str:
             try:
                 manager.get_action_url("nonexistent")
-            except FormActionNotFound as exc:
+            except FormActionNotFoundError as exc:
                 return str(exc)
             return ""
 

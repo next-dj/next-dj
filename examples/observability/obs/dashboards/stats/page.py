@@ -9,10 +9,22 @@ from next.pages import context
 
 
 WINDOW_TO_MINUTES = {"1m": 1, "5m": 5, "1h": 60}
+LIVE_TOTALS_ZONE = "live-totals"
 
 
 def _minutes_for(window: str) -> int:
     return WINDOW_TO_MINUTES.get(window, WINDOW_TO_MINUTES[DEFAULT_WINDOW])
+
+
+@context("live_zone")
+def live_zone() -> str:
+    """Name the zone the filter form re-aggregates without leaving the page.
+
+    Page-local, not inherited, so only this index carries the
+    `live-totals` zone the filter form targets. The nested stats sub-pages
+    keep an empty value and fall back to a full submit.
+    """
+    return LIVE_TOTALS_ZONE
 
 
 @context("window", inherit_context=True)
@@ -22,11 +34,13 @@ def window(request: HttpRequest | None = None) -> str:
     The `HttpRequest | None` annotation matches the union form
     `HttpRequestProvider` accepts, so DI fills the parameter on every
     real render while direct unit-test calls keep working with the
-    default `None`.
+    default `None`. A partial apply posts the window, so the POST value
+    is honoured first and the morphed zone re-aggregates under it without
+    a context override the provider chain would ignore.
     """
     if request is None:
         return DEFAULT_WINDOW
-    return request.GET.get("window", DEFAULT_WINDOW)
+    return request.POST.get("window") or request.GET.get("window", DEFAULT_WINDOW)
 
 
 @context(
