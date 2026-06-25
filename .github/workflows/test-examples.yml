@@ -47,3 +47,32 @@ jobs:
       env:
         PYTEST: uv run --no-project pytest
       run: make test-examples
+
+  test-examples-js:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 24
+        cache: 'npm'
+        cache-dependency-path: examples/*/package-lock.json
+    - name: Run vitest for every example that ships one
+      run: |
+        shopt -s nullglob
+        configs=(examples/*/vitest.config.*)
+        if [ ${#configs[@]} -eq 0 ]; then
+          echo "No example ships a vitest suite"
+          exit 0
+        fi
+        failed=()
+        for config in "${configs[@]}"; do
+          dir=$(dirname "$config")
+          echo "::group::$dir"
+          (cd "$dir" && npm ci && npm test) || failed+=("$dir")
+          echo "::endgroup::"
+        done
+        if [ ${#failed[@]} -ne 0 ]; then
+          echo "Failed: ${failed[*]}"
+          exit 1
+        fi

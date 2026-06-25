@@ -29,7 +29,9 @@ _STEP_PAGE_PATH = (
 
 
 def _load_step_page():
-    spec = importlib.util.spec_from_file_location("audit_step_page_e2e", _STEP_PAGE_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "audit_step_page_e2e", _STEP_PAGE_PATH
+    )
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
