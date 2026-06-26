@@ -23,20 +23,19 @@ Pipeline
 
    flowchart TB
        Callable[Decorated callable] --> Sig[Inspect signature]
-       Sig --> Markers[Scan markers]
-       Markers --> Providers[Provider registry]
+       Sig --> Providers[Providers in priority order]
        Providers --> Resolution[ResolutionContext]
        Resolution --> Cache{Cache hit}
        Cache -- yes --> Value[Cached value]
        Cache -- no --> Provider[Provider.resolve]
        Provider --> Value
        Value --> Inject[Inject parameter]
-       Markers -- Depends --> NamedDep[Named dependency]
-       Markers -- Context --> CtxByKey[Context by key]
-       Markers -- DUrl --> UrlProv[URL provider]
-       Markers -- DQuery --> QueryProv[Query provider]
-       Markers -- form or DForm or class --> FormProv[Form provider]
-       Markers -- name match --> NameProv[Context or URL kwargs by name]
+       Providers -- Depends --> NamedDep[Named dependency]
+       Providers -- Context --> CtxByKey[Context by key]
+       Providers -- DUrl --> UrlProv[URL provider]
+       Providers -- DQuery --> QueryProv[Query provider]
+       Providers -- form or DForm or class --> FormProv[Form provider]
+       Providers -- name match --> NameProv[Context or URL kwargs by name]
 
 Modules
 -------
@@ -45,7 +44,7 @@ Modules
    ``DependencyResolver`` plus the singleton ``resolver`` instance.
    Exposes ``resolve``, ``resolve_dependencies``, and ``resolve_with_template_context`` to run a callable with resolved parameters.
    ``resolve_with_template_context`` is the component entry point.
-   Like ``resolve_dependencies``, it strips ``EXPLICIT_RESOLVE_KEYS`` from the injectable context so a context key cannot shadow a dedicated provider such as ``request`` or ``form``.
+   It strips ``EXPLICIT_RESOLVE_KEYS`` from the template context it injects, so a context key cannot shadow a dedicated provider such as ``request`` or ``form``.
 
 ``next.deps.providers``.
    The ``ParameterProvider`` protocol and the ``RegisteredParameterProvider`` base class.

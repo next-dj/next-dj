@@ -100,7 +100,7 @@ Override a single ``NEXT_FRAMEWORK`` key without rewriting the whole block by co
    :caption: config/settings/dev.py
 
    NEXT_FRAMEWORK = {**NEXT_FRAMEWORK}  # noqa: F405
-   NEXT_FRAMEWORK["STRICT_CONTEXT"] = False
+   NEXT_FRAMEWORK["STRICT_CONTEXT"] = True
 
 Because ``{**NEXT_FRAMEWORK}`` is a shallow copy, mutate only flat keys this way.
 For nested backend lists use ``extend_default_backend`` or ``copy.deepcopy``.

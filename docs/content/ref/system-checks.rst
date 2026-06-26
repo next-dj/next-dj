@@ -356,6 +356,9 @@ Warnings
    * - ``next.W070``
      - A ``{% form %}`` renders directly inside a ``{% for %}`` of a composed page without a ``key=`` or a ``zone=``, so a partial morph cannot tell the repeated instances apart. The check does not descend into a component template, so a looped ``{% component %}`` that holds the form is not flagged. Thread a ``key=`` into the form to keep the repeated morph correct.
      - ``next.partial.checks``
+   * - ``next.W071``
+     - ``PARTIAL_BACKENDS`` has more than one entry. Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.
+     - ``next.partial.checks``
 
 .. note::
 

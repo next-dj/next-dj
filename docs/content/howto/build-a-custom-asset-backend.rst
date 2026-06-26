@@ -179,7 +179,7 @@ Ship the Asset
 Drop a ``component.jsx`` file next to the ``component.py`` it belongs to.
 Discovery finds it because ``component`` is a registered stem and ``.jsx`` is now a registered extension.
 
-.. code-block:: jinja
+.. code-block:: jsx
    :caption: kanban/boards/board/[int:id]/_pieces/card/component.jsx
 
    import { useState } from "react";

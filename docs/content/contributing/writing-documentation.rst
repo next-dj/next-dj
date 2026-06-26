@@ -205,6 +205,9 @@ The table below lists the public package, its primary narrative page, and its re
    * - ``next.static``
      - :doc:`/content/topics/static-assets/index`
      - :doc:`/content/ref/static`
+   * - ``next.partial``
+     - :doc:`/content/topics/partial-rendering/index`
+     - :doc:`/content/ref/partial`
    * - ``next.deps``
      - :doc:`/content/topics/dependency-injection`
      - :doc:`/content/ref/deps`

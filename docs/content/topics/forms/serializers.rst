@@ -4,7 +4,8 @@ Frozen Form Specs
 =================
 
 The forms subsystem ships frozen dataclass descriptors that describe a form, a formset, or a single field as immutable, comparable descriptors.
-This module (``next.forms.serializers``) is unrelated to JSON serializers for :doc:`the browser context object </content/topics/static-assets/js-context>`. Those live under ``next.static``.
+This module (``next.forms.serializers``) is unrelated to JSON serializers for :doc:`the browser context object </content/topics/static-assets/js-context>`.
+Those live under ``next.static``.
 
 Each descriptor is a frozen dataclass, so it is immutable and supports value equality.
 This makes a descriptor safe to cache or compare across renders.

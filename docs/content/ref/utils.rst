@@ -6,7 +6,7 @@ Utils Reference
 Module Summary
 --------------
 
-``next.utils`` exposes two helpers that project code can import: ``resolve_base_dir`` and ``classify_dirs_entries``.
+``next.utils`` exposes two helpers that project code can import, ``resolve_base_dir`` and ``classify_dirs_entries``.
 The module also defines a registration-internal frame helper that the framework uses to attribute decorated callables to their defining file.
 That helper is not part of the public surface and is excluded from the autodoc table below.
 

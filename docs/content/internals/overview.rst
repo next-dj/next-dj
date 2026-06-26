@@ -41,6 +41,9 @@ Subsystems
    * - Static
      - Asset discovery, collector, kinds, backends, JS context.
      - ``next.static``
+   * - Partial
+     - Zones, patches, SSE streams, partial protocol backend.
+     - ``next.partial``
    * - Dependencies
      - Parameter resolver, providers, request cache.
      - ``next.deps``
@@ -61,7 +64,9 @@ Bootstrap
 ---------
 
 Django calls ``NextFrameworkConfig.ready()`` once per process after all applications load.
-The hook registers the framework system checks, runs five installers that wire the subsystems into the Django runtime, and calls ``autodiscover_forms()`` so shared forms register before the first request arrives.
+The hook calls ``register_all()`` to register the framework system checks.
+It then runs five startup hooks in a fixed order that wire the subsystems into the Django runtime, autoreload, templates, staticfiles, components, and form autodiscovery.
+The final hook ``autodiscover_forms()`` registers shared forms before the first request arrives.
 See :doc:`/content/ref/apps` for the canonical ordering and the full API.
 
 How They Compose
@@ -69,6 +74,7 @@ How They Compose
 
 A request hands off ``next.urls`` to ``next.pages`` to ``next.deps`` to ``next.static`` and ``next.components`` before the final HTML returns to the client.
 Form submissions take a parallel path through ``next.forms``, which on validation failure reuses the same render pipeline.
+Partial requests take a zone-patch path through ``next.partial``, which renders the targeted zones through the same render pipeline and returns patches instead of a full page.
 :doc:`request-lifecycle` traces both paths end to end.
 
 Signals Fan Out
@@ -85,6 +91,7 @@ The diagram below shows which subsystem emits each signal and the typical receiv
        URLs["next.urls"]
        Forms["next.forms"]
        Static["next.static"]
+       Partial["next.partial"]
        Deps["next.deps"]
        Server["next.server"]
        Conf["next.conf"]
@@ -95,9 +102,10 @@ The diagram below shows which subsystem emits each signal and the typical receiv
        Pages -- "template_loaded, context_registered, page_rendered" --> Audit
        Components -- "component_registered, components_registered, component_rendered, component_backend_loaded" --> Audit
        URLs -- "route_registered, router_reloaded" --> Watch
-       Forms -- "action_registered, action_dispatched, form_validation_failed" --> Audit
+       Forms -- "action_registered, action_dispatched, form_validation_failed, form_access_denied, wizard_step_submitted, wizard_completed" --> Audit
        Forms -- "action_dispatched" --> Cache
        Static -- "asset_registered, collector_finalized, html_injected, backend_loaded" --> Audit
+       Partial -- "zone_registered, zone_rendered, patch_op_registered, field_validated, sse_stream_opened, sse_stream_closed" --> Audit
        Deps -- "provider_registered" --> Audit
        Server -- "watch_specs_ready" --> Watch
        Conf -- "settings_reloaded" --> Watch
@@ -118,6 +126,7 @@ The dependency graph between subsystems is shallow.
 - ``next.pages``, ``next.components``, ``next.static`` depend on ``next.conf`` and ``next.deps``.
 - ``next.forms`` depends on ``next.pages`` and ``next.deps``.
 - ``next.urls`` depends on ``next.conf``, ``next.deps``, ``next.pages``, ``next.components``, and ``next.forms``.
+- ``next.partial`` depends on ``next.conf``, ``next.deps``, ``next.pages``, ``next.components``, ``next.static``, ``next.forms``, and ``next.urls`` to render zones and shape patches.
 - ``next.server`` depends on ``next.conf``, ``next.pages``, ``next.urls``, and ``next.components``, the subsystems whose trees it watches.
 - ``next.testing`` depends on the page, component, form, dependency, and static subsystems to drive isolation and rendering helpers.
 - ``next.apps`` depends on every subsystem.
@@ -141,9 +150,11 @@ Each subsystem keeps a flat module layout.
    * - ``next.urls``
      - ``manager``, ``backends``, ``dispatcher``, ``parser``, ``markers``, ``reverse``, ``checks``, ``signals``.
    * - ``next.forms``
-     - ``manager``, ``dispatch``, ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``checks``, ``signals``.
+     - ``manager``, ``dispatch``, ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``diagnostics``, ``checks``, ``signals``.
    * - ``next.static``
      - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``scripts``, ``serializers``, ``defaults``, ``finders``, ``checks``, ``signals``.
+   * - ``next.partial``
+     - ``manager``, ``registry``, ``backends``, ``zone``, ``render``, ``patches``, ``shaping``, ``sse``, ``view``, ``headers``, ``keys``, ``origin``, ``checks``, ``signals``.
    * - ``next.deps``
      - ``resolver``, ``providers``, ``cache``, ``context``, ``markers``, ``signals``. The ``checks`` module is a reserved stub with no checks registered yet.
    * - ``next.server``
@@ -157,7 +168,7 @@ Each subsystem keeps a flat module layout.
    * - ``next.checks``
      - ``__init__`` aggregates system-check registration across every subpackage. ``common`` provides shared helpers used by individual ``checks`` modules.
    * - ``next.templatetags``
-     - ``components``, ``forms``, ``next_static``.
+     - ``components``, ``forms``, ``next_static``, ``partial``.
 
 See Also
 --------

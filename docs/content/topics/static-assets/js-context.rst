@@ -65,7 +65,14 @@ System Check
 ~~~~~~~~~~~~
 
 The ``next.W042`` system check validates ``JS_CONTEXT_SERIALIZER`` at startup.
-It warns when the value is not a string, when the dotted path cannot be imported, when the resolved attribute is not a class, when the class cannot be instantiated, or when the instance does not implement the ``JsContextSerializer`` protocol (a ``dumps(value) -> str`` method).
+It warns under any of five conditions.
+
+- The value is not a string.
+- The dotted path cannot be imported.
+- The resolved attribute is not a class.
+- The class cannot be instantiated.
+- The instance does not implement the ``JsContextSerializer`` protocol, a ``dumps(value) -> str`` method.
+
 The check is skipped when the key is absent or set to an empty string.
 
 Per-Key Serializer
@@ -279,7 +286,8 @@ An absent or empty ``NEXT_JS_OPTIONS`` uses the ``AUTO`` policy and the default 
 .. note::
 
    Under ``MANUAL`` the static manager skips both the preload hint and the ``Next._init`` wrap, exactly like ``DISABLED``.
-   To inject ``window.Next`` yourself, resolve the runtime URL with ``staticfiles_storage.url(NEXT_JS_STATIC_PATH)`` from ``next.static.scripts``, then build a ``NextScriptBuilder.from_options(url, NEXT_JS_OPTIONS)`` and emit ``preload_link()``, ``script_tag()``, and ``init_script(js_context)`` from a custom template tag or middleware.
+   To inject ``window.Next`` yourself, resolve the runtime URL with ``staticfiles_storage.url(NEXT_JS_STATIC_PATH)`` from ``next.static.scripts``, then bind one ``builder = NextScriptBuilder.from_options(url, NEXT_JS_OPTIONS)``.
+   Emit ``builder.preload_link()``, ``builder.script_tag()``, and ``builder.init_script(js_context)`` from a custom template tag or middleware.
 
 Set the policy through the ``NEXT_JS_OPTIONS`` dict.
 

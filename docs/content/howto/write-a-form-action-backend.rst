@@ -147,6 +147,7 @@ A from-scratch backend overrides the hook so its actions participate in checks s
    :caption: notes/backends.py
 
    from collections.abc import Iterable
+   from next.forms import FormActionBackend
    from next.forms.backends import ActionMeta
 
    class CustomBackend(FormActionBackend):

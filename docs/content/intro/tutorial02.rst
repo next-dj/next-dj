@@ -96,7 +96,7 @@ Add the Detail Page
 
 Create a new directory ``notes/pages/notes/[id]/``.
 The bracketed segment is a URL parameter that the file router captures as ``id``.
-The untyped ``[id]`` segment matches any string, and ``DUrl["id", int]`` in the page module coerces it to an integer.
+The untyped ``[id]`` segment matches any non-slash string, and ``DUrl["id", int]`` in the page module coerces it to an integer.
 The typed ``[int:id]`` directory form rejects non-numeric URLs at routing time before any page code runs, see :doc:`/content/topics/file-router`.
 
 .. code-block:: python

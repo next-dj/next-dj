@@ -67,5 +67,5 @@ See Also
 
 .. seealso::
 
-   :doc:`scenarios` for the same flow shown as six concrete tasks.
+   :doc:`scenarios` for the same flow shown as seven concrete tasks.
    :doc:`reference` for the verbs, headers, attributes, and client runtime surface in tables.

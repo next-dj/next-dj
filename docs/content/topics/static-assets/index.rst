@@ -4,9 +4,6 @@ Static Assets
 =============
 
 The static pipeline discovers co-located CSS, JS, and module files, deduplicates them across requests, and injects them into HTML.
-The default injection points are the ``collect_*`` template tags, which mark placeholder slots in the layout.
-Extra slots register through ``default_placeholders.register``, so projects can add their own injection points beyond ``styles`` and ``scripts``.
-The pipeline is fully pluggable through asset kinds, custom stems, and backends.
 
 .. rubric:: Concepts
 

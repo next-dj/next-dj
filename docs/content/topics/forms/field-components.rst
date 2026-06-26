@@ -194,7 +194,7 @@ A few field types are unsupported because their value semantics need behaviour t
 - A :class:`~django.forms.MultiValueField` such as a split date and time needs value decompression across several controls.
 - A :class:`~django.forms.SelectMultiple` and a checkbox or boolean field need multi-value or omitted-value handling the widget does not perform.
 
-The ``next.W055`` system check warns at startup when a ``ComponentWidget`` is attached to a ``FileField`` or a ``MultiValueField``, the cases where the mismatch silently loses data.
+The ``next.W055`` system check warns at startup for the first two cases, where the mismatch silently loses data.
 
 The widget renders through next.dj's component runtime and bypasses Django's form renderer, so the project's ``FORM_RENDERER`` theming does not apply, and widget introspection through ``subwidgets`` or a ``BoundWidget`` does not reflect the rendered output.
 This is the intended contract, since the component is itself the rendering and theming layer.

@@ -16,13 +16,23 @@ Forms
 
    Renders a form bound to a registered action.
    The first argument is the action name, a quoted string or a context variable that resolves to a string.
-   Injects two hidden inputs: the ``csrfmiddlewaretoken`` CSRF field and the ``_next_form_origin`` field carrying the URL path of the rendering page.
+   Injects the ``csrfmiddlewaretoken`` CSRF field, and the ``_next_form_origin`` field carrying the URL path of the rendering page when an origin is available.
    The block body has access to the bound or unbound form through ``{{ form }}``.
 
    Optional ``attr="value"`` arguments after the action name render as HTML attributes on the ``<form>`` element, for example ``{% form "upload_form" class="stack" %}``.
    Attribute values are escaped, and an unquoted value resolves as a context variable.
 
-   The opening tag emits its attributes in a fixed order: ``action`` with the dispatch URL, ``method="post"``, ``data-next-action`` with the action UID when the registry meta is available, ``enctype="multipart/form-data"`` when the form is multipart, then the attributes passed to the tag.
+   The opening tag emits its attributes in a fixed order.
+
+   .. list-table::
+      :widths: 100
+
+      * - ``action`` with the dispatch URL.
+      * - ``method="post"``.
+      * - ``data-next-action`` with the action UID when the registry meta is available.
+      * - ``enctype="multipart/form-data"`` when the form is multipart.
+      * - The attributes passed to the tag.
+
    The ``enctype`` attribute is automatic for any form whose widgets need multipart encoding, so a file-upload form needs no extra argument.
    An explicit ``enctype="..."`` argument on the tag suppresses the automatic value and renders in the user-attribute position, for example ``{% form "upload_form" enctype="text/plain" %}``.
 
@@ -31,7 +41,8 @@ Forms
    ``data-next-*`` is the single framework namespace in rendered markup.
 
    The ``validate``, ``trigger``, ``debounce``, ``zone``, and ``key`` params compile to the matching ``data-next-*`` attributes, the authored seam for partial behaviour.
-   ``key`` distinguishes one instance of a repeated form, rendered in a loop, so a partial morph lands on the submitted instance rather than the first, see :doc:`/content/topics/partial-rendering/scenarios`.
+   ``key`` distinguishes one instance of a repeated form, rendered in a loop, so a partial morph lands on the submitted instance rather than the first.
+   See :doc:`/content/topics/partial-rendering/scenarios`.
 
    Captured URL parameters travel inside the origin path, the dispatcher recovers them by resolving ``_next_form_origin`` against the URLconf.
 
@@ -86,7 +97,7 @@ Components
    Block form.
    Marks a slot location inside a component template, with a fallback body used when the caller omits the slot.
 
-Multiline tag bodies
+Multiline Tag Bodies
 ~~~~~~~~~~~~~~~~~~~~
 
 The framework reinstalls Django's template tag pattern with the ``re.DOTALL`` flag so a single ``{% ... %}`` token may span several lines.

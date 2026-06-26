@@ -56,12 +56,14 @@ The runtime closes the layer, fires accept, and by ``data-next-accepted="request
    GET / HTTP/1.1
    X-Next-Request: 1
    X-Next-Zone: request-list
+   X-Next-Origin: /
 
 The list re-renders through its own page view, with its own guards and middleware, on a request that carries the caller's cookies.
-The wizard is portable: it sits on any page without a change, and ``data-next-accepted`` moves with the markup.
+The wizard is portable.
+It sits on any page without a change, and ``data-next-accepted`` moves with the markup.
 
 This is the cycle of a redirect with reloaded props.
-The cost is one extra GET after the modal closes, which the dialog animation hides.
+The cost is one extra GET after the modal closes, masked by the ``aria-busy`` busy gate the runtime sets on the target.
 
 Server OOB Through Page Addressing
 ----------------------------------

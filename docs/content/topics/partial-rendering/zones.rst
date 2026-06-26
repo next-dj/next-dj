@@ -18,7 +18,8 @@ The default shape of an invalid form submission is an extract-morph.
 The server re-renders the whole origin page through the existing re-render path and sends it with ``extract: true``.
 The client parses the document, trims out the failed form by its ``data-next-action`` uid, and morphs only that form into the live page.
 
-The result on screen is correct: only the failed form changes, the neighbouring forms keep their typed input, the caret stays put.
+The result on screen is correct.
+Only the failed form changes, the neighbouring forms keep their typed input, the caret stays put.
 The cost is on the server, not the DOM.
 The whole page renders even though one form is kept.
 
@@ -34,9 +35,8 @@ The whole page renders even though one form is kept.
      "form": {"uid": "ab12cd34", "valid": false, "errors": {"title": ["…"]}}
    }
 
-This is the price today, not a regression.
-Before partial rendering an invalid submission always re-rendered the full page, so the extract default does exactly what the page did and adds nothing.
-The runtime turns that full render into a targeted DOM update for free.
+This is the price today, not a regression, because an invalid submission always re-rendered the full page before partial rendering.
+The runtime turns that same full render into a targeted DOM update for free.
 
 Adding a Zone
 -------------
@@ -138,7 +138,8 @@ A wrapping ``zone=`` is the alternative, and a looped form with neither raises `
 
 ``next.W070`` catches a ``{% form %}`` written directly inside a ``{% for %}`` of a composed page.
 It does not descend into a component template, so a form inside a ``{% component %}`` that a loop renders is not flagged.
-The remedy is the same either way: thread a ``key=`` with a stable per-row value into the form, and the repeated morph lands on the submitted instance even when the form lives inside a looped component.
+The remedy is the same either way.
+Thread a ``key=`` with a stable per-row value into the form, and the repeated morph lands on the submitted instance even when the form lives inside a looped component.
 
 Zone Rules the Checks Enforce
 -----------------------------

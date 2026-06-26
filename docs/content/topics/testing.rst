@@ -30,6 +30,15 @@ The table below maps each testing goal to the helper and its import path.
    * - POST to a registered action by name
      - ``NextClient.post_action``
      - ``next.testing`` or ``next.testing.client``
+   * - GET a URL as a partial zone request
+     - ``NextClient.get_zones``
+     - ``next.testing`` or ``next.testing.client``
+   * - Decode a partial response for structural assertions
+     - ``envelope_of``
+     - ``next.testing`` or ``next.testing.client``
+   * - Inspect ops, targets, and assets of a patch envelope
+     - ``PartialEnvelope``
+     - ``next.testing`` or ``next.testing.client``
    * - Render a page body without HTTP
      - ``render_page``
      - ``next.testing`` or ``next.testing.rendering``
@@ -70,7 +79,8 @@ The table below maps each testing goal to the helper and its import path.
      - ``reset_form_registration_state``
      - ``next.testing`` or ``next.testing.isolation``
 
-You can import everything above from the ``next.testing`` package. Submodule imports stay valid when you prefer explicit paths.
+You can import everything above from the ``next.testing`` package.
+Submodule imports stay valid when you prefer explicit paths.
 See :doc:`/content/ref/testing` for generated signatures.
 
 Boot the Suite
@@ -164,7 +174,8 @@ Eager Page Loading
 ``eager_load_pages(base_dir)`` imports every ``page.py`` under a given directory.
 Use it when a test suite does not go through the full request cycle and must trigger ``@context`` and ``@action`` side-effects manually.
 ``clear_loaded_dirs()`` drops the per-directory memoisation so a later ``eager_load_pages`` call re-imports.
-It is needed only when a test rewrites ``page.py`` files on disk within a single session.
+It is intended for self-tests of the loader and for the rare case of rewritten ``page.py`` files within one session.
+A normal test suite does not call it, since each pytest session starts a fresh interpreter.
 
 NextClient
 ----------
@@ -214,6 +225,46 @@ A value already present in ``data`` under ``_next_form_origin`` wins over the ke
 Both methods resolve the name through ``resolve_action_url`` from ``next.testing.actions``.
 An unknown name raises ``FormActionNotFoundError`` from ``next.forms``.
 
+Partial Requests
+~~~~~~~~~~~~~~~~
+
+The client drives partial rendering without hand-built headers.
+Pass ``partial=True`` and ``zones=`` to ``post_action`` to turn the POST into a patch request scoped to a zone.
+``zones`` accepts one name or a tuple of names.
+
+.. code-block:: python
+   :caption: tests/test_partial_action.py
+
+   from next.testing.client import NextClient, envelope_of
+
+   def test_partial_morph(db) -> None:
+       response = NextClient().post_action(
+           "create_note",
+           {"title": "hi"},
+           partial=True,
+           zones="notes",
+       )
+       envelope = envelope_of(response)
+       assert "notes" in envelope.zone_targets()
+
+``NextClient.get_zones(url, zones)`` GETs a URL as a partial request for the named zones.
+``zones`` is one name or a tuple of names.
+Both ``post_action`` and ``get_zones`` accept a ``version=`` keyword that stamps the ``X-Next-Version`` header so tests can drive the version-sync branch.
+
+.. code-block:: python
+   :caption: tests/test_partial_get.py
+
+   from next.testing.client import NextClient, envelope_of
+
+   def test_zone_get() -> None:
+       response = NextClient().get_zones("/notes/", "notes")
+       envelope = envelope_of(response)
+       assert envelope.zone_targets() == ["notes"]
+
+``envelope_of(response)`` decodes a patch response into a ``PartialEnvelope``.
+It raises when the response is not a patch envelope, so a navigation fallback never passes a structural assertion.
+``PartialEnvelope`` exposes ``version``, ``ops``, and ``assets``, plus ``op_verbs``, ``targets``, ``zone_targets``, ``form_targets``, ``form_meta``, ``toasts``, and ``html_for_zone`` for asserting on the server contract without parsing HTML.
+
 Render a Page
 -------------
 
@@ -228,7 +279,7 @@ Use ``next.testing.rendering`` to render a page without an HTTP round trip.
        html = render_page("notes/pages/page.py")
        assert "Notes" in html
 
-``render_page`` reads the static body source, the ``template`` attribute or a ``template.djx`` file, then runs context functions and the static collector.
+``render_page`` reads the static body source, the ``template`` attribute or a registered file template such as ``template.djx``, then runs context functions and the static collector.
 It does not invoke a ``render()`` function declared in ``page.py``.
 Use ``NextClient`` for pages whose body is built by ``render()``.
 Use it for snapshot tests and template assertion tests that do not need URL routing.
@@ -274,10 +325,12 @@ The recorder holds a list of ``SignalEvent`` instances with ``signal``, ``sender
    The full list of captured ``SignalEvent`` instances in emission order.
 
 ``start()``.
-   Connects receivers for every tracked signal and returns the recorder. Called automatically on context entry.
+   Connects receivers for every tracked signal and returns the recorder.
+   Called automatically on context entry.
 
 ``stop()``.
-   Disconnects receivers for every tracked signal. Called automatically on context exit.
+   Disconnects receivers for every tracked signal.
+   Called automatically on context exit.
 
 ``events_for(signal)``.
    Returns the list of captured events emitted by that signal.
@@ -319,7 +372,8 @@ Action Helpers
 ``next.testing.actions`` exposes ``resolve_action_url`` and ``build_form_for``.
 ``resolve_action_url`` turns an action name into its dispatch URL.
 ``build_form_for`` builds a bound form for an action so a unit test can assert validation without HTTP.
-Both raise ``FormActionNotFoundError`` from ``next.forms`` for an unknown action name, with the closest registered names rendered into the message, and ``build_form_for`` raises ``LookupError`` for an action registered without a form class.
+Both raise ``FormActionNotFoundError`` from ``next.forms`` for an unknown action name, with the closest registered names rendered into the message.
+``build_form_for`` raises ``LookupError`` for an action registered without a form class.
 
 .. code-block:: python
    :caption: tests/test_action_helpers.py

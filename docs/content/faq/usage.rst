@@ -75,7 +75,6 @@ See :doc:`/content/howto/integrate-django-admin`.
 How Do I Split Routes Across Applications
 -----------------------------------------
 
-Two strategies.
 Use ``APP_DIRS=True`` so every application contributes its own page tree.
 Use ``DIRS`` to add project level page roots.
 See :doc:`/content/topics/file-router`.
@@ -128,7 +127,7 @@ Can a Form Action Return a Custom HTTP Status Code
 Return any ``HttpResponseBase`` subclass.
 
 .. code-block:: python
-   :caption: notes/pages/page.py
+   :caption: notes/forms.py
 
    from django.http import HttpRequest, HttpResponse
    from notes.models import Note

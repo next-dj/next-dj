@@ -18,6 +18,8 @@ Random URLs that match the ``STATIC_URL`` prefix but do not match a registered a
 A custom backend can refuse to serve files that originate outside trusted directories.
 Add the directory whitelist to the backend and reject every path that falls outside.
 
+An empty ``STATIC_BACKENDS`` falls back to the bundled ``StaticFilesBackend``, and ``manage.py check`` reports ``next.W030`` so the missing chain stays visible.
+
 Content Hash
 ------------
 

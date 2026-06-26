@@ -134,7 +134,7 @@ That success re-render carries no ``X-Next-*`` headers and never re-enters ``sha
 
 Customisation splits into two layers.
 Override ``render_invalid_page`` when only the page HTML changes.
-The default envelope calls it on the invalid branch with the bound failing form, and on the success re-render of a ``None`` handler result with ``form=None``.
+The default envelope calls it on the invalid branch with the bound failing form, and again on the ``None``-result success re-render described above with ``form=None``.
 Override ``shape_response`` when the envelope itself changes, such as a different status code, extra headers, or a response other than a redirect on a wizard advance.
 
 Building a Backend From Scratch
@@ -150,6 +150,7 @@ The four abstract methods must all be present.
    from typing import Any
    from django.http import HttpRequest, HttpResponse, HttpResponseNotFound
    from django.urls import path
+   from django.views.decorators.http import require_http_methods
    from next.forms import ActionRegistration, FormActionBackend
    from next.forms.dispatch import FormActionDispatch
 
@@ -164,7 +165,8 @@ The four abstract methods must all be present.
            ...
 
        def generate_urls(self) -> list:
-           return [path("_next/custom/<str:uid>/", self.dispatch)]
+           view = require_http_methods(["GET", "POST"])(self.dispatch)
+           return [path("_next/custom/<str:uid>/", view)]
 
        def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
            entry = self._entry_for_uid(uid)
@@ -172,6 +174,8 @@ The four abstract methods must all be present.
                return HttpResponseNotFound()
            action_name, meta = entry
            return FormActionDispatch.dispatch(self, request, action_name, meta)
+
+The bundled backend wraps its dispatch view in ``require_http_methods(["GET", "POST"])`` so the endpoint rejects other verbs, and a from-scratch backend should restrict its own view the same way.
 
 ``dispatch`` answers an unknown UID with a 404, either by returning ``HttpResponseNotFound`` or by raising :exc:`~django.http.Http404` with a message.
 The bundled backend raises ``Http404`` explaining that the page which rendered the form may be stale after a rename or restart.
@@ -249,7 +253,7 @@ A custom ``dispatch`` that drives the pipeline by hand reuses one static helper 
 ``ensure_http_response(response, request=None, action_name=None, backend=None)``.
    Coerces a handler return value into an ``HttpResponse``.
    A string becomes a body, an object with a ``url`` becomes a redirect, and ``None`` re-renders the origin page when ``request``, ``action_name``, and ``backend`` are passed, otherwise it returns a 204.
-   The ``None`` re-render goes through ``backend.render_invalid_page`` directly, without the ``X-Next-*`` headers and without re-entering ``shape_response``.
+   The ``None`` re-render follows the behaviour under `Shaping the Response`_, through ``backend.render_invalid_page`` and never re-entering ``shape_response``.
 
 Every outcome of the standard pipeline funnels into exactly one call to the backend hook ``shape_response(request, outcome)`` described under `Shaping the Response`_.
 A layer that must reshape responses globally overrides that one hook instead of patching each dispatch branch.

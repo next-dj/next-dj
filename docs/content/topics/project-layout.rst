@@ -123,6 +123,23 @@ Scalar and list overrides replace the existing value.
 Dict overrides such as ``OPTIONS`` are merged one level deep into the default dict.
 Use it for narrow overrides such as changing the page directory name.
 
+A dict override illustrates the one-level-deep merge.
+
+.. code-block:: python
+   :caption: config/settings.py
+
+   from next.conf import extend_default_backend
+
+   NEXT_FRAMEWORK = {
+       "PAGE_BACKENDS": extend_default_backend(
+           "PAGE_BACKENDS",
+           OPTIONS={"context_processors": ["myapp.context.site"]},
+       )
+   }
+
+The default backend ships ``OPTIONS`` carrying only the ``context_processors`` key.
+The override merges into that dict one level deep, so any key the override omits keeps its default value while the supplied ``context_processors`` list replaces the empty default.
+
 Per Project Page DIRS
 ---------------------
 

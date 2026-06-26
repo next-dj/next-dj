@@ -12,36 +12,32 @@ Read it once before the tutorial, then refer back when the layout of a real proj
 What next.dj Adds
 -----------------
 
-next.dj layers four things on top of a regular Django project.
+next.dj layers five things on top of a regular Django project.
 
 File router.
-   Every directory under a configured page root becomes a URL.
-   A ``page.py`` in that directory turns it into a navigable page.
+   Every directory under a configured page root becomes a URL, and a ``page.py`` turns it into a navigable page.
    A bracketed segment such as ``[slug]`` becomes a captured URL parameter.
+   See :doc:`/content/topics/file-router`.
 
 Layouts and context.
-   A ``layout.djx`` wraps every page under its directory.
-   Layouts nest down the tree.
-   A ``@context`` decorator publishes named values into the template scope.
-   A context value can also be inherited, so every page below the directory that declares it can read it.
+   A ``layout.djx`` wraps every page under its directory, and layouts nest down the tree.
+   A ``@context`` decorator publishes named values into the template scope, optionally inherited by every descendant page.
+   See :doc:`/content/topics/layouts` and :doc:`/content/topics/context`.
 
 Components.
-   A folder under the configured components root becomes a reusable template fragment.
-   Components carry a template plus optional Python, CSS, and JS files in one folder.
-   The framework discovers them by name and renders them through the ``{% component %}`` tag.
+   A folder under the configured components root becomes a reusable template fragment with optional Python, CSS, and JS files.
+   The framework discovers components by name and renders them through the ``{% component %}`` tag.
+   See :doc:`/content/topics/components`.
 
 Form actions.
-   Subclassing ``next.forms.Form`` or ``next.forms.ModelForm`` automatically registers the form under a ``snake_case`` name derived from the class name.
-   The ``{% form "name" %}`` template tag renders that form by name.
-   The framework validates the submitted data and calls the ``on_valid`` method, injecting only the parameters the method signature asks for.
-   ``Meta`` keys declare access guards (``login_required``, ``permission_required``) and success feedback (``success_url``, ``success_message``).
+   Subclassing ``next.forms.Form`` or ``next.forms.ModelForm`` registers the form under a ``snake_case`` name, rendered by ``{% form "name" %}`` and validated into its ``on_valid`` method.
    Plain functions with no form can also register as actions with ``@action("name")``.
-   This is useful for logout buttons and simple confirmations.
+   See :doc:`/content/topics/forms/overview`.
 
 Partial rendering.
-   A ``{% zone %}`` block names a slice of a page the server can re-render on its own.
-   A form, filter, or link targets a zone, and the server ships the DOM patches the client applies, so a selector or swap strategy never crosses the wire.
+   A ``{% zone %}`` block names a slice of a page the server can re-render on its own, and a form, filter, or link targets that zone.
    Every interaction degrades to a full page cycle when JavaScript is off.
+   See :doc:`/content/topics/partial-rendering/index`.
 
 .. _intro-overview-django-unchanged:
 
@@ -69,7 +65,8 @@ When to Read the Tutorial
 -------------------------
 
 If you have used Django before and want to feel the framework, jump to :doc:`tutorial01`.
-The five tutorial parts build a small Notes application that exercises every core subsystem.
+The six tutorial parts build a small Notes application that exercises every core subsystem.
+The first five wire up routing, layouts, components, forms, and editing, and the sixth makes the Notes index update in place with partial rendering.
 
 .. seealso::
 

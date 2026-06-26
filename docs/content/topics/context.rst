@@ -177,7 +177,7 @@ Resolution Order
 The framework computes the template scope in this order.
 
 1. URL kwargs from the matched route are seeded into the context dict.
-2. Inherited context functions from every ancestor ``page.py``, walked from the route root inward.
+2. Inherited context functions from every ancestor ``page.py``, walked from the current page upward toward the page root.
 3. Page level context functions declared in the current ``page.py``.
 4. Context processors run after every ``@context`` callable.
    The first source is ``OPTIONS.context_processors`` on each page backend entry inside ``PAGE_BACKENDS``.

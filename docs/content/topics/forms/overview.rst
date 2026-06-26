@@ -46,20 +46,11 @@ The framework hashes the action's scope key and name into a single POST endpoint
 The URL is derived deterministically from the class, so a form needs no URL wiring and no per-page route.
 The same form can be embedded on any page that renders its tag and every copy submits to the same endpoint.
 
-File Scope (Anchor Files)
--------------------------
+Scope
+-----
 
-A single global registry would force every form name to be unique across the whole project, so two teams could not both ship a ``NoteForm`` without coordinating names.
-File scope removes that coupling.
-When a form class is declared in ``page.py`` or ``component.py``, its scope is ``page``.
-A page-scoped form is keyed to its definition file, so two different pages may each declare an ``ArticleEditForm`` without collision.
-The ``{% form "article_edit_form" %}`` tag on a given page resolves the form registered in that page's own file first.
-
-Shared Scope
-------------
-
-A form class declared in any other file (``forms.py``, ``models.py``, a module imported by ``AppConfig.ready``, etc.) receives ``shared`` scope.
-A shared form has a project-wide name and is reachable from any template.
+A form declared in ``page.py`` or ``component.py`` is page-scoped and keyed to its file, so two pages may each declare an ``ArticleEditForm`` without collision.
+A form declared in any other file is shared, carries a project-wide name, and is reachable from any template.
 
 .. code-block:: python
    :caption: app/forms.py — auto-registered as ``contact_form`` (shared)
@@ -74,30 +65,15 @@ A shared form has a project-wide name and is reachable from any template.
            send_email(self.cleaned_data["email"])
            return redirect_to_origin(request)
 
+Set ``Meta.scope`` to ``"page"`` or ``"shared"`` to pin the scope regardless of file name.
+See :doc:`actions` for the anchor-file rule, the ``Meta.scope`` override, and the ``next.E047`` check.
+
 Autodiscover
 ------------
 
 ``NextFrameworkConfig.ready`` calls ``autodiscover_forms()`` once on startup.
 It imports the ``forms`` submodule of every installed app so shared forms declared in ``app/forms.py`` register before the first request arrives.
 Set ``NEXT_FRAMEWORK["FORM_AUTODISCOVER"] = False`` to disable the automatic import.
-
-Override Scope
---------------
-
-Set ``Meta.scope`` to pin the form to a specific scope regardless of file name.
-
-.. code-block:: python
-   :caption: forcing page scope from forms.py
-
-   class LoginForm(next.forms.Form):
-       class Meta:
-           scope = "page"
-
-       username = next.forms.CharField()
-       password = next.forms.CharField(widget=next.forms.PasswordInput)
-
-Valid values are ``"page"`` and ``"shared"``.
-Any other value triggers the ``next.E047`` system check and the form is not registered.
 
 Handling Submissions
 --------------------

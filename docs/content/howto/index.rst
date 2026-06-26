@@ -141,9 +141,9 @@ Topic guides cover the underlying concepts, see :doc:`/content/topics/index`.
    internationalize-routes
    customize-error-pages
    share-context-across-pages
+   resolve-feature-flags-with-di
    build-a-composite-component
    share-components-across-projects
-   resolve-feature-flags-with-di
    add-a-new-asset-kind
    add-a-custom-stem
    write-a-static-backend

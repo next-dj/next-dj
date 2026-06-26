@@ -58,6 +58,10 @@ This is the authoritative ordering for the page render path.
 
 A ``render`` function therefore cannot read a value that a ``@context`` callable would publish, because the callables have not run yet.
 
+A partial-zone request takes a different path.
+When the request targets named zones, the view returns a zone response before step 3, so the layout composition does not run.
+See :doc:`/content/topics/partial-rendering/zones` for the zone-morph request.
+
 The ``render`` Function
 -----------------------
 
@@ -151,8 +155,8 @@ Unkeyed dict.
    Useful when several values share a dependency you only want to resolve once.
    The unkeyed form must return a mapping, and a return annotation that is not a mapping type reports :ref:`next.E029 <ref-system-checks>`.
 
-The ``inherit_context=True`` flag on a keyed function publishes the value to
-every descendant page rather than to the declaring page alone.
+The ``inherit_context=True`` flag works on both the keyed and the unkeyed-dict shapes.
+It publishes the value to every descendant page rather than to the declaring page alone.
 See :doc:`context` for that flag and the other ways to vary the decorator.
 
 Including Values in the JS Context
@@ -344,7 +348,7 @@ Register a ``MarkdownTemplateLoader`` in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` 
 The loader renders the Markdown to a body string, and that body flows through the ancestor layout chain like any other source.
 The page module still supplies context functions and action handlers as usual.
 
-The loader output passes through Django's template engine before the layout chain renders it.
+The loader output is substituted into the composed layout and rendered in one Django template pass.
 Any ``{{ ... }}`` or ``{% ... %}`` token inside the Markdown source is evaluated.
 Wrap untrusted prose in ``{% verbatim %}`` blocks inside the loader, or escape the braces before returning the body, when authors should not be able to invoke template tags.
 

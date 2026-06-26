@@ -37,7 +37,8 @@ Import Utilities
 
 .. autofunction:: next.conf.imports.perform_import
 
-.. autofunction:: next.conf.imports.clear_import_cache
+``next.conf.imports.clear_import_cache`` is framework-internal.
+The settings object invokes it from ``reload`` to drop cached imports when settings change.
 
 .. autodata:: next.conf.imports.IMPORT_STRINGS
 
