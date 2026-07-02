@@ -28,33 +28,62 @@ function manualClock(): Clock & { run(): void } {
 }
 
 // The poll timer re-arms itself from inside its own handler, so this clock
-// clears the pending slot before running it and each tick() drives one cycle.
-function manualPollClock(): Clock & { tick(): void } {
-  let pending: (() => void) | null = null;
+// holds every pending timer by handle with a working clearTimeout: a duplicate
+// timer chain is observable as pending() above one and doubled fetches per
+// tick(), which drains the due set before running it so a re-arm lands in the
+// next cycle. The intervals record every setTimeout delay, so a reschedule that
+// re-read a changed data-next-poll is observable, and setNow drives the
+// hidden-span gate of the visibility resume.
+function manualPollClock(): Clock & {
+  tick(): void;
+  pending(): number;
+  setNow(ms: number): void;
+  intervals: number[];
+} {
+  let now = 0;
+  let handles = 0;
+  const timers = new Map<number, () => void>();
+  const intervals: number[] = [];
   return {
-    now: () => 0,
-    setTimeout: (handler) => {
-      pending = handler;
-      return 1;
+    now: () => now,
+    setTimeout: (handler, ms) => {
+      handles += 1;
+      timers.set(handles, handler);
+      intervals.push(ms);
+      return handles;
     },
-    clearTimeout: () => {
-      pending = null;
+    clearTimeout: (handle) => {
+      timers.delete(handle);
     },
     tick() {
-      const h = pending;
-      pending = null;
-      h?.();
+      const due = Array.from(timers.values());
+      timers.clear();
+      for (const handler of due) handler();
     },
+    pending: () => timers.size,
+    setNow(ms) {
+      now = ms;
+    },
+    intervals,
   };
 }
 
+// The visibility seam holds every onChange subscriber, so the pause/resume
+// choreography fires alongside any other listener the runtime registers.
 function manualVisibility(): VisibilityAdapter & { setHidden(v: boolean): void } {
   let hidden = false;
+  const listeners = new Set<() => void>();
   return {
     hidden: () => hidden,
-    onChange: () => () => undefined,
+    onChange(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     setHidden(v) {
       hidden = v;
+      for (const listener of listeners) listener();
     },
   };
 }
@@ -84,7 +113,6 @@ function makeTriggers(over: Partial<Parameters<typeof createTriggers>[0]> = {}):
   const triggers = createTriggers({
     fetch: (request) => requests.push(request),
     abort: (zone) => aborted.push(zone),
-    version: () => "v1",
     document,
     clock: manualClock(),
     observer: manualObserver(),
@@ -114,7 +142,23 @@ describe("trigger delegation", () => {
     detach = triggers.install(document);
     triggers.ready();
     expect(requests).toHaveLength(1);
-    expect(requests[0]!.headers?.["X-Next-Zone"]).toBe("a,b");
+    expect(requests[0]!.zone).toBe("a,b");
+    expect(requests[0]!.headers).toBeUndefined();
+  });
+
+  it("groups a load batch by the owning page URL, one GET per page", () => {
+    document.body.innerHTML =
+      '<div id="a" data-next-zone="a" data-next-lazy="load"></div>' +
+      '<div id="b" data-next-zone="b" data-next-lazy="load"></div>' +
+      '<div id="c" data-next-zone="c" data-next-lazy="load"></div>';
+    const { triggers, requests } = makeTriggers({
+      pageUrl: (el) => (el.id === "c" ? "/layer/" : "/host/"),
+    });
+    detach = triggers.install(document);
+    triggers.ready();
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toMatchObject({ url: "/host/", zone: "a,b" });
+    expect(requests[1]).toMatchObject({ url: "/layer/", zone: "c" });
   });
 
   it("does not re-fire a load zone re-scanned by a parent morph", () => {
@@ -153,6 +197,20 @@ describe("trigger delegation", () => {
     observer.reveal();
     expect(requests).toHaveLength(1);
     expect(requests[0]!.zone).toBe("late");
+  });
+
+  it("a revealed zone GETs the page answered by the pageUrl dep", () => {
+    const observer = manualObserver();
+    document.body.innerHTML =
+      '<div data-next-zone="late" data-next-lazy="revealed"></div>';
+    const { triggers, requests } = makeTriggers({
+      observer,
+      pageUrl: () => "/host/",
+    });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    observer.reveal();
+    expect(requests[0]!.url).toBe("/host/");
   });
 
   it("blocks a request when confirm is cancelled", () => {
@@ -617,13 +675,49 @@ describe("zone polling", () => {
     clock.tick();
     expect(requests).toHaveLength(1);
     expect(requests[0]!.zone).toBe("t");
-    expect(requests[0]!.headers?.["X-Next-Zone"]).toBe("t");
-    expect(requests[0]!.headers?.["X-Next-Version"]).toBe("v1");
+    expect(requests[0]!.headers).toBeUndefined();
     clock.tick();
     expect(requests).toHaveLength(2);
   });
 
-  it("skips the fetch on a hidden tab and reschedules", () => {
+  it("a poller armed on a hidden tab sleeps and resumes as a single chain", () => {
+    const clock = manualPollClock();
+    const visibility = manualVisibility();
+    // Hidden before install, so no visibilitychange ever clears a pending timer.
+    visibility.setHidden(true);
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const { triggers, requests } = makeTriggers({ clock, visibility });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    // Hidden arming registers the entry with no live timer, so a background
+    // tab never wakes.
+    expect(clock.pending()).toBe(0);
+    clock.tick();
+    expect(requests).toHaveLength(0);
+    clock.setNow(3000);
+    visibility.setHidden(false);
+    expect(requests).toHaveLength(1);
+    expect(clock.pending()).toBe(1);
+    clock.tick();
+    expect(requests).toHaveLength(2);
+    expect(clock.pending()).toBe(1);
+  });
+
+  it("a tick landing on a hidden tab puts the poller to sleep", () => {
+    const clock = manualPollClock();
+    const visibility = manualVisibility();
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const { triggers, requests } = makeTriggers({ clock, visibility });
+    // No install: the hidden flip delivers no visibilitychange, so the armed
+    // timer fires into the in-tick safety net and stops rescheduling.
+    triggers.scan(document.body);
+    visibility.setHidden(true);
+    clock.tick();
+    expect(requests).toHaveLength(0);
+    expect(clock.pending()).toBe(0);
+  });
+
+  it("a repeated hidden flip tolerates a poller already sleeping", () => {
     const clock = manualPollClock();
     const visibility = manualVisibility();
     visibility.setHidden(true);
@@ -631,11 +725,80 @@ describe("zone polling", () => {
     const { triggers, requests } = makeTriggers({ clock, visibility });
     detach = triggers.install(document);
     triggers.scan(document.body);
+    visibility.setHidden(true);
+    expect(clock.pending()).toBe(0);
+    clock.setNow(3000);
+    visibility.setHidden(false);
+    expect(requests).toHaveLength(1);
+    expect(clock.pending()).toBe(1);
+  });
+
+  it("a hidden flip silences the pending poll timer", () => {
+    const clock = manualPollClock();
+    const visibility = manualVisibility();
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const { triggers, requests } = makeTriggers({ clock, visibility });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    visibility.setHidden(true);
     clock.tick();
     expect(requests).toHaveLength(0);
-    visibility.setHidden(false);
+    clock.tick();
+    expect(requests).toHaveLength(0);
+  });
+
+  it("a long hide runs the poller tick immediately on the visible flip", () => {
+    const clock = manualPollClock();
+    const visibility = manualVisibility();
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const { triggers, requests } = makeTriggers({ clock, visibility });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
     clock.tick();
     expect(requests).toHaveLength(1);
+    visibility.setHidden(true);
+    clock.setNow(3000);
+    visibility.setHidden(false);
+    expect(requests).toHaveLength(2);
+    expect(clock.pending()).toBe(1);
+    clock.tick();
+    expect(requests).toHaveLength(3);
+  });
+
+  it("a brief flicker re-arms the timers without an immediate fetch", () => {
+    const clock = manualPollClock();
+    const visibility = manualVisibility();
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const { triggers, requests } = makeTriggers({ clock, visibility });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    clock.tick();
+    expect(requests).toHaveLength(1);
+    visibility.setHidden(true);
+    clock.setNow(1000);
+    visibility.setHidden(false);
+    // Under the resume threshold nothing fetches: each poller re-arms with its
+    // own interval, the same anti-storm gate as the SSE resume.
+    expect(requests).toHaveLength(1);
+    expect(clock.pending()).toBe(1);
+    expect(clock.intervals).toEqual([5000, 5000, 5000]);
+    clock.tick();
+    expect(requests).toHaveLength(2);
+  });
+
+  it("resume tears down a poller whose zone vanished while hidden", () => {
+    const clock = manualPollClock();
+    const visibility = manualVisibility();
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const { triggers, requests } = makeTriggers({ clock, visibility });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    visibility.setHidden(true);
+    document.querySelector("div")!.removeAttribute("data-next-poll");
+    visibility.setHidden(false);
+    expect(requests).toHaveLength(0);
+    clock.tick();
+    expect(requests).toHaveLength(0);
   });
 
   it("stops the timer when the zone leaves the DOM", () => {
@@ -648,6 +811,90 @@ describe("zone polling", () => {
     el.remove();
     clock.tick();
     expect(requests).toHaveLength(0);
+    clock.tick();
+    expect(requests).toHaveLength(0);
+  });
+
+  it("stops the poller when the poll attribute is removed between ticks", () => {
+    const clock = manualPollClock();
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const { triggers, requests } = makeTriggers({ clock });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    document.querySelector("div")!.removeAttribute("data-next-poll");
+    clock.tick();
+    expect(requests).toHaveLength(0);
+    clock.tick();
+    expect(requests).toHaveLength(0);
+  });
+
+  it("stops the poller when the zone attribute is removed between ticks", () => {
+    const clock = manualPollClock();
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const { triggers, requests } = makeTriggers({ clock });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    document.querySelector("div")!.removeAttribute("data-next-zone");
+    clock.tick();
+    expect(requests).toHaveLength(0);
+    clock.tick();
+    expect(requests).toHaveLength(0);
+  });
+
+  it("a tick reschedules with the interval re-read from the live element", () => {
+    const clock = manualPollClock();
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const { triggers, requests } = makeTriggers({ clock });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    expect(clock.intervals).toEqual([5000]);
+    document.querySelector("div")!.setAttribute("data-next-poll", "9000");
+    clock.tick();
+    expect(requests).toHaveLength(1);
+    expect(clock.intervals).toEqual([5000, 9000]);
+    clock.tick();
+    expect(requests).toHaveLength(2);
+  });
+
+  it("arms a poller when the scan root itself is the poll wrapper", () => {
+    const clock = manualPollClock();
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const el = document.querySelector("div")!;
+    const { triggers, requests } = makeTriggers({ clock });
+    detach = triggers.install(document);
+    // A replace patch scans the new wrapper element itself, not a parent.
+    triggers.scan(el);
+    clock.tick();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.zone).toBe("t");
+  });
+
+  it("fires the load batch when the scan root itself is the load wrapper", () => {
+    document.body.innerHTML = '<div data-next-zone="a" data-next-lazy="load"></div>';
+    const el = document.querySelector("div")!;
+    const { triggers, requests } = makeTriggers();
+    detach = triggers.install(document);
+    triggers.scan(el);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.zone).toBe("a");
+  });
+
+  it("polls the URL answered by the pageUrl dep, not the address bar", () => {
+    const clock = manualPollClock();
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const { triggers, requests } = makeTriggers({ clock, pageUrl: () => "/host/" });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    clock.tick();
+    expect(requests[0]!.url).toBe("/host/");
+  });
+
+  it("ignores a hand-written duration literal under the strict grammar", () => {
+    const clock = manualPollClock();
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5s"></div>';
+    const { triggers, requests } = makeTriggers({ clock });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
     clock.tick();
     expect(requests).toHaveLength(0);
   });
@@ -690,6 +937,18 @@ describe("zone polling", () => {
     const { triggers, requests } = makeTriggers({ clock });
     detach = triggers.install(document);
     triggers.scan(document.body);
+    clock.tick();
+    expect(requests).toHaveLength(0);
+  });
+
+  it("ignores an interval above the browser's signed-32-bit timer bound", () => {
+    const clock = manualPollClock();
+    document.body.innerHTML =
+      '<div data-next-zone="t" data-next-poll="2147483648"></div>';
+    const { triggers, requests } = makeTriggers({ clock });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    expect(clock.pending()).toBe(0);
     clock.tick();
     expect(requests).toHaveLength(0);
   });
@@ -741,10 +1000,50 @@ describe("dev attribute validation", () => {
     warn.mockRestore();
   });
 
+  it("warns on a malformed data-next-poll value in dev", () => {
+    document.body.innerHTML = '<div data-next-zone="z" data-next-poll="5s"></div>';
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { triggers } = makeTriggers({ dev: true });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toContain('data-next-poll="5s"');
+    expect(warn.mock.calls[0]![0]).toContain("whole number of milliseconds");
+    warn.mockRestore();
+  });
+
+  it("warns on a poll interval above the timer bound in dev", () => {
+    document.body.innerHTML =
+      '<div data-next-zone="z" data-next-poll="2147483648"></div>';
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { triggers } = makeTriggers({ dev: true });
+    detach = triggers.install(document);
+    triggers.scan(document.body);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toContain('data-next-poll="2147483648"');
+    expect(warn.mock.calls[0]![0]).toContain("between 1 and 2147483647");
+    warn.mockRestore();
+  });
+
+  it("warns when the scan root itself carries the malformed attribute", () => {
+    document.body.innerHTML = '<div data-next-zone="z" data-next-lazy="loaded"></div>';
+    const el = document.querySelector("div")!;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { triggers } = makeTriggers({ dev: true });
+    detach = triggers.install(document);
+    // A replace patch scans the new wrapper element itself, so the dev warning
+    // must cover the root and not only its descendants.
+    triggers.scan(el);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toContain('data-next-lazy="loaded"');
+    warn.mockRestore();
+  });
+
   it("stays silent on recognised values in dev", () => {
     document.body.innerHTML =
       '<div data-next-zone="z" data-next-lazy="load"></div>' +
-      '<a href="/p2/" data-next-merge="append" data-next-target="list">more</a>';
+      '<a href="/p2/" data-next-merge="append" data-next-target="list">more</a>' +
+      '<div data-next-zone="p" data-next-poll="5000"></div>';
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { triggers } = makeTriggers({ dev: true });
     detach = triggers.install(document);
@@ -756,7 +1055,8 @@ describe("dev attribute validation", () => {
   it("stays silent on an out-of-set value when dev is off", () => {
     document.body.innerHTML =
       '<div data-next-zone="z" data-next-lazy="loaded"></div>' +
-      '<a href="/p2/" data-next-merge="add" data-next-target="list">more</a>';
+      '<a href="/p2/" data-next-merge="add" data-next-target="list">more</a>' +
+      '<div data-next-zone="p" data-next-poll="5s"></div>';
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { triggers } = makeTriggers();
     detach = triggers.install(document);

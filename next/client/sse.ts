@@ -11,16 +11,18 @@
 // the stream lives on.
 
 import { defaultEventSource, defaultVisibility } from "./adapters";
-import { HEADER_ZONE, asString, currentUrl, isRecord } from "./protocol";
+import {
+  HEADER_ZONE,
+  RESUME_REVALIDATE_MS,
+  asString,
+  currentUrl,
+  isRecord,
+} from "./protocol";
 
 const SSE_ATTR = "data-next-sse";
 // The ring holds the last 25 own request ids, matching the server-side echo
 // window. Overflow is safe: a dropped id yields an extra refresh, not a break.
 const ECHO_LIMIT = 25;
-// A visibility flip shorter than this revalidates nothing: a momentary alt-tab
-// reconnects the stream but skips the zone re-GET, so flicking between tabs does
-// not storm the server. A longer pause may have missed events, so it converges.
-const RESUME_REVALIDATE_MS = 3000;
 // The cap on bound zones a connection tracks. Without it a long background sleep
 // lets the registry grow unbounded, and resume would re-GET every accumulated
 // zone at once, a thundering herd on the server. Past the cap a new zone is

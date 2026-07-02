@@ -3,6 +3,7 @@ import { createPartial } from "./partial";
 import type { PartialAdapters, PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
 import type { EventSourceAdapter, SourceControl, VisibilityAdapter } from "./sse";
+import type { Clock } from "./wire";
 
 // A patches response the configured fetch returns so the wire resolves without a
 // real server.
@@ -33,16 +34,17 @@ function mockSource(): {
   return { adapter, opened };
 }
 
-// A visibility adapter the harness flips by hand.
+// A visibility adapter the harness flips by hand. It holds every onChange
+// subscriber, since the SSE bridge and the trigger pollers share the seam.
 function mockVisibility(): { adapter: VisibilityAdapter; set(hidden: boolean): void } {
   let hidden = false;
-  let listener: (() => void) | null = null;
+  const listeners = new Set<() => void>();
   const adapter: VisibilityAdapter = {
     hidden: () => hidden,
     onChange(l) {
-      listener = l;
+      listeners.add(l);
       return () => {
-        listener = null;
+        listeners.delete(l);
       };
     },
   };
@@ -50,7 +52,27 @@ function mockVisibility(): { adapter: VisibilityAdapter; set(hidden: boolean): v
     adapter,
     set(value) {
       hidden = value;
-      listener?.();
+      for (const l of listeners) l();
+    },
+  };
+}
+
+// A single-slot clock whose tick() drives one self-rescheduling poll cycle.
+function mockPollClock(): Clock & { tick(): void } {
+  let pending: (() => void) | null = null;
+  return {
+    now: () => 0,
+    setTimeout: (handler) => {
+      pending = handler;
+      return 1;
+    },
+    clearTimeout: () => {
+      pending = null;
+    },
+    tick() {
+      const h = pending;
+      pending = null;
+      h?.();
     },
   };
 }
@@ -323,6 +345,51 @@ describe("createPartial surface", () => {
     );
   });
 
+  it("_configure stops the pollers the previous configuration armed", async () => {
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const clock = mockPollClock();
+    const calls: string[] = [];
+    const fetch = async (url: string) => {
+      calls.push(url);
+      return patchesResponse();
+    };
+    partial._configure({ document, clock, fetch, navigate: () => {} });
+    partial.ready();
+    clock.tick();
+    await Promise.resolve();
+    expect(calls).toHaveLength(1);
+    partial._configure({ document, clock, fetch, navigate: () => {} });
+    clock.tick();
+    await Promise.resolve();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("a poll tick GETs the host page while a layer holds the address bar", async () => {
+    window.history.replaceState(null, "", "/host/");
+    document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
+    const clock = mockPollClock();
+    const calls: string[] = [];
+    partial._configure({
+      document,
+      clock,
+      dialog: mockDialog(),
+      fetch: async (url) => {
+        calls.push(url);
+        return patchesResponse();
+      },
+      navigate: () => {},
+    });
+    partial.ready();
+    await partial.layers.open(null, "/modal/", "m");
+    expect(window.location.pathname).toBe("/modal/");
+    calls.length = 0;
+    clock.tick();
+    await Promise.resolve();
+    expect(calls).toEqual(["/host/"]);
+    partial.layers._reset();
+    window.history.replaceState(null, "", "/");
+  });
+
   it("opening a layer GETs its body through the wire", async () => {
     const calls: string[] = [];
     partial._configure({
@@ -430,12 +497,15 @@ describe("createPartial surface", () => {
         form: null,
       }),
     );
+    await Promise.resolve();
+    // The refresh op itself fetched once. Dropping that call proves the next
+    // one comes from the resume revalidation, not the stream event.
+    calls.length = 0;
     visibility.set(true);
     clock = 5000;
     visibility.set(false);
     await Promise.resolve();
     nowSpy.mockRestore();
-    expect(calls.some((c) => c.url.includes("?") || c.init.headers)).toBe(true);
     expect(
       calls.some(
         (c) => (c.init.headers as Record<string, string>)["X-Next-Zone"] === "poll",

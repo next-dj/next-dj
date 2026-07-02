@@ -11,6 +11,7 @@ from next.partial.registry import (
     zones_of,
 )
 from next.partial.signals import patch_op_registered, zone_registered
+from next.partial.zone import ZoneOptions
 
 
 class TestBuiltinOps:
@@ -102,6 +103,17 @@ class TestZonesOf:
         template = Template('{% zone "z" poll="5s" %}b{% endzone %}')
         info = zones_of(template)["z"]
         assert info.poll == 5000
+
+    def test_zone_info_options_mirror_the_scalar_fields(self) -> None:
+        zones = zones_of(_zoned_template())
+        assert zones["first"].options == ZoneOptions()
+        assert zones["second"].options == ZoneOptions(tag="tbody", lazy="load")
+
+    def test_zone_info_options_carry_the_delivery_attrs(self) -> None:
+        template = Template('{% zone "z" poll="5s" %}b{% endzone %}')
+        info = zones_of(template)["z"]
+        assert info.options == ZoneOptions(poll=5000)
+        assert info.options.delivery_attrs == ' data-next-poll="5000"'
 
     def test_empty_template_has_no_zones(self) -> None:
         assert zones_of(Template("plain {{ x }}")) == {}

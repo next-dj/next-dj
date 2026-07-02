@@ -194,7 +194,12 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     return {
       fetch: (request: WireRequest) => void wire.fetch(request),
       abort: (zone: string) => wire.abort(zone),
-      version: () => assets.version(),
+      // A poll tick or lazy activation asks the layer stack for the page that
+      // owns its element, so a base-page zone keeps GETting the host URL while
+      // a modal layer holds the address bar. The arrow reads the `layers`
+      // variable, and _configure rebuilds the stack before the triggers, so
+      // the binding stays live the same way applyDeps holds it.
+      pageUrl: (el: Element) => layers.urlFor(el),
       ...opt("document", adapters?.document),
       ...opt("clock", adapters?.clock),
       ...opt("observer", adapters?.observer),
@@ -294,6 +299,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       assets = createAssets(assetsDeps(adapters));
       detachLayers();
       detachTriggers();
+      // Stop the old instance's pollers and observers before the rebuild, or
+      // they would keep fetching through the live wire as orphans, the same
+      // reason the SSE bridge resets here.
+      triggers._reset();
       sse._reset();
       layers = createLayers(layerDeps(adapters));
       triggers = createTriggers(triggerDeps(adapters));

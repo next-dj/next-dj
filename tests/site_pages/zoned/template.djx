@@ -2,3 +2,4 @@
 {% zone "alpha" %}<p>alpha {{ greeting }}</p>{% endzone %}
 {% zone "beta" tag="section" %}<p>beta {{ greeting }}</p>{% endzone %}
 {% zone "later" lazy="load" %}<p>later {{ greeting }}</p>{% placeholder %}<p>loading</p>{% endzone %}
+{% zone "ticker" poll="5s" %}<p>tick {{ greeting }}</p>{% endzone %}

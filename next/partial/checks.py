@@ -322,7 +322,7 @@ def check_lazy_zone_has_placeholder(
     messages: list[CheckMessage] = []
     for page_path, template in _iter_composed_pages():
         for node in _zone_nodes(template):
-            if node.lazy is None or _significant(node.placeholder):
+            if node.options.lazy is None or _significant(node.placeholder):
                 continue
             messages.append(
                 Error(

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
     from django.template.base import Template
 
-    from .zone import ZonePartial
+    from .zone import ZoneOptions, ZonePartial
 
 
 BUILTIN_OPS: frozenset[str] = frozenset(
@@ -78,13 +78,19 @@ def register_patch_op(name: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class ZoneInfo:
-    """One compiled zone of a composed page template."""
+    """One compiled zone of a composed page template.
+
+    `lazy`, `poll`, and `tag` mirror the structured `options` for the
+    read model, while the standalone render path consumes `options`
+    whole so no mode is lost between the two render paths.
+    """
 
     name: str
     lazy: str | None
     poll: int | None
     tag: str
     partial: "ZonePartial"
+    options: "ZoneOptions"
 
 
 _zone_cache: "WeakKeyDictionary[Template, Mapping[str, ZoneInfo]]" = WeakKeyDictionary()
@@ -97,10 +103,11 @@ def _zones_from_template(template: "Template") -> dict[str, ZoneInfo]:
     for node in nodes:
         zones[node.name] = ZoneInfo(
             name=node.name,
-            lazy=node.lazy,
-            poll=node.poll,
-            tag=node.tag,
+            lazy=node.options.lazy,
+            poll=node.options.poll,
+            tag=node.options.tag,
             partial=node.partial,
+            options=node.options,
         )
     return zones
 

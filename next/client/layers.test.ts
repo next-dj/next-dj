@@ -374,6 +374,69 @@ describe("layer requests carry the host origin", () => {
     expect(requests[0]!.headers?.[HEADER_ORIGIN]).toBe("/host/page/");
     layers._reset();
   });
+
+  it("keeps the host query string in the origin and the accept re-GET", async () => {
+    window.history.replaceState(null, "", "/host/page/?window=1h");
+    const { layers, requests } = makeOriginStack();
+    const opener = document.createElement("a");
+    opener.setAttribute("href", "/wizard/identity/");
+    opener.setAttribute("data-next-accepted", "request-list");
+    document.body.append(opener);
+    await layers.open(opener, "/wizard/identity/", "access-wizard");
+    expect(requests[0]!.headers?.[HEADER_ORIGIN]).toBe("/host/page/?window=1h");
+    requests.length = 0;
+    layers.close({ result: { id: 7 } });
+    expect(requests[0]!.url).toBe("/host/page/?window=1h");
+    expect(requests[0]!.headers?.[HEADER_ORIGIN]).toBe("/host/page/?window=1h");
+    layers._reset();
+  });
+});
+
+describe("urlFor resolves the page that owns an element", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    window.history.replaceState(null, "", "/feed/");
+  });
+
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("answers the current URL when no layer is open", () => {
+    const { layers } = makeStack();
+    const el = document.createElement("div");
+    document.body.append(el);
+    expect(layers.urlFor(el)).toBe("/feed/");
+  });
+
+  it("answers the pushed URL for an element inside an open layer", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/photos/1/", "photo");
+    const root = document.querySelector('dialog [data-next-zone="photo"]')!;
+    root.innerHTML = "<span>inside</span>";
+    expect(layers.urlFor(root.querySelector("span")!)).toBe("/photos/1/");
+    layers._reset();
+  });
+
+  it("answers the bottom layer's host for an element outside every layer", async () => {
+    const { layers } = makeStack();
+    const el = document.createElement("div");
+    document.body.append(el);
+    await layers.open(null, "/photos/1/", "photo");
+    expect(window.location.pathname).toBe("/photos/1/");
+    expect(layers.urlFor(el)).toBe("/feed/");
+    layers._reset();
+  });
+
+  it("keeps the host query string for a base-page element under a layer", async () => {
+    window.history.replaceState(null, "", "/feed/?page=2");
+    const { layers } = makeStack();
+    const el = document.createElement("div");
+    document.body.append(el);
+    await layers.open(null, "/photos/1/", "photo");
+    expect(layers.urlFor(el)).toBe("/feed/?page=2");
+    layers._reset();
+  });
 });
 
 describe("layer intercepting URL lifecycle", () => {
@@ -439,6 +502,13 @@ describe("layer intercepting URL lifecycle", () => {
     layers.close({ dismiss: true, reason: "escape" });
     expect(layers.size()).toBe(0);
     expect(window.location.pathname).toBe("/feed/");
+  });
+
+  it("restores the host query string on a programmatic close", async () => {
+    window.history.replaceState(null, "", "/feed/?page=2");
+    await layers.open(null, "/photos/1/", "photo");
+    layers.close({ result: undefined });
+    expect(window.location.pathname + window.location.search).toBe("/feed/?page=2");
   });
 
   it("Back closes only the top of a nested stack", async () => {

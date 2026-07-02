@@ -1,5 +1,7 @@
 """Zone template tag, its node, and the standalone zone-body renderable."""
 
+import re
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast, override
 
 from django.template import Library, TemplateSyntaxError
@@ -28,7 +30,9 @@ _TAG_KWARG = "tag"
 _LAZY_KWARG = "lazy"
 _POLL_KWARG = "poll"
 _MIN_POLL_MS = 1000
+_MAX_POLL_MS = 2_147_483_647
 _MS_PER_SECOND = 1000
+_POLL_DIGITS = re.compile(r"[0-9]+")
 
 
 def _strip_quotes(raw: str) -> str:
@@ -36,24 +40,51 @@ def _strip_quotes(raw: str) -> str:
     return raw.strip("'\"").strip()
 
 
-def _wrap_zone(tag: str, name: str, body: str) -> SafeString:
-    """Return the addressable wrapper element around a rendered zone body."""
-    return SafeString(f'<{tag} {ZONE_ATTR}="{name}">{body}</{tag}>')
+def _wrap_zone(tag: str, name: str, body: str, *, extra: str = "") -> SafeString:
+    """Return the addressable wrapper element around a rendered zone body.
+
+    A non-empty `extra` carries its own leading space, so the plain
+    wrapper stays byte-for-byte free of trailing whitespace.
+    """
+    return SafeString(f'<{tag} {ZONE_ATTR}="{name}"{extra}>{body}</{tag}>')
+
+
+@dataclass(frozen=True, slots=True)
+class ZoneOptions:
+    """Compile-time rendering options of one zone.
+
+    The wrapper attribute strings are assembled here once at parse time,
+    so the two render paths read the same precomputed values and a new
+    mode cannot diverge the full render from the standalone delivery.
+    """
+
+    tag: str = _DEFAULT_TAG
+    lazy: str | None = None
+    poll: int | None = None
+    full_attrs: str = field(init=False)
+    delivery_attrs: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Precompute the wrapper attribute strings from the mode options."""
+        delivery = "" if self.poll is None else f' {POLL_ATTR}="{self.poll}"'
+        full = delivery if self.lazy is None else f' {LAZY_ATTR}="{self.lazy}"'
+        object.__setattr__(self, "full_attrs", full)
+        object.__setattr__(self, "delivery_attrs", delivery)
 
 
 def render_zone_standalone(
     partial: "ZonePartial",
     name: str,
-    tag: str,
+    options: ZoneOptions,
     context: "Context",
 ) -> SafeString:
     """Render one zone body wrapped in its addressable element.
 
-    The wrapper drops the lazy hint because a partial request asks for
-    the body by name and the body has already arrived. Both the inline
-    full render and the partial path share this single wrapper string.
+    The wrapper carries the delivery attributes of the zone options,
+    which drop the lazy hint because the body has already arrived.
     """
-    return _wrap_zone(tag, name, partial.render(context))
+    body = partial.render(context)
+    return _wrap_zone(options.tag, name, body, extra=options.delivery_attrs)
 
 
 class ZonePartial:
@@ -116,39 +147,32 @@ class ZoneNode(Node):
         name: str,
         partial: ZonePartial,
         *,
-        tag: str = _DEFAULT_TAG,
-        lazy: str | None = None,
-        poll: int | None = None,
+        options: ZoneOptions,
         placeholder: NodeList | None = None,
     ) -> None:
         """Store the zone name, its body partial, and its rendering options."""
         self.name = name
         self.partial = partial
         self.nodelist = partial.nodelist
-        self.tag = tag
-        self.lazy = lazy
-        self.poll = poll
+        self.options = options
         self.placeholder = placeholder if placeholder is not None else NodeList()
 
     @override
     def render(self, context: "Context") -> SafeString:
         """Render the zone inline on a full page render."""
-        if self.lazy is not None:
-            open_tag = (
-                f'<{self.tag} {ZONE_ATTR}="{self.name}" {LAZY_ATTR}="{self.lazy}">'
+        options = self.options
+        if options.lazy is not None:
+            return _wrap_zone(
+                options.tag,
+                self.name,
+                self.placeholder.render(context),
+                extra=options.full_attrs,
             )
-            return SafeString(
-                f"{open_tag}{self.placeholder.render(context)}</{self.tag}>"
-            )
-        body = self.partial.render(context)
-        if self.poll is None:
-            return _wrap_zone(self.tag, self.name, body)
-        open_tag = f'<{self.tag} {ZONE_ATTR}="{self.name}" {POLL_ATTR}="{self.poll}">'
-        return SafeString(f"{open_tag}{body}</{self.tag}>")
+        return render_zone_standalone(self.partial, self.name, options, context)
 
 
-def _parse_options(token: "Token") -> tuple[str, str, str | None, int | None]:
-    """Return the zone name, wrapper tag, lazy trigger, and poll interval."""
+def _parse_options(token: "Token") -> tuple[str, ZoneOptions]:
+    """Return the zone name and its parsed rendering options."""
     bits = token.split_contents()
     if len(bits) < _ZONE_NAME_INDEX + 1:
         msg = '{% zone %} tag requires a quoted zone name, e.g. {% zone "name" %}.'
@@ -174,7 +198,7 @@ def _parse_options(token: "Token") -> tuple[str, str, str | None, int | None]:
     if lazy is not None and poll is not None:
         msg = "{% zone %} cannot combine poll= with lazy=, the modes are exclusive."
         raise TemplateSyntaxError(msg)
-    return name, tag, lazy, poll
+    return name, ZoneOptions(tag=tag, lazy=lazy, poll=poll)
 
 
 def _validate_lazy(value: str) -> str:
@@ -187,24 +211,28 @@ def _validate_lazy(value: str) -> str:
 
 
 def _validate_poll(value: str) -> int:
-    """Return the poll interval in ms parsed from a 5s or 500ms literal.
+    """Return the poll interval in ms parsed from a 5s or 1500ms literal.
 
-    A bare number is read as milliseconds. An interval below the floor or a
-    malformed literal fails at compile time, the same honest-fail as lazy.
+    A bare number is read as milliseconds and the digits must be plain
+    ASCII. An interval outside the floor-to-ceiling range or a malformed
+    literal fails at compile time, the same honest-fail as lazy.
     """
     text = value.strip()
-    try:
-        if text.endswith("ms"):
-            ms = int(text[:-2])
-        elif text.endswith("s"):
-            ms = int(text[:-1]) * _MS_PER_SECOND
-        else:
-            ms = int(text)
-    except ValueError:
-        msg = f"{{% zone %}} poll must be a duration like 5s or 500ms, got {value!r}."
-        raise TemplateSyntaxError(msg) from None
+    if text.endswith("ms"):
+        digits, scale = text[:-2], 1
+    elif text.endswith("s"):
+        digits, scale = text[:-1], _MS_PER_SECOND
+    else:
+        digits, scale = text, 1
+    if _POLL_DIGITS.fullmatch(digits) is None:
+        msg = f"{{% zone %}} poll must be a duration like 5s or 1500ms, got {value!r}."
+        raise TemplateSyntaxError(msg)
+    ms = int(digits) * scale
     if ms < _MIN_POLL_MS:
         msg = f"{{% zone %}} poll must be at least {_MIN_POLL_MS}ms, got {ms}ms."
+        raise TemplateSyntaxError(msg)
+    if ms > _MAX_POLL_MS:
+        msg = f"{{% zone %}} poll must be at most {_MAX_POLL_MS}ms, got {ms}ms."
         raise TemplateSyntaxError(msg)
     return ms
 
@@ -218,12 +246,18 @@ def do_zone(parser: "Parser", token: "Token") -> ZoneNode:
     arrives. This hook registers nothing with the zone registry, the
     registry is derived from the compiled page template on demand.
     """
-    name, tag, lazy, poll = _parse_options(token)
+    name, options = _parse_options(token)
     body = parser.parse(_PLACEHOLDER_THEN_END)
     placeholder: NodeList | None = None
     if parser.next_token().contents.split()[0] == "placeholder":
         placeholder = parser.parse(_END_ZONE)
         parser.delete_first_token()
+    if placeholder is not None and options.lazy is None:
+        msg = (
+            "{% zone %} placeholder requires lazy=, a zone that shows "
+            "its body never renders the placeholder branch."
+        )
+        raise TemplateSyntaxError(msg)
     partial = ZonePartial(
         nodelist=body,
         name=name,
@@ -233,9 +267,7 @@ def do_zone(parser: "Parser", token: "Token") -> ZoneNode:
     return ZoneNode(
         name=name,
         partial=partial,
-        tag=tag,
-        lazy=lazy,
-        poll=poll,
+        options=options,
         placeholder=placeholder,
     )
 
@@ -245,6 +277,7 @@ __all__ = [
     "POLL_ATTR",
     "ZONE_ATTR",
     "ZoneNode",
+    "ZoneOptions",
     "ZonePartial",
     "do_zone",
     "register",

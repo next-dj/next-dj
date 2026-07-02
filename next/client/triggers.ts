@@ -23,8 +23,7 @@ import {
   ATTR_KEY,
   ATTR_ZONE,
   HEADER_MERGE,
-  HEADER_VERSION,
-  HEADER_ZONE,
+  RESUME_REVALIDATE_MS,
   currentUrl,
 } from "./protocol";
 import type { VisibilityAdapter } from "./sse";
@@ -48,6 +47,11 @@ const HEADER_VALIDATE = "X-Next-Validate";
 // is caught at authoring time rather than failing quietly downstream.
 const LAZY_VALUES = new Set(["load", "revealed"]);
 const MERGE_VALUES = new Set(["append", "prepend"]);
+
+// The upper bound the {% zone %} tag enforces server-side. Above 2^31-1 the
+// browser's signed-32-bit setTimeout coercion fires the timer immediately, so
+// a larger hand-written value would poll in a tight loop instead of slowly.
+const MAX_POLL_MS = 2147483647;
 
 // The geometry seam: real IntersectionObserver behind a mock the harness drives
 // by calling the callback, since jsdom reports no intersections.
@@ -75,15 +79,19 @@ export interface TriggerDeps {
   // Abort the in-flight request on a zone queue, called when a form submit must
   // cancel its own inline validation.
   abort: (zone: string) => void;
-  // The version known to the client, sent on the lazy-zone and validate GETs so
-  // the safeguard sees a stale page.
-  version: () => string;
   document?: Document;
   clock?: Clock;
   observer?: IntersectionAdapter;
-  // The tab-visibility seam, shared with the SSE bridge: a poll tick on a
-  // hidden tab skips the fetch and reschedules.
+  // The tab-visibility seam, shared with the SSE bridge: a hidden tab arms no
+  // poll timers at all, a tab returning after a real absence runs every tick
+  // immediately, and a brief flicker only re-arms the timers, the same
+  // anti-storm gate as the SSE resume.
   visibility?: VisibilityAdapter;
+  // The URL of the page that owns an element, answered by the layer stack: a
+  // zone in the base document belongs to the host page even while a modal
+  // layer sits on top of history. Absent, lazy and poll GETs read the address
+  // bar.
+  pageUrl?: (el: Element) => string;
   // The confirm gate. Absent, the default calls window.confirm. Injectable so
   // tests drive accept and cancel without a real dialog.
   confirm?: ConfirmAdapter;
@@ -119,12 +127,28 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   // Observer teardowns, dropped on reset so vitest files do not leak observers.
   const observed: (() => void)[] = [];
   // Active pollers keyed by element, so a re-scan of a re-inserted zone does
-  // not arm a second timer and _reset can stop every one.
-  const polling = new Map<Element, number>();
+  // not arm a second timer and _reset can stop every one. The tick rides along
+  // so the visibility resume can run or re-arm every poller. A null handle is
+  // a sleeping entry: the tab was hidden, so no timer is live.
+  const polling = new Map<Element, { handle: number | null; tick: () => void }>();
+  // The clock reading at the last hidden flip, so the visible flip measures
+  // the hidden span and skips the immediate refresh for a flicker.
+  let hiddenAt = 0;
   let detach: (() => void) | null = null;
 
   function here(): string {
     return currentUrl(doc);
+  }
+
+  const pageUrl = deps.pageUrl ?? (() => here());
+
+  // querySelectorAll never matches its own root, but a replace patch scans the
+  // new wrapper element itself, so every activation pass folds a matching root
+  // into the result.
+  function matching(root: ParentNode, selector: string): Element[] {
+    const found = Array.from(root.querySelectorAll(selector));
+    if (root instanceof Element && root.matches(selector)) found.push(root);
+    return found;
   }
 
   // The abortable zone key of a form's inline validation, shared by the sender
@@ -170,7 +194,14 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     const action = form.getAttribute("action") || here().replace(/\?.*$/, "");
     const url = query === "" ? action : `${action}?${query}`;
     doc.defaultView?.history.replaceState(null, "", url);
-    deps.fetch({ url, zone, headers: versionHeaders({ [HEADER_ZONE]: zone }) });
+    zoneGet(url, zone);
+  }
+
+  // The one shape of a zone GET. The wire stamps X-Next-Zone from request.zone
+  // and asserts the asset version once one is learned, so the triggers pass
+  // intent, never headers.
+  function zoneGet(url: string, zone: string): void {
+    deps.fetch({ url, zone });
   }
 
   // A pagination link or sentinel GETs the next page with a merge intent, the
@@ -183,15 +214,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     // "append" fallback is never taken.
     /* v8 ignore next */
     const merge = el.getAttribute(MERGE_ATTR) ?? "append";
-    deps.fetch({
-      url: href,
-      zone,
-      headers: versionHeaders({ [HEADER_ZONE]: zone, [HEADER_MERGE]: merge }),
-    });
-  }
-
-  function versionHeaders(extra: Record<string, string>): Record<string, string> {
-    return { ...extra, [HEADER_VERSION]: deps.version() };
+    deps.fetch({ url: href, zone, headers: { [HEADER_MERGE]: merge } });
   }
 
   // Inline validation on blur. The FormData drops file fields so a multipart
@@ -212,7 +235,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       // fresh blur or a submit of the same form aborts it through the queue.
       zone: validateZone(uid),
       abortable: true,
-      headers: versionHeaders({ [HEADER_VALIDATE]: field }),
+      headers: { [HEADER_VALIDATE]: field },
       body: data,
     });
   }
@@ -315,13 +338,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     const merge = el.getAttribute(MERGE_ATTR);
     if (zone !== null && lazy === "revealed") {
       activated.add(el);
-      const stop = observer.observe(el, () => {
-        deps.fetch({
-          url: here(),
-          zone,
-          headers: versionHeaders({ [HEADER_ZONE]: zone }),
-        });
-      });
+      const stop = observer.observe(el, () => zoneGet(pageUrl(el), zone));
       observed.push(stop);
       return;
     }
@@ -334,75 +351,123 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     }
   }
 
+  // The poll interval under a strict decimal grammar: parseInt("5s") is 5 and
+  // would poll at 5ms, so only an all-digit positive value up to the server
+  // tag's own bound is an interval.
+  function pollMs(el: Element): number | null {
+    const raw = el.getAttribute(POLL_ATTR);
+    if (raw === null || !/^\d+$/.test(raw)) return null;
+    const ms = Number(raw);
+    return ms > 0 && ms <= MAX_POLL_MS ? ms : null;
+  }
+
   // Arm the self-rescheduling poll timer of one zone. A single Clock seam and
   // chained setTimeout, no setInterval, so tests drive ticks one by one. Each
-  // tick checks isConnected for an honest teardown after a morph removed the
-  // zone, and a hidden tab skips the fetch but keeps the schedule.
+  // tick re-reads the live element rather than trusting the arm-time capture:
+  // a morph may have removed it, reused it for unrelated content, or changed
+  // the interval, and the server keeps data-next-poll on partial responses, so
+  // a healthy zone always carries both attributes. Anything else is an honest
+  // teardown. A hidden tab arms no timer at all: the entry registers sleeping
+  // and the visible flip wakes it, so a background tab never forks a second
+  // timer chain on resume.
   function startPoll(el: Element): void {
     if (polling.has(el)) return;
-    const zone = el.getAttribute(ATTR_ZONE);
-    // scan reaches startPoll only via a [data-next-poll] match, so the
-    // attribute is always present.
-    const ms = Number.parseInt(el.getAttribute(POLL_ATTR)!, 10);
-    if (zone === null || !Number.isFinite(ms) || ms <= 0) return;
+    if (el.getAttribute(ATTR_ZONE) === null) return;
+    const ms = pollMs(el);
+    if (ms === null) return;
     const tick = (): void => {
-      if (!el.isConnected) {
+      const zone = el.getAttribute(ATTR_ZONE);
+      const interval = pollMs(el);
+      if (!el.isConnected || zone === null || interval === null) {
         stopPoll(el);
         return;
       }
-      if (!visibility.hidden()) {
-        deps.fetch({
-          url: here(),
-          zone,
-          headers: versionHeaders({ [HEADER_ZONE]: zone }),
-        });
+      if (visibility.hidden()) {
+        // The safety net for a hidden flip whose visibilitychange event was
+        // not delivered: the entry goes to sleep instead of rescheduling, and
+        // the visible flip wakes it like any paused poller.
+        polling.set(el, { handle: null, tick });
+        return;
       }
-      polling.set(el, clock.setTimeout(tick, ms));
+      zoneGet(pageUrl(el), zone);
+      polling.set(el, { handle: clock.setTimeout(tick, interval), tick });
     };
-    polling.set(el, clock.setTimeout(tick, ms));
+    polling.set(el, {
+      handle: visibility.hidden() ? null : clock.setTimeout(tick, ms),
+      tick,
+    });
   }
 
   // A tick's element is always in the map and _reset walks the map's own keys,
-  // so the handle is always present.
+  // so the entry is always present. A sleeping entry holds no live timer.
   function stopPoll(el: Element): void {
-    clock.clearTimeout(polling.get(el)!);
+    const entry = polling.get(el)!;
+    if (entry.handle !== null) clock.clearTimeout(entry.handle);
     polling.delete(el);
   }
 
-  // Batch the document's load zones into a single GET with a comma-joined
-  // X-Next-Zone, one round trip for every load zone on the page.
+  // On hidden, silence every pending timer but keep the entries sleeping, so a
+  // background tab stops waking entirely. On visible after a real absence, run
+  // every tick at once: each re-reads the live attributes, fetches, and re-arms
+  // itself. A flicker between tabs instead re-arms each timer with its own
+  // interval and no immediate fetch, the anti-storm gate the SSE resume applies
+  // at the same seam. A poller whose interval died while hidden still ticks so
+  // it tears itself down. A tick may stopPoll and delete its entry mid-walk,
+  // hence the copied entries.
+  function onVisibility(): void {
+    if (visibility.hidden()) {
+      hiddenAt = clock.now();
+      for (const entry of polling.values()) {
+        if (entry.handle !== null) clock.clearTimeout(entry.handle);
+        entry.handle = null;
+      }
+      return;
+    }
+    const stale = clock.now() - hiddenAt >= RESUME_REVALIDATE_MS;
+    for (const [el, entry] of Array.from(polling.entries())) {
+      const interval = pollMs(el);
+      if (stale || interval === null) entry.tick();
+      else entry.handle = clock.setTimeout(entry.tick, interval);
+    }
+  }
+
+  // Batch the load zones into one comma-joined GET per owning page, one round
+  // trip for every load zone the page contributed. The batch groups by the
+  // layer-resolved page URL: a base-page zone and a layer zone activated by
+  // the same apply GET their own pages, not whatever the address bar reads.
   function loadBatch(root: ParentNode): void {
-    const zones: string[] = [];
-    for (const el of Array.from(root.querySelectorAll(`[${LAZY_ATTR}="load"]`))) {
+    const batches = new Map<string, string[]>();
+    for (const el of matching(root, `[${LAZY_ATTR}="load"]`)) {
       if (activated.has(el)) continue;
       const zone = el.getAttribute(ATTR_ZONE);
       if (zone === null) continue;
       activated.add(el);
-      zones.push(zone);
+      const url = pageUrl(el);
+      const zones = batches.get(url);
+      if (zones === undefined) batches.set(url, [zone]);
+      else zones.push(zone);
     }
-    if (zones.length === 0) return;
-    const header = zones.join(",");
-    deps.fetch({
-      url: here(),
-      // The queue key is the batch header so a re-fired batch supersedes the
-      // old one cleanly.
-      zone: header,
-      headers: versionHeaders({ [HEADER_ZONE]: header }),
-    });
+    // The queue key is the zone batch so a re-fired batch supersedes the old
+    // one cleanly.
+    for (const [url, zones] of batches) zoneGet(url, zones.join(","));
   }
 
-  // Warn on a hand-written attribute value outside its closed set, which the
-  // runtime drops without acting on it. Dev-only, by the same shape as the
-  // script-neutralisation warning: prefix, attribute, value, and allowed set.
+  // Warn on a hand-written attribute value outside its closed set, and on a
+  // poll interval failing the strict grammar, both of which the runtime drops
+  // without acting on. Dev-only, by the same shape as the script-neutralisation
+  // warning: prefix, attribute, value, and allowed set.
   function validateAttrs(root: ParentNode): void {
     if (!dev) return;
-    for (const el of Array.from(root.querySelectorAll(`[${LAZY_ATTR}]`))) {
+    for (const el of matching(root, `[${LAZY_ATTR}]`)) {
       const value = el.getAttribute(LAZY_ATTR)!;
       if (!LAZY_VALUES.has(value)) warnAttr(LAZY_ATTR, value, LAZY_VALUES);
     }
-    for (const el of Array.from(root.querySelectorAll(`[${MERGE_ATTR}]`))) {
+    for (const el of matching(root, `[${MERGE_ATTR}]`)) {
       const value = el.getAttribute(MERGE_ATTR)!;
       if (!MERGE_VALUES.has(value)) warnAttr(MERGE_ATTR, value, MERGE_VALUES);
+    }
+    for (const el of matching(root, `[${POLL_ATTR}]`)) {
+      if (pollMs(el) === null) warnPoll(el.getAttribute(POLL_ATTR)!);
     }
   }
 
@@ -413,19 +478,25 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     );
   }
 
+  // The numeric sibling of warnAttr: the poll interval has no closed set to
+  // list, so the message points at the tag that writes a valid one.
+  function warnPoll(value: string): void {
+    console.warn(
+      `[next.partial] ${POLL_ATTR}="${value}" is not a whole number of milliseconds between 1 and ${MAX_POLL_MS} and is ignored. The {% zone %} tag writes the resolved interval.`,
+    );
+  }
+
   function scan(root: ParentNode): void {
     validateAttrs(root);
-    for (const el of Array.from(root.querySelectorAll(`[${LAZY_ATTR}="revealed"]`))) {
+    for (const el of matching(root, `[${LAZY_ATTR}="revealed"]`)) {
       activate(el);
     }
-    for (const el of Array.from(
-      root.querySelectorAll(`a[${MERGE_ATTR}][${TARGET_ATTR}]`),
-    )) {
+    for (const el of matching(root, `a[${MERGE_ATTR}][${TARGET_ATTR}]`)) {
       // Only sentinels (non-anchor or marked) arm an observer, plain pagination
       // links stay click-driven and are skipped here.
       if (el.hasAttribute(LAZY_ATTR)) activate(el);
     }
-    for (const el of Array.from(root.querySelectorAll(`[${POLL_ATTR}]`))) {
+    for (const el of matching(root, `[${POLL_ATTR}]`)) {
       startPoll(el);
     }
   }
@@ -438,12 +509,16 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     target.addEventListener("blur", onBlur, true);
     target.addEventListener("submit", onSubmit, true);
     target.addEventListener("click", onClick, true);
+    // The visibility subscription pauses and resumes the poll timers, torn
+    // down with the event listeners, the same choreography as the SSE bridge.
+    const stopVisibility = visibility.onChange(onVisibility);
     detach = () => {
       target.removeEventListener("input", onInput);
       target.removeEventListener("change", onInput);
       target.removeEventListener("blur", onBlur, true);
       target.removeEventListener("submit", onSubmit, true);
       target.removeEventListener("click", onClick, true);
+      stopVisibility();
     };
     return detach;
   }

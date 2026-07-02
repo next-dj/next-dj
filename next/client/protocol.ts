@@ -23,6 +23,13 @@ export const HEADER_VERSION = "X-Next-Version";
 export const HEADER_REQUEST_ID = "X-Next-Request-Id";
 export const HEADER_ORIGIN = "X-Next-Origin";
 
+// A visibility flip shorter than this revalidates nothing: a momentary alt-tab
+// reconnects the SSE stream and re-arms the poll timers but skips the zone
+// re-GETs, so flicking between tabs does not storm the server. The SSE bridge
+// and the poll triggers gate the same resume seam, so the threshold is part of
+// the shared vocabulary.
+export const RESUME_REVALIDATE_MS = 3000;
+
 // The data-next-* attributes the runtime resolves across module boundaries: a
 // zone container, a form keyed by its action uid, and a list-row dedup key. The
 // applier, the layer stack, the triggers, and the morph engine must spell these

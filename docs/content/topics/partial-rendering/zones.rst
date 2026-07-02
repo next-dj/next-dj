@@ -83,12 +83,13 @@ The body renders inline on the first paint, and the runtime re-GETs the zone on 
      {% component "stat_card" label="Pages" value=totals.pages %}
    {% endzone %}
 
-The interval reads ``5s``, ``500ms``, or a bare number of milliseconds.
-An interval below one second or a malformed literal fails when the template compiles, the same honest-fail as an unknown ``lazy=`` trigger.
+The interval reads ``5s``, ``1500ms``, or a bare number of milliseconds.
+An interval below one second or above the browser timer ceiling fails when the template compiles, the same honest-fail as a malformed literal or an unknown ``lazy=`` trigger.
 
 The wrapper carries ``data-next-poll`` with the resolved milliseconds on the full render.
-A partial response for the zone drops the hint, because the runtime reads the interval from the live element.
-A hidden tab does not poll, and the next tick after the tab returns to the foreground fetches the fresh body.
+A partial response for the zone keeps the interval on its wrapper and drops only the lazy hint, so the live element stays the source of truth across morphs.
+A hidden tab pauses the poll timers.
+A tab hidden long enough to have missed a tick refreshes every polling zone on its return to the foreground, while a brief flicker between tabs re-arms the timers without a fetch, so switching windows does not storm the server.
 A polling zone shows its body, so it cannot also be ``lazy=``, the two modes are exclusive and combining them is a compile error.
 
 The Wrapper Element
