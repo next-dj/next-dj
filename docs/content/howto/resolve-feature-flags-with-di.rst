@@ -113,11 +113,11 @@ The next ``get_cached_flag`` call refetches from the database.
    from .cache import invalidate_flag
    from .models import Flag
 
-   def _invalidate_on_save(sender: type[Flag], instance: Flag, **_: object) -> None:  # noqa: ARG001
+   def _invalidate_on_save(instance: Flag, **_: object) -> None:
        """Drop the cached entry so the next read reflects the updated row."""
        invalidate_flag(instance.name)
 
-   def _invalidate_on_delete(sender: type[Flag], instance: Flag, **_: object) -> None:  # noqa: ARG001
+   def _invalidate_on_delete(instance: Flag, **_: object) -> None:
        """Drop the cached entry when the flag is removed from the database."""
        invalidate_flag(instance.name)
 
@@ -224,7 +224,8 @@ The banner appears.
 Set ``enabled`` to ``False`` and save.
 The ``post_save`` receiver drops the cached entry, the next ``get_cached_flag`` call refetches, and the banner collapses to an empty string.
 
-A second context function that also asks for ``DFlag[Flag]`` triggers the provider again on the same request, but ``get_cached_flag`` shares Django's :class:`~django.core.cache.backends.locmem.LocMemCache` entry, so the lookup is served from process memory rather than the database.
+A second context function that also asks for ``DFlag[Flag]`` triggers the provider again on the same request.
+``get_cached_flag`` shares Django's :class:`~django.core.cache.backends.locmem.LocMemCache` entry, so the lookup is served from process memory rather than the database.
 The framework's per-resolution cache only memoises ``Depends("name")`` callables, so identity across calls comes from the LocMem cache the helper builds.
 
 See Also

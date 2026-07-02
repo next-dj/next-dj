@@ -5,7 +5,6 @@ Components
 
 A component is a reusable template fragment with optional Python context.
 Components live in folders under a configured components root and the framework discovers them by name.
-This page covers the two component shapes, the rules for props and slots, how component context is resolved, how to ship co-located CSS and JS, and how to compose several components into a larger interface.
 
 .. contents::
    :local:
@@ -369,7 +368,7 @@ Module Loading
 By default the framework imports every ``component.py`` from each ``DIRS`` root during component backend setup.
 ``import_all_component_modules`` walks only the ``DIRS``-derived registry entries present at setup time.
 The bulk import runs the side effects of ``@component.context`` so they are visible from the first request.
-A ``component.py`` may also register a form action with ``@action``, which the same import makes visible.
+A ``component.py`` may also register a form action by importing ``action`` from ``next.forms`` and applying ``@action``, which the same import makes visible.
 See :doc:`/content/topics/forms/actions` for the action decorator.
 
 Page-tree ``component.py`` modules follow a different path.

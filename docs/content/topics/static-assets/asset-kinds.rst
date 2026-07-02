@@ -43,7 +43,7 @@ The Registry
 ------------
 
 The kind registry is ``next.static.default_kinds``, an instance of ``KindRegistry``.
-A kind registration is keyed by the ``kind`` identifier and carries three pieces of metadata.
+A kind registration is keyed by the ``kind`` identifier and carries four pieces of metadata.
 
 ``kind``.
    The registry key, a non-empty Python identifier such as ``css`` or ``jsx``.
@@ -59,6 +59,10 @@ A kind registration is keyed by the ``kind`` identifier and carries three pieces
 ``renderer``.
    The method name that the active static backend exposes for rendering this kind.
    The manager looks the method up with ``getattr`` on the backend per asset.
+
+``inline_tag``.
+   The optional HTML wrapper element for an inline body, such as ``"style"`` or ``"script"``.
+   It defaults to verbatim, which wraps nothing and emits the inline body as written.
 
 Registering a Kind
 ------------------
@@ -83,6 +87,7 @@ Register kinds in ``AppConfig.ready`` so the kind exists before the first reques
            )
 
 The ``jsx`` kind now lands in the ``scripts`` slot and renders through ``render_module_tag``.
+The ``register`` call also accepts an optional ``inline_tag`` keyword, the HTML wrapper element such as ``"style"`` or ``"script"`` that wraps an inline body, defaulting to verbatim.
 A repeated call with identical parameters is idempotent.
 A repeated call with different parameters raises ``ValueError``.
 
@@ -161,10 +166,13 @@ Module Kind
 The ``module`` kind renders ``<script type="module" src="...">`` through ``render_module_tag``.
 Customise the rendered output through the ``module_tag`` key in the backend ``OPTIONS`` mapping, see :doc:`backends`.
 
+The ``module`` kind carries no ``inline_tag``, so it renders an inline body verbatim, as do custom kinds registered without an ``inline_tag``.
+
 System Checks
 -------------
 
-The static system checks validate the backend configuration and the ``JS_CONTEXT_SERIALIZER`` setting (``next.W042``).
+The static system checks ``next.W030`` and ``next.W031`` validate the backend configuration.
+The ``next.W042`` check validates the ``JS_CONTEXT_SERIALIZER`` setting.
 They do not validate kind registration.
 A bad call to ``default_kinds.register`` raises ``ValueError`` during ``AppConfig.ready``.
 Because Django runs ``ready`` for every management command and during ASGI or WSGI worker boot, the exception aborts whatever process is starting up, not only ``manage.py check``.

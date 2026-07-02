@@ -22,7 +22,7 @@ Custom providers and tests can import ``resolver`` from ``next.deps`` and call `
 Built In Providers
 ------------------
 
-The framework registers a fixed list of providers at startup.
+The framework discovers a fixed list of providers and instantiates them on first use.
 Each one carries an explicit ``priority`` value, the resolver consults them from lowest to highest, and the first match wins.
 
 1. Named dependency provider (priority 10).
@@ -51,6 +51,27 @@ The context-by-name provider sits ahead of the form, URL, and query providers be
 The form provider matches the parameter name ``form``, the marker ``DForm[FormClass]``, and any plain class annotation whose type the bound form is an instance of.
 The URL-kwargs provider is the last fallback that matches on the bare parameter name, after every marker provider has had a chance to claim the parameter.
 
+.. note::
+
+   This ordering is a publish-once, read-by-name escape hatch.
+   An ancestor that publishes a key under ``inherit_context=True`` lets a descendant page read it by bare parameter name in preference to a same-named URL kwarg.
+
+   .. code-block:: python
+      :caption: shadowing a same-named URL kwarg
+
+      # routes/shop/[category]/layout page.py
+      @context("category", inherit_context=True)
+      def category() -> str:
+          return "books"
+
+      # routes/shop/[category]/products/page.py
+      @context("listing")
+      def products(category: str) -> str:
+          return f"Listing for {category}."
+
+   The ``products`` callable receives the published ``category`` value, not the raw ``[category]`` segment.
+   See :doc:`/content/howto/share-context-across-pages` for the full pattern.
+
 DUrl
 ~~~~
 
@@ -70,7 +91,8 @@ The URL path provider coerces the captured segment to the requested type.
 In the simplest form ``DUrl[T]`` matches the captured segment whose name
 equals the parameter name, then coerces the captured value to ``T``.
 ``T`` may be ``str``, ``int``, ``bool``, ``float``, ``UUID``, ``Decimal``, ``date``, or ``datetime``.
-A value that already satisfies ``T`` passes through untouched, so a Django converter that pre-coerced the segment, such as ``[uuid:id]`` producing a :class:`~uuid.UUID`, reaches the handler in that shape.
+A value that already satisfies ``T`` passes through untouched.
+A Django converter that pre-coerced the segment, such as ``[uuid:id]`` producing a :class:`~uuid.UUID`, reaches the handler in that shape.
 A failed parse falls back to the raw captured value rather than raising.
 ``bool`` treats ``"1"``, ``"true"``, and ``"yes"`` as ``True`` and everything else as ``False``.
 ``date`` and ``datetime`` parse the ISO 8601 forms accepted by :meth:`date.fromisoformat <datetime.date.fromisoformat>` and :meth:`datetime.fromisoformat <datetime.datetime.fromisoformat>`.
@@ -186,11 +208,27 @@ Two markers fill parameters from distinct data sources.
 ``Context("key")``.
    Returns the value of the named context key produced by an ancestor layout or by a context function earlier in the chain.
    See :doc:`context` for the full set of ``Context`` shapes and how it relates to plain name matching.
+   ``Context`` takes four forms, namely no argument that reads the parameter name, a string key, a callable, and a constant, with a ``default=`` fallback when the key is absent.
+
+``Depends`` takes one of four forms, selected by its argument.
 
 ``Depends("name")``.
-   Returns the result of a callable registered through the ``resolver.dependency`` decorator.
-   ``Depends`` also accepts a callable factory, a constant value, and a bare ``Depends()`` that falls back to the parameter name.
-   See :doc:`/content/internals/di-resolver` for the four forms.
+   The argument is a string.
+   The resolver looks up the callable registered under that name through ``resolver.dependency`` and invokes it with its own parameters resolved.
+
+``Depends(callable)``.
+   The argument is a callable.
+   The resolver resolves the callable's own parameters and calls it as a factory.
+
+``Depends(value)``.
+   The argument is any other object.
+   That object is injected directly as a constant.
+
+``Depends()``.
+   No argument.
+   The marker falls back to the parameter name and resolves it as the named form.
+
+See :doc:`/content/internals/di-resolver` for the cycle and cache mechanics.
 
 .. code-block:: python
    :caption: consuming context and depends
@@ -340,11 +378,16 @@ Set ``priority`` on the subclass when the new provider has to claim a parameter 
 Resolution Cache
 ----------------
 
-The resolver creates a fresh ``DependencyCache`` for each resolution pass.
+Each resolution pass wraps a per-render dependency cache in a fresh ``DependencyCache``.
+The wrapper is new per call, but the backing store is shared across every ``@context`` callable in one page render, so a ``Depends("name")`` value resolved by one callable is reused by the next.
 The cache memoises ``Depends("name")`` callables only, keyed by the registered name.
-Parameter providers run once per parameter per resolution pass and their results are not stored, so a second context function that asks for the same ``DQuery`` or ``DUrl`` parameter triggers another provider call.
+Parameter providers run once per parameter per resolution pass and their results are not stored.
+A second context function that asks for the same ``DQuery`` or ``DUrl`` parameter triggers another provider call.
 
 A second context function in the same page render that asks for the same ``Depends("name")`` dependency receives the memoised value, not a fresh call.
+To share one value across several context functions in the same render, publish it through a named dependency such as ``Depends("active_tenant")``.
+The cache memoises named dependencies but not raw provider calls.
+See :doc:`/content/howto/share-context-across-pages` for a worked example.
 
 The same cache is shared between the initial render of a form page and the re-render on validation failure.
 ``FormActionDispatch`` attaches its dependency cache to the request, and ``get_request_dep_cache`` reads it back.
@@ -385,11 +428,8 @@ Keep DI types runtime importable.
 Resolver Lifecycle
 ------------------
 
-The resolver builds its provider registry on first use and reuses it, so register custom providers from ``AppConfig.ready`` and see :doc:`/content/internals/di-resolver` for the full lifecycle.
-
-A custom provider that wants to share one value across several context functions in the same render should publish it through ``Depends("name")``, because the per-resolution cache memoises named dependencies but not raw provider calls.
-Register a named callable through ``resolver.dependency("active_tenant")`` and have each ``@context`` function ask for ``Depends("active_tenant")``.
-See :doc:`/content/howto/share-context-across-pages` for a worked example.
+The resolver builds its provider registry on first use and reuses it, so register custom providers from ``AppConfig.ready``.
+See :doc:`/content/internals/di-resolver` for the full lifecycle.
 
 See Also
 --------

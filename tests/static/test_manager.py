@@ -99,14 +99,30 @@ class TestInjectStyles:
         assert f'<link rel="stylesheet" href="{CSS_URL}">' in out
         assert STYLES_PLACEHOLDER not in out
 
-    def test_inline_style_emitted_verbatim(self, fresh_manager: StaticManager) -> None:
-        collector = StaticCollector()
-        collector.add(
-            StaticAsset(url="", kind="css", inline="<style>body{color:red}</style>")
+    def test_inline_body_wrapped_by_kind(self, fresh_manager: StaticManager) -> None:
+        fresh_manager._ensure_backends()
+        backend = fresh_manager.default_backend
+        css = StaticAsset(url="", kind="css", inline="body{color:red}")
+        js = StaticAsset(url="", kind="js", inline="console.log(1)")
+        assert fresh_manager._render_one(css, backend, None) == (
+            "<style>body{color:red}</style>"
         )
-        html = f"<head>{STYLES_PLACEHOLDER}</head>"
-        out = fresh_manager.inject(html, collector)
-        assert "<style>body{color:red}</style>" in out
+        assert fresh_manager._render_one(js, backend, None) == (
+            "<script>console.log(1)</script>"
+        )
+
+    def test_inline_body_verbatim_when_kind_has_no_inline_tag(
+        self, fresh_manager: StaticManager
+    ) -> None:
+        fresh_manager._ensure_backends()
+        asset = StaticAsset(url="", kind="raw", inline="<custom>x</custom>")
+        with mock.patch(
+            "next.static.manager.default_kinds.inline_tag", return_value=None
+        ):
+            rendered = fresh_manager._render_one(
+                asset, fresh_manager.default_backend, None
+            )
+        assert rendered == "<custom>x</custom>"
 
     def test_empty_collector_empties_placeholder(
         self, fresh_manager: StaticManager

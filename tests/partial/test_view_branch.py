@@ -12,7 +12,9 @@ class TestZoneGetEnvelope:
         assert response.status_code == 200
         assert response["Content-Type"] == CONTENT_TYPE
         envelope = envelope_of(response)
-        assert envelope.op_verbs() == ["morph", "morph"]
+        # The zoned page registers a serialize=True provider, so the batch
+        # ends with the context op carrying its js-context delta.
+        assert envelope.op_verbs() == ["morph", "morph", "context"]
         assert envelope.zone_targets() == ["alpha", "beta"]
 
     def test_zone_html_is_wrapped_body(self) -> None:
@@ -104,7 +106,7 @@ class TestZoneGetMergeIntent:
         )
         assert response.status_code == 200
         envelope = envelope_of(response)
-        assert envelope.op_verbs() == ["append"]
+        assert envelope.op_verbs() == ["append", "context"]
         assert envelope.zone_targets() == ["alpha"]
 
     def test_append_patch_carries_key_dedupe(self) -> None:
@@ -117,11 +119,11 @@ class TestZoneGetMergeIntent:
         response = NextClient().get_zones(
             "/zoned/", "alpha", HTTP_X_NEXT_MERGE="prepend"
         )
-        assert envelope_of(response).op_verbs() == ["prepend"]
+        assert envelope_of(response).op_verbs() == ["prepend", "context"]
 
     def test_unknown_merge_value_falls_back_to_morph(self) -> None:
         response = NextClient().get_zones("/zoned/", "alpha", HTTP_X_NEXT_MERGE="bogus")
-        assert envelope_of(response).op_verbs() == ["morph"]
+        assert envelope_of(response).op_verbs() == ["morph", "context"]
 
     def test_merge_response_varies_on_merge_header(self) -> None:
         response = NextClient().get_zones(

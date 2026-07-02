@@ -253,14 +253,18 @@ class Patch:
 
 @dataclass(frozen=True, slots=True)
 class Asset:
-    """One co-located asset of a rendered target, by kind and URL."""
+    """One co-located asset of a rendered target by kind, URL, and inline body."""
 
     kind: str
     url: str
+    inline: str | None = None
 
     def as_dict(self) -> dict[str, str]:
-        """Return the wire form of the asset entry."""
-        return {keys.KIND: self.kind, keys.URL: self.url}
+        """Return the wire form of the asset, carrying its inline body when set."""
+        data = {keys.KIND: self.kind, keys.URL: self.url}
+        if self.inline is not None:
+            data[keys.INLINE] = self.inline
+        return data
 
 
 @dataclass(frozen=True, slots=True)
@@ -452,7 +456,7 @@ class Patches:
     ) -> "Patches":
         """Render the named zone of the origin page and morph it in place."""
         result = self._render_zone(zone, overrides)
-        self._collect_assets(result)
+        self._collect_zone_assets(result)
         return self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
 
     def morph_foreign_zone(
@@ -483,7 +487,7 @@ class Patches:
         if dynamic:
             raise DynamicForeignPageError(foreign_path)
         result = self._render_foreign_zone(foreign_path, zone, request, kwargs)
-        self._collect_assets(result)
+        self._collect_zone_assets(result)
         return self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
 
     def _foreign_page_path(self, page: "Path | str") -> "Path":
@@ -604,6 +608,15 @@ class Patches:
         self._ops.append(Patch(op="context", extras={"data": data}))
         return self
 
+    def _add_context(self, data: "Mapping[str, Any]") -> "Patches":
+        """Record a context patch from already wire-ready provider values.
+
+        The caller owns serialization, used by the zone-GET path where the
+        collector already gathered and encoded the js-context.
+        """
+        self._ops.append(Patch(op="context", extras={"data": dict(data)}))
+        return self
+
     def layer_open(
         self,
         *,
@@ -703,9 +716,9 @@ class Patches:
         self._ops.append(Patch(op=name, extras=dict(payload)))
         return self
 
-    def add_asset(self, kind: str, url: str) -> "Patches":
+    def add_asset(self, kind: str, url: str, *, inline: str | None = None) -> "Patches":
         """Record a co-located asset in the envelope manifest."""
-        self._assets.append(Asset(kind=kind, url=url))
+        self._assets.append(Asset(kind=kind, url=url, inline=inline))
         return self
 
     def set_form(self, form: FormMeta) -> "Patches":
@@ -832,10 +845,17 @@ class Patches:
         js_context = self._origin_render_context().get("_next_js_context", {})
         return frozenset(js_context) if isinstance(js_context, dict) else frozenset()
 
-    def _collect_assets(self, result: "ZoneRenderResult") -> None:
-        """Record the assets a rendered zone body collected on the envelope."""
+    def _collect_zone_assets(self, result: "ZoneRenderResult") -> "Patches":
+        """Record the URL-form and inline-form assets a zone body collected.
+
+        This deliberately collects assets only. The js-context delta is emitted
+        by the view path, since the builder path owns context through context().
+        """
+        for kind, body in result.inline_assets():
+            self.add_asset(kind, "", inline=body)
         for kind, url in result.url_assets():
             self.add_asset(kind, url)
+        return self
 
     def _is_same_site(self, href: str) -> bool:
         """Return True when `href` targets the bound request's host and scheme."""

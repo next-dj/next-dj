@@ -90,6 +90,7 @@ class KindRegistry:
         self._extensions: dict[str, str] = {}
         self._slots: dict[str, str] = {}
         self._renderers: dict[str, str] = {}
+        self._inline_tags: dict[str, str] = {}
 
     def register(
         self,
@@ -98,15 +99,20 @@ class KindRegistry:
         extension: str,
         slot: str,
         renderer: str,
+        inline_tag: str | None = None,
     ) -> None:
         """Register an asset kind and its dispatch metadata.
 
         The `kind` argument must be a non-empty Python identifier. The
         `extension` argument must begin with a dot. The `slot` and
         `renderer` arguments must be non-empty strings. Any other input
-        raises `ValueError`. A repeated call with identical parameters
-        is idempotent. A repeated call with different parameters raises
-        `ValueError` so silent re-registrations cannot mask bugs.
+        raises `ValueError`. The optional `inline_tag` names the HTML
+        element that wraps a co-located inline body for this kind, for
+        example `"style"` or `"script"`. When omitted, inline bodies of
+        this kind render verbatim. A repeated call with identical
+        parameters is idempotent. A repeated call with different
+        parameters raises `ValueError` so silent re-registrations cannot
+        mask bugs.
         """
         if not kind or not kind.isidentifier():
             msg = f"Invalid kind {kind!r}: must be a non-empty identifier"
@@ -122,8 +128,13 @@ class KindRegistry:
             raise ValueError(msg)
         existing = self._extensions.get(kind)
         if existing is not None:
-            current = (existing, self._slots[kind], self._renderers[kind])
-            incoming = (extension, slot, renderer)
+            current = (
+                existing,
+                self._slots[kind],
+                self._renderers[kind],
+                self._inline_tags.get(kind),
+            )
+            incoming = (extension, slot, renderer, inline_tag)
             if current == incoming:
                 return
             msg = (
@@ -136,6 +147,8 @@ class KindRegistry:
         self._extensions[kind] = extension
         self._slots[kind] = slot
         self._renderers[kind] = renderer
+        if inline_tag is not None:
+            self._inline_tags[kind] = inline_tag
 
     def extension(self, kind: str) -> str:
         """Return the file extension registered for the given kind.
@@ -160,6 +173,15 @@ class KindRegistry:
             msg = f"Unsupported asset kind: {kind!r}"
             raise KeyError(msg)
         return self._renderers[kind]
+
+    def inline_tag(self, kind: str) -> str | None:
+        """Return the inline wrapper element for the kind or None.
+
+        A `None` result means inline bodies of this kind render
+        verbatim, preserving backward compatibility for custom kinds
+        registered without an inline wrapper.
+        """
+        return self._inline_tags.get(kind)
 
     def kind_for_extension(self, extension: str) -> str | None:
         """Return the kind registered for the given extension or None."""

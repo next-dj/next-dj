@@ -144,7 +144,8 @@ Fields and Widgets
 
 The framework re-exports a curated set of commonly used Django form fields and widgets through
 ``next.forms`` so a single import covers most form definitions.
-The package surface is a superset of ``django.forms`` by construction: any public ``django.forms``
+The package surface is a superset of ``django.forms`` by construction.
+Any public ``django.forms``
 name resolves through ``next.forms``, with the framework versions winning where next.dj overrides
 a name such as ``Form`` or ``ModelForm``, and every other name resolving to the Django original.
 The factories ``formset_factory``, ``modelformset_factory``, ``inlineformset_factory``, and
@@ -189,7 +190,8 @@ Dispatch
 ``FormActionDispatch``, ``ActionOutcome``, and ``ActionOutcomeKind`` are the public members of this module.
 ``ActionOutcome`` and ``ActionOutcomeKind`` are re-exported from ``next.forms``, while ``FormActionDispatch`` imports from ``next.forms.dispatch`` directly.
 ``ActionOutcome`` is the frozen keyword-only dataclass a backend's ``shape_response`` hook receives, with ``ActionOutcomeKind`` as its ``kind`` discriminator.
-On ``INVALID`` outcomes the ``page_path`` and ``origin`` fields carry the resolved identity of the origin page: the source location of its ``page.py`` and the validated origin URL path.
+On ``INVALID`` outcomes the ``page_path`` and ``origin`` fields carry the resolved identity of the origin page.
+The ``page_path`` field holds the source location of its ``page.py`` and the ``origin`` field holds the validated origin URL path.
 ``FormActionDispatch.shape_response`` builds the default envelope for one outcome, and the backend hook delegates to it unless overridden.
 ``ensure_http_response`` coerces a handler return value into an ``HttpResponse``, kept for custom backends that drive the pipeline by hand.
 The underscore-prefixed helpers are internal hooks per the ``Internal hooks`` tier described above.

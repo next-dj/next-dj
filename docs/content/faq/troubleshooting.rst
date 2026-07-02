@@ -197,8 +197,9 @@ The snippet below uses ``fetch_note``, the ``@context("note")`` callable from th
 .. code-block:: python
 
    from next.testing import resolve_call, make_resolution_context
+   from next.urls import DUrl
 
-   def fetch_note(note_id):
+   def fetch_note(note_id: DUrl["id", int]):
        return None
 
    resolved = resolve_call(fetch_note, url_kwargs={"id": "1"})

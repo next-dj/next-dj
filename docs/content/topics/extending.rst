@@ -34,8 +34,6 @@ Signal.
    Observe a lifecycle event without changing it.
    Used for audit, observability, cache invalidation, and cross-app coordination.
 
-Choosing a signal over a backend replacement keeps the framework defaults intact and the project surface small.
-
 Backends
 --------
 

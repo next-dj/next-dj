@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -342,6 +343,87 @@ class TestJsContextSerializerOverride:
         collector.add_js_context("a", 1)
         collector.add_js_context("b", 2)
         assert collector.js_context_serializers() == {}
+
+
+class TestJsContextWire:
+    """`js_context_wire` reuses the cached fragment and reflects the merge."""
+
+    def test_single_add_serves_wire_from_cache(
+        self, collector: StaticCollector
+    ) -> None:
+        collector.add_js_context("k", {"x": 1})
+        assert collector.js_context_wire() == {"k": {"x": 1}}
+
+    def test_wire_matches_direct_serialisation(
+        self, collector: StaticCollector
+    ) -> None:
+        serializer = collector._get_js_serializer()
+        collector.add_js_context("a", [1, 2, 3])
+        encoded = serializer.dumps([1, 2, 3])
+        assert collector.js_context_wire() == {"a": json.loads(encoded)}
+
+    def test_cache_holds_the_validated_fragment(
+        self, collector: StaticCollector
+    ) -> None:
+        collector.add_js_context("k", {"x": 1})
+        assert collector._js_context_encoded["k"] == '{"x":1}'
+
+    @pytest.mark.parametrize(
+        ("policy", "first", "second", "expected"),
+        [
+            (FirstWinsPolicy(), {"a": 1}, {"a": 2}, {"a": 1}),
+            (DeepMergePolicy(), {"a": 1}, {"b": 2}, {"a": 1, "b": 2}),
+        ],
+    )
+    def test_second_write_pops_cache_and_wire_reflects_merge(
+        self,
+        policy: object,
+        first: dict[str, int],
+        second: dict[str, int],
+        expected: dict[str, int],
+    ) -> None:
+        collector = StaticCollector(js_context_policy=policy)
+        collector.add_js_context("k", first)
+        collector.add_js_context("k", second)
+        assert "k" not in collector._js_context_encoded
+        assert collector.js_context_wire() == {"k": expected}
+
+    def test_wire_fallback_uses_recorded_override(self) -> None:
+        calls: list[object] = []
+
+        class Wrapper:
+            def dumps(self, value: object) -> str:
+                calls.append(value)
+                return f'{{"wrapped":{value}}}'
+
+        collector = StaticCollector(js_context_policy=FirstWinsPolicy())
+        override = Wrapper()
+        collector.add_js_context("k", 1, serializer=override)
+        collector.add_js_context("k", 2, serializer=override)
+        assert collector.js_context_wire() == {"k": {"wrapped": 1}}
+        assert calls == [1, 2, 1]
+
+    def test_non_serialisable_value_still_raises_at_add(
+        self, collector: StaticCollector
+    ) -> None:
+        with pytest.raises(TypeError, match="not serialisable"):
+            collector.add_js_context("k", object())
+        assert collector.js_context_wire() == {}
+
+
+class TestJsContextEncoded:
+    """`js_context_encoded` serves per-key fragments from cache or re-encodes."""
+
+    def test_serves_fragment_from_cache(self, collector: StaticCollector) -> None:
+        collector.add_js_context("k", {"x": 1})
+        assert collector.js_context_encoded() == {"k": '{"x":1}'}
+
+    def test_reencodes_on_cache_miss(self) -> None:
+        collector = StaticCollector(js_context_policy=FirstWinsPolicy())
+        collector.add_js_context("k", {"a": 1})
+        collector.add_js_context("k", {"a": 2})
+        assert "k" not in collector._js_context_encoded
+        assert collector.js_context_encoded() == {"k": '{"a":1}'}
 
 
 class TestPlaceholderRegistry:

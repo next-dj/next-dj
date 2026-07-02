@@ -46,6 +46,7 @@ StaticAsset
 
 ``inline``.
    The pre-rendered inline body, or ``None`` for URL assets.
+   The manager wraps a ``css`` inline body in a ``<style>`` element and a ``js`` inline body in a ``<script>`` element on injection.
 
 ``url`` and ``inline`` are mutually exclusive.
 A URL asset carries a non-empty ``url`` and a ``None`` ``inline``.
@@ -130,7 +131,8 @@ Where Assets Live
 Hot Reload
 ----------
 
-The collector re-runs discovery on every request, so a saved or added co-located asset is picked up on the next page load without a process restart.
+The collector re-probes co-located files on every request, so a saved or added ``component.css`` or ``component.js`` is picked up on the next page load without a process restart.
+Module-level ``styles`` and ``scripts`` lists are read when the module imports, so an edit to one takes effect after a ``page.py`` change restarts the dev server.
 See the Hot Reload section of :doc:`/content/topics/components` for the full reload contract across ``page.py``, ``component.py``, and ``.djx`` changes.
 
 Production Build

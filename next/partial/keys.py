@@ -21,6 +21,7 @@ HTML: Final = "html"
 
 KIND: Final = "kind"
 URL: Final = "url"
+INLINE: Final = "inline"
 
 UID: Final = "uid"
 VALID: Final = "valid"
@@ -39,6 +40,7 @@ __all__ = [
     "FORM",
     "FORM_SELECTOR",
     "HTML",
+    "INLINE",
     "KIND",
     "OP",
     "OPS",

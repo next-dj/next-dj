@@ -92,6 +92,26 @@ class TestUseStyleBlocksThroughPipeline:
         assert 'href="https://cdn/shared.css"' in final
 
 
+class TestInlineBlocksThroughPipeline:
+    """`{% #use_style %}` / `{% #use_script %}` reach the head as working tags."""
+
+    def test_inline_blocks_land_wrapped(self) -> None:
+        manager = StaticManager()
+        manager._backends = [StaticFilesBackend()]
+        collector = StaticCollector()
+        template = Template(
+            "{% load next_static %}"
+            "{% #use_style %}.card{margin:0}{% /use_style %}"
+            "{% #use_script %}window.x=1;{% /use_script %}"
+            f"{STYLES_PLACEHOLDER}{SCRIPTS_PLACEHOLDER}"
+        )
+        rendered = template.render(Context({"_static_collector": collector}))
+
+        final = manager.inject(rendered, collector)
+        assert "<style>.card{margin:0}</style>" in final
+        assert "<script>window.x=1;</script>" in final
+
+
 class TestJsContextFlowsThroughInit:
     def test_context_values_reach_init_script(self) -> None:
 

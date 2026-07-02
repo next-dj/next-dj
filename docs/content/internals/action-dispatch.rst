@@ -143,7 +143,8 @@ Origin Resolution
 
 The hidden ``_next_form_origin`` field on every rendered form carries the URL path of the origin page.
 At dispatch the field is validated as a same-site path, the script prefix from :func:`django.urls.get_script_prefix` is stripped, and the remainder is resolved through :func:`django.urls.resolve` with the per-request URLconf from ``request.urlconf`` when one is set.
-The resolved match yields two things: the typed URL kwargs through the real URL converters, and the origin page source from the ``next_page_path`` attribute that the file router sets on every routed view, including the synthesised ``page.py`` location of virtual ``template.djx`` routes.
+The resolved match yields two things.
+The typed URL kwargs come through the real URL converters, and the origin page source comes from the ``next_page_path`` attribute that the file router sets on every routed view, including the synthesised ``page.py`` location of virtual ``template.djx`` routes.
 The result is memoised on the request, because the invalid re-render reads it from the dispatcher and from every ``{% form %}`` tag on the page.
 
 A missing field, an off-site value, a path that does not resolve, or a resolved view without ``next_page_path`` all yield no origin match.
@@ -184,7 +185,8 @@ Signals
 
 Six signals fire: ``action_registered`` at import time, the other five per request.
 
-- ``action_registered`` fires at import time, once per registration when the registry stores the action target: a handler, a form class, or a wizard class.
+- ``action_registered`` fires at import time, once per registration when the registry stores the action target.
+  The target is a handler, a form class, or a wizard class.
 - ``form_validation_failed`` fires at request time, once per failing submission, including a failing wizard step.
 - ``action_dispatched`` fires at request time, once per successful handler invocation and once per valid wizard step, with the action name, the action uid, the live request, the bound form (``None`` for form-less actions), the URL kwargs, the handler duration, the response status, and the dispatch dependency cache in the payload.
   A wizard step advance runs no handler and reports ``duration_ms`` as ``0.0``.

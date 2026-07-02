@@ -53,6 +53,7 @@ See :doc:`/content/topics/static-assets/js-context` for the runtime script optio
 
 .. automodule:: next.static.scripts
    :members:
+   :exclude-members: csrf_header_name, csrf_payload, csrf_payload_for, CSRF_PAYLOAD_KEY
 
 JS Context Serializer
 ~~~~~~~~~~~~~~~~~~~~~

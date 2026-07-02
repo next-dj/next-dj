@@ -80,7 +80,7 @@ Each page lists the public surface plus configuration and signal entries that be
    testing
    apps
    utils
-   system-checks
    settings
+   system-checks
    template-tags
    decorators

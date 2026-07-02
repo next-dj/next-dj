@@ -3,11 +3,8 @@
 URL Reversing
 =============
 
-next.dj generates URL names for every file-routed page.
-This page covers the two reverse helpers ``page_reverse`` and ``with_query`` exported from ``next.urls``.
-``page_reverse`` builds a URL from a directory-shaped template.
-``with_query`` adjusts the query string of an existing URL.
-These helpers cover every location where Python code needs a URL path, including action redirects, signal payloads, and tests.
+next.dj generates a URL name for every file-routed page.
+This page covers ``page_reverse`` and ``with_query``, the two reverse helpers exported from ``next.urls``.
 
 .. contents::
    :local:
@@ -134,6 +131,9 @@ The helper takes a URL string and adds, replaces, or removes query parameters.
    # An empty-valued parameter is preserved unless you pass that key.
    with_query("/search/?flag=", query="next.dj")
    # "/search/?flag=&query=next.dj"
+
+``with_query`` preserves blank-valued keys such as ``flag=`` because it parses the existing query with blank values kept.
+Pass the key explicitly to change or drop it.
 
 Multi Value Keys
 ~~~~~~~~~~~~~~~~

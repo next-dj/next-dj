@@ -42,6 +42,24 @@ class TestPatchAsDict:
         }
 
 
+class TestAssetAsDict:
+    """An asset serialises with its inline body only when one is present."""
+
+    def test_url_form_asset_carries_no_inline_key(self) -> None:
+        assert Asset(kind="css", url="/a.css").as_dict() == {
+            "kind": "css",
+            "url": "/a.css",
+        }
+
+    def test_inline_form_asset_carries_its_body(self) -> None:
+        asset = Asset(kind="css", url="", inline=".x { color: red; }")
+        assert asset.as_dict() == {
+            "kind": "css",
+            "url": "",
+            "inline": ".x { color: red; }",
+        }
+
+
 class TestEnvelopeAsDict:
     """The envelope wire form carries ops and meta with stable keys."""
 
@@ -176,6 +194,17 @@ class TestPatchesBuilder:
         assert envelope.assets[0] == Asset(kind="css", url="/x.css")
         assert envelope.form is form
 
+    def test_add_asset_records_an_inline_body(self) -> None:
+        envelope = Patches("v1").add_asset("css", "", inline=".x {}").envelope()
+        assert envelope.assets[0] == Asset(kind="css", url="", inline=".x {}")
+
+    def test_add_context_records_a_context_op(self) -> None:
+        envelope = Patches("v1")._add_context({"unread": 3}).envelope()
+        assert envelope.ops[0].as_dict() == {
+            "op": "context",
+            "data": {"unread": 3},
+        }
+
     def test_version_carried(self) -> None:
         assert Patches("9f3c").envelope().version == "9f3c"
 
@@ -260,6 +289,53 @@ class TestReservedPatchKey:
             Patch(op="x", extras={"target": 1, "op": 2, "html": 3})
         assert exc.value.keys == frozenset({"op", "target", "html"})
         assert "html, op, target" in str(exc.value)
+
+
+class TestBuilderZoneManifest:
+    """`morph_zone` ships the same inline and URL manifest as the view path."""
+
+    def test_inline_and_url_assets_travel_together(self) -> None:
+        envelope = (
+            Patches(partial_request(origin="/zoned_inline/"))
+            .morph(zone="styled")
+            .envelope()
+        )
+        wire = [asset.as_dict() for asset in envelope.assets]
+        assert {
+            "kind": "css",
+            "url": "",
+            "inline": ".zone-styled { color: crimson; }",
+        } in wire
+        assert {"kind": "css", "url": "/static/next/zoned_inline.css"} in wire
+
+    def test_inline_script_asset_travels(self) -> None:
+        envelope = (
+            Patches(partial_request(origin="/zoned_inline/"))
+            .morph(zone="scripted")
+            .envelope()
+        )
+        inline = [a.as_dict() for a in envelope.assets if a.url == ""]
+        assert inline == [
+            {"kind": "js", "url": "", "inline": 'console.log("zone scripted");'}
+        ]
+
+    def test_builder_path_emits_no_automatic_context_op(self) -> None:
+        envelope = (
+            Patches(partial_request(origin="/zoned_inline/"))
+            .morph(zone="styled")
+            .envelope()
+        )
+        assert [op.op for op in envelope.ops] == ["morph"]
+
+    def test_explicit_context_still_rides_on_the_builder_path(self) -> None:
+        envelope = (
+            Patches(partial_request(origin="/zoned_inline/"))
+            .morph(zone="styled")
+            .context(seen=7)
+            .envelope()
+        )
+        assert [op.op for op in envelope.ops] == ["morph", "context"]
+        assert envelope.ops[1].as_dict() == {"op": "context", "data": {"seen": 7}}
 
 
 class TestOriginRenderContextMemoised:

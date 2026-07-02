@@ -14,7 +14,7 @@ Every scenario degrades to a full page cycle without the runtime.
 Three Neighbouring Forms
 ------------------------
 
-A board settings page carries three independent forms: rename the board, add a column, archive the board.
+A board settings page carries three independent forms, one to rename the board, one to add a column, one to archive the board.
 A validation error in one form must not touch the DOM of the other two, so text typed but not yet submitted in a neighbour survives.
 
 This works with no changes at all.
@@ -136,7 +136,7 @@ Without the runtime nothing happens on blur and validation runs on submit, the c
 An Auto-Submitting Filter
 -------------------------
 
-A product catalogue is filtered by a panel form: search, brands, price, sort.
+A product catalogue is filtered by a panel form over search, brands, price, and sort.
 Today an Apply button triggers a full reload.
 The results should update as the user types, the URL should stay shareable, and the providers should not change.
 
@@ -315,7 +315,8 @@ The vote page wraps its results in a zone and connects the stream with a ``data-
    <div data-next-sse="/polls/{{ poll.pk }}/stream/"></div>
 
 The vote form lives inside the chart component and does not change.
-The broker carries one extra field: each change event ships the request id of the mutation that produced it.
+The broker carries one extra field.
+Each change event ships the request id of the mutation that produced it.
 Threading that id is the application channel's job, the framework does not smuggle it.
 
 A vote from the initiating tab posts with a request id.
@@ -327,7 +328,7 @@ A vote from the initiating tab posts with a request id.
    X-Next-Request: 1
    X-Next-Request-Id: 1c9f…-r1
 
-The vote handler here returns ``None``, so the dispatcher funnels the POST into a morph of the initiator's zone and the tab stays in place.
+The vote handler here returns ``None`` and the vote form carries no ``zone=``, so the dispatcher funnels the POST into an extract-morph of the vote form by its uid and the tab stays in place.
 A handler that redirects on success would full-navigate the initiator instead.
 Then every subscriber receives the same envelope over the stream.
 
@@ -465,6 +466,7 @@ The runtime closes the layer, fires accept, and by ``data-next-accepted="request
    GET / HTTP/1.1
    X-Next-Request: 1
    X-Next-Zone: request-list
+   X-Next-Origin: /
 
 The wizard never knows about the list, the list never knows about the wizard, and the opening link binds them.
 Without the runtime the button navigates to the full step page, steps advance with a 302 between step pages, and the last step redirects to the ``fallback`` audit page.

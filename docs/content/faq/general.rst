@@ -38,7 +38,6 @@ Discussions and feature requests live on GitHub Discussions.
 How Is This Different From Plain Django Forms
 ---------------------------------------------
 
-Three things.
 A next.dj form needs no URL entry and no view.
 Subclassing ``next.forms.Form`` or ``next.forms.ModelForm`` registers it and attaches a POST endpoint, CSRF, and a re-render-on-failure pipeline (see :doc:`/content/topics/forms/overview`).
 A failed submission re-renders the origin page with the entered values and field errors instead of an error page, so you write no re-render code (see :doc:`/content/topics/forms/validation-rerender`).

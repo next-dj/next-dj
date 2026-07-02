@@ -107,12 +107,27 @@ export function createAssets(deps: AssetsDeps): Assets {
     )) {
       loaded.add(script.src);
     }
+    // Seed the inline bodies the server already materialised into the head, so
+    // the first zone GET of a zone whose inline is up there does not re-insert
+    // the <style> or re-execute the <script>. textContent on an element node is
+    // a string, never null, so the body reads straight through.
+    for (const style of Array.from(doc.querySelectorAll<HTMLStyleElement>("style"))) {
+      loaded.add(inlineKey("css", textOf(style)));
+    }
+    for (const script of Array.from(
+      doc.querySelectorAll<HTMLScriptElement>("script:not([src])"),
+    )) {
+      loaded.add(inlineKey("js", textOf(script)));
+    }
   }
 
   function missing(manifest: Asset[], kind: string): string[] {
     const urls: string[] = [];
     for (const asset of manifest) {
       if (!isAsset(asset) || asset.kind !== kind) continue;
+      // An inline asset rides the inline path, never this URL delta: its empty
+      // url would otherwise collapse every inline body onto one "" key.
+      if (asset.inline !== undefined) continue;
       if (loaded.has(asset.url)) continue;
       // Mark loaded eagerly so a manifest that names the same URL twice, or a
       // re-entrant apply, inserts it exactly once.
@@ -122,7 +137,35 @@ export function createAssets(deps: AssetsDeps): Assets {
     return urls;
   }
 
+  // The inline bodies of a manifest, deduped by body under a kind-scoped key so
+  // the same inline asset inserts once per page and never clashes with a URL.
+  function missingInline(manifest: Asset[], kind: string): string[] {
+    const bodies: string[] = [];
+    for (const asset of manifest) {
+      if (!isAsset(asset) || asset.kind !== kind) continue;
+      if (asset.inline === undefined) continue;
+      const key = inlineKey(kind, asset.inline);
+      if (loaded.has(key)) continue;
+      loaded.add(key);
+      bodies.push(asset.inline);
+    }
+    return bodies;
+  }
+
+  // Insert an inline body with the page nonce so CSP still allows it.
+  function insertInline(tag: "style" | "script", body: string): void {
+    const el = doc.createElement(tag);
+    el.textContent = body;
+    if (nonce !== undefined) el.nonce = nonce;
+    doc.head.append(el);
+  }
+
   function loadCss(manifest: Asset[], done: () => void): void {
+    // Inline styles insert synchronously and need no load gate, so they go in
+    // before the URL delta whose loads the done callback waits on.
+    for (const body of missingInline(manifest, "css")) {
+      insertInline("style", body);
+    }
     const urls = missing(manifest, "css");
     if (urls.length === 0) {
       done();
@@ -152,6 +195,9 @@ export function createAssets(deps: AssetsDeps): Assets {
   }
 
   function loadJs(manifest: Asset[]): void {
+    for (const body of missingInline(manifest, "js")) {
+      insertInline("script", body);
+    }
     for (const url of missing(manifest, "js")) {
       const script = doc.createElement("script");
       script.src = url;
@@ -215,6 +261,19 @@ export function createAssets(deps: AssetsDeps): Assets {
       knownVersion = "";
     },
   };
+}
+
+// The dedup key for an inline body, shared by seed and the inline delta so the
+// seeded head bodies and the manifest bodies match byte for byte.
+function inlineKey(kind: string, body: string): string {
+  return `inline:${kind}:${body}`;
+}
+
+// The text body of an element. textContent is typed string | null, but for an
+// element node the DOM always yields a string, so String() coerces with no
+// untestable null branch left for the coverage gate.
+function textOf(element: Element): string {
+  return String(element.textContent);
 }
 
 // The bootstrap script carries the page nonce. document.currentScript is null by

@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+import pytest
 from django.http import HttpRequest, HttpResponse
 from django.test import RequestFactory
 
@@ -12,6 +13,7 @@ from next.partial.headers import (
     PartialIntent,
     set_partial_vary,
 )
+from next.testing import NextClient
 
 
 def _request_with_headers(**headers: str) -> HttpRequest:
@@ -149,6 +151,18 @@ class TestVaryHeaders:
         set_partial_vary(response)
         assert "Cookie" in response["Vary"]
         assert "X-Next-Merge" in response["Vary"]
+
+
+class TestZoneResponseVary:
+    """A zone GET response stamps the protective partial Vary header."""
+
+    @pytest.mark.parametrize(
+        "header",
+        ["X-Next-Request", "X-Next-Zone", "X-Next-Merge", "X-Next-Version"],
+    )
+    def test_zone_response_varies_on_partial_header(self, header: str) -> None:
+        response = NextClient().get_zones("/zoned/", "alpha")
+        assert header in response.get("Vary", "")
 
 
 class TestProtocolConstants:

@@ -105,7 +105,8 @@ The done Method
 It receives ``request`` and the merged ``cleaned_data`` of every stored step, so the keys from each step form are flattened into one mapping.
 For a wizard whose steps are ModelForms over a single model, the merged dict maps straight onto a model constructor.
 A field declared by two steps merges to the last stored value.
-Call ``self.get_cleaned_data_for_step(step)`` when the per-step value matters: it returns that step's stored dict, or ``None`` when the step has not been submitted.
+Call ``self.get_cleaned_data_for_step(step)`` when the per-step value matters.
+It returns that step's stored dict, or ``None`` when the step has not been submitted.
 
 .. code-block:: python
    :caption: finalising the wizard
@@ -119,7 +120,8 @@ The base implementation raises ``NotImplementedError``, so every wizard subclass
 Return any ``HttpResponse``, most often a redirect away from the wizard.
 
 A field declared by two steps is statically flagged by the ``next.W059`` check, since the merge silently keeps the last value.
-``Meta.success_message`` works on a wizard too: the message is flashed once, after ``done`` succeeds, interpolated over the merged step data, with ``get_success_message`` as the dynamic override.
+``Meta.success_message`` works on a wizard too.
+The message is flashed once, after ``done`` succeeds, interpolated over the merged step data, with ``get_success_message`` as the dynamic override.
 See :ref:`topics-forms-actions-success` for the message contract.
 
 Keep ``done`` idempotent.
@@ -159,6 +161,7 @@ The return value of ``done`` follows the same coercion as an action handler.
 
 - An ``HttpResponse`` subclass is sent as is. A redirect is the usual choice.
 - A string becomes an ``HttpResponse`` body with status 200.
+- A model instance with a ``get_absolute_url`` method redirects to that URL, the ``CreateView``-style idiom for a finaliser that saves and shows the result.
 - A value with a truthy ``url`` attribute becomes an ``HttpResponseRedirect`` to that URL.
 - ``None`` coerces to a success response that re-renders the origin page.
 
@@ -296,7 +299,8 @@ The captured kwarg name matches ``Meta.url_param``.
 On a valid non-final step the dispatcher saves the step data and redirects to the next step's URL.
 The redirect reuses the current page path and swaps the step segment, so ``request/identity/`` becomes ``request/scope/``.
 On a valid final step the dispatcher merges every stored step and calls ``done``.
-A direct POST to the final step does not finalise while an earlier step has no stored data: the dispatcher redirects to the first incomplete step instead, so a partial draft never reaches ``done``.
+A direct POST to the final step does not finalise while an earlier step has no stored data.
+The dispatcher redirects to the first incomplete step instead, so a partial draft never reaches ``done``.
 An invalid step re-renders the current step with its errors, and the draft already saved for earlier steps is left untouched.
 
 Back-navigation works through the same URL.

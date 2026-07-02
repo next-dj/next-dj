@@ -31,9 +31,11 @@ Eager Component Loading
 
    NEXT_FRAMEWORK["LAZY_COMPONENT_MODULES"] = False
 
-Keep ``LAZY_COMPONENT_MODULES: False`` (the default) in production so every ``component.py`` is imported during startup and registrations exist before traffic.
-When ``True``, each ``component.py`` is imported on the first render that resolves the component rather than during startup.
-Component discovery and registration still happen eagerly in both modes.
+``LAZY_COMPONENT_MODULES: False`` is the default, and production confirms it.
+The framework discovers the component tree eagerly in both modes, so the registry knows every component name before traffic.
+The flag controls only when each ``component.py`` module is imported.
+With the default ``False``, every ``component.py`` is imported during startup, so any import-time error surfaces before the first request.
+With ``True``, a ``component.py`` is imported on the first render that resolves the component rather than during startup.
 Reference for lazy behaviour and testing helpers: :ref:`ref-settings` and :doc:`/content/topics/testing`.
 
 Static Backend
@@ -132,7 +134,7 @@ When several recommendations apply at once, merge them into a single ``NEXT_FRAM
 Keep only the keys the deployment changes.
 The framework supplies the default for every key left out, so there is no need to duplicate the full default structures documented on :doc:`/content/ref/settings`.
 
-Runtime script overrides
+Runtime Script Overrides
 ------------------------
 
 Strict content security policies sometimes need nonces or manual ordering for the bundled ``next.min.js`` shell.

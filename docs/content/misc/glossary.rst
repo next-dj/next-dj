@@ -87,7 +87,7 @@ Terms used throughout the next.dj documentation.
       Wraps every descendant page.
 
    JS context policy
-      Algorithm class that resolves duplicate serialised keys for ``window.Next.context``.
+      Algorithm class that resolves duplicate serialised keys for ``window.Next.context``, distinct from the :term:`JS context serializer` that encodes the values.
       Selected through ``JS_CONTEXT_POLICY`` inside static backend ``OPTIONS``, see :doc:`/content/topics/static-assets/js-context`.
 
    NextScriptBuilder
@@ -100,7 +100,6 @@ Terms used throughout the next.dj documentation.
    manager
       The singleton orchestrator for one subsystem.
       Examples include ``page``, ``components_manager``, ``router_manager``, ``form_action_manager``.
-      ``page`` is the outlier without a ``_manager`` suffix because the rendering manager is exposed as a decorator-style facade rather than a named singleton.
 
    origin page
       The page that rendered a form.
@@ -150,7 +149,7 @@ Terms used throughout the next.dj documentation.
       Subscribers react without subclassing.
 
    JS context serializer
-      Implementations of ``next.static.JsContextSerializer`` that encode values for ``window.Next.context``.
+      Implementations of ``next.static.JsContextSerializer`` that encode values for ``window.Next.context``, distinct from the :term:`JS context policy` that resolves duplicate keys.
       Distinct from frozen form specs in ``next.forms.serializers``.
 
    slot

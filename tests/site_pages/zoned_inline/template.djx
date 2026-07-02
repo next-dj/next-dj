@@ -1,0 +1,4 @@
+<h1>zoned inline page</h1>
+{% zone "styled" %}{% #use_style %}.zone-styled { color: crimson; }{% /use_style %}<p>styled {{ greeting }}</p>{% endzone %}
+{% zone "scripted" %}{% #use_script %}console.log("zone scripted");{% /use_script %}<p>scripted {{ greeting }}</p>{% endzone %}
+{% zone "mixed" %}{% #use_style %}.zone-mixed { color: navy; }{% /use_style %}<p>mixed {{ greeting }}</p>{% endzone %}

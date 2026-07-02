@@ -32,11 +32,11 @@ The server is the only author of a target, the client never names one.
    * - ``replace``
      - ``replace()``
      - Replace the node wholesale, no morph.
-     - —
+     - none
    * - ``inner``
      - ``inner()``
      - Replace only the contents, no morph.
-     - —
+     - none
    * - ``append``
      - ``append()``
      - Add children at the end, dedup by ``data-next-key`` or ``id``.
@@ -48,15 +48,15 @@ The server is the only author of a target, the client never names one.
    * - ``remove``
      - ``remove()``
      - Remove the target.
-     - —
+     - none
    * - ``refresh``
      - ``refresh()``
      - Ask the client to re-fetch the zone with its own cookies. The safe default of an SSE fan-out.
-     - —
+     - none
    * - ``context``
      - ``context()``
      - Merge named serialize-provider values into ``Next.context`` and fire ``context-updated``.
-     - —
+     - none
    * - ``event``
      - ``event()``
      - Dispatch a ``CustomEvent`` on the document and the ``Next.on`` bus.
@@ -68,7 +68,7 @@ The server is the only author of a target, the client never names one.
    * - ``layer.open``
      - ``layer_open()``
      - Open a layer from the server, by zone or href.
-     - —
+     - none
    * - ``layer.close``
      - ``layer_close()``
      - Close the top layer with an accept result or a dismissal.
@@ -82,7 +82,7 @@ The server is the only author of a target, the client never names one.
    * - ``visit``
      - ``redirect()``
      - A full client navigation to a server-authored href. ``external=True`` skips same-host validation, see :ref:`security-overview`.
-     - —
+     - none
 
 A verb beyond this set is registered on both sides.
 ``register_patch_op("confetti")`` on the server clears the ``next.E066`` check and earns the generic ``op()`` channel on the builder.
@@ -185,7 +185,7 @@ Status Codes
    * - 404
      - An unknown form uid, the existing behaviour.
    * - 409
-     - A version mismatch on a safe method, with an empty body. The runtime fully visits the current URL. A mutation always runs and expresses a mismatch with a ``visit`` patch instead.
+     - A version mismatch on a safe method, with an empty body. The runtime fully visits the current URL. A mutation always runs, and a version mismatch surfaces in the envelope version, which the client reads to reload once into a full client visit.
    * - 5xx
      - No envelope. The runtime swaps nothing and fires ``partial:error``.
 

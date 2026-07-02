@@ -208,6 +208,7 @@ class StaticManager:
             init_payload = builder.init_script(
                 js_context,
                 key_serializers=collector.js_context_serializers(),
+                encoded=collector.js_context_encoded(),
             )
             next_scripts = f"{builder.script_tag()}\n{init_payload}\n"
             return next_scripts + user_tags if user_tags else next_scripts
@@ -236,7 +237,10 @@ class StaticManager:
         request: HttpRequest | None,
     ) -> str:
         if asset.inline is not None:
-            return asset.inline
+            tag = default_kinds.inline_tag(asset.kind)
+            if tag is None:
+                return asset.inline
+            return f"<{tag}>{asset.inline}</{tag}>"
         renderer_name = default_kinds.renderer(asset.kind)
         renderer = getattr(backend, renderer_name)
         return cast("str", renderer(asset.url, request=request))

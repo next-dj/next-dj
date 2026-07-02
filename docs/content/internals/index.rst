@@ -8,7 +8,7 @@ Each page traces one pipeline with a mermaid diagram, lists the modules involved
 The pages read top to bottom, from a whole-framework map down to each subsystem pipeline.
 
 :doc:`overview`
-   Map of every subsystem with a signals fan out diagram.
+   Map of every subsystem with a signals fan-out diagram.
 
 :doc:`request-lifecycle`
    End to end path of an HTTP request.

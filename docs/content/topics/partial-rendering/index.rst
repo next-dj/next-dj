@@ -13,14 +13,14 @@ The runtime is an enhancement layered on top of the same ``POST`` then ``303`` t
 A page that works without the runtime keeps working with it, and gains the partial behaviour for free.
 
 Read :doc:`scenarios` first.
-It walks six concrete tasks from markup to handler, and the rest of the section deepens one concern at a time.
+It walks seven concrete tasks from markup to handler, and the rest of the section deepens one concern at a time.
 
 .. rubric:: The tutorial
 
 :doc:`scenarios`
-   Six scenarios from task to markup to handler: neighbouring forms, inline validation,
-   an auto-submitting filter, pagination and infinite scroll, a live stream, and a modal
-   wizard that refreshes a list.
+   Seven scenarios from task to markup to handler: neighbouring forms, inline validation,
+   an auto-submitting filter, pagination and infinite scroll, a live stream, a modal
+   wizard that refreshes a list, and lazy zones.
 
 .. rubric:: Concepts
 

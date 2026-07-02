@@ -63,6 +63,17 @@ class ZoneRenderResult:
                 if static_asset.url:
                     yield static_asset.kind, static_asset.url
 
+    def inline_assets(self) -> "Iterator[tuple[str, str]]":
+        """Yield the (kind, inline body) of each collected inline asset."""
+        for slot in default_placeholders:
+            for static_asset in self.collector.assets_in_slot(slot.name):
+                if static_asset.inline is not None:
+                    yield static_asset.kind, static_asset.inline
+
+    def js_context_delta(self) -> dict[str, object]:
+        """Return the zone js-context as wire-ready values for a context patch."""
+        return self.collector.js_context_wire()
+
 
 def render_zone(
     page_path: "Path",

@@ -38,15 +38,10 @@ Create ``notes/forms.py``.
            model = Note
            fields = ("title", "body")
 
-       # The inherited ModelForm.on_valid already saves and redirects to origin,
-       # so CreateNoteForm needs no override.
-
    class DeleteNoteForm(Form):
        confirm = BooleanField(required=True)
 
        def on_valid(self, request: HttpRequest):
-           # Stub: redirect only, no delete yet. The Delete a Note section
-           # below replaces this with the real delete logic.
            return redirect_to_origin(request)
 
 ``next.forms.ModelForm`` and ``next.forms.Form`` are the framework form base classes.
@@ -268,8 +263,6 @@ The complete file now looks like this.
        class Meta:
            model = Note
            fields = ("title", "body")
-
-       # ModelForm.on_valid saves and redirects to origin by default.
 
    class DeleteNoteForm(Form):
        confirm = BooleanField(required=True)

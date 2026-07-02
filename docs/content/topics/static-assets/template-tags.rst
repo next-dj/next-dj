@@ -101,6 +101,9 @@ Prepend a hash sign to open the block and pair it with the matching close tag.
      console.log("hello");
    {% /use_script %}
 
+The framework wraps a ``{% #use_style %}`` body in a ``<style>`` element and a ``{% #use_script %}`` body in a ``<script>`` element on injection.
+The author writes only the inner CSS or JS, not the surrounding tag.
+
 The block body is rendered with the current template context, so inline blocks can interpolate page variables.
 Blank only blocks are dropped.
 The collector deduplicates inline entries by the rendered body, so two identical blocks collapse to one.
@@ -118,7 +121,8 @@ The recommended placement is the outermost layout.
 Customising the Tag Output
 --------------------------
 
-The ``collect`` tags accept no HTML attributes, and the rendered ``<link>``, ``<script>``, and ``<script type="module">`` markup comes from the active backend, see :doc:`backends` for the ``css_tag``, ``js_tag``, and ``module_tag`` ``OPTIONS`` keys.
+The ``collect`` tags accept no HTML attributes, and the rendered ``<link>``, ``<script>``, and ``<script type="module">`` markup comes from the active backend.
+See :doc:`backends` for the ``css_tag``, ``js_tag``, and ``module_tag`` ``OPTIONS`` keys.
 
 Tag Loading
 -----------

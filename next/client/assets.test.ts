@@ -67,6 +67,53 @@ describe("assets registry and delta", () => {
     ).toHaveLength(1);
   });
 
+  it("seeds an inline style so the inline css delta skips it", () => {
+    document.head.innerHTML = "<style>.z{}</style>";
+    const { assets } = makeAssets();
+    assets.seed();
+    assets.loadCss([{ kind: "css", url: "", inline: ".z{}" }], () => undefined);
+    expect(document.head.querySelectorAll("style")).toHaveLength(1);
+  });
+
+  it("seeds an inline script so the inline js delta does not re-execute it", () => {
+    document.head.innerHTML = "<script>void 0</script>";
+    const { assets } = makeAssets();
+    assets.seed();
+    assets.loadJs([{ kind: "js", url: "", inline: "void 0" }]);
+    expect(document.head.querySelectorAll("script:not([src])")).toHaveLength(1);
+  });
+
+  it("seeds inline bodies from the body, not just the head", () => {
+    document.body.innerHTML = "<style>.b{}</style><script>void 1</script>";
+    const { assets } = makeAssets();
+    assets.seed();
+    assets.loadCss([{ kind: "css", url: "", inline: ".b{}" }], () => undefined);
+    assets.loadJs([{ kind: "js", url: "", inline: "void 1" }]);
+    expect(document.head.querySelectorAll("style")).toHaveLength(0);
+    expect(document.head.querySelectorAll("script:not([src])")).toHaveLength(0);
+  });
+
+  it("inserts an inline asset that omits url entirely", () => {
+    const { assets, loaded } = makeAssets();
+    const done = vi.fn();
+    assets.loadCss([{ kind: "css", inline: ".n{}" } as Asset], done);
+    assets.loadJs([{ kind: "js", inline: "void 2" } as Asset]);
+    expect(document.head.querySelector("style")!.textContent).toBe(".n{}");
+    expect(document.head.querySelector("script:not([src])")!.textContent).toBe(
+      "void 2",
+    );
+    expect(loaded).toEqual([]);
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+
+  it("still inserts an inline body that differs from the seeded one", () => {
+    document.head.innerHTML = "<style>.z{}</style>";
+    const { assets } = makeAssets();
+    assets.seed();
+    assets.loadCss([{ kind: "css", url: "", inline: ".y{}" }], () => undefined);
+    expect(document.head.querySelectorAll("style")).toHaveLength(2);
+  });
+
   it("gates the done callback until the last of several sheets settles", () => {
     const settlers: ((ok: boolean) => void)[] = [];
     const loadLink: LinkLoader = (_url, _nonce, done) => settlers.push(done);
@@ -133,6 +180,49 @@ describe("assets registry and delta", () => {
     expect(loaded).toEqual(["http://x/s.css"]);
   });
 
+  it("injects an inline style with the body and skips the link loader", () => {
+    const { assets, loaded } = makeAssets();
+    const done = vi.fn();
+    assets.loadCss([{ kind: "css", url: "", inline: ".z{color:red}" }], done);
+    const style = document.head.querySelector("style")!;
+    expect(style.textContent).toBe(".z{color:red}");
+    expect(loaded).toEqual([]);
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+
+  it("dedupes an inline style by body across applies", () => {
+    const { assets } = makeAssets();
+    const inline = { kind: "css", url: "", inline: ".z{color:red}" };
+    assets.loadCss([inline], () => undefined);
+    assets.loadCss([inline], () => undefined);
+    expect(document.head.querySelectorAll("style")).toHaveLength(1);
+  });
+
+  it("injects an inline script with its body as textContent", () => {
+    const { assets } = makeAssets();
+    assets.loadJs([{ kind: "js", url: "", inline: "globalThis.__x = 1" }]);
+    const script = document.head.querySelector("script:not([src])")!;
+    expect(script.textContent).toBe("globalThis.__x = 1");
+  });
+
+  it("dedupes an inline script by body across applies", () => {
+    const { assets } = makeAssets();
+    const inline = { kind: "js", url: "", inline: "globalThis.__x = 1" };
+    assets.loadJs([inline]);
+    assets.loadJs([inline]);
+    expect(document.head.querySelectorAll("script:not([src])")).toHaveLength(1);
+  });
+
+  it("keeps inline and url assets of the same kind apart", () => {
+    const { assets, loaded } = makeAssets();
+    assets.loadCss(
+      [{ kind: "css", url: "", inline: ".z{color:red}" }, css("http://x/u.css")],
+      () => undefined,
+    );
+    expect(document.head.querySelector("style")!.textContent).toBe(".z{color:red}");
+    expect(loaded).toEqual(["http://x/u.css"]);
+  });
+
   it("copies the bootstrap nonce onto inserted scripts", () => {
     const boot = document.createElement("script");
     boot.nonce = "nonce-7a3f";
@@ -150,6 +240,28 @@ describe("assets registry and delta", () => {
       'script[src="http://x/n.js"]',
     )!;
     expect(script.nonce).toBe("nonce-7a3f");
+  });
+
+  it("copies the bootstrap nonce onto inline assets", () => {
+    const boot = document.createElement("script");
+    boot.nonce = "nonce-7a3f";
+    Object.defineProperty(document, "currentScript", {
+      value: boot,
+      configurable: true,
+    });
+    const { assets } = makeAssets();
+    Object.defineProperty(document, "currentScript", {
+      value: null,
+      configurable: true,
+    });
+    assets.loadCss([{ kind: "css", url: "", inline: ".z{}" }], () => undefined);
+    assets.loadJs([{ kind: "js", url: "", inline: "void 0" }]);
+    expect(document.head.querySelector<HTMLStyleElement>("style")!.nonce).toBe(
+      "nonce-7a3f",
+    );
+    expect(
+      document.head.querySelector<HTMLScriptElement>("script:not([src])")!.nonce,
+    ).toBe("nonce-7a3f");
   });
 });
 

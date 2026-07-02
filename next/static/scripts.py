@@ -146,27 +146,27 @@ class NextScriptBuilder:
         js_context: Mapping[str, Any],
         *,
         key_serializers: Mapping[str, JsContextSerializer] | None = None,
+        encoded: Mapping[str, str] | None = None,
     ) -> str:
         """Return the inline script that passes the context to `Next._init`.
 
-        Delegates serialisation to the configured `JsContextSerializer`
-        so the init payload honours the same encoding rules as values
-        registered through `StaticCollector.add_js_context`. When
-        `key_serializers` is supplied, each top-level key listed there
-        is encoded with its dedicated serializer and the rest fall
-        back to the global default.
+        Assembles the payload from per-key fragments so a value
+        `StaticCollector.add_js_context` already encoded is reused through
+        `encoded` rather than serialised a second time. A key missing from
+        `encoded` falls back to its serializer. Compact top-level separators
+        keep the output byte-identical to a whole-dict dump for the compact
+        serializers the framework ships.
         """
-        if not key_serializers:
-            payload = resolve_serializer().dumps(dict(js_context))
-        else:
-            default = resolve_serializer()
-            fragments: list[str] = []
-            for k, v in js_context.items():
-                key_serializer = key_serializers.get(k, default)
-                encoded_key = json.dumps(k, separators=(",", ":"))
-                encoded_val = key_serializer.dumps(v)
-                fragments.append(f"{encoded_key}:{encoded_val}")
-            payload = "{" + ",".join(fragments) + "}"
+        default = resolve_serializer()
+        serializers = key_serializers or {}
+        fragments: list[str] = []
+        for k, v in js_context.items():
+            frag = encoded.get(k) if encoded is not None else None
+            if frag is None:
+                frag = serializers.get(k, default).dumps(v)
+            encoded_key = json.dumps(k, separators=(",", ":"))
+            fragments.append(f"{encoded_key}:{frag}")
+        payload = "{" + ",".join(fragments) + "}"
         return self._init_template.format(payload=payload)
 
     @classmethod

@@ -35,8 +35,10 @@ Pick the backend list.
      - Static collector and asset rendering.
    * - ``FORM_ACTION_BACKENDS``
      - Form action dispatch.
+   * - ``PARTIAL_BACKENDS``
+     - Partial rendering protocol and patch wire format.
 
-The helper supports these four backend list settings.
+The helper supports these five backend list settings.
 
 Call the helper with the setting name and the keys to override.
 

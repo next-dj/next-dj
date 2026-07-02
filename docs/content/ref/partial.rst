@@ -238,7 +238,7 @@ System Checks
 -------------
 
 See :doc:`system-checks` for the zone-placement and custom-verb checks
-(``next.E060`` through ``next.E066``, ``next.W067`` through ``next.W070``).
+(``next.E060`` through ``next.E066``, ``next.W067`` through ``next.W071``).
 
 See Also
 --------

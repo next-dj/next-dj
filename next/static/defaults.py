@@ -30,12 +30,14 @@ def register_defaults() -> None:
         extension=".css",
         slot="styles",
         renderer="render_link_tag",
+        inline_tag="style",
     )
     default_kinds.register(
         "js",
         extension=".js",
         slot="scripts",
         renderer="render_script_tag",
+        inline_tag="script",
     )
     default_kinds.register(
         "module",

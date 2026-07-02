@@ -62,6 +62,62 @@ class TestKindRegistryRegister:
         reg.register("css", extension=".css", slot="styles", renderer="render_link_tag")
         assert reg.kinds() == ("css",)
 
+    def test_register_stores_inline_tag(self) -> None:
+        reg = KindRegistry()
+        reg.register(
+            "css",
+            extension=".css",
+            slot="styles",
+            renderer="render_link_tag",
+            inline_tag="style",
+        )
+        assert reg.inline_tag("css") == "style"
+
+    def test_inline_tag_defaults_to_none(self) -> None:
+        reg = KindRegistry()
+        reg.register("css", extension=".css", slot="styles", renderer="render_link_tag")
+        assert reg.inline_tag("css") is None
+
+    def test_inline_tag_none_for_unregistered_kind(self) -> None:
+        reg = KindRegistry()
+        assert reg.inline_tag("ghost") is None
+
+    def test_register_is_idempotent_with_matching_inline_tag(self) -> None:
+        reg = KindRegistry()
+        reg.register(
+            "css",
+            extension=".css",
+            slot="styles",
+            renderer="render_link_tag",
+            inline_tag="style",
+        )
+        reg.register(
+            "css",
+            extension=".css",
+            slot="styles",
+            renderer="render_link_tag",
+            inline_tag="style",
+        )
+        assert reg.kinds() == ("css",)
+
+    def test_register_rejects_conflicting_inline_tag(self) -> None:
+        reg = KindRegistry()
+        reg.register(
+            "css",
+            extension=".css",
+            slot="styles",
+            renderer="render_link_tag",
+            inline_tag="style",
+        )
+        with pytest.raises(ValueError, match="already registered"):
+            reg.register(
+                "css",
+                extension=".css",
+                slot="styles",
+                renderer="render_link_tag",
+                inline_tag="span",
+            )
+
     def test_register_rejects_conflicting_re_registration(self) -> None:
         reg = KindRegistry()
         reg.register("css", extension=".css", slot="styles", renderer="render_link_tag")
@@ -150,6 +206,8 @@ class TestDefaultKinds:
         assert default_kinds.slot("js") == "scripts"
         assert default_kinds.renderer("css") == "render_link_tag"
         assert default_kinds.renderer("js") == "render_script_tag"
+        assert default_kinds.inline_tag("css") == "style"
+        assert default_kinds.inline_tag("js") == "script"
 
 
 class TestStaticNamespace:

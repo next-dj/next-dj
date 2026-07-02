@@ -285,7 +285,15 @@ Use ``next.conf.extend_default_backend`` to patch one key of a default backend e
 The helper returns a deep copy of the default list with the entry at ``index`` (default ``0``) patched by the keyword overrides.
 Nested dicts such as ``OPTIONS`` are merged.
 
-The helper raises ``ImproperlyConfigured`` when ``key`` is not a known backend-list setting.
+The helper accepts five backend-list keys.
+
+- ``PAGE_BACKENDS``
+- ``COMPONENT_BACKENDS``
+- ``STATIC_BACKENDS``
+- ``FORM_ACTION_BACKENDS``
+- ``PARTIAL_BACKENDS``
+
+The helper raises ``ImproperlyConfigured`` when ``key`` is not one of these settings.
 It raises ``IndexError`` when ``index`` is out of range for the default list.
 
 See :doc:`conf` for the helper API and :doc:`/content/howto/extend-a-default-backend` for the recipe.

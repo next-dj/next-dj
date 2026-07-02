@@ -16,7 +16,7 @@ Prerequisites
 You have finished :doc:`tutorial05`.
 The Notes application creates, edits, and deletes notes through registered actions.
 
-The layout from :doc:`tutorial03` already pulls ``{% collect_scripts %}`` into ``<head>``, and the static pipeline injects the client runtime through that tag.
+The layout from :doc:`tutorial03` already pulls ``{% collect_scripts %}`` into the bottom of ``<body>``, and the static pipeline injects the client runtime through that tag.
 There is nothing new to install.
 
 Partial rendering layers on top of the ``POST`` then ``303`` then ``GET`` flow the framework already serves, covered in depth in :doc:`/content/topics/partial-rendering/index`.
@@ -214,7 +214,7 @@ Common Pitfalls
 ---------------
 
 The filter reloads the whole page instead of swapping the list.
-   Check that ``data-next-target`` names the same string as the ``{% zone %}`` tag, and that ``{% collect_scripts %}`` sits in the layout ``<head>`` so the runtime loads.
+   Check that ``data-next-target`` names the same string as the ``{% zone %}`` tag, and that ``{% collect_scripts %}`` sits at the bottom of the layout ``<body>`` so the runtime loads.
 
 Creating a note redirects instead of updating in place.
    The handler only returns a patch inside the ``is_partial_request`` branch.

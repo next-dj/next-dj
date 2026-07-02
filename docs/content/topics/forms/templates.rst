@@ -23,7 +23,7 @@ The Form Tag
 
 The first argument is the action name as a quoted string or a context variable that resolves to a string.
 An opening tag without the action name raises ``TemplateSyntaxError`` at parse time.
-Optional ``key="value"`` arguments after the name render as HTML attributes on the ``<form>`` element (see `HTML Attributes`_ below).
+Optional ``key="value"`` arguments after the name render as HTML attributes on the ``<form>`` element (see `HTML Attributes`_ below), except for the reserved partial param names (see `Partial Attributes`_ below).
 
 The tag does the following.
 
@@ -48,7 +48,7 @@ A name that is not in the registry raises ``FormActionNotFoundError`` at render 
 HTML Attributes
 ---------------
 
-Every ``key="value"`` argument after the action name lands on the ``<form>`` element, after the framework attributes.
+Every other ``key="value"`` argument after the action name lands on the ``<form>`` element, after the framework attributes.
 
 .. code-block:: jinja
    :caption: extra attributes
@@ -62,6 +62,44 @@ Attribute values are escaped, and an unquoted value resolves as a context variab
 An explicit ``enctype="..."`` argument suppresses the automatic multipart value, for the rare form that needs a different encoding.
 The ``action`` and ``method`` attributes belong to the tag, as does every attribute starting with ``data-next-``, and passing any of them raises ``TemplateSyntaxError`` at parse time.
 ``data-next-*`` is the single framework namespace in rendered markup, so user attributes never collide with framework ones.
+
+Partial Attributes
+------------------
+
+Five argument names are reserved for partial rendering and never land as raw HTML attributes.
+The tag compiles each one to a ``data-next-*`` attribute the client runtime reads.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 35 40
+
+   * - Tag argument
+     - Rendered attribute
+     - Carries
+   * - ``validate``
+     - ``data-next-validate``
+     - The client-side validation mode for the form.
+   * - ``trigger``
+     - ``data-next-trigger``
+     - The event that triggers a partial submission.
+   * - ``debounce``
+     - ``data-next-debounce``
+     - The debounce interval before a triggered submission fires.
+   * - ``zone``
+     - ``data-next-target``
+     - The zone the partial response replaces.
+   * - ``key``
+     - ``data-next-key``
+     - The stable key that pairs the form with its partial target.
+
+Pass each as a ``key="value"`` argument like any other, and the value resolves as a string literal or a context variable the same way an HTML attribute value does.
+
+.. code-block:: jinja
+   :caption: a form that posts a partial update
+
+   {% form "filter_form" trigger="change" debounce="200" zone="results" %}
+     {{ form.query }}
+   {% endform %}
 
 Scope Resolution
 ----------------

@@ -67,6 +67,12 @@ Modules
    ``FileComponentsBackend`` default implementation.
    ``ComponentsFactory`` instantiates a backend from its ``BACKEND`` dotted path.
 
+``next.components.manager``.
+   ``ComponentsManager`` orchestrates the backends, shares one render pipeline between them, and rebuilds on ``settings_reloaded``.
+
+``next.components.checks``.
+   The components system checks, including ``next.E020`` and ``next.E034``.
+
 ``next.components.watch``.
    Watch specs exposed to the autoreloader.
 
@@ -102,7 +108,8 @@ Component Context Resolution
 
 Each ``@component.context("key")`` function runs once per component render.
 When a component's ``component.py`` fails to import, the renderer falls back to plain template rendering and the ``@component.context`` callables in that module do not run.
-On the template render path the resolver shares the request-scoped dependency cache through ``get_request_dep_cache``, so DI parameters resolved earlier in the request are reused inside the component callables.
+On the template render path the resolver shares the request-scoped dependency cache through ``get_request_dep_cache``.
+DI parameters resolved earlier in the request are reused inside the component callables.
 Page context values reach the component through the template scope, not through the DI cache.
 A component whose ``component.py`` defines a ``render`` function uses a fresh ``DependencyCache`` for that call instead of the shared request cache.
 The surrounding template scope (props and page context variables) is still forwarded to the resolver as DI parameters.
