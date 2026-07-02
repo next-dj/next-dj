@@ -12,7 +12,12 @@
 // cancels its own in-flight validation so a late validation answer cannot
 // overwrite a response the server already accepted.
 
-import { defaultClock, defaultConfirm, defaultObserver } from "./adapters";
+import {
+  defaultClock,
+  defaultConfirm,
+  defaultObserver,
+  defaultVisibility,
+} from "./adapters";
 import {
   ATTR_ACTION,
   ATTR_KEY,
@@ -22,6 +27,7 @@ import {
   HEADER_ZONE,
   currentUrl,
 } from "./protocol";
+import type { VisibilityAdapter } from "./sse";
 import type { Clock } from "./wire";
 
 const TRIGGER_ATTR = "data-next-trigger";
@@ -30,6 +36,7 @@ const DEBOUNCE_ATTR = "data-next-debounce";
 const MERGE_ATTR = "data-next-merge";
 const CONFIRM_ATTR = "data-next-confirm";
 const LAZY_ATTR = "data-next-lazy";
+const POLL_ATTR = "data-next-poll";
 const VALIDATE_ATTR = "data-next-validate";
 // X-Next-Validate is local to inline validation, so it stays here rather than in
 // the shared protocol vocabulary.
@@ -74,6 +81,9 @@ export interface TriggerDeps {
   document?: Document;
   clock?: Clock;
   observer?: IntersectionAdapter;
+  // The tab-visibility seam, shared with the SSE bridge: a poll tick on a
+  // hidden tab skips the fetch and reschedules.
+  visibility?: VisibilityAdapter;
   // The confirm gate. Absent, the default calls window.confirm. Injectable so
   // tests drive accept and cancel without a real dialog.
   confirm?: ConfirmAdapter;
@@ -99,6 +109,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   const clock = deps.clock ?? defaultClock();
   const observer = deps.observer ?? defaultObserver();
   const confirm = deps.confirm ?? defaultConfirm();
+  const visibility = deps.visibility ?? defaultVisibility();
   const dev = deps.dev ?? false;
   // Per-element debounce handles, keyed by the element itself.
   const timers = new WeakMap<Element, number>();
@@ -107,6 +118,9 @@ export function createTriggers(deps: TriggerDeps): Triggers {
   const activated = new WeakSet<Element>();
   // Observer teardowns, dropped on reset so vitest files do not leak observers.
   const observed: (() => void)[] = [];
+  // Active pollers keyed by element, so a re-scan of a re-inserted zone does
+  // not arm a second timer and _reset can stop every one.
+  const polling = new Map<Element, number>();
   let detach: (() => void) | null = null;
 
   function here(): string {
@@ -320,6 +334,41 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     }
   }
 
+  // Arm the self-rescheduling poll timer of one zone. A single Clock seam and
+  // chained setTimeout, no setInterval, so tests drive ticks one by one. Each
+  // tick checks isConnected for an honest teardown after a morph removed the
+  // zone, and a hidden tab skips the fetch but keeps the schedule.
+  function startPoll(el: Element): void {
+    if (polling.has(el)) return;
+    const zone = el.getAttribute(ATTR_ZONE);
+    // scan reaches startPoll only via a [data-next-poll] match, so the
+    // attribute is always present.
+    const ms = Number.parseInt(el.getAttribute(POLL_ATTR)!, 10);
+    if (zone === null || !Number.isFinite(ms) || ms <= 0) return;
+    const tick = (): void => {
+      if (!el.isConnected) {
+        stopPoll(el);
+        return;
+      }
+      if (!visibility.hidden()) {
+        deps.fetch({
+          url: here(),
+          zone,
+          headers: versionHeaders({ [HEADER_ZONE]: zone }),
+        });
+      }
+      polling.set(el, clock.setTimeout(tick, ms));
+    };
+    polling.set(el, clock.setTimeout(tick, ms));
+  }
+
+  // A tick's element is always in the map and _reset walks the map's own keys,
+  // so the handle is always present.
+  function stopPoll(el: Element): void {
+    clock.clearTimeout(polling.get(el)!);
+    polling.delete(el);
+  }
+
   // Batch the document's load zones into a single GET with a comma-joined
   // X-Next-Zone, one round trip for every load zone on the page.
   function loadBatch(root: ParentNode): void {
@@ -376,6 +425,9 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       // links stay click-driven and are skipped here.
       if (el.hasAttribute(LAZY_ATTR)) activate(el);
     }
+    for (const el of Array.from(root.querySelectorAll(`[${POLL_ATTR}]`))) {
+      startPoll(el);
+    }
   }
 
   function install(target: Document): () => void {
@@ -408,6 +460,7 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     _reset() {
       for (const stop of observed) stop();
       observed.length = 0;
+      for (const el of Array.from(polling.keys())) stopPoll(el);
     },
   };
 }

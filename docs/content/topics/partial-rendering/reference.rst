@@ -210,6 +210,11 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from Python 
      - ``load`` or ``revealed``, the materialisation trigger. ``load`` fetches on
        ``ready``, ``revealed`` waits for the viewport. On a pagination sentinel
        ``revealed`` arms the observer that fires the merge GET.
+   * - ``data-next-poll``
+     - Zone wrapper
+     - The poll interval in milliseconds, written by the ``{% zone %}`` tag from a
+       ``poll=`` literal. The runtime re-GETs the zone on the interval while the
+       tab is visible.
    * - ``data-next-action``
      - ``<form>``
      - The action uid, written by ``{% form %}``, enables submit interception.

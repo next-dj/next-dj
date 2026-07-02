@@ -19,3 +19,9 @@ def totals() -> dict[str, int]:
         "actions_dispatched": metrics.total_for_kind("forms.action_dispatched"),
         "html_injections": metrics.read_kind("static").get("html_injected", 0),
     }
+
+
+@context("busiest_pages")
+def busiest_pages() -> list[tuple[str, int]]:
+    """Return the five most rendered page modules for the lazy widget."""
+    return metrics.top_by_kind("pages.rendered", limit=5)

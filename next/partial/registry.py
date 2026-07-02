@@ -82,6 +82,7 @@ class ZoneInfo:
 
     name: str
     lazy: str | None
+    poll: int | None
     tag: str
     partial: "ZonePartial"
 
@@ -97,6 +98,7 @@ def _zones_from_template(template: "Template") -> dict[str, ZoneInfo]:
         zones[node.name] = ZoneInfo(
             name=node.name,
             lazy=node.lazy,
+            poll=node.poll,
             tag=node.tag,
             partial=node.partial,
         )
@@ -123,6 +125,7 @@ def zones_of(template: "Template") -> "Mapping[str, ZoneInfo]":
                 template=template,
                 zone_name=info.name,
                 lazy=info.lazy,
+                poll=info.poll,
             )
     return zones
 

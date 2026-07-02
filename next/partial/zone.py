@@ -17,6 +17,7 @@ register = Library()
 
 ZONE_ATTR = "data-next-zone"
 LAZY_ATTR = "data-next-lazy"
+POLL_ATTR = "data-next-poll"
 
 _DEFAULT_TAG = "div"
 _ZONE_NAME_INDEX = 1
@@ -25,6 +26,9 @@ _PLACEHOLDER_THEN_END = ("placeholder", "endzone")
 _LAZY_TRIGGERS = frozenset({"load", "revealed"})
 _TAG_KWARG = "tag"
 _LAZY_KWARG = "lazy"
+_POLL_KWARG = "poll"
+_MIN_POLL_MS = 1000
+_MS_PER_SECOND = 1000
 
 
 def _strip_quotes(raw: str) -> str:
@@ -114,6 +118,7 @@ class ZoneNode(Node):
         *,
         tag: str = _DEFAULT_TAG,
         lazy: str | None = None,
+        poll: int | None = None,
         placeholder: NodeList | None = None,
     ) -> None:
         """Store the zone name, its body partial, and its rendering options."""
@@ -122,19 +127,28 @@ class ZoneNode(Node):
         self.nodelist = partial.nodelist
         self.tag = tag
         self.lazy = lazy
+        self.poll = poll
         self.placeholder = placeholder if placeholder is not None else NodeList()
 
     @override
     def render(self, context: "Context") -> SafeString:
         """Render the zone inline on a full page render."""
-        if self.lazy is None:
-            return render_zone_standalone(self.partial, self.name, self.tag, context)
-        open_tag = f'<{self.tag} {ZONE_ATTR}="{self.name}" {LAZY_ATTR}="{self.lazy}">'
-        return SafeString(f"{open_tag}{self.placeholder.render(context)}</{self.tag}>")
+        if self.lazy is not None:
+            open_tag = (
+                f'<{self.tag} {ZONE_ATTR}="{self.name}" {LAZY_ATTR}="{self.lazy}">'
+            )
+            return SafeString(
+                f"{open_tag}{self.placeholder.render(context)}</{self.tag}>"
+            )
+        body = self.partial.render(context)
+        if self.poll is None:
+            return _wrap_zone(self.tag, self.name, body)
+        open_tag = f'<{self.tag} {ZONE_ATTR}="{self.name}" {POLL_ATTR}="{self.poll}">'
+        return SafeString(f"{open_tag}{body}</{self.tag}>")
 
 
-def _parse_options(token: "Token") -> tuple[str, str, str | None]:
-    """Return the zone name, wrapper tag, and lazy trigger from a zone token."""
+def _parse_options(token: "Token") -> tuple[str, str, str | None, int | None]:
+    """Return the zone name, wrapper tag, lazy trigger, and poll interval."""
     bits = token.split_contents()
     if len(bits) < _ZONE_NAME_INDEX + 1:
         msg = '{% zone %} tag requires a quoted zone name, e.g. {% zone "name" %}.'
@@ -145,6 +159,7 @@ def _parse_options(token: "Token") -> tuple[str, str, str | None]:
         raise TemplateSyntaxError(msg)
     tag = _DEFAULT_TAG
     lazy: str | None = None
+    poll: int | None = None
     for part in bits[_ZONE_NAME_INDEX + 1 :]:
         key, sep, raw = part.partition("=")
         if not sep:
@@ -154,7 +169,12 @@ def _parse_options(token: "Token") -> tuple[str, str, str | None]:
             tag = value or _DEFAULT_TAG
         elif key == _LAZY_KWARG:
             lazy = _validate_lazy(value)
-    return name, tag, lazy
+        elif key == _POLL_KWARG:
+            poll = _validate_poll(value)
+    if lazy is not None and poll is not None:
+        msg = "{% zone %} cannot combine poll= with lazy=, the modes are exclusive."
+        raise TemplateSyntaxError(msg)
+    return name, tag, lazy, poll
 
 
 def _validate_lazy(value: str) -> str:
@@ -166,16 +186,39 @@ def _validate_lazy(value: str) -> str:
     return value
 
 
+def _validate_poll(value: str) -> int:
+    """Return the poll interval in ms parsed from a 5s or 500ms literal.
+
+    A bare number is read as milliseconds. An interval below the floor or a
+    malformed literal fails at compile time, the same honest-fail as lazy.
+    """
+    text = value.strip()
+    try:
+        if text.endswith("ms"):
+            ms = int(text[:-2])
+        elif text.endswith("s"):
+            ms = int(text[:-1]) * _MS_PER_SECOND
+        else:
+            ms = int(text)
+    except ValueError:
+        msg = f"{{% zone %}} poll must be a duration like 5s or 500ms, got {value!r}."
+        raise TemplateSyntaxError(msg) from None
+    if ms < _MIN_POLL_MS:
+        msg = f"{{% zone %}} poll must be at least {_MIN_POLL_MS}ms, got {ms}ms."
+        raise TemplateSyntaxError(msg)
+    return ms
+
+
 @register.tag(name="zone")
 def do_zone(parser: "Parser", token: "Token") -> ZoneNode:
-    """Compile `{% zone "name" tag=... lazy=... %}` … `{% endzone %}`.
+    """Compile `{% zone "name" tag=... lazy=... poll=... %}` … `{% endzone %}`.
 
     The body compiles into a standalone `ZonePartial`. An optional
     `{% placeholder %}` branch holds the markup shown until a lazy body
     arrives. This hook registers nothing with the zone registry, the
     registry is derived from the compiled page template on demand.
     """
-    name, tag, lazy = _parse_options(token)
+    name, tag, lazy, poll = _parse_options(token)
     body = parser.parse(_PLACEHOLDER_THEN_END)
     placeholder: NodeList | None = None
     if parser.next_token().contents.split()[0] == "placeholder":
@@ -192,12 +235,14 @@ def do_zone(parser: "Parser", token: "Token") -> ZoneNode:
         partial=partial,
         tag=tag,
         lazy=lazy,
+        poll=poll,
         placeholder=placeholder,
     )
 
 
 __all__ = [
     "LAZY_ATTR",
+    "POLL_ATTR",
     "ZONE_ATTR",
     "ZoneNode",
     "ZonePartial",

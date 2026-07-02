@@ -5,6 +5,7 @@ from django.test import RequestFactory
 
 from next.partial.zone import (
     LAZY_ATTR,
+    POLL_ATTR,
     ZONE_ATTR,
     ZoneNode,
     ZonePartial,
@@ -44,6 +45,18 @@ class TestZoneTagFullRender:
         out = _render(source)
         assert f'{LAZY_ATTR}="load"' in out
 
+    def test_poll_seconds_renders_interval_inline(self) -> None:
+        out = _render('{% zone "t" poll="5s" %}<p>{{ n }}</p>{% endzone %}', n=7)
+        assert out == f'<div {ZONE_ATTR}="t" {POLL_ATTR}="5000"><p>7</p></div>'
+
+    def test_poll_milliseconds_literal(self) -> None:
+        out = _render('{% zone "t" poll="1500ms" %}body{% endzone %}')
+        assert out == f'<div {ZONE_ATTR}="t" {POLL_ATTR}="1500">body</div>'
+
+    def test_poll_bare_number_reads_as_milliseconds(self) -> None:
+        out = _render('{% zone "t" poll="3000" %}body{% endzone %}')
+        assert out == f'<div {ZONE_ATTR}="t" {POLL_ATTR}="3000">body</div>'
+
     def test_full_render_is_byte_for_byte_outside_wrapper(self) -> None:
         plain = _render("before <p>{{ msg }}</p> after", msg="hi")
         zoned = _render(
@@ -67,6 +80,22 @@ class TestZoneTagSyntax:
     def test_unknown_lazy_trigger(self) -> None:
         with pytest.raises(TemplateSyntaxError):
             Template('{% zone "z" lazy="whenever" %}b{% placeholder %}p{% endzone %}')
+
+    def test_invalid_poll_literal_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError):
+            Template('{% zone "z" poll="soon" %}b{% endzone %}')
+
+    def test_poll_below_floor_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError):
+            Template('{% zone "z" poll="100ms" %}b{% endzone %}')
+
+    def test_poll_and_lazy_are_exclusive(self) -> None:
+        with pytest.raises(TemplateSyntaxError):
+            Template('{% zone "z" lazy="load" poll="5s" %}b{% endzone %}')
+
+    def test_empty_poll_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError):
+            Template('{% zone "z" poll="" %}b{% endzone %}')
 
     def test_stray_bits_ignored(self) -> None:
         out = _render('{% zone "z" garbage %}body{% endzone %}')
@@ -107,6 +136,15 @@ class TestRenderZoneStandalone:
         )
         assert out == f'<section {ZONE_ATTR}="lz"><b>x</b></section>'
         assert LAZY_ATTR not in out
+
+    def test_standalone_render_drops_poll_hint(self) -> None:
+        template = Template('{% zone "p" poll="5s" %}<b>{{ v }}</b>{% endzone %}')
+        node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
+        out = render_zone_standalone(
+            node.partial, node.name, node.tag, Context({"v": "x"})
+        )
+        assert out == f'<div {ZONE_ATTR}="p"><b>x</b></div>'
+        assert POLL_ATTR not in out
 
 
 class TestZoneDebugContract:

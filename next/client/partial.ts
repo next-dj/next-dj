@@ -198,6 +198,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       ...opt("document", adapters?.document),
       ...opt("clock", adapters?.clock),
       ...opt("observer", adapters?.observer),
+      ...opt("visibility", adapters?.visibility),
       ...opt("confirm", adapters?.confirm),
       ...opt("dev", adapters?.dev),
     };

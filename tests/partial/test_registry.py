@@ -93,6 +93,16 @@ class TestZonesOf:
         assert zones["second"].tag == "tbody"
         assert zones["second"].lazy == "load"
 
+    def test_carries_no_poll_without_the_kwarg(self) -> None:
+        zones = zones_of(_zoned_template())
+        assert zones["first"].poll is None
+        assert zones["second"].poll is None
+
+    def test_zone_info_carries_poll(self) -> None:
+        template = Template('{% zone "z" poll="5s" %}b{% endzone %}')
+        info = zones_of(template)["z"]
+        assert info.poll == 5000
+
     def test_empty_template_has_no_zones(self) -> None:
         assert zones_of(Template("plain {{ x }}")) == {}
 
@@ -131,6 +141,23 @@ class TestZoneRegisteredSignal:
 
         names = sorted(str(entry["zone_name"]) for entry in seen)
         assert names == ["first", "second"]
+
+    def test_sends_lazy_and_poll_kwargs(self) -> None:
+        seen: list[dict[str, object]] = []
+
+        def receiver(sender: object, **kwargs: object) -> None:
+            seen.append({"sender": sender, **kwargs})
+
+        zone_registered.connect(receiver)
+        try:
+            zones_of(Template('{% zone "z" poll="5s" %}b{% endzone %}'))
+        finally:
+            zone_registered.disconnect(receiver)
+
+        assert len(seen) == 1
+        assert seen[0]["zone_name"] == "z"
+        assert seen[0]["lazy"] is None
+        assert seen[0]["poll"] == 5000
 
     def test_quiet_without_receivers(self) -> None:
         assert zones_of(_zoned_template())
