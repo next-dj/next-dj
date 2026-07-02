@@ -82,10 +82,10 @@ def _build_envelope(
     patches = Patches(version)
     for name in intent.zones:
         _patch_zone(patches, name, result.html[name], intent.merge)
-    patches.collect_zone_assets(result)
+    patches._collect_zone_assets(result)
     delta = result.js_context_delta()
     if delta:
-        patches.add_context(delta)
+        patches._add_context(delta)
     return patches.envelope()
 
 

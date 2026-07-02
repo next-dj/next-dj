@@ -411,6 +411,21 @@ class TestJsContextWire:
         assert collector.js_context_wire() == {}
 
 
+class TestJsContextEncoded:
+    """`js_context_encoded` serves per-key fragments from cache or re-encodes."""
+
+    def test_serves_fragment_from_cache(self, collector: StaticCollector) -> None:
+        collector.add_js_context("k", {"x": 1})
+        assert collector.js_context_encoded() == {"k": '{"x":1}'}
+
+    def test_reencodes_on_cache_miss(self) -> None:
+        collector = StaticCollector(js_context_policy=FirstWinsPolicy())
+        collector.add_js_context("k", {"a": 1})
+        collector.add_js_context("k", {"a": 2})
+        assert "k" not in collector._js_context_encoded
+        assert collector.js_context_encoded() == {"k": '{"a":1}'}
+
+
 class TestPlaceholderRegistry:
     """PlaceholderRegistry stores slot metadata keyed by slot name."""
 

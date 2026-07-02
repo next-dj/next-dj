@@ -208,6 +208,7 @@ class StaticManager:
             init_payload = builder.init_script(
                 js_context,
                 key_serializers=collector.js_context_serializers(),
+                encoded=collector.js_context_encoded(),
             )
             next_scripts = f"{builder.script_tag()}\n{init_payload}\n"
             return next_scripts + user_tags if user_tags else next_scripts

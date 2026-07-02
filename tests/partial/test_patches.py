@@ -199,7 +199,7 @@ class TestPatchesBuilder:
         assert envelope.assets[0] == Asset(kind="css", url="", inline=".x {}")
 
     def test_add_context_records_a_context_op(self) -> None:
-        envelope = Patches("v1").add_context({"unread": 3}).envelope()
+        envelope = Patches("v1")._add_context({"unread": 3}).envelope()
         assert envelope.ops[0].as_dict() == {
             "op": "context",
             "data": {"unread": 3},

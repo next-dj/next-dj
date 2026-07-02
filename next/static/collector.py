@@ -408,6 +408,37 @@ class StaticCollector:
         """
         return self._js_context_serializers
 
+    def _encoded_fragment(
+        self,
+        key: str,
+        value: object,
+        default: JsContextSerializer,
+    ) -> str:
+        """Return the cached JSON fragment for a key or re-encode on miss.
+
+        A miss happens when a merge policy overwrote the value after
+        add_js_context cached its fragment, so the value is re-encoded
+        through the same per-key serializer the collector recorded.
+        """
+        encoded = self._js_context_encoded.get(key)
+        if encoded is None:
+            serializer = self._js_context_serializers.get(key, default)
+            encoded = serializer.dumps(value)
+        return encoded
+
+    def js_context_encoded(self) -> dict[str, str]:
+        """Return the merged js-context as per-key encoded JSON fragments.
+
+        Each fragment is the exact byte output add_js_context validated,
+        so the init script assembles its payload without re-serialising.
+        Callers must not mutate the returned mapping.
+        """
+        default = self._get_js_serializer()
+        return {
+            key: self._encoded_fragment(key, value, default)
+            for key, value in self._js_context.items()
+        }
+
     def js_context_wire(self) -> dict[str, Any]:
         """Return the merged js-context as wire-ready JSON values.
 
@@ -415,11 +446,7 @@ class StaticCollector:
         patch does not re-encode what add_js_context already validated.
         """
         default = self._get_js_serializer()
-        wire: dict[str, Any] = {}
-        for key, value in self._js_context.items():
-            encoded = self._js_context_encoded.get(key)
-            if encoded is None:
-                serializer = self._js_context_serializers.get(key, default)
-                encoded = serializer.dumps(value)
-            wire[key] = json.loads(encoded)
-        return wire
+        return {
+            key: json.loads(self._encoded_fragment(key, value, default))
+            for key, value in self._js_context.items()
+        }

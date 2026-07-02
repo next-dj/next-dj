@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from django.test import RequestFactory, override_settings
 
 from next.static import NextScriptBuilder, ScriptInjectionPolicy
+from next.static.collector import StaticCollector
 from next.static.scripts import (
     CSRF_PAYLOAD_KEY,
     NEXT_JS_STATIC_PATH,
@@ -14,9 +16,40 @@ from next.static.scripts import (
     csrf_payload,
     csrf_payload_for,
 )
+from next.static.serializers import resolve_serializer
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from next.static.serializers import JsContextSerializer
 
 
 URL = "/static/next/next.min.js"
+
+
+def _legacy_init_payload(
+    js_context: Mapping[str, Any],
+    key_serializers: Mapping[str, JsContextSerializer] | None,
+) -> str:
+    """Reproduce the whole-dict or per-key init payload for byte-parity checks."""
+    if not key_serializers:
+        return resolve_serializer().dumps(dict(js_context))
+    default = resolve_serializer()
+    fragments: list[str] = []
+    for k, v in js_context.items():
+        serializer = key_serializers.get(k, default)
+        encoded_key = json.dumps(k, separators=(",", ":"))
+        fragments.append(f"{encoded_key}:{serializer.dumps(v)}")
+    return "{" + ",".join(fragments) + "}"
+
+
+class _MarkSerializer:
+    """Compact per-key serializer that wraps values under a marker."""
+
+    def dumps(self, value: object) -> str:
+        """Return the value wrapped in a marker object as compact JSON."""
+        return json.dumps({"mark": value}, separators=(",", ":"))
 
 
 class TestScriptInjectionPolicy:
@@ -138,6 +171,80 @@ class TestNextScriptBuilderFromOptions:
         assert "async" in builder.script_tag()
         payload = json.dumps({"a": 1}, separators=(",", ":"))
         assert builder.init_script({"a": 1}) == f"<script>boot({payload})</script>"
+
+
+class TestInitScriptGoldenParity:
+    """Fragment-assembled init payload stays byte-identical to the whole-dict dump.
+
+    Each case builds a collector the way the static manager does, then asserts
+    the new `encoded`-driven `init_script` output equals the legacy payload for
+    the compact serializers the framework ships.
+    """
+
+    def _assert_parity(
+        self,
+        js_context: Mapping[str, Any],
+        *,
+        key_serializers: Mapping[str, JsContextSerializer],
+        encoded: Mapping[str, str],
+    ) -> str:
+        builder = NextScriptBuilder(URL)
+        new = builder.init_script(
+            js_context, key_serializers=key_serializers, encoded=encoded
+        )
+        legacy = _legacy_init_payload(js_context, key_serializers)
+        assert new == f"<script>Next._init({legacy});</script>"
+        return new
+
+    def test_default_serializer_simple_value(self) -> None:
+        collector = StaticCollector()
+        collector.add_js_context("user", "alice")
+        self._assert_parity(
+            collector.js_context(),
+            key_serializers=collector.js_context_serializers(),
+            encoded=collector.js_context_encoded(),
+        )
+
+    def test_empty_js_context(self) -> None:
+        collector = StaticCollector()
+        out = self._assert_parity(
+            collector.js_context(),
+            key_serializers=collector.js_context_serializers(),
+            encoded=collector.js_context_encoded(),
+        )
+        assert out == "<script>Next._init({});</script>"
+
+    def test_per_key_serializer_override(self) -> None:
+        collector = StaticCollector()
+        collector.add_js_context("user", "alice")
+        collector.add_js_context("flags", [1, 2], serializer=_MarkSerializer())
+        out = self._assert_parity(
+            collector.js_context(),
+            key_serializers=collector.js_context_serializers(),
+            encoded=collector.js_context_encoded(),
+        )
+        assert '"flags":{"mark":[1,2]}' in out
+
+    def test_nested_structure_value(self) -> None:
+        collector = StaticCollector()
+        collector.add_js_context("data", {"a": [1, 2], "b": {"c": 3}})
+        self._assert_parity(
+            collector.js_context(),
+            key_serializers=collector.js_context_serializers(),
+            encoded=collector.js_context_encoded(),
+        )
+
+    def test_externally_added_csrf_key_falls_back(self) -> None:
+        collector = StaticCollector()
+        collector.add_js_context("user", "alice")
+        csrf = {"header": "X-CSRFToken", "token": "tok"}
+        js_context = {**collector.js_context(), CSRF_PAYLOAD_KEY: csrf}
+        out = self._assert_parity(
+            js_context,
+            key_serializers=collector.js_context_serializers(),
+            encoded=collector.js_context_encoded(),
+        )
+        assert '"$csrf":{"header":"X-CSRFToken","token":"tok"}' in out
 
 
 class TestNextJsStaticPath:

@@ -456,7 +456,7 @@ class Patches:
     ) -> "Patches":
         """Render the named zone of the origin page and morph it in place."""
         result = self._render_zone(zone, overrides)
-        self.collect_zone_assets(result)
+        self._collect_zone_assets(result)
         return self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
 
     def morph_foreign_zone(
@@ -487,7 +487,7 @@ class Patches:
         if dynamic:
             raise DynamicForeignPageError(foreign_path)
         result = self._render_foreign_zone(foreign_path, zone, request, kwargs)
-        self.collect_zone_assets(result)
+        self._collect_zone_assets(result)
         return self._append_morph({keys.ZONE: zone}, result.html[zone], extract=False)
 
     def _foreign_page_path(self, page: "Path | str") -> "Path":
@@ -608,7 +608,7 @@ class Patches:
         self._ops.append(Patch(op="context", extras={"data": data}))
         return self
 
-    def add_context(self, data: "Mapping[str, Any]") -> "Patches":
+    def _add_context(self, data: "Mapping[str, Any]") -> "Patches":
         """Record a context patch from already wire-ready provider values.
 
         The caller owns serialization, used by the zone-GET path where the
@@ -845,8 +845,12 @@ class Patches:
         js_context = self._origin_render_context().get("_next_js_context", {})
         return frozenset(js_context) if isinstance(js_context, dict) else frozenset()
 
-    def collect_zone_assets(self, result: "ZoneRenderResult") -> "Patches":
-        """Record the URL-form and inline-form assets a zone body collected."""
+    def _collect_zone_assets(self, result: "ZoneRenderResult") -> "Patches":
+        """Record the URL-form and inline-form assets a zone body collected.
+
+        This deliberately collects assets only. The js-context delta is emitted
+        by the view path, since the builder path owns context through context().
+        """
         for kind, body in result.inline_assets():
             self.add_asset(kind, "", inline=body)
         for kind, url in result.url_assets():

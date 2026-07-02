@@ -152,14 +152,19 @@ export function createAssets(deps: AssetsDeps): Assets {
     return bodies;
   }
 
+  // Insert an inline body with the page nonce so CSP still allows it.
+  function insertInline(tag: "style" | "script", body: string): void {
+    const el = doc.createElement(tag);
+    el.textContent = body;
+    if (nonce !== undefined) el.nonce = nonce;
+    doc.head.append(el);
+  }
+
   function loadCss(manifest: Asset[], done: () => void): void {
     // Inline styles insert synchronously and need no load gate, so they go in
     // before the URL delta whose loads the done callback waits on.
     for (const body of missingInline(manifest, "css")) {
-      const style = doc.createElement("style");
-      style.textContent = body;
-      if (nonce !== undefined) style.nonce = nonce;
-      doc.head.append(style);
+      insertInline("style", body);
     }
     const urls = missing(manifest, "css");
     if (urls.length === 0) {
@@ -191,10 +196,7 @@ export function createAssets(deps: AssetsDeps): Assets {
 
   function loadJs(manifest: Asset[]): void {
     for (const body of missingInline(manifest, "js")) {
-      const script = doc.createElement("script");
-      script.textContent = body;
-      if (nonce !== undefined) script.nonce = nonce;
-      doc.head.append(script);
+      insertInline("script", body);
     }
     for (const url of missing(manifest, "js")) {
       const script = doc.createElement("script");

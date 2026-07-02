@@ -83,6 +83,29 @@ describe("assets registry and delta", () => {
     expect(document.head.querySelectorAll("script:not([src])")).toHaveLength(1);
   });
 
+  it("seeds inline bodies from the body, not just the head", () => {
+    document.body.innerHTML = "<style>.b{}</style><script>void 1</script>";
+    const { assets } = makeAssets();
+    assets.seed();
+    assets.loadCss([{ kind: "css", url: "", inline: ".b{}" }], () => undefined);
+    assets.loadJs([{ kind: "js", url: "", inline: "void 1" }]);
+    expect(document.head.querySelectorAll("style")).toHaveLength(0);
+    expect(document.head.querySelectorAll("script:not([src])")).toHaveLength(0);
+  });
+
+  it("inserts an inline asset that omits url entirely", () => {
+    const { assets, loaded } = makeAssets();
+    const done = vi.fn();
+    assets.loadCss([{ kind: "css", inline: ".n{}" } as Asset], done);
+    assets.loadJs([{ kind: "js", inline: "void 2" } as Asset]);
+    expect(document.head.querySelector("style")!.textContent).toBe(".n{}");
+    expect(document.head.querySelector("script:not([src])")!.textContent).toBe(
+      "void 2",
+    );
+    expect(loaded).toEqual([]);
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+
   it("still inserts an inline body that differs from the seeded one", () => {
     document.head.innerHTML = "<style>.z{}</style>";
     const { assets } = makeAssets();
