@@ -283,6 +283,7 @@ Lifecycle Events
 The runtime fires events on three channels, the element, the document, and the ``Next.on`` bus.
 The ``next:*`` node events fire on the element as a bubbling ``CustomEvent`` caught with ``addEventListener``.
 The apply-stage ``partial:*`` events and ``next:toast`` fire on the document and the ``Next.on`` bus.
+A ``partial:error`` of kind ``asset``, raised when a co-located stylesheet fails to load or its version mismatches, reaches only the bus.
 ``ready``, ``context-updated``, ``partial:before-request``, and the fetch-stage ``partial:error`` reach only the bus.
 The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live only on ``document.addEventListener`` and never reach the bus, so ``Next.on("next:mounted")`` is a silent no-op.
 

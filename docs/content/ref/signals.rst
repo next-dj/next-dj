@@ -55,7 +55,10 @@ not be retained past the receiver call.
    * - ``collector_finalized``
      - The static collector
      - ``page_path``, ``request``
-     - When the static manager begins injection, after template rendering completes. ``page_path`` may be ``None`` for partial renders. ``request`` may be ``None`` outside a request.
+     - When the static manager begins injection, after template rendering completes.
+       ``page_path`` is the file path of the rendered page.
+       A standalone zone render does not fire this signal.
+       ``request`` may be ``None`` outside a request.
    * - ``component_backend_loaded``
      - ``ComponentsManager``
      - ``backend``, ``config``
