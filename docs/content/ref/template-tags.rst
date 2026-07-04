@@ -144,7 +144,7 @@ Static Pipeline
 Partial Rendering
 -----------------
 
-.. describe:: {% zone "<name>" tag="<element>" lazy="<trigger>" %}...{% placeholder %}...{% endzone %}
+.. describe:: {% zone "<name>" tag="<element>" lazy="<trigger>" poll="<interval>" %}...{% placeholder %}...{% endzone %}
 
    Marks a named slice of a page template the server can re-render on its own.
    The first argument is the quoted zone name, an ASCII slug that must be unique across the composed template, the layout chain plus the page body.
@@ -158,10 +158,16 @@ Partial Rendering
    A lazy zone renders only its ``{% placeholder %}`` branch up front and fetches the body on ``ready`` for ``load`` or when it scrolls into view for ``revealed``.
    Any other ``lazy`` value raises ``TemplateSyntaxError`` at parse time.
 
+   ``poll="<interval>"`` re-GETs the body on the interval, read from a quoted ``5s`` or ``1500ms`` literal or a bare number of milliseconds, never from a template variable.
+   It is mutually exclusive with ``lazy=``, and an interval below one second, above the browser timer ceiling, or malformed raises ``TemplateSyntaxError`` at parse time.
+
+   An option without ``=`` and an unknown option key also raise ``TemplateSyntaxError`` at parse time, so a typo fails the compile rather than being silently dropped.
+
 .. describe:: {% placeholder %}
 
    Opens the placeholder branch of a lazy ``{% zone %}``, shown until the deferred body arrives.
    It is valid only between a ``{% zone %}`` and its ``{% endzone %}``, and a lazy zone without it raises ``next.E064``.
+   The branch belongs to lazy zones only, so a zone without ``lazy=`` rejects it with ``TemplateSyntaxError`` when the template compiles.
 
 A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}``, an ``{% if %}``, or directly inside a ``{% with %}``.
 The :doc:`zone placement checks </content/ref/system-checks>` enforce each rule at ``manage.py check`` time.

@@ -283,6 +283,9 @@ Errors
    * - ``next.E066``
      - A custom patch op shadows a built-in verb or uses a name that is not a valid verb token.
      - ``next.partial.checks``
+   * - ``next.E072``
+     - A composed page template does not compile, so the syntax error would otherwise surface only as a 500 on the first request to the page.
+     - ``next.partial.checks``
 
 A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
 

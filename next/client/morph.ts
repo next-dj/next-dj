@@ -326,7 +326,7 @@ function morphNode(
 }
 
 // Walk new children left to right with an insertion pointer into old children.
-// hard match -> soft match -> create. A match at the pointer is morphed in place
+// hard match, then soft match, then create. A match at the pointer is morphed in place
 // and the pointer advances. A match found further on is moved before the pointer
 // and morphed, the pointer stays so the skipped old nodes are revisited by later
 // new children or swept at the end. The trailing old children are discarded once

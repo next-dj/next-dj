@@ -11,6 +11,7 @@ from next.partial.registry import (
     zones_of,
 )
 from next.partial.signals import patch_op_registered, zone_registered
+from next.partial.zone import ZoneOptions
 
 
 class TestBuiltinOps:
@@ -93,6 +94,34 @@ class TestZonesOf:
         assert zones["second"].tag == "tbody"
         assert zones["second"].lazy == "load"
 
+    def test_carries_no_poll_without_the_kwarg(self) -> None:
+        zones = zones_of(_zoned_template())
+        assert zones["first"].poll is None
+        assert zones["second"].poll is None
+
+    def test_zone_info_carries_poll(self) -> None:
+        template = Template('{% zone "z" poll="5s" %}b{% endzone %}')
+        info = zones_of(template)["z"]
+        assert info.poll == 5000
+
+    def test_zone_info_carries_structured_options(self) -> None:
+        zones = zones_of(_zoned_template())
+        assert zones["first"].options == ZoneOptions()
+        assert zones["second"].options == ZoneOptions(tag="tbody", lazy="load")
+
+    def test_zone_info_scalars_delegate_to_options(self) -> None:
+        zones = zones_of(_zoned_template())
+        info = zones["second"]
+        assert info.lazy == info.options.lazy
+        assert info.poll == info.options.poll
+        assert info.tag == info.options.tag
+
+    def test_zone_info_options_carry_the_delivery_attrs(self) -> None:
+        template = Template('{% zone "z" poll="5s" %}b{% endzone %}')
+        info = zones_of(template)["z"]
+        assert info.options == ZoneOptions(poll=5000)
+        assert info.options.delivery_attrs == ' data-next-poll="5000"'
+
     def test_empty_template_has_no_zones(self) -> None:
         assert zones_of(Template("plain {{ x }}")) == {}
 
@@ -131,6 +160,23 @@ class TestZoneRegisteredSignal:
 
         names = sorted(str(entry["zone_name"]) for entry in seen)
         assert names == ["first", "second"]
+
+    def test_sends_lazy_and_poll_kwargs(self) -> None:
+        seen: list[dict[str, object]] = []
+
+        def receiver(sender: object, **kwargs: object) -> None:
+            seen.append({"sender": sender, **kwargs})
+
+        zone_registered.connect(receiver)
+        try:
+            zones_of(Template('{% zone "z" poll="5s" %}b{% endzone %}'))
+        finally:
+            zone_registered.disconnect(receiver)
+
+        assert len(seen) == 1
+        assert seen[0]["zone_name"] == "z"
+        assert seen[0]["lazy"] is None
+        assert seen[0]["poll"] == 5000
 
     def test_quiet_without_receivers(self) -> None:
         assert zones_of(_zoned_template())

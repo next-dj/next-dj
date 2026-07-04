@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { Board } from "./page";
 
 const mockBoard = {
@@ -48,7 +48,7 @@ describe("Board", () => {
     const col2 = document.querySelector("[data-kanban-column='2']");
     fireEvent.drop(col2, { dataTransfer: { getData: () => "10" } });
 
-    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
 
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("/actions/kanban/move_card");
@@ -99,7 +99,7 @@ describe("Board", () => {
     const col2 = document.querySelector("[data-kanban-column='2']");
     fireEvent.drop(col2, { dataTransfer: { getData: () => "10" } });
 
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(document.querySelector("[data-kanban-error]")).toBeTruthy(),
     );
 
@@ -119,7 +119,7 @@ describe("Board", () => {
     const col2 = document.querySelector("[data-kanban-column='2']");
     fireEvent.drop(col2, { dataTransfer: { getData: () => "10" } });
 
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(document.querySelector("[data-kanban-error]")).toBeTruthy(),
     );
 
@@ -137,7 +137,7 @@ describe("Board", () => {
     const col2 = document.querySelector("[data-kanban-column='2']");
     fireEvent.drop(col2, { dataTransfer: { getData: () => "10" } });
 
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(document.querySelector("[data-kanban-error]")).toBeTruthy(),
     );
 

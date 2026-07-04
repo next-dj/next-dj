@@ -8,7 +8,7 @@ The page tree is `dashboards/`. The components live next to the pages that use t
 
 | URL | Description |
 | --- | --- |
-| `/` | Overview with four headline counters and a React sparkline. |
+| `/` | Overview with four headline counters in a polling zone, a React sparkline, and a lazy-loaded busiest-pages widget. |
 | `/stats/` | Live page with the Chart.js bar chart and a filter form. |
 | `/stats/?window=1h` | Same page, real time-bucketed aggregation across the last hour. |
 | `/stats/pages/` | Per-page render counts pulled from the cumulative `pages.rendered` kind. |
@@ -19,6 +19,8 @@ The page tree is `dashboards/`. The components live next to the pages that use t
 
 The filter form uses the framework `{% form "window_filter_form" %}` tag. Submitting it fires `forms.action_dispatched` so the example exercises the full form path without adding a model write. From the live page the form targets the `live-totals` zone, so the apply rides the partial protocol and ships a project-defined verb beside the built-in morph.
 
+The overview shows the other two zone modes. The stat-tile grid sits in `{% zone "overview-totals" poll="5s" %}`, so the client re-GETs the zone every five seconds and the counters refresh without a reload. Each poll tick re-renders the four tiles, so the components counter also counts the poll's own renders — visible proof the polling works. The busiest-pages widget below the sparkline is a `lazy="load"` zone: the first paint ships only its `{% placeholder %}` branch and the body arrives through one batched zone-GET as soon as the page loads.
+
 ## How to run
 
 ```bash
@@ -27,7 +29,7 @@ uv run python manage.py migrate
 uv run python manage.py runserver        # http://127.0.0.1:8000/
 ```
 
-Click around `/`, `/stats/`, the four sub-pages. Apply different windows. Counters move on every render, and the windowed view actually narrows to the chosen aggregation slice.
+Click around `/`, `/stats/`, the four sub-pages. Apply different windows. Counters move on every render, the overview tiles re-poll on their own every five seconds, and the windowed view actually narrows to the chosen aggregation slice.
 
 ```bash
 uv run python manage.py flush_metrics
@@ -55,10 +57,11 @@ obs/
 └── dashboards/
     ├── layout.djx            <- root html shell, Tailwind from CDN
     ├── page.py               <- @context totals
-    ├── template.djx          <- overview grid + React sparkline
+    ├── template.djx          <- poll zone with the overview grid, React sparkline, lazy busiest-pages widget
     ├── _widgets/
     │   ├── stat_card/        <- card composite reused on every page
     │   ├── counter_list/     <- list/table widget shared by every stats subpage
+    │   ├── busiest_pages/    <- lazy-zone body, component-level top_by_kind lookup
     │   ├── stats_nav/        <- nav tabs rendered from a Python list
     │   ├── filter_window/    <- window filter form (template-only component)
     │   ├── render_chart/     <- Chart.js bar chart, scripts=[chart.js cdn]

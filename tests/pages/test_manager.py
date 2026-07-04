@@ -542,6 +542,17 @@ class TestComposedTemplateCache:
         template = page_instance.composed_template_for(page_file)
         assert template.source == "<p>replaced</p>"
 
+    def test_composed_template_carries_page_origin(
+        self, page_instance, tmp_path
+    ) -> None:
+        """The compiled composed template names the page path as its origin."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("x = 1")
+        (tmp_path / "template.djx").write_text("<p>ok</p>")
+        template = page_instance.composed_template_for(page_file)
+        assert template.origin.name == str(page_file)
+        assert template.name == str(page_file)
+
     def test_render_function_pages_bypass_compiled_cache(
         self, page_instance, tmp_path
     ) -> None:

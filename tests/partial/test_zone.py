@@ -5,8 +5,10 @@ from django.test import RequestFactory
 
 from next.partial.zone import (
     LAZY_ATTR,
+    POLL_ATTR,
     ZONE_ATTR,
     ZoneNode,
+    ZoneOptions,
     ZonePartial,
     render_zone_standalone,
 )
@@ -44,6 +46,26 @@ class TestZoneTagFullRender:
         out = _render(source)
         assert f'{LAZY_ATTR}="load"' in out
 
+    def test_poll_seconds_renders_interval_inline(self) -> None:
+        out = _render('{% zone "t" poll="5s" %}<p>{{ n }}</p>{% endzone %}', n=7)
+        assert out == f'<div {ZONE_ATTR}="t" {POLL_ATTR}="5000"><p>7</p></div>'
+
+    def test_poll_milliseconds_literal(self) -> None:
+        out = _render('{% zone "t" poll="1500ms" %}body{% endzone %}')
+        assert out == f'<div {ZONE_ATTR}="t" {POLL_ATTR}="1500">body</div>'
+
+    def test_poll_bare_number_reads_as_milliseconds(self) -> None:
+        out = _render('{% zone "t" poll="3000" %}body{% endzone %}')
+        assert out == f'<div {ZONE_ATTR}="t" {POLL_ATTR}="3000">body</div>'
+
+    def test_poll_at_the_ceiling_renders(self) -> None:
+        out = _render('{% zone "t" poll="2147483647" %}body{% endzone %}')
+        assert out == f'<div {ZONE_ATTR}="t" {POLL_ATTR}="2147483647">body</div>'
+
+    def test_poll_literal_outer_whitespace_is_stripped(self) -> None:
+        out = _render('{% zone "t" poll=" 5s " %}body{% endzone %}')
+        assert out == f'<div {ZONE_ATTR}="t" {POLL_ATTR}="5000">body</div>'
+
     def test_full_render_is_byte_for_byte_outside_wrapper(self) -> None:
         plain = _render("before <p>{{ msg }}</p> after", msg="hi")
         zoned = _render(
@@ -68,9 +90,68 @@ class TestZoneTagSyntax:
         with pytest.raises(TemplateSyntaxError):
             Template('{% zone "z" lazy="whenever" %}b{% placeholder %}p{% endzone %}')
 
-    def test_stray_bits_ignored(self) -> None:
-        out = _render('{% zone "z" garbage %}body{% endzone %}')
-        assert out == f'<div {ZONE_ATTR}="z">body</div>'
+    def test_invalid_poll_literal_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError):
+            Template('{% zone "z" poll="soon" %}b{% endzone %}')
+
+    # U+0665 is the Arabic-Indic digit five, which int() accepts but the
+    # strict ASCII-digit grammar must not.
+    @pytest.mark.parametrize("literal", ["1_000", "+5s", "5 s", "\u0665s"])
+    def test_malformed_poll_literal_raises_with_the_grammar_hint(
+        self, literal: str
+    ) -> None:
+        with pytest.raises(TemplateSyntaxError, match="5s or 1500ms"):
+            Template('{% zone "z" poll="' + literal + '" %}b{% endzone %}')
+
+    def test_poll_below_floor_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError):
+            Template('{% zone "z" poll="100ms" %}b{% endzone %}')
+
+    def test_poll_above_ceiling_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError):
+            Template('{% zone "z" poll="2592000s" %}b{% endzone %}')
+
+    def test_placeholder_without_lazy_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError):
+            Template('{% zone "z" %}b{% placeholder %}p{% endzone %}')
+
+    def test_placeholder_with_poll_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError):
+            Template('{% zone "z" poll="5s" %}b{% placeholder %}p{% endzone %}')
+
+    def test_poll_and_lazy_are_exclusive(self) -> None:
+        with pytest.raises(TemplateSyntaxError):
+            Template('{% zone "z" lazy="load" poll="5s" %}b{% endzone %}')
+
+    def test_empty_poll_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError):
+            Template('{% zone "z" poll="" %}b{% endzone %}')
+
+    def test_stray_bit_without_equals_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="'garbage' is missing '='"):
+            Template('{% zone "z" garbage %}body{% endzone %}')
+
+    def test_spaces_around_equals_raise(self) -> None:
+        # token splitting turns poll = "5s" into three bits, the first of
+        # which carries no '=' and must fail loudly instead of dropping poll
+        with pytest.raises(TemplateSyntaxError, match='key="value"'):
+            Template('{% zone "z" poll = "5s" %}body{% endzone %}')
+
+    def test_unknown_option_key_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="unknown option 'pol'"):
+            Template('{% zone "z" pol="5s" %}body{% endzone %}')
+
+    def test_unknown_option_error_lists_the_valid_keys(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="tag, lazy, and poll"):
+            Template('{% zone "z" lzay="load" %}body{% endzone %}')
+
+    def test_placeholder_error_names_the_zone(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match='zone "z"'):
+            Template('{% zone "z" %}b{% placeholder %}p{% endzone %}')
+
+    def test_poll_grammar_error_says_literals_only(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="Template variables"):
+            Template('{% zone "z" poll=interval %}b{% endzone %}')
 
 
 class TestZonePartialStandalone:
@@ -93,6 +174,34 @@ class TestZonePartialStandalone:
         assert node.partial.engine is not None
 
 
+class TestZoneOptions:
+    """`ZoneOptions` derives the wrapper attributes from the mode options."""
+
+    def test_plain_options_have_no_attrs(self) -> None:
+        options = ZoneOptions()
+        assert options.full_attrs == ""
+        assert options.delivery_attrs == ""
+
+    def test_poll_attr_appears_on_both_render_paths(self) -> None:
+        options = ZoneOptions(poll=5000)
+        assert options.full_attrs == f' {POLL_ATTR}="5000"'
+        assert options.delivery_attrs == options.full_attrs
+
+    def test_lazy_attr_is_dropped_from_delivery(self) -> None:
+        options = ZoneOptions(lazy="load")
+        assert options.full_attrs == f' {LAZY_ATTR}="load"'
+        assert options.delivery_attrs == ""
+
+    def test_lazy_and_poll_together_raise(self) -> None:
+        with pytest.raises(ValueError, match="the modes are exclusive"):
+            ZoneOptions(lazy="load", poll=5000)
+
+    def test_parsed_node_carries_options(self) -> None:
+        template = Template('{% zone "p" tag="ul" poll="5s" %}b{% endzone %}')
+        node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
+        assert node.options == ZoneOptions(tag="ul", poll=5000)
+
+
 class TestRenderZoneStandalone:
     """`render_zone_standalone` wraps the body for a delivered partial."""
 
@@ -103,10 +212,29 @@ class TestRenderZoneStandalone:
         )
         node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
         out = render_zone_standalone(
-            node.partial, node.name, node.tag, Context({"v": "x"})
+            node.partial, node.name, node.options, Context({"v": "x"})
         )
         assert out == f'<section {ZONE_ATTR}="lz"><b>x</b></section>'
         assert LAZY_ATTR not in out
+
+    def test_standalone_render_carries_poll_interval(self) -> None:
+        # The client re-reads the interval from the live element after every
+        # morph, so a delivered poll zone must keep the hint on its wrapper.
+        template = Template('{% zone "p" poll="5s" %}<b>{{ v }}</b>{% endzone %}')
+        node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
+        out = render_zone_standalone(
+            node.partial, node.name, node.options, Context({"v": "x"})
+        )
+        assert out == f'<div {ZONE_ATTR}="p" {POLL_ATTR}="5000"><b>x</b></div>'
+
+    def test_standalone_render_without_poll_stays_plain(self) -> None:
+        template = Template('{% zone "p" %}<b>{{ v }}</b>{% endzone %}')
+        node = template.nodelist.get_nodes_by_type(ZoneNode)[0]
+        out = render_zone_standalone(
+            node.partial, node.name, node.options, Context({"v": "x"})
+        )
+        assert out == f'<div {ZONE_ATTR}="p"><b>x</b></div>'
+        assert POLL_ATTR not in out
 
 
 class TestZoneDebugContract:

@@ -1,13 +1,24 @@
 <div class="space-y-6">
-  {% component "page_header" title="Overview" description="In-process counters refresh on every page render." %}
-  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    {% component "stat_card" label="Pages rendered" value=totals.pages_rendered %}
-    {% component "stat_card" label="Components rendered" value=totals.components_rendered %}
-    {% component "stat_card" label="Actions dispatched" value=totals.actions_dispatched %}
-    {% component "stat_card" label="HTML injections" value=totals.html_injections %}
-  </div>
+  {% component "page_header" title="Overview" description="In-process counters refresh on an interval without a reload." %}
+  {% zone "overview-totals" poll="5s" %}
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {% component "stat_card" label="Pages rendered" value=totals.pages_rendered %}
+      {% component "stat_card" label="Components rendered" value=totals.components_rendered %}
+      {% component "stat_card" label="Actions dispatched" value=totals.actions_dispatched %}
+      {% component "stat_card" label="HTML injections" value=totals.html_injections %}
+    </div>
+  {% endzone %}
 
   {% component "sparkline" %}
+
+  <section class="rounded-md border border-border bg-card p-6 shadow-sm">
+    <h2 class="mb-4 text-sm font-semibold text-foreground">Busiest pages</h2>
+    {% zone "busiest-pages" lazy="load" %}
+      {% component "busiest_pages" %}
+    {% placeholder %}
+      <p class="text-sm text-muted-foreground">Loading the busiest pages&hellip;</p>
+    {% endzone %}
+  </section>
 
   <p class="text-sm text-muted-foreground">
     Drill down on the

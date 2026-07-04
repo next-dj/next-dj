@@ -23,6 +23,12 @@ export const HEADER_VERSION = "X-Next-Version";
 export const HEADER_REQUEST_ID = "X-Next-Request-Id";
 export const HEADER_ORIGIN = "X-Next-Origin";
 
+// The data-next-poll bounds. Both must match _MIN_POLL_MS and _MAX_POLL_MS in
+// next/partial/zone.py exactly. The ceiling is the browser's signed-32-bit
+// setTimeout coercion, above which a timer fires immediately.
+export const MIN_POLL_MS = 1000;
+export const MAX_POLL_MS = 2147483647;
+
 // The data-next-* attributes the runtime resolves across module boundaries: a
 // zone container, a form keyed by its action uid, and a list-row dedup key. The
 // applier, the layer stack, the triggers, and the morph engine must spell these
@@ -59,4 +65,12 @@ export function cssEscape(value: string): string {
 // so a query filter survives a re-GET instead of collapsing to the bare path.
 export function currentUrl(doc: Document): string {
   return doc.location.pathname + doc.location.search;
+}
+
+// querySelectorAll never matches its own root, but a replace patch scans the
+// new wrapper element itself, so scans fold a matching root into the result.
+export function matching(root: ParentNode, selector: string): Element[] {
+  const found = Array.from(root.querySelectorAll(selector));
+  if (root instanceof Element && root.matches(selector)) found.push(root);
+  return found;
 }

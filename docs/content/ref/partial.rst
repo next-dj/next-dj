@@ -237,8 +237,8 @@ See :doc:`signals` and :doc:`/content/topics/signals` for the partial signals
 System Checks
 -------------
 
-See :doc:`system-checks` for the zone-placement and custom-verb checks
-(``next.E060`` through ``next.E066``, ``next.W067`` through ``next.W071``).
+See :doc:`system-checks` for the zone-placement, template-compile, and custom-verb checks
+(``next.E060`` through ``next.E066``, ``next.E072``, ``next.W067`` through ``next.W071``).
 
 See Also
 --------

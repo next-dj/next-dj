@@ -6,8 +6,8 @@ quiet deployment pays nothing.
 
 The `zone_registered` signal fires once per compiled composed template
 when its named zones are first read. The sender is the compiled
-template class. The keyword arguments are `template`, `zone_name`, and
-`lazy`.
+template class. The keyword arguments are `template`, `zone_name`,
+`lazy`, and `poll`.
 
 The `zone_rendered` signal fires after a zone body renders for a
 partial request. The sender is the `ZoneRenderResult` class. The keyword

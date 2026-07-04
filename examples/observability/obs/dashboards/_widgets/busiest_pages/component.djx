@@ -1,0 +1,1 @@
+{% component "counter_list" items=busiest_pages empty_message="No pages have been rendered yet." %}

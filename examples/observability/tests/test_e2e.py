@@ -220,6 +220,42 @@ class TestFilterFormDispatch:
         assert events[0].kwargs["response_status"] == 302
 
 
+class TestPollZone:
+    """The overview totals zone carries a poll interval and still morphs."""
+
+    def test_overview_zone_carries_poll_interval(self, client) -> None:
+        body = client.get("/").content.decode()
+        assert 'data-next-poll="5000"' in body
+        assert 'data-next-zone="overview-totals"' in body
+
+    def test_overview_zone_get_still_morphs(self, client) -> None:
+        response = client.get_zones("/", "overview-totals")
+        envelope = envelope_of(response)
+        assert envelope.zone_targets() == ["overview-totals"]
+        assert "Pages rendered" in envelope.html_for_zone("overview-totals")
+
+
+class TestLazyLoadZone:
+    """The busiest-pages widget ships a placeholder and loads its body lazily."""
+
+    def test_overview_lazy_load_widget_renders_hint(self, client) -> None:
+        body = client.get("/").content.decode()
+        assert 'data-next-lazy="load"' in body
+        assert 'data-next-zone="busiest-pages"' in body
+        assert "Busiest pages" in body
+        assert "Loading the busiest pages" in body
+
+    def test_lazy_zone_get_delivers_the_body(self, client) -> None:
+        client.get("/stats/pages/")
+        response = client.get_zones("/", "busiest-pages")
+        envelope = envelope_of(response)
+        assert envelope.zone_targets() == ["busiest-pages"]
+        html = envelope.html_for_zone("busiest-pages")
+        assert "stats/pages/page.py" in html
+        assert "No pages have been rendered yet." not in html
+        assert "Loading the busiest pages" not in html
+
+
 class TestMetricPulseVerb:
     """A partial apply morphs the totals zone and emits the custom verb."""
 

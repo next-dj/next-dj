@@ -30,7 +30,7 @@ import type { ConfirmAdapter, IntersectionAdapter } from "./triggers";
 import { createSse } from "./sse";
 import type { EventSourceAdapter, Sse, VisibilityAdapter } from "./sse";
 import { defaultHistory, defaultNavigate } from "./adapters";
-import { currentUrl } from "./protocol";
+import { currentUrl, matching } from "./protocol";
 
 export interface PartialDeps {
   dispatch: (event: string, detail: Record<string, unknown>) => void;
@@ -61,8 +61,9 @@ export interface PartialAdapters {
   session?: SessionStore;
   confirm?: ConfirmAdapter;
   cssTimeoutMs?: number;
-  // The EventSource and visibility seams of the SSE bridge, both absent in
-  // jsdom: tests drive message, error, and the visibility flip through mocks.
+  // The EventSource seam of the SSE bridge and the visibility seam the bridge
+  // shares with the poll triggers, both absent in jsdom: tests drive message,
+  // error, and the visibility flip through mocks.
   source?: EventSourceAdapter;
   visibility?: VisibilityAdapter;
 }
@@ -119,13 +120,7 @@ export function createPartial(deps: PartialDeps): PartialSurface {
   let mounted = false;
   const runMount: MountCallback = (root) => {
     for (const entry of mounts) {
-      for (const el of Array.from(root.querySelectorAll(entry.selector))) {
-        entry.callback(el);
-      }
-      // A subtree root that matches the selector itself is mounted too.
-      if (root instanceof Element && root.matches(entry.selector)) {
-        entry.callback(root);
-      }
+      for (const el of matching(root, entry.selector)) entry.callback(el);
     }
     triggers.scan(root);
     sse.scan(root);
@@ -194,10 +189,16 @@ export function createPartial(deps: PartialDeps): PartialSurface {
     return {
       fetch: (request: WireRequest) => void wire.fetch(request),
       abort: (zone: string) => wire.abort(zone),
-      version: () => assets.version(),
+      // A poll tick or lazy activation asks the layer stack for the page that
+      // owns its element, so a base-page zone keeps GETting the host URL while
+      // a modal layer holds the address bar. The arrow reads the `layers`
+      // variable, and _configure rebuilds the stack before the triggers, so
+      // the binding stays live the same way applyDeps holds it.
+      pageUrl: (el: Element) => layers.urlFor(el),
       ...opt("document", adapters?.document),
       ...opt("clock", adapters?.clock),
       ...opt("observer", adapters?.observer),
+      ...opt("visibility", adapters?.visibility),
       ...opt("confirm", adapters?.confirm),
       ...opt("dev", adapters?.dev),
     };
@@ -210,6 +211,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       apply: (raw: unknown) => void applier.apply(raw),
       fetch: (request: WireRequest) => void wire.fetch(request),
       dispatch: deps.dispatch,
+      // A stream subscription captures the page that owns its container from
+      // the layer stack, the same live binding as triggerDeps: _configure
+      // rebuilds the stack before the bridge, so the arrow stays current.
+      pageUrl: (el: Element) => layers.urlFor(el),
       ...opt("document", adapters?.document),
       ...opt("source", adapters?.source),
       ...opt("visibility", adapters?.visibility),
@@ -226,8 +231,9 @@ export function createPartial(deps: PartialDeps): PartialSurface {
         _response: Response,
         snapshot: number,
         key: string | undefined,
+        page: string | undefined,
       ) => {
-        const envelope = applier.apply(raw, snapshot, key);
+        const envelope = applier.apply(raw, snapshot, key, page);
         // The csrf meta rotates the payload token too, so the next mutation
         // submits the fresh token, not just the forms already in the document.
         if (envelope.csrf) csrf = envelope.csrf;
@@ -293,6 +299,10 @@ export function createPartial(deps: PartialDeps): PartialSurface {
       assets = createAssets(assetsDeps(adapters));
       detachLayers();
       detachTriggers();
+      // Stop the old instance's pollers and observers before the rebuild, or
+      // they would keep fetching through the live wire as orphans, the same
+      // reason the SSE bridge resets here.
+      triggers._reset();
       sse._reset();
       layers = createLayers(layerDeps(adapters));
       triggers = createTriggers(triggerDeps(adapters));

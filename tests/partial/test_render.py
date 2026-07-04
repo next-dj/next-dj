@@ -6,7 +6,7 @@ import pytest
 import next.partial.render as render_module
 from next.partial import UnknownZoneError, ZoneRenderResult, render_zone
 from next.partial.signals import zone_rendered
-from next.partial.zone import ZONE_ATTR
+from next.partial.zone import POLL_ATTR, ZONE_ATTR
 from tests.support import plain_get
 
 
@@ -43,6 +43,12 @@ class TestRenderZoneBatch:
         result = render_zone(ZONED_PAGE, ("later",), _request())
         assert result.html["later"] == f'<div {ZONE_ATTR}="later"><p>later hi</p></div>'
         assert "data-next-lazy" not in result.html["later"]
+
+    def test_poll_zone_delivery_keeps_the_poll_interval(self) -> None:
+        result = render_zone(ZONED_PAGE, ("ticker",), _request())
+        assert result.html["ticker"] == (
+            f'<div {ZONE_ATTR}="ticker" {POLL_ATTR}="5000"><p>tick hi</p></div>'
+        )
 
     def test_context_collected_once_for_the_batch(self) -> None:
         original = render_module.page.build_render_context

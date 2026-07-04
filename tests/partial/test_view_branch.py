@@ -24,6 +24,13 @@ class TestZoneGetEnvelope:
             '<div data-next-zone="alpha"><p>alpha hi</p></div>'
         )
 
+    def test_poll_zone_html_keeps_the_poll_interval(self) -> None:
+        response = NextClient().get_zones("/zoned/", "ticker")
+        envelope = envelope_of(response)
+        assert envelope.html_for_zone("ticker") == (
+            '<div data-next-zone="ticker" data-next-poll="5000"><p>tick hi</p></div>'
+        )
+
     def test_envelope_stamps_version(self) -> None:
         response = NextClient().get_zones("/zoned/", "alpha")
         assert response["X-Next-Version"] == envelope_of(response).version

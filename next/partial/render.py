@@ -114,9 +114,10 @@ def render_zone(
     html: dict[str, str] = {}
     for name in zone_names:
         info = zones[name]
-        html[name] = str(
-            render_zone_standalone(info.partial, info.name, info.tag, django_context)
+        rendered = render_zone_standalone(
+            info.partial, info.name, info.options, django_context
         )
+        html[name] = str(rendered)
 
     _emit_rendered(page_path, zone_names, request, start)
     return ZoneRenderResult(html=html, collector=collector)

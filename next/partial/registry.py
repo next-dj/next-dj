@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from django.http import HttpRequest
     from django.template.base import Template
 
-    from .zone import ZonePartial
+    from .zone import ZoneOptions, ZonePartial
 
 
 BUILTIN_OPS: frozenset[str] = frozenset(
@@ -78,12 +78,30 @@ def register_patch_op(name: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class ZoneInfo:
-    """One compiled zone of a composed page template."""
+    """One compiled zone of a composed page template.
+
+    The render paths consume `options` whole, and the scalar read
+    surface delegates to it so no mode can drift between the two.
+    """
 
     name: str
-    lazy: str | None
-    tag: str
     partial: "ZonePartial"
+    options: "ZoneOptions"
+
+    @property
+    def lazy(self) -> str | None:
+        """Lazy trigger of the zone, read from its options."""
+        return self.options.lazy
+
+    @property
+    def poll(self) -> int | None:
+        """Poll interval of the zone in milliseconds, read from its options."""
+        return self.options.poll
+
+    @property
+    def tag(self) -> str:
+        """Wrapper tag name of the zone, read from its options."""
+        return self.options.tag
 
 
 _zone_cache: "WeakKeyDictionary[Template, Mapping[str, ZoneInfo]]" = WeakKeyDictionary()
@@ -96,9 +114,8 @@ def _zones_from_template(template: "Template") -> dict[str, ZoneInfo]:
     for node in nodes:
         zones[node.name] = ZoneInfo(
             name=node.name,
-            lazy=node.lazy,
-            tag=node.tag,
             partial=node.partial,
+            options=node.options,
         )
     return zones
 
@@ -122,7 +139,8 @@ def zones_of(template: "Template") -> "Mapping[str, ZoneInfo]":
                 sender=type(template),
                 template=template,
                 zone_name=info.name,
-                lazy=info.lazy,
+                lazy=info.options.lazy,
+                poll=info.options.poll,
             )
     return zones
 

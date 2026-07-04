@@ -72,7 +72,7 @@ The canonical server-driven done choreography.
 The wizard puts the morph of the list's zone into its own response, so one envelope closes the layer, refreshes the list, and shows the toast.
 
 This addresses a zone of a foreign page through ``morph(page=, url_kwargs=)``, the one path the server takes to refresh a host-page zone from a ``done`` step.
-The builder takes ``page=`` and ``url_kwargs=`` alongside ``zone=``, and the request carries ``X-Next-Origin`` with the path of the page that hosts the layer.
+The builder takes ``page=`` and ``url_kwargs=`` alongside ``zone=``, and the request carries ``X-Next-Origin`` with the path and query string of the page that hosts the layer.
 ``resolve_partial_origin`` is the thin helper that reads that header back into the ``page_path`` and ``url_kwargs`` the morph needs, nothing more.
 
 .. code-block:: python

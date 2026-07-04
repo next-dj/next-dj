@@ -70,6 +70,30 @@ The network payload shrinks from a page to a zone, and the server render shrinks
 Reach for a zone when a page is heavy, when a form sits among expensive siblings, or when the response size matters.
 Leave it off when the page is small and the extract default already does the job.
 
+Poll a Zone on an Interval
+--------------------------
+
+A zone polls itself when the tag carries a ``poll=`` interval.
+The body renders inline on the first paint, and the runtime re-GETs the zone on the interval through the same zone request a lazy load uses.
+
+.. code-block:: jinja
+   :caption: a polling zone
+
+   {% zone "overview-totals" poll="5s" %}
+     {% component "stat_card" label="Pages" value=totals.pages %}
+   {% endzone %}
+
+The interval reads ``5s``, ``1500ms``, or a bare number of milliseconds.
+An interval below one second or above the browser timer ceiling fails when the template compiles, the same honest-fail as a malformed literal or an unknown ``lazy=`` trigger.
+
+The wrapper carries ``data-next-poll`` with the resolved milliseconds on the full render.
+A partial response for the zone keeps the interval on its wrapper and drops only the lazy hint, so the live element stays the source of truth across morphs.
+Zones that share an interval batch into one zone request per owning page.
+A hidden tab holds no poll timers.
+On its return to the foreground each zone refetches only when its own interval elapsed while hidden, and otherwise the countdown resumes with the remaining time.
+A brief flicker between tabs therefore fetches nothing, and switching windows does not storm the server.
+A polling zone shows its body, so it cannot also be ``lazy=``, the two modes are exclusive and combining them is a compile error.
+
 The Wrapper Element
 -------------------
 
