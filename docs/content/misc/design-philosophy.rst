@@ -43,7 +43,6 @@ Composition Over Inheritance
 
 Layouts compose by string substitution, not by Django ``{% extends %}``.
 Components compose by name resolution, not by class hierarchies.
-The framework prefers data over class inheritance whenever it makes sense.
 
 Stable URLs
 -----------

@@ -55,7 +55,7 @@ The static manager builds the collector per request and reads the strategy dotte
    }
 
 The ``DEDUP_STRATEGY`` value is the dotted path to a dedup strategy class.
-The collector instantiates it once per request.
+The manager instantiates it once per request when it builds the collector.
 When the key is absent the collector uses ``UrlDedup``.
 
 Inline Assets
@@ -107,8 +107,7 @@ Point the backend ``OPTIONS`` at the new strategy.
        ]
    }
 
-The collector instantiates the strategy once per request.
-A strategy can therefore hold per request state.
+The strategy lives for one request, so it can hold per request state.
 
 Common Patterns
 ---------------

@@ -6,7 +6,7 @@ Testing Reference
 Module Summary
 --------------
 
-``next.testing`` exposes a test client, signal recorder, registry isolation, action helpers, HTML utilities, rendering helpers, loaders, patching helpers, and dependency context builders.
+``next.testing`` exposes a test client, partial envelope decoding, signal recorder, registry isolation, action helpers, HTML utilities, rendering helpers, loaders, patching helpers, and dependency context builders.
 
 Public API
 ----------
@@ -14,7 +14,7 @@ Public API
 Client
 ~~~~~~
 
-``NextClient`` extends Django's test client with form-action shortcuts for end to end HTTP tests.
+``NextClient`` extends Django's test client with form-action shortcuts and the partial-request helpers ``get_zones``, ``envelope_of``, and ``PartialEnvelope`` for end to end HTTP tests.
 
 .. automodule:: next.testing.client
    :members:

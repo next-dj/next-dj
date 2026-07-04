@@ -46,7 +46,8 @@ Define the form.
 
 ``AttachmentForm`` registers automatically as ``attachment_form`` via autodiscovery on startup.
 No manual import is needed in the page module.
-No ``on_valid`` override is needed either: the default ``ModelForm`` implementation saves the instance and redirects to ``Meta.success_url``.
+No ``on_valid`` override is needed either.
+The default ``ModelForm`` implementation saves the instance and redirects to ``Meta.success_url``.
 Without ``success_url`` the submission redirects back to the origin page.
 See :ref:`topics-forms-actions-success` for the redirect contract.
 

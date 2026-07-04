@@ -281,7 +281,7 @@ class TestComponentVisibilityResolver:
     def _resolve_same_name_from_two_roots(
         self, base: Path, first: str, second: str
     ) -> ComponentInfo:
-        """Register a same-named component from two global roots in given order."""
+        """Register a same-named component from two DIRS roots in given order."""
         reg = ComponentRegistry()
         for name in (first, second):
             root = (base / name).resolve()
@@ -296,7 +296,7 @@ class TestComponentVisibilityResolver:
         return resolved["button"]
 
     def test_equal_score_tie_breaks_on_registration_order(self, tmp_path: Path) -> None:
-        """Two equal-score global roots resolve to the one registered first."""
+        """Two equal-score same-origin DIRS roots resolve to the one registered first."""
         winner = self._resolve_same_name_from_two_roots(
             tmp_path / "case1", "z_root", "a_root"
         )
@@ -306,3 +306,49 @@ class TestComponentVisibilityResolver:
             tmp_path / "case2", "a_root", "z_root"
         )
         assert other.scope_root == (tmp_path / "case2" / "a_root").resolve()
+
+    def _register_page_tree_and_dirs_button(
+        self, base: Path
+    ) -> tuple[ComponentRegistry, Path, Path]:
+        """Register a DIRS `button` then a page-tree `button` under `base`."""
+        pages = (base / "pages").resolve()
+        dirs_root = (base / "shared").resolve()
+        (pages / "_components").mkdir(parents=True)
+        dirs_root.mkdir(parents=True)
+        reg = ComponentRegistry()
+        reg.register(
+            ComponentInfo(
+                "button", dirs_root, "", dirs_root / "button.djx", None, True
+            )
+        )
+        reg.mark_as_root(dirs_root)
+        reg.register(
+            ComponentInfo(
+                "button",
+                pages,
+                "",
+                pages / "_components" / "button.djx",
+                None,
+                True,
+            )
+        )
+        return reg, pages, dirs_root
+
+    def test_page_tree_component_shadows_dirs_root_at_equal_score(
+        self, tmp_path: Path
+    ) -> None:
+        """A project-local page-tree component wins over a same-name DIRS root."""
+        reg, pages, _dirs_root = self._register_page_tree_and_dirs_button(tmp_path)
+        tmpl = pages / "home.djx"
+        tmpl.write_text("x")
+        resolved = ComponentVisibilityResolver(reg).resolve_visible(tmpl)
+        assert resolved["button"].scope_root == pages
+
+    def test_dirs_root_button_visible_outside_page_tree(self, tmp_path: Path) -> None:
+        """A template outside the page tree still sees the shared DIRS button."""
+        reg, _pages, dirs_root = self._register_page_tree_and_dirs_button(tmp_path)
+        outside = tmp_path / "elsewhere" / "t.djx"
+        outside.parent.mkdir(parents=True)
+        outside.write_text("x")
+        resolved = ComponentVisibilityResolver(reg).resolve_visible(outside)
+        assert resolved["button"].scope_root == dirs_root

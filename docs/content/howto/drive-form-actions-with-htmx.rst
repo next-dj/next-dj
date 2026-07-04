@@ -12,7 +12,8 @@ Solution
 --------
 
 Pass ``hx-*`` attributes through the ``{% form %}`` tag.
-The tag reserves only ``action``, ``method``, and the ``data-next-*`` prefix, so every htmx attribute lands on the ``<form>`` element unchanged.
+The tag reserves ``action``, ``method``, the ``data-next-*`` prefix, and the partial parameters ``validate``, ``trigger``, ``debounce``, ``zone``, and ``key``.
+Every ``hx-*`` attribute lands on the ``<form>`` element unchanged.
 Boost the form with ``hx-boost`` and carve its region out of the response with ``hx-select``.
 Verified with django-htmx 1.19 and later on Django 5.2 through 6.0.
 

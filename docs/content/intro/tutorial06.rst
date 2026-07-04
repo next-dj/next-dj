@@ -126,9 +126,15 @@ The server re-renders only the ``note-list`` zone and answers with a single morp
      "ops": [
        {"op": "morph", "target": {"zone": "note-list"},
         "html": "<ul data-next-zone=\"note-list\">…matching notes…</ul>"}
-     ]
+     ],
+     "assets": [
+       {"kind": "css", "url": "…/note_card/component.css"},
+       {"kind": "js", "url": "…/note_card/component.js"}
+     ],
+     "form": null
    }
 
+The envelope also ships the co-located assets of the zone body, here the ``note_card`` styles and script, and adds a ``context`` op with the js-context delta when one applies.
 The runtime syncs the address bar with ``history.replaceState``, so ``/?q=gro`` stays shareable.
 A new keystroke aborts an in-flight request, and a stale response that arrives after a fresher one is discarded.
 
@@ -162,7 +168,8 @@ Teach its handler to answer a partial request with a patch instead of a redirect
 
 ``is_partial_request`` is ``True`` only when the runtime made the submission.
 On that path the handler saves the note and returns a morph of the ``note-list`` zone, which re-renders the list from the ``notes`` context with the new note included.
-On the no-JavaScript path ``super().on_valid`` keeps the inherited behaviour: it saves and redirects to origin, and the reload shows the new note.
+On the no-JavaScript path ``super().on_valid`` keeps the inherited behaviour.
+It saves and redirects to origin, and the reload shows the new note.
 
 The form tag itself does not change.
 

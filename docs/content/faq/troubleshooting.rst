@@ -25,7 +25,8 @@ Page Renders Without Layout
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A layout must contain the placeholder block ``{% block template %}{% endblock template %}`` or its short form ``{% block template %}{% endblock %}``.
-Without the placeholder the framework drops the body at render time without an error, and ``manage.py check`` reports :ref:`next.W001 <ref-system-checks>`.
+Without the placeholder the framework skips that layout during composition, so its markup disappears from the rendered page while the body still renders through the remaining ancestor layouts.
+``manage.py check`` reports :ref:`next.W001 <ref-system-checks>`.
 
 Confirm that ``layout.djx`` sits in the same directory as ``page.py`` or in an ancestor directory.
 
@@ -146,7 +147,7 @@ Hashed URL Does Not Change
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Restart the development server.
-The watcher picks up file content changes but a hash computed at startup can stale during long sessions.
+The watcher picks up file content changes but a URL memoised at startup can go stale during long sessions.
 
 next.W030 Empty Static Backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -165,6 +166,37 @@ next.W042 Unusable JS_CONTEXT_SERIALIZER
 
 ``JS_CONTEXT_SERIALIZER`` is set but does not resolve to a class that implements the ``JsContextSerializer`` protocol (a ``dumps`` method).
 Fix the dotted path or install optional dependencies such as ``pydantic`` when using ``PydanticJsContextSerializer``.
+
+Partial Rendering
+-----------------
+
+Zone GET Returns HTTP 400
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A response body of ``unknown zone`` means the requested name matches no ``{% zone %}`` in the composed page.
+Check that ``data-next-target`` names the same string as the zone tag on the page that serves the request.
+A response body of ``zone in dynamic body`` means the page body comes from a ``render`` function returning a string, so there is no compiled template source to render the slice standalone.
+Move the zone to a page whose body comes from a template source.
+
+Zone GET Returns HTTP 409
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The client asserted an asset version that no longer matches the server's, which usually happens right after a deploy.
+The empty-bodied 409 tells the runtime to perform a full visit of the current URL, so the page reloads once with fresh assets.
+No action is needed beyond the reload the runtime already performs.
+
+Inline Script in a Patch Does Not Run
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The applier strips every ``<script>`` element from patch HTML before the markup reaches the document.
+A development build prints a ``console.warn`` for each neutralised script, so the removal is visible rather than silent.
+Move the behaviour into a co-located module, see :doc:`/content/topics/partial-rendering/co-located-js`.
+
+next.W071 Extra PARTIAL_BACKENDS Entries
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``PARTIAL_BACKENDS`` lists more than one entry.
+Partial rendering activates only the first entry and ignores the rest, so remove the extra entries or merge their options into one.
 
 Dependency Injection
 --------------------

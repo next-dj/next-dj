@@ -29,7 +29,9 @@ Manager
 
 ``urlpatterns`` is a ``list`` subclass that recollects router and form-action patterns from the active backends on each access.
 The backends themselves are cached by ``router_manager`` and are only rebuilt when ``router_manager.reload()`` runs or when ``PAGE_BACKENDS`` changes.
-A route added after import is therefore visible without a process restart, but each access still iterates the cached backend list rather than walking the page tree again.
+Laziness here means the patterns are collected on the first URL access rather than at import time.
+A page added on disk after that first collection needs ``router_manager.reload()``, which rebuilds the backends and clears the Django resolver cache.
+Within a backend the per-application pattern lists are memoised after the first scan, while the roots configured in ``DIRS`` are rescanned on every recollection.
 The ``list`` subclass overrides ``__reversed__`` so Django's resolver observes the recollected patterns rather than the empty internal buffer of the ``list`` base.
 Django's resolver iterates ``reversed(urlpatterns)``, so the override feeds it the fresh patterns.
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.

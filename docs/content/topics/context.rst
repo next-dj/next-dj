@@ -36,7 +36,8 @@ Component context.
 Framework-Provided Keys
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Every page render starts with three keys already populated, before any user-defined ``@context`` callable runs.
+Every rendered template starts with three keys populated.
+The two path keys are seeded before any user-defined ``@context`` callable runs, while ``request`` joins the scope after context collection finishes.
 
 ``request``.
    The active :class:`~django.http.HttpRequest`, when the route was reached through the HTTP stack.
@@ -68,8 +69,8 @@ The decorator takes a single key and the function returns the value.
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from notes.models import Note
    from next.pages import context
+   from notes.models import Note
 
    @context("notes")
    def recent_notes() -> list[Note]:
@@ -122,8 +123,8 @@ Treat ``context("key")`` as a callable that registers an existing function.
 .. code-block:: python
    :caption: registering an external function
 
-   from notes.cache import pending_clicks
    from next.pages import context
+   from notes.cache import pending_clicks
 
    context("pending_clicks")(pending_clicks)
 
@@ -153,9 +154,9 @@ The factory takes its own dependency-injected arguments, so it can ask for the r
 .. code-block:: python
    :caption: notes/pages/notes/[int:note_id]/page.py
 
-   from notes.models import Note
    from next.pages import Context, context
    from next.urls import DUrl
+   from notes.models import Note
 
    def load_note(note_id: DUrl[int]) -> Note:
        return Note.objects.get(pk=note_id)
@@ -177,7 +178,7 @@ Resolution Order
 The framework computes the template scope in this order.
 
 1. URL kwargs from the matched route are seeded into the context dict.
-2. Inherited context functions from every ancestor ``page.py``, walked from the current page upward toward the page root.
+2. Inherited context functions from every ancestor ``page.py``, walked from the current page upward through every ancestor directory, bounded at 64 levels.
 3. Page level context functions declared in the current ``page.py``.
 4. Context processors run after every ``@context`` callable.
    The first source is ``OPTIONS.context_processors`` on each page backend entry inside ``PAGE_BACKENDS``.
@@ -201,6 +202,8 @@ The framework walks up from the current ``page.py`` directory and runs every ``@
 - A ``page.py`` at ``notes/pages/admin/`` publishes inherited values only for pages under ``/admin/``.
 - A page at ``/admin/links/`` sees both layers because it sits below both directories.
 
+When two ancestor directories publish the same inherited key, the value from the outermost ancestor currently wins.
+
 The current page can shadow an inherited value by declaring a context function with the same key.
 The page level value takes precedence, and every layout wrapper in the chain sees that value.
 
@@ -208,15 +211,15 @@ Inherited Function That Names a URL Parameter
 ---------------------------------------------
 
 When an inherited context function is keyed under the same name as a captured URL segment, the parameter it asks for changes type across runs.
-On the first run it holds the raw URL string.
-On a descendant re-run it holds the resolved object the function already produced.
-Leave the parameter untyped and return early if it is already an instance of the model.
+On a descendant request the callable runs once and receives the raw URL string.
+On the declaring page's own request it runs twice, first in the inherited pass with the raw string, then in the page pass with the object the first run produced.
+Leave the parameter untyped and return early when it is already a model instance.
 
 .. code-block:: python
    :caption: notes/pages/notes/[category]/page.py
 
-   from notes.models import Category
    from next.pages import context
+   from notes.models import Category
 
    @context("category", inherit_context=True)
    def category(category: object) -> Category:
@@ -289,9 +292,9 @@ Publish the page title from each page.
 .. code-block:: python
    :caption: notes/pages/notes/[id]/page.py
 
-   from notes.models import Note
    from next.pages import context
    from next.urls import DUrl
+   from notes.models import Note
 
    @context("page_title")
    def page_title(note_id: DUrl[int]) -> str:

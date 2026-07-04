@@ -98,6 +98,8 @@ It pairs with ``page_reverse`` the way Django pairs :func:`~django.urls.reverse`
 .. code-block:: python
    :caption: class-level URL
 
+   from attachments.models import Attachment
+   from next.forms import ModelForm
    from next.urls import page_reverse_lazy
 
    class AttachmentForm(ModelForm):
@@ -185,9 +187,9 @@ An action handler can return an ``HttpResponseRedirect`` to a reversed page URL.
    :caption: notes/pages/page.py
 
    from django.http import HttpRequest, HttpResponseRedirect
-   from notes.models import Note
    from next.forms import ModelForm
    from next.urls import page_reverse
+   from notes.models import Note
 
    class CreateNoteForm(ModelForm):
        class Meta:
@@ -206,9 +208,9 @@ A component can compute a URL through ``@component.context``.
 .. code-block:: python
    :caption: _components/note_link/component.py
 
-   from notes.models import Note
    from next.components import component
    from next.urls import page_reverse
+   from notes.models import Note
 
    @component.context("href")
    def href(note: Note) -> str:

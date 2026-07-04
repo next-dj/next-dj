@@ -45,27 +45,28 @@ Register the action.
    :caption: notes/pages/notes/bulk/page.py
 
    from django.forms.formsets import BaseFormSet
-   from django.http import HttpResponseRedirect
-   from django.urls import reverse
-   from next.forms import action
+   from django.http import HttpRequest, HttpResponseRedirect
+
+   from next.forms import action, redirect_to_origin
    from notes.forms import NoteFormSet
 
    def build_bulk_formset() -> tuple[type[BaseFormSet], dict]:
        return NoteFormSet, {"prefix": "notes"}
 
    @action("bulk_create", form_class=build_bulk_formset)
-   def bulk_create(form: NoteFormSet) -> HttpResponseRedirect:
+   def bulk_create(request: HttpRequest, form: NoteFormSet) -> HttpResponseRedirect:
        for row in form:
            if row.cleaned_data and not row.cleaned_data.get("DELETE"):
                row.save()
-       return HttpResponseRedirect(reverse("next:page_"))
+       return redirect_to_origin(request)
 
-Passing a formset class directly to ``@action``'s ``form_class`` is accepted at decoration time but fails at request time, because the dispatcher calls ``get_initial`` on a directly passed class and Django formset classes have none.
+Passing a formset class directly to ``@action``'s ``form_class`` is accepted at decoration time but fails at request time.
+The dispatcher calls ``get_initial`` on a directly passed class, and Django formset classes have none.
 Register a factory callable that returns a ``(FormSetClass, init_kwargs)`` tuple instead.
 The ``init_kwargs`` reach the formset constructor, and a non-empty dict makes the dispatcher skip the ``get_initial`` step.
 A formset has no ``get_initial``, so the ``init_kwargs`` must be non-empty even if they only set the ``prefix``.
 
-The ``page_{path}`` URL name follows the file-router naming convention, see :doc:`/content/topics/file-router`.
+``redirect_to_origin`` reads the posted origin path, so a successful submission lands back on the bulk page.
 
 Render the formset.
 
@@ -79,19 +80,21 @@ Render the formset.
          <legend>Row {{ forloop.counter }}</legend>
          {{ row.title }}
          {{ row.body }}
+         {{ row.DELETE }}
        </fieldset>
      {% endfor %}
      <button type="submit">Save all</button>
    {% endform %}
 
 Always render ``{{ form.management_form }}`` before the row loop.
+``can_delete=True`` adds the ``DELETE`` checkbox to every row, and the handler skips the rows the user marked, so the template renders it alongside the fields.
 
 Clean Up Empty Rows
 -------------------
 
 A formset with ``extra=3`` ships three blank rows.
-When ``initial`` data is provided alongside those extra rows, Django pre-populates the blank rows with the initial values.
-A user who leaves those rows untouched submits data that appears empty but carries hidden values, triggering validation errors.
+Field-level initials, declared on the row form or inherited from model field defaults, pre-populate those blank rows.
+An untouched pre-filled row no longer looks empty to Django, so it validates as a partial submission and triggers errors.
 Use ``cleanup_extra_initial`` to clear initial values from blank extra rows before the formset is rendered.
 
 .. code-block:: python
@@ -103,19 +106,16 @@ Use ``cleanup_extra_initial`` to clear initial values from blank extra rows befo
    from next.pages import context
    from notes.forms import NoteFormSet
 
-   def build_formset(initial: list[dict]) -> NoteFormSet:
-       formset = NoteFormSet(initial=initial)
-       cleanup_extra_initial(formset)
-       return formset
-
    @context("bulk_create")
    def bulk_create_form() -> SimpleNamespace:
-       return SimpleNamespace(form=build_formset([{"title": "Draft"}]))
+       formset = NoteFormSet(prefix="notes")
+       cleanup_extra_initial(formset)
+       return SimpleNamespace(form=formset)
 
-The ``{% form %}`` tag looks up a context variable named after the action and reads its ``.form`` attribute.
-A regular form action satisfies this through its own ``get_initial``, but a formset has no ``get_initial``, so the ``@context`` callable must publish the value itself.
-The callable name must match the action name, and the returned object must expose ``.form``, hence the ``SimpleNamespace(form=...)`` wrapper.
-Returning the bare formset, or publishing it under a different key, leaves ``form`` as ``None`` in the template.
+The ``{% form %}`` tag first looks up a context variable named after the action and reads its ``.form`` attribute.
+When the variable is absent the tag builds the namespace itself from the registered factory, so a plain render needs no ``@context`` at all.
+Publish the namespace only to customise construction, here to clean the field-level initials off the blank extra rows.
+The context key passed to ``@context`` must match the action name, and the returned object must expose ``.form``, hence the ``SimpleNamespace(form=...)`` wrapper.
 
 Verification
 ------------

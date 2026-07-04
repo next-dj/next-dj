@@ -13,7 +13,7 @@ What Is next.dj and Is It a Django Replacement
 ----------------------------------------------
 
 next.dj is a framework built on Django, not a replacement for it.
-It adds file-based routing, a layout system, reusable components, and form dispatch on top of a regular Django project.
+It adds file-based routing, a layout system, reusable components, form dispatch, and partial rendering on top of a regular Django project.
 See :doc:`/content/intro/overview`, especially :ref:`intro-overview-django-unchanged`, for what stays stock Django versus what the framework adds.
 
 Which Django and Python Versions Are Supported

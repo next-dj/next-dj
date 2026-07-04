@@ -233,6 +233,66 @@ describe("layer stack", () => {
     expect(after).toBe(before);
   });
 
+  it("closing a layer fires next:removed on the dialog so an island inside unmounts", async () => {
+    await layers.open(null, "/w/", "z");
+    const dialog = document.querySelector("[data-next-dialog]")!;
+    const root = dialog.querySelector('[data-next-zone="z"]')!;
+    const island = document.createElement("div");
+    island.setAttribute("data-island", "");
+    root.append(island);
+    const removed: { target: Element; connected: boolean }[] = [];
+    const unmounted: Element[] = [];
+    const listener = (event: Event): void => {
+      const node = event.target as Element;
+      removed.push({ target: node, connected: node.isConnected });
+      // The documented island adapter walks the detached root for its islands.
+      const islands = node.matches("[data-island]")
+        ? [node]
+        : Array.from(node.querySelectorAll("[data-island]"));
+      unmounted.push(...islands);
+    };
+    document.addEventListener("next:removed", listener);
+    layers.close({ result: 1 });
+    document.removeEventListener("next:removed", listener);
+    expect(removed).toHaveLength(1);
+    expect(removed[0]!.target).toBe(dialog);
+    expect(removed[0]!.connected).toBe(true);
+    expect(unmounted).toEqual([island]);
+  });
+
+  it("a double remove on one layer fires next:removed only once", async () => {
+    let captured: HTMLDialogElement | null = null;
+    const seen: ((reason: string) => void)[] = [];
+    const adapter: DialogAdapter = {
+      open(dialog, onDismiss) {
+        captured = dialog;
+        seen.push(onDismiss);
+        return () => undefined;
+      },
+    };
+    const local = createLayers({
+      dispatch: () => undefined,
+      fetch: async () => {
+        // A dismiss gesture tears the layer down while this GET is in flight,
+        // then the rejection lands open's catch on the already-spliced layer.
+        seen[0]!("escape");
+        throw new Error("boom");
+      },
+      document,
+      dialog: adapter,
+      history: { push: () => undefined, replace: () => undefined },
+    });
+    const removed: Element[] = [];
+    const listener = (event: Event): void => {
+      removed.push(event.target as Element);
+    };
+    document.addEventListener("next:removed", listener);
+    await expect(local.open(null, "/w/", "z")).rejects.toThrow("boom");
+    document.removeEventListener("next:removed", listener);
+    expect(removed).toEqual([captured]);
+    expect(local.size()).toBe(0);
+  });
+
   it("returns focus only to an HTMLElement, skipping a null activeElement", async () => {
     // A document proxy whose activeElement is null exercises the focus guard's
     // false arm, which jsdom cannot reach since its activeElement is the body.

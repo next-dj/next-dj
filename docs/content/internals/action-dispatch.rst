@@ -32,7 +32,9 @@ Pipeline
        Guard -- "missing permission" --> Forbidden["HTTP 403"]
        Guard -- "pass, no form_class" --> HandlerOnly["Run handler only"]
        Guard -- "pass, form_class" --> ViewHook{"check_permissions hook"}
-       Guard -- "pass, wizard_class" --> ViewHook
+       Guard -- "pass, wizard_class" --> WizardOrigin{"Origin resolves"}
+       WizardOrigin -- no --> BadRequest["HTTP 400"]
+       WizardOrigin -- yes --> ViewHook
        ViewHook -- "deny" --> HookDenied["HTTP 403 or response"]
        ViewHook -- "deny" --> AccessDenied["form_access_denied signal"]
        ViewHook -- "allow, form_class" --> Build["Build form"]
@@ -43,8 +45,10 @@ Pipeline
        WizardStep --> ObjectHook
        ObjectHook -- "deny" --> ObjectDenied["HTTP 403 or response"]
        ObjectHook -- "deny" --> AccessDenied
-       ObjectHook -- "allow, form_class" --> Validate{"Form valid"}
-       ObjectHook -- "allow, wizard_class" --> WizardValid{"Step valid"}
+       ObjectHook -- allow --> ValidateOnly{"Validate-only intent"}
+       ValidateOnly -- yes --> ValidateEnvelope["Validation envelope, no handler"]
+       ValidateOnly -- "no, form_class" --> Validate{"Form valid"}
+       ValidateOnly -- "no, wizard_class" --> WizardValid{"Step valid"}
        Validate -- yes --> Handler["Run handler"]
        Handler --> Response["Handler response"]
        Handler --> ActionDispatched
@@ -86,7 +90,7 @@ Modules
    ``FormActionBackend`` abstract contract, ``RegistryFormActionBackend`` default implementation, ``FormActionFactory``, and the ``FormActionNotFoundError`` exception.
 
 ``next.forms.uid``.
-   ``redirect_to_origin``, ``reverse_form_action``, and ``validated_origin_path`` helpers for the origin page round trip, plus the ``ORIGIN_FIELD_NAME`` wire constant.
+   ``redirect_to_origin``, ``reverse_form_action``, and ``validated_origin_path`` helpers for the origin page round trip, plus the ``ORIGIN_FIELD_NAME`` wire constant and the ``FORM_ORIGIN_OVERRIDE_KEY`` render-context key the partial shaping layer sets on a wizard advance.
 
 ``next.forms.origin``.
    Resolution of the posted origin path into the page module and the typed URL kwargs, memoised per request.
@@ -138,6 +142,15 @@ A wizard enforces ``check_permissions`` once per step POST before the step binds
 A wizard step binds without ``get_initial`` or ``Meta.instance_from_url``, so a ``ModelForm`` step reads an unbound ``self.instance`` in that hook, not the URL-addressed target the standalone path loads.
 The guide covers the authoring contract at :ref:`topics-forms-actions-dynamic-guards`.
 
+Validate-Only Short Circuit
+---------------------------
+
+A partial request whose intent carries validate fields short-circuits the pipeline on the already bound form.
+The branch fires in the form path and in the wizard step path only after the static guard, the ``check_permissions`` hook, the form binding, and the ``has_object_permission`` hook have all passed, so a guarded validator is never an anonymous oracle.
+The dispatcher answers with the validation envelope, the handler never runs, the success signals never fire, and wizard storage stays untouched.
+A request without validate fields falls through to the normal submit path.
+See :doc:`/content/topics/partial-rendering/scenarios` for the client-side flow.
+
 Origin Resolution
 -----------------
 
@@ -183,7 +196,8 @@ The page manager caches the composed template source and its compiled ``Template
 Signals
 -------
 
-Six signals fire: ``action_registered`` at import time, the other five per request.
+Six signals fire.
+``action_registered`` fires at import time and the other five fire per request.
 
 - ``action_registered`` fires at import time, once per registration when the registry stores the action target.
   The target is a handler, a form class, or a wizard class.
@@ -204,6 +218,7 @@ Extension Points
 
 - Subclass ``RegistryFormActionBackend`` and override ``dispatch`` to wrap the standard pipeline.
 - Override ``render_invalid_page`` for custom validation-error HTML, or ``shape_response`` for a custom response envelope.
+  The base ``shape_response`` routes a partial request through ``shape_partial`` before the default full-page envelope, so an override that never calls ``super().shape_response`` disables the patch envelopes.
 - Register the custom backend through ``FORM_ACTION_BACKENDS``.
 - Subscribe to ``action_dispatched`` for audit and cache invalidation.
 - Subscribe to ``form_validation_failed`` for alerting on failure rates.

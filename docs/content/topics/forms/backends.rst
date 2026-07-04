@@ -82,7 +82,12 @@ A backend subclasses ``next.forms.FormActionBackend``, an abstract base class wi
 ``dispatch(request, uid)``.
    Runs the handler for the given action UID and returns an ``HttpResponse``.
 
-The base class also offers four optional override points: ``get_meta``, ``iter_actions``, ``render_invalid_page``, and ``shape_response``.
+The base class also offers four optional override points.
+
+- ``get_meta``
+- ``iter_actions``
+- ``render_invalid_page``
+- ``shape_response``
 
 ``get_meta`` and Multi-Backend Routing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -96,9 +101,9 @@ The base implementation returns ``None``.
 
 ``get_meta`` is the routing key for the namespace build and the uid stamping when more than one backend is configured.
 ``FormActionManager`` asks each backend's ``get_meta`` in order and routes those two concerns to the first backend that answers with a non-``None`` meta.
-The URL reverse takes a different path: the manager calls each backend's ``get_action_url`` in order and returns the first answer, collecting ``FormActionNotFoundError`` suggestions along the way, so ``get_meta`` plays no part in it.
+The URL reverse takes a different path.
+The manager calls each backend's ``get_action_url`` in order and returns the first answer, collecting ``FormActionNotFoundError`` suggestions along the way, so ``get_meta`` plays no part in it.
 The proxy method ``FormActionManager.get_action_meta`` exposes the meta resolution, and the ``{% form %}`` tag calls it to stamp the meta's ``uid`` key onto the ``data-next-action`` attribute of the rendered ``<form>`` element.
-A backend whose meta omits ``uid`` therefore renders forms without that attribute, and the dispatch-time signals carry ``uid=None`` for its actions.
 A custom backend whose ``get_meta`` returns ``None`` for its own actions still resolves their URLs through ``get_action_url``, so the ``{% form %}`` tag renders the form element.
 That form renders without ``data-next-action`` and without a bound form instance, and the dispatch-time signals carry ``uid=None``.
 Return a truthy meta for owned names to restore the attribute, the bound form, and the uid.
@@ -116,14 +121,24 @@ Shaping the Response
 ~~~~~~~~~~~~~~~~~~~~
 
 Every outcome of the dispatch pipeline leaves through exactly one call to the backend's ``shape_response(request, outcome)``.
-The ``outcome`` is an ``ActionOutcome``, a frozen keyword-only dataclass whose ``kind`` field is an ``ActionOutcomeKind`` member: ``RESULT`` for a handler return value, ``INVALID`` for a failed validation, and ``WIZARD_ADVANCE`` for a wizard step that moved forward.
+The ``outcome`` is an ``ActionOutcome``, a frozen keyword-only dataclass whose ``kind`` field is an ``ActionOutcomeKind`` member.
+``RESULT`` marks a handler return value, ``INVALID`` marks a failed validation, and ``WIZARD_ADVANCE`` marks a wizard step that moved forward.
 A successful submission is always a ``RESULT`` outcome, including a handler that returns ``None``, so a backend keying off ``INVALID`` only ever sees genuine validation failures.
-The other fields carry what each kind needs: the ``action_name`` and ``uid``, the raw handler return value, the bound failing ``form``, the resolved ``url_kwargs``, the wizard ``redirect_to`` target, and the live ``wizard`` instance.
-On ``INVALID`` outcomes the ``page_path`` and ``origin`` fields carry the identity of the origin page that the dispatcher resolved from the posted ``_next_form_origin`` field, and a ``page_path`` of ``None`` makes the default envelope answer HTTP 400.
-Fields may be added in future versions, so construct an ``ActionOutcome`` with keywords only.
+The other fields carry what each kind needs.
 
-The base implementation delegates to ``FormActionDispatch.shape_response``, the default envelope.
-An invalid submission re-renders the origin page with HTTP 200, the ``X-Next-Form: invalid`` header, and the ``X-Next-Action`` header when the outcome carries a ``uid``.
+- The ``action_name`` and ``uid``.
+- The raw handler return value.
+- The bound failing ``form``.
+- The resolved ``url_kwargs``.
+- The wizard ``redirect_to`` target.
+- The live ``wizard`` instance.
+
+On ``INVALID`` outcomes the ``page_path`` and ``origin`` fields carry the identity of the origin page that the dispatcher resolved from the posted ``_next_form_origin`` field, and a ``page_path`` of ``None`` makes the default envelope answer HTTP 400.
+The dataclass may grow fields over time, so construct an ``ActionOutcome`` with keywords only.
+
+The base implementation first routes a partial request through ``shape_partial`` for a patch envelope, and only a plain request reaches ``FormActionDispatch.shape_response``, the default full-page envelope.
+An override that never calls ``super().shape_response`` therefore disables the partial envelopes for every action the backend dispatches, see :doc:`/content/topics/partial-rendering/how-it-works`.
+On the default full-page path an invalid submission re-renders the origin page with HTTP 200, the ``X-Next-Form: invalid`` header, and the ``X-Next-Action`` header when the outcome carries a ``uid``.
 A wizard advance redirects with HTTP 302.
 Both are behaviour of the default backend, not a guarantee of the endpoint.
 A custom backend may answer with any envelope.
@@ -148,33 +163,43 @@ The four abstract methods must all be present.
    :caption: a minimal from-scratch backend skeleton
 
    from typing import Any
+
    from django.http import HttpRequest, HttpResponse, HttpResponseNotFound
-   from django.urls import path
+   from django.urls import path, reverse
    from django.views.decorators.http import require_http_methods
+
    from next.forms import ActionRegistration, FormActionBackend
+   from next.forms.backends import ActionMeta
    from next.forms.dispatch import FormActionDispatch
 
    class CustomBackend(FormActionBackend):
        def __init__(self, config: dict[str, Any] | None = None) -> None:
-           self._actions: dict[str, ActionRegistration] = {}
+           self._actions: dict[str, ActionMeta] = {}
 
        def register_action(self, registration: ActionRegistration) -> None:
-           self._actions[registration.name] = registration
+           self._actions[registration.name] = ActionMeta(
+               name=registration.name,
+               handler=registration.handler,
+               form_class=registration.form_class,
+               wizard_class=registration.wizard_class,
+               guard=registration.guard,
+           )
 
        def get_action_url(self, action_name: str, *, page_path: str | None = None) -> str:
-           ...
+           return reverse("custom_form_action", kwargs={"uid": action_name})
 
        def generate_urls(self) -> list:
            view = require_http_methods(["GET", "POST"])(self.dispatch)
-           return [path("_next/custom/<str:uid>/", view)]
+           return [path("_next/custom/<str:uid>/", view, name="custom_form_action")]
 
        def dispatch(self, request: HttpRequest, uid: str) -> HttpResponse:
-           entry = self._entry_for_uid(uid)
-           if entry is None:
+           meta = self._actions.get(uid)
+           if meta is None:
                return HttpResponseNotFound()
-           action_name, meta = entry
-           return FormActionDispatch.dispatch(self, request, action_name, meta)
+           return FormActionDispatch.dispatch(self, request, meta["name"], meta)
 
+The skeleton keys its dispatch URL by the plain action name, where the bundled backend derives a hashed UID from the scope key and the name.
+Its meta stores no ``uid``, so the rendered forms carry no ``data-next-action`` attribute, as `get_meta and Multi-Backend Routing`_ describes.
 The bundled backend wraps its dispatch view in ``require_http_methods(["GET", "POST"])`` so the endpoint rejects other verbs, and a from-scratch backend should restrict its own view the same way.
 
 ``dispatch`` answers an unknown UID with a 404, either by returning ``HttpResponseNotFound`` or by raising :exc:`~django.http.Http404` with a message.
@@ -284,6 +309,9 @@ Testing
 Tests that register actions through ``@action`` must drop the global registry between cases so action names from one test do not leak into the next.
 Call :func:`next.testing.reset_form_actions` from a pytest fixture or a ``setUp`` method.
 The helper invokes ``form_action_manager._reload_config()``, which rebuilds the backend list from the current ``NEXT_FRAMEWORK["FORM_ACTION_BACKENDS"]`` setting and discards any actions registered against the previous backend instances.
+
+A test that registers extra actions on a live ``RegistryFormActionBackend`` takes a snapshot first and restores it afterwards.
+``backend.snapshot()`` returns a ``RegistryBackendSnapshot``, an immutable copy of the three registry maps, and ``backend.restore(snapshot)`` puts the registry back exactly as it was, without reaching into the backend's private state.
 
 See :doc:`/content/topics/testing` for the surrounding helpers and fixtures.
 

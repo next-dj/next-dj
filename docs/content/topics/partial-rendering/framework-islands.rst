@@ -22,9 +22,8 @@ The Mount and Unmount Pair
 ``next:removed`` fires on a node immediately before it detaches, for every detach the runtime performs.
 Both bubble to the document, so one delegated listener catches every island, and the pair brackets the life of a node inside the document.
 
-Mount through :ref:`Next.partial.onMount <topics-partial-rendering-co-located-js>`, which
-runs its callback over the matching elements present at load and over every matching
-element a later patch inserts, descendants included.
+Mount through :ref:`Next.partial.onMount <topics-partial-rendering-co-located-js>`.
+The registry runs its callback over the matching elements present at load and over every matching element a later patch inserts, descendants included.
 Unmount through ``next:removed``, walking the detached subtree for islands, because the event fires on the detached root rather than on each descendant.
 
 A React Island
@@ -39,6 +38,7 @@ A React Island
    const roots = new WeakMap();
 
    Next.partial.onMount("[data-chart]", (el) => {
+     if (roots.has(el)) return;
      const root = createRoot(el);
      root.render(Chart(JSON.parse(el.dataset.props ?? "{}")));
      roots.set(el, root);
@@ -59,6 +59,7 @@ A React Island
      }
    });
 
+The ``roots.has(el)`` guard keeps the mount idempotent, because ``onMount`` re-runs its callback over a matching element the morph reconciled in place.
 The ``next:removed`` handler walks the subtree because a morph that removes the zone containing the chart fires the event on the zone, not on the chart inside it.
 Matching the node itself and its descendants covers both the island-as-root and the island-inside-a-removed-zone cases.
 
@@ -74,6 +75,7 @@ A Vue Island
    const apps = new WeakMap();
 
    Next.partial.onMount("[data-chart]", (el) => {
+     if (apps.has(el)) return;
      const app = createApp(Chart, { ...el.dataset });
      app.mount(el);
      apps.set(el, app);
@@ -119,7 +121,8 @@ The morph syncs no attributes and walks none of its children, so a framework tha
 
 A custom element, a tag with a hyphen, and any node carrying a shadow root are atomic in a narrower sense.
 The morph still syncs their attributes, then stops at the boundary and never enters the children or the shadow tree.
-The attribute sync is the point: a server re-render that ships a stale attribute on a custom element overwrites the live one the framework was managing.
+The attribute sync is the point.
+A server re-render that ships a stale attribute on a custom element overwrites the live one the framework was managing.
 
 Use ``data-next-keep`` for an island whose attributes the framework drives after mount.
 Lean on the built-in custom-element atomicity only when the server attributes and the framework attributes never disagree, for example a web component the server seeds once and never re-authors.

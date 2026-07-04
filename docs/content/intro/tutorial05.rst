@@ -15,7 +15,8 @@ Prerequisites
 
 You have finished :doc:`tutorial04`.
 The application creates, edits, and deletes notes through registered actions.
-The patterns below mirror :doc:`/content/topics/testing`. Keep that page open if you want the full helper catalog.
+The patterns below mirror :doc:`/content/topics/testing`.
+Keep that page open if you want the full helper catalog.
 
 Walkthrough
 -----------

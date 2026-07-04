@@ -71,6 +71,11 @@ Open redirect.
    Validate destinations before passing user input into a redirect target.
    The partial ``redirect(href, external=True)`` patch is the same escape hatch on the client side, see `Server-Authored Redirects`_.
 
+Object-level authorization.
+   A lookup keyed only on a URL value loads whatever row matches, regardless of who owns it.
+   The ModelForm ``Meta.instance_from_url`` lookup is unscoped, so scope it to the user or tenant.
+   See :doc:`/content/topics/forms/modelforms` for the ownership-scoped pattern and :doc:`di-and-untrusted-input` for the posted origin path that feeds the lookup.
+
 Server-Authored Redirects
 -------------------------
 
@@ -81,12 +86,8 @@ The ``external=True`` flag promotes the navigation to a full visit and bypasses 
 The flag trusts the caller to author the href.
 Pass only a server-controlled destination through it, never a value derived from URL, query, or form input.
 A user-supplied href behind ``external=True`` turns the page into an open redirect, the same risk Django guards against in :doc:`its login next-page handling <django:topics/auth/default>`.
-The rule mirrors the plain ``HttpResponseRedirect`` case above: validate or whitelist any destination that traces back to a request value before it reaches the patch.
-
-Object-level authorization.
-   A lookup keyed only on a URL value loads whatever row matches, regardless of who owns it.
-   The ModelForm ``Meta.instance_from_url`` lookup is unscoped, so scope it to the user or tenant.
-   See :doc:`/content/topics/forms/modelforms` for the ownership-scoped pattern and :doc:`di-and-untrusted-input` for the posted origin path that feeds the lookup.
+The rule mirrors the plain ``HttpResponseRedirect`` case above.
+Validate or whitelist any destination that traces back to a request value before it reaches the patch.
 
 Access Control
 --------------

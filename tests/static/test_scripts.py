@@ -52,6 +52,14 @@ class _MarkSerializer:
         return json.dumps({"mark": value}, separators=(",", ":"))
 
 
+class _RawSeparatorSerializer:
+    """Per-key serializer that leaves non-ASCII raw via `ensure_ascii=False`."""
+
+    def dumps(self, value: object) -> str:
+        """Return compact JSON with raw non-ASCII characters."""
+        return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+
+
 class TestScriptInjectionPolicy:
     """Enum values drive conditional injection in StaticManager."""
 
@@ -245,6 +253,56 @@ class TestInitScriptGoldenParity:
             encoded=collector.js_context_encoded(),
         )
         assert '"$csrf":{"header":"X-CSRFToken","token":"tok"}' in out
+
+
+class TestInitScriptEscaping:
+    """The assembled payload is escaped for the inline `<script>` context.
+
+    A `serialize=True` value whose text holds `</script>`, `<!--`, or the
+    JS line separators must not break out of the inline init element.
+    """
+
+    def _payload(self, out: str) -> str:
+        """Return the `Next._init` argument stripped of the script wrapper."""
+        prefix = "<script>Next._init("
+        suffix = ");</script>"
+        assert out.startswith(prefix)
+        assert out.endswith(suffix)
+        return out[len(prefix) : -len(suffix)]
+
+    def test_script_close_sequence_cannot_break_out(self) -> None:
+        builder = NextScriptBuilder(URL)
+        payload = self._payload(builder.init_script({"x": "</script><b>pwn"}))
+        assert "</script>" not in payload
+        assert "\\u003C/script\\u003E" in payload
+
+    def test_angle_and_amp_each_escape(self) -> None:
+        builder = NextScriptBuilder(URL)
+        payload = self._payload(builder.init_script({"x": "<&>"}))
+        assert "<" not in payload
+        assert ">" not in payload
+        assert "&" not in payload
+        assert "\\u003C\\u0026\\u003E" in payload
+
+    def test_line_separator_from_custom_serializer_is_escaped(self) -> None:
+        builder = NextScriptBuilder(URL)
+        payload = self._payload(
+            builder.init_script(
+                {"x": "a" + chr(0x2028) + "b" + chr(0x2029) + "c"},
+                key_serializers={"x": _RawSeparatorSerializer()},
+            )
+        )
+        assert chr(0x2028) not in payload
+        assert chr(0x2029) not in payload
+        assert "\\u2028" in payload
+        assert "\\u2029" in payload
+
+    def test_clean_payload_is_byte_identical_to_compact_dump(self) -> None:
+        builder = NextScriptBuilder(URL)
+        value = {"user": "alice", "score": 42}
+        out = builder.init_script(value)
+        expected = resolve_serializer().dumps(value)
+        assert out == f"<script>Next._init({expected});</script>"
 
 
 class TestNextJsStaticPath:

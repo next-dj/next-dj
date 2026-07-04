@@ -6,12 +6,9 @@ Partial Rendering Reference
 Module Summary
 --------------
 
-``next.partial`` exposes the server side of partial rendering: the ``Patches`` builder
-that authors a patch envelope, the response and stream classes that carry it, the
-zone-render and origin helpers, the custom-verb registration hook, and the protocol
-backend that serialises the wire format.
-The wire protocol, the ``data-next-*`` attributes, and the client runtime live in the
-topic section, see :doc:`/content/topics/partial-rendering/reference`.
+``next.partial`` exposes the server side of partial rendering.
+The surface covers the ``Patches`` builder that authors a patch envelope, the response and stream classes that carry it, the zone-render and origin helpers, the custom-verb registration hook, and the protocol backend that serialises the wire format.
+The wire protocol, the ``data-next-*`` attributes, and the client runtime live in the topic section, see :doc:`/content/topics/partial-rendering/reference`.
 
 API Tiers
 ---------

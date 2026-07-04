@@ -11,7 +11,7 @@ The names in this reference are grouped by their intended audience.
 
 .. note::
 
-   The three API tiers discussed in :doc:`/content/faq/general` apply to this package.
+   The Application Imports, Framework Extension, and Internal Infrastructure tiers follow the public-surface rules in :ref:`faq-safe-symbols`.
    Underscore-prefixed render helpers under *Internal Infrastructure* are hooks for tests and framework code, not for everyday imports in applications.
 
 Application Imports
@@ -105,7 +105,8 @@ Prefer the Application Imports tier unless you are building framework tooling.
 .. autoclass:: next.components.ComponentInfo
    :members:
 
-``scope_key`` is the stable grouping tuple the duplicate-name check uses to detect same-scope collisions.
+``scope_key`` is a stable value-object tuple for grouping by name and scope.
+The duplicate-name check groups by ``(scope_root, name)`` and ignores ``scope_relative``, so two same-named components anywhere in one tree collide under ``next.E020``.
 
 .. autoclass:: next.components.ContextFunction
    :members:

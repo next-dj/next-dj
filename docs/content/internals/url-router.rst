@@ -53,7 +53,7 @@ Modules
    See :doc:`/content/topics/dependency-injection` for the marker semantics and the provider order.
 
 ``next.urls.reverse``.
-   ``page_reverse`` and ``with_query`` helpers.
+   ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` helpers.
 
 URL Name Computation
 --------------------
@@ -61,7 +61,7 @@ URL Name Computation
 Names follow ``next:page_<segments>`` where the segments come from the directory path.
 
 - Static segments contribute their directory name unchanged.
-- Captured segments contribute their parameter name without the type prefix.
+- Captured segments contribute the raw bracket text with separators collapsed to underscores, so a converter prefix such as ``int:`` stays in the name.
 - Wildcard segments contribute the parameter name without brackets.
 
 The template ``URL_NAME_TEMPLATE`` controls the format.

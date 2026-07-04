@@ -64,7 +64,8 @@ A row deleted between steps decodes to ``None``, so ``done`` must not assume the
 An unsaved instance has no primary key to store, so encoding it raises ``ImproperlyConfigured`` at save time.
 
 A value the codec does not recognise raises ``ImproperlyConfigured`` naming the offending type.
-The error suggests the way out: configure ``CacheFormWizardBackend`` or a custom ``FormWizardBackend`` for cleaned data that does not fit JSON.
+The error suggests the fix.
+Configure ``CacheFormWizardBackend`` or a custom ``FormWizardBackend`` for cleaned data that does not fit JSON.
 
 The Cache Backend
 -----------------
@@ -125,7 +126,8 @@ Draft Expiry Mid-Wizard
 
 A draft can vanish between two steps when the session ends, when the cache backend's ``TIMEOUT`` is short, or when the cache evicts under pressure.
 The backend reads a missing entry as an empty mapping.
-The dispatcher does not finalise over the gap: a final-step submission while an earlier step has no stored data redirects to the first incomplete step, so the visitor re-enters the lost data instead of triggering ``done`` with a partial draft.
+The dispatcher does not finalise over the gap.
+A final-step submission while an earlier step has no stored data redirects to the first incomplete step, so the visitor re-enters the lost data instead of triggering ``done`` with a partial draft.
 
 .. warning::
 

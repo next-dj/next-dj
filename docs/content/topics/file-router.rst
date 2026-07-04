@@ -107,9 +107,9 @@ Name your directories without hyphens when you want the parameter name and the d
 .. code-block:: python
    :caption: routes/posts/[int:post_id]/page.py
 
-   from notes.models import Note
    from next.pages import context
    from next.urls import DUrl
+   from notes.models import Note
 
    @context("note")
    def fetch_note(post_id: DUrl[int]) -> Note:
@@ -200,6 +200,27 @@ App directories.
 Project directories.
    The ``DIRS`` list adds absolute or project-relative paths to the scan.
    The router walks each directory in order and registers every ``page.py`` and ``template.djx`` it finds.
+
+Fallback root.
+   With ``APP_DIRS`` set to ``False`` and no usable path entry in ``DIRS``, the router falls back to scanning ``BASE_DIR / PAGES_DIR``.
+   This shape serves a project that keeps every page in a single tree without a page-bearing application.
+
+.. code-block:: python
+   :caption: config/settings.py, pages without applications
+
+   NEXT_FRAMEWORK = {
+       "PAGE_BACKENDS": [
+           {
+               "BACKEND": "next.urls.FileRouterBackend",
+               "APP_DIRS": False,
+               "DIRS": [],
+               "PAGES_DIR": "pages",
+               "OPTIONS": {"context_processors": []},
+           }
+       ]
+   }
+
+With this configuration the router serves every page under ``<BASE_DIR>/pages/``.
 
 You can use both sources at once.
 URL patterns are built in this order, first from application directories then from each entry in ``DIRS``.

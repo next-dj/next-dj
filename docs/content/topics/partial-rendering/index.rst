@@ -8,19 +8,17 @@ A form re-renders only the form that failed, a filter swaps only the result list
 The server authors every DOM operation and the client applies it.
 Selectors and swap strategies never cross the wire.
 
-Every interaction in this section degrades to a full page cycle when JavaScript is off.
-The runtime is an enhancement layered on top of the same ``POST`` then ``303`` then ``GET`` flow the framework already serves.
-A page that works without the runtime keeps working with it, and gains the partial behaviour for free.
+Every interaction in this section degrades to a full page cycle when JavaScript is off, layered on top of the same ``POST`` then ``303`` then ``GET`` flow the framework already serves.
 
 Read :doc:`scenarios` first.
 It walks seven concrete tasks from markup to handler, and the rest of the section deepens one concern at a time.
 
-.. rubric:: The tutorial
+.. rubric:: The Tutorial
 
 :doc:`scenarios`
-   Seven scenarios from task to markup to handler: neighbouring forms, inline validation,
-   an auto-submitting filter, pagination and infinite scroll, a live stream, a modal
-   wizard that refreshes a list, and lazy zones.
+   Seven scenarios from task to markup to handler, from neighbouring forms and inline
+   validation to an auto-submitting filter, pagination and infinite scroll, a live
+   stream, a modal wizard that refreshes a list, and lazy zones.
 
 .. rubric:: Concepts
 
@@ -43,9 +41,12 @@ It walks seven concrete tasks from markup to handler, and the rest of the sectio
    Streaming patch envelopes over Server-Sent Events, the WSGI and ASGI contract, and the refresh fan-out pattern.
 
 :doc:`extending`
-   The three seams that open the protocol to an application: a custom verb, a server-pushed context value, and a server-fired event.
+   The three seams that open the protocol to an application, a custom verb, a server-pushed context value, and a server-fired event.
 
 .. rubric:: Reference
+
+:doc:`limitations`
+   The boundaries the model draws on purpose, from the synchronous zone render to the single active backend, and what to reach for at each one.
 
 :doc:`reference`
    The patch verbs, request and response headers, ``data-next-*`` attributes, and ``PARTIAL_BACKENDS`` settings, in tables.
@@ -66,4 +67,5 @@ It walks seven concrete tasks from markup to handler, and the rest of the sectio
    framework-islands
    sse
    extending
+   limitations
    reference

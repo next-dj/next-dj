@@ -35,6 +35,7 @@ The tag does the following.
 6. Publishes ``form`` inside the block body (see `The form Variable`_ below).
 
 On the validation-error re-render the request targets the dispatch endpoint, so the tag re-emits the posted origin of the original page instead of ``request.path``.
+On a wizard advance in a partial render the shaping layer sets the ``FORM_ORIGIN_OVERRIDE_KEY`` context key to the next step URL, and that value wins over the posted origin.
 
 The ``data-next-action`` attribute carries the action UID, the registry identity that also names the dispatch URL.
 The tag emits it when the action meta is available, which makes the form addressable from client-side scripts without parsing the ``action`` URL.
@@ -90,7 +91,9 @@ The tag compiles each one to a ``data-next-*`` attribute the client runtime read
      - The zone the partial response replaces.
    * - ``key``
      - ``data-next-key``
-     - The stable key that pairs the form with its partial target.
+     - The match key that names the form instance among repeated forms, so a partial morph lands on the submitted copy.
+
+See :doc:`/content/topics/partial-rendering/reference` for the attribute semantics and :doc:`/content/topics/partial-rendering/index` for the topic.
 
 Pass each as a ``key="value"`` argument like any other, and the value resolves as a string literal or a context variable the same way an HTML attribute value does.
 
@@ -105,7 +108,7 @@ Scope Resolution
 ----------------
 
 When the template renders inside a page, the tag first looks for a page-scoped registration whose file matches the current ``page.py``.
-If no page-scoped match exists the tag falls back to the shared registry.
+If no page-scoped match exists the tag falls back to the first registration of that name and accepts it only when its scope is shared.
 This means a page-local ``NoteForm`` takes precedence over a shared ``NoteForm`` with the same derived name.
 
 The ``form`` Variable
@@ -128,7 +131,8 @@ Captured URL Parameters
 -----------------------
 
 The tag does not need any extra argument to forward URL parameters.
-The captured kwargs travel inside the origin path itself: the dispatcher resolves the posted ``_next_form_origin`` against the URLconf and recovers every kwarg through the real URL converters, skipping names reserved by the dependency resolver.
+The captured kwargs travel inside the origin path itself.
+The dispatcher resolves the posted ``_next_form_origin`` against the URLconf and recovers every kwarg through the real URL converters, skipping names reserved by the dependency resolver.
 
 .. code-block:: jinja
    :caption: page for /notes/<int:note_id>/
@@ -227,7 +231,8 @@ Forms in Hand-Written Views
 
 A ``{% form %}`` tag also works inside a template rendered by an ordinary Django view, outside the file router.
 The success path needs nothing extra, the handler runs and its response goes out.
-The error re-render is different: the dispatcher resolves the posted origin to a view and reads the page source location from its ``next_page_path`` attribute, which the file router sets on every routed view and a hand-written view lacks.
+The error re-render is different.
+The dispatcher resolves the posted origin to a view and reads the page source location from its ``next_page_path`` attribute, which the file router sets on every routed view and a hand-written view lacks.
 Without it an invalid submission returns HTTP 400 instead of re-rendering.
 
 Opt in by setting the attribute on the view function yourself, as a ``Path`` or a string naming the ``page.py`` location whose body the dispatcher should compose on the error re-render.

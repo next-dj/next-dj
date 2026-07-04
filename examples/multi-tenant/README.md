@@ -73,6 +73,9 @@ class TenantPrefixStaticBackend(StaticFilesBackend):
 
     def render_script_tag(self, url, *, request=None):
         return super().render_script_tag(_prefixed(url, request))
+
+    def render_module_tag(self, url, *, request=None):
+        return super().render_module_tag(_prefixed(url, request))
 ```
 
 The settings entry is a single line:

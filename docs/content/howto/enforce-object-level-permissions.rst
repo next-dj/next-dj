@@ -21,7 +21,7 @@ A ``False`` return denies with HTTP 403 and the row is never saved.
 Walkthrough
 -----------
 
-Load the row from the URL
+Load the Row From the URL
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The edit form loads its instance from a captured URL segment through ``Meta.instance_from_url``.
@@ -30,8 +30,9 @@ The route segment ``[slug]`` captures the lookup value.
 .. code-block:: python
    :caption: notes/pages/notes/edit/[slug]/page.py
 
-   import next.forms
    from django.http import HttpRequest
+
+   import next.forms
    from notes.models import Note
 
    class NoteEditForm(next.forms.ModelForm):
@@ -40,14 +41,14 @@ The route segment ``[slug]`` captures the lookup value.
            fields = ["title", "body"]
            instance_from_url = "slug"
 
-       def has_object_permission(self, request: HttpRequest):
+       def has_object_permission(self, request: HttpRequest) -> bool:
            return self.instance.owner_id == request.user.id
 
 The default ``get_initial`` loads ``Note.objects.get(slug=<captured slug>)`` through :func:`~django.shortcuts.get_object_or_404`.
 The dispatcher binds the form against that instance, then resolves ``has_object_permission``.
 At that point ``self.instance`` is the loaded ``Note``, so the hook compares its owner against the current user.
 
-Combine it with a login requirement
+Combine It With a Login Requirement
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The object-level hook compares ``request.user``, so the request needs an authenticated user.
@@ -63,13 +64,13 @@ Pair the hook with the static ``Meta.login_required`` so an anonymous POST is re
            instance_from_url = "slug"
            login_required = True
 
-       def has_object_permission(self, request: HttpRequest):
+       def has_object_permission(self, request: HttpRequest) -> bool:
            return self.instance.owner_id == request.user.id
 
 The static guard runs first and pre-database.
 An anonymous visitor is redirected before any application code runs, and the object-level hook only ever sees an authenticated user.
 
-Render the form
+Render the Form
 ~~~~~~~~~~~~~~~
 
 The template renders the form by name.
@@ -121,7 +122,8 @@ A test signs in as the owner, edits the row, then signs in as another user and c
        assert Note.objects.get(pk=note.pk).title == "Intro v2"
 
 The owner's POST binds the form, passes ``has_object_permission``, and saves.
-The stranger's POST binds the same row, the hook returns ``False``, and the dispatcher raises :exc:`~django.core.exceptions.PermissionDenied` which Django renders as a bare HTTP 403 without re-rendering the origin, so the row is unchanged.
+The stranger's POST binds the same row, the hook returns ``False``, and the dispatcher raises :exc:`~django.core.exceptions.PermissionDenied`.
+Django renders the denial as a bare HTTP 403 without re-rendering the origin, so the row is unchanged.
 
 A ``form_access_denied`` signal fires on the denial with ``layer="object"`` and ``reason="denied"``.
 Connect a receiver to audit refused edits, see :ref:`topics-forms-signals-form-access-denied`.

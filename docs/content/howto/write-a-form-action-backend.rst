@@ -6,7 +6,7 @@ Write a Form Action Backend
 Problem
 -------
 
-You want every form dispatch to run an extra step such as audit logging or rate limiting, transactional with the dispatch itself.
+You want every form dispatch to run an extra step such as audit logging or rate limiting, wired into the dispatch pipeline itself.
 
 Solution
 --------
@@ -132,9 +132,15 @@ Override ``shape_response`` to change the envelope without touching the HTML, fo
 
 ``outcome.kind`` discriminates the pipeline outcomes, so the handler-result and wizard-advance envelopes stay default.
 ``ActionOutcomeKind.INVALID`` only ever represents a failed validation.
-A valid submission whose handler returns ``None`` leaves the pipeline as a ``RESULT`` outcome whose default envelope re-renders the origin without re-entering ``shape_response``, so the 422 override never touches successful submissions.
+A valid submission whose handler returns ``None`` leaves the pipeline as a ``RESULT`` outcome.
+Its default envelope re-renders the origin without re-entering ``shape_response``, so the 422 override never touches successful submissions.
 Override ``render_invalid_page`` instead when only the error HTML changes and the envelope stays as shipped.
 See :doc:`/content/topics/forms/backends` for the two customisation layers and the ``ActionOutcome`` fields.
+
+.. warning::
+
+   ``FormActionBackend.shape_response`` routes partial requests through the patch-envelope shaping first, so this override restamps patch envelopes too.
+   Gate the status change on ``not is_partial_request(request)`` from ``next.partial`` to keep the partial wire contract at 200.
 
 Surface Actions to the System Checks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -147,13 +153,21 @@ A from-scratch backend overrides the hook so its actions participate in checks s
    :caption: notes/backends.py
 
    from collections.abc import Iterable
+   from typing import Any
+
    from next.forms import FormActionBackend
    from next.forms.backends import ActionMeta
 
    class CustomBackend(FormActionBackend):
+       def __init__(self, config: dict[str, Any] | None = None) -> None:
+           self._config = config or {}
+           self._metas: dict[str, ActionMeta] = {}
+
        def iter_actions(self) -> Iterable[ActionMeta]:
            yield from self._metas.values()
 
+The fragment shows only the storage and the hook.
+A from-scratch backend also implements the four abstract methods ``register_action``, ``get_action_url``, ``generate_urls``, and ``dispatch``, which fill and consume ``self._metas``.
 The yielded dicts carry the action ``name``, the target, the ``uid``, and the access ``guard``, the same shape ``get_meta`` returns.
 
 Verification

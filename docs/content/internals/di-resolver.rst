@@ -14,7 +14,8 @@ Overview
 
 The resolver is a singleton instance of ``DependencyResolver``.
 Every page context function, every page render, and every component context function is invoked through the resolver.
-The form dispatch adds its own call sites: the form-class factory, ``get_initial``, the ``@action`` handler, ``on_valid``, and ``wizard.done``.
+The form dispatch adds its own call sites.
+These are the form-class factory, ``get_initial``, the ``@action`` handler, ``on_valid``, and ``wizard.done``.
 
 Pipeline
 --------
@@ -93,7 +94,7 @@ ResolutionContext
 -----------------
 
 Each call builds a fresh ``ResolutionContext``.
-It carries the current request, the captured URL kwargs, the template scope carried as ``context_data``, the bound form when one exists, the dependency cache, and the resolution stack.
+It carries the current request, the captured URL kwargs, the template scope as ``context_data``, the bound form when one exists, the dependency cache, and the resolution stack.
 Query-string values are read off the request by the query provider.
 Providers read what they need and never mutate the context.
 
@@ -108,7 +109,7 @@ It lives on the ``ResolutionContext`` for that pass and holds named dependency v
 The cache key is the dependency name string alone, with no type component.
 
 ``FormActionDispatch.dispatch`` creates a fresh dispatch cache dict on every POST and attaches it to the request under the attribute named ``REQUEST_DEP_CACHE_ATTR``.
-The cache is shared across each stage of the dispatch: ``get_initial``, the factory resolution, the handler call, and any re-render after validation failure.
+The cache is shared across each stage of the dispatch, from ``get_initial`` and the factory resolution to the handler call and any re-render after validation failure.
 On a re-render the page context and component context renderers read it back through ``get_request_dep_cache`` and rejoin the same cache.
 An ordinary page request that does not pass through the form dispatcher never sees this attribute.
 
@@ -130,7 +131,7 @@ The error message lists the chain of named dependencies that closed the loop, re
 Signals
 -------
 
-The resolver fires ``provider_registered`` once per provider when the class enters the registry.
+``provider_registered`` fires once per provider when the subclass enters the ``RegisteredParameterProvider`` registry.
 Subscribe to track custom providers across reloads.
 
 Extension Points

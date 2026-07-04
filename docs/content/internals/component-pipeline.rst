@@ -83,12 +83,13 @@ A component reference resolves through the visibility resolver.
 The resolver collects every component visible from the template path, then scores each by scope specificity.
 The highest score wins.
 A component nested in a sub-folder of the template's own page tree outscores a same-named component contributed at a tree root or through a ``DIRS`` root.
-A page-tree root and a ``DIRS`` root both score zero, so the tie breaks on registration order.
+A page-tree root and a ``DIRS`` root both score zero, so the tie breaks on origin, and the page-tree component wins.
 
-The full sort key is ``(-score, component.name, registration_position)``.
-Equal scores break first by component name, then by registration order, so the component discovered first shadows a later same-named one.
+The full sort key is ``(-score, dirs_origin, component.name, registration_position)``, where ``dirs_origin`` is ``0`` for a page-tree component and ``1`` for a ``DIRS`` component.
+At equal score a page-tree component sorts before a ``DIRS`` one, so a project-local component shadows a shared ``DIRS`` entry.
+A remaining same-origin tie breaks first by component name, then by registration order, so within one origin the component discovered first shadows a later same-named one.
 Registration order operates inside a single ``FileComponentsBackend``.
-The page-tree backend records its roots during the URL router walk before ``DIRS`` roots are scanned, so its components shadow same-name entries from ``DIRS``.
+``DIRS`` roots are scanned at app ready, before the URL router walk registers page-tree folders, but the origin dimension of the sort key makes the page-tree component win regardless of that order.
 Across backends, the order of entries in ``COMPONENT_BACKENDS`` decides which backend is consulted first.
 
 Two components in the same scope with the same name are reported by ``next.E020``.

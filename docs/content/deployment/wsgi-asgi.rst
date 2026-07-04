@@ -17,7 +17,7 @@ Pick WSGI when every response is synchronous and short lived.
 
 ASGI is the right choice when the project uses any of these features.
 
-- Server Sent Events for real time updates.
+- Server Sent Events for real time updates, including the patch streams described in :doc:`/content/topics/partial-rendering/sse`.
 - Websockets for bidirectional communication.
 - Async view handlers that await I/O.
 - Streaming responses that hold the connection open.
@@ -51,10 +51,7 @@ Run with a production WSGI server such as ``gunicorn`` or ``uwsgi``.
    uv run gunicorn config.wsgi:application --workers 4 --bind 0.0.0.0:8000
 
 The example passes ``--workers 4``.
-Effective worker counts depend on Gunicorn CLI flags and environment variables (for example ``WEB_CONCURRENCY``).
-Verify the upstream Gunicorn docs for your installed version instead of trusting second-hand shortcuts.
-Teams often iterate from rough heuristics such as ``(2 * num_cores) + 1`` once they profile real traffic and saturation.
-Tune based on the expected concurrency and the average request duration.
+Start from a heuristic such as ``(2 * num_cores) + 1`` and tune against the measured concurrency and request duration.
 
 ASGI Configuration
 ------------------
@@ -90,6 +87,8 @@ Size the worker count proportional to the request rate and the average response 
 
 ASGI workers can multiplex many connections through an event loop.
 A single worker handles many concurrent SSE or websocket connections.
+A patch stream (see :doc:`/content/topics/partial-rendering/sse`) holds its connection open until the source ends or the client disconnects, which outlives any reasonable sync worker timeout.
+Serve those streams from ASGI workers rather than raising the WSGI worker timeout.
 
 Reverse Proxy
 -------------

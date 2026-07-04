@@ -27,10 +27,9 @@ Origin Validation
 
 The framework adds a second hidden field named ``_next_form_origin``.
 The ``{% form %}`` tag sets it to the URL path the form was rendered under, so the HTML never exposes the server filesystem layout.
-The dispatcher resolves the field only when it has to re-render the origin page: on a validation failure, and when a form-backed handler returns ``None`` so the page renders again.
-A valid submission whose handler returns a response never resolves the field, so the check is a re-render lookup, not a pre-handler origin gate.
-
-When the field is resolved, these checks apply.
+The dispatcher resolves the field on every POST to recover the origin page's URL kwargs for dependency injection.
+The checks below are enforced only when the dispatcher has to re-render the origin page, on a validation failure and when a form-backed handler returns ``None``.
+A missing or unresolvable origin never blocks a valid submission whose handler returns a response.
 
 The value must be a same-site path that starts with ``/`` and not with ``//``.
 It must resolve against the URLconf through :func:`django.urls.resolve`, and the resolved view must carry the ``next_page_path`` attribute the file router sets on every routed page.
@@ -159,7 +158,7 @@ Form post without ``_next_form_origin``.
 Language switch between render and submit.
    Under :func:`django.conf.urls.i18n.i18n_patterns` the origin resolves under the language active on the POST.
    A user who changes the language in between posts an origin whose prefix no longer resolves, so a failing validation answers HTTP 400 instead of re-rendering.
-   The success path is unaffected because it never resolves the origin.
+   The success path is unaffected because the origin checks are enforced only on the re-render.
 
 Stale token after deploy.
    Cached page renders carry the previous token.

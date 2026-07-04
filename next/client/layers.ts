@@ -13,6 +13,7 @@
 
 import { defaultDialog, defaultHistory, defaultPopState } from "./adapters";
 import type { HistoryAdapter } from "./apply";
+import { fireRemoved } from "./morph";
 import {
   HEADER_ORIGIN,
   HEADER_ZONE,
@@ -311,6 +312,10 @@ export function createLayers(deps: LayerDeps): LayerStack {
     if (index === -1) return;
     stack.splice(index, 1);
     layer.close();
+    // Fire next:removed on the detaching dialog root, the same contract the
+    // apply verbs keep, so an island mounted inside the modal unmounts before
+    // the subtree leaves the document rather than leaking its listeners.
+    fireRemoved(layer.dialog);
     layer.dialog.remove();
     if (layer.returnFocus instanceof HTMLElement) layer.returnFocus.focus();
     // A programmatic close still sits on the pushed URL, so replace it back to

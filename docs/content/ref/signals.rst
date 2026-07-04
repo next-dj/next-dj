@@ -55,7 +55,10 @@ not be retained past the receiver call.
    * - ``collector_finalized``
      - The static collector
      - ``page_path``, ``request``
-     - When the static manager begins injection, after template rendering completes. ``page_path`` may be ``None`` for partial renders. ``request`` may be ``None`` outside a request.
+     - When the static manager begins injection, after template rendering completes.
+       ``page_path`` is the file path of the rendered page.
+       A standalone zone render does not fire this signal.
+       ``request`` may be ``None`` outside a request.
    * - ``component_backend_loaded``
      - ``ComponentsManager``
      - ``backend``, ``config``
@@ -78,10 +81,10 @@ not be retained past the receiver call.
      - After a context callable is attached to a page module.
    * - ``field_validated``
      - The active partial protocol backend class
-     - ``action_name``, ``uid``, ``request``, ``field_names``, ``error_count``.
+     - ``action_name``, ``uid``, ``request``, ``field_names``, ``error_count``
+     - After a validate-only blur pass runs, always behind the action guard so unauthenticated validate traffic never reaches telemetry.
        ``field_names`` is the validated subset.
        ``error_count`` is the number of fields that failed.
-     - After a validate-only blur pass runs, always behind the action guard so unauthenticated validate traffic never reaches telemetry.
    * - ``form_access_denied``
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``layer``, ``reason``

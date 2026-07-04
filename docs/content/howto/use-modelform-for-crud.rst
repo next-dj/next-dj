@@ -18,10 +18,11 @@ The same class drives the create page, where the kwarg is absent and the form re
 Walkthrough
 -----------
 
-Declare the form once
+Declare the Form Once
 ~~~~~~~~~~~~~~~~~~~~~
 
-The class lives outside ``page.py``, so it registers with shared scope: one action name and one action URL serve both pages.
+The class lives outside ``page.py``, so it registers with shared scope.
+One action name and one action URL serve both pages.
 Autodiscovery imports ``notes/forms.py`` on startup, so neither page module imports it.
 
 .. code-block:: python
@@ -39,7 +40,7 @@ Autodiscovery imports ``notes/forms.py`` on startup, so neither page module impo
 A copy declared in each ``page.py`` would be page-scoped instead, keeping the shared action name but giving every per-file registration its own action URL.
 See :doc:`/content/topics/forms/modelforms` for that distinction and :doc:`/content/topics/forms/actions` for the scope rules.
 
-Edit page
+Edit Page
 ~~~~~~~~~
 
 The edit page lives under a route that captures the lookup field.
@@ -58,11 +59,14 @@ Here the route segment is ``[slug]``, so the captured kwarg is ``slug``.
 The default ``get_initial`` loads ``Note.objects.get(slug=<captured slug>)`` through :func:`~django.shortcuts.get_object_or_404`.
 The default ``on_valid`` calls ``self.save()`` and redirects to the origin page.
 No handler, no hidden lookup field, and no second lookup are needed.
+``Meta.success_url`` redirects the successful submission to another page instead, and ``next.urls.page_reverse_lazy`` builds that value from a page path.
+``Meta.success_message`` flashes a message through Django's :doc:`messages framework <django:ref/contrib/messages>`, interpolated over the cleaned data.
+See :ref:`topics-forms-actions-success` for both options.
 
 The ``{% form %}`` tag resolves the action by name, opens the ``<form>`` element, injects the CSRF token, and publishes ``form`` inside the block.
 It also emits a hidden ``_next_form_origin`` field with the page URL, so the dispatcher recovers the captured ``slug`` by resolving that path and the submission re-attaches to the same row.
 
-Create page
+Create Page
 ~~~~~~~~~~~
 
 The create page renders the same form on a route with no captured kwarg.
@@ -108,8 +112,10 @@ A test asserts the same flow with ``NextClient``.
        )
        assert Note.objects.get(pk=note.pk).title == "Intro v2"
 
-The first ``post_action`` mimics the create page: with no ``origin`` there is no captured kwarg, so the form is unbound and inserts a row.
-The second passes ``origin``, which fills the ``_next_form_origin`` field the ``{% form %}`` tag emits, so resolving the edit-page path yields the ``slug`` kwarg, ``instance_from_url`` loads the existing row, and the save updates it.
+The first ``post_action`` mimics the create page.
+With no ``origin`` there is no captured kwarg, ``get_initial`` returns an empty dict, and the bound form inserts a new row.
+The second passes ``origin``, which fills the ``_next_form_origin`` field the ``{% form %}`` tag emits.
+Resolving the edit-page path yields the ``slug`` kwarg, ``instance_from_url`` loads the existing row, and the save updates it.
 
 The recovered kwargs come through the URL converters of the resolved route, so a ``[int:id]`` kwarg arrives as an integer on both the initial render and the re-render, while a slug stays a string.
 

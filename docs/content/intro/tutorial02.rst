@@ -45,7 +45,7 @@ For the Notes application the most common layout sits next to the page tree at `
 
 Writing the ``{% block template %}`` placeholder explicitly is the recommended practice because it controls where the page body lands.
 The framework substitutes the body of each page into that block.
-When a layout omits the block, the framework still wraps the page body in a ``{% block template %}`` block so an ancestor layout's placeholder stays valid.
+When the page has no sibling ``layout.djx``, the framework wraps the page body in a ``{% block template %}`` block itself, so an ancestor layout's placeholder stays valid.
 
 Reverse names such as ``next:page_`` come from the file router.
 See :doc:`/content/topics/file-router` for how directories become URLs and :doc:`/content/topics/url-reversing` for helpers such as ``page_reverse``.
@@ -205,10 +205,9 @@ Inherited context flows from the root ``page.py`` down to every page.
 Common Pitfalls
 ---------------
 
-Layout shows but page body does not.
-   Add ``{% block template %}{% endblock template %}`` to the innermost ``layout.djx`` that wraps the page.
-   An ancestor layout that omits the block still wraps its descendants because the framework folds the inner layout into a ``{% block template %}`` block on the way out.
-   The placeholder is mandatory only in the innermost layout that should host the page body.
+A layout's markup does not appear on the page.
+   A ``layout.djx`` that omits the placeholder is skipped during composition.
+   Add ``{% block template %}{% endblock template %}`` to the layout whose markup disappeared.
 
 ``DUrl`` resolves to ``None`` when the captured segment is missing.
    ``DUrl[T]`` reads the segment whose name matches the parameter and coerces the value to ``T``.

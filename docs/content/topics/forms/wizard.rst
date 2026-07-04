@@ -44,10 +44,11 @@ Each form class is a plain ``django.forms.Form`` or ``django.forms.ModelForm``.
 .. code-block:: python
    :caption: access/views/request/[step]/page.py — auto-registered as ``access_request_wizard``
 
-   import next.forms
    from access.models import AccessRequest
    from django import forms
    from django.http import HttpRequest
+
+   import next.forms
    from next.forms import redirect_to_origin
 
    class IdentityStep(forms.ModelForm):
@@ -81,8 +82,9 @@ Under the default settings the same files live in ``access/pages/request/[step]/
 
 Every step form subclasses ``django.forms`` directly.
 A step is not a standalone action, so a plain Django form has nothing to register and nothing to suppress.
-The wizard never calls the ``next.forms`` hooks on a step, so the framework base classes buy a step nothing, see `How Step Forms Differ From Standalone Forms`_.
-A ``next.forms`` base can still serve as a step, but then it must set ``Meta.abstract = True``: without the flag ``__init_subclass__`` registers the step as its own form action whose default ``on_valid`` saves a partial row, and the ``next.W057`` system check warns about the double role.
+The wizard never runs ``get_initial`` or ``on_valid`` on a step, so a plain Django form is the canonical base, see `How Step Forms Differ From Standalone Forms`_.
+A ``next.forms`` base can still serve as a step, but then it must set ``Meta.abstract = True``.
+Without the flag ``__init_subclass__`` registers the step as its own form action whose default ``on_valid`` saves a partial row, and the ``next.W057`` system check warns about the double role.
 See :ref:`Preventing Registration <topics-forms-actions-abstract>` for the ``Meta.abstract`` semantics.
 
 ``Meta.steps`` is required.
@@ -98,8 +100,8 @@ It defaults to ``"step"``, so a route segment of ``[step]`` works with no furthe
 Per-step drafts persist through the configured ``FORM_WIZARD_BACKEND``, which the project sets once for every wizard.
 See :doc:`wizard-backend` for the backend contract and its options.
 
-The done Method
----------------
+The ``done`` Method
+-------------------
 
 ``done`` runs once after the last step validates.
 It receives ``request`` and the merged ``cleaned_data`` of every stored step, so the keys from each step form are flattened into one mapping.
@@ -152,14 +154,16 @@ Beyond the reserved names, ``done`` declares markers and named dependencies like
        return redirect_to_origin(request)
 
 ``self.url_kwargs`` still carries the captured URL values for code that prefers an explicit read.
-A wizard module falls under the DI annotation rule: do not add ``from __future__ import annotations`` to a module whose ``done`` the resolver inspects, see :doc:`/content/topics/dependency-injection`.
+A wizard module falls under the DI annotation rule.
+Do not add ``from __future__ import annotations`` to a module whose ``done`` the resolver inspects, see :doc:`/content/topics/dependency-injection`.
 
 The ``done`` Return Value
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The return value of ``done`` follows the same coercion as an action handler.
 
-- An ``HttpResponse`` subclass is sent as is. A redirect is the usual choice.
+- An ``HttpResponse`` subclass is sent as is.
+  A redirect is the usual choice.
 - A string becomes an ``HttpResponse`` body with status 200.
 - A model instance with a ``get_absolute_url`` method redirects to that URL, the ``CreateView``-style idiom for a finaliser that saves and shows the result.
 - A value with a truthy ``url`` attribute becomes an ``HttpResponseRedirect`` to that URL.
@@ -190,7 +194,8 @@ Two hooks that fire for a standalone ``next.forms`` action never fire for a step
    Put per-step side effects nowhere, and put the single finalising write in ``done``.
 
 A step built on a ``next.forms`` base that defines ``get_initial`` or ``on_valid`` sees neither method run inside the wizard.
-Both are silently inert on a step class, so subclassing ``next.forms`` buys a step nothing and costs the ``Meta.abstract`` flag.
+Both are silently inert on a step class.
+A ``next.forms`` base does give a step the object-level ``has_object_permission`` hook, which the dispatcher enforces after the step binds, at the cost of the ``Meta.abstract`` flag, see :ref:`topics-forms-actions-dynamic-guards`.
 
 Rendering
 ---------
@@ -295,6 +300,7 @@ Routing and Back-Navigation
 
 The wizard lives on a route that captures the step segment, such as ``request/[step]/``.
 The captured kwarg name matches ``Meta.url_param``.
+A route that captures kwargs but not the ``Meta.url_param`` name raises :exc:`~django.core.exceptions.ImproperlyConfigured` at request time instead of silently pinning the wizard to its first step, which also covers shared wizards the static ``next.E054`` check cannot see.
 
 On a valid non-final step the dispatcher saves the step data and redirects to the next step's URL.
 The redirect reuses the current page path and swaps the step segment, so ``request/identity/`` becomes ``request/scope/``.

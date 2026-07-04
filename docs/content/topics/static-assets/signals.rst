@@ -6,6 +6,7 @@ Static Signals
 The static pipeline emits ``asset_registered``, ``collector_finalized``, ``html_injected``, and ``backend_loaded`` from ``next.static.signals``.
 
 Import either from ``next.static.signals`` or from the aggregator ``next.signals``.
+Import receiver modules from ``AppConfig.ready`` so receivers exist before the first request.
 
 Signals and Payloads
 --------------------
@@ -40,7 +41,8 @@ collector_finalized
 
 Fires when the static manager begins injection, after template rendering has completed and the collector is sealed.
 The sender is the collector.
-The payload carries ``page_path``, which is ``None`` for partial renders, and ``request``, which is the active ``HttpRequest`` or ``None`` for renders outside a request lifecycle.
+The payload carries ``page_path``, the file path of the rendered page, and ``request``, the active ``HttpRequest`` or ``None`` for renders outside a request lifecycle.
+A standalone zone render never fires this signal because its assets travel in the patch envelope instead of through injection.
 
 .. code-block:: python
    :caption: inspect collected slots per request
@@ -87,8 +89,6 @@ backend_loaded
 Fires after the static factory instantiates a backend.
 The sender is the backend class.
 The payload carries ``config`` and ``instance``.
-
-Register imports from ``AppConfig.ready`` so receivers exist before the first request.
 
 .. note::
 

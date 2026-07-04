@@ -26,9 +26,13 @@ The composition is purely structural, driven by directory placement.
 Layout Discovery
 ----------------
 
-The framework walks from the page directory upward until it reaches the page root.
+The framework walks every ancestor directory upward from the page directory, bounded at 64 levels.
 Every directory along the way is inspected for a ``layout.djx`` file.
 The collected layouts are composed in order, with the closest layout wrapping the page body and the farthest layout wrapping everything else.
+
+The walk does not stop at the page root.
+A ``layout.djx`` in a directory above the page root, such as the application package directory, also joins the chain and wraps every page below it.
+Keep layout files inside the page tree unless that wrapping is intended.
 
 .. code-block:: text
    :caption: layout discovery
@@ -81,8 +85,8 @@ The closing tag can be written either way.
    </html>
 
 Without the placeholder that layout emits its own markup and discards the wrapped content, so the page body and every inner layout below the broken layer vanish from the output without an error.
-The ``check_layout_templates`` system check emits ``next.W001`` for any ``layout.djx`` that lacks a ``{% block template %}`` block.
-Run ``uv run python manage.py check`` to catch layouts that miss the placeholder.
+The ``check_layout_templates`` system check emits ``next.W001`` for a ``layout.djx`` sitting next to a discovered page when it lacks a ``{% block template %}`` block.
+A layout in an intermediate segment directory without a sibling page is not covered, so ``uv run python manage.py check`` does not catch every broken layout.
 
 Layouts can declare layout-level CSS and JS through the static collector tags shown above.
 The tags also live in inner layouts when you want a section-scoped style sheet.
@@ -96,8 +100,8 @@ Use it to publish values that the layout markup needs and, with ``inherit_contex
 .. code-block:: python
    :caption: notes/pages/page.py
 
-   from notes.models import Note
    from next.pages import context
+   from notes.models import Note
 
    @context("site_name", inherit_context=True)
    def site_name() -> str:
@@ -153,8 +157,8 @@ The static collector emits the file only when a request reaches a page below tha
 Multiple Backends and Layout Roots
 ----------------------------------
 
-Each entry in ``PAGE_BACKENDS`` produces an independent layout tree.
-Two backends can have entirely different root layouts even when both scan the same applications.
+Two backends that scan different directories produce two separate layout chains.
+The separation comes from the directories, not from the backends, because layout discovery is purely filesystem-based.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -180,7 +184,10 @@ Two backends can have entirely different root layouts even when both scan the sa
 
 The first backend reads ``notes/pages/`` and uses ``notes/pages/layout.djx`` as its root.
 The second backend reads ``notes/admin_routes/`` and uses ``notes/admin_routes/layout.djx`` as its root.
-The two trees do not share layouts.
+The two chains stay separate only because the two directories share no ancestor that carries a ``layout.djx``.
+A layout in a shared ancestor directory, such as the ``notes`` package directory itself, wraps pages from both backends.
+Root layouts collected from ``DIRS`` are also global.
+The framework gathers them from every ``PAGE_BACKENDS`` entry and appends them to the chain of every page, regardless of which backend discovered the page.
 
 Project Level Root Layout
 -------------------------
@@ -230,7 +237,7 @@ Inherited context not visible to a sub-page.
    Without it the value is not injected into descendant routes.
 
 Two roots produce one composed page.
-   Each backend has its own layout tree.
+   A page composes its layout chain from its own ancestor directories.
    A page lives under exactly one backend, even when the file path is also reachable from another backend.
 
 See Also

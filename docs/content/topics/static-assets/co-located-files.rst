@@ -32,11 +32,11 @@ Discovery groups stems into three roles.
 .. code-block:: text
    :caption: directory layout
 
-   notes/_components/note_card/
-     component.djx
-     component.css
-     component.js
    notes/pages/
+     _components/note_card/
+       component.djx
+       component.css
+       component.js
      layout.djx
      layout.css
      page.py
@@ -124,7 +124,7 @@ External URLs via Module Lists
 Declare ``styles`` and ``scripts`` at module level in ``page.py`` or ``component.py`` to register external URLs alongside co-located files.
 
 .. code-block:: python
-   :caption: notes/_components/note_card/component.py
+   :caption: notes/pages/_components/note_card/component.py
 
    styles = ["https://cdn.example.com/reset.css"]
    scripts = ["https://cdn.example.com/vendor.js", "/static/local/widget.mjs"]
@@ -133,6 +133,7 @@ Each variable is a list of strings.
 The slot is picked from the registered placeholder name, ``styles`` or ``scripts``.
 The kind is inferred from the URL extension through the kind registry.
 URLs with an unknown extension are dropped with a debug log.
+A URL whose kind belongs to a different slot than the list name is also dropped with a debug log, so a stylesheet URL in ``scripts`` never renders.
 
 See Also
 --------

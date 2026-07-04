@@ -116,7 +116,9 @@ class ComponentVisibilityResolver:
         self._result_cache: OrderedDict[Path, Mapping[str, ComponentInfo]] = (
             OrderedDict()
         )
-        self._scope_index: dict[Path, list[tuple[int, ComponentInfo]]] = {}
+        self._scope_index: dict[
+            Path, tuple[int, list[tuple[int, int, ComponentInfo]]]
+        ] = {}
         self._scope_index_registry_version = -1
         self._cached_registry_version = -1
         self._resolved_path_cache: dict[Path, Path] = {}
@@ -126,19 +128,23 @@ class ComponentVisibilityResolver:
             return
         self._scope_index = {}
         for position, ci in enumerate(self._registry.get_all()):
-            self._scope_index.setdefault(ci.resolved_scope_root, []).append(
-                (position, ci)
-            )
+            root = ci.resolved_scope_root
+            group = self._scope_index.get(root)
+            if group is None:
+                dirs_origin = 1 if self._registry.is_root(root) else 0
+                group = (dirs_origin, [])
+                self._scope_index[root] = group
+            group[1].append((position, group[0], ci))
         self._scope_index_registry_version = self._registry.version
 
     def _candidate_components(
         self, template_path: Path
-    ) -> list[tuple[int, ComponentInfo]]:
+    ) -> list[tuple[int, int, ComponentInfo]]:
         self._ensure_scope_index()
         tmpl_dir = template_path.parent
-        out: list[tuple[int, ComponentInfo]] = []
-        for scope_root, infos in self._scope_index.items():
-            if self._registry.is_root(scope_root):
+        out: list[tuple[int, int, ComponentInfo]] = []
+        for scope_root, (dirs_origin, infos) in self._scope_index.items():
+            if dirs_origin:
                 out.extend(infos)
                 continue
             try:
@@ -169,20 +175,25 @@ class ComponentVisibilityResolver:
             self._result_cache.move_to_end(template_path)
             return self._result_cache[template_path]
 
-        candidates: list[tuple[int, str, int, ComponentInfo]] = []
-        for position, component in self._candidate_components(template_path):
+        candidates: list[tuple[int, int, str, int, ComponentInfo]] = []
+        for position, dirs_origin, component in self._candidate_components(
+            template_path
+        ):
             score = self._calculate_visibility_score(component, template_path)
             if score is not None:
-                candidates.append((score, component.name, position, component))
+                candidates.append(
+                    (score, dirs_origin, component.name, position, component)
+                )
 
-        # Higher score wins. Equal score and name fall back to registration
-        # order, so the component discovered first shadows a later same-named
-        # one. Roots are scanned in DIRS order, so an earlier DIRS entry wins.
-        candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
+        # Higher score wins. At equal score a page-tree component shadows a
+        # shared DIRS root one, so a project-local override takes precedence.
+        # Same-origin ties fall back to name then registration order, keeping
+        # the component discovered first ahead of a later same-named sibling.
+        candidates.sort(key=lambda x: (-x[0], x[1], x[2], x[3]))
 
         seen: set[str] = set()
         result: dict[str, ComponentInfo] = {}
-        for _score, name, _position, info in candidates:
+        for _score, _origin, name, _position, info in candidates:
             if name not in seen:
                 result[name] = info
                 seen.add(name)

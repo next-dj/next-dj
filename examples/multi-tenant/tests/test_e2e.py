@@ -333,6 +333,22 @@ class TestNoteEditPage:
         assert note.title in body
         assert "Preview" in body
 
+    @override_settings(DEBUG=False)
+    def test_edit_page_prefixes_component_module(
+        self, client: NextClient, acme: Tenant
+    ) -> None:
+        note = _acme_note(acme)
+        response = client.get(
+            f"/notes/{note.pk}/edit/",
+            HTTP_X_TENANT="acme",
+        )
+        body = response.content.decode()
+        assert (
+            '<script type="module" '
+            'src="/_t/acme/static/next/components/markdown_preview.mjs">' in body
+        )
+        assert 'src="/static/next/components/markdown_preview.mjs"' not in body
+
 
 class TestDebugAffordance:
     """Browser demo path: ?tenant=<slug> sets a cookie and redirects."""

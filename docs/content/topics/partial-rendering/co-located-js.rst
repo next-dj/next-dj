@@ -7,7 +7,7 @@ A morph replaces DOM nodes.
 A node that arrives in a patch was not in the document when the page loaded, and a node that a morph removes takes any listener bound to it with it.
 Co-located JavaScript has to survive that, and the rule is to attach behaviour to something that outlives the morph rather than to the markup itself.
 
-Each asset URL runs exactly once per page lifetime.
+Each asset runs exactly once per page lifetime, a URL deduped by its address and an inline body by its content.
 A module loaded for the first zone that needs it is not re-run when a later patch brings more of the same markup.
 A module that wires itself up at load time finds the markup that exists at load time and nothing later.
 Use one of the three idioms below.
@@ -73,6 +73,8 @@ It is the one-for-one replacement of a ``DOMContentLoaded`` scan.
    });
 
 The callback fires for the matching elements present at load and for every matching element that a later patch brings.
+The callback also re-runs for a matching element the morph reconciled in place, so it must be idempotent per element.
+Guard the setup with a data flag or a ``WeakSet`` so a second run over the same element does nothing.
 Reach for this when a module wired itself on ``DOMContentLoaded`` before and needs the same per-element setup to keep working under partial updates.
 
 The Anti-Pattern
@@ -95,10 +97,8 @@ The second open of a modal is worse.
 The asset URL is already in the runtime's loaded registry from the first open, so the module is not re-executed at all, and a scan inside it never runs a second time.
 
 Migrate a module-load scan to one of the three idioms above.
-A search catalogue's minimum-length hint and a wiki's markdown preview both moved from a load-time scan to ``onMount`` for exactly this reason.
-In a development build the runtime prints a ``console.warn`` for every inline
-``<script>`` it neutralises out of a patch, which surfaces a widget that died silently
-rather than letting it fail in quiet.
+The search catalogue's minimum-length hint and the wiki's markdown preview both register through ``onMount`` for exactly this reason.
+In a development build the runtime prints a ``console.warn`` for every ``<script>`` it neutralises out of a patch, which surfaces a widget that died silently rather than letting it fail in quiet.
 
 Scripts in Patches Never Run
 ----------------------------
@@ -108,6 +108,12 @@ The applier removes every script element from parsed patch HTML before it reache
 Behaviour is delivered only through the co-located asset manifest and the ``event`` verb, never through inline script in a morph.
 This is structural, not a parser side effect, and it is why an inline widget initialiser has to move to one of the idioms above.
 See :doc:`/content/security/csp-and-nonce` for how this interacts with a Content Security Policy.
+
+What the applier neutralises is the script inside the patch markup itself.
+The zone's co-located assets travel separately, in the envelope's asset manifest, and those do load.
+A stylesheet or module URL the page has not seen is inserted, and so is an inline body it has not seen, each once per page lifetime.
+Behaviour co-located with a zone therefore arrives on a standalone zone render.
+It must still use the three idioms above because of the once-per-page execution, not because a delivery channel is missing.
 
 See Also
 --------

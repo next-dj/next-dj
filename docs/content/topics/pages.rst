@@ -59,7 +59,7 @@ This is the authoritative ordering for the page render path.
 A ``render`` function therefore cannot read a value that a ``@context`` callable would publish, because the callables have not run yet.
 
 A partial-zone request takes a different path.
-When the request targets named zones, the view returns a zone response before step 3, so the layout composition does not run.
+When the request targets named zones, the view returns a zone response before step 3, so the full page render does not run.
 See :doc:`/content/topics/partial-rendering/zones` for the zone-morph request.
 
 The ``render`` Function
@@ -71,8 +71,8 @@ The most common shape is ``request`` plus captured URL parameters and marker-dri
 .. code-block:: python
    :caption: notes/pages/reports/[int:report_id]/page.py
 
-   from notes.models import Report
    from next.urls import DUrl
+   from notes.models import Report
 
    def render(request, report_id: DUrl[int]) -> str:
        report = Report.objects.get(pk=report_id)
@@ -230,10 +230,13 @@ Register additional loaders in ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` to support
 A user-provided ``NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`` replaces the default list entirely.
 Include ``DjxTemplateLoader`` explicitly when you still want sibling ``template.djx`` files to load.
 
-Call ``next.pages.page.register_template(file_path, template_str)`` from an app's ``ready()`` to attach an in-process template string to a page path without authoring a loader class.
+``next.pages.page.register_template(file_path, template_str)`` seeds the composed-template cache that ``composed_template_for`` reads.
+That cache serves direct ``Page.render`` calls, including ``next.testing.render_page``, the form re-render after a validation failure, and standalone zone renders.
+A regular HTTP request for the page bypasses the cache and resolves the body from its disk source, so a registered string never serves the page at its URL.
 The method stores the supplied body verbatim, with no layout composition, so no ancestor ``layout.djx`` wraps it.
 Pre-compose the body through the layout chain before registering it when wrapping is required.
 See :doc:`/content/ref/pages` for the full ``Page`` surface.
+See :doc:`/content/howto/add-a-custom-template-loader` for the recipe-shaped walkthrough of a loader class.
 
 Loader Contract
 ~~~~~~~~~~~~~~~~~
@@ -318,25 +321,28 @@ Streaming Response
 Reach for ``StreamingHttpResponse`` when the body is produced incrementally, such as Server Sent Events or a large export.
 
 .. code-block:: python
-   :caption: notes/pages/notes/[id]/stream/page.py
+   :caption: notes/pages/notes/[int:note_id]/stream/page.py
 
+   import time
    from collections.abc import Iterator
 
    from django.http import StreamingHttpResponse
+   from next.urls import DUrl
    from notes.models import Note
-   from notes.providers import DNote
 
    def event_stream(note_id: int) -> Iterator[bytes]:
-       ...  # see examples/live-polls for a worked generator
+       while True:
+           note = Note.objects.get(pk=note_id)
+           yield f"data: {note.title}\n\n".encode()
+           time.sleep(5)
 
-   def render(note: DNote[Note]) -> StreamingHttpResponse:
+   def render(note_id: DUrl[int]) -> StreamingHttpResponse:
        return StreamingHttpResponse(
-           event_stream(note.pk),
+           event_stream(note_id),
            content_type="text/event-stream",
            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
        )
 
-``DNote`` is a custom DI provider that resolves the note from the captured URL segment, defined in ``notes/providers.py``.
 A synchronous generator works under WSGI and the development server.
 An ASGI deployment can yield from an async generator instead.
 See ``examples/live-polls`` for a worked SSE broker.
@@ -370,7 +376,8 @@ The pages subsystem contributes Django system checks. The ``check_page_functions
 ``next.W043``.
    More than one body source is declared in the same directory, see *Priority Resolution*.
 
-The ``check_context_functions`` check inspects every ``page.py`` for keyless ``@context`` callables.
+The ``check_context_functions`` check inspects ``page.py`` files under one representative pages root per router for keyless ``@context`` callables.
+In a project with several page-bearing applications the remaining roots are not scanned, so ``next.E029`` surfaces only for pages under the scanned root.
 
 ``next.E029``.
    A keyless ``@context`` callable has a return annotation that is not a mapping type.

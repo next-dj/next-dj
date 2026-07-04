@@ -82,6 +82,10 @@ Terms used throughout the next.dj documentation.
       The ``inherit_context=True`` flag on ``@context`` in ``page.py``.
       Publishes the context value to every descendant page under that directory, not only to the page that declares it.
 
+   layer
+      A server-initiated overlay stacked above the current page, opened by the ``layer.open`` patch verb or a ``data-next-layer`` link.
+      The client runtime hosts each layer in its own ``<dialog>`` element and closes the top layer on accept, dismissal, or Back.
+
    layout
       A ``layout.djx`` file in an ancestor directory.
       Wraps every descendant page.
@@ -101,6 +105,10 @@ Terms used throughout the next.dj documentation.
       The singleton orchestrator for one subsystem.
       Examples include ``page``, ``components_manager``, ``router_manager``, ``form_action_manager``.
 
+   morph
+      The default patch verb.
+      Reconciles the target element in place instead of replacing it, and ``data-next-key`` lets it reuse the node a keyed child already owns.
+
    origin page
       The page that rendered a form.
       Identified at dispatch time by resolving the hidden ``_next_form_origin`` URL path against the URLconf.
@@ -119,6 +127,18 @@ Terms used throughout the next.dj documentation.
    multi-project layout
       Multiple Django applications or explicit ``DIRS`` entries each contributing page trees while optionally sharing component directories through ``COMPONENT_BACKENDS``.
       See :doc:`/content/topics/multi-project`.
+
+   partial request
+      A request the client runtime marks with the ``X-Next-Request`` header.
+      ``is_partial_request`` detects it on the server, so a handler can answer with a patch envelope instead of a redirect.
+
+   patch
+      One addressed DOM operation inside a patch envelope.
+      Carries a verb such as ``morph`` or ``remove``, a target selector, and optional HTML.
+
+   patch envelope
+      The wire object of a partial response.
+      Carries the asset version, the ordered patch ops, the co-located assets of the rendered targets, and the machine-readable form meta.
 
    provider
       A class that produces a value for a parameter.
@@ -173,6 +193,10 @@ Terms used throughout the next.dj documentation.
    virtual route
       A directory with only ``template.djx`` and no ``page.py``.
       No Python module is invoked for the route itself, but ancestor ``layout.djx`` files still wrap it and co-located static assets are still collected.
+
+   zone
+      A named slice of a page template wrapped in ``{% zone %}``.
+      The server re-renders the slice standalone, and patches address it by its name.
 
 See Also
 --------

@@ -94,20 +94,9 @@ Override for Development
        },
    }
 
-Override a single ``NEXT_FRAMEWORK`` key without rewriting the whole block by copying it from ``base`` and patching the copy.
-
-.. code-block:: python
-   :caption: config/settings/dev.py
-
-   NEXT_FRAMEWORK = {**NEXT_FRAMEWORK}  # noqa: F405
-   NEXT_FRAMEWORK["STRICT_CONTEXT"] = True
-
-Because ``{**NEXT_FRAMEWORK}`` is a shallow copy, mutate only flat keys this way.
-For nested backend lists use ``extend_default_backend`` or ``copy.deepcopy``.
-
-``extend_default_backend`` patches the backend-list keys.
-A flat key such as ``STRICT_CONTEXT`` is copied and reassigned as shown here.
-See :doc:`extend-a-default-backend` for the backend-list case.
+Development keeps the framework defaults, so ``dev.py`` leaves ``NEXT_FRAMEWORK`` untouched.
+The default ``STRICT_CONTEXT`` value ``False`` keeps local rendering alive when a context processor fails.
+The copy-and-patch pattern for a per-environment key is shown in the production module below.
 
 Override for Production
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -129,6 +118,12 @@ Override for Production
 
    NEXT_FRAMEWORK = {**NEXT_FRAMEWORK}  # noqa: F405
    NEXT_FRAMEWORK["STRICT_CONTEXT"] = True
+
+Override a single ``NEXT_FRAMEWORK`` key without rewriting the whole block by copying it from ``base`` and patching the copy.
+Because ``{**NEXT_FRAMEWORK}`` is a shallow copy, mutate only flat keys this way.
+A flat key such as ``STRICT_CONTEXT`` is copied and reassigned as shown here.
+For nested backend lists use ``extend_default_backend`` or ``copy.deepcopy``.
+See :doc:`extend-a-default-backend` for the backend-list case.
 
 Select a Module per Process
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -163,7 +158,8 @@ Run the framework system checks under each module.
    DJANGO_SETTINGS_MODULE=config.settings.prod uv run python manage.py check
 
 Both runs report no errors.
-The development run has ``DEBUG`` on, the production run has it off, and ``NEXT_FRAMEWORK`` carries the per-environment override in each.
+The development run has ``DEBUG`` on and the production run has it off.
+The production run carries the ``STRICT_CONTEXT`` override, the development run keeps the default.
 
 See Also
 --------

@@ -126,7 +126,7 @@ Tell the layout where to emit the collected style and script tags.
 
 The ``{% collect_styles %}`` tag emits one ``<link>`` per discovered stylesheet.
 ``{% collect_scripts %}`` does the same for JavaScript.
-Each asset is hashed and deduplicated, so the same file referenced from two components is emitted once.
+Each asset is deduplicated by its URL, so the same file referenced from two components is emitted once.
 
 Reload ``/`` and confirm that the served HTML now contains a ``<link>`` to ``note_card/component.css``.
 

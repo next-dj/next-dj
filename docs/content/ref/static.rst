@@ -81,7 +81,8 @@ The mapping is rebuilt on each lookup so assets added at runtime are picked up.
 The finder is appended to ``STATICFILES_FINDERS`` automatically by ``NextFrameworkConfig.ready`` through ``next.apps.staticfiles.install``.
 The install step is idempotent and skips the entry when it is already present.
 You do not need to list it in ``STATICFILES_FINDERS`` yourself.
-The dotted path is ``next.static.NextStaticFilesFinder``. You can confirm it is active by running ``manage.py findstatic next/some-component/component.css``.
+The dotted path is ``next.static.NextStaticFilesFinder``.
+Confirm it is active by running ``manage.py findstatic next/components/note_card.css``.
 
 Signals
 -------

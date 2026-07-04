@@ -14,11 +14,13 @@ For production-specific recommendations (which values to change and why), see :d
 Key Naming
 ----------
 
-Keys inside ``NEXT_FRAMEWORK`` carry no ``DEFAULT_`` prefix. The dict itself is the framework defaults namespace. A plural ``*_BACKENDS`` key
-holds an ordered list of sources the manager consults in order. A
-singular ``*_BACKEND`` key holds the one engine for a concern. A
-subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``,
-``URL_``, ``TEMPLATE_``, ``JS_``) groups related keys.
+Keys inside ``NEXT_FRAMEWORK`` carry no ``DEFAULT_`` prefix.
+The dict itself is the framework defaults namespace.
+A plural ``*_BACKENDS`` key holds an ordered list of sources the manager consults in order.
+``PARTIAL_BACKENDS`` is the exception.
+Partial rendering uses a single protocol backend, so only the first entry runs.
+A singular ``*_BACKEND`` key holds the one engine for a concern.
+A subsystem prefix (``PAGE_``, ``COMPONENT_``, ``STATIC_``, ``FORM_``, ``URL_``, ``TEMPLATE_``, ``JS_``) groups related keys.
 
 Backends
 --------
@@ -147,7 +149,8 @@ Default value.
 The bundled ``SessionFormWizardBackend`` stores each step's cleaned data in the Django session through a typed value codec, so drafts share the durability of the session engine.
 It reads no ``OPTIONS`` keys.
 The bundled ``CacheFormWizardBackend`` stores drafts in the Django cache instead.
-It reads two keys from ``OPTIONS``: ``CACHE_ALIAS`` names the cache to use, defaulting to ``"default"``, and ``TIMEOUT`` sets the draft expiry in seconds, defaulting to ``SESSION_COOKIE_AGE``.
+It reads two keys from ``OPTIONS``.
+``CACHE_ALIAS`` names the cache to use, defaulting to ``"default"``, and ``TIMEOUT`` sets the draft expiry in seconds, defaulting to ``SESSION_COOKIE_AGE``.
 Set ``BACKEND`` to a dotted path that subclasses ``FormWizardBackend`` to swap the persistence layer.
 See :doc:`/content/topics/forms/wizard-backend` for the contract, the codec, and a custom backend.
 
@@ -156,6 +159,7 @@ PARTIAL_BACKENDS
 
 List of partial protocol backend configurations.
 The first entry is active and owns the patch wire format that partial rendering serialises over HTTP and Server-Sent Events.
+Entries after the first are ignored, and ``manage.py check`` reports them with ``next.W071``.
 
 Default value.
 
@@ -176,7 +180,9 @@ Default value.
    ]
 
 The ``OPTIONS`` keys tune the active backend.
-``VERSION`` is the source of the ``X-Next-Version`` stamp: the sentinel ``"manifest"`` hashes the staticfiles manifest when the active storage hashes its files, an explicit string pins the version yourself, and without a manifest the version guard stays silent and raises ``next.W069``.
+``VERSION`` is the source of the ``X-Next-Version`` stamp.
+The sentinel ``"manifest"`` hashes the staticfiles manifest when the active storage hashes its files, and an explicit string pins the version yourself.
+Without a manifest storage the version guard stays silent at runtime, and ``manage.py check`` reports ``next.W069``.
 ``PUSH_WIZARD_STEPS`` is the global default for pushing wizard steps to browser history, which a wizard's ``Meta.push_steps`` overrides per wizard.
 ``SSE.HEARTBEAT_SECONDS`` is the keepalive period in seconds for an async stream source, and ``SSE.RETRY_MS`` is the ``EventSource`` reconnect hint in milliseconds sent in the leading stream frame.
 
@@ -236,7 +242,9 @@ The class is instantiated with no arguments and its ``dumps`` method encodes eve
 Default value ``None``, which selects the built-in ``JsonJsContextSerializer``.
 
 ``resolve_serializer`` reads this setting on every call, so ``override_settings`` takes effect without a restart.
-A value that does not resolve to a usable serializer triggers the ``next.W042`` warning during ``manage.py check`` and the framework falls back to ``JsonJsContextSerializer``.
+A value that does not resolve to a usable serializer triggers the ``next.W042`` warning during ``manage.py check``.
+At render time such a value raises ``ImportError`` or ``TypeError`` on first use, so fix the dotted path rather than rely on a fallback.
+The built-in ``JsonJsContextSerializer`` steps in only when the setting is unset.
 
 See :doc:`static` under *JS Context Serializer* for the protocol and the bundled serializers.
 

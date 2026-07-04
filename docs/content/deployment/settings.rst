@@ -21,7 +21,7 @@ Strict Context
    NEXT_FRAMEWORK["STRICT_CONTEXT"] = True
 
 Use ``STRICT_CONTEXT: True`` in production so a misconfigured context processor fails loudly.
-Reference for behaviour and exception types: :ref:`ref-settings`.
+See :ref:`ref-settings` for behaviour and exception types.
 
 Eager Component Loading
 -----------------------
@@ -36,7 +36,7 @@ The framework discovers the component tree eagerly in both modes, so the registr
 The flag controls only when each ``component.py`` module is imported.
 With the default ``False``, every ``component.py`` is imported during startup, so any import-time error surfaces before the first request.
 With ``True``, a ``component.py`` is imported on the first render that resolves the component rather than during startup.
-Reference for lazy behaviour and testing helpers: :ref:`ref-settings` and :doc:`/content/topics/testing`.
+See :ref:`ref-settings` and :doc:`/content/topics/testing` for lazy behaviour and testing helpers.
 
 Static Backend
 --------------

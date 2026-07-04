@@ -16,7 +16,8 @@ Autoreload
 ~~~~~~~~~~
 
 ``NextStatReloader`` subclasses Django's ``StatReloader``.
-In addition to watching ``.py`` mtimes, it recomputes the discovered route set on every tick and triggers a reload when pages appear or disappear from the routing tree, even when no file mtime changed.
+In addition to watching ``.py`` mtimes, it recomputes the discovered route set on every tick.
+A reload triggers when pages appear or disappear from the routing tree, even when no file mtime changed.
 ``.djx`` templates are not watched.
 They are re-read on render with mtime-based invalidation.
 

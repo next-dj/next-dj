@@ -48,7 +48,7 @@ A custom backend can intercept one kind and resolve it elsewhere, then delegate 
    class ViteManifestBackend(StaticFilesBackend):
        def __init__(self, config: Mapping[str, Any] | None = None) -> None:
            super().__init__(config)
-           opts = dict(self._config.get("OPTIONS") or {})
+           opts = dict(self.config.get("OPTIONS") or {})
            self._dev_origin: str = opts.get("DEV_ORIGIN", "")
            self._vite_root: str = opts.get("VITE_ROOT", "")
            self._manifest_path: str = opts.get("MANIFEST_PATH", "")
@@ -98,6 +98,14 @@ A missing manifest logs one warning and falls back to staticfiles so the dev wor
            return str(staticfiles_storage.url(f"kanban/dist/{built}"))
        return super().register_file(source_path, logical_name, "jsx")
 
+   def _manifest_key(self, source_path: Path) -> str:
+       if self._vite_root:
+           try:
+               return str(source_path.relative_to(Path(self._vite_root)))
+           except ValueError:
+               pass
+       return source_path.name
+
    def _load_manifest(self) -> dict[str, Any] | None:
        if self._manifest_data is not None:
            return self._manifest_data
@@ -115,6 +123,7 @@ A missing manifest logs one warning and falls back to staticfiles so the dev wor
            self._manifest_data = json.load(f)
        return self._manifest_data
 
+``_manifest_key`` builds the lookup key relative to ``VITE_ROOT`` and falls back to the bare filename.
 URL resolution delegates to ``staticfiles_storage`` so manifest storage, S3 storage, and CDN settings still apply to the hashed output.
 
 Register the Kind
@@ -153,7 +162,7 @@ Register the Backend
 ~~~~~~~~~~~~~~~~~~~~
 
 List the subclass in ``STATIC_BACKENDS``.
-Every key under ``OPTIONS`` reaches the constructor through ``self._config``.
+Every key under ``OPTIONS`` reaches the backend through the ``config`` property.
 
 .. code-block:: python
    :caption: config/settings.py

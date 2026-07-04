@@ -4,7 +4,7 @@ Request Lifecycle
 =================
 
 This page traces an HTTP request from the Django entry point through next.dj to the rendered response.
-It covers the regular page request flow plus the parallel path used for form submissions.
+It covers the regular page request flow, the zone branch for partial requests, and the parallel path used for form submissions.
 
 .. contents::
    :local:
@@ -30,8 +30,11 @@ Pipeline
        Loader --> BodySource{"Body source"}
        BodySource -- "render() function" --> RenderFn["Call render(), resolve its arguments"]
        BodySource -- "template / template.djx" --> StaticBody["Read static body string"]
-       RenderFn --> ContextCtx["Run context functions"]
-       StaticBody --> ContextCtx
+       RenderFn --> ZoneIntent{"Partial intent"}
+       StaticBody --> ZoneIntent
+       ZoneIntent -- "zone request" --> ZoneResp["Zone response"]
+       ZoneResp --> Response
+       ZoneIntent -- "full page" --> ContextCtx["Run context functions"]
        ContextCtx --> LayoutChain["Compose layout chain"]
        LayoutChain --> CollectAssets["Static collector"]
        CollectAssets --> InjectTags["Emit collected tags"]
@@ -68,10 +71,17 @@ When the body comes from the ``template`` attribute or a ``template.djx`` file t
 After the body is in hand the view builds the render context and runs every ``@context`` function in order.
 Captured URL kwargs from the matched route are seeded into the context dict before any ``@context`` function runs.
 
+Zone Requests
+~~~~~~~~~~~~~
+
+After the body source resolves, the view inspects the request for a partial intent.
+A request that targets named zones receives a zone response instead of the full page render.
+See :doc:`/content/topics/partial-rendering/how-it-works` for the zone request wire format and the patch envelope.
+
 Layout Chain
 ~~~~~~~~~~~~
 
-The framework collects every ancestor ``layout.djx`` walking from the page directory up to the page root.
+The framework collects every ancestor ``layout.djx`` walking upward from the page directory through every ancestor, bounded at 64 levels.
 Each layout substitutes the wrapped content into its ``{% block template %}`` placeholder.
 The innermost layout wraps the page body, the outermost layout wraps everything.
 

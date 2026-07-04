@@ -27,11 +27,13 @@ The wizard lists them in order.
 .. code-block:: python
    :caption: access/views/request/[step]/page.py
 
+   from typing import Any
+
+   from django import forms
+   from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+
    import next.forms
    from access.models import AccessRequest
-   from django import forms
-   from django.http import HttpRequest
-   from next.forms import redirect_to_origin
 
    class IdentityStep(forms.ModelForm):
        class Meta:
@@ -54,9 +56,9 @@ The wizard lists them in order.
                ("approval", ApprovalStep),
            ]
 
-       def done(self, request: HttpRequest, cleaned_data):
-           AccessRequest.objects.create(**cleaned_data)
-           return redirect_to_origin(request)
+       def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> HttpResponse:
+           obj = AccessRequest.objects.create(**cleaned_data)
+           return HttpResponseRedirect(f"/request/{obj.pk}/audit/")
 
 The captions mirror the repository's ``audit-forms`` example, which configures ``PAGES_DIR`` as ``views``.
 Under the default settings the same files live in ``access/pages/request/[step]/``, see :doc:`/content/ref/settings`.
@@ -89,12 +91,15 @@ The ``{% form %}`` tag publishes ``form`` for the current step and ``wizard`` fo
 
 A valid step saves its draft and advances, the final step calls ``done``, and an invalid step re-renders with errors.
 Per-step drafts persist through the configured wizard backend (see :doc:`/content/topics/forms/wizard-backend`).
+A back link or a progress indicator builds on ``wizard.goto`` and ``wizard.step_names``, see the wizard template API in :doc:`/content/topics/forms/wizard`.
 
 Finalise the Wizard
 ~~~~~~~~~~~~~~~~~~~~
 
 ``done`` receives the merged cleaned data of every step, so for ModelForm steps over one model the dict maps straight onto the constructor.
 The ``create`` call in the wizard above is the whole finaliser.
+``done`` redirects to a result page rather than back to the wizard, because a successful finish clears the stored drafts and the wizard route would render an emptied final step.
+The result page here is the per-request audit page of the ``audit-forms`` example, and any routed page outside the ``[step]`` segment works.
 :doc:`/content/topics/forms/wizard` documents the ``done`` contract, its return-value coercion, and the idempotency requirement.
 
 Verification
@@ -105,7 +110,8 @@ Fill the first step, advance through the rest, and confirm the final submission 
 Use the browser back button on an earlier step and confirm the values you entered reappear.
 
 A test asserts the same flow with ``NextClient``.
-The whole wire protocol of a wizard step is the ``origin`` path: the dispatcher resolves it against the URLconf, the ``[step]`` segment yields the current step, and the next-step redirect derives from the same path.
+The whole wire protocol of a wizard step is the ``origin`` path.
+The dispatcher resolves it against the URLconf, the ``[step]`` segment yields the current step, and the next-step redirect derives from the same path.
 ``post_action(..., origin=...)`` fills the ``_next_form_origin`` field the ``{% form %}`` tag would emit.
 
 .. code-block:: python

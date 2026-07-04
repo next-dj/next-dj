@@ -47,7 +47,7 @@ Import the receivers module from ``AppConfig.ready`` so the decorators run at st
        name = "notes"
 
        def ready(self) -> None:
-           from notes import receivers  # noqa: F401, PLC0415
+           from notes import receivers  # imported for its receiver registrations
 
 Each call rebuilds the backend list from the current ``NEXT_FRAMEWORK`` configuration, clears Django's URL caches, and emits ``router_reloaded``.
 Receivers should tolerate being invoked more than once when several writes batch into one task.
