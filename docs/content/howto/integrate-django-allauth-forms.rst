@@ -175,7 +175,8 @@ Both metaclasses are ``DeclarativeFieldsMetaclass``, so the bases compose.
            return self.login(request, redirect_url=None)
 
 The request recovery in ``__init__`` is mandatory for request-aware forms such as ``LoginForm``.
-The dispatcher builds a registered form from the POST data without a ``request`` kwarg, so the allauth constructor stores ``self.request = None``, and ``clean()`` then crashes inside the login rate limiter, which calls ``get_current_site(self.request)``.
+The dispatcher builds a registered form from the POST data without a ``request`` kwarg, so the allauth constructor stores ``self.request = None``.
+``clean()`` then crashes inside the login rate limiter, which calls ``get_current_site(self.request)``.
 The GET render works without the line, the crash fires only on submit.
 ``AccountMiddleware`` publishes the live request through ``allauth.core.context``, and the constructor falls back to it.
 
@@ -207,7 +208,16 @@ Verification
 .. code-block:: python
    :caption: tests/test_login.py
 
+   import pytest
+   from django.contrib.auth import get_user_model
+
    from next.testing.client import NextClient
+
+   @pytest.fixture
+   def user(db):
+       return get_user_model().objects.create_user(
+           username="ada", password="correct-horse-staple"
+       )
 
    def test_wrong_password_rerenders(db, user) -> None:
        client = NextClient()

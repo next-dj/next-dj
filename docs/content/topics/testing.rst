@@ -72,8 +72,8 @@ The table below maps each testing goal to the helper and its import path.
    * - Force-import pages or components in tests
      - ``eager_load_components``, ``eager_load_pages``, ``clear_loaded_dirs``
      - ``next.testing`` or ``next.testing.loaders``
-   * - Clear registries between tests
-     - ``reset_registries`` (call from an autouse fixture), or narrower ``reset_components`` / ``reset_form_actions`` / ``reset_page_cache``
+   * - Reload backends after mutating settings or registries
+     - ``reset_registries`` (opt-in), or narrower ``reset_components`` / ``reset_form_actions`` / ``reset_page_cache``
      - ``next.testing`` or ``next.testing.isolation``
    * - Clear the form registries, diagnostics, and wizard backend
      - ``reset_form_registration_state``
@@ -102,38 +102,73 @@ Pytest.
 Stdlib ``unittest``.
    Call ``django.setup()`` once before importing any ``next.testing`` helper, then run the suite with the standard runner.
 
-Isolate Registries
-------------------
+Registry State Between Tests
+----------------------------
 
-Add an ``autouse`` fixture in ``conftest.py`` to clear every registry between tests.
+Action and component registrations are side effects of importing ``page.py`` and ``component.py`` modules.
+The canonical scaffold imports them once per session with the eager loaders from ``next.testing.loaders`` and leaves the registries alone between tests.
 
 .. code-block:: python
    :caption: conftest.py
 
+   from pathlib import Path
+
    import pytest
-   from next.testing.isolation import reset_registries
+   from next.testing import eager_load_pages
 
-   @pytest.fixture(autouse=True)
-   def _next_isolation():
-       reset_registries()
-       yield
-       reset_registries()
+   PROJECT_ROOT = Path(__file__).resolve().parent
 
-The helper reloads the form-action and component backends from the current settings.
+   @pytest.fixture(autouse=True, scope="session")
+   def _load_pages() -> None:
+       eager_load_pages(PROJECT_ROOT / "notes" / "pages")
+
+The session fixture runs the ``@context`` and ``@action`` decorators before the first test dispatches a request.
+Every project under ``examples/`` uses this scaffold.
+
+.. note::
+
+   When ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK``, bulk import of ``component.py`` modules from configured component roots is skipped during ``AppConfig.ready``.
+   Call ``eager_load_components()`` from ``next.testing.loaders`` once per session to import every registered ``component.py`` regardless of the flag.
+
+   .. code-block:: python
+      :caption: conftest.py, eager loading with lazy modules
+
+      import pytest
+      from next.testing.loaders import eager_load_components
+
+      @pytest.fixture(autouse=True, scope="session")
+      def _load_components() -> None:
+          eager_load_components()
+
+   With the default ``LAZY_COMPONENT_MODULES = False``, all registrations are in place after ``AppConfig.ready``, so the extra call is unnecessary.
+   See :ref:`ref-settings` for the full description of ``LAZY_COMPONENT_MODULES``.
+
+Resetting Registries
+~~~~~~~~~~~~~~~~~~~~
+
+``reset_registries()`` is an opt-in helper for tests that mutate ``NEXT_FRAMEWORK`` or the registries themselves.
+It reloads the form-action and component backends from the current settings.
 Two narrower helpers reset a single registry.
 
 - ``reset_components()`` reloads only the component backends.
 - ``reset_form_actions()`` reloads only the form-action backends.
+
+.. warning::
+
+   A reset does not bring import-time registrations back.
+   Python does not re-import a module that is already in ``sys.modules``, so ``@action`` handlers and page-tree components registered by earlier imports stay absent after the reset.
+   Do not call ``reset_registries()`` from an autouse fixture in an ordinary suite.
+   Reserve it for tests that verify registry behaviour itself.
 
 A third helper, ``reset_page_cache()``, resets no registry.
 It drops the page template cache and is useful when a test rewrites template files on disk.
 
 For tests that probe registration itself, ``reset_form_registration_state()`` clears every form registry, the registration diagnostics buffer, and resets the wizard backend in one call.
 
-Tests that write ``template.djx`` or ``page.py`` files to ``tmp_path`` need both helpers:
+Tests that write ``template.djx`` or ``page.py`` files to ``tmp_path`` register fresh state on every run, so a suite dedicated to them pairs a registry reset with a page-cache reset.
 
 .. code-block:: python
-   :caption: conftest.py
+   :caption: conftest.py for a tmp_path suite
 
    import pytest
    from next.testing.isolation import reset_page_cache, reset_registries
@@ -144,29 +179,6 @@ Tests that write ``template.djx`` or ``page.py`` files to ``tmp_path`` need both
        yield
        reset_registries()
        reset_page_cache()
-
-.. note::
-
-   When ``LAZY_COMPONENT_MODULES = True`` in ``NEXT_FRAMEWORK``, bulk import of ``component.py`` modules from configured component roots is skipped during ``AppConfig.ready``.
-   After ``reset_registries()``, decorator side effects from those modules are absent until resolve time.
-   Call ``eager_load_components()`` from ``next.testing.loaders`` to import every registered ``component.py`` regardless of the flag.
-
-   .. code-block:: python
-      :caption: conftest.py, eager loading with lazy modules
-
-      import pytest
-      from next.testing.isolation import reset_registries
-      from next.testing.loaders import eager_load_components
-
-      @pytest.fixture(autouse=True)
-      def _next_isolation():
-          reset_registries()
-          eager_load_components()
-          yield
-          reset_registries()
-
-   With the default ``LAZY_COMPONENT_MODULES = False``, all registrations are in place after ``AppConfig.ready``, so the extra call is unnecessary.
-   See :ref:`ref-settings` for the full description of ``LAZY_COMPONENT_MODULES``.
 
 Eager Page Loading
 ~~~~~~~~~~~~~~~~~~
@@ -180,8 +192,8 @@ A normal test suite does not call it, since each pytest session starts a fresh i
 NextClient
 ----------
 
-``NextClient`` is a thin subclass of Django's ``Client`` that adds ``post_action`` and ``get_action_url``.
-Both resolve an action name through ``resolve_action_url`` before delegating to the underlying client.
+``NextClient`` is a thin subclass of Django's ``Client`` that adds ``post_action``, ``get_action_url``, and ``get_zones``.
+``post_action`` and ``get_action_url`` resolve an action name through ``resolve_action_url`` before delegating to the underlying client.
 
 .. code-block:: python
    :caption: tests/test_index.py
@@ -264,6 +276,7 @@ Both ``post_action`` and ``get_zones`` accept a ``version=`` keyword that stamps
 ``envelope_of(response)`` decodes a patch response into a ``PartialEnvelope``.
 It raises when the response is not a patch envelope, so a navigation fallback never passes a structural assertion.
 ``PartialEnvelope`` exposes ``version``, ``ops``, and ``assets``, plus ``op_verbs``, ``targets``, ``zone_targets``, ``form_targets``, ``form_meta``, ``toasts``, and ``html_for_zone`` for asserting on the server contract without parsing HTML.
+See :doc:`/content/topics/partial-rendering/index` for the zone and patch model these helpers exercise.
 
 Render a Page
 -------------
@@ -444,9 +457,10 @@ Its ``.collector`` attribute holds the collector built inside the block, so a te
 Pass ``factory=`` to swap the collector implementation entirely.
 The callable runs in place of the default ``create_collector`` and returns a custom ``StaticCollector`` for the duration of the block.
 
-Use ``patch_static_collector(capture=True)`` to inspect which assets a page emits:
+Use ``patch_static_collector(capture=True)`` to inspect which assets a page emits.
 
 .. code-block:: python
+   :caption: tests/test_static_capture.py
 
    from next.testing.patching import patch_static_collector
    from next.testing.client import NextClient
@@ -461,6 +475,7 @@ Use ``patch_static_collector(capture=True)`` to inspect which assets a page emit
 .. code-block:: python
    :caption: temporary settings
 
+   from next.testing.client import NextClient
    from next.testing.patching import override_next_settings
 
    def test_with_strict_context() -> None:
@@ -469,6 +484,44 @@ Use ``patch_static_collector(capture=True)`` to inspect which assets a page emit
        assert response.status_code == 200
 
 The patch reverts on exit, so the next test sees the original configuration.
+
+``override_dependency`` binds a stub value to a ``Depends("name")`` registration for the block, and restores the previous registration on exit.
+
+.. code-block:: python
+   :caption: stubbing a named dependency
+
+   from next.testing.client import NextClient
+   from next.testing.patching import override_dependency
+
+   def test_stubbed_theme() -> None:
+       with override_dependency("layout_theme", {"name": "Stub"}):
+           response = NextClient().get("/")
+       assert b"Stub" in response.content
+
+``override_provider`` prepends a provider instance to the resolver's provider list for the block.
+The prepended provider wins over every auto-registered provider that would otherwise claim the same parameter.
+Implement the ``ParameterProvider`` protocol on a plain class for the stub, because subclassing ``RegisteredParameterProvider`` registers the provider globally.
+
+.. code-block:: python
+   :caption: prepending a stub provider
+
+   from next.testing.deps import resolve_call
+   from next.testing.patching import override_provider
+
+   class EveryIntIsSeven:
+       def can_handle(self, param, context) -> bool:
+           return param.annotation is int
+
+       def resolve(self, param, context) -> int:
+           return 7
+
+   def count_notes(limit: int) -> int:
+       return limit
+
+   def test_provider_wins() -> None:
+       with override_provider(EveryIntIsSeven()):
+           kwargs = resolve_call(count_notes)
+       assert kwargs == {"limit": 7}
 
 Resolution Context Doubles
 --------------------------
@@ -489,15 +542,8 @@ Both accept the same loose keyword arguments, ``request``, ``form``, ``url_kwarg
 Pass ``resolve_call`` a callable whose annotated parameters a provider can fill, then assert on the returned mapping.
 Use these helpers for testing custom providers without booting the router.
 
-Common Patterns
----------------
-
-.. seealso::
-
-   :doc:`/content/howto/test-a-page-with-actions` walks a full end to end flow, a form validation failure, and a signal emission assertion with working code.
-
 System Checks
-~~~~~~~~~~~~~
+-------------
 
 Pytest can run ``manage.py check`` as part of the suite.
 
@@ -514,6 +560,6 @@ See Also
 
 .. seealso::
 
-   :doc:`/content/howto/test-a-page-with-actions` for a recipe.
+   :doc:`/content/howto/test-a-page-with-actions` for a full end to end flow, a form validation failure, and a signal emission assertion with working code.
    :doc:`/content/ref/testing` for the public API.
    :doc:`/content/topics/signals` for the signal catalog.

@@ -4,7 +4,7 @@ CSP and Nonce
 =============
 
 A Content Security Policy restricts which scripts a page may run.
-The partial runtime is designed to live under one, and this page covers how the runtime carries a nonce, why scripts in patches never run, and what ``'strict-dynamic'`` does and does not guarantee.
+The client runtime is designed to live under one, and this page covers how the runtime carries a nonce, why scripts in patches never run, and what ``'strict-dynamic'`` does and does not guarantee.
 
 .. contents::
    :local:
@@ -25,7 +25,8 @@ Scripts in Patches Never Run
 
 A ``<script>`` inside patch HTML is never executed by any insertion path.
 The applier removes every script element from parsed patch HTML before it reaches the document.
-This is structural neutralisation, not a parser side effect: the script is cut out, so there is no element for the browser to evaluate and no nonce question to answer.
+This is structural neutralisation, not a parser side effect.
+The script is cut out, so there is no element for the browser to evaluate and no nonce question to answer.
 
 The consequence for a CSP is that a morph cannot smuggle an inline script past the policy, because a morph cannot run an inline script at all.
 Behaviour arrives only through the co-located asset manifest, whose scripts are nonced, and through the ``event`` verb, which carries no code.

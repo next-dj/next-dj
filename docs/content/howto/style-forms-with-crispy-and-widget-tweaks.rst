@@ -11,7 +11,7 @@ You want Bootstrap-grade form markup inside ``{% form %}`` without hand-writing 
 Solution
 --------
 
-The ``{% form %}`` tag publishes an ordinary bound form under the ``form`` variable, so every renderer that consumes a Django form works unchanged.
+The ``{% form %}`` tag publishes an ordinary Django form instance under the ``form`` variable, so every renderer that consumes a Django form works unchanged.
 Render the whole form through the ``|crispy`` filter, or restyle single fields with django-widget-tweaks filters.
 No compatibility code is involved on either side.
 Verified with django-crispy-forms 2.5 and later plus the crispy-bootstrap5 template pack, and django-widget-tweaks 1.5 and later, on Django 5.2 through 6.0.
@@ -76,9 +76,12 @@ The ``{% crispy %}`` tag drives the layout from a ``FormHelper``, and a helper d
 Inside ``{% form %}`` both must be switched off.
 
 .. code-block:: python
-   :caption: contact/pages/contact/page.py
+   :caption: contact/pages/contact/page.py — replaces the earlier ``ContactForm``
 
    from crispy_forms.helper import FormHelper
+   from django import forms
+
+   import next.forms
 
    class ContactForm(next.forms.Form):
        name = forms.CharField(max_length=100)
@@ -134,7 +137,8 @@ Validation Re-Render
 
 An invalid submission re-renders the origin page with the bound failing form in place of ``form``, see :doc:`/content/topics/forms/validation-rerender`.
 The styled markup survives that round trip.
-Crispy renders the bound errors with the pack's error markup (``is-invalid`` and ``invalid-feedback`` under Bootstrap 5), and the widget-tweaks classes and attributes stay on the field next to its error list.
+Crispy renders the bound errors with the pack's error markup, ``is-invalid`` and ``invalid-feedback`` under Bootstrap 5.
+The widget-tweaks classes and attributes stay on the field next to its error list.
 
 Verification
 ------------

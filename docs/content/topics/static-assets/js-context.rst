@@ -212,7 +212,7 @@ Register the key server-side with ``serialize=True``.
 Co-located JS and inline scripts then read the value under ``window.Next.context``.
 
 .. code-block:: javascript
-   :caption: notes/_components/note_card/component.js
+   :caption: notes/pages/_components/note_card/component.js
 
    document.addEventListener("DOMContentLoaded", () => {
      const count = window.Next.context.note_count ?? 0;
@@ -232,12 +232,15 @@ Code that needs the context the moment it lands subscribes through ``Next.on`` r
 The function removes that listener when called.
 The ``listener`` receives the context object as its only argument and reads its values.
 
-Two events fire.
+Two context events reach the bus.
 The ``"context-updated"`` event fires whenever the framework loads a new context.
+A partial zone render ships a js-context delta in its patch envelope, see :doc:`/content/topics/partial-rendering/how-it-works`.
+The runtime merges the delta into ``window.Next.context`` and fires ``context-updated`` again.
 The ``"ready"`` event fires once the first context is loaded, and a listener registered after that point receives an immediate replay with the current context.
+The partial runtime fires further ``partial:*`` events on the same bus, see :doc:`/content/topics/partial-rendering/reference`.
 
 .. code-block:: javascript
-   :caption: notes/_components/note_card/component.js
+   :caption: notes/pages/_components/note_card/component.js
 
    const unsubscribe = window.Next.on("ready", (context) => {
      const count = context.note_count ?? 0;

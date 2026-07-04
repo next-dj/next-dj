@@ -16,6 +16,7 @@ Patch Verbs
 A patch is one addressed DOM operation with a verb, an optional target, optional HTML, and verb-specific extras.
 The operations apply in list order.
 The server is the only author of a target, the client never names one.
+The envelope around the list always carries the ``assets`` and ``form`` keys, serialised as ``[]`` and ``null`` when empty, and the JSON examples in this section omit them.
 
 .. list-table::
    :header-rows: 1
@@ -67,7 +68,8 @@ The server is the only author of a target, the client never names one.
      - ``variant: "info"``
    * - ``layer.open``
      - ``layer_open()``
-     - Open a layer from the server, by zone or href.
+     - Open a layer from the server. The client acts only when the op carries both
+       the zone container name and the href to GET into it, a single seed is ignored.
      - none
    * - ``layer.close``
      - ``layer_close()``
@@ -121,13 +123,13 @@ All values are ASCII, and zone names are ASCII slugs.
      - Pagination
      - ``append`` or ``prepend``, the merge intent.
    * - ``X-Next-Version``
-     - Every intercepted request
-     - The asset version the client holds.
+     - Every request once a version is learned
+     - The asset version the client holds. The first request of a page asserts none.
    * - ``X-Next-Request-Id``
      - Every mutation
      - The ring id used to suppress an SSE echo.
    * - ``X-Next-Origin``
-     - Server OOB choreography only
+     - Every layer request, the open GET and the accept re-GET
      - The path and query string of the page that hosts a layer, for a server-side morph of its zones.
    * - CSRF header
      - Every unsafe method
@@ -178,8 +180,12 @@ Status Codes
      - A success with no patch to apply, for example a wizard advance with no redirect target. The runtime applies nothing.
    * - 303
      - A mutation succeeded without the runtime, the existing full cycle.
-   * - 302 or 403 without an envelope
-     - A guard denial or a CSRF failure served outside the shaping path. The runtime navigates fully.
+   * - 302 without an envelope
+     - A guard redirect served outside the shaping path. The runtime navigates fully to the final URL.
+   * - 403 without an envelope
+     - A guard denial or a CSRF failure served outside the shaping path. On a mutation the runtime
+       stays in place and fires ``partial:error`` with the status and body. On a safe method it
+       navigates fully.
    * - 400
      - An intent that did not validate: an unknown zone, a bad origin, a zone in a dynamic page body.
    * - 404
@@ -193,7 +199,7 @@ Attributes
 ----------
 
 The single namespace the runtime reads is ``data-next-*``.
-The form-behaviour attributes are written by the ``{% form %}`` tag from Python parameters, not hand-authored as a string DSL.
+The form-behaviour attributes are written by the ``{% form %}`` tag from its parameters, not hand-authored as a string DSL.
 
 .. list-table::
    :header-rows: 1
@@ -225,8 +231,10 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from Python 
      - ``<form>``
      - Inline validation, source is the ``validate=`` tag parameter.
    * - ``data-next-target``
-     - ``<a>``, GET ``<form>``
-     - Route the response into a zone, source is the ``zone=`` tag parameter on a form.
+     - ``<a>``, ``<form>``
+     - Route the response into a zone. On a GET filter it names the zone to morph,
+       and on a POST form it is written by the ``zone=`` tag parameter and travels
+       as the morph target of the submission.
    * - ``data-next-trigger``
      - Filter ``<form>``, sort ``<select>``
      - The event that auto-submits a GET filter, ``input`` or ``change``. Submit and click interception are wired by ``data-next-action`` and ``data-next-merge``, not this attribute.
@@ -272,9 +280,10 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from Python 
 Lifecycle Events
 ----------------
 
-The runtime fires events on the document and the ``Next.on`` bus.
+The runtime fires events on three channels, the element, the document, and the ``Next.on`` bus.
 The ``next:*`` node events fire on the element as a bubbling ``CustomEvent`` caught with ``addEventListener``.
-The ``partial:*``, ``ready``, ``context-updated``, and ``next:toast`` events also reach the ``Next.on`` bus.
+The apply-stage ``partial:*`` events and ``next:toast`` fire on the document and the ``Next.on`` bus.
+``ready``, ``context-updated``, ``partial:before-request``, and the fetch-stage ``partial:error`` reach only the bus.
 The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live only on ``document.addEventListener`` and never reach the bus, so ``Next.on("next:mounted")`` is a silent no-op.
 
 .. list-table::
@@ -403,7 +412,8 @@ Settings
 --------
 
 The partial subsystem reads ``PARTIAL_BACKENDS`` inside ``NEXT_FRAMEWORK``.
-The list holds the protocol backends, with the first one active.
+The list holds the protocol backends, and only the first entry is active.
+The rest are ignored, multi-backend selection is not supported, and a list with more than one entry earns the ``next.W071`` warning at ``manage.py check``.
 
 .. code-block:: python
    :caption: the default

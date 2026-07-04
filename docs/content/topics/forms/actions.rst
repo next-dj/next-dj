@@ -131,7 +131,7 @@ The method signature uses the same dependency-injection rules as any other DI-re
 
 ``self`` is the bound, validated form instance.
 ``request`` is the current ``HttpRequest``.
-Any additional parameter is resolved through the DI injector: ``DUrl[...]`` markers, ``Depends`` providers, and so on.
+Any additional parameter is resolved through the DI injector, through ``DUrl[...]`` markers, ``Depends`` providers, and similar mechanisms.
 
 The default implementation on ``BaseForm`` redirects to ``Meta.success_url`` when declared, otherwise it returns ``redirect_to_origin(request)``.
 The default implementation on ``BaseModelForm`` calls ``self.save()`` then follows the same redirect rule.
@@ -168,7 +168,8 @@ The dispatcher calls it through the dependency injector before the initial rende
 ``request`` is supplied by the framework.
 A parameter whose name matches a captured URL segment is filled from the URL, so ``note_id`` above receives the ``note_id`` route kwarg.
 Any other parameter resolves through a registered provider, the same as on a handler.
-The base signatures carry no positional arguments of their own: ``BaseForm.get_initial(cls)`` takes none, and ``BaseModelForm.get_initial(cls, **url_kwargs)`` accepts the URL kwargs as keywords.
+The base signatures carry no positional arguments of their own.
+``BaseForm.get_initial(cls)`` takes none, and ``BaseModelForm.get_initial(cls, **url_kwargs)`` accepts the URL kwargs as keywords.
 Declare only the parameters an override actually reads.
 
 Form-Less Actions
@@ -191,13 +192,17 @@ A bare ``@action`` or an empty ``@action()`` registers the function under its ow
        Note.objects.filter(pk=note_id).delete()
        return redirect_to_origin(request)
 
-The scope of a form-less action follows the same anchor-file rule: ``page.py`` and ``component.py`` produce page-scoped actions.
+A form-less handler that returns ``None`` answers with HTTP 204 and never re-renders the origin page, unlike the ``None`` return of a form-bound handler.
+
+The scope of a form-less action follows the same anchor-file rule.
+``page.py`` and ``component.py`` produce page-scoped actions.
 All other files produce shared actions.
 Pass ``scope="page"`` or ``scope="shared"`` to override the file-derived scope, the same override ``Meta.scope`` provides for a form class.
 Any other value triggers ``next.E047`` and the action is not registered.
 The ``login_required`` and ``permission_required`` keywords guard the endpoint, see `Access Guards`_.
 
-Applying ``@action`` to a class registers no action: the decorator records the misuse, returns the class unchanged, and ``manage.py check`` reports it as ``next.E053``.
+Applying ``@action`` to a class registers no action.
+The decorator records the misuse, returns the class unchanged, and ``manage.py check`` reports it as ``next.E053``.
 Form classes register through ``__init_subclass__`` and must not use ``@action``.
 
 Injecting the Form Into a Handler
@@ -208,15 +213,17 @@ A parameter named ``form`` resolves to it, untyped.
 Annotate the parameter with ``DForm[FormClass]`` to type the form for editors and type checkers.
 
 ``form_class=`` accepts the form class directly when that class does not register an endpoint of its own.
-A ``next.forms`` base marked ``Meta.abstract = True`` is the canonical case: it skips auto-registration yet keeps the ``get_initial`` classmethod the dispatcher calls.
+A ``next.forms`` base marked ``Meta.abstract = True`` is the canonical case.
+It skips auto-registration yet keeps the ``get_initial`` classmethod the dispatcher calls.
 Passing a class that already registered itself raises ``TypeError`` at decoration time.
 Mark such a class abstract, or move the handler logic into its ``on_valid``.
 
 .. code-block:: python
    :caption: page.py
 
-   import next.forms
    from django.shortcuts import redirect
+
+   import next.forms
    from next.forms import action
    from next.forms.markers import DForm
 
@@ -307,8 +314,9 @@ Declare the access requirements on the action itself.
 .. code-block:: python
    :caption: page.py
 
-   import next.forms
    from django.http import HttpRequest
+
+   import next.forms
    from next.forms import action, redirect_to_origin
    from next.urls import DUrl
 
@@ -347,13 +355,14 @@ The ``next.W060`` check warns when ``permission_required`` is declared while ``d
 Dynamic Permission Hooks
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The static guard answers a fixed question frozen at import time: is the user authenticated and does the user hold a named permission.
+The static guard answers a fixed question frozen at import time, whether the user is authenticated and holds a named permission.
 A permission that depends on the request, the database, the current tenant, or the target row needs a decision taken per request.
 Two opt-in hooks resolve such a decision, layered on top of the static guard rather than replacing it.
 
 ``check_permissions`` is a view-level ``@classmethod``.
 ``has_object_permission`` is an object-level instance method.
-Both are dependency-injected exactly like ``get_initial`` and ``on_valid``: the base signatures take no parameters of their own, and an override declares only what it reads.
+Both are dependency-injected exactly like ``get_initial`` and ``on_valid``.
+The base signatures take no parameters of their own, and an override declares only what it reads.
 The signature is open, so an override pulls ``request``, captured URL kwargs, ``DUrl[...]`` markers, ``Depends(...)`` providers, or nothing at all, following the same rule as the other DI hooks.
 
 Unlike the static guard, the dynamic hooks intentionally run application code.
@@ -381,11 +390,12 @@ Declare ``request`` to read the user, and any further parameter the injector res
 .. code-block:: python
    :caption: page.py — view-level gate reading the request, a URL kwarg, and a provider
 
-   import next.forms
    from django.http import HttpRequest
+   from notes.models import Note
+
+   import next.forms
    from next.deps import Depends
    from next.urls import DUrl
-   from notes.models import Note
 
    class WorkspaceNoteForm(next.forms.ModelForm):
        class Meta:
@@ -408,9 +418,10 @@ The object-level hook reads the bound instance.
 .. code-block:: python
    :caption: page.py — object-level gate on the loaded row
 
-   import next.forms
    from django.http import HttpRequest
    from notes.models import Note
+
+   import next.forms
 
    class NoteEditForm(next.forms.ModelForm):
        class Meta:
@@ -472,7 +483,7 @@ A wizard step binds from posted data and ``get_form_kwargs`` and never runs ``ge
 Success Feedback
 ----------------
 
-Two ``Meta`` keys describe what a valid submission tells the user: a flash message and a redirect target.
+Two ``Meta`` keys describe what a valid submission tells the user, a flash message and a redirect target.
 
 Success Messages
 ~~~~~~~~~~~~~~~~
@@ -494,7 +505,7 @@ An empty return value sends nothing.
 The message is sent only when the action outcome shapes into a response with a status below 400, so a failed validation flashes nothing.
 On a ``FormWizard`` the message is sent once, after ``done`` succeeds, interpolated over the merged step data.
 
-The messages framework must be fully installed: ``django.contrib.messages`` in ``INSTALLED_APPS`` and ``MessageMiddleware`` in ``MIDDLEWARE``.
+The messages framework must be fully installed, with ``django.contrib.messages`` in ``INSTALLED_APPS`` and ``MessageMiddleware`` in ``MIDDLEWARE``.
 Without it a valid submission raises ``MessageFailure`` rather than silently dropping the message, and the ``next.W061`` check reports the gap at ``manage.py check`` time.
 
 A handler-only action has no ``cleaned_data`` to interpolate, so ``@action`` takes no ``success_message`` keyword.
@@ -532,7 +543,8 @@ The value is a path string, a lazy object, or a zero-argument callable returning
            success_url = page_reverse_lazy("attachments")
 
 On a ``ModelForm`` the default ``on_valid`` saves first, then follows ``success_url``.
-A custom ``on_valid`` or handler that saves an instance can lean on the model itself: returning the instance redirects to its ``get_absolute_url()``, the ``CreateView`` idiom.
+A custom ``on_valid`` or handler that saves an instance can lean on the model itself.
+Returning the instance redirects to its ``get_absolute_url()``, the ``CreateView`` idiom.
 
 .. code-block:: python
 

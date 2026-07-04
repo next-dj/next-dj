@@ -14,7 +14,8 @@ The resolver answers all of those calls through the same pipeline.
 Overview
 --------
 
-The resolver runs at several call sites: page context functions, the page render function, component context functions, and the form dispatch.
+The resolver runs at several call sites.
+Page context functions, the page render function, component context functions, and the form dispatch all pass through it.
 The form dispatch resolves the form-class factory, ``get_initial``, ``@action`` handlers, ``on_valid``, and ``wizard.done``.
 Every call site shares one provider list and one set of markers.
 Custom providers and tests can import ``resolver`` from ``next.deps`` and call ``resolver.resolve_dependencies``.
@@ -49,7 +50,8 @@ The order makes the default-driven and marker-driven providers decisive.
 ``DUrl`` and ``DQuery`` look only at the annotation.
 The context-by-name provider sits ahead of the form, URL, and query providers because a context key under the same name is considered a deliberate publication.
 The form provider matches the parameter name ``form``, the marker ``DForm[FormClass]``, and any plain class annotation whose type the bound form is an instance of.
-The URL-kwargs provider is the last fallback that matches on the bare parameter name, after every marker provider has had a chance to claim the parameter.
+The URL-kwargs provider is the by-name fallback after the ``Depends``, ``Context``, form, request, and ``DUrl`` providers.
+It runs before the ``DQuery`` provider, so a ``DQuery`` parameter that shares a captured segment name receives the URL value, not the query value.
 
 .. note::
 
@@ -373,7 +375,7 @@ Import before resolution.
 A custom provider that does not declare ``priority`` inherits the ``RegisteredParameterProvider`` default of ``100``.
 The nine built-in providers occupy the range ``10`` (named dependency) through ``80`` (query string), so the default keeps a custom provider after every built-in.
 ``FormProvider`` and ``CleanedDataProvider`` share priority ``40``.
-Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``50`` for an annotation that should outrank ``DUrl``.
+Set ``priority`` on the subclass when the new provider has to claim a parameter the built-ins would otherwise match, for example a value below ``60`` for an annotation that should outrank ``DUrl``.
 
 Resolution Cache
 ----------------
@@ -389,7 +391,8 @@ To share one value across several context functions in the same render, publish 
 The cache memoises named dependencies but not raw provider calls.
 See :doc:`/content/howto/share-context-across-pages` for a worked example.
 
-The same cache is shared between the initial render of a form page and the re-render on validation failure.
+The cache lives for one form dispatch.
+Every stage of that POST, from ``get_initial`` through the validation-failure re-render, shares it.
 ``FormActionDispatch`` attaches its dependency cache to the request, and ``get_request_dep_cache`` reads it back.
 The function returns ``None`` outside a form dispatch, so callers handle the missing case.
 
@@ -438,6 +441,7 @@ See Also
 
    :doc:`context` for the ``@context`` decorator and inheritance flow.
    :doc:`file-router` for ``DUrl`` and captured URL parameters.
+   :doc:`testing` for the ``override_dependency`` and ``override_provider`` test helpers.
    :doc:`/content/faq/troubleshooting` for concrete resolver and dispatch errors.
    :doc:`/content/howto/share-context-across-pages` for the inherited context pattern.
    :doc:`/content/internals/di-resolver` for the resolver internals.

@@ -64,7 +64,7 @@ The manager already consults ``module.template`` directly, so registering this l
 .. autoclass:: next.pages.loaders.PythonTemplateLoader
    :members:
 
-``LayoutTemplateLoader`` composes nested ``layout.djx`` wrappers around the page template, walking the directory chain from the page up to the page root.
+``LayoutTemplateLoader`` composes nested ``layout.djx`` wrappers around the page template, walking every ancestor directory upward from the page, bounded at 64 levels.
 It runs on a dedicated path and is not registered through ``TEMPLATE_LOADERS``.
 
 .. autoclass:: next.pages.loaders.LayoutTemplateLoader

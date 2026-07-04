@@ -46,7 +46,8 @@ Create ``notes/forms.py``.
 
 ``next.forms.ModelForm`` and ``next.forms.Form`` are the framework form base classes.
 Subclassing either one auto-registers the form.
-The action name is derived from the class name in ``snake_case``: ``CreateNoteForm`` registers as ``create_note_form``, ``DeleteNoteForm`` registers as ``delete_note_form``.
+The action name is derived from the class name in ``snake_case``.
+``CreateNoteForm`` registers as ``create_note_form`` and ``DeleteNoteForm`` registers as ``delete_note_form``.
 Override ``on_valid`` to run code after the form passes validation.
 The default ``on_valid`` on ``ModelForm`` calls ``self.save()`` then redirects back.
 ``redirect_to_origin`` sends the visitor back to the page that rendered the form.
@@ -225,7 +226,8 @@ Extend the detail template.
 
 The rendered form carries several hidden inputs from different sources.
 ``confirm`` is a real field on ``DeleteNoteForm``, so the template posts it explicitly.
-The ``{% form %}`` tag emits the framework fields itself: ``csrfmiddlewaretoken`` carries the CSRF token and ``_next_form_origin`` records the page URL, such as ``/notes/7/``.
+The ``{% form %}`` tag emits the framework fields itself.
+``csrfmiddlewaretoken`` carries the CSRF token and ``_next_form_origin`` records the page URL, such as ``/notes/7/``.
 The dispatcher resolves that path against the URLconf, which recovers the captured ``id`` through the URL converter, so the action handler resolves ``DUrl["id", int]`` without any extra argument on the tag.
 Add the delete handler to the detail page.
 ``DeleteNoteForm`` is declared in ``notes/forms.py`` and registers automatically at startup via autodiscovery.

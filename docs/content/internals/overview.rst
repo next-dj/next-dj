@@ -65,17 +65,19 @@ Bootstrap
 
 Django calls ``NextFrameworkConfig.ready()`` once per process after all applications load.
 The hook calls ``register_all()`` to register the framework system checks.
-It then runs five startup hooks in a fixed order that wire the subsystems into the Django runtime, autoreload, templates, staticfiles, components, and form autodiscovery.
+It then runs five startup hooks in a fixed order.
+The hooks wire autoreload, templates, staticfiles, components, and form autodiscovery into the Django runtime.
 The final hook ``autodiscover_forms()`` registers shared forms before the first request arrives.
 See :doc:`/content/ref/apps` for the canonical ordering and the full API.
 
 How They Compose
 ----------------
 
-A request hands off ``next.urls`` to ``next.pages`` to ``next.deps`` to ``next.static`` and ``next.components`` before the final HTML returns to the client.
+A request passes from ``next.urls`` through ``next.pages`` and ``next.deps`` to ``next.static`` and ``next.components`` before the final HTML returns to the client.
 Form submissions take a parallel path through ``next.forms``, which on validation failure reuses the same render pipeline.
 Partial requests take a zone-patch path through ``next.partial``, which renders the targeted zones through the same render pipeline and returns patches instead of a full page.
-:doc:`request-lifecycle` traces both paths end to end.
+:doc:`request-lifecycle` traces the render and form paths end to end.
+:doc:`/content/topics/partial-rendering/how-it-works` traces the zone-patch path.
 
 Signals Fan Out
 ---------------
@@ -150,7 +152,8 @@ Each subsystem keeps a flat module layout.
    * - ``next.urls``
      - ``manager``, ``backends``, ``dispatcher``, ``parser``, ``markers``, ``reverse``, ``checks``, ``signals``.
    * - ``next.forms``
-     - ``manager``, ``dispatch``, ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``, ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``diagnostics``, ``checks``, ``signals``.
+     - ``manager``, ``dispatch``, ``backends``, ``decorators``, ``base``, ``markers``, ``serializers``, ``formsets``,
+       ``uid``, ``rendering``, ``autodiscover``, ``wizard``, ``widgets``, ``origin``, ``diagnostics``, ``checks``, ``signals``.
    * - ``next.static``
      - ``manager``, ``collector``, ``discovery``, ``backends``, ``assets``, ``scripts``, ``serializers``, ``defaults``, ``finders``, ``checks``, ``signals``.
    * - ``next.partial``

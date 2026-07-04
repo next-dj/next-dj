@@ -42,9 +42,8 @@ The zone is an optional optimisation, not required markup.
      {% form "rename_board_form" zone="rename-board" %}…{% endform %}
    {% endzone %}
 
-The ``zone="rename-board"`` argument on the tag compiles to ``data-next-target`` on the
-``<form>``, so the runtime sends the zone name with the submission and the server
-re-renders only that zone with the bound form.
+The ``zone="rename-board"`` argument on the tag compiles to ``data-next-target`` on the ``<form>``.
+The runtime then sends the zone name with the submission and the server re-renders only that zone with the bound form.
 
 Submitting an empty title posts to the form endpoint with the partial switch set.
 
@@ -80,7 +79,7 @@ Inline Validation on Blur
 A wizard step carries an email field.
 The user should see a format error the moment focus leaves the field, before submitting, and with no server code.
 
-One Python parameter on the existing tag turns it on.
+One parameter on the existing ``{% form %}`` tag turns it on.
 
 .. code-block:: jinja
    :caption: request/[step]/template.djx
@@ -407,6 +406,7 @@ On click the runtime opens a native ``<dialog>``, builds the ``access-wizard`` z
    GET /request/identity/ HTTP/1.1
    X-Next-Request: 1
    X-Next-Zone: access-wizard
+   X-Next-Origin: /
 
 .. code-block:: json
    :caption: response body
@@ -423,7 +423,8 @@ On click the runtime opens a native ``<dialog>``, builds the ``access-wizard`` z
 A step submitted with an error answers 200 with a morph of the wizard zone and the form meta.
 No operation names the layer, so the modal lives on.
 The dialog carries the ``data-next-dialog`` attribute so project CSS can target it without relying on tag or internal structure.
-A valid non-last step advances without a 302: the dispatcher builds the next wizard and the unbound form of the next step, and morphs the wizard zone to the next step.
+A valid non-last step advances without a 302.
+The dispatcher builds the next wizard and the unbound form of the next step, and morphs the wizard zone to the next step.
 
 Wizard steps inside a layer are not pushed to history by default.
 The per-uid mutation lock makes a double-click on Submit request impossible by construction, it lets exactly one fetch through.
@@ -435,7 +436,7 @@ The default ``done`` closes the layer with a result and asks the opening link to
 .. code-block:: python
    :caption: request/[step]/page.py
 
-   def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> PatchResponse:
+   def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> HttpResponse:
        """Create the access request and close the layer with a result."""
        access_request = AccessRequest.objects.create(**cleaned_data)
        return (

@@ -168,7 +168,9 @@ Share the Snapshot Across a Layout Chain
 
 Register a resolved value with ``inherit_context=True`` so nested pages receive the same instance through DI.
 The ``[category]`` bracket segment becomes a URL kwarg.
-The callable reads it with ``DUrl[str]`` through a parameter named ``category`` to match the segment, then resolves it once.
+The callable reads it through a parameter named ``category`` to match the segment, then resolves it once.
+On the declaring page's own request the callable runs twice, first with the raw slug and then with the object the first run produced.
+The parameter therefore stays untyped and the callable returns early when the value is already resolved.
 Child callables then ask for ``category`` by parameter name and never re-query.
 
 .. code-block:: python
@@ -177,10 +179,11 @@ Child callables then ask for ``category`` by parameter name and never re-query.
    from catalog.models import Category
    from django.http import Http404
    from next.pages import context
-   from next.urls import DUrl
 
    @context("category", inherit_context=True)
-   def category(category: DUrl[str]) -> Category:
+   def category(category: object) -> Category:
+       if isinstance(category, Category):
+           return category
        try:
            return Category.objects.get(slug=category)
        except Category.DoesNotExist as exc:

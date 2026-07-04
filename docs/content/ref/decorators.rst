@@ -46,7 +46,8 @@ Pass ``serializer=`` to route that key through a custom ``JsContextSerializer``.
 .. py:decorator:: @action(name=None, *, form_class=None, scope=None, login_required=False, permission_required=None)
 
 Registers a plain callable as a named form action.
-The name is optional: a bare ``@action`` or an empty ``@action()`` registers the function under its own name, and ``@action("custom_name")`` overrides it.
+The name is optional.
+A bare ``@action`` or an empty ``@action()`` registers the function under its own name, and ``@action("custom_name")`` overrides it.
 The name must be unique within its scope, see :doc:`/content/topics/forms/actions`.
 Used without ``form_class``, the handler runs with no form validation.
 Reach for it for delete confirmations or logout buttons.

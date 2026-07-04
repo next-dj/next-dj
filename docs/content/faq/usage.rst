@@ -42,6 +42,13 @@ Subclass ``next.forms.Form`` or ``next.forms.ModelForm`` and render the form wit
 The action name is derived automatically from the class name in ``snake_case``.
 See :doc:`/content/intro/tutorial04`.
 
+How Do I Update Part of a Page Without a Reload
+-----------------------------------------------
+
+Wrap the slice in ``{% zone "name" %}`` and point a form or a link at it with ``data-next-target="name"``.
+The server re-renders only that zone and the client runtime swaps it in place.
+See :doc:`/content/intro/tutorial06` for the walkthrough and :doc:`/content/topics/partial-rendering/index` for the full model.
+
 How Do I Customise the Static Output
 ------------------------------------
 
@@ -105,14 +112,14 @@ Reconstruct the query string from the validated fields instead.
 
    from django.http import HttpRequest, HttpResponseRedirect
    from django.urls import reverse
-   from next.forms import Form, CharField, redirect_to_origin
+   from next.forms import Form, CharField
 
    class SearchForm(Form):
        q = CharField(required=False)
 
        def on_valid(self, request: HttpRequest) -> HttpResponseRedirect:
            q = self.cleaned_data.get("q", "")
-           base = reverse("next:page_notes")
+           base = reverse("next:page_")
            return HttpResponseRedirect(f"{base}?q={q}" if q else base)
 
 The form registers as ``search_form`` automatically.

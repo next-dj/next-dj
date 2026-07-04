@@ -217,6 +217,17 @@ class TestTenantPrefixStaticBackend:
         )
         assert 'src="/_t/acme/static/next/a.js"' in rendered
 
+    def test_module_tag_prepends_prefix(self) -> None:
+        backend = TenantPrefixStaticBackend()
+        request = HttpRequest()
+        request.tenant = Tenant(slug="acme", name="Acme")  # type: ignore[attr-defined]
+        rendered = backend.render_module_tag(
+            "/static/next/components/markdown_preview.mjs",
+            request=request,
+        )
+        assert 'type="module"' in rendered
+        assert 'src="/_t/acme/static/next/components/markdown_preview.mjs"' in rendered
+
     def test_absolute_external_url_passes_through(self) -> None:
         backend = TenantPrefixStaticBackend()
         request = HttpRequest()

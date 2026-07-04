@@ -35,7 +35,7 @@ The whole page renders even though one form is kept.
      "form": {"uid": "ab12cd34", "valid": false, "errors": {"title": ["…"]}}
    }
 
-This is the price today, not a regression, because an invalid submission always re-rendered the full page before partial rendering.
+The extract default costs no more than the no-runtime cycle, which re-renders the full page on every invalid submission.
 The runtime turns that same full render into a targeted DOM update for free.
 
 Adding a Zone
@@ -69,6 +69,15 @@ The envelope addresses the zone by name and the client morphs it in place.
 The network payload shrinks from a page to a zone, and the server render shrinks with it.
 Reach for a zone when a page is heavy, when a form sits among expensive siblings, or when the response size matters.
 Leave it off when the page is small and the extract default already does the job.
+
+Zone Assets on a Standalone Render
+----------------------------------
+
+A standalone zone render collects the co-located assets its body registers, component widgets included.
+The envelope carries them outward as an asset manifest, URL-form and inline alike.
+The client loads only what the page does not already have, missing CSS before the operations apply and missing JS after, and each asset executes once per page lifetime.
+On a zone ``GET`` the envelope also ships the values of the page's ``serialize=True`` context providers, introduced in :doc:`/content/topics/context`, as a ``context`` patch, so ``Next.context`` stays in step with the re-rendered zone.
+See :doc:`co-located-js` for what once-per-page execution means for behaviour, and :doc:`/content/topics/static-assets/index` for how the assets are discovered and bundled.
 
 Poll a Zone on an Interval
 --------------------------

@@ -91,8 +91,8 @@ When the kwarg is present but no row matches, :func:`~django.shortcuts.get_objec
 The field named by ``instance_from_url`` should be unique.
 :func:`~django.shortcuts.get_object_or_404` turns only the not-found case into a 404, so a lookup matching several rows surfaces as a server error instead.
 
-Security: the lookup is not ownership-scoped
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Ownership Is Not Scoped by Default
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. warning::
 
@@ -171,7 +171,8 @@ Create and Edit With One Class
 ------------------------------
 
 The same ModelForm class can drive both a create page and an edit page.
-The URL shape encodes the intent: a route that captures the lookup kwarg means edit, and a route without it means create.
+The URL shape encodes the intent.
+A route that captures the lookup kwarg means edit, and a route without it means create.
 The route shape decides which mode the form runs in, with no branching in the form.
 
 On a create page the route has no captured kwarg, so the form renders unbound and ``self.save()`` inserts a new row.
@@ -193,7 +194,8 @@ On an edit page the route captures the kwarg named by ``instance_from_url``, so 
 The class above behaves as a create form on ``notes/new/`` and as an edit form on ``notes/edit/[slug]/``, with no per-page branching.
 One action name and one action URL for both pages require shared scope.
 Declare the class outside ``page.py`` and ``component.py`` as above, or set ``Meta.scope = "shared"`` inside a page module.
-A page-scoped class works differently: declaring a copy in each ``page.py`` keeps the shared action name, but every per-file registration gets its own action URL.
+A page-scoped class works differently.
+Declaring a copy in each ``page.py`` keeps the shared action name, but every per-file registration gets its own action URL.
 See :doc:`actions` for the scope derivation and the UID rules.
 
 Separate create and edit forms are an option, and the repository examples take that route, see :doc:`/content/misc/examples`.

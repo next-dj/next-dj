@@ -79,7 +79,8 @@ action_dispatched
 -----------------
 
 Fires after a handler runs and the response has been coerced.
-It also fires once per valid wizard step: a step advance runs no handler and reports ``duration_ms`` as ``0.0``, and the finalising step times the ``done`` call.
+It also fires once per valid wizard step.
+A step advance runs no handler and reports ``duration_ms`` as ``0.0``, and the finalising step times the ``done`` call.
 The sender is ``FormActionDispatch``.
 
 The payload carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwargs``, ``duration_ms``, ``response_status``, and ``dep_cache``.
@@ -88,7 +89,8 @@ The payload carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwarg
    The registry identity of the action, matching the dispatch URL and the ``data-next-action`` attribute, or ``None`` for a backend without meta.
 
 ``request``.
-   The live ``HttpRequest``. Do not retain it past the receiver call.
+   The live ``HttpRequest``.
+   Do not retain it past the receiver call.
 
 ``form``.
    The bound form after the handler returns normally and the response has been coerced, or ``None`` for a handler-only action registered without a ``form_class``.
@@ -98,11 +100,13 @@ The payload carries ``action_name``, ``uid``, ``request``, ``form``, ``url_kwarg
    A copy of the URL kwargs the dispatcher resolved before invoking the handler.
 
 ``duration_ms``.
-   Wall-clock time the handler itself took, in milliseconds. It does not include form validation or dependency resolution.
+   Wall-clock time the handler itself took, in milliseconds.
+   It does not include form validation or dependency resolution.
    A wizard step advance runs no handler and reports ``0.0``, so receivers averaging handler latency should skip zero-duration wizard events.
 
 ``dep_cache``.
-   A snapshot of the dispatch dependency cache. Receivers can read named ``Depends("name")`` values resolved during the dispatch without re-running their providers.
+   A snapshot of the dispatch dependency cache.
+   Receivers can read named ``Depends("name")`` values resolved during the dispatch without re-running their providers.
    The dict is a shallow copy taken when the signal fires, so mutating it does not change the live dispatch cache.
 
 A receiver that needs request data reads it from ``request`` directly or from ``dep_cache``, without keeping a reference after it returns.

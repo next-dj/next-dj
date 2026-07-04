@@ -13,7 +13,8 @@ It covers the build step, the staticfiles finder integration, content hashing, a
 Overview
 --------
 
-next.dj contributes ``NextStaticFilesFinder`` (dotted path ``next.static.NextStaticFilesFinder``) that exposes every co-located asset to Django's :doc:`standard staticfiles pipeline <django:howto/static-files/index>`.
+next.dj contributes ``NextStaticFilesFinder``, exported as ``next.static.NextStaticFilesFinder``.
+The finder exposes every co-located asset to Django's :doc:`standard staticfiles pipeline <django:howto/static-files/index>`.
 ``NextFrameworkConfig.ready`` appends it to ``STATICFILES_FINDERS`` automatically, so no manual configuration is required.
 Production deployments use :doc:`collectstatic <django:ref/contrib/staticfiles>` exactly as they would for any other Django project.
 
@@ -48,7 +49,8 @@ Hashed URLs
 -----------
 
 The default ``StaticFilesBackend`` resolves every asset URL through Django staticfiles.
-Pair it with Django's :doc:`ManifestStaticFilesStorage <django:ref/contrib/staticfiles>` so each URL carries a content hash that changes only when the file content changes, which makes long lived browser cache lifetimes safe.
+Pair it with Django's :doc:`ManifestStaticFilesStorage <django:ref/contrib/staticfiles>` so each URL carries a content hash that changes only when the file content changes.
+Stable hashes make long lived browser cache lifetimes safe.
 
 .. code-block:: text
    :caption: rendered output example

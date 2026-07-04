@@ -5,7 +5,7 @@ Forms Overview
 
 A Django form usually costs a URL entry, a view, manual CSRF handling, and a redirect-on-success per action before it accepts a single POST.
 The forms subsystem removes that wiring.
-Declaring a subclass of ``next.forms.Form`` or ``next.forms.ModelForm`` is enough to make that form reachable by name in any template in the project, with a POST endpoint, CSRF, and re-render-on-failure already attached.
+Declaring a subclass of ``next.forms.Form`` or ``next.forms.ModelForm`` is enough to make that form reachable by name from every template its scope covers, with a POST endpoint, CSRF, and re-render-on-failure already attached.
 No decorator, no manual registry call, and no URL wiring is required.
 
 .. contents::
@@ -17,7 +17,7 @@ Auto-Registration
 
 Every subclass of ``next.forms.BaseForm`` or ``next.forms.BaseModelForm`` registers itself through the ``__init_subclass__`` hook the moment Python executes the ``class`` statement.
 
-The framework derives the action name from the class name by converting ``CamelCase`` to ``snake_case``:
+The framework derives the action name from the class name by converting ``CamelCase`` to ``snake_case``.
 ``ArticleEditForm`` becomes ``article_edit_form``, ``ContactForm`` becomes ``contact_form``.
 
 The framework also records which file the class was declared in and uses that to decide its scope.
@@ -26,8 +26,9 @@ The framework also records which file the class was declared in and uses that to
 .. code-block:: python
    :caption: page.py — auto-registered as ``article_edit_form``
 
-   import next.forms
    from django.http import HttpRequest
+
+   import next.forms
    from next.forms import redirect_to_origin
 
    class ArticleEditForm(next.forms.ModelForm):

@@ -130,9 +130,7 @@ each signal.
      - Configuration
      - After the settings layer drops its caches.
 
-The forms and static signals have dedicated topic pages with worked receiver
-examples: :doc:`/content/topics/forms/signals` and
-:doc:`/content/topics/static-assets/signals`.
+The forms and static signals have dedicated topic pages with worked receiver examples, see :doc:`/content/topics/forms/signals` and :doc:`/content/topics/static-assets/signals`.
 The partial-rendering stream signals appear in context in
 :doc:`/content/topics/partial-rendering/sse`.
 

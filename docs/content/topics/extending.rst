@@ -15,7 +15,7 @@ The Five Mechanisms
 
 Backend.
    Replace or augment a complete subsystem.
-   Used for URL routing, components, forms dispatch, and the :doc:`static pipeline <static-assets/index>`.
+   Used for URL routing, components, forms dispatch, the :doc:`static pipeline <static-assets/index>`, and the :doc:`partial patch protocol <partial-rendering/index>`.
 
 Registry.
    Add new entries to a global list at startup.
@@ -59,9 +59,13 @@ Subclass an abstract base class and register the dotted path in ``NEXT_FRAMEWORK
    * - Static pipeline
      - ``STATIC_BACKENDS``
      - ``next.static.backends.StaticBackend``
+   * - Partial protocol
+     - ``PARTIAL_BACKENDS``
+     - ``next.partial.PartialProtocolBackend``
 
 A backend always implements the full contract.
 A custom backend usually subclasses the default so it inherits every default behaviour.
+``PARTIAL_BACKENDS`` differs from the other backend lists in that only its first entry is active.
 
 .. code-block:: python
    :caption: registering a custom backend
@@ -114,7 +118,6 @@ Register entries in ``AppConfig.ready`` or through a settings key.
 The registry pattern is the right choice when the framework already knows how to consume the values and only needs to learn about a new entry.
 
 The asset-stem registry is the extension point for teaching the static discovery scanner about a new asset filename next to a page, layout, or component.
-``default_stems`` is not re-exported from the ``next.static`` package, so the registration requires the deep import ``from next.static.discovery import default_stems``.
 Call ``default_stems.register(...)`` from ``AppConfig.ready`` so the new stem is known before the first component scan.
 
 .. code-block:: python
@@ -231,6 +234,7 @@ Use the entries below as a quick map.
 - **Recognise a new asset filename next to a page, layout, or component.** Register a custom stem (``default_stems``).
 - **Validate every dispatch.** Implement a form action backend.
 - **Log every dispatch.** Subscribe to the ``action_dispatched`` signal.
+- **Change the patch wire format.** Register a partial protocol backend under ``PARTIAL_BACKENDS``.
 - **Change how URLs land in HTML.** Customise a static backend.
 - **Vary URLs by request.** Use a request-aware static backend.
 - **Inspect every rendered page.** Subscribe to the ``page_rendered`` signal.

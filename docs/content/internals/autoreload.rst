@@ -37,7 +37,8 @@ The pipeline is wired by ``next.apps.autoreload.install()``, which ``NextFramewo
 ``install`` performs two actions:
 
 #. Replaces ``django.utils.autoreload.StatReloader`` with ``NextStatReloader``.
-   The swap is idempotent: subsequent calls are no-ops if ``StatReloader`` is already a ``NextStatReloader`` subclass.
+   The swap is idempotent.
+   Subsequent calls are no-ops when ``StatReloader`` is already a ``NextStatReloader`` subclass.
 #. Connects ``_watch_next_filesystem`` to Django's ``autoreload_started`` signal so the watch specs are registered the moment the dev server starts.
 
 .. note::
@@ -80,7 +81,7 @@ A watch spec is a tuple of a root path and one glob pattern.
 User code calls ``iter_all_autoreload_watch_specs`` instead, which wraps the built-in set with the registered extra specs.
 
 - Each page root contributes a ``**/page.py`` spec.
-- Each page root paired with its components folder name contributes a ``**/_components/**/component.py`` spec.
+- Each page root paired with its components folder name contributes a ``**/<components-folder>/**/component.py`` spec, ``_components`` by default.
 - Each extra component root from ``COMPONENT_BACKENDS`` contributes a ``**/component.py`` spec.
 
 Only Python entrypoints are watched.
@@ -115,7 +116,8 @@ Signals
 The autoreload pipeline fires ``watch_specs_ready`` after the watch-spec aggregation completes.
 The sender is the ``iter_all_autoreload_watch_specs`` function itself, so a receiver connected with ``sender=iter_all_autoreload_watch_specs`` fires only for that aggregation.
 
-Custom routers subscribe to ``watch_specs_ready`` to register additional patterns.
+Receivers subscribe to ``watch_specs_ready`` to log or assert on the resolved spec set.
+Registration goes through ``register_autoreload_watch_spec``.
 
 Extension Points
 ----------------

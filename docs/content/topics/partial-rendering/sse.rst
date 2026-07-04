@@ -64,7 +64,8 @@ The fan-out is built on ``refresh`` rather than a ``context`` patch on purpose.
 A ``context`` patch carries the value of a registered serialize provider, and the builder reads that value from the origin page of the request that creates it.
 A stream source has no page-render origin, so it cannot build a ``context`` patch from one.
 A stream that needs to push fresh context drives a ``refresh``, and the re-fetched zone delivers the new context through its own render.
-This is a documented limitation: the stream source addresses zones to refresh, not provider values to push directly.
+This is a documented limitation.
+The stream source addresses zones to refresh, not provider values to push directly.
 
 Echo Suppression
 ----------------
@@ -79,7 +80,8 @@ The application channel threads the mutation's ``X-Next-Request-Id`` to the stre
 
 The serialiser stamps ``echo_of`` as the envelope's ``request_id``.
 The client keeps a ring buffer of its recent ``X-Next-Request-Id`` values and drops an event whose id matches.
-When the buffer overflows under a flood of submissions the degradation is safe: an extra ``refresh``, not a failure.
+When the buffer overflows under a flood of submissions the degradation is safe.
+The subscriber applies an extra ``refresh`` rather than failing.
 
 The framework does not smuggle the request id through the broker.
 A change event has to carry it, which the broker does by recording the request id of the mutation that produced it.
@@ -132,7 +134,10 @@ Stream Politeness
 
 On the client a background tab pauses the stream by closing the connection.
 When the tab becomes visible the runtime reconnects and re-fetches the zones the stream addressed since the connection opened.
-Events missed while paused are not lost, because ``refresh`` is idempotent: the re-fetch brings the current state regardless of how many fan-outs were missed.
+A brief flicker between tabs reconnects the stream but skips the re-fetches, because only a tab hidden past a short threshold revalidates.
+The set of tracked zones is bounded, so a long sleep cannot storm the server on resume.
+Events missed while paused are not lost, because ``refresh`` is idempotent.
+The re-fetch brings the current state regardless of how many fan-outs were missed.
 
 See Also
 --------

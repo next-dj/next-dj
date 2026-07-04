@@ -21,20 +21,22 @@ Load the Components
 ~~~~~~~~~~~~~~~~~~~
 
 Component discovery is a side effect, so import the components before a test resolves one.
-A pytest fixture calls ``eager_load_components`` once and resets the registries around each test.
+A session-scoped pytest fixture calls ``eager_load_components`` once.
 
 .. code-block:: python
    :caption: conftest.py
 
    import pytest
-   from next.testing import eager_load_components, reset_registries
+   from next.testing import eager_load_components
 
-   @pytest.fixture(autouse=True)
-   def _next_components():
-       reset_registries()
+   @pytest.fixture(autouse=True, scope="session")
+   def _load_components() -> None:
        eager_load_components()
-       yield
-       reset_registries()
+
+``eager_load_components`` covers the roots configured through ``COMPONENT_BACKENDS``.
+Component folders inside a page tree register during the URL router walk instead, which runs when the URLconf first loads.
+A suite whose other tests issue ``NextClient`` requests has already triggered the walk.
+A suite that renders components without any HTTP triggers it by reversing one route in the same fixture, for example with ``page_reverse()`` from ``next.urls``.
 
 Render the Component
 ~~~~~~~~~~~~~~~~~~~~

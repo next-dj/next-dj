@@ -14,7 +14,8 @@ Check Registration
 
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
-The imported modules are ``next.conf.checks``, ``next.pages.checks``, ``next.urls.checks``, ``next.components.checks``, ``next.forms.checks``, ``next.server.checks``, ``next.static.checks``, ``next.partial.checks``, and ``next.apps.checks``.
+The imported modules are ``next.conf.checks``, ``next.pages.checks``, ``next.urls.checks``, ``next.components.checks``, and ``next.forms.checks``.
+The list continues with ``next.server.checks``, ``next.static.checks``, ``next.partial.checks``, and ``next.apps.checks``.
 
 Most of these modules register checks. ``next.server.checks`` registers no Django system checks.
 The dependency injection layer contributes no Django system checks.
@@ -91,7 +92,8 @@ There is no ``next.ENNN`` code for a missing provider or a bad marker graph.
 
 .. note::
 
-   Expect misconfiguration at **runtime**: unresolved parameters become ``None``, and cycles raise ``DependencyCycleError``.
+   Expect misconfiguration at **runtime**.
+   Unresolved parameters become ``None``, and cycles raise ``DependencyCycleError``.
    Troubleshooting lives in :doc:`/content/topics/dependency-injection` and :doc:`/content/faq/troubleshooting`.
 
 Check Code Reference
@@ -357,7 +359,9 @@ Warnings
      - A partial backend sets ``VERSION: "manifest"`` while the staticfiles storage does not hash files, so the version guard stays silent.
      - ``next.partial.checks``
    * - ``next.W070``
-     - A ``{% form %}`` renders directly inside a ``{% for %}`` of a composed page without a ``key=`` or a ``zone=``, so a partial morph cannot tell the repeated instances apart. The check does not descend into a component template, so a looped ``{% component %}`` that holds the form is not flagged. Thread a ``key=`` into the form to keep the repeated morph correct.
+     - A ``{% form %}`` renders directly inside a ``{% for %}`` of a composed page without a ``key=`` or a ``zone=``, so a partial morph cannot tell the repeated instances apart.
+       The check does not descend into a component template, so a looped ``{% component %}`` that holds the form is not flagged.
+       Thread a ``key=`` into the form to keep the repeated morph correct.
      - ``next.partial.checks``
    * - ``next.W071``
      - ``PARTIAL_BACKENDS`` has more than one entry. Partial rendering uses a single protocol backend, so only the first entry runs and the rest are ignored.

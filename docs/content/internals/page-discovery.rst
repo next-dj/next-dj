@@ -12,7 +12,7 @@ This page covers how the framework discovers pages from the filesystem, register
 Overview
 --------
 
-Discovery runs once at startup and again whenever the autoreload watcher fires.
+Discovery runs lazily on the first URL access and again whenever the autoreload watcher fires.
 The result is a set of Django URL patterns plus the context callables and layout chains attached to each ``page.py``.
 
 Pipeline
@@ -75,7 +75,9 @@ When the body source is a ``render`` function that returns an ``HttpResponseBase
 Composed-Template Cache
 -----------------------
 
-``Page`` keeps two parallel dicts that short-circuit the layout composition step when nothing on disk has changed.
+``Page`` keeps two parallel dicts that short-circuit layout composition for the callers of ``composed_template_for``.
+Those callers are the form re-render after a validation failure, the standalone zone render, and direct ``Page.render`` calls such as ``next.testing.render_page``.
+The canonical full-page path never consults the cache and recomposes the body and layout chain from the disk sources on each request.
 
 ``_template_registry``.
    Maps a ``page.py`` path to its already-composed template string.
@@ -83,9 +85,8 @@ Composed-Template Cache
 ``_template_source_mtimes``.
    Snapshots the modification time of every file that contributed to the composition, including the page body source and each ancestor ``layout.djx``.
 
-On every request ``_is_template_stale`` compares the current mtimes against the snapshot.
+On each cache read ``_is_template_stale`` compares the current mtimes against the snapshot.
 A change to any contributing file evicts the entry, the composition step rebuilds the template string, and the new snapshot is stored.
-The dynamic ``render`` path bypasses this cache entirely, so a ``render`` function that returns a fresh body never poisons the registry.
 
 Layout Composition
 ------------------
@@ -111,7 +112,7 @@ Context Resolution
 2. ``PageContextRegistry.collect_context`` runs in two sub-steps.
 
    a. Inherited context.
-      Every ``@context(..., inherit_context=True)`` callable registered in ancestor ``page.py`` files, walked from the current page upward toward the page root.
+      Every ``@context(..., inherit_context=True)`` callable registered in ancestor ``page.py`` files, walked from the current page upward through every ancestor directory, bounded at 64 levels.
    b. Page-level context.
       The ``@context`` callables declared in the current ``page.py``, evaluated after inherited values are in place so the page can shadow any inherited key.
 
@@ -121,7 +122,9 @@ Context Resolution
    Each surviving processor returns a dict that updates the merged scope, so a later processor overrides an earlier key on a collision.
 4. Component-level context functions run on demand as each ``{% component %}`` tag is evaluated during rendering.
 
-The dependency resolver shares a per-request cache across all four steps so a value resolved once (for example, the current user from ``Depends``) is not recomputed.
+The dependency resolver shares one cache between the inherited and page-level sub-steps of a single ``collect_context`` call, so a value resolved at an ancestor is not recomputed for the page.
+On a regular GET that cache does not extend to components, and each component render starts its own cache.
+A cache that spans the page and its components exists only on the form-dispatch re-render after a validation failure, where the dispatcher attaches its cache to the request.
 
 The canonical description is in :doc:`/content/topics/context`.
 This page focuses on which module performs each step.

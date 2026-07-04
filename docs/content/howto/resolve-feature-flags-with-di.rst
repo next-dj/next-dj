@@ -128,23 +128,24 @@ The next ``get_cached_flag`` call refetches from the database.
 Wire the provider and receivers at app ready
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``flags.providers`` registers ``FlagProvider`` with the resolver as a side effect of import, so a top-level import of the module is enough.
-``flags.receivers`` exposes a ``connect`` helper that ``AppConfig.ready`` calls, which keeps the actual signal wiring out of import time.
+``flags.providers`` registers ``FlagProvider`` with the resolver as a side effect of import.
+Both ``flags.providers`` and ``flags.receivers`` reach ``flags.models`` through their import chains, so ``AppConfig.ready`` defers the imports until the app registry is populated.
+A top-level import in ``apps.py`` would run while Django is still loading app configs, and defining the ``Flag`` model at that point raises :exc:`~django.core.exceptions.AppRegistryNotReady`.
 
 .. code-block:: python
    :caption: flags/apps.py
 
    from django.apps import AppConfig
-   from flags import providers, receivers
-
-   _ = providers
 
    class FlagsConfig(AppConfig):
        default_auto_field = "django.db.models.BigAutoField"
        name = "flags"
 
        def ready(self) -> None:
-           """Connect receivers once the app registry is populated."""
+           """Import providers and connect receivers once the app registry is populated."""
+           from flags import providers, receivers
+
+           _ = providers
            receivers.connect()
 
 The ``_ = providers`` line documents the intentional side-effect import.

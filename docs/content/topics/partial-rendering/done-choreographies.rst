@@ -25,7 +25,7 @@ The wizard does not know the list exists.
 .. code-block:: python
    :caption: request/[step]/page.py
 
-   def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> PatchResponse:
+   def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> HttpResponse:
        """Create the access request and close the layer with a result."""
        access_request = AccessRequest.objects.create(**cleaned_data)
        return (
@@ -63,7 +63,7 @@ The wizard is portable.
 It sits on any page without a change, and ``data-next-accepted`` moves with the markup.
 
 This is the cycle of a redirect with reloaded props.
-The cost is one extra GET after the modal closes, masked by the ``aria-busy`` busy gate the runtime sets on the target.
+The cost is one extra GET after the modal closes.
 
 Server OOB Through Page Addressing
 ----------------------------------
@@ -78,12 +78,12 @@ The builder takes ``page=`` and ``url_kwargs=`` alongside ``zone=``, and the req
 .. code-block:: python
    :caption: request/[step]/page.py
 
-   from django.http import Http404
+   from django.http import Http404, HttpResponse
 
    from next.partial import resolve_partial_origin
 
 
-   def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> PatchResponse:
+   def done(self, request: HttpRequest, cleaned_data: dict[str, Any]) -> HttpResponse:
        """Create the access request and patch the host page list in one response."""
        access_request = AccessRequest.objects.create(**cleaned_data)
        origin = resolve_partial_origin(request)
@@ -145,7 +145,7 @@ The Comparison
      - Drops onto any page, ``data-next-accepted`` moves with it
      - ``done`` hard-codes the zone or branches on the origin
    * - UX atomicity
-     - A one-GET gap between close and list, masked by ``aria-busy``
+     - A one-GET gap between close and list
      - Close, list, and toast apply in one envelope
    * - Without the runtime
      - Identical: a 303 to ``fallback``

@@ -62,6 +62,7 @@ A custom backend overrides that one method to change how validation errors rende
 The default backend answers an invalid submission with HTTP 200, the full origin page, and the headers ``X-Next-Form: invalid`` and ``X-Next-Action: <uid>``.
 A success re-render of a handler that returned ``None`` carries no such headers, so a client can branch on the headers without scraping the HTML.
 The status and the headers are behaviour of the default backend, not a guarantee of the endpoint, and the ``X-Next-*`` header namespace is reserved for the framework.
+A request carrying the partial-runtime headers receives the same outcome as a patch envelope instead of the full page, see :doc:`/content/topics/partial-rendering/how-it-works`.
 See :doc:`backends` for the override signature and the bundled implementation.
 
 What Survives Re-render
@@ -108,7 +109,7 @@ The template can render error messages inline with each field.
 On re-render the dispatcher always supplies the bound failing form under the action-named context key so the user sees the input that triggered the failure.
 ``get_initial`` still runs on the POST bind to seed the form's ``initial``, but the submitted values win in the rendered fields.
 
-Multiple Forms On The Same Page
+Multiple Forms on the Same Page
 -------------------------------
 
 A page that hosts several actions only re-renders the failing form.
@@ -175,7 +176,8 @@ This guarantee makes it safe to put database writes and external calls inside th
 .. warning::
 
    A page level context function runs again on every re-render, so any write or external call it makes happens a second time on every validation failure.
-   Keep context functions read only. Put writes inside the action handler where they run once on success, or in a custom provider whose result is cached on the request.
+   Keep context functions read only.
+   Put writes inside the action handler where they run once on success, or in a custom provider whose result is cached on the request.
 
 Signals
 -------
@@ -195,15 +197,24 @@ See :doc:`signals` for the full list and payload shapes.
 Edge Cases
 ----------
 
-- A missing or unresolvable ``_next_form_origin`` field returns HTTP 400 on the invalid branch. A plain HTML form must set the field to the URL path of its page, the value the tag emits.
+- A missing or unresolvable ``_next_form_origin`` field returns HTTP 400 on the invalid branch.
+  A plain HTML form must set the field to the URL path of its page, the value the tag emits.
 - A route removed in a deploy between the render and the POST no longer resolves, so the invalid branch returns HTTP 400.
-- Under :func:`django.conf.urls.i18n.i18n_patterns` the origin resolves under the active language of the POST. A user who switches the language between the render and the submit posts an origin whose language prefix no longer resolves, and the invalid branch returns HTTP 400. The success path never resolves the origin and is unaffected.
-- The UID is hashed from the scope key and the action name, not the name alone. For a page-scoped form the scope key is the absolute ``page.py`` path, so moving the file or renaming the class changes the UID. For a shared form the scope key is the dotted module, so moving the module changes the UID. See :ref:`UID stability <topics-forms-actions-uid>` in :doc:`actions`.
-- A handler that returns ``HttpResponseRedirect`` skips the re-render path entirely. Use this on success only.
+- Under :func:`django.conf.urls.i18n.i18n_patterns` the origin resolves under the active language of the POST.
+  A user who switches the language between the render and the submit posts an origin whose language prefix no longer resolves, and the invalid branch returns HTTP 400.
+  The success path never resolves the origin and is unaffected.
+- The UID is hashed from the scope key and the action name, not the name alone.
+  For a page-scoped form the scope key is the absolute ``page.py`` path, so moving the file or renaming the class changes the UID.
+  For a shared form the scope key is the dotted module, so moving the module changes the UID.
+  See :ref:`UID stability <topics-forms-actions-uid>` in :doc:`actions`.
+- A handler that returns ``HttpResponseRedirect`` skips the re-render path entirely.
+  Use this on success only.
 - Virtual page origins backed by ``template.djx`` resolve through the template loader, as :ref:`topics-forms-validation-rerender-origin` explains above.
 - The re-render emits a fresh ``csrfmiddlewaretoken`` through ``get_token``, so the browser cookie stays valid and the resubmission passes CSRF without a reload.
-- File inputs reset on re-render because the HTTP spec does not let a server re-populate them. Set ``enctype="multipart/form-data"`` and re-prompt the user for the upload.
-- Text, select, checkbox, and textarea widgets keep their raw submitted values because the dispatcher binds the failing form to ``request.POST``. Password widgets clear unless ``render_value=True``.
+- File inputs reset on re-render because the HTTP spec does not let a server re-populate them.
+  Set ``enctype="multipart/form-data"`` and re-prompt the user for the upload.
+- Text, select, checkbox, and textarea widgets keep their raw submitted values because the dispatcher binds the failing form to ``request.POST``.
+  Password widgets clear unless ``render_value=True``.
 
 Common Patterns
 ---------------

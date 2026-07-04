@@ -5,8 +5,8 @@ Extending the Protocol
 
 The protocol is closed by design.
 The server authors every verb and the client never invents one, so a page cannot be asked to do anything the server did not name.
-Three seams open that protocol to an application without forking the runtime: a custom verb, a server-pushed context value, and a server-fired event.
-Each rides the same envelope and the same apply pipeline as the built-ins.
+Three seams open that protocol to an application without forking the runtime.
+A custom verb, a server-pushed context value, and a server-fired event each ride the same envelope and the same apply pipeline as the built-ins.
 
 .. contents::
    :local:
@@ -57,7 +57,7 @@ Supply the handler on the client through a co-located asset.
 
 The handler receives the patch and an apply context.
 The patch carries the payload fields the server authored, here ``patch.count``.
-The context exposes ``dispatch`` for a ``CustomEvent`` on the ``Next.on`` bus, ``mergeContext`` for a context merge, ``root`` for the document, and ``dev`` for the development-build flag.
+The context exposes ``dispatch`` for an event on the ``Next.on`` bus, ``mergeContext`` for a context merge, ``root`` for the document, and ``dev`` for the development-build flag.
 Registering the handler at load time is safe, because ``defineOp`` records a handler rather than scanning the DOM.
 
 The envelope carries the custom verb beside the built-ins.
@@ -155,6 +155,18 @@ Consume it with a delegated document listener or the ``Next.on`` bus.
    });
 
 The ``toast`` verb is sugar over ``event`` with a built-in container, so a project that wants its own notification surface listens for ``next:toast`` and renders the toast itself.
+The item still lands in the built-in ``[data-next-toasts]`` tray, so such a project also hides the tray with CSS.
+
+One Active Backend
+------------------
+
+The three seams above extend the envelope from inside.
+The wire format itself is replaced rather than extended, and the replacement lives in the protocol backend.
+``PARTIAL_BACKENDS`` holds the protocol backends and only the first entry is active.
+The rest are ignored, so multi-backend selection is not a supported seam.
+A configuration with more than one entry earns the ``next.W071`` warning at ``manage.py check``.
+An application that needs a different envelope shape subclasses ``PartialProtocolBackend``, serialises its own wire format, and makes the subclass the single entry of ``PARTIAL_BACKENDS``.
+See :doc:`/content/ref/partial` for the ``PartialProtocolBackend`` API.
 
 See Also
 --------

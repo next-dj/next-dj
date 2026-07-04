@@ -78,10 +78,10 @@ not be retained past the receiver call.
      - After a context callable is attached to a page module.
    * - ``field_validated``
      - The active partial protocol backend class
-     - ``action_name``, ``uid``, ``request``, ``field_names``, ``error_count``.
+     - ``action_name``, ``uid``, ``request``, ``field_names``, ``error_count``
+     - After a validate-only blur pass runs, always behind the action guard so unauthenticated validate traffic never reaches telemetry.
        ``field_names`` is the validated subset.
        ``error_count`` is the number of fields that failed.
-     - After a validate-only blur pass runs, always behind the action guard so unauthenticated validate traffic never reaches telemetry.
    * - ``form_access_denied``
      - ``FormActionDispatch``
      - ``action_name``, ``uid``, ``request``, ``layer``, ``reason``

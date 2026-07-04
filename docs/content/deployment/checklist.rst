@@ -77,6 +77,7 @@ Monitoring
 - Forward ``page_rendered`` and ``action_dispatched`` to your metrics pipeline.
 - Forward ``form_validation_failed`` to alerting when failure rate exceeds the baseline.
 - Track ``router_reloaded`` if the project mounts a dynamic router.
+- Forward ``sse_stream_opened``, ``sse_stream_closed``, and ``zone_rendered`` when the project uses partial rendering.
 
 System Checks
 -------------

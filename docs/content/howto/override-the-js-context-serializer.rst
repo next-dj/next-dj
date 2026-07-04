@@ -54,8 +54,9 @@ See :doc:`/content/topics/static-assets/js-context` for the protocol and a minim
 Per Key Override
 ~~~~~~~~~~~~~~~~
 
-Pass ``serializer=`` on a single ``@context`` so only that key uses a different encoder. Everything else keeps the project default.
-See the **Per Key Serializer** section in :doc:`/content/topics/static-assets/js-context` for a concrete snippet.
+Pass ``serializer=`` on a single ``@context`` so only that key uses a different encoder.
+Everything else keeps the project default.
+See the Per-Key Serializer section in :doc:`/content/topics/static-assets/js-context` for a concrete snippet.
 
 Verification
 ------------

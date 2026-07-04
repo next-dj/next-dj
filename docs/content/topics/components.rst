@@ -118,7 +118,8 @@ Local scope.
 Global scope.
    Components in directories listed under ``DIRS`` are visible from every template, regardless of tree.
 
-Two components with the same name in different scopes are valid only when one is local to a tree and the other is in another tree.
+Two components with the same name are valid when their scope roots differ, for example one in a page tree and one in a ``DIRS`` root, or one in each of two page trees.
+Within one tree the name must be unique regardless of nesting depth.
 The same-scope name clash is reported by a system check, covered in the `System Checks`_ section below.
 
 Calling a Component
@@ -391,11 +392,10 @@ The Render Function
 
 A composite component can define a ``render`` function in ``component.py`` that returns the component body as a string in place of the template.
 The function receives DI-resolved parameters drawn from the surrounding template scope, including props and page context variables.
-The lazy ``csrf_token`` and any ``@component.context`` callables are not run on this path.
 Return an empty string to render nothing, which turns the component into a server side gate.
 
 A ``render`` function takes over completely.
-The component template and ``@component.context`` callables do not run for that component.
+The component template, the lazy ``csrf_token``, and the ``@component.context`` callables do not run for that component.
 The function may return a string or an :class:`~django.http.HttpResponse`.
 When it returns an :class:`~django.http.HttpResponse`, the body is decoded as UTF-8 regardless of the response's ``Content-Type`` charset and spliced into the page.
 The response status code and headers are not propagated.
@@ -461,10 +461,13 @@ The components subsystem contributes Django system checks.
 
 - ``next.E020`` reports two components with the same name in the same scope.
   Rename one of the colliding components or move it to a different scope root.
+- ``next.E021`` reports a ``component.py`` that uses ``context`` from ``next.pages``.
+  Use ``@component.context`` from ``next.components`` instead.
 - ``next.E034`` reports one component name used at the root route scope of more than one page tree.
   Rename one of the colliding components or move it to a different scope root.
 
 Run them with ``uv run python manage.py check``.
+The full catalog lives in :doc:`/content/ref/system-checks`.
 
 Common Patterns
 ---------------

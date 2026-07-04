@@ -116,7 +116,7 @@ They duplicate the same problem under a different syntax.
 Runtime matrices
 ~~~~~~~~~~~~~~~~
 
-Document supported Python and Django releases in one place: :doc:`/content/intro/install` under *Requirements*.
+The *Requirements* section of :doc:`/content/intro/install` documents supported Python and Django releases in one place.
 On other pages link back with a short sentence such as "Use a supported Python and Django release (see :doc:`/content/intro/install`)" instead of copying the bullet list.
 Fragmented matrices drift out of sync with ``pyproject.toml`` and CI.
 

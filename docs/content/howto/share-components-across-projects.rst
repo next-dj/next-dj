@@ -84,10 +84,10 @@ A project can override a shared component by placing a component with the same n
 .. code-block:: text
    :caption: project override
 
-   projects/admin/admin_app/_components/button/component.djx
+   projects/admin/admin_app/pages/_components/button/component.djx
 
-The project local version wins because the visibility resolver scores the project's page-tree root and a global ``DIRS`` root equally and breaks the tie by registration order.
-The page-tree backend registers first during the URL router walk, so its components shadow same-name entries contributed through ``DIRS``.
+The project-local version wins because the visibility resolver scores the project's page-tree root and a global ``DIRS`` root equally, then breaks the tie in favour of the page-tree component.
+A page-tree component shadows a same-name ``DIRS`` component at equal score, so the project's own copy overrides the shared one regardless of which root was registered first.
 
 Static Files
 ~~~~~~~~~~~~

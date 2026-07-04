@@ -67,9 +67,9 @@ Use Inside an Action Handler
    :caption: notes/pages/page.py
 
    from django.http import HttpRequest, HttpResponseRedirect
-   from notes.models import Note
    from next.forms import ModelForm
    from next.urls import page_reverse
+   from notes.models import Note
 
    class CreateNoteForm(ModelForm):
        class Meta:

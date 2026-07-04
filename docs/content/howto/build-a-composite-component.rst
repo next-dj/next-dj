@@ -19,10 +19,10 @@ Create a component folder under the components root with three files.
 Walkthrough
 -----------
 
-Create the folder ``notes/_components/info_card/`` with three files.
+Create the folder ``notes/pages/_components/info_card/`` with three files.
 
 .. code-block:: jinja
-   :caption: notes/_components/info_card/component.djx
+   :caption: notes/pages/_components/info_card/component.djx
 
    <article class="info-card">
      <header class="info-card__head">
@@ -35,7 +35,7 @@ Create the folder ``notes/_components/info_card/`` with three files.
    </article>
 
 .. code-block:: python
-   :caption: notes/_components/info_card/component.py
+   :caption: notes/pages/_components/info_card/component.py
 
    from next.components import component
 
@@ -47,7 +47,7 @@ The parameter and the published key share the name ``subtitle`` on purpose.
 The function reads its own ``subtitle`` prop through dependency injection and republishes the cleaned value under the same key, so the trimmed value replaces the raw prop and the template sees the trimmed string.
 
 .. code-block:: css
-   :caption: notes/_components/info_card/component.css
+   :caption: notes/pages/_components/info_card/component.css
 
    .info-card {
      border: 1px solid #ddd;

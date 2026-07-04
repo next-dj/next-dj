@@ -98,8 +98,10 @@ Run the system checks after the port.
 
    uv run python manage.py check
 
-``next.E050`` catches an empty step list, ``next.W057`` a step class doubling as a standalone action, ``next.W058`` a file field in a step, and ``next.W059`` a field declared by two steps.
-Then walk the flow once: fill the first step, use the browser back button to confirm the draft reappears, and finish to confirm ``done`` runs exactly once.
+``next.E050`` catches an empty step list, and ``next.E054`` a page-scoped wizard whose page path lacks the ``[step]`` segment.
+``next.W057`` flags a step class doubling as a standalone action, ``next.W058`` a file field in a step, and ``next.W059`` a field declared by two steps.
+Then walk the flow once.
+Fill the first step, use the browser back button to confirm the draft reappears, and finish to confirm ``done`` runs exactly once.
 
 See Also
 --------

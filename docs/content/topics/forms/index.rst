@@ -16,8 +16,7 @@ Read :doc:`overview` first, then jump to the page that matches the part you are 
 
 :doc:`actions`
    Register a handler with ``@action`` and decide which parameters to ask for.
-   Also covers the static access guards (``login_required``, ``permission_required``) and the success contracts (``success_url``, ``success_message``).
-   Covers the dynamic permission hooks (``check_permissions``, ``has_object_permission``) for per-request authorization.
+   Also covers the access guards, the dynamic permission hooks, and the success contracts (``success_url``, ``success_message``).
 
 :doc:`templates`
    Render a form with ``{% form %}`` and link several forms on a single page.

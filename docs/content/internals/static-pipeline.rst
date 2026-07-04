@@ -119,6 +119,8 @@ The pipeline fires four signals.
 - ``html_injected`` once per request after the manager replaces the placeholder slots.
 - ``backend_loaded`` once per backend instance when the factory builds it.
 
+A standalone zone render runs the same discovery but ships the collected assets in the patch envelope, so ``collector_finalized`` and ``html_injected`` fire only on full-page renders.
+
 Extension Points
 ----------------
 

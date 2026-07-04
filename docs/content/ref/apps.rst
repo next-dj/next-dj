@@ -9,7 +9,14 @@ Module Summary
 ``next.apps`` contains the Django ``AppConfig`` and the helpers that the framework runs at application startup.
 
 ``NextFrameworkConfig.ready()`` first runs ``next.checks.register_all()`` to register the framework system checks.
-It then calls five installer hooks in a fixed order: ``autoreload.install()``, ``templates.install()``, ``staticfiles.install()``, ``components.install()``, and ``autodiscover_forms()``.
+It then calls five installer hooks in a fixed order.
+
+#. ``autoreload.install()``
+#. ``templates.install()``
+#. ``staticfiles.install()``
+#. ``components.install()``
+#. ``autodiscover_forms()``
+
 ``autodiscover_forms()`` imports the ``forms`` submodule of every installed app so shared forms register before the first request arrives.
 It respects the ``FORM_AUTODISCOVER`` setting and is a no-op when that setting is ``False``.
 
@@ -18,6 +25,9 @@ Public API
 
 .. automodule:: next.apps
    :members:
+
+The installer submodules below are called exclusively from ``NextFrameworkConfig.ready`` and are not part of the project-level public API.
+They are documented here for framework contributors and for projects that instrument startup behaviour.
 
 Template Tag Registration
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -35,9 +45,6 @@ Staticfiles Integration
 
 Autoreload Installer
 ~~~~~~~~~~~~~~~~~~~~
-
-The two installer submodules below are called exclusively from ``NextFrameworkConfig.ready`` and are not part of the project-level public API.
-They are documented here for framework contributors and for projects that instrument startup behaviour.
 
 .. automodule:: next.apps.autoreload
    :members:

@@ -171,7 +171,7 @@ The ``module`` kind carries no ``inline_tag``, so it renders an inline body verb
 System Checks
 -------------
 
-The static system checks ``next.W030`` and ``next.W031`` validate the backend configuration.
+The static system checks ``next.W030``, ``next.W031``, and ``next.E036`` through ``next.E038`` validate the backend configuration.
 The ``next.W042`` check validates the ``JS_CONTEXT_SERIALIZER`` setting.
 They do not validate kind registration.
 A bad call to ``default_kinds.register`` raises ``ValueError`` during ``AppConfig.ready``.

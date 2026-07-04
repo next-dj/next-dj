@@ -5,7 +5,8 @@ Internals
 
 The internals section explains how next.dj works under the hood.
 Each page traces one pipeline with a mermaid diagram, lists the modules involved, and points at the public hooks used to extend it.
-The pages read top to bottom, from a whole-framework map down to each subsystem pipeline.
+The pages read top to bottom, from a whole-framework map down to individual subsystem pipelines.
+The partial rendering pipeline is traced in :doc:`/content/topics/partial-rendering/how-it-works` rather than on a page here.
 
 :doc:`overview`
    Map of every subsystem with a signals fan-out diagram.

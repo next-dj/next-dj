@@ -37,6 +37,18 @@ NEXT_JS_STATIC_PATH: Final = "next/next.min.js"
 
 CSRF_PAYLOAD_KEY: Final = "$csrf"
 
+# Escape the inline-init payload for the HTML `<script>` context, mirroring
+# Django's `json_script`. These code points only ever appear inside JSON string
+# literals, so `\u00XX` and `\u202X` keep the value semantically identical while
+# stopping a `serialize=True` value from closing the element with `</script>`.
+_SCRIPT_ESCAPES: Final[dict[int, str]] = {
+    ord("<"): "\\u003C",
+    ord(">"): "\\u003E",
+    ord("&"): "\\u0026",
+    ord("\u2028"): "\\u2028",
+    ord("\u2029"): "\\u2029",
+}
+
 
 def csrf_header_name() -> str:
     """Return the CSRF header name in HTTP wire form from Django settings.
@@ -155,7 +167,9 @@ class NextScriptBuilder:
         `encoded` rather than serialised a second time. A key missing from
         `encoded` falls back to its serializer. Compact top-level separators
         keep the output byte-identical to a whole-dict dump for the compact
-        serializers the framework ships.
+        serializers the framework ships. The assembled payload is escaped for
+        the inline `<script>` context so a `serialize=True` value whose text
+        holds `</script>` cannot break out of the element.
         """
         default = resolve_serializer()
         serializers = key_serializers or {}
@@ -167,6 +181,7 @@ class NextScriptBuilder:
             encoded_key = json.dumps(k, separators=(",", ":"))
             fragments.append(f"{encoded_key}:{frag}")
         payload = "{" + ",".join(fragments) + "}"
+        payload = payload.translate(_SCRIPT_ESCAPES)
         return self._init_template.format(payload=payload)
 
     @classmethod

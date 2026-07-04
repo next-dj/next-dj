@@ -40,6 +40,15 @@ class TenantPrefixStaticBackend(StaticFilesBackend):
         """Return a JS script tag with the per-tenant prefix injected."""
         return super().render_script_tag(_prefixed(url, request))
 
+    def render_module_tag(
+        self,
+        url: str,
+        *,
+        request: HttpRequest | None = None,
+    ) -> str:
+        """Return a module script tag with the per-tenant prefix injected."""
+        return super().render_module_tag(_prefixed(url, request))
+
 
 def _prefixed(url: str, request: HttpRequest | None) -> str:
     """Return `url` with `/_t/<slug>` injected before its path."""

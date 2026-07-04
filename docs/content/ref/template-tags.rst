@@ -30,6 +30,7 @@ Forms
       * - ``action`` with the dispatch URL.
       * - ``method="post"``.
       * - ``data-next-action`` with the action UID when the registry meta is available.
+      * - The ``data-next-*`` attributes compiled from the partial params.
       * - ``enctype="multipart/form-data"`` when the form is multipart.
       * - The attributes passed to the tag.
 
@@ -40,7 +41,8 @@ Forms
    The tag owns the ``action`` and ``method`` attributes plus every attribute starting with ``data-next-``, and passing any of them raises ``TemplateSyntaxError`` at parse time.
    ``data-next-*`` is the single framework namespace in rendered markup.
 
-   The ``validate``, ``trigger``, ``debounce``, ``zone``, and ``key`` params compile to the matching ``data-next-*`` attributes, the authored seam for partial behaviour.
+   The ``validate``, ``trigger``, ``debounce``, ``zone``, and ``key`` params compile to ``data-next-*`` attributes, the authored seam for partial behaviour.
+   Each param maps to the attribute of the same name except ``zone``, which compiles to ``data-next-target``.
    ``key`` distinguishes one instance of a repeated form, rendered in a loop, so a partial morph lands on the submitted instance rather than the first.
    See :doc:`/content/topics/partial-rendering/scenarios`.
 
@@ -48,13 +50,15 @@ Forms
 
    The tag requires ``request`` in the template context for the CSRF token.
    It also uses ``current_page_module_path`` when present to scope the action lookup to the origin page, which is how the file router renders it.
-   That context value is not strictly required: when it is absent the action lookup falls back to the name index.
+   That context value is not strictly required.
+   When it is absent the action lookup falls back to the name index.
 
 .. describe:: {% action_url "<name>" %}
 
    Returns the dispatch endpoint URL for a registered action.
    The first argument is the action name, a quoted string or a context variable that resolves to a string.
-   The lookup uses the same page scoping as ``{% form %}``: a page-scoped match for the rendering page wins over a shared one, read from ``current_page_module_path`` when present.
+   The lookup uses the same page scoping as ``{% form %}``.
+   A page-scoped match for the rendering page wins over a shared one, read from ``current_page_module_path`` when present.
 
    As a ``simple_tag`` it supports assignment, ``{% action_url "delete_note" as delete_url %}``.
 
@@ -169,7 +173,8 @@ Partial Rendering
    It is valid only between a ``{% zone %}`` and its ``{% endzone %}``, and a lazy zone without it raises ``next.E064``.
    The branch belongs to lazy zones only, so a zone without ``lazy=`` rejects it with ``TemplateSyntaxError`` when the template compiles.
 
-A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}``, an ``{% if %}``, or directly inside a ``{% with %}``.
+A zone belongs to a page or layout, not a component, and may not sit inside a ``{% for %}`` or an ``{% if %}``.
+A zone directly inside a ``{% with %}`` draws the ``next.W067`` warning because the bindings are invisible to a standalone zone render.
 The :doc:`zone placement checks </content/ref/system-checks>` enforce each rule at ``manage.py check`` time.
 
 Layouts
