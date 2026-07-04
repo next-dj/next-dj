@@ -51,6 +51,7 @@ E_ZONE_IN_IF: Final = "next.E063"
 E_LAZY_WITHOUT_PLACEHOLDER: Final = "next.E064"
 E_ZONE_IN_COMPONENT: Final = "next.E065"
 E_UNREGISTERED_OP: Final = "next.E066"
+E_COMPOSED_TEMPLATE_SYNTAX: Final = "next.E072"
 
 W_WITH_OVER_ZONE: Final = "next.W067"
 W_FORM_BACKEND_NOT_AWARE: Final = "next.W068"
@@ -71,6 +72,7 @@ CHECK_IDS: Final = (
     E_LAZY_WITHOUT_PLACEHOLDER,
     E_ZONE_IN_COMPONENT,
     E_UNREGISTERED_OP,
+    E_COMPOSED_TEMPLATE_SYNTAX,
     W_WITH_OVER_ZONE,
     W_FORM_BACKEND_NOT_AWARE,
     W_MANIFEST_VERSION_NO_STORAGE,
@@ -87,7 +89,8 @@ def _iter_composed_pages() -> "Iterator[tuple[Path, Template]]":
 
     Pages whose body is produced dynamically by `render()` have no
     static composed template and are skipped. A page that fails to
-    compile is left to the page checks that own that failure.
+    compile is skipped here and reported by
+    `check_composed_templates_compile`.
     """
     router_manager, _errors = get_router_manager()
     if router_manager is None:
@@ -137,6 +140,46 @@ def _significant(nodelist: NodeList) -> list[Node]:
             continue
         out.append(node)
     return out
+
+
+@register(Tags.templates)
+def check_composed_templates_compile(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Error when a composed page template fails to compile (`next.E072`).
+
+    The zone checks skip a page whose composed template does not
+    compile, so without this check the syntax error would surface only
+    as a 500 on the first request to the page.
+    """
+    messages: list[CheckMessage] = []
+    router_manager, _errors = get_router_manager()
+    if router_manager is None:
+        return messages
+    seen: set[Path] = set()
+    for router in router_manager._backends:
+        for _url_path, page_path in iter_scanned_page_pairs(router):
+            resolved = page_path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if not page.has_template(page_path):
+                continue
+            try:
+                page.composed_template_for(page_path)
+            except TemplateSyntaxError as error:
+                messages.append(
+                    Error(
+                        f"The composed page template for {page_path} does not "
+                        f"compile. {error}",
+                        obj=str(page_path),
+                        id=E_COMPOSED_TEMPLATE_SYNTAX,
+                    )
+                )
+            except (TemplateDoesNotExist, OSError, ValueError):
+                continue
+    return messages
 
 
 @register(Tags.templates)
@@ -611,6 +654,7 @@ def _staticfiles_storage_path() -> str | None:
 
 __all__ = [
     "CHECK_IDS",
+    "E_COMPOSED_TEMPLATE_SYNTAX",
     "E_DUPLICATE_ZONE",
     "E_LAZY_WITHOUT_PLACEHOLDER",
     "E_NON_ASCII_ZONE",
@@ -623,6 +667,7 @@ __all__ = [
     "W_MANIFEST_VERSION_NO_STORAGE",
     "W_TOO_MANY_BACKENDS",
     "W_WITH_OVER_ZONE",
+    "check_composed_templates_compile",
     "check_custom_patch_ops_well_formed",
     "check_duplicate_zone_names",
     "check_form_backend_partial_aware",

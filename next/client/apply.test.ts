@@ -1002,6 +1002,52 @@ describe("Applier layer, toast, and url verbs", () => {
   });
 });
 
+describe("Applier page-scoped zone resolve", () => {
+  function makeRecordingApplier() {
+    const pages: (string | undefined)[] = [];
+    const layers = {
+      resolveZone: (name: string, root: ParentNode, page?: string) => {
+        pages.push(page);
+        return root.querySelector(`[data-next-zone="${name}"]`);
+      },
+      open: () => undefined,
+      close: () => undefined,
+      toast: () => undefined,
+    };
+    const applier = new Applier({
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+      document,
+      layers,
+    });
+    return { applier, pages };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("threads the fetched page of a zone GET into the layer resolve", () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const { applier, pages } = makeRecordingApplier();
+    applier.apply(
+      envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]),
+      undefined,
+      undefined,
+      "/host/",
+    );
+    expect(pages).toEqual(["/host/"]);
+    expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("new");
+  });
+
+  it("a direct apply resolves zones with no page", () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const { applier, pages } = makeRecordingApplier();
+    applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "new" }]));
+    expect(pages).toEqual([undefined]);
+  });
+});
+
 describe("Applier visit verb", () => {
   beforeEach(() => {
     document.body.innerHTML = "";

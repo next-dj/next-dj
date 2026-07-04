@@ -48,7 +48,7 @@ describe("Board", () => {
     const col2 = document.querySelector("[data-kanban-column='2']");
     fireEvent.drop(col2, { dataTransfer: { getData: () => "10" } });
 
-    await vi.waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
 
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("/actions/kanban/move_card");

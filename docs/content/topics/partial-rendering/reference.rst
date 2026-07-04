@@ -128,7 +128,7 @@ All values are ASCII, and zone names are ASCII slugs.
      - The ring id used to suppress an SSE echo.
    * - ``X-Next-Origin``
      - Server OOB choreography only
-     - The path of the page that hosts a layer, for a server-side morph of its zones.
+     - The path and query string of the page that hosts a layer, for a server-side morph of its zones.
    * - CSRF header
      - Every unsafe method
      - The name comes from ``CSRF_HEADER_NAME``, the token from the runtime payload, the cookie is never read.
@@ -215,8 +215,9 @@ The form-behaviour attributes are written by the ``{% form %}`` tag from Python 
      - The poll interval in milliseconds, from the ``poll=`` literal, written on the
        full render and on the partial response wrapper. The runtime re-GETs the zone
        on the interval while the tab is visible. A hand-written value outside the
-       whole-millisecond grammar or the browser timer range is dropped, with a
-       console warning in dev.
+       whole-millisecond grammar, below the one-second floor, or above the browser
+       timer ceiling is dropped, as is the attribute on an element without
+       ``data-next-zone``, each with a console warning in dev.
    * - ``data-next-action``
      - ``<form>``
      - The action uid, written by ``{% form %}``, enables submit interception.

@@ -127,9 +127,31 @@ class TestZoneTagSyntax:
         with pytest.raises(TemplateSyntaxError):
             Template('{% zone "z" poll="" %}b{% endzone %}')
 
-    def test_stray_bits_ignored(self) -> None:
-        out = _render('{% zone "z" garbage %}body{% endzone %}')
-        assert out == f'<div {ZONE_ATTR}="z">body</div>'
+    def test_stray_bit_without_equals_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="'garbage' is missing '='"):
+            Template('{% zone "z" garbage %}body{% endzone %}')
+
+    def test_spaces_around_equals_raise(self) -> None:
+        # token splitting turns poll = "5s" into three bits, the first of
+        # which carries no '=' and must fail loudly instead of dropping poll
+        with pytest.raises(TemplateSyntaxError, match='key="value"'):
+            Template('{% zone "z" poll = "5s" %}body{% endzone %}')
+
+    def test_unknown_option_key_raises(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="unknown option 'pol'"):
+            Template('{% zone "z" pol="5s" %}body{% endzone %}')
+
+    def test_unknown_option_error_lists_the_valid_keys(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="tag, lazy, and poll"):
+            Template('{% zone "z" lzay="load" %}body{% endzone %}')
+
+    def test_placeholder_error_names_the_zone(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match='zone "z"'):
+            Template('{% zone "z" %}b{% placeholder %}p{% endzone %}')
+
+    def test_poll_grammar_error_says_literals_only(self) -> None:
+        with pytest.raises(TemplateSyntaxError, match="Template variables"):
+            Template('{% zone "z" poll=interval %}b{% endzone %}')
 
 
 class TestZonePartialStandalone:
@@ -153,7 +175,7 @@ class TestZonePartialStandalone:
 
 
 class TestZoneOptions:
-    """`ZoneOptions` precomputes the wrapper attributes at parse time."""
+    """`ZoneOptions` derives the wrapper attributes from the mode options."""
 
     def test_plain_options_have_no_attrs(self) -> None:
         options = ZoneOptions()
@@ -169,6 +191,10 @@ class TestZoneOptions:
         options = ZoneOptions(lazy="load")
         assert options.full_attrs == f' {LAZY_ATTR}="load"'
         assert options.delivery_attrs == ""
+
+    def test_lazy_and_poll_together_raise(self) -> None:
+        with pytest.raises(ValueError, match="the modes are exclusive"):
+            ZoneOptions(lazy="load", poll=5000)
 
     def test_parsed_node_carries_options(self) -> None:
         template = Template('{% zone "p" tag="ul" poll="5s" %}b{% endzone %}')

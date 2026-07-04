@@ -207,12 +207,13 @@ export interface ApplyContext {
   dev: boolean;
 }
 
-// The layer-aware bits the applier needs from the layer stack: a top-down zone
-// resolve, the open and close verbs, and the toast container. The LayerStack
-// satisfies this structurally, so partial.ts passes it directly. A
-// server-initiated open carries no opener element.
+// The layer-aware bits the applier needs from the layer stack: a zone resolve
+// (top-down, or scoped to the page a zone GET fetched), the open and close
+// verbs, and the toast container. The LayerStack satisfies this structurally,
+// so partial.ts passes it directly. A server-initiated open carries no opener
+// element.
 export interface LayerBridge {
-  resolveZone(name: string, root: ParentNode): Element | null;
+  resolveZone(name: string, root: ParentNode, page?: string): Element | null;
   open(opener: null, href: string, zone: string): unknown;
   close(detail: { result?: unknown; dismiss?: boolean; reason?: string }): void;
   toast(text: string, variant: string): void;
@@ -266,6 +267,8 @@ export type ZoneFetch = (request: {
 interface ApplyState {
   isDirty: (field: Element) => boolean;
   requestKey: string | undefined;
+  // The page a safe zone GET fetched, scoping its zone patches to that page.
+  page: string | undefined;
   touched: Element[];
 }
 
@@ -415,11 +418,12 @@ export class Applier {
 
   // The snapshot is the dirty counter wire.ts captured at fetch time. A direct
   // apply with no snapshot uses the highest mark, so no field reads as dirty.
-  // The pipeline is normative: version → before-apply → CSS delta → ops → JS
-  // delta → mount → applied. CSS is gated before the ops, so the body after the
-  // gate runs in a continuation. With no asset bridge the gate is a
-  // straight-through call and the whole apply stays synchronous.
-  apply(raw: unknown, snapshot?: number, key?: string): Envelope {
+  // The page scopes zone patches to the page a zone GET fetched. The pipeline
+  // is normative: version, before-apply, CSS delta, ops, JS delta, mount, then
+  // applied. CSS is gated before the ops, so the body after the gate runs in
+  // a continuation. With no asset bridge the gate is a straight-through call
+  // and the whole apply stays synchronous.
+  apply(raw: unknown, snapshot?: number, key?: string, page?: string): Envelope {
     const envelope = parseEnvelope(raw);
     // A version mismatch is a full visit instead of an apply, guarded against a
     // reload loop inside the bridge. true means the bridge took over.
@@ -434,6 +438,7 @@ export class Applier {
     const state: ApplyState = {
       isDirty: snapshot === undefined ? () => false : this.#dirtySince(snapshot),
       requestKey: key,
+      page,
       touched: [],
     };
     const runOps = (): void => this.#runOps(envelope, state);
@@ -751,12 +756,11 @@ export class Applier {
     if (zone !== undefined) this.#applied.set(zone, this.generation(zone) + 1);
   }
 
-  // Resolve against the live document. A zone is asked of the layer stack
-  // first, top layer down, so a zone inside the upper modal wins over the
-  // same-named page zone beneath it.
+  // Resolve against the live document. A zone goes to the layer stack with the
+  // envelope's page, so a base-page poll cannot morph a same-named modal zone.
   #resolve(target: Target | undefined, state: ApplyState): Element | null {
     if (target?.zone !== undefined && this.#layers !== undefined) {
-      return this.#layers.resolveZone(target.zone, this.#document);
+      return this.#layers.resolveZone(target.zone, this.#document, state.page);
     }
     return this.#resolveIn(this.#document, target, state);
   }

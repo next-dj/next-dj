@@ -91,9 +91,9 @@ export interface LayerDeps {
 }
 
 export interface LayerStack {
-  // Resolve a zone from the top layer down, then the page root. The applier
-  // calls this for every zone-addressed patch so a layer target wins.
-  resolveZone(name: string, root: ParentNode): Element | null;
+  // Resolve a zone for a patch: scoped to the page a zone GET fetched, or the
+  // top-down walk (layer target wins) when no page is known.
+  resolveZone(name: string, root: ParentNode, page?: string): Element | null;
   // The URL of the page that owns an element: a layer's pushed URL for an
   // element inside its subtree, the host page for the base document even while
   // layers are open, the current URL when none are. A poll tick GETs this
@@ -139,18 +139,40 @@ export function createLayers(deps: LayerDeps): LayerStack {
     return pageUrl(doc);
   }
 
-  function resolveZone(name: string, root: ParentNode): Element | null {
+  // A page-scoped lookup searches only the fetched page's subtree: the layer
+  // whose pushed URL matches, or the base document outside every dialog. An
+  // unmatched page (its layer closed mid-flight) degrades to the top-down walk.
+  function resolveZone(name: string, root: ParentNode, page?: string): Element | null {
     const selector = `[data-next-zone="${cssEscape(name)}"]`;
-    // Top layer down: a zone inside the upper modal is found before the
-    // same-named page zone beneath it. The layer's own container carries the
-    // zone, so it is matched directly, not only its descendants.
+    if (page !== undefined) {
+      for (const layer of Array.from(stack).reverse()) {
+        if (layer.pushedUrl === page) return findIn(layer.root, selector);
+      }
+      const bottom = stack[0];
+      const base = bottom === undefined ? currentUrl() : bottom.host;
+      if (page === base) return findOutsideLayers(selector, root);
+    }
     for (const layer of Array.from(stack).reverse()) {
-      const container = layer.root;
-      if (container.matches(selector)) return container;
-      const found = container.querySelector(selector);
+      const found = findIn(layer.root, selector);
       if (found !== null) return found;
     }
     return root.querySelector(selector);
+  }
+
+  // The layer's own container carries the zone, so it is matched directly, not
+  // only its descendants.
+  function findIn(container: HTMLElement, selector: string): Element | null {
+    if (container.matches(selector)) return container;
+    return container.querySelector(selector);
+  }
+
+  // Dialogs live in the body, so a bare querySelector would still reach a
+  // layer's zone: skip matches inside any dialog subtree.
+  function findOutsideLayers(selector: string, root: ParentNode): Element | null {
+    for (const el of Array.from(root.querySelectorAll(selector))) {
+      if (!stack.some((layer) => layer.dialog.contains(el))) return el;
+    }
+    return null;
   }
 
   // Top layer down, the same walk as resolveZone: an element inside a layer's
@@ -160,8 +182,9 @@ export function createLayers(deps: LayerDeps): LayerStack {
   function urlFor(el: Element): string {
     for (const layer of Array.from(stack).reverse()) {
       if (layer.root.contains(el)) {
-        // pushedUrl is assigned right after the push in open, so a layer on
-        // the stack always carries it and the fallback is never taken.
+        // open stacks the layer and assigns pushedUrl in one synchronous
+        // stretch (a failed push unwinds within it), so the fallback is
+        // never taken.
         /* v8 ignore next */
         return layer.pushedUrl ?? currentUrl();
       }
@@ -218,24 +241,23 @@ export function createLayers(deps: LayerDeps): LayerStack {
     const close = dialogAdapter.open(dialog, (reason) => dismissFrom(dialog, reason));
     const layer: Layer = { dialog, root, opener, close, returnFocus, host };
     stack.push(layer);
-    // Push the honest URL of the layer body so the modal is shareable and a
-    // refresh resolves it as the standalone page, while Back closes it.
-    history.push(href);
-    layer.pushedUrl = currentUrl();
-    emit("partial:layer-opened", { opener });
     // The opener already carries busy, so only the target zone is marked here.
     const release = busy(null, root);
     try {
+      // Push the honest URL of the layer body so the modal is shareable and
+      // Back closes it. Inside the try: pushState can throw (Safari's rate
+      // limit) and the half-open layer must unwind, not strand on the stack.
+      history.push(href);
+      layer.pushedUrl = currentUrl();
+      emit("partial:layer-opened", { opener });
       await deps.fetch({
         url: href,
         zone,
         headers: { [HEADER_ZONE]: zone, [HEADER_ORIGIN]: host },
       });
     } catch (e) {
-      // The request died after the URL was pushed and the dialog opened. Tear
-      // down the orphaned layer: remove already rolls the URL back through
-      // history.replace(host) while the current URL still equals pushedUrl, so
-      // Back does not land on a dead modal URL.
+      // remove rolls the URL back to the host only when the push actually
+      // moved it (pushedUrl set), so a failed push rolls back nothing.
       remove(layer);
       throw e;
     } finally {

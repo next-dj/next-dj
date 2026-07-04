@@ -11,15 +11,13 @@
 // the stream lives on.
 
 import { defaultEventSource, defaultVisibility } from "./adapters";
-import {
-  HEADER_ZONE,
-  RESUME_REVALIDATE_MS,
-  asString,
-  currentUrl,
-  isRecord,
-} from "./protocol";
+import { asString, currentUrl, isRecord, matching } from "./protocol";
 
 const SSE_ATTR = "data-next-sse";
+// A visibility flip shorter than this revalidates nothing: a momentary alt-tab
+// reconnects the stream but skips the zone re-GETs, so flicking between tabs
+// does not storm the server.
+const RESUME_REVALIDATE_MS = 3000;
 // The ring holds the last 25 own request ids, matching the server-side echo
 // window. Overflow is safe: a dropped id yields an extra refresh, not a break.
 const ECHO_LIMIT = 25;
@@ -68,16 +66,16 @@ export interface SseDeps {
   // fires partial:error without poisoning the connection.
   apply: (raw: unknown) => void;
   // The zone re-GET used to revalidate bound zones on resume, the same shape
-  // the refresh verb already uses.
-  fetch: (request: {
-    url: string;
-    zone: string;
-    headers?: Record<string, string>;
-  }) => void;
+  // the refresh verb already uses. The wire stamps X-Next-Zone from the zone
+  // intent, so the bridge passes intent, never headers.
+  fetch: (request: { url: string; zone: string }) => void;
   dispatch: (event: string, detail: Record<string, unknown>) => void;
   document?: Document;
   source?: EventSourceAdapter;
   visibility?: VisibilityAdapter;
+  // The URL of the page that owns a data-next-sse container, answered by the
+  // layer stack. Absent, the capture reads the address bar.
+  pageUrl?: (el: Element) => string;
   // The monotonic clock the resume gate reads to measure how long the tab was
   // hidden. Injectable so tests drive the anti-storm threshold deterministically.
   now?: () => number;
@@ -98,10 +96,8 @@ export interface Sse {
 interface Connection {
   url: string;
   control: SourceControl;
-  // The page path and query the stream subscribed from, captured at open and
-  // carried across a pause so resume re-GETs the bound zones against the page
-  // they were rendered for, query filters and all, not whatever the location
-  // reads at resume time.
+  // The page the stream subscribed from, captured at open so resume re-GETs
+  // the bound zones against it rather than the location at resume time.
   pageUrl: string;
   // The zones this stream addressed with operations since subscribing, the
   // registry re-GET on resume so events missed while hidden converge.
@@ -113,6 +109,7 @@ export function createSse(deps: SseDeps): Sse {
   const source = deps.source ?? defaultEventSource();
   const visibility = deps.visibility ?? defaultVisibility();
   const now = deps.now ?? (() => Date.now());
+  const pageUrl = deps.pageUrl ?? (() => currentUrl(doc));
   // The connections keyed by url so a re-scan of a re-inserted container does
   // not open a second stream to the same endpoint.
   const connections = new Map<string, Connection>();
@@ -179,14 +176,15 @@ export function createSse(deps: SseDeps): Sse {
     deps.dispatch("partial:error", { kind: "network", error: null });
   }
 
-  // Open a stream to a url, carrying over the bound zones and page URL of a
-  // paused predecessor so resume knows what to revalidate and where.
-  function openConnection(url: string, previous?: Connection): void {
+  // Open a stream to a url against the resolved owning page, carrying over
+  // the bound zones of a paused predecessor so resume knows what to
+  // revalidate and where.
+  function openConnection(url: string, page: string, previous?: Connection): void {
     if (connections.has(url) || paused) return;
     const connection: Connection = {
       url,
       control: NOOP,
-      pageUrl: previous?.pageUrl ?? currentUrl(doc),
+      pageUrl: page,
       // An independent copy per connection, never the predecessor's Set by
       // reference, so a mutation on the resumed stream cannot leak back into a
       // paused one that was never re-GET.
@@ -201,9 +199,9 @@ export function createSse(deps: SseDeps): Sse {
   }
 
   function scan(root: ParentNode): void {
-    for (const el of Array.from(root.querySelectorAll(`[${SSE_ATTR}]`))) {
+    for (const el of matching(root, `[${SSE_ATTR}]`)) {
       const url = el.getAttribute(SSE_ATTR);
-      if (url !== null && url !== "") openConnection(url);
+      if (url !== null && url !== "") openConnection(url, pageUrl(el));
     }
   }
 
@@ -215,24 +213,20 @@ export function createSse(deps: SseDeps): Sse {
     for (const connection of connections.values()) connection.control.close();
   }
 
-  // On returning visibility every paused connection reopens. Its bound zones are
-  // re-GET only when the tab was hidden long enough to have missed events, so a
-  // flicker between tabs reconnects without storming the server. A longer pause
-  // revalidates with the zone's own cookies so missed events converge.
+  // On returning visibility every paused connection reopens, and bound zones
+  // re-GET only when the tab was hidden past the threshold, so a flicker
+  // reconnects without storming the server. A polled zone may also refetch on
+  // the same flip once its own interval elapsed — the morphs are idempotent.
   function resume(): void {
     paused = false;
     const revalidate = now() - pausedAt >= RESUME_REVALIDATE_MS;
     const pending = [...connections.values()];
     connections.clear();
     for (const previous of pending) {
-      openConnection(previous.url, previous);
+      openConnection(previous.url, previous.pageUrl, previous);
       if (!revalidate) continue;
       for (const zone of previous.bound) {
-        deps.fetch({
-          url: previous.pageUrl,
-          zone,
-          headers: { [HEADER_ZONE]: zone },
-        });
+        deps.fetch({ url: previous.pageUrl, zone });
       }
     }
   }

@@ -104,10 +104,17 @@ class TestZonesOf:
         info = zones_of(template)["z"]
         assert info.poll == 5000
 
-    def test_zone_info_options_mirror_the_scalar_fields(self) -> None:
+    def test_zone_info_carries_structured_options(self) -> None:
         zones = zones_of(_zoned_template())
         assert zones["first"].options == ZoneOptions()
         assert zones["second"].options == ZoneOptions(tag="tbody", lazy="load")
+
+    def test_zone_info_scalars_delegate_to_options(self) -> None:
+        zones = zones_of(_zoned_template())
+        info = zones["second"]
+        assert info.lazy == info.options.lazy
+        assert info.poll == info.options.poll
+        assert info.tag == info.options.tag
 
     def test_zone_info_options_carry_the_delivery_attrs(self) -> None:
         template = Template('{% zone "z" poll="5s" %}b{% endzone %}')

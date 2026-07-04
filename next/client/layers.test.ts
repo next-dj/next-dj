@@ -90,6 +90,14 @@ describe("layer stack", () => {
     expect((found as Element).textContent).toBe("page");
   });
 
+  it("the top-down walk continues past a layer that lacks the zone", async () => {
+    document.body.innerHTML = '<div data-next-zone="only">page</div>';
+    await layers.open(null, "/w/", "m");
+    const found = layers.resolveZone("only", document);
+    expect((found as Element).textContent).toBe("page");
+    layers._reset();
+  });
+
   it("accept fires layer-accepted with the result and re-GETs the host zone", async () => {
     const opener = document.createElement("a");
     opener.setAttribute("href", "/wizard/");
@@ -435,6 +443,144 @@ describe("urlFor resolves the page that owns an element", () => {
     document.body.append(el);
     await layers.open(null, "/photos/1/", "photo");
     expect(layers.urlFor(el)).toBe("/feed/?page=2");
+    layers._reset();
+  });
+});
+
+describe("page-scoped zone resolution", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    window.history.replaceState(null, "", "/host/");
+  });
+
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("a host-page patch resolves the base zone, not the layer twin", async () => {
+    document.body.innerHTML = '<div data-next-zone="dup" id="page">page</div>';
+    const { layers } = makeStack();
+    await layers.open(null, "/modal/", "dup");
+    const found = layers.resolveZone("dup", document, "/host/");
+    expect((found as Element).id).toBe("page");
+    layers._reset();
+  });
+
+  it("the base-page lookup skips a same-named zone inside a dialog", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/modal/", "dup");
+    const late = document.createElement("div");
+    late.setAttribute("data-next-zone", "dup");
+    late.id = "late";
+    document.body.append(late);
+    const found = layers.resolveZone("dup", document, "/host/");
+    expect((found as Element).id).toBe("late");
+    layers._reset();
+  });
+
+  it("a base-page lookup answers null when the zone lives only in the layer", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, "/modal/", "dup");
+    expect(layers.resolveZone("dup", document, "/host/")).toBeNull();
+    layers._reset();
+  });
+
+  it("a layer-page patch resolves the layer's own container", async () => {
+    document.body.innerHTML = '<div data-next-zone="dup" id="page">page</div>';
+    const { layers } = makeStack();
+    await layers.open(null, "/modal/", "dup");
+    const found = layers.resolveZone("dup", document, "/modal/");
+    expect((found as Element).closest("dialog")).not.toBeNull();
+    layers._reset();
+  });
+
+  it("a layer-page lookup stays inside its layer when the zone is missing", async () => {
+    document.body.innerHTML = '<div data-next-zone="dup" id="page">page</div>';
+    const { layers } = makeStack();
+    await layers.open(null, "/modal/", "m");
+    expect(layers.resolveZone("dup", document, "/modal/")).toBeNull();
+    layers._reset();
+  });
+
+  it("a page matching no open scope degrades to the top-down walk", async () => {
+    document.body.innerHTML = '<div data-next-zone="dup" id="page">page</div>';
+    const { layers } = makeStack();
+    await layers.open(null, "/modal/", "dup");
+    const found = layers.resolveZone("dup", document, "/elsewhere/");
+    expect((found as Element).closest("dialog")).not.toBeNull();
+    layers._reset();
+  });
+
+  it("a base-page lookup with no layers open answers the page zone", () => {
+    document.body.innerHTML = '<div data-next-zone="solo" id="s">x</div>';
+    const { layers } = makeStack();
+    const found = layers.resolveZone("solo", document, "/host/");
+    expect((found as Element).id).toBe("s");
+  });
+});
+
+describe("open unwinds when history.push throws", () => {
+  function makeThrowingStack(history: {
+    push(href: string): void;
+    replace(href: string): void;
+  }) {
+    const dispatched: Dispatched[] = [];
+    const fetched: string[] = [];
+    const layers = createLayers({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      fetch: async (request) => {
+        fetched.push(request.url);
+      },
+      document,
+      dialog: mockDialog().adapter,
+      history,
+    });
+    return { layers, dispatched, fetched };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("a throwing pushState tears the half-open layer down and rejects", async () => {
+    const replaced: string[] = [];
+    const { layers, dispatched, fetched } = makeThrowingStack({
+      push: () => {
+        throw new Error("pushState rate limited");
+      },
+      replace: (href) => replaced.push(href),
+    });
+    const opener = document.createElement("a");
+    document.body.append(opener);
+    await expect(layers.open(opener, "/photos/1/", "photo")).rejects.toThrow(
+      "pushState rate limited",
+    );
+    expect(layers.size()).toBe(0);
+    expect(document.querySelector("[data-next-dialog]")).toBeNull();
+    expect(opener.hasAttribute("data-next-busy")).toBe(false);
+    expect(opener.hasAttribute("aria-busy")).toBe(false);
+    // The URL never moved and the body GET never left, so nothing rolls back.
+    expect(replaced).toEqual([]);
+    expect(fetched).toEqual([]);
+    expect(dispatched.some((d) => d.event === "partial:layer-opened")).toBe(false);
+  });
+
+  it("a fresh open succeeds after a failed push released the opener", async () => {
+    let fail = true;
+    const { layers } = makeThrowingStack({
+      push: () => {
+        if (fail) {
+          fail = false;
+          throw new Error("boom");
+        }
+      },
+      replace: () => undefined,
+    });
+    const opener = document.createElement("a");
+    document.body.append(opener);
+    await expect(layers.open(opener, "/photos/1/", "photo")).rejects.toThrow("boom");
+    await layers.open(opener, "/photos/1/", "photo");
+    expect(layers.size()).toBe(1);
     layers._reset();
   });
 });

@@ -148,8 +148,8 @@ not be retained past the receiver call.
      - After a ``FormWizard`` step validates during dispatch. ``cleaned_data`` is a copy of that step's validated data.
    * - ``zone_registered``
      - The compiled page template class
-     - ``template``, ``zone_name``, ``lazy``
-     - Once per compiled composed template, when its named zones are first read. ``lazy`` is the trigger string or ``None``.
+     - ``template``, ``zone_name``, ``lazy``, ``poll``
+     - Once per compiled composed template, when its named zones are first read. ``lazy`` is the trigger string or ``None``, ``poll`` the interval in milliseconds or ``None``.
    * - ``zone_rendered``
      - ``ZoneRenderResult``
      - ``zone_name``, ``page_path``, ``request``, ``duration_ms``

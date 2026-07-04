@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSse } from "./sse";
 import type { EventSourceAdapter, SourceControl, VisibilityAdapter } from "./sse";
+import { manualVisibility } from "./test-doubles";
 import { Wire } from "./wire";
 import { CONTENT_TYPE, HEADER_REQUEST_ID } from "./protocol";
 
@@ -34,31 +35,6 @@ function mockSource(): { adapter: EventSourceAdapter; opened: MockSource[] } {
   return { adapter, opened };
 }
 
-// A mock visibility adapter the test flips and fires by hand.
-function mockVisibility(): {
-  adapter: VisibilityAdapter;
-  set(hidden: boolean): void;
-} {
-  let hidden = false;
-  let listener: (() => void) | null = null;
-  const adapter: VisibilityAdapter = {
-    hidden: () => hidden,
-    onChange(l) {
-      listener = l;
-      return () => {
-        listener = null;
-      };
-    },
-  };
-  return {
-    adapter,
-    set(value) {
-      hidden = value;
-      listener?.();
-    },
-  };
-}
-
 function envelope(ops: unknown[], requestId?: string): string {
   const body: Record<string, unknown> = {
     version: "v1",
@@ -85,23 +61,26 @@ describe("createSse", () => {
   function makeSse(
     source: EventSourceAdapter,
     visibility: VisibilityAdapter,
-    now?: () => number,
+    over: { now?: () => number; pageUrl?: (el: Element) => string } = {},
   ) {
     return createSse({
       apply: (raw) => applied.push(raw),
-      fetch: (request) => fetched.push({ url: request.url, zone: request.zone }),
+      // The request object is recorded as handed over, so an assertion on its
+      // exact shape proves the bridge passes intent and stamps no headers.
+      fetch: (request) => fetched.push(request),
       dispatch: (event, detail) => dispatched.push({ event, detail }),
       document,
       source,
       visibility,
-      ...(now !== undefined ? { now } : {}),
+      ...(over.now !== undefined ? { now: over.now } : {}),
+      ...(over.pageUrl !== undefined ? { pageUrl: over.pageUrl } : {}),
     });
   }
 
   it("scan opens one stream per data-next-sse container and applies events", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const sse = makeSse(adapter, mockVisibility().adapter);
+    const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
     expect(opened).toHaveLength(1);
     expect(opened[0]!.url).toBe("/stream/");
@@ -112,7 +91,7 @@ describe("createSse", () => {
   it("scan opens a stream only once per url", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const sse = makeSse(adapter, mockVisibility().adapter);
+    const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
     sse.scan(document);
     expect(opened).toHaveLength(1);
@@ -122,7 +101,7 @@ describe("createSse", () => {
   it("drops an event whose request_id is the client's own echo", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const sse = makeSse(adapter, mockVisibility().adapter);
+    const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
     sse.remember("r1");
     opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }], "r1"));
@@ -134,7 +113,7 @@ describe("createSse", () => {
   it("keeps only the last 25 request ids in the echo ring", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const sse = makeSse(adapter, mockVisibility().adapter);
+    const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
     for (let i = 0; i < 26; i += 1) sse.remember(`r${i}`);
     opened[0]!.message(envelope([], "r0"));
@@ -146,7 +125,7 @@ describe("createSse", () => {
   it("drops the echo of a mutation whose id the wire fed into the ring", async () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const sse = makeSse(adapter, mockVisibility().adapter);
+    const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
     const envelopeBody = '{"version":"v1","ops":[],"assets":[],"form":null}';
     const sent: { headers: Record<string, string> }[] = [];
@@ -174,7 +153,7 @@ describe("createSse", () => {
   it("fires partial:error on a malformed event and keeps the stream alive", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const sse = makeSse(adapter, mockVisibility().adapter);
+    const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
     opened[0]!.message("{not json");
     const err = dispatched.find((d) => d.event === "partial:error");
@@ -186,7 +165,7 @@ describe("createSse", () => {
   it("evicts the connection and fires partial:error on a fatal error", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const sse = makeSse(adapter, mockVisibility().adapter);
+    const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
     opened[0]!.error(true);
     expect(opened[0]!.closed).toBe(true);
@@ -198,7 +177,7 @@ describe("createSse", () => {
   it("leaves a transient error to the native reconnect without a toast", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const sse = makeSse(adapter, mockVisibility().adapter);
+    const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
     opened[0]!.error(false);
     expect(opened[0]!.closed).toBe(false);
@@ -209,13 +188,13 @@ describe("createSse", () => {
   it("does not reopen a fatally evicted url on resume", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const visibility = mockVisibility();
-    const sse = makeSse(adapter, visibility.adapter);
+    const visibility = manualVisibility();
+    const sse = makeSse(adapter, visibility);
     sse.scan(document);
     opened[0]!.error(true);
     expect(sse.size()).toBe(0);
-    visibility.set(true);
-    visibility.set(false);
+    visibility.setHidden(true);
+    visibility.setHidden(false);
     expect(opened).toHaveLength(1);
     expect(sse.size()).toBe(0);
   });
@@ -223,9 +202,9 @@ describe("createSse", () => {
   it("pauses in a background tab and reconnects with a re-GET of bound zones", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const visibility = mockVisibility();
+    const visibility = manualVisibility();
     let clock = 0;
-    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    const sse = makeSse(adapter, visibility, { now: () => clock });
     sse.scan(document);
     opened[0]!.message(
       envelope([
@@ -233,12 +212,12 @@ describe("createSse", () => {
         { op: "morph", target: { zone: "list" } },
       ]),
     );
-    visibility.set(true);
+    visibility.setHidden(true);
     expect(opened[0]!.closed).toBe(true);
     // A pause longer than the revalidate threshold may have missed events, so
     // resume re-GETs every bound zone.
     clock = 5000;
-    visibility.set(false);
+    visibility.setHidden(false);
     expect(opened).toHaveLength(2);
     expect(opened[1]!.closed).toBe(false);
     expect(sse.size()).toBe(1);
@@ -249,27 +228,76 @@ describe("createSse", () => {
     window.history.replaceState(null, "", "/catalog/?q=novel");
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const visibility = mockVisibility();
+    const visibility = manualVisibility();
     let clock = 0;
-    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    const sse = makeSse(adapter, visibility, { now: () => clock });
     sse.scan(document);
     opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }]));
-    visibility.set(true);
+    visibility.setHidden(true);
     // The address bar moved while the tab was hidden, so resume must still
     // target the page the stream subscribed from, query filters and all.
     window.history.replaceState(null, "", "/catalog/?q=other");
     clock = 5000;
-    visibility.set(false);
+    visibility.setHidden(false);
     expect(fetched.find((f) => f.zone === "poll")?.url).toBe("/catalog/?q=novel");
     window.history.replaceState(null, "", "/");
+  });
+
+  it("captures the owning page through the pageUrl seam, not the address bar", () => {
+    window.history.replaceState(null, "", "/modal/");
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const visibility = manualVisibility();
+    let clock = 0;
+    const sse = makeSse(adapter, visibility, {
+      now: () => clock,
+      // The layer stack answers the host page while a modal holds the address
+      // bar, so the stream subscribes for the page that owns its container.
+      pageUrl: () => "/host/",
+    });
+    sse.scan(document);
+    opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }]));
+    visibility.setHidden(true);
+    clock = 5000;
+    visibility.setHidden(false);
+    expect(fetched.find((f) => f.zone === "poll")?.url).toBe("/host/");
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("a resume re-GET passes zone intent and stamps no headers of its own", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const { adapter, opened } = mockSource();
+    const visibility = manualVisibility();
+    let clock = 0;
+    const sse = makeSse(adapter, visibility, { now: () => clock });
+    sse.scan(document);
+    opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }]));
+    visibility.setHidden(true);
+    clock = 5000;
+    visibility.setHidden(false);
+    // The wire stamps X-Next-Zone from the zone intent, so the exact request
+    // shape carries url and zone and nothing else.
+    expect(fetched).toEqual([{ url: "/", zone: "poll" }]);
+  });
+
+  it("opens a stream when the scan root itself carries data-next-sse", () => {
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    const el = document.querySelector("div")!;
+    const { adapter, opened } = mockSource();
+    const sse = makeSse(adapter, manualVisibility());
+    // A replace patch scans the new wrapper element itself, so the container
+    // binds even when it is the subtree root and not a descendant.
+    sse.scan(el);
+    expect(opened).toHaveLength(1);
+    expect(opened[0]!.url).toBe("/stream/");
   });
 
   it("reconnects without a re-GET when the tab flickers briefly", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const visibility = mockVisibility();
+    const visibility = manualVisibility();
     let clock = 0;
-    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    const sse = makeSse(adapter, visibility, { now: () => clock });
     sse.scan(document);
     opened[0]!.message(
       envelope([
@@ -277,11 +305,11 @@ describe("createSse", () => {
         { op: "morph", target: { zone: "list" } },
       ]),
     );
-    visibility.set(true);
+    visibility.setHidden(true);
     // A momentary alt-tab reconnects the stream but skips the zone re-GET, so
     // flicking between tabs does not storm the server.
     clock = 500;
-    visibility.set(false);
+    visibility.setHidden(false);
     expect(opened).toHaveLength(2);
     expect(opened[1]!.closed).toBe(false);
     expect(sse.size()).toBe(1);
@@ -291,7 +319,7 @@ describe("createSse", () => {
   it("applies a non-record event body without binding any zone", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const sse = makeSse(adapter, mockVisibility().adapter);
+    const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
     opened[0]!.message("[1,2,3]");
     expect(applied).toEqual([[1, 2, 3]]);
@@ -300,23 +328,23 @@ describe("createSse", () => {
   it("binds no zone when the event ops field is not an array", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const visibility = mockVisibility();
+    const visibility = manualVisibility();
     let clock = 0;
-    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    const sse = makeSse(adapter, visibility, { now: () => clock });
     sse.scan(document);
     opened[0]!.message('{"ops":"nope"}');
-    visibility.set(true);
+    visibility.setHidden(true);
     clock = 5000;
-    visibility.set(false);
+    visibility.setHidden(false);
     expect(fetched).toHaveLength(0);
   });
 
   it("skips a non-record op and an op without a zone when binding", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const visibility = mockVisibility();
+    const visibility = manualVisibility();
     let clock = 0;
-    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    const sse = makeSse(adapter, visibility, { now: () => clock });
     sse.scan(document);
     opened[0]!.message(
       JSON.stringify({
@@ -326,56 +354,56 @@ describe("createSse", () => {
         form: null,
       }),
     );
-    visibility.set(true);
+    visibility.setHidden(true);
     clock = 5000;
-    visibility.set(false);
+    visibility.setHidden(false);
     expect(fetched.map((f) => f.zone)).toEqual(["poll"]);
   });
 
   it("resume copies bound zones so a late event on the paused stream does not leak", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const visibility = mockVisibility();
+    const visibility = manualVisibility();
     let clock = 0;
-    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    const sse = makeSse(adapter, visibility, { now: () => clock });
     sse.scan(document);
     opened[0]!.message(envelope([{ op: "refresh", zone: "poll" }]));
-    visibility.set(true);
+    visibility.setHidden(true);
     clock = 5000;
-    visibility.set(false);
+    visibility.setHidden(false);
     fetched.length = 0;
     // The paused predecessor still holds its message closure. A stray event on
     // it must not bind into the resumed connection, which carries its own copy.
     opened[0]!.message(envelope([{ op: "refresh", zone: "stale" }]));
     clock = 10000;
-    visibility.set(true);
+    visibility.setHidden(true);
     clock = 15000;
-    visibility.set(false);
+    visibility.setHidden(false);
     expect(fetched.map((f) => f.zone)).toEqual(["poll"]);
   });
 
   it("caps the bound registry so a long sleep does not re-GET an unbounded set", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
-    const visibility = mockVisibility();
+    const visibility = manualVisibility();
     let clock = 0;
-    const sse = makeSse(adapter, visibility.adapter, () => clock);
+    const sse = makeSse(adapter, visibility, { now: () => clock });
     sse.scan(document);
     const ops = Array.from({ length: 100 }, (_, i) => ({
       op: "refresh",
       zone: `zone-${i}`,
     }));
     opened[0]!.message(envelope(ops));
-    visibility.set(true);
+    visibility.setHidden(true);
     clock = 5000;
-    visibility.set(false);
+    visibility.setHidden(false);
     expect(fetched).toHaveLength(64);
   });
 
   it("ignores a data-next-sse container with an empty url", () => {
     document.body.innerHTML = '<div data-next-sse=""></div>';
     const { adapter, opened } = mockSource();
-    const sse = makeSse(adapter, mockVisibility().adapter);
+    const sse = makeSse(adapter, manualVisibility());
     sse.scan(document);
     expect(opened).toHaveLength(0);
     expect(sse.size()).toBe(0);

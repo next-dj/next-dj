@@ -38,7 +38,7 @@ def override_next_settings(**overrides: object) -> Iterator[None]:
 
     The merge is shallow: top-level keys supplied as kwargs replace any
     values present in the current `NEXT_FRAMEWORK`. Relies on Django's
-    `override_settings` underneath, so the `setting_changed` →
+    `override_settings` underneath, so the `setting_changed` then
     `settings_reloaded` signal chain fires automatically and framework
     managers pick up the new values.
     """

@@ -26,6 +26,7 @@ function makeWire(
   const dispatched: { event: string; detail: Record<string, unknown> }[] = [];
   const navigated: string[] = [];
   const envelopes: unknown[] = [];
+  const pages: (string | undefined)[] = [];
   const calls: { url: string; init: RequestInit }[] = [];
   const wire = new Wire({
     fetch: (url, init) => {
@@ -34,11 +35,14 @@ function makeWire(
     },
     navigate: (url) => navigated.push(url),
     dispatch: (event, detail) => dispatched.push({ event, detail }),
-    onEnvelope: (raw) => envelopes.push(raw),
+    onEnvelope: (raw, _response, _snapshot, _key, page) => {
+      envelopes.push(raw);
+      pages.push(page);
+    },
     version: () => opts.version ?? "v1",
     csrf: () => opts.csrf,
   });
-  return { wire, dispatched, navigated, envelopes, calls };
+  return { wire, dispatched, navigated, envelopes, pages, calls };
 }
 
 const ENVELOPE = '{"version":"v1","ops":[],"assets":[],"form":null}';
@@ -238,7 +242,7 @@ describe("Wire mutation lock", () => {
 });
 
 describe("Wire safe-GET queue", () => {
-  it("aborts the in-flight GET of the same zone (latest-wins)", async () => {
+  it("aborts the in-flight GET of the same page and zone (latest-wins)", async () => {
     const signals: AbortSignal[] = [];
     let resolveFirst!: (r: Response) => void;
     let n = 0;
@@ -248,12 +252,49 @@ describe("Wire safe-GET queue", () => {
       if (n === 1) return new Promise<Response>((r) => (resolveFirst = r));
       return Promise.resolve(envelopeResponse(ENVELOPE));
     });
-    const first = h.wire.fetch({ url: "/p1/", zone: "list" });
-    const second = h.wire.fetch({ url: "/p2/", zone: "list" });
+    const first = h.wire.fetch({ url: "/p/", zone: "list" });
+    const second = h.wire.fetch({ url: "/p/", zone: "list" });
     expect(signals[0]!.aborted).toBe(true);
     resolveFirst(envelopeResponse(ENVELOPE));
     await Promise.all([first, second]);
     // Only the latest response is applied, the stale one is dropped.
+    expect(h.envelopes).toHaveLength(1);
+  });
+
+  it("runs same-zone GETs for different pages independently", async () => {
+    const signals: AbortSignal[] = [];
+    let resolveFirst!: (r: Response) => void;
+    let n = 0;
+    const h = makeWire((_url, init) => {
+      signals.push(init.signal!);
+      n += 1;
+      if (n === 1) return new Promise<Response>((r) => (resolveFirst = r));
+      return Promise.resolve(envelopeResponse(ENVELOPE));
+    });
+    // Two pages sharing a zone name must not abort each other.
+    const first = h.wire.fetch({ url: "/host/", zone: "list" });
+    const second = h.wire.fetch({ url: "/modal/", zone: "list" });
+    expect(signals[0]!.aborted).toBe(false);
+    resolveFirst(envelopeResponse(ENVELOPE));
+    await Promise.all([first, second]);
+    expect(h.envelopes).toHaveLength(2);
+  });
+
+  it("a re-filtered GET of the same page supersedes across query strings", async () => {
+    const signals: AbortSignal[] = [];
+    let resolveFirst!: (r: Response) => void;
+    let n = 0;
+    const h = makeWire((_url, init) => {
+      signals.push(init.signal!);
+      n += 1;
+      if (n === 1) return new Promise<Response>((r) => (resolveFirst = r));
+      return Promise.resolve(envelopeResponse(ENVELOPE));
+    });
+    const first = h.wire.fetch({ url: "/p/?window=1h", zone: "totals" });
+    const second = h.wire.fetch({ url: "/p/?window=6h", zone: "totals" });
+    expect(signals[0]!.aborted).toBe(true);
+    resolveFirst(envelopeResponse(ENVELOPE));
+    await Promise.all([first, second]);
     expect(h.envelopes).toHaveLength(1);
   });
 
@@ -263,6 +304,24 @@ describe("Wire safe-GET queue", () => {
       h.wire.fetch({ url: "/a/", zone: "a" }),
       h.wire.fetch({ url: "/b/", zone: "b" }),
     ]);
+    expect(h.envelopes).toHaveLength(2);
+  });
+
+  it("a mutating POST with a zone intent never joins the GET queue", async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    let resolveFirst!: (r: Response) => void;
+    let n = 0;
+    const h = makeWire((_url, init) => {
+      signals.push(init.signal ?? undefined);
+      n += 1;
+      if (n === 1) return new Promise<Response>((r) => (resolveFirst = r));
+      return Promise.resolve(envelopeResponse(ENVELOPE));
+    });
+    const inflight = h.wire.fetch({ url: "/p/", zone: "z" });
+    await h.wire.fetch({ url: "/p/", method: "POST", uid: "u1", zone: "z" });
+    expect(signals[0]!.aborted).toBe(false);
+    resolveFirst(envelopeResponse(ENVELOPE));
+    await inflight;
     expect(h.envelopes).toHaveLength(2);
   });
 
@@ -281,10 +340,55 @@ describe("Wire safe-GET queue", () => {
       }
       return Promise.resolve(envelopeResponse(ENVELOPE));
     });
-    const first = h.wire.fetch({ url: "/p1/", zone: "list" });
-    const second = h.wire.fetch({ url: "/p2/", zone: "list" });
+    const first = h.wire.fetch({ url: "/p/", zone: "list" });
+    const second = h.wire.fetch({ url: "/p/", zone: "list" });
     await Promise.all([first, second]);
     expect(h.dispatched.some((d) => d.event === "partial:error")).toBe(false);
+  });
+});
+
+describe("Wire page threading", () => {
+  it("threads the fetched url as the page of a safe zone GET", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "/host/?q=1", zone: "list" });
+    expect(h.pages).toEqual(["/host/?q=1"]);
+  });
+
+  it("a mutation applies with no page, keeping the top-down resolve", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({
+      url: "/_next/form/u1/",
+      method: "POST",
+      uid: "u1",
+      zone: "z",
+    });
+    expect(h.pages).toEqual([undefined]);
+  });
+
+  it("an abortable validate POST applies with no page", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({
+      url: "/f/",
+      method: "POST",
+      zone: "validate:u",
+      abortable: true,
+    });
+    expect(h.pages).toEqual([undefined]);
+  });
+
+  it("a zone-less GET applies with no page", async () => {
+    const h = makeWire(async () => envelopeResponse(ENVELOPE));
+    await h.wire.fetch({ url: "/list/" });
+    expect(h.pages).toEqual([undefined]);
+  });
+
+  it("the parse-hook path threads the page alongside the foreign envelope", async () => {
+    const h = makeWire(async () =>
+      envelopeResponse("raw", { type: "text/vnd.next.stream+html" }),
+    );
+    h.wire.parseHook("text/vnd.next.stream+html", () => ({ version: "v1", ops: [] }));
+    await h.wire.fetch({ url: "/list/", zone: "z" });
+    expect(h.pages).toEqual(["/list/"]);
   });
 });
 

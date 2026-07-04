@@ -36,7 +36,8 @@ export interface WireRequest {
   url: string;
   method?: string;
   // The lock key for mutations is the form uid, the queue key for safe GETs is
-  // the target zone. Absent, the request runs unqueued and unlocked.
+  // the url and target zone pair. Absent both, the request runs unqueued and
+  // unlocked.
   uid?: string;
   zone?: string;
   headers?: Record<string, string>;
@@ -50,12 +51,14 @@ export interface WireRequest {
 }
 
 // The snapshot is the dirty counter captured at fetch time, threaded to apply so
-// a field touched after this request is protected from its own response.
+// a field touched after this request is protected from its own response. The
+// page is the URL a safe zone GET fetched, absent on mutations.
 export type EnvelopeHandler = (
   raw: unknown,
   response: Response,
   snapshot: number,
   key: string | undefined,
+  page: string | undefined,
 ) => void;
 
 // A parse-hook turns a non-default content-type body into a JSON-ish envelope.
@@ -164,15 +167,26 @@ export class Wire {
       if (this.#busy.has(request.uid!)) return;
       this.#busy.add(request.uid!);
     }
-    const queueKey = safe || request.abortable === true ? request.zone : undefined;
+    const queueKey = this.#queueKey(request, safe);
     const entry = queueKey !== undefined ? this.#enqueue(queueKey) : undefined;
     try {
-      await this.#run(request, method, entry);
+      await this.#run(request, method, queueKey, entry);
     } finally {
       if (locked) {
         this.#busy.delete(request.uid!);
       }
     }
+  }
+
+  // A safe GET queues per path+zone: two pages may legally GET the same zone
+  // name at once, while a re-filtered GET of the same page differs only in
+  // query and must supersede its predecessor. The space separator cannot
+  // appear in either part. An abortable POST keeps the bare zone key that
+  // abort() addresses.
+  #queueKey(request: WireRequest, safe: boolean): string | undefined {
+    if (request.zone === undefined) return undefined;
+    if (safe) return `${request.url.split("?")[0]} ${request.zone}`;
+    return request.abortable === true ? request.zone : undefined;
   }
 
   // A new safe GET to a target aborts the in-flight one (latest-wins). The
@@ -193,6 +207,7 @@ export class Wire {
   async #run(
     request: WireRequest,
     method: string,
+    queueKey: string | undefined,
     entry: QueueEntry | undefined,
   ): Promise<void> {
     const headers = this.#headers(request, method);
@@ -217,7 +232,7 @@ export class Wire {
       return;
     }
     // A stale safe-GET response that lost its race is dropped silently.
-    if (entry !== undefined && this.#queues.get(request.zone!)?.seq !== entry.seq) {
+    if (entry !== undefined && this.#queues.get(queueKey!)?.seq !== entry.seq) {
       return;
     }
     await this.#classify(request, method, response, snapshot);
@@ -244,12 +259,15 @@ export class Wire {
       });
       return;
     }
+    // Only a safe zone GET names a page: mutations keep the unscoped resolve.
+    const page =
+      SAFE_METHODS.has(method) && request.zone !== undefined ? request.url : undefined;
     const contentType = response.headers.get("content-type") ?? "";
     const baseType = contentType.replace(/;.*$/, "").trim();
     const hook = this.#parseHooks.get(baseType);
     if (hook !== undefined) {
       const body = await this.#text(response);
-      this.#onEnvelope(hook(response, body), response, snapshot, request.key);
+      this.#onEnvelope(hook(response, body), response, snapshot, request.key, page);
       return;
     }
     // Any non-envelope content-type, or a redirected response, is a full
@@ -279,7 +297,7 @@ export class Wire {
       this.#dispatch("partial:error", { kind: "parse", body, error });
       return;
     }
-    this.#onEnvelope(raw, response, snapshot, request.key);
+    this.#onEnvelope(raw, response, snapshot, request.key, page);
   }
 
   #text(response: Response): Promise<string> {

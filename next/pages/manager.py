@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, overload
 
 from django.http import HttpRequest, HttpResponse
 from django.http.response import HttpResponseBase
-from django.template import Context as DjangoTemplateContext, Template
+from django.template import Context as DjangoTemplateContext, Origin, Template
 from django.urls import URLPattern, path
 
 from next.conf import next_framework_settings
@@ -410,7 +410,12 @@ class Page:
             self._record_template_source_mtimes(file_path)
         compiled = self._compiled_registry.get(file_path)
         if compiled is None:
-            compiled = Template(self._template_registry[file_path])
+            # The origin makes compile errors name the page path.
+            compiled = Template(
+                self._template_registry[file_path],
+                origin=Origin(str(file_path)),
+                name=str(file_path),
+            )
             self._compiled_registry[file_path] = compiled
         return compiled
 

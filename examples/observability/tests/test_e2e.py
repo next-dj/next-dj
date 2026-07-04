@@ -242,6 +242,7 @@ class TestLazyLoadZone:
         body = client.get("/").content.decode()
         assert 'data-next-lazy="load"' in body
         assert 'data-next-zone="busiest-pages"' in body
+        assert "Busiest pages" in body
         assert "Loading the busiest pages" in body
 
     def test_lazy_zone_get_delivers_the_body(self, client) -> None:
@@ -250,7 +251,8 @@ class TestLazyLoadZone:
         envelope = envelope_of(response)
         assert envelope.zone_targets() == ["busiest-pages"]
         html = envelope.html_for_zone("busiest-pages")
-        assert "Busiest pages" in html
+        assert "stats/pages/page.py" in html
+        assert "No pages have been rendered yet." not in html
         assert "Loading the busiest pages" not in html
 
 

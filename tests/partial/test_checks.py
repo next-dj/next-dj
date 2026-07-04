@@ -155,6 +155,36 @@ class TestLazyPlaceholderCheck:
             assert checks.check_lazy_zone_has_placeholder() == []
 
 
+class TestComposedTemplateCompileCheck:
+    """`next.E072` fires when a composed page template fails to compile."""
+
+    def test_placeholder_without_lazy_errors(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "broken")
+        body = '{% zone "z" %}<p>{{ a }}</p>{% placeholder %}<p>p</p>{% endzone %}'
+        with _composed_pages((page_file, body)):
+            messages = checks.check_composed_templates_compile()
+        assert [m.id for m in messages] == [checks.E_COMPOSED_TEMPLATE_SYNTAX]
+        assert str(page_file) in messages[0].msg
+        assert "placeholder requires lazy=" in messages[0].msg
+
+    def test_healthy_page_is_silent(self, tmp_path: Path) -> None:
+        page_file = _page_dir(tmp_path, "compiles")
+        body = '{% zone "z" %}<p>{{ a }}</p>{% endzone %}'
+        with _composed_pages((page_file, body)):
+            assert checks.check_composed_templates_compile() == []
+
+    def test_only_the_broken_page_is_reported(self, tmp_path: Path) -> None:
+        healthy = _page_dir(tmp_path, "fine")
+        broken = _page_dir(tmp_path, "torn")
+        with _composed_pages(
+            (healthy, '{% zone "ok" %}<p>{{ a }}</p>{% endzone %}'),
+            (broken, '{% zone "z" %}b{% placeholder %}p{% endzone %}'),
+        ):
+            messages = checks.check_composed_templates_compile()
+        assert [m.id for m in messages] == [checks.E_COMPOSED_TEMPLATE_SYNTAX]
+        assert messages[0].obj == str(broken)
+
+
 class TestWithOverZoneCheck:
     """`next.W067` warns when a `{% with %}` wraps a zone directly."""
 

@@ -39,7 +39,9 @@ A selector or a swap strategy never crosses the wire, so the client cannot be as
 The Apply
 ---------
 
-The client narrows the envelope and runs each operation against the addressed zone, resolving a layer zone before the same-named page zone.
+The client narrows the envelope and runs each operation against the addressed zone.
+A patch answering a zone GET resolves inside the page that GET fetched, so a base-page refresh cannot morph a same-named zone in an open modal.
+A patch with no page attached resolves top-down, a layer zone before the same-named page zone.
 The built-in verbs are ``morph``, ``replace``, ``inner``, ``append``, ``prepend``, ``remove``, ``refresh``, ``event``, ``toast``, ``url``, ``visit``, ``layer.open``, ``layer.close``, and ``context``.
 ``morph`` is the default, reconciling the live subtree in place against the new markup so focus, the caret, and a field the user is editing survive the update.
 A reused node keeps its own state, scroll position included, because it never leaves the document.

@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPartial } from "./partial";
 import type { PartialAdapters, PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
-import type { EventSourceAdapter, SourceControl, VisibilityAdapter } from "./sse";
-import type { Clock } from "./wire";
+import type { EventSourceAdapter, SourceControl } from "./sse";
+import { manualPollClock, manualVisibility } from "./test-doubles";
 
 // A patches response the configured fetch returns so the wire resolves without a
 // real server.
@@ -32,49 +32,6 @@ function mockSource(): {
     },
   };
   return { adapter, opened };
-}
-
-// A visibility adapter the harness flips by hand. It holds every onChange
-// subscriber, since the SSE bridge and the trigger pollers share the seam.
-function mockVisibility(): { adapter: VisibilityAdapter; set(hidden: boolean): void } {
-  let hidden = false;
-  const listeners = new Set<() => void>();
-  const adapter: VisibilityAdapter = {
-    hidden: () => hidden,
-    onChange(l) {
-      listeners.add(l);
-      return () => {
-        listeners.delete(l);
-      };
-    },
-  };
-  return {
-    adapter,
-    set(value) {
-      hidden = value;
-      for (const l of listeners) l();
-    },
-  };
-}
-
-// A single-slot clock whose tick() drives one self-rescheduling poll cycle.
-function mockPollClock(): Clock & { tick(): void } {
-  let pending: (() => void) | null = null;
-  return {
-    now: () => 0,
-    setTimeout: (handler) => {
-      pending = handler;
-      return 1;
-    },
-    clearTimeout: () => {
-      pending = null;
-    },
-    tick() {
-      const h = pending;
-      pending = null;
-      h?.();
-    },
-  };
 }
 
 function makeSurface() {
@@ -347,7 +304,7 @@ describe("createPartial surface", () => {
 
   it("_configure stops the pollers the previous configuration armed", async () => {
     document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
-    const clock = mockPollClock();
+    const clock = manualPollClock();
     const calls: string[] = [];
     const fetch = async (url: string) => {
       calls.push(url);
@@ -367,7 +324,7 @@ describe("createPartial surface", () => {
   it("a poll tick GETs the host page while a layer holds the address bar", async () => {
     window.history.replaceState(null, "", "/host/");
     document.body.innerHTML = '<div data-next-zone="t" data-next-poll="5000"></div>';
-    const clock = mockPollClock();
+    const clock = manualPollClock();
     const calls: string[] = [];
     partial._configure({
       document,
@@ -386,6 +343,38 @@ describe("createPartial surface", () => {
     clock.tick();
     await Promise.resolve();
     expect(calls).toEqual(["/host/"]);
+    partial.layers._reset();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("a host-page zone GET morphs the base zone, not an open layer's twin", async () => {
+    window.history.replaceState(null, "", "/host/");
+    document.body.innerHTML = '<div data-next-zone="dup" id="base">stale</div>';
+    partial._configure({
+      document,
+      dialog: mockDialog(),
+      fetch: async (url) => {
+        const html =
+          url === "/host/"
+            ? '<div data-next-zone="dup" id="base">host</div>'
+            : '<div data-next-zone="dup">modal</div>';
+        return patchesResponse(
+          JSON.stringify({
+            version: "v1",
+            ops: [{ op: "morph", target: { zone: "dup" }, html }],
+            assets: [],
+            form: null,
+          }),
+        );
+      },
+      navigate: () => {},
+    });
+    await partial.layers.open(null, "/modal/", "dup");
+    const layerZone = document.querySelector('dialog [data-next-zone="dup"]')!;
+    expect(layerZone.textContent).toBe("modal");
+    await partial.fetch({ url: "/host/", zone: "dup" });
+    expect(document.querySelector("#base")!.textContent).toBe("host");
+    expect(layerZone.textContent).toBe("modal");
     partial.layers._reset();
     window.history.replaceState(null, "", "/");
   });
@@ -456,7 +445,7 @@ describe("createPartial surface", () => {
     partial._configure({
       document,
       source: source.adapter,
-      visibility: mockVisibility().adapter,
+      visibility: manualVisibility(),
     });
     partial.sse.scan(document);
     expect(source.opened).toHaveLength(1);
@@ -474,13 +463,13 @@ describe("createPartial surface", () => {
   it("an SSE resume re-GETs the bound zones through the wire", async () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const source = mockSource();
-    const visibility = mockVisibility();
+    const visibility = manualVisibility();
     const calls: { url: string; init: RequestInit }[] = [];
     let clock = 0;
     partial._configure({
       document,
       source: source.adapter,
-      visibility: visibility.adapter,
+      visibility,
       fetch: async (url, init) => {
         calls.push({ url, init });
         return patchesResponse();
@@ -501,9 +490,9 @@ describe("createPartial surface", () => {
     // The refresh op itself fetched once. Dropping that call proves the next
     // one comes from the resume revalidation, not the stream event.
     calls.length = 0;
-    visibility.set(true);
+    visibility.setHidden(true);
     clock = 5000;
-    visibility.set(false);
+    visibility.setHidden(false);
     await Promise.resolve();
     nowSpy.mockRestore();
     expect(

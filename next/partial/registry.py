@@ -80,17 +80,28 @@ def register_patch_op(name: str) -> None:
 class ZoneInfo:
     """One compiled zone of a composed page template.
 
-    `lazy`, `poll`, and `tag` mirror the structured `options` for the
-    read model, while the standalone render path consumes `options`
-    whole so no mode is lost between the two render paths.
+    The render paths consume `options` whole, and the scalar read
+    surface delegates to it so no mode can drift between the two.
     """
 
     name: str
-    lazy: str | None
-    poll: int | None
-    tag: str
     partial: "ZonePartial"
     options: "ZoneOptions"
+
+    @property
+    def lazy(self) -> str | None:
+        """Lazy trigger of the zone, read from its options."""
+        return self.options.lazy
+
+    @property
+    def poll(self) -> int | None:
+        """Poll interval of the zone in milliseconds, read from its options."""
+        return self.options.poll
+
+    @property
+    def tag(self) -> str:
+        """Wrapper tag name of the zone, read from its options."""
+        return self.options.tag
 
 
 _zone_cache: "WeakKeyDictionary[Template, Mapping[str, ZoneInfo]]" = WeakKeyDictionary()
@@ -103,9 +114,6 @@ def _zones_from_template(template: "Template") -> dict[str, ZoneInfo]:
     for node in nodes:
         zones[node.name] = ZoneInfo(
             name=node.name,
-            lazy=node.options.lazy,
-            poll=node.options.poll,
-            tag=node.options.tag,
             partial=node.partial,
             options=node.options,
         )
@@ -131,8 +139,8 @@ def zones_of(template: "Template") -> "Mapping[str, ZoneInfo]":
                 sender=type(template),
                 template=template,
                 zone_name=info.name,
-                lazy=info.lazy,
-                poll=info.poll,
+                lazy=info.options.lazy,
+                poll=info.options.poll,
             )
     return zones
 

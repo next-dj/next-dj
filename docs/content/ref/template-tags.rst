@@ -158,8 +158,10 @@ Partial Rendering
    A lazy zone renders only its ``{% placeholder %}`` branch up front and fetches the body on ``ready`` for ``load`` or when it scrolls into view for ``revealed``.
    Any other ``lazy`` value raises ``TemplateSyntaxError`` at parse time.
 
-   ``poll="<interval>"`` re-GETs the body on the interval, read from a ``5s`` or ``1500ms`` literal or a bare number of milliseconds.
+   ``poll="<interval>"`` re-GETs the body on the interval, read from a quoted ``5s`` or ``1500ms`` literal or a bare number of milliseconds, never from a template variable.
    It is mutually exclusive with ``lazy=``, and an interval below one second, above the browser timer ceiling, or malformed raises ``TemplateSyntaxError`` at parse time.
+
+   An option without ``=`` and an unknown option key also raise ``TemplateSyntaxError`` at parse time, so a typo fails the compile rather than being silently dropped.
 
 .. describe:: {% placeholder %}
 

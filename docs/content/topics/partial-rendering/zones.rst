@@ -88,8 +88,10 @@ An interval below one second or above the browser timer ceiling fails when the t
 
 The wrapper carries ``data-next-poll`` with the resolved milliseconds on the full render.
 A partial response for the zone keeps the interval on its wrapper and drops only the lazy hint, so the live element stays the source of truth across morphs.
-A hidden tab pauses the poll timers.
-A tab hidden long enough to have missed a tick refreshes every polling zone on its return to the foreground, while a brief flicker between tabs re-arms the timers without a fetch, so switching windows does not storm the server.
+Zones that share an interval batch into one zone request per owning page.
+A hidden tab holds no poll timers.
+On its return to the foreground each zone refetches only when its own interval elapsed while hidden, and otherwise the countdown resumes with the remaining time.
+A brief flicker between tabs therefore fetches nothing, and switching windows does not storm the server.
 A polling zone shows its body, so it cannot also be ``lazy=``, the two modes are exclusive and combining them is a compile error.
 
 The Wrapper Element

@@ -1,7 +1,7 @@
 """Zone template tag, its node, and the standalone zone-body renderable."""
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast, override
 
 from django.template import Library, TemplateSyntaxError
@@ -53,23 +53,32 @@ def _wrap_zone(tag: str, name: str, body: str, *, extra: str = "") -> SafeString
 class ZoneOptions:
     """Compile-time rendering options of one zone.
 
-    The wrapper attribute strings are assembled here once at parse time,
-    so the two render paths read the same precomputed values and a new
-    mode cannot diverge the full render from the standalone delivery.
+    Both render paths derive their wrapper attributes from these options,
+    so a new mode cannot diverge the full render from the standalone
+    delivery.
     """
 
     tag: str = _DEFAULT_TAG
     lazy: str | None = None
     poll: int | None = None
-    full_attrs: str = field(init=False)
-    delivery_attrs: str = field(init=False)
 
     def __post_init__(self) -> None:
-        """Precompute the wrapper attribute strings from the mode options."""
-        delivery = "" if self.poll is None else f' {POLL_ATTR}="{self.poll}"'
-        full = delivery if self.lazy is None else f' {LAZY_ATTR}="{self.lazy}"'
-        object.__setattr__(self, "full_attrs", full)
-        object.__setattr__(self, "delivery_attrs", delivery)
+        """Reject the exclusive lazy and poll modes appearing together."""
+        if self.lazy is not None and self.poll is not None:
+            msg = "ZoneOptions cannot combine poll with lazy, the modes are exclusive."
+            raise ValueError(msg)
+
+    @property
+    def delivery_attrs(self) -> str:
+        """Wrapper attributes of a delivered zone body, without the lazy hint."""
+        return "" if self.poll is None else f' {POLL_ATTR}="{self.poll}"'
+
+    @property
+    def full_attrs(self) -> str:
+        """Wrapper attributes of the zone on a full page render."""
+        if self.lazy is None:
+            return self.delivery_attrs
+        return f' {LAZY_ATTR}="{self.lazy}"'
 
 
 def render_zone_standalone(
@@ -187,7 +196,11 @@ def _parse_options(token: "Token") -> tuple[str, ZoneOptions]:
     for part in bits[_ZONE_NAME_INDEX + 1 :]:
         key, sep, raw = part.partition("=")
         if not sep:
-            continue
+            msg = (
+                f"{{% zone %}} option {part!r} is missing '='. Write options "
+                'as key="value" with no spaces around =.'
+            )
+            raise TemplateSyntaxError(msg)
         value = _strip_quotes(raw)
         if key == _TAG_KWARG:
             tag = value or _DEFAULT_TAG
@@ -195,10 +208,18 @@ def _parse_options(token: "Token") -> tuple[str, ZoneOptions]:
             lazy = _validate_lazy(value)
         elif key == _POLL_KWARG:
             poll = _validate_poll(value)
-    if lazy is not None and poll is not None:
+        else:
+            msg = (
+                f"{{% zone %}} got an unknown option {key!r}. The valid "
+                "options are tag, lazy, and poll."
+            )
+            raise TemplateSyntaxError(msg)
+    try:
+        options = ZoneOptions(tag=tag, lazy=lazy, poll=poll)
+    except ValueError as error:
         msg = "{% zone %} cannot combine poll= with lazy=, the modes are exclusive."
-        raise TemplateSyntaxError(msg)
-    return name, ZoneOptions(tag=tag, lazy=lazy, poll=poll)
+        raise TemplateSyntaxError(msg) from error
+    return name, options
 
 
 def _validate_lazy(value: str) -> str:
@@ -217,15 +238,17 @@ def _validate_poll(value: str) -> int:
     ASCII. An interval outside the floor-to-ceiling range or a malformed
     literal fails at compile time, the same honest-fail as lazy.
     """
-    text = value.strip()
-    if text.endswith("ms"):
-        digits, scale = text[:-2], 1
-    elif text.endswith("s"):
-        digits, scale = text[:-1], _MS_PER_SECOND
+    if value.endswith("ms"):
+        digits, scale = value[:-2], 1
+    elif value.endswith("s"):
+        digits, scale = value[:-1], _MS_PER_SECOND
     else:
-        digits, scale = text, 1
+        digits, scale = value, 1
     if _POLL_DIGITS.fullmatch(digits) is None:
-        msg = f"{{% zone %}} poll must be a duration like 5s or 1500ms, got {value!r}."
+        msg = (
+            "{% zone %} poll must be a quoted literal duration like 5s or "
+            f"1500ms, got {value!r}. Template variables are not read."
+        )
         raise TemplateSyntaxError(msg)
     ms = int(digits) * scale
     if ms < _MIN_POLL_MS:
@@ -254,8 +277,8 @@ def do_zone(parser: "Parser", token: "Token") -> ZoneNode:
         parser.delete_first_token()
     if placeholder is not None and options.lazy is None:
         msg = (
-            "{% zone %} placeholder requires lazy=, a zone that shows "
-            "its body never renders the placeholder branch."
+            f'{{% zone "{name}" %}} placeholder requires lazy=, a zone that '
+            "shows its body never renders the placeholder branch."
         )
         raise TemplateSyntaxError(msg)
     partial = ZonePartial(
