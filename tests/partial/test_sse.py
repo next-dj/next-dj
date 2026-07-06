@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
@@ -354,6 +354,52 @@ async def _disconnect_midpull(async_request_obj: object) -> _FinalizedSource:
     await stream.__anext__()
     await stream.aclose()
     return source
+
+
+class _SyncFinalizedSource:
+    """Sync source that records its generator finalization in a flag."""
+
+    def __init__(self) -> None:
+        """Start unfinalized with a fresh body generator."""
+        self.finalized = False
+        self._gen = self._iterate()
+
+    def __iter__(self) -> Iterator[Patches]:
+        """Return the single body generator."""
+        return self._gen
+
+    def _iterate(self) -> Iterator[Patches]:
+        """Yield two items, marking finalized in the closing finally."""
+        try:
+            yield _patches()
+            yield _patches()
+        finally:
+            self.finalized = True
+
+    def close(self) -> None:
+        """Close the body generator so the stream can release it."""
+        self._gen.close()
+
+
+class TestSyncSourceCleanup:
+    """The sync stream closes its source generator on end or disconnect."""
+
+    def test_exhaustion_closes_the_source(self, request_obj: object) -> None:
+        source = _SyncFinalizedSource()
+        response = PatchEventStream(request_obj, source)
+        _consume(response)
+        assert source.finalized is True
+
+    def test_disconnect_closes_the_source(self, request_obj: object) -> None:
+        source = _SyncFinalizedSource()
+        response = PatchEventStream(request_obj, source)
+        stream = response.streaming_content
+        next(stream)
+        next(stream)
+        # a mid-stream disconnect closes the byte generator, whose finally
+        # closes the source generator without draining it
+        response._iterator.close()
+        assert source.finalized is True
 
 
 class TestAsyncDisconnectCleanup:

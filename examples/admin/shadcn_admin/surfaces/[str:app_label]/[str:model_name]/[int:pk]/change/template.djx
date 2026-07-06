@@ -1,1 +1,1 @@
-{% component "admin_form" %}
+{% zone "record" %}{% component "admin_form" %}{% endzone %}

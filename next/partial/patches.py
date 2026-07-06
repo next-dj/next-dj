@@ -216,6 +216,23 @@ class CrossSiteHrefError(ValueError):
         )
 
 
+class LayerHrefWithoutZoneError(ValueError):
+    """Raised when a layer seeds an href but names no zone to load it into.
+
+    The client fetch path needs a zone to know which fragment of the href
+    to pull, so an href without one would silently open an empty modal,
+    which is a caller bug refused at the builder.
+    """
+
+    def __init__(self, href: str) -> None:
+        """Store the rejected href and build a readable message."""
+        self.href = href
+        super().__init__(
+            f'href "{href}" needs a zone to load into, name the page zone that '
+            'receives the content, for example layer_open(href=..., zone="record").'
+        )
+
+
 def _is_reserved_event(name: str) -> bool:
     """Return True when the name belongs to the framework client-bus channel."""
     return name in _RESERVED_EVENT_NAMES or name.startswith(_RESERVED_EVENT_PREFIXES)
@@ -625,9 +642,12 @@ class Patches:
     ) -> "Patches":
         """Open a server-initiated layer, optionally seeding a zone or href.
 
-        A seeded href must be same-site, a cross-site value raises
-        `CrossSiteHrefError` rather than being masked as the origin path.
+        A seeded href needs a zone to load into and must be same-site, so a
+        href without a zone raises `LayerHrefWithoutZoneError` and a
+        cross-site value raises `CrossSiteHrefError`.
         """
+        if href is not None and zone is None:
+            raise LayerHrefWithoutZoneError(href)
         extras: dict[str, Any] = {}
         if zone is not None:
             extras[keys.ZONE] = zone
@@ -642,12 +662,18 @@ class Patches:
         result: object = None,
         dismiss: str | None = None,
     ) -> "Patches":
-        """Close the top layer with an accept result or a dismissal."""
+        """Close the top layer with an accept result or a dismissal.
+
+        A dismissal sets the boolean `dismiss` flag the client reads and
+        carries the reason string under `reason`, matching the wire shape
+        the runtime expects rather than overloading `dismiss` with the text.
+        """
         extras: dict[str, Any] = {}
         if result is not None:
             extras["result"] = result
         if dismiss is not None:
-            extras["dismiss"] = dismiss
+            extras["dismiss"] = True
+            extras["reason"] = dismiss
         self._ops.append(Patch(op="layer.close", extras=extras))
         return self
 
@@ -915,6 +941,7 @@ __all__ = [
     "Envelope",
     "ForeignPageNotAuthorizedError",
     "FormMeta",
+    "LayerHrefWithoutZoneError",
     "Patch",
     "PatchResponse",
     "Patches",

@@ -11,6 +11,7 @@ from next.partial.headers import CONTENT_TYPE
 from next.partial.patches import (
     BuiltinPatchOpError,
     CrossSiteHrefError,
+    LayerHrefWithoutZoneError,
     ReservedEventNameError,
     ReservedPatchKeyError,
     UnknownContextNameError,
@@ -162,7 +163,8 @@ class TestStandaloneVerbs:
         envelope = Patches("v1").layer_close(dismiss="cancel").envelope()
         assert envelope.ops[0].as_dict() == {
             "op": "layer.close",
-            "dismiss": "cancel",
+            "dismiss": True,
+            "reason": "cancel",
         }
 
     def test_layer_open_is_empty_without_seeds(self) -> None:
@@ -173,9 +175,28 @@ class TestStandaloneVerbs:
         envelope = Patches("v1").layer_open(zone="cart").envelope()
         assert envelope.ops[0].as_dict() == {"op": "layer.open", "zone": "cart"}
 
+    def test_layer_open_raises_on_an_href_without_a_zone(self) -> None:
+        with pytest.raises(LayerHrefWithoutZoneError) as exc:
+            Patches(partial_request()).layer_open(href="/detail/7/")
+        assert exc.value.href == "/detail/7/"
+
+    def test_layer_open_seeds_an_href_with_a_zone(self) -> None:
+        envelope = (
+            Patches(partial_request())
+            .layer_open(href="/detail/7/", zone="record")
+            .envelope()
+        )
+        assert envelope.ops[0].as_dict() == {
+            "op": "layer.open",
+            "zone": "record",
+            "href": "/detail/7/",
+        }
+
     def test_layer_open_raises_on_a_cross_site_href(self) -> None:
         with pytest.raises(CrossSiteHrefError) as exc:
-            Patches(partial_request()).layer_open(href="https://evil.example.com/x")
+            Patches(partial_request()).layer_open(
+                href="https://evil.example.com/x", zone="record"
+            )
         assert exc.value.href == "https://evil.example.com/x"
 
     def test_toast_default_variant(self) -> None:

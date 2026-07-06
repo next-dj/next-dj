@@ -28,9 +28,11 @@ const ECHO_LIMIT = 25;
 // This keeps the earliest bound zones, not the freshest: it is a plain cap, not
 // an LRU, since any bounded slice serves the anti-thundering-herd goal.
 const MAX_BOUND = 64;
-// The transient placeholder control between openConnection setting it and the
-// synchronous source.open returning the real one. Its close is never reached:
-// nothing closes a connection between those two statements in the same tick.
+// The placeholder control before a real socket exists: the transient between
+// openConnection setting it and source.open returning, and the lasting control
+// of a connection registered while paused whose socket resume opens. Its close
+// is never reached: resume drops the paused registration from the map without
+// closing it, and nothing closes a connection between the two open statements.
 /* v8 ignore next */
 const NOOP: SourceControl = { close: () => undefined };
 
@@ -180,7 +182,7 @@ export function createSse(deps: SseDeps): Sse {
   // the bound zones of a paused predecessor so resume knows what to
   // revalidate and where.
   function openConnection(url: string, page: string, previous?: Connection): void {
-    if (connections.has(url) || paused) return;
+    if (connections.has(url)) return;
     const connection: Connection = {
       url,
       control: NOOP,
@@ -191,6 +193,10 @@ export function createSse(deps: SseDeps): Sse {
       bound: new Set(previous?.bound),
     };
     connections.set(url, connection);
+    // A container scanned while the tab is hidden registers its connection but
+    // defers the socket to resume: an early return before the map write would
+    // strand the background-mounted zone with a feed resume never reopens.
+    if (paused) return;
     connection.control = source.open(
       url,
       (data) => onMessage(connection, data),

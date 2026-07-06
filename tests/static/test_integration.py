@@ -131,6 +131,28 @@ class TestJsContextFlowsThroughInit:
         assert 'Next._init({"user":"alice","score":42})' in out
 
 
+class TestJsContextEscapedInInit:
+    def test_script_delimiter_cannot_break_out_of_init(self) -> None:
+
+        manager = StaticManager()
+        manager._backends = [StaticFilesBackend()]
+        collector = StaticCollector()
+        collector.add_js_context("k", "</script><b>pwn")
+
+        staticfiles_storage._setup()  # type: ignore[attr-defined]
+        with mock.patch.object(
+            staticfiles_storage._wrapped,  # type: ignore[attr-defined]
+            "url",
+            side_effect=lambda path: f"/static/{path}",
+        ):
+            out = manager.inject(f"<body>{SCRIPTS_PLACEHOLDER}</body>", collector)
+        init_start = out.index("Next._init(")
+        init_end = out.index("</script>", init_start)
+        payload = out[init_start:init_end]
+        assert "</script>" not in payload
+        assert "\\u003C/script\\u003E\\u003Cb\\u003Epwn" in payload
+
+
 class TestEmptyCollectorIntegration:
     def test_empty_collector_yields_next_runtime_only(self) -> None:
 

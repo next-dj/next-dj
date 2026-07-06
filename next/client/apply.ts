@@ -208,13 +208,15 @@ export interface ApplyContext {
 }
 
 // The layer-aware bits the applier needs from the layer stack: a zone resolve
-// (top-down, or scoped to the page a zone GET fetched), the open and close
-// verbs, and the toast container. The LayerStack satisfies this structurally,
-// so partial.ts passes it directly. A server-initiated open carries no opener
-// element.
+// (top-down, or scoped to the page a zone GET fetched), the owning-page URL of
+// an element, the open and close verbs, and the toast container. The LayerStack
+// satisfies this structurally, so partial.ts passes it directly. A
+// server-initiated open carries no opener element and may seed a zone, an href,
+// both, or neither.
 export interface LayerBridge {
   resolveZone(name: string, root: ParentNode, page?: string): Element | null;
-  open(opener: null, href: string, zone: string): unknown;
+  urlFor(el: Element): string;
+  open(opener: null, href?: string, zone?: string): unknown;
   close(detail: { result?: unknown; dismiss?: boolean; reason?: string }): void;
   toast(text: string, variant: string): void;
 }
@@ -537,7 +539,7 @@ export class Applier {
         this.#remove(patch, state);
         return;
       case "refresh":
-        this.#refreshOp(patch);
+        this.#refreshOp(patch, state);
         return;
       case "event":
         this.#event(patch);
@@ -572,9 +574,12 @@ export class Applier {
     };
   }
 
+  // The server authors any of four forms: zone plus href, zone only, href only,
+  // or an empty open that shows a bare modal for later seeding. Each opens a
+  // layer, so the guard passes the fields through as-is rather than demanding
+  // both.
   #layerOpen(patch: LayerOpenPatch): void {
-    if (patch.zone !== undefined && patch.href !== undefined)
-      this.#layers?.open(null, patch.href, patch.zone);
+    this.#layers?.open(null, patch.href, patch.zone);
   }
 
   #layerClose(patch: LayerClosePatch): void {
@@ -627,8 +632,10 @@ export class Applier {
         ? this.#extract(html, node, patch.target, state)
         : this.#fragment(html, patch.target);
     if (content === null) return;
-    morph(node, content, { isDirty: state.isDirty });
-    this.#mark(node, patch.target, state);
+    // A root-tag change recreates the node, so morph returns the live root to
+    // mark, not the detached original the mount pass would skip.
+    const result = morph(node, content, { isDirty: state.isDirty });
+    this.#mark(result, patch.target, state);
   }
 
   // Parse a full document and carve out the node matching the target, the path
@@ -652,12 +659,14 @@ export class Applier {
     const node = this.#resolve(patch.target, state);
     if (node === null) return;
     const fragment = this.#fragment(patch.html ?? "", patch.target);
-    // The first child is the new live node, captured before the fragment is
-    // emptied into the document, so mount sees the replacement.
-    const inserted = fragment.firstElementChild;
+    // Every root element captured before the fragment empties into the
+    // document, so the mount pass revives each replacement, not only the first.
+    const inserted = Array.from(fragment.children);
     fireRemoved(node);
     node.replaceWith(fragment);
-    this.#mark(inserted ?? null, patch.target, state);
+    for (const el of inserted) state.touched.push(el);
+    // Bump the zone generation once for the replace, even with no root element.
+    this.#mark(null, patch.target, state);
   }
 
   #inner(patch: InnerPatch, state: ApplyState): void {
@@ -707,14 +716,19 @@ export class Applier {
 
   // refresh re-GETs the zone with its own cookies, the safe default of an SSE
   // fan-out: the server says "this zone is stale", the client fetches it fresh.
-  #refreshOp(patch: RefreshPatch): void {
+  // The re-GET targets the page that owns the zone, resolved through the layer
+  // stack like a poll tick, so a base-page zone refreshes against its own page
+  // even while a modal holds the address bar. A zone absent from the DOM falls
+  // back to the current URL.
+  #refreshOp(patch: RefreshPatch, state: ApplyState): void {
     const zone = patch.zone ?? patch.target?.zone;
     if (zone === undefined) return;
-    this.#refresh?.({
-      url: this.#here(),
-      zone,
-      headers: { [HEADER_ZONE]: zone },
-    });
+    const node = this.#resolve({ zone }, state);
+    const url =
+      node !== null && this.#layers !== undefined
+        ? this.#layers.urlFor(node)
+        : this.#here();
+    this.#refresh?.({ url, zone, headers: { [HEADER_ZONE]: zone } });
   }
 
   #event(patch: EventPatch): void {

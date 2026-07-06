@@ -917,7 +917,8 @@ describe("Applier layer, toast, and url verbs", () => {
     const layers = {
       resolveZone: (name: string, root: ParentNode) =>
         root.querySelector(`[data-next-zone="${name}"]`),
-      open: (opener: null, href: string, zone: string) =>
+      urlFor: () => "/here/",
+      open: (opener: null, href?: string, zone?: string) =>
         calls.push({ verb: "open", args: [opener, href, zone] }),
       close: (detail: Record<string, unknown>) =>
         calls.push({ verb: "close", args: [detail] }),
@@ -944,10 +945,22 @@ describe("Applier layer, toast, and url verbs", () => {
     expect(calls).toEqual([{ verb: "open", args: [null, "/w/", "wiz"] }]);
   });
 
-  it("layer.open without a zone or href is a no-op", () => {
+  it("layer.open seeds a zone-only open with an undefined href", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(envelope([{ op: "layer.open", zone: "cart" }]));
+    expect(calls).toEqual([{ verb: "open", args: [null, undefined, "cart"] }]);
+  });
+
+  it("layer.open seeds an href-only open with an undefined zone", () => {
     const { applier, calls } = makeLayerApplier();
     applier.apply(envelope([{ op: "layer.open", href: "/w/" }]));
-    expect(calls).toEqual([]);
+    expect(calls).toEqual([{ verb: "open", args: [null, "/w/", undefined] }]);
+  });
+
+  it("layer.open with neither zone nor href still opens a bare modal", () => {
+    const { applier, calls } = makeLayerApplier();
+    applier.apply(envelope([{ op: "layer.open" }]));
+    expect(calls).toEqual([{ verb: "open", args: [null, undefined, undefined] }]);
   });
 
   it("toast without text is a no-op", () => {
@@ -1010,6 +1023,7 @@ describe("Applier page-scoped zone resolve", () => {
         pages.push(page);
         return root.querySelector(`[data-next-zone="${name}"]`);
       },
+      urlFor: () => "/here/",
       open: () => undefined,
       close: () => undefined,
       toast: () => undefined,

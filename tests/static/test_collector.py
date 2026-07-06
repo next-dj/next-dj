@@ -362,6 +362,10 @@ class TestJsContextWire:
         encoded = serializer.dumps([1, 2, 3])
         assert collector.js_context_wire() == {"a": json.loads(encoded)}
 
+    def test_wire_keeps_html_delimiters_raw(self, collector: StaticCollector) -> None:
+        collector.add_js_context("k", "</script><b>pwn")
+        assert collector.js_context_wire() == {"k": "</script><b>pwn"}
+
     def test_cache_holds_the_validated_fragment(
         self, collector: StaticCollector
     ) -> None:

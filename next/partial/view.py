@@ -76,12 +76,14 @@ def _build_envelope(
     Without a merge intent each zone morphs in place. With an `append` or
     `prepend` merge intent each zone is patched with the matching merge
     verb instead, so a paginating request grows the zone with deduplicated
-    children rather than replacing its body. The verb is server-authored
-    from the parsed intent, the client never names it.
+    children rather than replacing its body. The zones come from the render
+    result rather than the intent, so a skipped unknown name emits no patch
+    and a duplicated name is patched once. The verb is server-authored from
+    the parsed intent, the client never names it.
     """
     patches = Patches(version)
-    for name in intent.zones:
-        _patch_zone(patches, name, result.html[name], intent.merge)
+    for name in result.html:
+        _patch_zone(patches, name, result, intent.merge)
     patches._collect_zone_assets(result)
     delta = result.js_context_delta()
     if delta:
@@ -92,17 +94,22 @@ def _build_envelope(
 def _patch_zone(
     patches: Patches,
     name: str,
-    html: str,
+    result: "ZoneRenderResult",
     merge: "MergeMode | None",
 ) -> None:
-    """Patch one zone in place, morphing it or merging deduplicated children."""
+    """Patch one zone in place, morphing it or merging deduplicated children.
+
+    A morph addresses the wrapped marker element, an append or prepend
+    grafts the bare inner body so the merge deduplicates children against
+    the live zone rather than nesting a second wrapper inside it.
+    """
     target = {keys.ZONE: name}
     if merge is MergeMode.APPEND:
-        patches.append(target, html)
+        patches.append(target, result.bodies[name])
     elif merge is MergeMode.PREPEND:
-        patches.prepend(target, html)
+        patches.prepend(target, result.bodies[name])
     else:
-        patches.morph(target, html)
+        patches.morph(target, result.html[name])
 
 
 def _bad_request(reason: str) -> HttpResponse:

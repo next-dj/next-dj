@@ -96,7 +96,11 @@ NEXT_FRAMEWORK = {
             "APP_DIRS": True,
             "DIRS": [str(BASE_DIR / "chrome")],
             "PAGES_DIR": "surfaces",
-            "OPTIONS": {"context_processors": []},
+            "OPTIONS": {
+                # The hand-crafted logout form in `layout.djx` writes a bare
+                # `{% csrf_token %}`, which reads the token this processor seeds.
+                "context_processors": ["django.template.context_processors.csrf"],
+            },
         },
     ],
     "COMPONENT_BACKENDS": [

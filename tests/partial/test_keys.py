@@ -1,5 +1,14 @@
-from next.partial import Asset, Envelope, FormMeta, Patch, Patches, keys
+from next.partial import (
+    Asset,
+    Envelope,
+    FormMeta,
+    Patch,
+    Patches,
+    ZoneRenderResult,
+    keys,
+)
 from next.partial.view import _patch_zone
+from next.static.manager import default_manager
 from next.testing.client import PartialEnvelope
 
 
@@ -78,7 +87,12 @@ class TestProducersWriteTargetSelectorKeys:
 
     def test_view_zone_patch_targets_zone_key(self) -> None:
         patches = Patches("v1")
-        _patch_zone(patches, "list", "<ul></ul>", None)
+        result = ZoneRenderResult(
+            html={"list": '<div data-next-zone="list"><ul></ul></div>'},
+            bodies={"list": "<ul></ul>"},
+            collector=default_manager.create_collector(),
+        )
+        _patch_zone(patches, "list", result, None)
         view = PartialEnvelope(patches.envelope().as_dict())
         assert view.zone_targets() == ["list"]
         assert view.targets() == [{keys.ZONE: "list"}]

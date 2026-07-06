@@ -317,9 +317,7 @@ class TestComponentVisibilityResolver:
         dirs_root.mkdir(parents=True)
         reg = ComponentRegistry()
         reg.register(
-            ComponentInfo(
-                "button", dirs_root, "", dirs_root / "button.djx", None, True
-            )
+            ComponentInfo("button", dirs_root, "", dirs_root / "button.djx", None, True)
         )
         reg.mark_as_root(dirs_root)
         reg.register(

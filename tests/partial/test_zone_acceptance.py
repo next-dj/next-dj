@@ -119,6 +119,57 @@ class TestUnrequestedZonesDoNotRender:
         assert counted_page.counters["beta"] == 0
 
 
+class TestMergeIntentShipsBareBody:
+    """An append or prepend intent grafts the bare zone body, not the wrapper."""
+
+    def test_append_ships_the_bare_inner_body(self) -> None:
+        response = NextClient().get_zones(
+            "/zoned/", "alpha", HTTP_X_NEXT_MERGE="append"
+        )
+        envelope = envelope_of(response)
+        assert envelope.op_verbs()[0] == "append"
+        assert "data-next-zone" not in envelope.html_for_zone("alpha")
+
+    def test_prepend_ships_the_bare_inner_body(self) -> None:
+        response = NextClient().get_zones(
+            "/zoned/", "alpha", HTTP_X_NEXT_MERGE="prepend"
+        )
+        envelope = envelope_of(response)
+        assert envelope.op_verbs()[0] == "prepend"
+        assert "data-next-zone" not in envelope.html_for_zone("alpha")
+
+    def test_morph_keeps_the_wrapped_marker_element(self) -> None:
+        response = NextClient().get_zones("/zoned/", "alpha")
+        envelope = envelope_of(response)
+        assert envelope.op_verbs()[0] == "morph"
+        assert 'data-next-zone="alpha"' in envelope.html_for_zone("alpha")
+
+
+class TestBatchSkipsUnknownZone:
+    """A stale name in a batch is skipped, a lone unknown name is a 400."""
+
+    def test_batch_renders_the_valid_zone_and_skips_the_unknown(self) -> None:
+        response = NextClient().get_zones("/zoned/", ("alpha", "ghost"))
+        assert response.status_code == 200
+        assert envelope_of(response).zone_targets() == ["alpha"]
+
+    def test_only_unknown_zone_is_a_bad_request(self) -> None:
+        response = NextClient().get_zones("/zoned/", "ghost")
+        assert response.status_code == 400
+
+
+class TestDuplicateZoneNamePatchedOnce:
+    """A repeated zone name renders once and emits a single morph."""
+
+    def test_duplicate_name_emits_one_morph(self) -> None:
+        response = NextClient().get_zones("/zoned/", ("alpha", "alpha"))
+        assert envelope_of(response).zone_targets() == ["alpha"]
+
+    def test_duplicate_name_renders_only_once(self, counted_page) -> None:
+        NextClient().get_zones("/counted/", ("alpha", "alpha"))
+        assert counted_page.counters["alpha"] == 1
+
+
 class TestLazyZoneDataStaysHonest:
     """The lazy report body and its database hit stay off the full render."""
 

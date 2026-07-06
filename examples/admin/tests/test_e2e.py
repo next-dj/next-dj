@@ -683,10 +683,58 @@ class TestInlinePartialPatches:
         assert response.status_code == 200
         envelope = envelope_of(response)
         assert envelope.op_verbs() == ["layer.open", "inner"]
-        assert envelope.ops[0]["href"] == f"/admin/library/book/{book.pk}/change/"
+        new_chapter = Chapter.objects.get(book=book, number=2, title="Rising")
+        assert (
+            envelope.ops[0]["href"]
+            == f"/admin/library/chapter/{new_chapter.pk}/change/"
+        )
+        assert envelope.ops[0]["zone"] == "record"
         assert envelope.targets()[1] == {"css": '[data-inline-count="chapter"]'}
         assert "2 saved" in envelope.ops[1]["html"]
-        assert Chapter.objects.filter(book=book, number=2, title="Rising").exists()
+
+
+class TestLayerDismiss:
+    """The chapter editor layer offers a server-side discard dismissal."""
+
+    def _chapter(self):
+        author = Author.objects.create(full_name="A. Author")
+        book = Book.objects.create(title="Book", author=author)
+        return Chapter.objects.create(
+            book=book, number=1, title="Intro", word_count=100
+        )
+
+    def test_layer_zone_render_offers_discard(self, admin_client):
+        chapter = self._chapter()
+        response = admin_client.get_zones(
+            f"/admin/library/chapter/{chapter.pk}/change/", "record"
+        )
+        assert response.status_code == 200
+        html = envelope_of(response).html_for_zone("record")
+        discard_url = admin_client.get_action_url("admin:discard")
+        assert f'action="{discard_url}" method="post" data-next-action=' in html
+        assert "Discard" in html
+
+    def test_full_page_render_omits_discard(self, admin_client):
+        chapter = self._chapter()
+        response = admin_client.get(f"/admin/library/chapter/{chapter.pk}/change/")
+        assert response.status_code == 200
+        assert admin_client.get_action_url("admin:discard") not in (
+            response.content.decode()
+        )
+
+    def test_discard_closes_layer_with_dismiss_reason(self, admin_client):
+        response = admin_client.post_action("admin:discard", {}, partial=True)
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["layer.close"]
+        op = envelope.ops[0]
+        assert op["dismiss"] is True
+        assert op["reason"] == "discarded"
+
+    def test_discard_without_runtime_redirects_to_dashboard(self, admin_client):
+        response = admin_client.post_action("admin:discard", {})
+        assert response.status_code == 302
+        assert response.headers["Location"] == "/admin/"
 
 
 class TestHistoryView:

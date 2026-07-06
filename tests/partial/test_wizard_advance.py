@@ -1,7 +1,9 @@
 import pytest
 
-from next.partial import shaping as shaping_module
+from next.partial import ZoneRenderResult, shaping as shaping_module
 from next.partial.headers import CONTENT_TYPE
+from next.static.assets import StaticAsset
+from next.static.manager import default_manager
 from next.testing import NextClient, envelope_of
 from tests.support import CountingWizardBackend
 
@@ -201,6 +203,80 @@ class TestWizardInvalidStepZoneMorph:
         assert response["X-Next-Form"] == "invalid"
         html = envelope_of(response).html_for_zone("wizard-zone")
         assert too_long in html
+
+
+@pytest.mark.django_db()
+class TestWizardAdvanceShipsZoneAssetsAndContext:
+    """A step whose zone body introduces assets ships the manifest and delta.
+
+    The render is stubbed so the next step's zone carries a co-located
+    asset and a serialize provider, proving the advance forwards both the
+    asset manifest and the js-context delta a fresh step first introduces.
+    """
+
+    def test_advance_forwards_assets_and_context_delta(
+        self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        collector = default_manager.create_collector()
+        collector.add(StaticAsset(url="/static/next/wizard.css", kind="css"))
+        collector.add_js_context("progress", 42)
+        crafted = ZoneRenderResult(
+            html={"wizard-zone": '<div data-next-zone="wizard-zone">step</div>'},
+            bodies={"wizard-zone": "step"},
+            collector=collector,
+        )
+        monkeypatch.setattr(
+            shaping_module, "render_zone", lambda *_args, **_kwargs: crafted
+        )
+        response = next_client.post_action(
+            "step_wizard",
+            {"name": "Ada"},
+            origin="/wizard/identity/",
+            partial=True,
+            zones="wizard-zone",
+        )
+        envelope = envelope_of(response)
+        assert {"kind": "css", "url": "/static/next/wizard.css"} in envelope.assets
+        context_ops = [op for op in envelope.ops if op["op"] == "context"]
+        assert context_ops == [{"op": "context", "data": {"progress": 42}}]
+
+
+@pytest.mark.django_db()
+class TestWizardAdvanceWholePage:
+    """A wizard advance with no zone extract-morphs the next step form.
+
+    Without a named zone the advance re-renders the whole next step page
+    and trims the form out by uid, the same shape the invalid path uses,
+    so the envelope is never an empty 204.
+    """
+
+    def test_advance_without_zone_extract_morphs_the_next_step(
+        self, next_client: NextClient
+    ) -> None:
+        response = next_client.post_action(
+            "step_wizard",
+            {"name": "Ada"},
+            origin="/wizard/identity/",
+            partial=True,
+        )
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.form_targets()
+
+    def test_advance_without_zone_carries_the_next_step_field(
+        self, next_client: NextClient
+    ) -> None:
+        response = next_client.post_action(
+            "step_wizard",
+            {"name": "Ada"},
+            origin="/wizard/identity/",
+            partial=True,
+        )
+        html = next(
+            op["html"] for op in envelope_of(response).ops if op["op"] == "morph"
+        )
+        assert 'name="scope"' in html
 
 
 @pytest.mark.django_db()

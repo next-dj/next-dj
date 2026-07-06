@@ -116,6 +116,14 @@ Component JS files run in the global browser context.
 Avoid using component scripts for sensitive operations such as form submission with secret tokens.
 Keep auth state in cookies and HTTP only attributes.
 
+Inline Init Payload
+-------------------
+
+The runtime injects serialised JS context through an inline ``<script>`` that calls ``Next._init``.
+The framework escapes ``<``, ``>``, ``&``, U+2028, and U+2029 in that payload, so a serialised value that contains ``</script>`` cannot break out of the tag.
+The remaining risk is visibility, since serialised values appear in the page source, not tag breakout.
+Never mark a secret ``serialize=True``.
+
 Cross Origin Resource Sharing
 -----------------------------
 

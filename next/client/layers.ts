@@ -101,10 +101,11 @@ export interface LayerStack {
   // rather than the address bar, which reads the modal route while one is up.
   urlFor(el: Element): string;
   // Open a layer. Builds the dialog and the zone container before the request,
-  // then GETs the body into it. The opener link, when present, carries
-  // data-next-accepted and takes focus back on close. A server-initiated open
-  // passes null.
-  open(opener: HTMLElement | null, href: string, zone: string): Promise<void>;
+  // then GETs the body into it when both an href and a zone address one. The
+  // opener link, when present, carries data-next-accepted and takes focus back
+  // on close. A server-initiated open passes null and may seed a zone, an href,
+  // both, or neither.
+  open(opener: HTMLElement | null, href?: string, zone?: string): Promise<void>;
   // Close the top layer. A result accepts, a dismiss rejects with a reason. An
   // empty argument accepts with no result.
   close(detail: LayerCloseEvent): void;
@@ -212,8 +213,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
 
   async function open(
     opener: HTMLElement | null,
-    href: string,
-    zone: string,
+    href?: string,
+    zone?: string,
   ): Promise<void> {
     // Mark the opener busy before any dialog or history mutation, the single
     // source of truth the double-click guard reads. A second open for the same
@@ -226,10 +227,10 @@ export function createLayers(deps: LayerDeps): LayerStack {
     const dialog = doc.createElement("dialog");
     dialog.setAttribute("data-next-dialog", "");
     const root = doc.createElement("div");
-    // The zone container is named after the opener's own attribute and built
-    // before the request, so the first morph finds the target by the ordinary
-    // resolve without interpreting the response.
-    root.setAttribute("data-next-zone", zone);
+    // A seeded zone names the container before the request, so the first morph
+    // finds the target by the ordinary resolve. An empty open leaves it unnamed
+    // for a later patch to fill.
+    if (zone !== undefined) root.setAttribute("data-next-zone", zone);
     dialog.append(root);
     doc.body.append(dialog);
     const returnFocus = doc.activeElement;
@@ -245,17 +246,24 @@ export function createLayers(deps: LayerDeps): LayerStack {
     // The opener already carries busy, so only the target zone is marked here.
     const release = busy(null, root);
     try {
-      // Push the honest URL of the layer body so the modal is shareable and
-      // Back closes it. Inside the try: pushState can throw (Safari's rate
-      // limit) and the half-open layer must unwind, not strand on the stack.
-      history.push(href);
-      layer.pushedUrl = currentUrl();
-      emit("partial:layer-opened", { opener });
-      await deps.fetch({
-        url: href,
-        zone,
-        headers: { [HEADER_ZONE]: zone, [HEADER_ORIGIN]: host },
-      });
+      // A body fetch needs both the URL to GET and the zone to name it. A
+      // partial or empty open shows a bare modal for a later patch to seed,
+      // with no history entry and no body request of its own.
+      if (href !== undefined && zone !== undefined) {
+        // Push the honest URL of the layer body so the modal is shareable and
+        // Back closes it. Inside the try: pushState can throw (Safari's rate
+        // limit) and the half-open layer must unwind, not strand on the stack.
+        history.push(href);
+        layer.pushedUrl = currentUrl();
+        emit("partial:layer-opened", { opener });
+        await deps.fetch({
+          url: href,
+          zone,
+          headers: { [HEADER_ZONE]: zone, [HEADER_ORIGIN]: host },
+        });
+      } else {
+        emit("partial:layer-opened", { opener });
+      }
     } catch (e) {
       // remove rolls the URL back to the host only when the push actually
       // moved it (pushedUrl set), so a failed push rolls back nothing.

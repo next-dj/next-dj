@@ -645,6 +645,60 @@ describe("open unwinds when history.push throws", () => {
   });
 });
 
+describe("a server-initiated open seeds a zone, an href, both, or neither", () => {
+  function makeSeedStack() {
+    const dispatched: Dispatched[] = [];
+    const fetched: string[] = [];
+    const pushed: string[] = [];
+    const layers = createLayers({
+      dispatch: (event, detail) => dispatched.push({ event, detail }),
+      fetch: async (request) => {
+        fetched.push(request.url);
+      },
+      document,
+      dialog: mockDialog().adapter,
+      history: { push: (href) => pushed.push(href), replace: () => undefined },
+    });
+    return { layers, dispatched, fetched, pushed };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("a zone-only open names the container and fetches no body", async () => {
+    const { layers, dispatched, fetched, pushed } = makeSeedStack();
+    await layers.open(null, undefined, "cart");
+    expect(document.querySelector('dialog [data-next-zone="cart"]')).not.toBeNull();
+    expect(fetched).toEqual([]);
+    expect(pushed).toEqual([]);
+    expect(dispatched.some((d) => d.event === "partial:layer-opened")).toBe(true);
+    expect(layers.size()).toBe(1);
+    layers._reset();
+  });
+
+  it("an href-only open shows a bare unnamed modal and fetches no body", async () => {
+    const { layers, fetched, pushed } = makeSeedStack();
+    await layers.open(null, "/w/");
+    expect(document.querySelector("[data-next-dialog]")).not.toBeNull();
+    expect(document.querySelector("dialog [data-next-zone]")).toBeNull();
+    expect(fetched).toEqual([]);
+    expect(pushed).toEqual([]);
+    layers._reset();
+  });
+
+  it("an empty open shows a bare modal with no zone, fetch, or history entry", async () => {
+    const { layers, dispatched, fetched, pushed } = makeSeedStack();
+    await layers.open(null);
+    expect(document.querySelector("[data-next-dialog]")).not.toBeNull();
+    expect(document.querySelector("dialog [data-next-zone]")).toBeNull();
+    expect(fetched).toEqual([]);
+    expect(pushed).toEqual([]);
+    expect(dispatched.some((d) => d.event === "partial:layer-opened")).toBe(true);
+    layers._reset();
+  });
+});
+
 describe("layer intercepting URL lifecycle", () => {
   let layers: LayerStack;
   let dispatched: Dispatched[];

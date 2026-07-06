@@ -185,6 +185,26 @@ describe("createSse", () => {
     expect(dispatched.some((d) => d.event === "partial:error")).toBe(false);
   });
 
+  it("registers a container scanned while paused and opens it on resume", () => {
+    const { adapter, opened } = mockSource();
+    const visibility = manualVisibility();
+    let clock = 0;
+    const sse = makeSse(adapter, visibility, { now: () => clock });
+    visibility.setHidden(true);
+    // A zone mounts in the background tab: its container registers a connection
+    // but opens no socket while the stream is paused.
+    document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
+    sse.scan(document);
+    expect(opened).toHaveLength(0);
+    expect(sse.size()).toBe(1);
+    clock = 5000;
+    visibility.setHidden(false);
+    // Resume opens the deferred socket rather than stranding the zone's feed.
+    expect(opened).toHaveLength(1);
+    expect(opened[0]!.url).toBe("/stream/");
+    expect(sse.size()).toBe(1);
+  });
+
   it("does not reopen a fatally evicted url on resume", () => {
     document.body.innerHTML = '<div data-next-sse="/stream/"></div>';
     const { adapter, opened } = mockSource();
