@@ -480,19 +480,24 @@ class TestInlines:
 
 _INLINE_ACTIONS = ("admin:inline_change", "admin:inline_add")
 
+_CHAPTER_ROWS = ((1, "Intro", 100), (2, "Rising", 200))
+
+
+def _book_with_chapters(count=1):
+    author = Author.objects.create(full_name="A. Author")
+    book = Book.objects.create(title="Book", author=author)
+    chapters = [
+        Chapter.objects.create(book=book, number=number, title=title, word_count=words)
+        for number, title, words in _CHAPTER_ROWS[:count]
+    ]
+    return book, chapters
+
 
 class TestLiveInlines:
     """Each existing related row is its own keyed `admin:inline_change` form."""
 
     def _book(self):
-        author = Author.objects.create(full_name="A. Author")
-        book = Book.objects.create(title="Book", author=author)
-        first = Chapter.objects.create(
-            book=book, number=1, title="Intro", word_count=100
-        )
-        second = Chapter.objects.create(
-            book=book, number=2, title="Rising", word_count=200
-        )
+        book, (first, second) = _book_with_chapters(2)
         return book, first, second
 
     @staticmethod
@@ -632,11 +637,7 @@ class TestInlinePartialPatches:
     """Inline saves author replace, inner, and server-opened layer patches."""
 
     def _book(self):
-        author = Author.objects.create(full_name="A. Author")
-        book = Book.objects.create(title="Book", author=author)
-        chapter = Chapter.objects.create(
-            book=book, number=1, title="Intro", word_count=100
-        )
+        book, (chapter,) = _book_with_chapters()
         return book, chapter
 
     def test_partial_inline_change_replaces_row_and_inners_count(self, admin_client):
@@ -697,11 +698,8 @@ class TestLayerDismiss:
     """The chapter editor layer offers a server-side discard dismissal."""
 
     def _chapter(self):
-        author = Author.objects.create(full_name="A. Author")
-        book = Book.objects.create(title="Book", author=author)
-        return Chapter.objects.create(
-            book=book, number=1, title="Intro", word_count=100
-        )
+        _book, (chapter,) = _book_with_chapters()
+        return chapter
 
     def test_layer_zone_render_offers_discard(self, admin_client):
         chapter = self._chapter()
@@ -714,13 +712,13 @@ class TestLayerDismiss:
         assert f'action="{discard_url}" method="post" data-next-action=' in html
         assert "Discard" in html
 
-    def test_full_page_render_omits_discard(self, admin_client):
+    def test_discard_form_is_scoped_to_the_dialog_by_css(self, admin_client):
         chapter = self._chapter()
         response = admin_client.get(f"/admin/library/chapter/{chapter.pk}/change/")
         assert response.status_code == 200
-        assert admin_client.get_action_url("admin:discard") not in (
-            response.content.decode()
-        )
+        body = response.content.decode()
+        assert 'class="discard-in-layer"' in body
+        assert "/static/next/components/admin_form.css" in body
 
     def test_discard_closes_layer_with_dismiss_reason(self, admin_client):
         response = admin_client.post_action("admin:discard", {}, partial=True)

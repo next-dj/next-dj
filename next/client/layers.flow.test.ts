@@ -3,8 +3,14 @@ import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import type { DialogAdapter } from "./layers";
 
-type Dispatched = { event: string; detail: Record<string, unknown> };
-type Call = { url: string; init: RequestInit };
+interface Dispatched {
+  event: string;
+  detail: Record<string, unknown>;
+}
+interface Call {
+  url: string;
+  init: RequestInit;
+}
 
 const ENVELOPE_TYPE = "application/vnd.next.patches+json";
 

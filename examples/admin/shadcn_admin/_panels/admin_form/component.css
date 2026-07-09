@@ -1,0 +1,7 @@
+.discard-in-layer {
+  display: none;
+}
+
+dialog .discard-in-layer {
+  display: inline;
+}

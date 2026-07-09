@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLayers } from "./layers";
-import type { DialogAdapter, LayerStack, PopStateAdapter } from "./layers";
+import type { DialogAdapter, LayerDeps, LayerStack, PopStateAdapter } from "./layers";
 import { HEADER_ORIGIN, HEADER_ZONE } from "./protocol";
 
-type Dispatched = { event: string; detail: Record<string, unknown> };
+interface Dispatched {
+  event: string;
+  detail: Record<string, unknown>;
+}
 
 // A mock dialog adapter that records its dismiss callback so a test fires Esc,
 // backdrop, or a dialog-form close without jsdom's missing showModal.
@@ -18,11 +21,26 @@ function mockDialog() {
   return { adapter, dismissed };
 }
 
+// Every stack made in this file registers here, and the module-level afterEach
+// resets them all, so a failing assertion never leaks dialogs or listeners into
+// the next test.
+const madeStacks: LayerStack[] = [];
+
+function createTrackedLayers(deps: LayerDeps): LayerStack {
+  const layers = createLayers(deps);
+  madeStacks.push(layers);
+  return layers;
+}
+
+afterEach(() => {
+  for (const layers of madeStacks.splice(0)) layers._reset();
+});
+
 function makeStackOn(doc: Document) {
   const dispatched: Dispatched[] = [];
   const fetched: { url: string; zone: string }[] = [];
   const { adapter, dismissed } = mockDialog();
-  const layers = createLayers({
+  const layers = createTrackedLayers({
     dispatch: (event, detail) => dispatched.push({ event, detail }),
     fetch: async (request) => {
       fetched.push({ url: request.url, zone: request.zone });
@@ -71,8 +89,8 @@ describe("layer stack", () => {
     await layers.open(null, "/w/", "z");
     const found = layers.resolveZone("z", document);
     expect(found).not.toBeNull();
-    expect((found as Element).id).toBe("");
-    expect((found as Element).closest("dialog")).not.toBeNull();
+    expect(found!.id).toBe("");
+    expect(found!.closest("dialog")).not.toBeNull();
   });
 
   it("resolves a zone nested inside a layer container", async () => {
@@ -81,21 +99,20 @@ describe("layer stack", () => {
     container.innerHTML = '<section data-next-zone="inner">x</section>';
     const found = layers.resolveZone("inner", document);
     expect(found).not.toBeNull();
-    expect((found as Element).tagName).toBe("SECTION");
+    expect(found!.tagName).toBe("SECTION");
   });
 
   it("falls back to the page zone when no layer holds it", () => {
     document.body.innerHTML = '<div data-next-zone="only">page</div>';
     const found = layers.resolveZone("only", document);
-    expect((found as Element).textContent).toBe("page");
+    expect(found!.textContent).toBe("page");
   });
 
   it("the top-down walk continues past a layer that lacks the zone", async () => {
     document.body.innerHTML = '<div data-next-zone="only">page</div>';
     await layers.open(null, "/w/", "m");
     const found = layers.resolveZone("only", document);
-    expect((found as Element).textContent).toBe("page");
-    layers._reset();
+    expect(found!.textContent).toBe("page");
   });
 
   it("accept fires layer-accepted with the result and re-GETs the host zone", async () => {
@@ -180,7 +197,7 @@ describe("layer stack", () => {
         popstateDetached += 1;
       },
     };
-    const local = createLayers({
+    const local = createTrackedLayers({
       dispatch: () => undefined,
       fetch: async () => undefined,
       document,
@@ -204,7 +221,6 @@ describe("layer stack", () => {
     local.install(document);
     opener.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     expect(local.size()).toBe(1);
-    local._reset();
   });
 
   it("close on an empty stack is a no-op", () => {
@@ -270,7 +286,7 @@ describe("layer stack", () => {
         return () => undefined;
       },
     };
-    const local = createLayers({
+    const local = createTrackedLayers({
       dispatch: () => undefined,
       fetch: async () => {
         // A dismiss gesture tears the layer down while this GET is in flight,
@@ -303,7 +319,7 @@ describe("layer stack", () => {
         return typeof value === "function" ? value.bind(base) : value;
       },
     });
-    const local = makeStackOn(proxy as Document);
+    const local = makeStackOn(proxy);
     await local.layers.open(null, "/w/", "z");
     expect(() => local.layers.close({ result: 1 })).not.toThrow();
     expect(local.layers.size()).toBe(0);
@@ -370,7 +386,7 @@ describe("layer stack", () => {
         detached += 1;
       },
     };
-    const local = createLayers({
+    const local = createTrackedLayers({
       dispatch: () => undefined,
       fetch: async () => undefined,
       document,
@@ -385,11 +401,15 @@ describe("layer stack", () => {
 });
 
 describe("layer requests carry the host origin", () => {
-  type Request = { url: string; zone: string; headers?: Record<string, string> };
+  interface Request {
+    url: string;
+    zone: string;
+    headers?: Record<string, string>;
+  }
 
   function makeOriginStack() {
     const requests: Request[] = [];
-    const layers = createLayers({
+    const layers = createTrackedLayers({
       dispatch: () => undefined,
       fetch: async (request) => {
         requests.push(request);
@@ -410,7 +430,6 @@ describe("layer requests carry the host origin", () => {
     await layers.open(null, "/wizard/identity/", "access-wizard");
     expect(requests[0]!.headers?.[HEADER_ORIGIN]).toBe("/host/page/");
     expect(requests[0]!.headers?.[HEADER_ZONE]).toBe("access-wizard");
-    layers._reset();
   });
 
   it("re-GETs the host zone on accept with the same captured origin", async () => {
@@ -425,7 +444,6 @@ describe("layer requests carry the host origin", () => {
     expect(requests[0]!.url).toBe("/host/page/");
     expect(requests[0]!.headers?.[HEADER_ORIGIN]).toBe("/host/page/");
     expect(requests[0]!.headers?.[HEADER_ZONE]).toBe("request-list");
-    layers._reset();
   });
 
   it("keeps the open-time host even after a later navigation", async () => {
@@ -440,7 +458,6 @@ describe("layer requests carry the host origin", () => {
     layers.close({ result: { id: 7 } });
     expect(requests[0]!.url).toBe("/host/page/");
     expect(requests[0]!.headers?.[HEADER_ORIGIN]).toBe("/host/page/");
-    layers._reset();
   });
 
   it("keeps the host query string in the origin and the accept re-GET", async () => {
@@ -456,7 +473,6 @@ describe("layer requests carry the host origin", () => {
     layers.close({ result: { id: 7 } });
     expect(requests[0]!.url).toBe("/host/page/?window=1h");
     expect(requests[0]!.headers?.[HEADER_ORIGIN]).toBe("/host/page/?window=1h");
-    layers._reset();
   });
 });
 
@@ -483,7 +499,6 @@ describe("urlFor resolves the page that owns an element", () => {
     const root = document.querySelector('dialog [data-next-zone="photo"]')!;
     root.innerHTML = "<span>inside</span>";
     expect(layers.urlFor(root.querySelector("span")!)).toBe("/photos/1/");
-    layers._reset();
   });
 
   it("answers the bottom layer's host for an element outside every layer", async () => {
@@ -493,7 +508,6 @@ describe("urlFor resolves the page that owns an element", () => {
     await layers.open(null, "/photos/1/", "photo");
     expect(window.location.pathname).toBe("/photos/1/");
     expect(layers.urlFor(el)).toBe("/feed/");
-    layers._reset();
   });
 
   it("keeps the host query string for a base-page element under a layer", async () => {
@@ -503,7 +517,15 @@ describe("urlFor resolves the page that owns an element", () => {
     document.body.append(el);
     await layers.open(null, "/photos/1/", "photo");
     expect(layers.urlFor(el)).toBe("/feed/?page=2");
-    layers._reset();
+  });
+
+  it("answers the opening host for an element inside a seeded layer", async () => {
+    const { layers } = makeStack();
+    await layers.open(null, undefined, "cart");
+    const root = document.querySelector('dialog [data-next-zone="cart"]')!;
+    root.innerHTML = "<span>inside</span>";
+    window.history.replaceState(null, "", "/moved/");
+    expect(layers.urlFor(root.querySelector("span")!)).toBe("/feed/");
   });
 });
 
@@ -522,8 +544,25 @@ describe("page-scoped zone resolution", () => {
     const { layers } = makeStack();
     await layers.open(null, "/modal/", "dup");
     const found = layers.resolveZone("dup", document, "/host/");
-    expect((found as Element).id).toBe("page");
-    layers._reset();
+    expect(found!.id).toBe("page");
+  });
+
+  it("resolveSelector prefers the topmost layer's match over the page", async () => {
+    document.body.innerHTML = '<form data-next-action="u1" id="page-form"></form>';
+    const { layers } = makeStack();
+    await layers.open(null, "/modal/", "dup");
+    const root = document.querySelector('dialog [data-next-zone="dup"]')!;
+    root.innerHTML = '<form data-next-action="u1" id="modal-form"></form>';
+    const found = layers.resolveSelector('[data-next-action="u1"]', document);
+    expect(found!.id).toBe("modal-form");
+  });
+
+  it("resolveSelector falls back to the document with no layer match", async () => {
+    document.body.innerHTML = '<form data-next-action="u1" id="page-form"></form>';
+    const { layers } = makeStack();
+    await layers.open(null, "/modal/", "dup");
+    const found = layers.resolveSelector('[data-next-action="u1"]', document);
+    expect(found!.id).toBe("page-form");
   });
 
   it("the base-page lookup skips a same-named zone inside a dialog", async () => {
@@ -534,15 +573,13 @@ describe("page-scoped zone resolution", () => {
     late.id = "late";
     document.body.append(late);
     const found = layers.resolveZone("dup", document, "/host/");
-    expect((found as Element).id).toBe("late");
-    layers._reset();
+    expect(found!.id).toBe("late");
   });
 
   it("a base-page lookup answers null when the zone lives only in the layer", async () => {
     const { layers } = makeStack();
     await layers.open(null, "/modal/", "dup");
     expect(layers.resolveZone("dup", document, "/host/")).toBeNull();
-    layers._reset();
   });
 
   it("a layer-page patch resolves the layer's own container", async () => {
@@ -550,8 +587,7 @@ describe("page-scoped zone resolution", () => {
     const { layers } = makeStack();
     await layers.open(null, "/modal/", "dup");
     const found = layers.resolveZone("dup", document, "/modal/");
-    expect((found as Element).closest("dialog")).not.toBeNull();
-    layers._reset();
+    expect(found!.closest("dialog")).not.toBeNull();
   });
 
   it("a layer-page lookup stays inside its layer when the zone is missing", async () => {
@@ -559,7 +595,6 @@ describe("page-scoped zone resolution", () => {
     const { layers } = makeStack();
     await layers.open(null, "/modal/", "m");
     expect(layers.resolveZone("dup", document, "/modal/")).toBeNull();
-    layers._reset();
   });
 
   it("a page matching no open scope degrades to the top-down walk", async () => {
@@ -567,15 +602,14 @@ describe("page-scoped zone resolution", () => {
     const { layers } = makeStack();
     await layers.open(null, "/modal/", "dup");
     const found = layers.resolveZone("dup", document, "/elsewhere/");
-    expect((found as Element).closest("dialog")).not.toBeNull();
-    layers._reset();
+    expect(found!.closest("dialog")).not.toBeNull();
   });
 
   it("a base-page lookup with no layers open answers the page zone", () => {
     document.body.innerHTML = '<div data-next-zone="solo" id="s">x</div>';
     const { layers } = makeStack();
     const found = layers.resolveZone("solo", document, "/host/");
-    expect((found as Element).id).toBe("s");
+    expect(found!.id).toBe("s");
   });
 });
 
@@ -586,7 +620,7 @@ describe("open unwinds when history.push throws", () => {
   }) {
     const dispatched: Dispatched[] = [];
     const fetched: string[] = [];
-    const layers = createLayers({
+    const layers = createTrackedLayers({
       dispatch: (event, detail) => dispatched.push({ event, detail }),
       fetch: async (request) => {
         fetched.push(request.url);
@@ -641,7 +675,6 @@ describe("open unwinds when history.push throws", () => {
     await expect(layers.open(opener, "/photos/1/", "photo")).rejects.toThrow("boom");
     await layers.open(opener, "/photos/1/", "photo");
     expect(layers.size()).toBe(1);
-    layers._reset();
   });
 });
 
@@ -650,7 +683,7 @@ describe("a server-initiated open seeds a zone, an href, both, or neither", () =
     const dispatched: Dispatched[] = [];
     const fetched: string[] = [];
     const pushed: string[] = [];
-    const layers = createLayers({
+    const layers = createTrackedLayers({
       dispatch: (event, detail) => dispatched.push({ event, detail }),
       fetch: async (request) => {
         fetched.push(request.url);
@@ -674,17 +707,15 @@ describe("a server-initiated open seeds a zone, an href, both, or neither", () =
     expect(pushed).toEqual([]);
     expect(dispatched.some((d) => d.event === "partial:layer-opened")).toBe(true);
     expect(layers.size()).toBe(1);
-    layers._reset();
   });
 
-  it("an href-only open shows a bare unnamed modal and fetches no body", async () => {
+  it("an href without a zone is ignored and shows a bare modal", async () => {
     const { layers, fetched, pushed } = makeSeedStack();
     await layers.open(null, "/w/");
     expect(document.querySelector("[data-next-dialog]")).not.toBeNull();
     expect(document.querySelector("dialog [data-next-zone]")).toBeNull();
     expect(fetched).toEqual([]);
     expect(pushed).toEqual([]);
-    layers._reset();
   });
 
   it("an empty open shows a bare modal with no zone, fetch, or history entry", async () => {
@@ -695,7 +726,6 @@ describe("a server-initiated open seeds a zone, an href, both, or neither", () =
     expect(fetched).toEqual([]);
     expect(pushed).toEqual([]);
     expect(dispatched.some((d) => d.event === "partial:layer-opened")).toBe(true);
-    layers._reset();
   });
 });
 
@@ -717,7 +747,7 @@ describe("layer intercepting URL lifecycle", () => {
         };
       },
     };
-    layers = createLayers({
+    layers = createTrackedLayers({
       dispatch: (event, detail) => dispatched.push({ event, detail }),
       fetch: async () => {},
       document,
@@ -726,10 +756,6 @@ describe("layer intercepting URL lifecycle", () => {
     });
     layers.install(document);
     fire = () => handler?.();
-  });
-
-  afterEach(() => {
-    layers._reset();
   });
 
   it("pushes the honest URL of the layer body on open", async () => {
@@ -779,6 +805,25 @@ describe("layer intercepting URL lifecycle", () => {
     expect(layers.size()).toBe(1);
   });
 
+  it("Back past a pushed layer also closes the bare layers above it", async () => {
+    await layers.open(null, "/photos/1/", "a");
+    await layers.open(null, undefined, "seeded");
+    window.history.replaceState(null, "", "/feed/");
+    fire();
+    expect(layers.size()).toBe(0);
+    expect(
+      dispatched.filter(
+        (d) => d.event === "partial:layer-dismissed" && d.detail.reason === "popstate",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("Back with only bare layers open is a no-op", async () => {
+    await layers.open(null, undefined, "seeded");
+    fire();
+    expect(layers.size()).toBe(1);
+  });
+
   it("a stray popstate after a programmatic close is a no-op", async () => {
     await layers.open(null, "/photos/1/", "photo");
     layers.close({ result: undefined });
@@ -806,13 +851,9 @@ describe("layer open is single-flight and rolls back on failure", () => {
     window.history.replaceState(null, "", "/feed/");
   });
 
-  afterEach(() => {
-    layers._reset();
-  });
-
   it("a double click opens one dialog and pushes history once", () => {
     const { history, pushed } = makeHistory();
-    layers = createLayers({
+    layers = createTrackedLayers({
       dispatch: () => undefined,
       fetch: () => new Promise<void>(() => undefined),
       document,
@@ -833,7 +874,7 @@ describe("layer open is single-flight and rolls back on failure", () => {
 
   it("a second open for a busy opener is dropped before any mutation", async () => {
     const { history, pushed } = makeHistory();
-    layers = createLayers({
+    layers = createTrackedLayers({
       dispatch: () => undefined,
       fetch: () => new Promise<void>(() => undefined),
       document,
@@ -851,7 +892,7 @@ describe("layer open is single-flight and rolls back on failure", () => {
 
   it("a fetch failure tears down the orphan and rolls the URL back to the host", async () => {
     const { history, replaced } = makeHistory();
-    layers = createLayers({
+    layers = createTrackedLayers({
       dispatch: () => undefined,
       fetch: () => Promise.reject(new Error("boom")),
       document,
@@ -873,7 +914,7 @@ describe("layer open is single-flight and rolls back on failure", () => {
     const { history, replaced } = makeHistory();
     const { adapter, dismissed } = mockDialog();
     let rejectFetch: ((reason: Error) => void) | undefined;
-    layers = createLayers({
+    layers = createTrackedLayers({
       dispatch: () => undefined,
       fetch: () =>
         new Promise<void>((_resolve, reject) => {

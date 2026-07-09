@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Applier } from "./apply";
 import type { ApplyDeps, AssetBridge, Asset, MountRegistry, ZoneFetch } from "./apply";
 
-type Dispatched = { event: string; detail: Record<string, unknown> };
+interface Dispatched {
+  event: string;
+  detail: Record<string, unknown>;
+}
 
 function makeApplier(over: Partial<ApplyDeps> = {}) {
   const dispatched: Dispatched[] = [];
@@ -221,6 +224,7 @@ describe("refresh verb", () => {
     // against the page the layer stack says owns it, not the modal route.
     const layers = {
       resolveZone: () => el,
+      resolveSelector: () => null,
       urlFor: () => "/owner/",
       open: () => undefined,
       close: () => undefined,
@@ -239,6 +243,7 @@ describe("refresh verb", () => {
     const refresh = vi.fn<ZoneFetch>();
     const layers = {
       resolveZone: () => null,
+      resolveSelector: () => null,
       urlFor: () => "/owner/",
       open: () => undefined,
       close: () => undefined,

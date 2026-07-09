@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Applier, parseEnvelope } from "./apply";
 import type { Asset, AssetBridge, Envelope } from "./apply";
 
-type Dispatched = { event: string; detail: Record<string, unknown> };
+interface Dispatched {
+  event: string;
+  detail: Record<string, unknown>;
+}
 
 function makeApplier(dev = false) {
   const dispatched: Dispatched[] = [];
@@ -917,6 +920,8 @@ describe("Applier layer, toast, and url verbs", () => {
     const layers = {
       resolveZone: (name: string, root: ParentNode) =>
         root.querySelector(`[data-next-zone="${name}"]`),
+      resolveSelector: (selector: string, root: ParentNode) =>
+        root.querySelector(selector),
       urlFor: () => "/here/",
       open: (opener: null, href?: string, zone?: string) =>
         calls.push({ verb: "open", args: [opener, href, zone] }),
@@ -951,10 +956,10 @@ describe("Applier layer, toast, and url verbs", () => {
     expect(calls).toEqual([{ verb: "open", args: [null, undefined, "cart"] }]);
   });
 
-  it("layer.open seeds an href-only open with an undefined zone", () => {
+  it("layer.open with an href and no zone is dropped as malformed", () => {
     const { applier, calls } = makeLayerApplier();
     applier.apply(envelope([{ op: "layer.open", href: "/w/" }]));
-    expect(calls).toEqual([{ verb: "open", args: [null, "/w/", undefined] }]);
+    expect(calls).toEqual([]);
   });
 
   it("layer.open with neither zone nor href still opens a bare modal", () => {
@@ -1013,6 +1018,30 @@ describe("Applier layer, toast, and url verbs", () => {
     applier.apply(envelope([{ op: "inner", target: { zone: "z" }, html: "patched" }]));
     expect(document.querySelector('[data-next-zone="z"]')!.textContent).toBe("patched");
   });
+
+  it("a form target resolves through the layer stack, modal form first", () => {
+    document.body.innerHTML =
+      '<form data-next-action="u1" id="page-form"></form>' +
+      '<dialog><div><form data-next-action="u1" id="modal-form"></form></div></dialog>';
+    const layers = {
+      resolveZone: () => null,
+      resolveSelector: (selector: string) =>
+        document.querySelector(`dialog ${selector}`),
+      urlFor: () => "/here/",
+      open: () => undefined,
+      close: () => undefined,
+      toast: () => undefined,
+    };
+    const applier = new Applier({
+      dispatch: () => undefined,
+      mergeContext: () => undefined,
+      document,
+      layers,
+    });
+    applier.apply(envelope([{ op: "inner", target: { form: "u1" }, html: "patched" }]));
+    expect(document.getElementById("modal-form")!.innerHTML).toBe("patched");
+    expect(document.getElementById("page-form")!.innerHTML).toBe("");
+  });
 });
 
 describe("Applier page-scoped zone resolve", () => {
@@ -1023,6 +1052,8 @@ describe("Applier page-scoped zone resolve", () => {
         pages.push(page);
         return root.querySelector(`[data-next-zone="${name}"]`);
       },
+      resolveSelector: (selector: string, root: ParentNode) =>
+        root.querySelector(selector),
       urlFor: () => "/here/",
       open: () => undefined,
       close: () => undefined,

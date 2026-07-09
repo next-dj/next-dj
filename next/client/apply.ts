@@ -13,6 +13,7 @@ import {
   currentUrl,
   isRecord,
 } from "./protocol";
+import type { PartialError } from "./protocol";
 import type { Navigate } from "./wire";
 
 export interface Target {
@@ -147,13 +148,19 @@ const BUILTIN_OPS = new Set<string>([
   "url",
   "visit",
   "context",
-]);
+] satisfies BuiltinPatch["op"][]);
 
 // Narrow a patch to a built-in verb by its op. A type predicate rather than an
 // op-only check so the switch in #applyBuiltin sees a BuiltinPatch, with no
 // CustomPatch in the union to defeat the per-op narrowing.
 function isBuiltin(patch: Patch): patch is BuiltinPatch {
-  return typeof patch.op === "string" && BUILTIN_OPS.has(patch.op);
+  return BUILTIN_OPS.has(patch.op);
+}
+
+// A wire op is a record naming its verb, the one field every patch shares, so
+// an op-less record is dropped at the boundary like any other malformed op.
+function isPatch(value: unknown): value is Patch {
+  return isRecord(value) && typeof value.op === "string";
 }
 
 export interface Asset {
@@ -184,11 +191,13 @@ export interface FormMeta {
   errors: Record<string, string[]>;
 }
 
+// The parsed wire envelope is read-only past the boundary: the applier and the
+// partial:before-apply listeners observe it, none of them rewrite it.
 export interface Envelope {
-  version: string;
-  ops: Patch[];
-  assets: Asset[];
-  form: FormMeta | null;
+  readonly version: string;
+  readonly ops: readonly Patch[];
+  readonly assets: readonly Asset[];
+  readonly form: FormMeta | null;
   csrf?: { header: string; token: string };
   request_id?: string;
 }
@@ -208,13 +217,15 @@ export interface ApplyContext {
 }
 
 // The layer-aware bits the applier needs from the layer stack: a zone resolve
-// (top-down, or scoped to the page a zone GET fetched), the owning-page URL of
-// an element, the open and close verbs, and the toast container. The LayerStack
-// satisfies this structurally, so partial.ts passes it directly. A
-// server-initiated open carries no opener element and may seed a zone, an href,
-// both, or neither.
+// (top-down, or scoped to the page a zone GET fetched), the unscoped selector
+// resolve for form targets, the owning-page URL of an element, the open and
+// close verbs, and the toast container. The LayerStack satisfies this
+// structurally, so partial.ts passes it directly. A server-initiated open
+// carries no opener element and may seed a zone, an href with a zone, or
+// neither.
 export interface LayerBridge {
   resolveZone(name: string, root: ParentNode, page?: string): Element | null;
+  resolveSelector(selector: string, root: ParentNode): Element | null;
   urlFor(el: Element): string;
   open(opener: null, href?: string, zone?: string): unknown;
   close(detail: { result?: unknown; dismiss?: boolean; reason?: string }): void;
@@ -234,8 +245,8 @@ export interface HistoryAdapter {
 // the loader nor the registry: those live in assets.ts. Absent, the ops run
 // inline with no asset handling, the path the verb-only tests exercise.
 export interface AssetBridge {
-  loadCss(manifest: Asset[], done: () => void): void;
-  loadJs(manifest: Asset[]): void;
+  loadCss(manifest: readonly Asset[], done: () => void): void;
+  loadJs(manifest: readonly Asset[]): void;
   versionMismatch(envelopeVersion: string, url: string): boolean;
   acceptVersion(envelopeVersion: string): void;
 }
@@ -346,10 +357,10 @@ export function parseEnvelope(raw: unknown): Envelope {
   if (version === undefined) {
     throw new TypeError("partial envelope is missing version");
   }
-  // Keep only record ops, so a non-object element (ops: [null]) is a dropped op
-  // rather than a poison that throws mid-apply over a half-mutated DOM. Each op
-  // still carries an unknown op name, narrowed by isBuiltin at apply time.
-  const ops = Array.isArray(wire.ops) ? (wire.ops.filter(isRecord) as Patch[]) : [];
+  // Keep only ops naming a verb, so a non-object element (ops: [null]) or an
+  // op-less record is a dropped op rather than a poison that throws mid-apply
+  // over a half-mutated DOM. The verb itself is narrowed by isBuiltin at apply.
+  const ops = Array.isArray(wire.ops) ? wire.ops.filter(isPatch) : [];
   const assets = Array.isArray(wire.assets) ? wire.assets.filter(isAsset) : [];
   const form = parseFormMeta(wire.form);
   const envelope: Envelope = { version, ops, assets, form };
@@ -368,7 +379,7 @@ export function parseEnvelope(raw: unknown): Envelope {
 }
 
 export class Applier {
-  readonly #ops: Map<string, OpHandler> = new Map();
+  readonly #ops = new Map<string, OpHandler>();
   readonly #dispatch: (event: string, detail: Record<string, unknown>) => void;
   readonly #mergeContext: (data: Record<string, unknown>) => void;
   readonly #document: Document;
@@ -383,7 +394,7 @@ export class Applier {
   readonly #dev: boolean;
   // Monotonic apply counter per zone. The lazy-zone triggers read it so a zone
   // whose ancestor was re-created mid-flight does not enqueue a stale second GET.
-  readonly #applied: Map<string, number> = new Map();
+  readonly #applied = new Map<string, number>();
 
   constructor(deps: ApplyDeps) {
     this.#dispatch = deps.dispatch;
@@ -465,7 +476,11 @@ export class Applier {
         if (!this.#applyOp(op, state)) ok = false;
       } catch (error) {
         ok = false;
-        this.#emit("partial:error", { kind: "op", op: op.op, error }, false);
+        this.#emit(
+          "partial:error",
+          { kind: "op", op: op.op, error } satisfies PartialError,
+          false,
+        );
       }
     }
     if (envelope.csrf) this.#rotateCsrf(envelope.csrf);
@@ -509,7 +524,11 @@ export class Applier {
     // An unknown verb is a single skipped op, never a poisoned envelope.
     this.#emit(
       "partial:error",
-      { kind: "op", op: patch.op, error: new Error(`unknown op ${patch.op}`) },
+      {
+        kind: "op",
+        op: patch.op,
+        error: new Error(`unknown op ${patch.op}`),
+      } satisfies PartialError,
       false,
     );
     return false;
@@ -574,11 +593,10 @@ export class Applier {
     };
   }
 
-  // The server authors any of four forms: zone plus href, zone only, href only,
-  // or an empty open that shows a bare modal for later seeding. Each opens a
-  // layer, so the guard passes the fields through as-is rather than demanding
-  // both.
+  // An href without a zone names no container, the same rule the server
+  // builder enforces, so the malformed op stays a no-op.
   #layerOpen(patch: LayerOpenPatch): void {
+    if (patch.href !== undefined && patch.zone === undefined) return;
     this.#layers?.open(null, patch.href, patch.zone);
   }
 
@@ -811,12 +829,22 @@ export class Applier {
   #resolveForm(root: Document, uid: string, state: ApplyState): Element | null {
     const key = state.requestKey;
     if (key !== undefined) {
-      const scoped = root.querySelector(
+      const scoped = this.#formQuery(
+        root,
         `[${ATTR_ACTION}="${cssEscape(uid)}"][${ATTR_KEY}="${cssEscape(key)}"]`,
       );
       if (scoped !== null) return scoped;
     }
-    return root.querySelector(`[${ATTR_ACTION}="${cssEscape(uid)}"]`);
+    return this.#formQuery(root, `[${ATTR_ACTION}="${cssEscape(uid)}"]`);
+  }
+
+  // In the live document a modal form wins over a same-uid form under it.
+  // The parsed extract document holds no layers, so it keeps the plain lookup.
+  #formQuery(root: Document, selector: string): Element | null {
+    if (root === this.#document && this.#layers !== undefined) {
+      return this.#layers.resolveSelector(selector, root);
+    }
+    return root.querySelector(selector);
   }
 
   // Rotate the CSRF token in every form of the document so unmorphed forms do

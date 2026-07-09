@@ -299,9 +299,10 @@ class FormActionBackend(ABC):
         form: "BaseForm | BaseFormSet | None",
         page_file_path: "Path | None" = None,
         url_kwargs: dict[str, object] | None = None,
+        overrides: dict[str, object] | None = None,
     ) -> str:
         """Return the full origin-page HTML for a failed validation."""
-        del request, action_name, form, page_file_path, url_kwargs
+        del request, action_name, form, page_file_path, url_kwargs, overrides
         return ""
 
     def shape_response(
@@ -553,6 +554,7 @@ class RegistryFormActionBackend(FormActionBackend):
         form: "BaseForm | BaseFormSet | None",
         page_file_path: "Path | None" = None,
         url_kwargs: dict[str, object] | None = None,
+        overrides: dict[str, object] | None = None,
     ) -> str:
         """Render validation-error HTML for a page module path."""
         if page_file_path is None:
@@ -561,6 +563,7 @@ class RegistryFormActionBackend(FormActionBackend):
             action_name=action_name,
             form=form,
             url_kwargs=url_kwargs if url_kwargs is not None else {},
+            overrides=overrides,
         )
         return render_form_page_with_errors(self, request, params, page_file_path)
 

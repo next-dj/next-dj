@@ -12,6 +12,7 @@
 
 import { defaultEventSource, defaultVisibility } from "./adapters";
 import { asString, currentUrl, isRecord, matching } from "./protocol";
+import type { PartialError } from "./protocol";
 
 const SSE_ATTR = "data-next-sse";
 // A visibility flip shorter than this revalidates nothing: a momentary alt-tab
@@ -139,7 +140,11 @@ export function createSse(deps: SseDeps): Sse {
     try {
       raw = JSON.parse(data);
     } catch (error) {
-      deps.dispatch("partial:error", { kind: "parse", body: data, error });
+      deps.dispatch("partial:error", {
+        kind: "parse",
+        body: data,
+        error,
+      } satisfies PartialError);
       return;
     }
     if (isRecord(raw)) {
@@ -175,7 +180,10 @@ export function createSse(deps: SseDeps): Sse {
     if (!fatal) return;
     connection.control.close();
     connections.delete(connection.url);
-    deps.dispatch("partial:error", { kind: "network", error: null });
+    deps.dispatch("partial:error", {
+      kind: "network",
+      error: null,
+    } satisfies PartialError);
   }
 
   // Open a stream to a url against the resolved owning page, carrying over

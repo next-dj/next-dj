@@ -32,6 +32,7 @@ class _ErrorRenderParams:
     action_name: str
     form: "BaseForm | BaseFormSet | None"
     url_kwargs: dict[str, object]
+    overrides: dict[str, object] | None = None
 
 
 def render_form_page_with_errors(
@@ -59,12 +60,15 @@ def render_form_page_with_errors(
         return _form_fallback_html(form)
 
     url_kwargs = params.url_kwargs
+    overrides = params.overrides or {}
 
     context_data = page.build_render_context(file_path, request, **url_kwargs)
     if form is not None:
         namespace = types.SimpleNamespace(form=form)
         wizard_class = meta.get("wizard_class")
-        if wizard_class is not None:
+        # A wizard in the overrides is already bound to the right step, a
+        # rebuild here would bind the posted previous-step origin instead.
+        if wizard_class is not None and "wizard" not in overrides:
             origin_match = resolve_origin(request)
             origin = origin_match.origin if origin_match is not None else ""
             wizard = wizard_class(
@@ -74,6 +78,7 @@ def render_form_page_with_errors(
             context_data["wizard"] = wizard
         context_data[action_name] = namespace
         context_data["form"] = form
+    context_data.update(overrides)
 
     rendered, _collector = page.render_with_static_assets(
         file_path,

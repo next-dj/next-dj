@@ -95,6 +95,9 @@ export interface LayerStack {
   // Resolve a zone for a patch: scoped to the page a zone GET fetched, or the
   // top-down walk (layer target wins) when no page is known.
   resolveZone(name: string, root: ParentNode, page?: string): Element | null;
+  // Resolve any selector with the same top-down walk, so a form patch inside a
+  // modal wins over a same-uid form on the page underneath it.
+  resolveSelector(selector: string, root: ParentNode): Element | null;
   // The URL of the page that owns an element: a layer's pushed URL for an
   // element inside its subtree, the host page for the base document even while
   // layers are open, the current URL when none are. A poll tick GETs this
@@ -103,8 +106,8 @@ export interface LayerStack {
   // Open a layer. Builds the dialog and the zone container before the request,
   // then GETs the body into it when both an href and a zone address one. The
   // opener link, when present, carries data-next-accepted and takes focus back
-  // on close. A server-initiated open passes null and may seed a zone, an href,
-  // both, or neither.
+  // on close. A server-initiated open passes null and may seed both, a zone
+  // alone, or neither. An href alone names no container, so it is ignored.
   open(opener: HTMLElement | null, href?: string, zone?: string): Promise<void>;
   // Close the top layer. A result accepts, a dismiss rejects with a reason. An
   // empty argument accepts with no result.
@@ -154,6 +157,11 @@ export function createLayers(deps: LayerDeps): LayerStack {
       const base = bottom === undefined ? currentUrl() : bottom.host;
       if (page === base) return findOutsideLayers(selector, root);
     }
+    return resolveSelector(selector, root);
+  }
+
+  // Top-down walk: the topmost layer holding a match wins, the document last.
+  function resolveSelector(selector: string, root: ParentNode): Element | null {
     for (const layer of Array.from(stack).reverse()) {
       const found = findIn(layer.root, selector);
       if (found !== null) return found;
@@ -184,11 +192,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
   function urlFor(el: Element): string {
     for (const layer of Array.from(stack).reverse()) {
       if (layer.root.contains(el)) {
-        // open stacks the layer and assigns pushedUrl in one synchronous
-        // stretch (a failed push unwinds within it), so the fallback is
-        // never taken.
-        /* v8 ignore next */
-        return layer.pushedUrl ?? currentUrl();
+        // A seeded layer pushed no URL, its zones belong to the opening page.
+        return layer.pushedUrl ?? layer.host;
       }
     }
     const bottom = stack[0];
@@ -228,8 +233,8 @@ export function createLayers(deps: LayerDeps): LayerStack {
     dialog.setAttribute("data-next-dialog", "");
     const root = doc.createElement("div");
     // A seeded zone names the container before the request, so the first morph
-    // finds the target by the ordinary resolve. An empty open leaves it unnamed
-    // for a later patch to fill.
+    // finds the target by the ordinary resolve. An empty open leaves it
+    // unnamed, an empty shell only a css-targeted patch can address.
     if (zone !== undefined) root.setAttribute("data-next-zone", zone);
     dialog.append(root);
     doc.body.append(dialog);
@@ -245,24 +250,25 @@ export function createLayers(deps: LayerDeps): LayerStack {
     stack.push(layer);
     // The opener already carries busy, so only the target zone is marked here.
     const release = busy(null, root);
+    // A body fetch needs both the URL to GET and the zone to name it. A
+    // zone-only or empty open shows a bare modal for a later patch to seed,
+    // with no history entry and no body request of its own.
+    const seeded = href !== undefined && zone !== undefined;
     try {
-      // A body fetch needs both the URL to GET and the zone to name it. A
-      // partial or empty open shows a bare modal for a later patch to seed,
-      // with no history entry and no body request of its own.
-      if (href !== undefined && zone !== undefined) {
+      if (seeded) {
         // Push the honest URL of the layer body so the modal is shareable and
         // Back closes it. Inside the try: pushState can throw (Safari's rate
         // limit) and the half-open layer must unwind, not strand on the stack.
         history.push(href);
         layer.pushedUrl = currentUrl();
-        emit("partial:layer-opened", { opener });
+      }
+      emit("partial:layer-opened", { opener });
+      if (seeded) {
         await deps.fetch({
           url: href,
           zone,
           headers: { [HEADER_ZONE]: zone, [HEADER_ORIGIN]: host },
         });
-      } else {
-        emit("partial:layer-opened", { opener });
       }
     } catch (e) {
       // remove rolls the URL back to the host only when the push actually
@@ -335,14 +341,16 @@ export function createLayers(deps: LayerDeps): LayerStack {
     }
   }
 
-  // The single bounded Back handler: when the top layer's pushed URL is no
-  // longer current, the user navigated past it, so close that layer. It never
-  // restores zones or writes history, the narrow contract that keeps this short
-  // of a client router.
+  // Back past the topmost pushed URL closes that layer and the bare layers
+  // stacked above it. Never restores zones or writes history, the narrow
+  // contract that keeps this short of a client router.
   function onPopstate(): void {
-    const layer = topLayer();
-    if (layer?.pushedUrl !== undefined && layer.pushedUrl !== currentUrl()) {
+    const layers = Array.from(stack).reverse();
+    const anchor = layers.find((layer) => layer.pushedUrl !== undefined);
+    if (anchor === undefined || anchor.pushedUrl === currentUrl()) return;
+    for (const layer of layers) {
       dismissFrom(layer.dialog, "popstate");
+      if (layer === anchor) return;
     }
   }
 
@@ -358,7 +366,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
   }
 
   function ensureToastHost(): HTMLElement {
-    if (toastHost !== null && toastHost.isConnected) return toastHost;
+    if (toastHost?.isConnected) return toastHost;
     const host = doc.createElement("div");
     host.setAttribute("data-next-toasts", "");
     host.setAttribute("aria-live", "polite");
@@ -402,6 +410,7 @@ export function createLayers(deps: LayerDeps): LayerStack {
 
   return {
     resolveZone,
+    resolveSelector,
     urlFor,
     open,
     close,

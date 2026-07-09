@@ -10,7 +10,6 @@ from shadcn_admin.forms import (
 from next.components import component
 from next.deps import Depends
 from next.forms import form_spec, formset_spec
-from next.partial import zone_requested
 
 
 @component.context("form_state")
@@ -53,5 +52,4 @@ def form_state(
         "title": "Edit" if spec.is_change else "Add",
         "changelist_url": spec.changelist_url,
         "delete_url": spec.delete_url,
-        "in_layer": zone_requested(request, "record"),
     }

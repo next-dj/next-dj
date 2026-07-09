@@ -2,6 +2,7 @@ import hashlib
 import json
 from unittest.mock import patch
 
+import pytest
 from django.contrib.staticfiles.storage import ManifestFilesMixin
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
@@ -115,6 +116,10 @@ class TestFactory:
         config = {"BACKEND": _DEFAULT_BACKEND, "OPTIONS": {}}
         backend = PartialProtocolFactory.create_backend(config)
         assert isinstance(backend, PartialProtocolBackend)
+
+    def test_entry_without_backend_path_is_refused(self) -> None:
+        with pytest.raises(ImproperlyConfigured, match="BACKEND"):
+            PartialProtocolFactory.create_backend({"OPTIONS": {}})
 
 
 class TestManager:

@@ -123,7 +123,7 @@ The form repeats once per row, so every instance shares one action UID. `key=` w
 
 The change swap reuses the `inline_row` component so the live markup never drifts from the page render. The add editor reuses the chapter's own generic change template, which is already wrapped in the `record` zone. Without a runtime each falls back to a redirect to the change view, and an invalid submit still re-renders the page with the bad row's errors, the rest untouched.
 
-When the editor renders inside that layer — `form_state` detects it via `zone_requested(request, "record")` — it grows a **Discard** button that posts `admin:discard`. The handler answers with `Patches(request).layer_close(dismiss="discarded")`, a server-side _dismissal_ rather than a `layer_close(result=...)` accept, so the client fires `partial:layer-dismissed` and skips any accept side effects. The full-page change view never shows the button, and without a runtime the post falls back to a dashboard redirect.
+The editor also renders a **Discard** form that posts `admin:discard`. The handler answers with `Patches(request).layer_close(dismiss="discarded")`, a server-side _dismissal_ rather than a `layer_close(result=...)` accept, so the client fires `partial:layer-dismissed` and skips any accept side effects. Whether the editor sits in a layer is a client-side fact the server cannot see — a modal submit and a full-page submit arrive identical — so the panel's co-located `component.css` shows the button only under a `dialog` ancestor and the full-page change view keeps it hidden. Without a runtime the post falls back to a dashboard redirect.
 
 ### 6. Save and continue / Save and add another
 

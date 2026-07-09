@@ -65,7 +65,7 @@ function collectIds(
   universe: Set<string>,
 ): void {
   consume(root, root, into, universe);
-  const tagged = root.querySelectorAll<Element>("[id],[data-next-key]");
+  const tagged = root.querySelectorAll("[id],[data-next-key]");
   for (const el of Array.from(tagged)) {
     consume(el, root, into, universe);
   }
@@ -427,7 +427,7 @@ function restoreFocus(doc: Document, snap: FocusSnapshot): void {
       (el as HTMLInputElement).setSelectionRange(
         snap.start,
         snap.end,
-        (snap.direction as "forward" | "backward" | "none") ?? undefined,
+        (snap.direction ?? undefined) as "forward" | "backward" | "none" | undefined,
       );
     } catch {
       // Not a text field with a settable selection range.

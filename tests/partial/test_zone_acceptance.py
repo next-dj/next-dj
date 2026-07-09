@@ -122,20 +122,11 @@ class TestUnrequestedZonesDoNotRender:
 class TestMergeIntentShipsBareBody:
     """An append or prepend intent grafts the bare zone body, not the wrapper."""
 
-    def test_append_ships_the_bare_inner_body(self) -> None:
-        response = NextClient().get_zones(
-            "/zoned/", "alpha", HTTP_X_NEXT_MERGE="append"
-        )
+    @pytest.mark.parametrize("intent", ["append", "prepend"])
+    def test_merge_intent_ships_the_bare_inner_body(self, intent: str) -> None:
+        response = NextClient().get_zones("/zoned/", "alpha", HTTP_X_NEXT_MERGE=intent)
         envelope = envelope_of(response)
-        assert envelope.op_verbs()[0] == "append"
-        assert "data-next-zone" not in envelope.html_for_zone("alpha")
-
-    def test_prepend_ships_the_bare_inner_body(self) -> None:
-        response = NextClient().get_zones(
-            "/zoned/", "alpha", HTTP_X_NEXT_MERGE="prepend"
-        )
-        envelope = envelope_of(response)
-        assert envelope.op_verbs()[0] == "prepend"
+        assert envelope.op_verbs()[0] == intent
         assert "data-next-zone" not in envelope.html_for_zone("alpha")
 
     def test_morph_keeps_the_wrapped_marker_element(self) -> None:

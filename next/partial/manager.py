@@ -36,7 +36,13 @@ class PartialProtocolFactory:
     @classmethod
     def create_backend(cls, config: "Mapping[str, Any]") -> PartialProtocolBackend:
         """Return a single backend instance for one settings entry."""
-        backend_path = config["BACKEND"]
+        backend_path = config.get("BACKEND")
+        if not isinstance(backend_path, str):
+            msg = (
+                "A PARTIAL_BACKENDS entry names its protocol backend by a "
+                f"dotted path under BACKEND, got {config!r}."
+            )
+            raise ImproperlyConfigured(msg)
         backend_class = import_class_cached(backend_path)
         return cast("PartialProtocolBackend", backend_class(config))
 

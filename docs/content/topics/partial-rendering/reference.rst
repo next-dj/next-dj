@@ -408,7 +408,7 @@ Server-Initiated Layers
 -----------------------
 
 ``Patches.layer_open`` opens a layer from a handler, the server counterpart of the ``data-next-layer`` opener.
-Its signature is ``layer_open(*, zone=None, href=None)``, and the two keywords select one of four forms.
+Its signature is ``layer_open(*, zone=None, href=None)``, and the two keywords select one of three forms.
 
 A layer shows a zone of a page, uniformly.
 There is no separate mechanism for a whole page in a modal.
@@ -421,9 +421,9 @@ A page that opens in a layer declares a zone with ``{% zone "name" %}``, and tha
    * - Call
      - Effect
    * - ``layer_open()``
-     - Open a bare modal, an empty layer a later patch in the same envelope fills.
+     - Open a bare modal shell. Its container carries no zone name, so only a css-targeted patch can address it. Name a zone to fill the modal with zone patches.
    * - ``layer_open(zone="cart")``
-     - Open a layer whose zone container is named ``cart``, so a following ``morph(zone="cart")`` lands inside the modal.
+     - Open a layer whose zone container is named ``cart``, so a following ``morph(zone="cart")`` in the same envelope lands inside the modal.
    * - ``layer_open(href="/records/42/", zone="record")``
      - Fetch the ``record`` zone of ``/records/42/`` and load it into the layer. The page at that href declares ``{% zone "record" %}``.
 

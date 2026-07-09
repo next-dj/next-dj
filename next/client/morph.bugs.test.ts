@@ -83,7 +83,7 @@ const bugTable: BugCase[] = [
     },
     verify: (result, target) => {
       const widget = result.querySelector("#w")!;
-      const child = (target as Element).querySelector("#w")!.firstElementChild;
+      const child = target.querySelector("#w")!.firstElementChild;
       expect(widget.getAttribute("v")).toBe("2");
       expect(widget.firstElementChild).toBe(child);
       expect(child!.tagName).toBe("B");

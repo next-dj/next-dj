@@ -539,12 +539,17 @@ def check_form_backend_partial_aware(
     return messages
 
 
+def _partial_backend_configs() -> list[object]:
+    """Return PARTIAL_BACKENDS as a list, tolerating any malformed shape."""
+    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", ())
+    if isinstance(configs, list | tuple):
+        return list(configs)
+    return []
+
+
 def _partial_backends_active() -> bool:
     """Return True when at least one partial protocol backend is configured."""
-    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", [])
-    return isinstance(configs, list) and any(
-        isinstance(config, dict) for config in configs
-    )
+    return any(isinstance(config, dict) for config in _partial_backend_configs())
 
 
 @register(Tags.compatibility)
@@ -558,10 +563,9 @@ def check_single_partial_backend(
     PARTIAL_BACKENDS entry is instantiated, so a second entry is dead config
     that silently never runs.
     """
-    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", [])
-    if not isinstance(configs, list):
-        return []
-    valid = [config for config in configs if isinstance(config, dict)]
+    valid = [
+        config for config in _partial_backend_configs() if isinstance(config, dict)
+    ]
     if len(valid) <= 1:
         return []
     return [
@@ -586,16 +590,12 @@ def check_partial_backend_names_a_path(
 ) -> list[CheckMessage]:
     """Error when a PARTIAL_BACKENDS entry omits its BACKEND key (`next.E073`).
 
-    The factory reads `config["BACKEND"]` to import the protocol backend, so
-    an entry without the key would raise a bare KeyError on the first partial
-    request. The check turns that runtime 500 into a startup error naming the
-    entry that lacks a dotted path.
+    The factory refuses such an entry with `ImproperlyConfigured` on the
+    first partial request. The check surfaces the same misconfiguration at
+    startup, naming the entry that lacks a dotted path.
     """
-    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", [])
-    if not isinstance(configs, list):
-        return []
     messages: list[CheckMessage] = []
-    for index, config in enumerate(configs):
+    for index, config in enumerate(_partial_backend_configs()):
         if not isinstance(config, dict) or "BACKEND" in config:
             continue
         messages.append(
@@ -641,10 +641,7 @@ def check_manifest_version_has_manifest_storage(
 
 def _manifest_version_requested() -> bool:
     """Return True when a partial backend resolves VERSION to the sentinel."""
-    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", [])
-    if not isinstance(configs, list):
-        return False
-    for config in configs:
+    for config in _partial_backend_configs():
         if not isinstance(config, dict):
             continue
         options = config.get("OPTIONS")

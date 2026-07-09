@@ -87,6 +87,11 @@ class TestRenderZoneUnknown:
         assert set(result.html) == {"alpha"}
         assert set(result.bodies) == {"alpha"}
 
+    def test_empty_batch_renders_nothing(self) -> None:
+        result = render_zone(ZONED_PAGE, (), _request())
+        assert result.html == {}
+        assert result.bodies == {}
+
     def test_unknown_zone_message_lists_declared_zones(self) -> None:
         with pytest.raises(UnknownZoneError) as exc:
             render_zone(ZONED_PAGE, ("ghost",), _request())

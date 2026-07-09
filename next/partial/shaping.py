@@ -223,19 +223,24 @@ def _shape_advance(
     )
     form = next_wizard.current_form()
     patches = Patches(request)
+    overrides = _wizard_overrides(form, next_wizard, outcome.action_name)
+    # Override the form origin so the next step's hidden _next_form_origin
+    # field carries the next step URL, not the current step URL from
+    # request.POST. Without this, blur-validate probes on the new step
+    # resolve the origin back to the previous step page and morph the
+    # wrong step into the zone or the page.
+    overrides[FORM_ORIGIN_OVERRIDE_KEY] = redirect_to
     zone = _form_zone(request, page_path)
     if zone is not None:
-        overrides = _wizard_overrides(form, next_wizard, outcome.action_name)
-        # Override the form origin so the next step's hidden _next_form_origin
-        # field carries the next step URL, not the current step URL from
-        # request.POST. Without this, blur-validate probes on the new step
-        # resolve the origin back to the previous step page and morph the
-        # wrong step into the zone.
-        overrides[FORM_ORIGIN_OVERRIDE_KEY] = redirect_to
         _advance_zone(patches, page_path, zone, request, url_kwargs, overrides)
     else:
         html = backend.render_invalid_page(
-            request, outcome.action_name, form, page_path, url_kwargs
+            request,
+            outcome.action_name,
+            form,
+            page_path,
+            url_kwargs,
+            overrides=overrides,
         )
         patches.morph({keys.FORM_SELECTOR: outcome.uid or ""}, html, extract=True)
     if _should_push_steps(wizard):
@@ -262,10 +267,7 @@ def _advance_zone(
         page_path, (zone,), request, url_kwargs=url_kwargs, overrides=overrides
     )
     patches.morph({keys.ZONE: zone}, result.html[zone])
-    patches._collect_zone_assets(result)
-    delta = result.js_context_delta()
-    if delta:
-        patches._add_context(delta)
+    patches._absorb_zone_result(result)
 
 
 def _shape_result(

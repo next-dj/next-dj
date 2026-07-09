@@ -874,13 +874,26 @@ class Patches:
     def _collect_zone_assets(self, result: "ZoneRenderResult") -> "Patches":
         """Record the URL-form and inline-form assets a zone body collected.
 
-        This deliberately collects assets only. The js-context delta is emitted
-        by the view path, since the builder path owns context through context().
+        This deliberately collects assets only. The builder verbs own context
+        through context(), so they never absorb the js-context delta.
         """
         for kind, body in result.inline_assets():
             self.add_asset(kind, "", inline=body)
         for kind, url in result.url_assets():
             self.add_asset(kind, url)
+        return self
+
+    def _absorb_zone_result(self, result: "ZoneRenderResult") -> "Patches":
+        """Record a zone render's assets and js-context delta on the envelope.
+
+        The framework render paths, zone GET and wizard advance, forward
+        both so a zone body that first introduces a co-located asset or a
+        serialize provider still ships it to the client.
+        """
+        self._collect_zone_assets(result)
+        delta = result.js_context_delta()
+        if delta:
+            self._add_context(delta)
         return self
 
     def _is_same_site(self, href: str) -> bool:
