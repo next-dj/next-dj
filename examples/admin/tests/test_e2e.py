@@ -480,19 +480,24 @@ class TestInlines:
 
 _INLINE_ACTIONS = ("admin:inline_change", "admin:inline_add")
 
+_CHAPTER_ROWS = ((1, "Intro", 100), (2, "Rising", 200))
+
+
+def _book_with_chapters(count=1):
+    author = Author.objects.create(full_name="A. Author")
+    book = Book.objects.create(title="Book", author=author)
+    chapters = [
+        Chapter.objects.create(book=book, number=number, title=title, word_count=words)
+        for number, title, words in _CHAPTER_ROWS[:count]
+    ]
+    return book, chapters
+
 
 class TestLiveInlines:
     """Each existing related row is its own keyed `admin:inline_change` form."""
 
     def _book(self):
-        author = Author.objects.create(full_name="A. Author")
-        book = Book.objects.create(title="Book", author=author)
-        first = Chapter.objects.create(
-            book=book, number=1, title="Intro", word_count=100
-        )
-        second = Chapter.objects.create(
-            book=book, number=2, title="Rising", word_count=200
-        )
+        book, (first, second) = _book_with_chapters(2)
         return book, first, second
 
     @staticmethod
@@ -632,11 +637,7 @@ class TestInlinePartialPatches:
     """Inline saves author replace, inner, and server-opened layer patches."""
 
     def _book(self):
-        author = Author.objects.create(full_name="A. Author")
-        book = Book.objects.create(title="Book", author=author)
-        chapter = Chapter.objects.create(
-            book=book, number=1, title="Intro", word_count=100
-        )
+        book, (chapter,) = _book_with_chapters()
         return book, chapter
 
     def test_partial_inline_change_replaces_row_and_inners_count(self, admin_client):
@@ -683,10 +684,55 @@ class TestInlinePartialPatches:
         assert response.status_code == 200
         envelope = envelope_of(response)
         assert envelope.op_verbs() == ["layer.open", "inner"]
-        assert envelope.ops[0]["href"] == f"/admin/library/book/{book.pk}/change/"
+        new_chapter = Chapter.objects.get(book=book, number=2, title="Rising")
+        assert (
+            envelope.ops[0]["href"]
+            == f"/admin/library/chapter/{new_chapter.pk}/change/"
+        )
+        assert envelope.ops[0]["zone"] == "record"
         assert envelope.targets()[1] == {"css": '[data-inline-count="chapter"]'}
         assert "2 saved" in envelope.ops[1]["html"]
-        assert Chapter.objects.filter(book=book, number=2, title="Rising").exists()
+
+
+class TestLayerDismiss:
+    """The chapter editor layer offers a server-side discard dismissal."""
+
+    def _chapter(self):
+        _book, (chapter,) = _book_with_chapters()
+        return chapter
+
+    def test_layer_zone_render_offers_discard(self, admin_client):
+        chapter = self._chapter()
+        response = admin_client.get_zones(
+            f"/admin/library/chapter/{chapter.pk}/change/", "record"
+        )
+        assert response.status_code == 200
+        html = envelope_of(response).html_for_zone("record")
+        discard_url = admin_client.get_action_url("admin:discard")
+        assert f'action="{discard_url}" method="post" data-next-action=' in html
+        assert "Discard" in html
+
+    def test_discard_form_is_scoped_to_the_dialog_by_css(self, admin_client):
+        chapter = self._chapter()
+        response = admin_client.get(f"/admin/library/chapter/{chapter.pk}/change/")
+        assert response.status_code == 200
+        body = response.content.decode()
+        assert 'class="discard-in-layer"' in body
+        assert "/static/next/components/admin_form.css" in body
+
+    def test_discard_closes_layer_with_dismiss_reason(self, admin_client):
+        response = admin_client.post_action("admin:discard", {}, partial=True)
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["layer.close"]
+        op = envelope.ops[0]
+        assert op["dismiss"] is True
+        assert op["reason"] == "discarded"
+
+    def test_discard_without_runtime_redirects_to_dashboard(self, admin_client):
+        response = admin_client.post_action("admin:discard", {})
+        assert response.status_code == 302
+        assert response.headers["Location"] == "/admin/"
 
 
 class TestHistoryView:

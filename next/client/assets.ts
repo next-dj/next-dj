@@ -19,6 +19,7 @@ import {
 } from "./adapters";
 import { isAsset } from "./apply";
 import type { Asset } from "./apply";
+import type { PartialError } from "./protocol";
 import type { Clock, Navigate } from "./wire";
 
 const RELOAD_FLAG = "next:partial:reloaded";
@@ -67,9 +68,9 @@ export interface Assets {
   // Insert the missing CSS of a manifest and call done once every new sheet has
   // loaded, errored, or timed out. With no missing CSS the callback runs
   // synchronously so the ops apply in the same tick.
-  loadCss(manifest: Asset[], done: () => void): void;
+  loadCss(manifest: readonly Asset[], done: () => void): void;
   // Run the missing JS of a manifest after the ops, each URL once per page.
-  loadJs(manifest: Asset[]): void;
+  loadJs(manifest: readonly Asset[]): void;
   // The current asset version known to the client, sent on every request.
   version(): string;
   // Compare the envelope version against the known one. A mismatch returns true
@@ -121,7 +122,7 @@ export function createAssets(deps: AssetsDeps): Assets {
     }
   }
 
-  function missing(manifest: Asset[], kind: string): string[] {
+  function missing(manifest: readonly Asset[], kind: string): string[] {
     const urls: string[] = [];
     for (const asset of manifest) {
       if (!isAsset(asset) || asset.kind !== kind) continue;
@@ -139,7 +140,7 @@ export function createAssets(deps: AssetsDeps): Assets {
 
   // The inline bodies of a manifest, deduped by body under a kind-scoped key so
   // the same inline asset inserts once per page and never clashes with a URL.
-  function missingInline(manifest: Asset[], kind: string): string[] {
+  function missingInline(manifest: readonly Asset[], kind: string): string[] {
     const bodies: string[] = [];
     for (const asset of manifest) {
       if (!isAsset(asset) || asset.kind !== kind) continue;
@@ -160,7 +161,7 @@ export function createAssets(deps: AssetsDeps): Assets {
     doc.head.append(el);
   }
 
-  function loadCss(manifest: Asset[], done: () => void): void {
+  function loadCss(manifest: readonly Asset[], done: () => void): void {
     // Inline styles insert synchronously and need no load gate, so they go in
     // before the URL delta whose loads the done callback waits on.
     for (const body of missingInline(manifest, "css")) {
@@ -185,7 +186,7 @@ export function createAssets(deps: AssetsDeps): Assets {
         deps.dispatch("partial:error", {
           kind: "asset",
           error: new Error("a stylesheet failed to load"),
-        });
+        } satisfies PartialError);
       }
       done();
     };
@@ -194,7 +195,7 @@ export function createAssets(deps: AssetsDeps): Assets {
     }
   }
 
-  function loadJs(manifest: Asset[]): void {
+  function loadJs(manifest: readonly Asset[]): void {
     for (const body of missingInline(manifest, "js")) {
       insertInline("script", body);
     }
@@ -223,7 +224,7 @@ export function createAssets(deps: AssetsDeps): Assets {
         kind: "asset",
         url,
         error: new Error("asset version mismatch after reload"),
-      });
+      } satisfies PartialError);
       return true;
     }
     setFlag();
@@ -269,11 +270,9 @@ function inlineKey(kind: string, body: string): string {
   return `inline:${kind}:${body}`;
 }
 
-// The text body of an element. textContent is typed string | null, but for an
-// element node the DOM always yields a string, so String() coerces with no
-// untestable null branch left for the coverage gate.
+// The text body of an element, a plain string on element nodes.
 function textOf(element: Element): string {
-  return String(element.textContent);
+  return element.textContent;
 }
 
 // The bootstrap script carries the page nonce. document.currentScript is null by
@@ -282,5 +281,5 @@ function textOf(element: Element): string {
 function rememberNonce(doc: Document): string | undefined {
   const current = doc.currentScript;
   const value = current instanceof HTMLElement ? current.nonce : "";
-  return value !== undefined && value !== "" ? value : undefined;
+  return value === "" ? undefined : value;
 }

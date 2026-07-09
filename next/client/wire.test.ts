@@ -508,7 +508,7 @@ describe("Wire echo request id", () => {
   it("falls back to a timestamp id when crypto.randomUUID is absent", async () => {
     const original = globalThis.crypto;
     Object.defineProperty(globalThis, "crypto", {
-      value: { ...original, randomUUID: undefined },
+      value: { randomUUID: undefined },
       configurable: true,
     });
     try {

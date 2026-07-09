@@ -81,6 +81,24 @@ class ZoneOptions:
         return f' {LAZY_ATTR}="{self.lazy}"'
 
 
+def render_zone_body(
+    partial: "ZonePartial",
+    name: str,
+    options: ZoneOptions,
+    context: "Context",
+) -> tuple[SafeString, SafeString]:
+    """Render one zone body and its addressable wrapper element.
+
+    The first element is the bare inner body, the second wraps it in the
+    marker element carrying the delivery attributes of the zone options.
+    An append or prepend merge grafts the bare body into the live zone, so
+    it needs the body without the wrapper the morph path addresses.
+    """
+    body = partial.render(context)
+    wrapped = _wrap_zone(options.tag, name, body, extra=options.delivery_attrs)
+    return body, wrapped
+
+
 def render_zone_standalone(
     partial: "ZonePartial",
     name: str,
@@ -92,8 +110,8 @@ def render_zone_standalone(
     The wrapper carries the delivery attributes of the zone options,
     which drop the lazy hint because the body has already arrived.
     """
-    body = partial.render(context)
-    return _wrap_zone(options.tag, name, body, extra=options.delivery_attrs)
+    _body, wrapped = render_zone_body(partial, name, options, context)
+    return wrapped
 
 
 class ZonePartial:
@@ -304,5 +322,6 @@ __all__ = [
     "ZonePartial",
     "do_zone",
     "register",
+    "render_zone_body",
     "render_zone_standalone",
 ]

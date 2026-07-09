@@ -1,5 +1,6 @@
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
@@ -9,6 +10,17 @@ from next.partial import Patches, PatchEventStream
 from next.partial.manager import partial_backend_manager
 from next.partial.signals import sse_stream_closed, sse_stream_opened
 from next.partial.sse import _heartbeat_seconds, _retry_ms
+
+
+@contextmanager
+def _partial_backend_config(backends: list[dict]) -> Iterator[None]:
+    """Activate a PARTIAL_BACKENDS config with a manager reset around it."""
+    with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": backends}):
+        partial_backend_manager.reset()
+        try:
+            yield
+        finally:
+            partial_backend_manager.reset()
 
 
 @pytest.fixture()
@@ -95,12 +107,8 @@ class TestRetryOption:
         assert frames[0] == b"retry: 3000\n\n"
 
     def test_retry_falls_back_without_sse_option(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": _NO_SSE_BACKEND}):
-            partial_backend_manager.reset()
-            try:
-                assert _retry_ms() == 3000
-            finally:
-                partial_backend_manager.reset()
+        with _partial_backend_config(_NO_SSE_BACKEND):
+            assert _retry_ms() == 3000
 
     def test_retry_falls_back_on_non_int_value(self) -> None:
         backend = [
@@ -109,12 +117,8 @@ class TestRetryOption:
                 "OPTIONS": {"SSE": {"RETRY_MS": "fast"}},
             },
         ]
-        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": backend}):
-            partial_backend_manager.reset()
-            try:
-                assert _retry_ms() == 3000
-            finally:
-                partial_backend_manager.reset()
+        with _partial_backend_config(backend):
+            assert _retry_ms() == 3000
 
 
 def _custom_heartbeat_backend(seconds: object) -> list[dict]:
@@ -145,40 +149,18 @@ class TestHeartbeatOption:
         assert response._heartbeat_seconds == 0
 
     def test_custom_setting_is_picked_up(self, request_obj: object) -> None:
-        backend = _custom_heartbeat_backend(10)
-        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": backend}):
-            partial_backend_manager.reset()
-            try:
-                response = PatchEventStream(request_obj, iter(()))
-                assert response._heartbeat_seconds == 10.0
-            finally:
-                partial_backend_manager.reset()
+        with _partial_backend_config(_custom_heartbeat_backend(10)):
+            response = PatchEventStream(request_obj, iter(()))
+            assert response._heartbeat_seconds == 10.0
 
     def test_falls_back_without_sse_option(self) -> None:
-        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": _NO_SSE_BACKEND}):
-            partial_backend_manager.reset()
-            try:
-                assert _heartbeat_seconds() == 25.0
-            finally:
-                partial_backend_manager.reset()
+        with _partial_backend_config(_NO_SSE_BACKEND):
+            assert _heartbeat_seconds() == 25.0
 
-    def test_non_numeric_value_falls_back(self) -> None:
-        backend = _custom_heartbeat_backend("nope")
-        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": backend}):
-            partial_backend_manager.reset()
-            try:
-                assert _heartbeat_seconds() == 25.0
-            finally:
-                partial_backend_manager.reset()
-
-    def test_bool_value_falls_back(self) -> None:
-        backend = _custom_heartbeat_backend(True)
-        with override_settings(NEXT_FRAMEWORK={"PARTIAL_BACKENDS": backend}):
-            partial_backend_manager.reset()
-            try:
-                assert _heartbeat_seconds() == 25.0
-            finally:
-                partial_backend_manager.reset()
+    @pytest.mark.parametrize("seconds", ["nope", True], ids=["non_numeric", "bool"])
+    def test_invalid_heartbeat_value_falls_back(self, seconds: object) -> None:
+        with _partial_backend_config(_custom_heartbeat_backend(seconds)):
+            assert _heartbeat_seconds() == 25.0
 
 
 class _Recorder:
@@ -354,6 +336,52 @@ async def _disconnect_midpull(async_request_obj: object) -> _FinalizedSource:
     await stream.__anext__()
     await stream.aclose()
     return source
+
+
+class _SyncFinalizedSource:
+    """Sync source that records its generator finalization in a flag."""
+
+    def __init__(self) -> None:
+        """Start unfinalized with a fresh body generator."""
+        self.finalized = False
+        self._gen = self._iterate()
+
+    def __iter__(self) -> Iterator[Patches]:
+        """Return the single body generator."""
+        return self._gen
+
+    def _iterate(self) -> Iterator[Patches]:
+        """Yield two items, marking finalized in the closing finally."""
+        try:
+            yield _patches()
+            yield _patches()
+        finally:
+            self.finalized = True
+
+    def close(self) -> None:
+        """Close the body generator so the stream can release it."""
+        self._gen.close()
+
+
+class TestSyncSourceCleanup:
+    """The sync stream closes its source generator on end or disconnect."""
+
+    def test_exhaustion_closes_the_source(self, request_obj: object) -> None:
+        source = _SyncFinalizedSource()
+        response = PatchEventStream(request_obj, source)
+        _consume(response)
+        assert source.finalized is True
+
+    def test_disconnect_closes_the_source(self, request_obj: object) -> None:
+        source = _SyncFinalizedSource()
+        response = PatchEventStream(request_obj, source)
+        stream = response.streaming_content
+        next(stream)
+        next(stream)
+        # a mid-stream disconnect closes the byte generator, whose finally
+        # closes the source generator without draining it
+        response._iterator.close()
+        assert source.finalized is True
 
 
 class TestAsyncDisconnectCleanup:

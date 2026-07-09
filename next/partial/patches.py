@@ -216,6 +216,23 @@ class CrossSiteHrefError(ValueError):
         )
 
 
+class LayerHrefWithoutZoneError(ValueError):
+    """Raised when a layer seeds an href but names no zone to load it into.
+
+    The client fetch path needs a zone to know which fragment of the href
+    to pull, so an href without one would silently open an empty modal,
+    which is a caller bug refused at the builder.
+    """
+
+    def __init__(self, href: str) -> None:
+        """Store the rejected href and build a readable message."""
+        self.href = href
+        super().__init__(
+            f'href "{href}" needs a zone to load into, name the page zone that '
+            'receives the content, for example layer_open(href=..., zone="record").'
+        )
+
+
 def _is_reserved_event(name: str) -> bool:
     """Return True when the name belongs to the framework client-bus channel."""
     return name in _RESERVED_EVENT_NAMES or name.startswith(_RESERVED_EVENT_PREFIXES)
@@ -625,9 +642,12 @@ class Patches:
     ) -> "Patches":
         """Open a server-initiated layer, optionally seeding a zone or href.
 
-        A seeded href must be same-site, a cross-site value raises
-        `CrossSiteHrefError` rather than being masked as the origin path.
+        A seeded href needs a zone to load into and must be same-site, so a
+        href without a zone raises `LayerHrefWithoutZoneError` and a
+        cross-site value raises `CrossSiteHrefError`.
         """
+        if href is not None and zone is None:
+            raise LayerHrefWithoutZoneError(href)
         extras: dict[str, Any] = {}
         if zone is not None:
             extras[keys.ZONE] = zone
@@ -642,12 +662,18 @@ class Patches:
         result: object = None,
         dismiss: str | None = None,
     ) -> "Patches":
-        """Close the top layer with an accept result or a dismissal."""
+        """Close the top layer with an accept result or a dismissal.
+
+        A dismissal sets the boolean `dismiss` flag the client reads and
+        carries the reason string under `reason`, matching the wire shape
+        the runtime expects rather than overloading `dismiss` with the text.
+        """
         extras: dict[str, Any] = {}
         if result is not None:
             extras["result"] = result
         if dismiss is not None:
-            extras["dismiss"] = dismiss
+            extras["dismiss"] = True
+            extras["reason"] = dismiss
         self._ops.append(Patch(op="layer.close", extras=extras))
         return self
 
@@ -848,13 +874,26 @@ class Patches:
     def _collect_zone_assets(self, result: "ZoneRenderResult") -> "Patches":
         """Record the URL-form and inline-form assets a zone body collected.
 
-        This deliberately collects assets only. The js-context delta is emitted
-        by the view path, since the builder path owns context through context().
+        This deliberately collects assets only. The builder verbs own context
+        through context(), so they never absorb the js-context delta.
         """
         for kind, body in result.inline_assets():
             self.add_asset(kind, "", inline=body)
         for kind, url in result.url_assets():
             self.add_asset(kind, url)
+        return self
+
+    def _absorb_zone_result(self, result: "ZoneRenderResult") -> "Patches":
+        """Record a zone render's assets and js-context delta on the envelope.
+
+        The framework render paths, zone GET and wizard advance, forward
+        both so a zone body that first introduces a co-located asset or a
+        serialize provider still ships it to the client.
+        """
+        self._collect_zone_assets(result)
+        delta = result.js_context_delta()
+        if delta:
+            self._add_context(delta)
         return self
 
     def _is_same_site(self, href: str) -> bool:
@@ -915,6 +954,7 @@ __all__ = [
     "Envelope",
     "ForeignPageNotAuthorizedError",
     "FormMeta",
+    "LayerHrefWithoutZoneError",
     "Patch",
     "PatchResponse",
     "Patches",

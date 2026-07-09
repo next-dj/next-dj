@@ -12,16 +12,18 @@ from next.static.manager import default_manager
 
 from .registry import zones_of
 from .signals import zone_rendered
-from .zone import render_zone_standalone
+from .zone import render_zone_body
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
     from pathlib import Path
 
     from django.http import HttpRequest
 
     from next.static import StaticCollector
+
+    from .registry import ZoneInfo
 
 
 class UnknownZoneError(LookupError):
@@ -48,12 +50,16 @@ class UnknownZoneError(LookupError):
 class ZoneRenderResult:
     """Rendered zones plus the assets their bodies collected.
 
-    `html` maps each requested zone name to its wrapped marker element.
-    `collector` carries the co-located assets the bodies registered so
-    the caller can ship a manifest outward, past the no-op inject.
+    `html` maps each rendered zone name to its wrapped marker element and
+    `bodies` maps it to the bare inner body. A morph or replace addresses
+    the wrapped element, an append or prepend grafts the bare body into the
+    live zone. `collector` carries the co-located assets the bodies
+    registered so the caller can ship a manifest outward, past the no-op
+    inject.
     """
 
     html: dict[str, str]
+    bodies: dict[str, str]
     collector: "StaticCollector"
 
     def url_assets(self) -> "Iterator[tuple[str, str]]":
@@ -92,16 +98,15 @@ def render_zone(
     zone bodies are gathered. A caller that already built the origin context
     passes it as `context_data` so it is reused rather than rebuilt. The
     manifest travels outward in the result rather than through inject, which
-    is a no-op for fragments. An unknown zone name raises before any body
-    renders.
+    is a no-op for fragments. Unknown zone names are skipped so one stale
+    name never poisons a batch, but a batch of only unknown names raises so
+    a single-zone request keeps its 400.
     """
     start = time.perf_counter()
     kwargs = url_kwargs or {}
     template = page.composed_template_for(page_path)
     zones = zones_of(template)
-    for name in zone_names:
-        if name not in zones:
-            raise UnknownZoneError(name, tuple(sorted(zones)))
+    rendered_names = _renderable_zone_names(zone_names, zones)
 
     if context_data is None:
         context_data = page.build_render_context(page_path, request, **kwargs)
@@ -112,15 +117,35 @@ def render_zone(
     django_context = DjangoTemplateContext(context_data)
 
     html: dict[str, str] = {}
-    for name in zone_names:
+    bodies: dict[str, str] = {}
+    for name in rendered_names:
         info = zones[name]
-        rendered = render_zone_standalone(
+        body, wrapped = render_zone_body(
             info.partial, info.name, info.options, django_context
         )
-        html[name] = str(rendered)
+        # SafeString is a str, kept as-is to avoid copies on the hot path.
+        html[name] = wrapped
+        bodies[name] = body
 
-    _emit_rendered(page_path, zone_names, request, start)
-    return ZoneRenderResult(html=html, collector=collector)
+    _emit_rendered(page_path, rendered_names, request, start)
+    return ZoneRenderResult(html=html, bodies=bodies, collector=collector)
+
+
+def _renderable_zone_names(
+    zone_names: tuple[str, ...],
+    zones: "Mapping[str, ZoneInfo]",
+) -> tuple[str, ...]:
+    """Return the declared names of a batch, deduplicated in request order.
+
+    A name the page does not declare is dropped so one stale name never
+    poisons the batch. A non-empty batch left with no declared name raises,
+    naming the first unknown, so a single-zone request keeps its 400. An
+    empty batch stays the no-op it always was.
+    """
+    rendered = tuple(name for name in dict.fromkeys(zone_names) if name in zones)
+    if zone_names and not rendered:
+        raise UnknownZoneError(zone_names[0], tuple(sorted(zones)))
+    return rendered
 
 
 def _seed_collector(

@@ -119,9 +119,11 @@ The form repeats once per row, so every instance shares one action UID. `key=` w
 `admin:inline_change` resolves the child model from the parent admin's inlines (`_inline` on the wire), the row by primary key (`_inline_pk`), and saves just that row. A trailing `{% form "admin:inline_add" %}` creates a new row through the same inline form class. On a partial request both author patch envelopes through `Patches(request)`:
 
 - **change** → `replace` swaps the keyed row form wholesale for the freshly rendered saved form, and `inner` updates the section's `data-inline-count` badge in place.
-- **add** → `layer_open(href=...)` opens the parent change view in a server-initiated result layer, and `inner` refreshes the same count badge.
+- **add** → `layer_open(href=..., zone="record")` opens the _new row's own_ standalone change view `record` zone in a server-initiated result layer, and `inner` refreshes the parent's count badge. The client fetches that zone and morphs it into the modal, so adding a chapter drops the operator straight into editing its details rather than reopening the parent over itself.
 
-Both reuse the `inline_row` component for the swapped form so the live markup never drifts from the page render. Without a runtime each falls back to a redirect to the change view, and an invalid submit still re-renders the page with the bad row's errors, the rest untouched.
+The change swap reuses the `inline_row` component so the live markup never drifts from the page render. The add editor reuses the chapter's own generic change template, which is already wrapped in the `record` zone. Without a runtime each falls back to a redirect to the change view, and an invalid submit still re-renders the page with the bad row's errors, the rest untouched.
+
+The editor also renders a **Discard** form that posts `admin:discard`. The handler answers with `Patches(request).layer_close(dismiss="discarded")`, a server-side _dismissal_ rather than a `layer_close(result=...)` accept, so the client fires `partial:layer-dismissed` and skips any accept side effects. Whether the editor sits in a layer is a client-side fact the server cannot see — a modal submit and a full-page submit arrive identical — so the panel's co-located `component.css` shows the button only under a `dialog` ancestor and the full-page change view keeps it hidden. Without a runtime the post falls back to a dashboard redirect.
 
 ### 6. Save and continue / Save and add another
 

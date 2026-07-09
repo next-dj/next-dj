@@ -28,6 +28,11 @@ A value the active serializer cannot encode raises ``TypeError`` during renderin
 The error names the offending key.
 See :ref:`Serialization for the Browser <topics-context-serialization>` for the accepted shapes and the common materialisation patterns.
 
+.. note::
+
+   The framework escapes the init payload before it enters the inline ``<script>``, so a serialised value that contains ``</script>`` cannot break out of the tag.
+   Serialised values still appear in the page source, so never mark a secret ``serialize=True``.
+
 Serializers
 -----------
 

@@ -67,9 +67,7 @@ export interface IntersectionAdapter {
   observe(el: Element, onReveal: () => void): () => void;
 }
 
-export interface ConfirmAdapter {
-  (text: string): boolean;
-}
+export type ConfirmAdapter = (text: string) => boolean;
 
 export interface TriggerDeps {
   // The partial fetch, the only transport the triggers reach. They name zones
@@ -183,7 +181,9 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       if (typeof value === "string") pairs.push([name, value]);
     }
     const query = new URLSearchParams(pairs).toString();
-    const action = form.getAttribute("action") || here().replace(/\?.*$/, "");
+    // An absent and an empty action both mean the current URL sans query.
+    const attr = form.getAttribute("action");
+    const action = attr === null || attr === "" ? here().replace(/\?.*$/, "") : attr;
     const url = query === "" ? action : `${action}?${query}`;
     doc.defaultView?.history.replaceState(null, "", url);
     zoneGet(url, zone);
@@ -334,10 +334,10 @@ export function createTriggers(deps: TriggerDeps): Triggers {
       observed.push(stop);
       return;
     }
-    if (merge !== null && el.getAttribute(TARGET_ATTR) !== null) {
+    const targetZ = el.getAttribute(TARGET_ATTR);
+    if (merge !== null && targetZ !== null) {
       // An infinite-scroll sentinel: paginate when it scrolls into view.
       activated.add(el);
-      const targetZ = el.getAttribute(TARGET_ATTR)!;
       const stop = observer.observe(el, () => paginate(el, targetZ));
       observed.push(stop);
     }
@@ -468,21 +468,28 @@ export function createTriggers(deps: TriggerDeps): Triggers {
     for (const [url, zones] of batches) zoneGet(url, zones.join(","));
   }
 
+  // The attribute of an element matched by an attribute selector, so the null
+  // arm cannot occur and stays out of the branch count.
+  function attrOf(el: Element, name: string): string {
+    /* v8 ignore next */
+    return el.getAttribute(name) ?? "";
+  }
+
   // Warn on hand-written values the runtime drops in silence: an attribute
   // outside its closed set, a poll interval failing the grammar or bounds, a
   // poll element naming no zone. Dev-only.
   function validateAttrs(root: ParentNode): void {
     if (!dev) return;
     for (const el of matching(root, `[${LAZY_ATTR}]`)) {
-      const value = el.getAttribute(LAZY_ATTR)!;
+      const value = attrOf(el, LAZY_ATTR);
       if (!LAZY_VALUES.has(value)) warnAttr(LAZY_ATTR, value, LAZY_VALUES);
     }
     for (const el of matching(root, `[${MERGE_ATTR}]`)) {
-      const value = el.getAttribute(MERGE_ATTR)!;
+      const value = attrOf(el, MERGE_ATTR);
       if (!MERGE_VALUES.has(value)) warnAttr(MERGE_ATTR, value, MERGE_VALUES);
     }
     for (const el of matching(root, `[${POLL_ATTR}]`)) {
-      const value = el.getAttribute(POLL_ATTR)!;
+      const value = attrOf(el, POLL_ATTR);
       if (pollMs(el) === null) warnPoll(value);
       else if (el.getAttribute(ATTR_ZONE) === null) warnPollZone(value);
     }

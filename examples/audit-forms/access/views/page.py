@@ -5,9 +5,9 @@ from next.pages import context
 
 @context("recent_requests")
 def recent_requests() -> list[AccessRequest]:
-    return list(AccessRequest.objects.all()[:5])
+    return list(AccessRequest.objects.order_by("-created_at", "-pk")[:5])
 
 
 @context("recent_audit")
 def recent_audit() -> list[AuditEntry]:
-    return list(AuditEntry.objects.all()[:5])
+    return list(AuditEntry.objects.order_by("-created_at", "-pk")[:5])

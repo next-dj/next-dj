@@ -79,7 +79,7 @@ def shape_partial(
     if outcome.kind == ActionOutcomeKind.INVALID:
         return _shape_invalid(backend, request, outcome, rotated=rotated)
     if outcome.kind == ActionOutcomeKind.WIZARD_ADVANCE:
-        return _shape_advance(request, outcome, rotated=rotated)
+        return _shape_advance(backend, request, outcome, rotated=rotated)
     return _shape_result(backend, request, outcome, rotated=rotated)
 
 
@@ -182,6 +182,7 @@ def _shape_invalid(
 
 
 def _shape_advance(
+    backend: "FormActionBackend",
     request: "HttpRequest",
     outcome: ActionOutcome,
     *,
@@ -192,10 +193,12 @@ def _shape_advance(
     The advance carries a live wizard and the URL of the next step. The
     URL resolves through the URLconf to the next step's page identity, a
     second wizard binds to that page and yields the unbound next-step
-    form, and the master zone of the next step renders into a morph. The
-    next step page view never runs, so wizard authorization must live in
-    the action guard. A history `url.push` rides along only when the
-    wizard opts into pushing steps, off by default.
+    form, and the master zone of the next step renders into a morph. A
+    whole-page wizard with no zone extract-morphs the next step's form so
+    the client trims it out of a full re-render, the same shape the invalid
+    path uses. The next step page view never runs, so wizard authorization
+    must live in the action guard. A history `url.push` rides along only
+    when the wizard opts into pushing steps, off by default.
     """
     wizard = outcome.wizard
     redirect_to = outcome.redirect_to
@@ -220,22 +223,51 @@ def _shape_advance(
     )
     form = next_wizard.current_form()
     patches = Patches(request)
+    overrides = _wizard_overrides(form, next_wizard, outcome.action_name)
+    # Override the form origin so the next step's hidden _next_form_origin
+    # field carries the next step URL, not the current step URL from
+    # request.POST. Without this, blur-validate probes on the new step
+    # resolve the origin back to the previous step page and morph the
+    # wrong step into the zone or the page.
+    overrides[FORM_ORIGIN_OVERRIDE_KEY] = redirect_to
     zone = _form_zone(request, page_path)
     if zone is not None:
-        overrides = _wizard_overrides(form, next_wizard, outcome.action_name)
-        # Override the form origin in the render context so the next step's
-        # hidden _next_form_origin field carries the next step URL, not the
-        # current step URL from request.POST. Without this, blur-validate
-        # probes on the new step resolve the origin back to the previous step
-        # page and morph the wrong step into the zone.
-        overrides[FORM_ORIGIN_OVERRIDE_KEY] = redirect_to
-        result = render_zone(
-            page_path, (zone,), request, url_kwargs=url_kwargs, overrides=overrides
+        _advance_zone(patches, page_path, zone, request, url_kwargs, overrides)
+    else:
+        html = backend.render_invalid_page(
+            request,
+            outcome.action_name,
+            form,
+            page_path,
+            url_kwargs,
+            overrides=overrides,
         )
-        patches.morph({keys.ZONE: zone}, result.html[zone])
+        patches.morph({keys.FORM_SELECTOR: outcome.uid or ""}, html, extract=True)
     if _should_push_steps(wizard):
         patches.push_url(redirect_to)
     return _envelope_response(patches, request=request, rotated=rotated)
+
+
+def _advance_zone(
+    patches: Patches,
+    page_path: "Path",
+    zone: str,
+    request: "HttpRequest",
+    url_kwargs: dict[str, object],
+    overrides: dict[str, object],
+) -> None:
+    """Render the next step's zone and morph it with its co-located assets.
+
+    The next step lives on a foreign page, so its zone renders directly
+    rather than through `morph_zone`, which resolves the origin page. The
+    manifest and js-context delta of the step's body ride along so a step
+    that first introduces an asset or a serialize provider still ships it.
+    """
+    result = render_zone(
+        page_path, (zone,), request, url_kwargs=url_kwargs, overrides=overrides
+    )
+    patches.morph({keys.ZONE: zone}, result.html[zone])
+    patches._absorb_zone_result(result)
 
 
 def _shape_result(

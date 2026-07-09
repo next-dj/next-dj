@@ -51,6 +51,8 @@ XSS.
    Django template auto escaping prevents most cases.
    Context functions that return ``mark_safe`` strings or HTML strings bypass escaping.
    Apply ``mark_safe`` only to values you fully control, and never to untrusted input as covered in :doc:`di-and-untrusted-input`.
+   The framework escapes ``<``, ``>``, ``&``, U+2028, and U+2029 in the inline init payload, so a serialised value that contains ``</script>`` cannot break out of the tag.
+   The remaining risk is that serialised values appear in the page source, so never mark a secret ``serialize=True``, see :doc:`static-assets`.
 
 SQL injection.
    The :doc:`Django ORM <django:topics/db/queries>` uses parameterised queries.

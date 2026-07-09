@@ -11,6 +11,7 @@ import {
   HEADER_ZONE,
   REQUEST_FLAG,
 } from "./protocol";
+import type { PartialError } from "./protocol";
 import { defaultFetch, defaultNavigate } from "./adapters";
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
@@ -91,10 +92,12 @@ function isAbortError(error: unknown): boolean {
 
 // A ring id for a mutation, unique enough to suppress the SSE echo of this
 // client's own change. crypto.randomUUID is present in every secure context and
-// in jsdom, the timestamp fallback covers a plain-HTTP origin.
+// in jsdom, the timestamp fallback covers a plain-HTTP origin, where the
+// runtime object is narrower than the lib type claims.
 function newRequestId(): string {
-  return globalThis.crypto?.randomUUID
-    ? globalThis.crypto.randomUUID()
+  const impl = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  return impl?.randomUUID
+    ? impl.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
@@ -110,9 +113,9 @@ export class Wire {
 
   // Latest-wins per-target GET queues and the per-uid mutation lock. Both are
   // wiped by `_reset` so vitest files start from a clean slate.
-  readonly #queues: Map<string, QueueEntry> = new Map();
-  readonly #busy: Set<string> = new Set();
-  readonly #parseHooks: Map<string, ParseHook> = new Map();
+  readonly #queues = new Map<string, QueueEntry>();
+  readonly #busy = new Set<string>();
+  readonly #parseHooks = new Map<string, ParseHook>();
 
   constructor(deps: WireDeps) {
     this.#fetch = deps.fetch ?? defaultFetch();
@@ -158,14 +161,15 @@ export class Wire {
   async fetch(request: WireRequest): Promise<void> {
     const method = (request.method ?? "GET").toUpperCase();
     const safe = SAFE_METHODS.has(method);
+    const uid = request.uid;
     // An abortable request (inline validation) is queue-managed like a safe GET
     // even though it is a POST: it never takes the mutation lock.
-    const locked = !safe && !request.abortable && request.uid !== undefined;
+    const locked = !safe && !request.abortable && uid !== undefined;
     if (locked) {
       // Per-uid mutation lock: a second submit drops while busy, so a double
       // click yields exactly one fetch.
-      if (this.#busy.has(request.uid!)) return;
-      this.#busy.add(request.uid!);
+      if (this.#busy.has(uid)) return;
+      this.#busy.add(uid);
     }
     const queueKey = this.#queueKey(request, safe);
     const entry = queueKey !== undefined ? this.#enqueue(queueKey) : undefined;
@@ -173,7 +177,7 @@ export class Wire {
       await this.#run(request, method, queueKey, entry);
     } finally {
       if (locked) {
-        this.#busy.delete(request.uid!);
+        this.#busy.delete(uid);
       }
     }
   }
@@ -228,11 +232,18 @@ export class Wire {
     } catch (error) {
       // AbortError is never an error: the user moved on, no toast, no event.
       if (isAbortError(error)) return;
-      this.#dispatch("partial:error", { kind: "network", error });
+      this.#dispatch("partial:error", {
+        kind: "network",
+        error,
+      } satisfies PartialError);
       return;
     }
     // A stale safe-GET response that lost its race is dropped silently.
-    if (entry !== undefined && this.#queues.get(queueKey!)?.seq !== entry.seq) {
+    if (
+      entry !== undefined &&
+      queueKey !== undefined &&
+      this.#queues.get(queueKey)?.seq !== entry.seq
+    ) {
       return;
     }
     await this.#classify(request, method, response, snapshot);
@@ -256,7 +267,7 @@ export class Wire {
         kind: "http",
         status: response.status,
         body,
-      });
+      } satisfies PartialError);
       return;
     }
     // Only a safe zone GET names a page: mutations keep the unscoped resolve.
@@ -286,7 +297,7 @@ export class Wire {
         kind: "http",
         status: response.status,
         body,
-      });
+      } satisfies PartialError);
       return;
     }
     const body = await this.#text(response);
@@ -294,7 +305,11 @@ export class Wire {
     try {
       raw = JSON.parse(body);
     } catch (error) {
-      this.#dispatch("partial:error", { kind: "parse", body, error });
+      this.#dispatch("partial:error", {
+        kind: "parse",
+        body,
+        error,
+      } satisfies PartialError);
       return;
     }
     this.#onEnvelope(raw, response, snapshot, request.key, page);

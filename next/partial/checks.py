@@ -52,6 +52,7 @@ E_LAZY_WITHOUT_PLACEHOLDER: Final = "next.E064"
 E_ZONE_IN_COMPONENT: Final = "next.E065"
 E_UNREGISTERED_OP: Final = "next.E066"
 E_COMPOSED_TEMPLATE_SYNTAX: Final = "next.E072"
+E_BACKEND_WITHOUT_PATH: Final = "next.E073"
 
 W_WITH_OVER_ZONE: Final = "next.W067"
 W_FORM_BACKEND_NOT_AWARE: Final = "next.W068"
@@ -73,6 +74,7 @@ CHECK_IDS: Final = (
     E_ZONE_IN_COMPONENT,
     E_UNREGISTERED_OP,
     E_COMPOSED_TEMPLATE_SYNTAX,
+    E_BACKEND_WITHOUT_PATH,
     W_WITH_OVER_ZONE,
     W_FORM_BACKEND_NOT_AWARE,
     W_MANIFEST_VERSION_NO_STORAGE,
@@ -537,12 +539,17 @@ def check_form_backend_partial_aware(
     return messages
 
 
+def _partial_backend_configs() -> list[object]:
+    """Return PARTIAL_BACKENDS as a list, tolerating any malformed shape."""
+    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", ())
+    if isinstance(configs, list | tuple):
+        return list(configs)
+    return []
+
+
 def _partial_backends_active() -> bool:
     """Return True when at least one partial protocol backend is configured."""
-    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", [])
-    return isinstance(configs, list) and any(
-        isinstance(config, dict) for config in configs
-    )
+    return any(isinstance(config, dict) for config in _partial_backend_configs())
 
 
 @register(Tags.compatibility)
@@ -556,10 +563,9 @@ def check_single_partial_backend(
     PARTIAL_BACKENDS entry is instantiated, so a second entry is dead config
     that silently never runs.
     """
-    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", [])
-    if not isinstance(configs, list):
-        return []
-    valid = [config for config in configs if isinstance(config, dict)]
+    valid = [
+        config for config in _partial_backend_configs() if isinstance(config, dict)
+    ]
     if len(valid) <= 1:
         return []
     return [
@@ -575,6 +581,32 @@ def check_single_partial_backend(
 _VERSION_OPTION: Final = "VERSION"
 _MANIFEST_VERSION: Final = "manifest"
 _STATICFILES_ALIAS: Final = "staticfiles"
+
+
+@register(Tags.compatibility)
+def check_partial_backend_names_a_path(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Error when a PARTIAL_BACKENDS entry omits its BACKEND key (`next.E073`).
+
+    The factory refuses such an entry with `ImproperlyConfigured` on the
+    first partial request. The check surfaces the same misconfiguration at
+    startup, naming the entry that lacks a dotted path.
+    """
+    messages: list[CheckMessage] = []
+    for index, config in enumerate(_partial_backend_configs()):
+        if not isinstance(config, dict) or "BACKEND" in config:
+            continue
+        messages.append(
+            Error(
+                f"PARTIAL_BACKENDS entry {index} has no BACKEND key. Every "
+                "entry names its protocol backend by dotted path under "
+                "BACKEND, so add it or drop the entry.",
+                id=E_BACKEND_WITHOUT_PATH,
+            )
+        )
+    return messages
 
 
 @register(Tags.compatibility)
@@ -609,10 +641,7 @@ def check_manifest_version_has_manifest_storage(
 
 def _manifest_version_requested() -> bool:
     """Return True when a partial backend resolves VERSION to the sentinel."""
-    configs = getattr(next_framework_settings, "PARTIAL_BACKENDS", [])
-    if not isinstance(configs, list):
-        return False
-    for config in configs:
+    for config in _partial_backend_configs():
         if not isinstance(config, dict):
             continue
         options = config.get("OPTIONS")
@@ -654,6 +683,7 @@ def _staticfiles_storage_path() -> str | None:
 
 __all__ = [
     "CHECK_IDS",
+    "E_BACKEND_WITHOUT_PATH",
     "E_COMPOSED_TEMPLATE_SYNTAX",
     "E_DUPLICATE_ZONE",
     "E_LAZY_WITHOUT_PLACEHOLDER",
@@ -674,6 +704,7 @@ __all__ = [
     "check_lazy_zone_has_placeholder",
     "check_manifest_version_has_manifest_storage",
     "check_no_zone_in_component",
+    "check_partial_backend_names_a_path",
     "check_repeated_form_has_key",
     "check_single_partial_backend",
     "check_with_directly_over_zone",

@@ -6,28 +6,15 @@
 import { createPartial } from "./partial";
 import type { PartialSurface } from "./partial";
 import type { Envelope } from "./apply";
+import type { PartialError } from "./protocol";
 
 // The client context store, the same shape _init seeds and the context op and
 // csrf meta merge into.
 export type NextContext = Readonly<Record<string, unknown>>;
 
-// A partial:error as a discriminated union on kind, so a listener branches on
-// the cause and reads only the fields that cause carries. network is a fetch
-// reject or a dropped SSE connection, with no status or body to report. http is
-// a 5xx or a mutating reply that is not an envelope, carrying the status and
-// body. parse is a malformed JSON body. op is a thrown or unknown verb mid-apply,
-// naming the verb. asset is a stylesheet that failed to load or a version
-// mismatch surviving a reload, optionally naming the url.
-export type PartialError =
-  | { kind: "network"; error: unknown }
-  | { kind: "http"; status: number; body: string }
-  | { kind: "parse"; body: string; error: unknown }
-  | { kind: "op"; op: string; error: unknown }
-  | { kind: "asset"; url?: string; error: unknown };
-
-// The discriminant of PartialError, kept as a named alias for listeners that
-// switch on the kind before reading the cause-specific fields.
-export type PartialErrorKind = PartialError["kind"];
+// PartialError lives with the wire vocabulary so every emitting module stamps
+// its payload against one shape, re-exported here as the public surface.
+export type { PartialError, PartialErrorKind } from "./protocol";
 
 // The payload of every runtime event reaching the Next.on bus, keyed by event
 // name, so a known event types its listener argument. This is only the bus
@@ -58,7 +45,7 @@ type NextPlugin<T> = (next: typeof Next) => T;
 
 class Next {
   static #context: Record<string, unknown> = {};
-  static #listeners: Map<string, Set<NextListener>> = new Map();
+  static #listeners = new Map<string, Set<NextListener>>();
   static #ready = false;
 
   static partial: PartialSurface = createPartial({
@@ -104,7 +91,7 @@ class Next {
       listener({ ...Next.#context });
     }
     return () => {
-      bucket!.delete(listener);
+      bucket.delete(listener);
     };
   }
 

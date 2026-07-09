@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "./next";
 
-type NextStatic = {
+interface NextStatic {
   context: Readonly<Record<string, unknown>>;
   partial: {
     apply(raw: unknown): unknown;
@@ -15,7 +15,7 @@ type NextStatic = {
   _init(context: Record<string, unknown>): void;
   on(event: string, listener: (payload: Record<string, unknown>) => void): () => void;
   use<T>(plugin: (next: NextStatic) => T): T;
-};
+}
 
 const win = globalThis as unknown as { Next: NextStatic };
 
@@ -137,7 +137,7 @@ describe("Next.on", () => {
   });
 
   it("fires the context-updated listener on _init", () => {
-    const received: Array<Record<string, unknown>> = [];
+    const received: Record<string, unknown>[] = [];
     win.Next.on("context-updated", (payload) => {
       received.push(payload);
     });

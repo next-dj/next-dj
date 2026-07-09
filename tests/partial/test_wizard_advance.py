@@ -1,9 +1,22 @@
 import pytest
+from django.http import HttpResponse
 
-from next.partial import shaping as shaping_module
+from next.partial import ZoneRenderResult, shaping as shaping_module
 from next.partial.headers import CONTENT_TYPE
+from next.static.assets import StaticAsset
+from next.static.manager import default_manager
 from next.testing import NextClient, envelope_of
 from tests.support import CountingWizardBackend
+
+
+def _advance_identity(next_client: NextClient, **kwargs: object) -> HttpResponse:
+    return next_client.post_action(
+        "step_wizard",
+        {"name": "Ada"},
+        origin="/wizard/identity/",
+        partial=True,
+        **kwargs,
+    )
 
 
 @pytest.mark.django_db()
@@ -18,13 +31,7 @@ class TestWizardAdvanceStepsByEnvelope:
     def test_partial_advance_is_an_envelope_not_a_redirect(
         self, next_client: NextClient
     ) -> None:
-        response = next_client.post_action(
-            "step_wizard",
-            {"name": "Ada"},
-            origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
-        )
+        response = _advance_identity(next_client, zones="wizard-zone")
         assert response.status_code == 200
         assert response["Content-Type"] == CONTENT_TYPE
         assert envelope_of(response).zone_targets() == ["wizard-zone"]
@@ -32,13 +39,7 @@ class TestWizardAdvanceStepsByEnvelope:
     def test_partial_advance_swaps_the_step_fields(
         self, next_client: NextClient
     ) -> None:
-        response = next_client.post_action(
-            "step_wizard",
-            {"name": "Ada"},
-            origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
-        )
+        response = _advance_identity(next_client, zones="wizard-zone")
         html = envelope_of(response).html_for_zone("wizard-zone")
         assert 'name="scope"' in html
         assert 'name="name"' not in html
@@ -46,13 +47,7 @@ class TestWizardAdvanceStepsByEnvelope:
     def test_advance_stamps_next_step_origin_in_zone_html(
         self, next_client: NextClient
     ) -> None:
-        response = next_client.post_action(
-            "step_wizard",
-            {"name": "Ada"},
-            origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
-        )
+        response = _advance_identity(next_client, zones="wizard-zone")
         html = envelope_of(response).html_for_zone("wizard-zone")
         assert 'value="/wizard/scope/"' in html
         assert 'value="/wizard/identity/"' not in html
@@ -60,13 +55,7 @@ class TestWizardAdvanceStepsByEnvelope:
     def test_draft_lands_in_storage_on_the_partial_advance(
         self, next_client: NextClient
     ) -> None:
-        next_client.post_action(
-            "step_wizard",
-            {"name": "Ada"},
-            origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
-        )
+        _advance_identity(next_client, zones="wizard-zone")
         follow = next_client.post_action(
             "step_wizard",
             {"scope": ""},
@@ -120,13 +109,7 @@ class TestWizardAdvanceRendersZoneNotPageView:
             return original(page_path, zones, request, **kwargs)
 
         monkeypatch.setattr(shaping_module, "render_zone", _spy)
-        next_client.post_action(
-            "step_wizard",
-            {"name": "Ada"},
-            origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
-        )
+        _advance_identity(next_client, zones="wizard-zone")
         assert len(calls) == 1
         _page_path, zones = calls[0]
         assert zones == ("wizard-zone",)
@@ -148,13 +131,7 @@ class TestWizardAdvanceCsrfMeta:
         # The submit request rotated its token, modelled by forcing the flag
         # the shaper reads before any step re-render mints a fresh one.
         monkeypatch.setattr(shaping_module, "_csrf_rotated", lambda _request: True)
-        response = next_client.post_action(
-            "step_wizard",
-            {"name": "Ada"},
-            origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
-        )
+        response = _advance_identity(next_client, zones="wizard-zone")
         envelope = envelope_of(response).data
         assert "csrf" in envelope
         assert envelope["csrf"]["token"]
@@ -162,13 +139,7 @@ class TestWizardAdvanceCsrfMeta:
     def test_no_rotation_leaves_no_csrf_on_advance(
         self, next_client: NextClient
     ) -> None:
-        response = next_client.post_action(
-            "step_wizard",
-            {"name": "Ada"},
-            origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
-        )
+        response = _advance_identity(next_client, zones="wizard-zone")
         assert "csrf" not in envelope_of(response).data
 
 
@@ -183,13 +154,7 @@ class TestWizardInvalidStepZoneMorph:
     def test_invalid_step_zone_carries_bound_submitted_value(
         self, next_client: NextClient
     ) -> None:
-        next_client.post_action(
-            "step_wizard",
-            {"name": "Ada"},
-            origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
-        )
+        _advance_identity(next_client, zones="wizard-zone")
         too_long = "x" * 101
         response = next_client.post_action(
             "step_wizard",
@@ -204,6 +169,73 @@ class TestWizardInvalidStepZoneMorph:
 
 
 @pytest.mark.django_db()
+class TestWizardAdvanceShipsZoneAssetsAndContext:
+    """A step whose zone body introduces assets ships the manifest and delta.
+
+    The render is stubbed so the next step's zone carries a co-located
+    asset and a serialize provider, proving the advance forwards both the
+    asset manifest and the js-context delta a fresh step first introduces.
+    """
+
+    def test_advance_forwards_assets_and_context_delta(
+        self, next_client: NextClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        collector = default_manager.create_collector()
+        collector.add(StaticAsset(url="/static/next/wizard.css", kind="css"))
+        collector.add_js_context("progress", 42)
+        crafted = ZoneRenderResult(
+            html={"wizard-zone": '<div data-next-zone="wizard-zone">step</div>'},
+            bodies={"wizard-zone": "step"},
+            collector=collector,
+        )
+        monkeypatch.setattr(
+            shaping_module, "render_zone", lambda *_args, **_kwargs: crafted
+        )
+        response = _advance_identity(next_client, zones="wizard-zone")
+        envelope = envelope_of(response)
+        assert {"kind": "css", "url": "/static/next/wizard.css"} in envelope.assets
+        context_ops = [op for op in envelope.ops if op["op"] == "context"]
+        assert context_ops == [{"op": "context", "data": {"progress": 42}}]
+
+
+@pytest.mark.django_db()
+class TestWizardAdvanceWholePage:
+    """A wizard advance with no zone extract-morphs the next step form.
+
+    Without a named zone the advance re-renders the whole next step page
+    and trims the form out by uid, the same shape the invalid path uses,
+    so the envelope is never an empty 204.
+    """
+
+    @pytest.fixture()
+    def morph_html(self, next_client: NextClient) -> str:
+        response = _advance_identity(next_client)
+        return next(
+            op["html"] for op in envelope_of(response).ops if op["op"] == "morph"
+        )
+
+    def test_advance_without_zone_extract_morphs_the_next_step(
+        self, next_client: NextClient
+    ) -> None:
+        response = _advance_identity(next_client)
+        assert response.status_code == 200
+        envelope = envelope_of(response)
+        assert envelope.op_verbs() == ["morph"]
+        assert envelope.form_targets()
+
+    def test_advance_without_zone_carries_the_next_step_field(
+        self, morph_html: str
+    ) -> None:
+        assert 'name="scope"' in morph_html
+
+    def test_advance_without_zone_stamps_the_next_step_origin(
+        self, morph_html: str
+    ) -> None:
+        assert 'value="/wizard/scope/"' in morph_html
+        assert 'value="/wizard/identity/"' not in morph_html
+
+
+@pytest.mark.django_db()
 class TestWizardAdvanceStorageBudget:
     """One round trip to wizard storage per advanced step.
 
@@ -215,13 +247,7 @@ class TestWizardAdvanceStorageBudget:
     def test_partial_advance_pays_one_save_and_one_load(
         self, next_client: NextClient, counting_wizard_backend: CountingWizardBackend
     ) -> None:
-        response = next_client.post_action(
-            "step_wizard",
-            {"name": "Ada"},
-            origin="/wizard/identity/",
-            partial=True,
-            zones="wizard-zone",
-        )
+        response = _advance_identity(next_client, zones="wizard-zone")
         assert response.status_code == 200
         assert counting_wizard_backend.saves == 1
         assert counting_wizard_backend.loads == 1

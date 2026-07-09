@@ -4,7 +4,10 @@ import type { Assets, LinkLoader, SessionStore } from "./assets";
 import type { Asset } from "./apply";
 import type { Clock } from "./wire";
 
-type Dispatched = { event: string; detail: Record<string, unknown> };
+interface Dispatched {
+  event: string;
+  detail: Record<string, unknown>;
+}
 
 function fakeClock(): Clock {
   return { now: () => 0, setTimeout: () => 1, clearTimeout: () => undefined };

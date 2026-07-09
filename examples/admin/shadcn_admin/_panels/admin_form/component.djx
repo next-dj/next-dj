@@ -2,6 +2,10 @@
   {% #component "page_header" title=form_state.title description=form_state.verbose_name %}
     {% if form_state.is_change %}
       {% #slot "actions" %}
+        {# Hidden outside a dialog by the co-located CSS: only the client knows the editor is layered. #}
+        {% form "admin:discard" class="discard-in-layer" %}
+          {% component "button" type="submit" text="Discard" variant="ghost" %}
+        {% endform %}
         {% component "button" href=form_state.delete_url text="Delete" variant="outline" %}
       {% /slot %}
     {% endif %}

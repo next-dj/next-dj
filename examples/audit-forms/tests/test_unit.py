@@ -408,6 +408,20 @@ class TestLandingPage:
         assert "compilers" in body
         assert "access_request_wizard" in body
 
+    def test_landing_lists_newest_requests_first(self, client) -> None:
+        for index in range(6):
+            AccessRequest.objects.create(
+                full_name=f"Requester {index}",
+                email=f"person{index}@example.com",
+                team="Compilers",
+                project_slug=f"proj-{index}",
+                reason="docs",
+                expires_in_days=3,
+            )
+        body = client.get("/").content.decode()
+        assert "Requester 5" in body
+        assert "Requester 0" not in body
+
 
 @pytest.mark.django_db()
 class TestLazyAuditEntries:

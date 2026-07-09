@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Applier } from "./apply";
 import type { ApplyDeps, AssetBridge, Asset, MountRegistry, ZoneFetch } from "./apply";
 
-type Dispatched = { event: string; detail: Record<string, unknown> };
+interface Dispatched {
+  event: string;
+  detail: Record<string, unknown>;
+}
 
 function makeApplier(over: Partial<ApplyDeps> = {}) {
   const dispatched: Dispatched[] = [];
@@ -213,6 +216,48 @@ describe("refresh verb", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  it("refresh targets the zone's owning page, not the address bar", () => {
+    document.body.innerHTML = '<div data-next-zone="feed">x</div>';
+    const refresh = vi.fn<ZoneFetch>();
+    const el = document.querySelector('[data-next-zone="feed"]')!;
+    // A modal holds the address bar (here), so a base-page zone must refresh
+    // against the page the layer stack says owns it, not the modal route.
+    const layers = {
+      resolveZone: () => el,
+      resolveSelector: () => null,
+      urlFor: () => "/owner/",
+      open: () => undefined,
+      close: () => undefined,
+      toast: () => undefined,
+    };
+    const { applier } = makeApplier({ refresh, layers, here: () => "/modal/" });
+    applier.apply(envelope([{ op: "refresh", zone: "feed" }]));
+    expect(refresh).toHaveBeenCalledWith({
+      url: "/owner/",
+      zone: "feed",
+      headers: { "X-Next-Zone": "feed" },
+    });
+  });
+
+  it("refresh falls back to the current URL when the zone is absent", () => {
+    const refresh = vi.fn<ZoneFetch>();
+    const layers = {
+      resolveZone: () => null,
+      resolveSelector: () => null,
+      urlFor: () => "/owner/",
+      open: () => undefined,
+      close: () => undefined,
+      toast: () => undefined,
+    };
+    const { applier } = makeApplier({ refresh, layers, here: () => "/page/" });
+    applier.apply(envelope([{ op: "refresh", zone: "gone" }]));
+    expect(refresh).toHaveBeenCalledWith({
+      url: "/page/",
+      zone: "gone",
+      headers: { "X-Next-Zone": "gone" },
+    });
+  });
+
   it("default here keeps the query of the current URL on a re-GET", () => {
     const refresh = vi.fn<ZoneFetch>();
     const doc = docAt("/feed", "?q=foo");
@@ -279,6 +324,44 @@ describe("mount and generation", () => {
     );
     expect(document.querySelector("#row")).toBeNull();
     expect(ran.some((node) => node.id === "row")).toBe(false);
+  });
+
+  it("replace mounts every root element, not only the first", () => {
+    document.body.innerHTML = '<div data-next-zone="z">old</div>';
+    const ran: string[] = [];
+    const mount: MountRegistry = { run: (root) => ran.push((root as Element).id) };
+    const { applier } = makeApplier({ mount });
+    applier.apply(
+      envelope([
+        {
+          op: "replace",
+          target: { zone: "z" },
+          html: '<p id="a">a</p><p id="b">b</p>',
+        },
+      ]),
+    );
+    expect(ran).toEqual(["a", "b"]);
+    expect(document.querySelectorAll("p")).toHaveLength(2);
+  });
+
+  it("morph mounts the new subtree when the root tag changes", () => {
+    document.body.innerHTML = '<div data-next-zone="z"><span>old</span></div>';
+    const ran: string[] = [];
+    const mount: MountRegistry = { run: (root) => ran.push((root as Element).tagName) };
+    const { applier } = makeApplier({ mount });
+    // A root-tag change recreates the node, so the mount pass must see the live
+    // replacement, not the detached original a stale mark would carry.
+    applier.apply(
+      envelope([
+        {
+          op: "morph",
+          target: { zone: "z" },
+          html: '<section data-next-zone="z"><b>new</b></section>',
+        },
+      ]),
+    );
+    expect(ran).toEqual(["SECTION"]);
+    expect(document.querySelector("section")!.textContent).toBe("new");
   });
 
   it("bumps the per-zone generation on each apply", () => {

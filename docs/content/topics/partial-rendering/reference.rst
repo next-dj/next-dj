@@ -68,8 +68,8 @@ The envelope around the list always carries the ``assets`` and ``form`` keys, se
      - ``variant: "info"``
    * - ``layer.open``
      - ``layer_open()``
-     - Open a layer from the server. The client acts only when the op carries both
-       the zone container name and the href to GET into it, a single seed is ignored.
+     - Open a layer from the server, optionally seeding a zone to fill later or an
+       href whose zone loads into the modal. See :ref:`partial-server-layers`.
      - none
    * - ``layer.close``
      - ``layer_close()``
@@ -401,6 +401,51 @@ The confirm gate is a capture-phase click handler, the layer opener is a bubble-
 A cancelled confirm stops the click before it reaches the opener, so the layer never opens.
 An accepted confirm lets the click through and the layer opens.
 The same gate protects every click-driven trigger, so a prompt fronts a layer open the same way it fronts a pagination merge.
+
+.. _partial-server-layers:
+
+Server-Initiated Layers
+-----------------------
+
+``Patches.layer_open`` opens a layer from a handler, the server counterpart of the ``data-next-layer`` opener.
+Its signature is ``layer_open(*, zone=None, href=None)``, and the two keywords select one of three forms.
+
+A layer shows a zone of a page, uniformly.
+There is no separate mechanism for a whole page in a modal.
+A page that opens in a layer declares a zone with ``{% zone "name" %}``, and that name travels to ``layer_open`` or to ``data-next-layer``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Call
+     - Effect
+   * - ``layer_open()``
+     - Open a bare modal shell. Its container carries no zone name, so only a css-targeted patch can address it. Name a zone to fill the modal with zone patches.
+   * - ``layer_open(zone="cart")``
+     - Open a layer whose zone container is named ``cart``, so a following ``morph(zone="cart")`` in the same envelope lands inside the modal.
+   * - ``layer_open(href="/records/42/", zone="record")``
+     - Fetch the ``record`` zone of ``/records/42/`` and load it into the layer. The page at that href declares ``{% zone "record" %}``.
+
+A modal that shows a page's content takes the third form.
+
+.. code-block:: python
+   :caption: page.py
+
+   def open_record(self, request: HttpRequest, record_id: int) -> HttpResponse:
+       """Open the record's detail zone in a layer."""
+       return (
+           Patches(request)
+           .layer_open(href=f"/records/{record_id}/", zone="record")
+           .response()
+       )
+
+An href without a zone raises ``LayerHrefWithoutZoneError``.
+A layer loads a zone, so an href that names no zone has nowhere to mount its content.
+To open a page in a layer, wrap the page content in a zone and pass the zone name.
+The href is validated same-site like every navigation sink, a cross-site value raises ``CrossSiteHrefError``.
+
+The client ``data-next-layer="record"`` opener and the server ``layer_open(href, zone)`` do the same work, both load a page zone into a layer.
 
 Foreign-Zone Authorisation
 --------------------------

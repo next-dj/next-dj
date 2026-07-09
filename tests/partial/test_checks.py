@@ -495,6 +495,29 @@ class TestSinglePartialBackendCheck:
             assert checks.check_single_partial_backend() == []
 
 
+class TestBackendNamesPathCheck:
+    """`next.E073` fires when a PARTIAL_BACKENDS entry omits its BACKEND key."""
+
+    @pytest.mark.parametrize(
+        "config",
+        [[{}], ["x", {}], ({},)],
+        ids=["bare_entry", "non_dict_skipped", "tuple_config"],
+    )
+    def test_entry_without_backend_key_errors(self, config: object) -> None:
+        with _partial_backends(config):
+            ids = [m.id for m in checks.check_partial_backend_names_a_path()]
+        assert ids == [checks.E_BACKEND_WITHOUT_PATH]
+
+    @pytest.mark.parametrize(
+        "config",
+        [[_BACKEND_DICT], "not-a-list"],
+        ids=["valid_entry", "non_sequence"],
+    )
+    def test_valid_or_non_sequence_config_is_silent(self, config: object) -> None:
+        with _partial_backends(config):
+            assert checks.check_partial_backend_names_a_path() == []
+
+
 class TestChecksSilentOnValidComposite:
     """A page with well-formed zones triggers none of the zone checks."""
 

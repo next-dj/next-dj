@@ -502,11 +502,13 @@ def handle_inline_add(
     form: django_forms.ModelForm,
     spec: AdminFormSpec = Depends("admin_spec"),
 ) -> HttpResponse:
-    """Create one inline row and confirm it in a server-opened result layer.
+    """Create one inline row and open its own editor in a result layer.
 
-    A live runtime opens the saved row's parent change view in a result
-    layer and refreshes the row-count badge in place. Without the runtime
-    the builder falls back to the parent change view.
+    A live runtime opens the new row's standalone change view `record` zone
+    in a result layer, so the client fetches that zone and morphs the editor
+    into the modal for immediate detail edits, then refreshes the parent's
+    row-count badge in place. Without the runtime the builder falls back to
+    the parent change view.
     """
     inline = AdminInlineSpec.for_request(spec)
     if not inline.has_add_permission():
@@ -515,15 +517,32 @@ def handle_inline_add(
     _flash_save(spec, obj, verb="added")
     if not is_partial_request(request):
         return HttpResponseRedirect(spec.change_url(spec.instance))
+    child_meta = inline.inline.model._meta
+    child_change_url = utils.change_url(
+        child_meta.app_label, child_meta.model_name, obj.pk
+    )
     return (
         Patches(request)
-        .layer_open(href=spec.change_url(spec.instance))
+        .layer_open(href=child_change_url, zone="record")
         .inner(
             {"css": f'[data-inline-count="{inline.token}"]'},
             _count_badge(inline),
         )
         .response()
     )
+
+
+@action("admin:discard", login_required=True)
+def handle_discard(request: HttpRequest) -> HttpResponse:
+    """Dismiss the editor layer server-side, carrying a discard reason.
+
+    Unlike a `layer_close(result=...)` accept, this closes the layer as a
+    rejection — the client fires `partial:layer-dismissed` and skips any
+    accept side effects. Without a runtime it falls back to the dashboard.
+    """
+    if not is_partial_request(request):
+        return HttpResponseRedirect(utils.dashboard_url())
+    return Patches(request).layer_close(dismiss="discarded").response()
 
 
 @action("admin:logout")

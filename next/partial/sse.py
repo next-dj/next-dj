@@ -133,7 +133,9 @@ class PatchEventStream(StreamingHttpResponse):
         A blocked `next()` on a sync source has nothing to interrupt it
         without a thread, so a quiet sync stream sends no heartbeat. A
         keepalive is the source's own job under WSGI. The close signal
-        fires once the source is exhausted or the client disconnects.
+        fires once the source is exhausted or the client disconnects, after
+        the source generator is closed so it releases its resources like the
+        async path drives `aclose`.
         """
         sent = 0
         yield self._retry_frame()
@@ -142,7 +144,20 @@ class PatchEventStream(StreamingHttpResponse):
                 yield self._event_frame(patches)
                 sent += 1
         finally:
+            self._close_source(source)
             self._announce_closed(sent)
+
+    @staticmethod
+    def _close_source(source: "Iterable[Patches]") -> None:
+        """Close a generator source so a disconnect leaves nothing suspended.
+
+        A plain iterable owns no `close`, so the call is skipped. A double
+        close on an already-exhausted generator is a no-op, so this stays
+        safe on normal exhaustion too.
+        """
+        close = getattr(source, "close", None)
+        if callable(close):
+            close()
 
     async def _async_stream(
         self,
