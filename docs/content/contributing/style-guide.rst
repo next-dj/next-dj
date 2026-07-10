@@ -127,7 +127,7 @@ Pull Request Checklist
 
 A documentation pull request lands when.
 
-- ``uv run --group docs sphinx-build -nW --keep-going docs docs/_build`` is green.
+- ``make docs`` is green.
 - ``uv run doc8 docs/content`` is green.
 - Every new section follows its template.
 - Every page under ``content/internals/`` includes a ``.. mermaid::`` diagram.

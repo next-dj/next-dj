@@ -108,6 +108,9 @@ Enforce access at one of these layers.
 An action that mutates data and an action that loads an instance through ``instance_from_url`` both need this guard.
 The :ref:`howto-enforce-object-level-permissions` recipe shows the owner-only edit on a ``ModelForm``.
 
+The out-of-band morph path enforces page-level access on its own.
+A ``morph(zone=..., page=...)`` onto a foreign page re-runs that page's authorization chain and raises ``ForeignPageNotAuthorizedError`` on a denial or ``DynamicForeignPageError`` for a dynamic body, see :doc:`/content/topics/partial-rendering/reference`.
+
 Production Hardening
 --------------------
 

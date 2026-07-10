@@ -102,8 +102,7 @@ Tenant URL Prefix
 A common multi-tenant pattern is to prefix every collected URL with a tenant slug so static files are scoped per tenant.
 Override all three renderer methods and delegate to the parent after rewriting the URL.
 Leave absolute URLs untouched.
-The shipped multi-tenant example overrides only ``render_link_tag`` and ``render_script_tag``, so its ``.mjs`` assets bypass the prefix.
-The snippet below overrides all three methods so every kind stays consistent.
+The shipped multi-tenant example implements this pattern, and the snippet below mirrors its backend, overriding all three methods so every kind stays consistent.
 
 .. code-block:: python
    :caption: notes/backends.py

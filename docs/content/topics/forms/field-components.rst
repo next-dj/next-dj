@@ -96,6 +96,9 @@ Extra keyword arguments.
    Every keyword passed to ``ComponentWidget("input", placeholder=..., rows=...)`` is spread to the top level too.
    A ``placeholder`` argument reaches the template as ``{{ placeholder }}``.
 
+``name``, ``value``, ``errors``, and ``attrs`` are reserved context keys.
+The widget writes them last, so they always win over a same-named entry from ``attrs=`` or an extra keyword argument.
+
 .. warning::
 
    ``value`` is user-supplied input.

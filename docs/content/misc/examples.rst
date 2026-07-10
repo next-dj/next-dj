@@ -43,10 +43,10 @@ The **Primary docs** column points to the sections of this manual where the tech
      - :doc:`/content/howto/scope-requests-per-tenant`, :doc:`/content/topics/static-assets/backends`
    * - `kanban <https://github.com/next-dj/next-dj/tree/main/examples/kanban>`__
      - Custom ``StaticBackend``, ``.jsx`` kind, ``DeepMergePolicy``, ``HashContentDedup``, composite components
-     - :doc:`/content/topics/static-assets/asset-kinds`, :doc:`/content/topics/static-assets/deduplication`
+     - :doc:`/content/topics/static-assets/asset-kinds`, :doc:`/content/topics/static-assets/deduplication`, :doc:`/content/topics/partial-rendering/framework-islands`
    * - `live-polls <https://github.com/next-dj/next-dj/tree/main/examples/live-polls>`__
      - Framework SSE bridge, ``refresh`` patches, request-id echo, ``action_dispatched`` fan-out, Vue SFC asset kind
-     - :doc:`/content/topics/partial-rendering/sse`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/topics/extending`
+     - :doc:`/content/topics/partial-rendering/sse`, :doc:`/content/howto/stream-live-updates-with-sse`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/framework-islands`
    * - `observability <https://github.com/next-dj/next-dj/tree/main/examples/observability>`__
      - Signal groups, custom ``ComponentsBackend``, ``DedupStrategy``, polling and lazy zones, custom patch verb, per-key ``JsContextSerializer``
      - :doc:`/content/topics/signals`, :doc:`/content/topics/extending`, :doc:`/content/topics/partial-rendering/index`

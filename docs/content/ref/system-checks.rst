@@ -288,6 +288,9 @@ Errors
    * - ``next.E072``
      - A composed page template does not compile, so the syntax error would otherwise surface only as a 500 on the first request to the page.
      - ``next.partial.checks``
+   * - ``next.E073``
+     - A ``PARTIAL_BACKENDS`` entry has no ``BACKEND`` key, so the factory would refuse it with ``ImproperlyConfigured`` on the first partial request.
+     - ``next.partial.checks``
 
 A code emitted by ``next.checks.common`` is produced by a shared helper that the listed subsystem check modules call.
 

@@ -164,6 +164,12 @@ Stale token after deploy.
    Cached page renders carry the previous token.
    Set short cache lifetimes on HTML or warm the cache after a deploy.
 
+Token rotation on a partial response.
+   A login inside a partial flow rotates the CSRF token, and Django flags the rotation on the request as ``CSRF_COOKIE_NEEDS_UPDATE``.
+   The response shaper reads that flag and places the fresh token in the patch envelope.
+   The client runtime then rewrites ``csrfmiddlewaretoken`` in every form on the document, so forms outside the morphed region do not keep a stale token.
+   No project code is needed, see :doc:`/content/topics/partial-rendering/how-it-works` for the envelope.
+
 Different origin without ``CSRF_TRUSTED_ORIGINS``.
    The middleware returns 403.
    Add every origin that posts to the project.

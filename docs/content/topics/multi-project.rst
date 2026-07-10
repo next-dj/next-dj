@@ -155,7 +155,7 @@ A project can ship project-specific components alongside the shared kit.
 
 When the same component name appears in two roots, the visibility resolver scores each candidate by scope specificity.
 A page-tree component visible from the template wins over a same-named component contributed through ``DIRS``.
-The full sort key is ``(-score, component.name, registration_position)``.
+The full sort key is ``(-score, dirs_origin, component.name, registration_position)``, where ``dirs_origin`` orders page-tree candidates ahead of ``DIRS`` ones at equal score.
 When two ``DIRS`` roots score equally the resolver breaks the tie first by component name, then by registration order.
 Roots are scanned in ``DIRS`` order, so an entry placed earlier in the list shadows a same-named component from a later entry.
 Prefer distinct names for project-specific components over relying on this ordering.

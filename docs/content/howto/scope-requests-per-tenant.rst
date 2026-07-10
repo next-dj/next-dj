@@ -14,7 +14,8 @@ Solution
 Resolve the tenant once in :doc:`middleware <django:topics/http/middleware>` and stash it on the request.
 A dependency provider, a :doc:`context processor <django:ref/templates/api>`, and a custom static backend each read it back from there.
 
-The ``examples/multi-tenant/`` project in the repository applies the same pattern end to end. See :doc:`/content/misc/examples`.
+The ``examples/multi-tenant/`` project in the repository applies the same pattern end to end.
+See :doc:`/content/misc/examples`.
 
 Walkthrough
 -----------

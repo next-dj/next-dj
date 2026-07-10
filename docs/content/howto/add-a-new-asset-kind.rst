@@ -68,8 +68,8 @@ When the new kind needs a tag shape that the bundled methods do not produce, add
            return f'<script type="text/babel" src="{url}"></script>'
 
 Register the kind against the new method and register the backend.
-This registration replaces the one from the walkthrough.
-Registering the same kind twice with different parameters raises ``ValueError``.
+Replace the ``ready`` registration from the walkthrough with this one, keeping a single registration per kind.
+A repeated ``register`` call with the same parameters is idempotent, but registering the same kind again with different parameters raises ``ValueError``.
 
 .. code-block:: python
    :caption: notes/apps.py

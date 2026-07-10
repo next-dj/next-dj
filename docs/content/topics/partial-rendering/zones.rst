@@ -167,7 +167,7 @@ Render the same ``open`` state the client should keep, or let a real toggle carr
 A repeated form needs the same key.
 A ``{% form %}`` rendered inside a ``{% for %}`` produces one instance per iteration, all sharing the action uid the morph addresses.
 Give each instance a ``key=`` with a stable per-row value, ``{% form "rename_item" key=item.pk %}``, so an invalid submit re-renders the submitted instance rather than the first one on the page.
-A wrapping ``zone=`` is the alternative, and a looped form with neither raises ``next.W070`` at ``manage.py check``.
+A wrapping ``zone=`` is the alternative, and a looped form with neither earns the ``next.W070`` warning at ``manage.py check``.
 
 ``next.W070`` catches a ``{% form %}`` written directly inside a ``{% for %}`` of a composed page.
 It does not descend into a component template, so a form inside a ``{% component %}`` that a loop renders is not flagged.

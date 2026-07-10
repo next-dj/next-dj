@@ -369,6 +369,7 @@ The router contributes Django system checks that validate the configuration at s
 - ``check_pages_structure`` and ``check_page_functions`` come from ``next.pages`` and appear here because they validate the same page tree the router scans.
 - ``check_url_patterns`` reports two routes that resolve to the same Django path, whether they come from one tree or several (:ref:`next.E015 <ref-system-checks>`).
 - ``check_duplicate_url_parameters`` fails when one route repeats a captured parameter name (:ref:`next.E028 <ref-system-checks>`).
+  It scans one representative pages root per router, so in a project with several page-bearing applications ``next.E028`` surfaces only for routes under the scanned root.
 
 Run them through ``uv run python manage.py check``.
 A clean exit confirms that every page resolves and every name is unique.

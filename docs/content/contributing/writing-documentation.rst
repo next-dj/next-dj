@@ -148,7 +148,7 @@ A typical change goes through three steps.
 
 1. Branch from ``main``.
 2. Add or update pages under ``docs/content/``.
-3. Build with ``uv run --group docs sphinx-build -nW --keep-going docs docs/_build``.
+3. Build with ``make docs``, which runs ``uv run sphinx-build -aETW --keep-going -b html docs docs/_build``.
 
 A green build is a hard precondition for merge.
 Local builds reveal anchor and cross reference issues quickly.

@@ -125,8 +125,9 @@ The dependency graph between subsystems is shallow.
 
 - ``next.conf`` has no internal dependencies and sits at the bottom.
 - ``next.deps`` depends only on ``next.conf``.
-- ``next.pages``, ``next.components``, ``next.static`` depend on ``next.conf`` and ``next.deps``.
-- ``next.forms`` depends on ``next.pages`` and ``next.deps``.
+- ``next.pages`` and ``next.components`` depend on ``next.conf`` and ``next.deps``.
+- ``next.static`` depends on ``next.conf``, ``next.deps``, ``next.pages``, and ``next.components``, whose trees its discovery and staticfiles finder walk.
+- ``next.forms`` depends on ``next.pages``, ``next.deps``, ``next.components``, and ``next.static``, the last two through the component-widget binding.
 - ``next.urls`` depends on ``next.conf``, ``next.deps``, ``next.pages``, ``next.components``, and ``next.forms``.
 - ``next.partial`` depends on ``next.conf``, ``next.deps``, ``next.pages``, ``next.components``, ``next.static``, ``next.forms``, and ``next.urls`` to render zones and shape patches.
 - ``next.server`` depends on ``next.conf``, ``next.pages``, ``next.urls``, and ``next.components``, the subsystems whose trees it watches.
