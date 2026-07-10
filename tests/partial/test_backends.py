@@ -6,7 +6,7 @@ from next.partial.headers import CONTENT_TYPE
 
 def _sample_envelope() -> Envelope:
     return (
-        Patches("9f3c2e1b")
+        Patches.versioned("9f3c2e1b")
         .replace({"zone": "list"}, "<div></div>")
         .event("saved", {"id": 7})
         .envelope()
@@ -36,7 +36,7 @@ class TestSerializeEnvelope:
         assert data["ops"][1]["op"] == "event"
 
     def test_serialize_keeps_non_ascii(self) -> None:
-        envelope = Patches("v1").event("сохранено").envelope()
+        envelope = Patches.versioned("v1").event("сохранено").envelope()
         body = PartialProtocolBackend().serialize_envelope(envelope)
         assert "сохранено".encode() in body
 

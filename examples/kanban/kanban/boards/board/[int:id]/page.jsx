@@ -89,5 +89,30 @@ export function Board() {
   );
 }
 
-const el = document.getElementById("kanban-board");
-if (el) ReactDOM.createRoot(el).render(<Board />);
+const roots = new WeakMap();
+
+// onMount re-runs over an element a morph reconciled in place, so the
+// WeakMap guard keeps the mount idempotent.
+window.Next?.partial?.onMount("#kanban-board", (el) => {
+  if (roots.has(el)) return;
+  const root = ReactDOM.createRoot(el);
+  root.render(<Board />);
+  roots.set(el, root);
+});
+
+// next:removed fires on the detached root, not on each descendant, so the
+// handler checks the node itself and walks its subtree for the board.
+document.addEventListener("next:removed", (event) => {
+  const node = event.target;
+  if (!(node instanceof Element)) return;
+  const islands = node.matches("#kanban-board")
+    ? [node]
+    : node.querySelectorAll("#kanban-board");
+  for (const el of islands) {
+    const root = roots.get(el);
+    if (root !== undefined) {
+      root.unmount();
+      roots.delete(el);
+    }
+  }
+});

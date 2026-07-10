@@ -2,7 +2,7 @@
 
 A self-hosted dashboard that watches the framework from the inside. Every signal next.dj emits during a render flows through one of eight receivers, lands in an in-process counter store, and surfaces in a table, a Chart.js bar chart, or a React sparkline. The example is the most compact proof that the public extension surface is enough to instrument an entire request lifecycle without monkey-patching.
 
-The page tree is `dashboards/`. The components live next to the pages that use them. The `JS_CONTEXT_SERIALIZER` setting points at a custom class. One co-located component declares its CDN dependencies through `scripts = [...]` so the framework collects them, dedupes them, and emits them through `{% collect_scripts %}`. Two co-located components read `window.Next.context.<key>` through a per-decorator serializer override that wraps the payload in a versioned envelope, while a sibling key on the same page stays flat through the global default. The entire frontend arrives from CDNs, so the dashboard runs without `npm`. The static collector picks up `.css`, `.js`, and `.jsx` files, the last through a custom `BabelJsxBackend` that emits `<script type="text/babel">` tags.
+The page tree is `dashboards/`. The components live next to the pages that use them. The `JS_CONTEXT_SERIALIZER` setting points at a custom class. Two pages declare their CDN dependencies through page-level `scripts = [...]` lists so the framework collects them, dedupes them, and emits them through `{% collect_scripts %}` ahead of every widget's co-located file. Two co-located components read `window.Next.context.<key>` through a per-decorator serializer override that wraps the payload in a versioned envelope, while a sibling key on the same page stays flat through the global default. The entire frontend arrives from CDNs, so the dashboard runs without `npm`. The static collector picks up `.css`, `.js`, and `.jsx` files, the last through a custom `BabelJsxBackend` that emits `<script type="text/babel">` tags.
 
 ## What you will see
 
@@ -37,7 +37,9 @@ uv run python manage.py flush_metrics
 
 Drains both the cumulative and the bucketed counters into the `obs.MetricSnapshot` table and empties the cache. The next render starts at zero.
 
-Tailwind loads from a CDN in `obs/dashboards/layout.djx`. Chart.js arrives through the framework static collector — the URL is declared in `obs/dashboards/_widgets/render_chart/component.py` as `scripts = [...]` and reaches the page via `{% collect_scripts %}`. React, ReactDOM, and Babel-standalone follow the same path from `obs/dashboards/_widgets/sparkline/component.py`. There is no build step.
+Tailwind loads from a CDN in `obs/dashboards/layout.djx`. Chart.js arrives through the framework static collector — the URL is declared in the page-level `scripts` list of `obs/dashboards/stats/page.py` and reaches the page via `{% collect_scripts %}`. Page-level scripts land in the injection order before every widget's co-located file, so the chart widget's `component.js` always finds `window.Chart` defined. React, ReactDOM, and Babel-standalone follow the same path from the `scripts` list in `obs/dashboards/page.py`, which keeps them ahead of the sparkline's own `component.jsx`. There is no build step.
+
+Both chart widgets mount through `Next.partial.onMount` with a WeakMap keyed by the host element, so a partial morph that reconciles the host in place never creates a second Chart.js instance or React root. A delegated `next:removed` listener walks the detached subtree and destroys the chart or unmounts the root when the host actually leaves the document.
 
 ## Walking the code
 
@@ -64,11 +66,11 @@ obs/
     │   ├── busiest_pages/    <- lazy-zone body, component-level top_by_kind lookup
     │   ├── stats_nav/        <- nav tabs rendered from a Python list
     │   ├── filter_window/    <- window filter form (template-only component)
-    │   ├── render_chart/     <- Chart.js bar chart, scripts=[chart.js cdn]
-    │   └── sparkline/        <- React + JSX sparkline, scripts=[react, babel cdn]
+    │   ├── render_chart/     <- Chart.js bar chart, chart.js cdn via stats/page.py
+    │   └── sparkline/        <- React + JSX sparkline, react/babel cdn via page.py
     └── stats/
         ├── layout.djx        <- nested layout, tabs, filter form chrome
-        ├── page.py           <- @context live_stats, live_zone names the morph target
+        ├── page.py           <- @context live_stats, live_zone, scripts=[chart.js cdn]
         ├── template.djx      <- live-totals zone
         ├── template.js       <- defineOp("metric-pulse") flash handler, co-located
         ├── template.css      <- metric-pulse keyframe, co-located

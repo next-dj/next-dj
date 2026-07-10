@@ -51,7 +51,7 @@ async def _aconsume(response: PatchEventStream) -> list[bytes]:
 
 def _patches(*, echo_of: str | None = None) -> Patches:
     """Build a request-free builder with one refresh op."""
-    builder = Patches("v1", echo_of=echo_of)
+    builder = Patches.versioned("v1", echo_of=echo_of)
     builder.refresh(zone="poll-results")
     return builder
 

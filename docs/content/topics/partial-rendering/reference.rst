@@ -17,6 +17,8 @@ A patch is one addressed DOM operation with a verb, an optional target, optional
 The operations apply in list order.
 The server is the only author of a target, the client never names one.
 The envelope around the list always carries the ``assets`` and ``form`` keys, serialised as ``[]`` and ``null`` when empty, and the JSON examples in this section omit them.
+``Patches(request)`` opens the builder in a handler.
+``Patches.versioned(version)`` opens the same builder for code that holds no request, a test of a custom operation or a hand-assembled envelope.
 
 .. list-table::
    :header-rows: 1
@@ -299,7 +301,9 @@ The ``next:mounted``, ``next:removed``, and ``next:morph-*`` node events live on
      - The existing core contract.
    * - ``context-updated``
      - No
-     - Read context through ``Next.context``.
+     - ``{context, changed}``, where ``context`` is the whole merged store and
+       ``changed`` lists only the keys of the delta that just arrived. The
+       initial seed lists every seeded key in ``changed``.
    * - ``partial:before-request``
      - No
      - ``{url, method, intent}``, where ``intent`` is ``{zone?, uid?}``. The runtime fires this through the bus before the fetch leaves, so a listener observes the request rather than vetoing it.

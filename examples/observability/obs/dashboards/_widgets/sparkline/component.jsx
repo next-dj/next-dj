@@ -6,11 +6,10 @@
  * `.data.bars`. The component renders one rounded bar per source
  * scaled to the largest value in the snapshot.
  *
- * Babel-standalone fetches and transforms `<script type="text/babel">`
- * tags after `DOMContentLoaded` already fired, so a fresh listener on
- * that event would never run. The init code dispatches on
- * `document.readyState` instead, which works both during initial
- * compilation and on hot reloads.
+ * Babel-standalone transforms and runs this file after
+ * DOMContentLoaded, so React, ReactDOM, and the runtime globals are
+ * already in place when `Next.partial.onMount` replays its callback
+ * over the parsed document.
  */
 const Sparkline = ({ bars }) => {
   if (!Array.isArray(bars) || bars.length === 0) {
@@ -41,9 +40,10 @@ const Sparkline = ({ bars }) => {
   );
 };
 
-const mountSparkline = () => {
-  const mount = document.getElementById("sparkline-mount");
-  if (!mount || !window.React || !window.ReactDOM || !window.Next || !window.Next.context) {
+const roots = new WeakMap();
+
+Next.partial.onMount("#sparkline-mount", (mount) => {
+  if (roots.has(mount)) {
     return;
   }
   const envelope = window.Next.context.totals_chart;
@@ -52,10 +52,22 @@ const mountSparkline = () => {
     : [];
   const root = window.ReactDOM.createRoot(mount);
   root.render(<Sparkline bars={bars} />);
-};
+  roots.set(mount, root);
+});
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", mountSparkline);
-} else {
-  mountSparkline();
-}
+document.addEventListener("next:removed", (event) => {
+  const node = event.target;
+  if (!(node instanceof Element)) {
+    return;
+  }
+  const islands = node.matches("#sparkline-mount")
+    ? [node]
+    : node.querySelectorAll("#sparkline-mount");
+  for (const mount of islands) {
+    const root = roots.get(mount);
+    if (root !== undefined) {
+      root.unmount();
+      roots.delete(mount);
+    }
+  }
+});

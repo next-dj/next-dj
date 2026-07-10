@@ -235,13 +235,16 @@ Code that needs the context the moment it lands subscribes through ``Next.on`` r
 
 ``Next.on(event, listener)`` registers a listener and returns an unsubscribe function.
 The function removes that listener when called.
-The ``listener`` receives the context object as its only argument and reads its values.
+The ``listener`` receives the event payload as its only argument.
 
 Two context events reach the bus.
 The ``"context-updated"`` event fires whenever the framework loads a new context.
+Its payload is an object with two fields, where ``context`` is the whole merged store and ``changed`` lists only the keys of the delta that just arrived.
+The initial seed lists every seeded key in ``changed``.
 A partial zone render ships a js-context delta in its patch envelope, see :doc:`/content/topics/partial-rendering/how-it-works`.
-The runtime merges the delta into ``window.Next.context`` and fires ``context-updated`` again.
-The ``"ready"`` event fires once the first context is loaded, and a listener registered after that point receives an immediate replay with the current context.
+The runtime merges the delta into ``window.Next.context`` and fires ``context-updated`` again with only the delta keys in ``changed``.
+The ``"ready"`` event fires once the first context is loaded, and its listener receives the context object itself.
+A ``ready`` listener registered after that point receives an immediate replay with the current context.
 The partial runtime fires further ``partial:*`` events on the same bus, see :doc:`/content/topics/partial-rendering/reference`.
 
 .. code-block:: javascript
@@ -252,8 +255,10 @@ The partial runtime fires further ``partial:*`` events on the same bus, see :doc
      console.log(`There are ${count} notes.`);
    });
 
-   window.Next.on("context-updated", (context) => {
-     render(context);
+   window.Next.on("context-updated", ({ context, changed }) => {
+     if (changed.includes("note_count")) {
+       render(context.note_count);
+     }
    });
 
 ``Next.use(plugin)`` calls ``plugin`` with the ``Next`` object and returns whatever the plugin returns.

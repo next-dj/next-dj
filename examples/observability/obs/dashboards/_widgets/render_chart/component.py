@@ -3,11 +3,9 @@ from typing import Any
 from next.components import component
 
 
-# Chart.js loads from a CDN. The framework collects this URL through
-# `{% collect_scripts %}` and dedupes it across renders, so listing it
-# once in the component module is enough for every page that mounts
-# the chart.
-scripts = ["https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"]
+# The Chart.js CDN URL lives in the page-level `scripts` list of
+# `stats/page.py`, not here, because page scripts are injected before
+# this widget's co-located `component.js` that needs `window.Chart`.
 
 
 @component.context("render_rates", serialize=True)

@@ -107,13 +107,15 @@ A value is pushed by the name of a registered ``serialize=True`` provider on the
 A name that is not a ``serialize=True`` provider of the origin page raises ``UnknownContextNameError``, so the verb cannot smuggle an arbitrary value past the provider contract.
 
 Read the merged value on the client through ``Next.context`` and react to the merge through ``context-updated``.
+The event payload carries the whole merged store in ``context`` and the keys of the delta in ``changed``, so a listener filters on ``changed`` instead of re-reading every value.
 
 .. code-block:: javascript
    :caption: static/cart/badge.js
 
-   Next.on("context-updated", () => {
+   Next.on("context-updated", ({ context, changed }) => {
+     if (!changed.includes("cart_count")) return;
      document.querySelector("[data-cart-badge]").textContent =
-       String(Next.context.cart_count);
+       String(context.cart_count);
    });
 
 A stream source cannot build a ``context`` patch, because it has no page-render origin to read a provider value from.

@@ -8,7 +8,6 @@ beforeEach(async () => {
   mountChart = null;
   contextUpdated = null;
   window.Next = {
-    context: {},
     partial: {
       onMount: (selector, callback) => {
         expect(selector).toBe("[data-poll-chart]");
@@ -89,20 +88,24 @@ describe("poll chart mount", () => {
     expect(() => mountChart(root)).not.toThrow();
   });
 
-  it("applies the pushed snapshot to mounted charts on context-updated", async () => {
+  it("applies the pushed snapshot when live_results is in changed", async () => {
     const root = chartRoot();
     document.body.append(root);
     mountChart(root);
     await Promise.resolve();
-    window.Next.context.live_results = {
-      poll_id: 1,
-      total_votes: 12,
-      choices: [
-        { id: 10, text: "Tabs", votes: 9 },
-        { id: 11, text: "Spaces", votes: 3 },
-      ],
-    };
-    contextUpdated();
+    contextUpdated({
+      context: {
+        live_results: {
+          poll_id: 1,
+          total_votes: 12,
+          choices: [
+            { id: 10, text: "Tabs", votes: 9 },
+            { id: 11, text: "Spaces", votes: 3 },
+          ],
+        },
+      },
+      changed: ["live_results"],
+    });
     await Promise.resolve();
     const app = root.querySelector("[data-poll-chart-app]");
     expect(app.querySelector("[data-poll-chart-total]").textContent).toBe("12");
@@ -112,12 +115,90 @@ describe("poll chart mount", () => {
     root.remove();
   });
 
+  it("skips context-updated when live_results is not in changed", async () => {
+    const root = chartRoot();
+    document.body.append(root);
+    mountChart(root);
+    await Promise.resolve();
+    contextUpdated({
+      context: {
+        live_results: {
+          poll_id: 1,
+          total_votes: 99,
+          choices: [
+            { id: 10, text: "Tabs", votes: 99 },
+            { id: 11, text: "Spaces", votes: 0 },
+          ],
+        },
+      },
+      changed: ["flash_messages"],
+    });
+    await Promise.resolve();
+    const app = root.querySelector("[data-poll-chart-app]");
+    expect(app.querySelector("[data-poll-chart-total]").textContent).toBe("5");
+    expect(
+      app.querySelector('[data-choice-id="10"] [data-poll-chart-votes]').textContent,
+    ).toBe("3");
+    root.remove();
+  });
+
   it("ignores context-updated when no snapshot is present", () => {
     const root = chartRoot();
     document.body.append(root);
     mountChart(root);
-    window.Next.context.live_results = undefined;
-    expect(() => contextUpdated()).not.toThrow();
+    expect(() =>
+      contextUpdated({ context: {}, changed: ["live_results"] }),
+    ).not.toThrow();
     root.remove();
+  });
+});
+
+describe("poll chart unmount", () => {
+  it("unmounts the app when next:removed fires on the island root", async () => {
+    const root = chartRoot();
+    document.body.append(root);
+    mountChart(root);
+    await Promise.resolve();
+    const app = root.querySelector("[data-poll-chart-app]");
+    expect(app.querySelectorAll(".poll-chart-row")).toHaveLength(2);
+    root.dispatchEvent(new CustomEvent("next:removed", { bubbles: true }));
+    expect(app.querySelectorAll(".poll-chart-row")).toHaveLength(0);
+    mountChart(root);
+    await Promise.resolve();
+    expect(app.querySelectorAll(".poll-chart-row")).toHaveLength(2);
+    root.remove();
+  });
+
+  it("unmounts islands inside a removed subtree", async () => {
+    const wrapper = document.createElement("section");
+    const root = chartRoot();
+    wrapper.append(root);
+    document.body.append(wrapper);
+    mountChart(root);
+    await Promise.resolve();
+    const app = root.querySelector("[data-poll-chart-app]");
+    expect(app.querySelectorAll(".poll-chart-row")).toHaveLength(2);
+    wrapper.dispatchEvent(new CustomEvent("next:removed", { bubbles: true }));
+    expect(app.querySelectorAll(".poll-chart-row")).toHaveLength(0);
+    wrapper.remove();
+  });
+
+  it("leaves mounted islands alone when an unrelated node is removed", async () => {
+    const root = chartRoot();
+    const other = document.createElement("aside");
+    document.body.append(root, other);
+    mountChart(root);
+    await Promise.resolve();
+    other.dispatchEvent(new CustomEvent("next:removed", { bubbles: true }));
+    const app = root.querySelector("[data-poll-chart-app]");
+    expect(app.querySelectorAll(".poll-chart-row")).toHaveLength(2);
+    root.remove();
+    other.remove();
+  });
+
+  it("ignores next:removed with a non-element target", () => {
+    expect(() =>
+      document.dispatchEvent(new CustomEvent("next:removed", { bubbles: true })),
+    ).not.toThrow();
   });
 });

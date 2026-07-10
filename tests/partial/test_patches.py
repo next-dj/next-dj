@@ -105,7 +105,9 @@ class TestPatchesBuilder:
     """The minimal builder emits HTML and HTML-less verbs in order."""
 
     def test_morph_is_the_default_verb(self) -> None:
-        envelope = Patches("v1").morph({"zone": "list"}, "<div></div>").envelope()
+        envelope = (
+            Patches.versioned("v1").morph({"zone": "list"}, "<div></div>").envelope()
+        )
         assert envelope.ops[0].as_dict() == {
             "op": "morph",
             "target": {"zone": "list"},
@@ -114,14 +116,16 @@ class TestPatchesBuilder:
 
     def test_morph_extract_marks_payload(self) -> None:
         envelope = (
-            Patches("v1")
+            Patches.versioned("v1")
             .morph({"form": "ab12"}, "<html></html>", extract=True)
             .envelope()
         )
         assert envelope.ops[0].as_dict()["extract"] is True
 
     def test_morph_form_extract_morphs_by_uid(self) -> None:
-        envelope = Patches("v1").morph_form("ab12", "<form></form>").envelope()
+        envelope = (
+            Patches.versioned("v1").morph_form("ab12", "<form></form>").envelope()
+        )
         assert envelope.ops[0].as_dict() == {
             "op": "morph",
             "target": {"form": "ab12"},
@@ -130,24 +134,28 @@ class TestPatchesBuilder:
         }
 
     def test_morph_facade_form_delegates_to_morph_form(self) -> None:
-        facade = Patches("v1").morph(form="ab12", html="<form></form>").envelope()
-        direct = Patches("v1").morph_form("ab12", "<form></form>").envelope()
+        facade = (
+            Patches.versioned("v1").morph(form="ab12", html="<form></form>").envelope()
+        )
+        direct = Patches.versioned("v1").morph_form("ab12", "<form></form>").envelope()
         assert facade.ops[0].as_dict() == direct.ops[0].as_dict()
 
     def test_morph_rejects_an_unknown_selector(self) -> None:
         with pytest.raises(TypeError, match="unexpected selector"):
-            Patches("v1").morph(widget="ab12")
+            Patches.versioned("v1").morph(widget="ab12")
 
     def test_morph_rejects_conflicting_selectors(self) -> None:
         with pytest.raises(TypeError, match="conflicting selector"):
-            Patches("v1").morph(zone="list", form="ab12")
+            Patches.versioned("v1").morph(zone="list", form="ab12")
 
     def test_morph_rejects_a_none_valued_selector(self) -> None:
         with pytest.raises(TypeError, match="unexpected selector"):
-            Patches("v1").morph(zone=None)
+            Patches.versioned("v1").morph(zone=None)
 
     def test_replace(self) -> None:
-        envelope = Patches("v1").replace({"zone": "list"}, "<div></div>").envelope()
+        envelope = (
+            Patches.versioned("v1").replace({"zone": "list"}, "<div></div>").envelope()
+        )
         assert envelope.ops[0].as_dict() == {
             "op": "replace",
             "target": {"zone": "list"},
@@ -155,19 +163,19 @@ class TestPatchesBuilder:
         }
 
     def test_inner(self) -> None:
-        envelope = Patches("v1").inner({"zone": "list"}, "<p></p>").envelope()
+        envelope = Patches.versioned("v1").inner({"zone": "list"}, "<p></p>").envelope()
         assert envelope.ops[0].op == "inner"
         assert envelope.ops[0].html == "<p></p>"
 
     def test_remove(self) -> None:
-        envelope = Patches("v1").remove({"css": "#row-1"}).envelope()
+        envelope = Patches.versioned("v1").remove({"css": "#row-1"}).envelope()
         assert envelope.ops[0].as_dict() == {
             "op": "remove",
             "target": {"css": "#row-1"},
         }
 
     def test_event_default_detail(self) -> None:
-        envelope = Patches("v1").event("saved").envelope()
+        envelope = Patches.versioned("v1").event("saved").envelope()
         assert envelope.ops[0].as_dict() == {
             "op": "event",
             "name": "saved",
@@ -175,12 +183,12 @@ class TestPatchesBuilder:
         }
 
     def test_event_with_detail(self) -> None:
-        envelope = Patches("v1").event("saved", {"id": 7}).envelope()
+        envelope = Patches.versioned("v1").event("saved", {"id": 7}).envelope()
         assert envelope.ops[0].as_dict()["detail"] == {"id": 7}
 
     def test_chaining_preserves_order(self) -> None:
         envelope = (
-            Patches("v1")
+            Patches.versioned("v1")
             .replace({"zone": "a"}, "<a></a>")
             .remove({"zone": "b"})
             .event("done")
@@ -190,23 +198,34 @@ class TestPatchesBuilder:
 
     def test_assets_and_form(self) -> None:
         form = FormMeta(uid="ab12", valid=True)
-        envelope = Patches("v1").add_asset("css", "/x.css").set_form(form).envelope()
+        envelope = (
+            Patches.versioned("v1").add_asset("css", "/x.css").set_form(form).envelope()
+        )
         assert envelope.assets[0] == Asset(kind="css", url="/x.css")
         assert envelope.form is form
 
     def test_add_asset_records_an_inline_body(self) -> None:
-        envelope = Patches("v1").add_asset("css", "", inline=".x {}").envelope()
+        envelope = (
+            Patches.versioned("v1").add_asset("css", "", inline=".x {}").envelope()
+        )
         assert envelope.assets[0] == Asset(kind="css", url="", inline=".x {}")
 
     def test_add_context_records_a_context_op(self) -> None:
-        envelope = Patches("v1")._add_context({"unread": 3}).envelope()
+        envelope = Patches.versioned("v1")._add_context({"unread": 3}).envelope()
         assert envelope.ops[0].as_dict() == {
             "op": "context",
             "data": {"unread": 3},
         }
 
     def test_version_carried(self) -> None:
-        assert Patches("9f3c").envelope().version == "9f3c"
+        assert Patches.versioned("9f3c").envelope().version == "9f3c"
+
+    def test_versioned_echo_of_rides_as_request_id(self) -> None:
+        envelope = Patches.versioned("v1", echo_of="r1").envelope()
+        assert envelope.request_id == "r1"
+
+    def test_versioned_carries_no_request_id_by_default(self) -> None:
+        assert Patches.versioned("v1").envelope().request_id is None
 
 
 class TestPatchResponse:
@@ -277,7 +296,7 @@ class TestReservedPatchKey:
 
     def test_op_frame_refuses_reserved_payload_key(self, custom_op: str) -> None:
         with pytest.raises(ReservedPatchKeyError) as exc:
-            Patches("v1").op(custom_op, op="boom")
+            Patches.versioned("v1").op(custom_op, op="boom")
         assert exc.value.keys == frozenset({"op"})
 
     def test_valid_patch_as_dict_does_not_raise(self) -> None:
