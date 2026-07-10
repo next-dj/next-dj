@@ -20,7 +20,8 @@ The autodoc blocks under `Public API`_ are the exhaustive surface.
 Stable.
    ``Patches``, ``PatchResponse``, ``PatchEventStream``, ``render_zone``,
    ``ZoneRenderResult``, ``zone_requested``, ``is_partial_request``, ``partial_intent``,
-   ``register_patch_op``, ``UnknownZoneError``, and ``ForeignPageNotAuthorizedError``.
+   ``register_patch_op``, ``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, and
+   ``LayerHrefWithoutZoneError``.
    ``Envelope``, ``Patch``, ``Asset``, and ``FormMeta`` are the frozen value objects of
    the wire contract.
    Import all of these from ``next.partial``.
@@ -42,7 +43,7 @@ Framework machinery.
    ``next.partial.headers``.
    ``PartialIntent`` and ``MergeMode`` live in ``next.partial.headers``.
    ``PartialOrigin`` lives in ``next.partial.origin``.
-   ``shape_validate`` and ``drain_messages`` live in ``next.partial.shaping``.
+   ``ActionRef``, ``shape_validate``, and ``drain_messages`` live in ``next.partial.shaping``.
    ``PatchOpRegistry``, the ``patch_op_registry`` instance, and ``BUILTIN_OPS`` live in
    ``next.partial.registry``.
 
@@ -183,13 +184,16 @@ Subclass it and serialise a different envelope shape to support another wire for
 Exceptions
 ~~~~~~~~~~
 
-``UnknownZoneError`` and ``ForeignPageNotAuthorizedError`` are curated ``next.partial``
-exceptions.
+``UnknownZoneError``, ``ForeignPageNotAuthorizedError``, and ``LayerHrefWithoutZoneError``
+are curated ``next.partial`` exceptions.
 ``UnknownZoneError`` is raised when a partial request names a zone the template does not
 declare, surfacing as a 400 before any render.
 ``ForeignPageNotAuthorizedError`` is raised when an out-of-band morph of a foreign page
 fails that page's own authorisation, so a zone never travels in a response the page would
 have denied.
+``LayerHrefWithoutZoneError`` is raised when a layer seeds an ``href`` but names no
+``zone=`` to load it into, so the builder refuses the layer instead of opening an empty
+one on the client.
 The remaining eight are rarely caught and stay out of the curated surface.
 They guard the custom-verb contract, the event-name and dedupe vocabularies, and the
 foreign-page and href rules, and live in ``next.partial.patches``.
@@ -198,6 +202,9 @@ foreign-page and href rules, and live in ``next.partial.patches``.
    :members:
 
 .. autoexception:: next.partial.ForeignPageNotAuthorizedError
+   :members:
+
+.. autoexception:: next.partial.LayerHrefWithoutZoneError
    :members:
 
 .. autoexception:: next.partial.patches.UnknownPatchOpError
@@ -234,8 +241,10 @@ See :doc:`signals` and :doc:`/content/topics/signals` for the partial signals
 System Checks
 -------------
 
-See :doc:`system-checks` for the zone-placement, template-compile, and custom-verb checks
-(``next.E060`` through ``next.E066``, ``next.E072``, ``next.W067`` through ``next.W071``).
+See :doc:`system-checks` for the zone-placement, template-compile, custom-verb, and
+backend-configuration checks
+(``next.E060`` through ``next.E066``, ``next.E072``, ``next.E073``,
+``next.W067`` through ``next.W071``).
 
 See Also
 --------

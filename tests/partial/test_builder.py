@@ -66,13 +66,17 @@ class TestMorphFormAndHtml:
     """`morph(form=)` extract-morphs and `morph(html=)` morphs ready HTML."""
 
     def test_form_target_extract_morphs(self) -> None:
-        envelope = Patches("v1").morph(form="ab12", html="<form></form>").envelope()
+        envelope = (
+            Patches.versioned("v1").morph(form="ab12", html="<form></form>").envelope()
+        )
         op = envelope.ops[0].as_dict()
         assert op["target"] == {"form": "ab12"}
         assert op["extract"] is True
 
     def test_ready_html_morphs_the_passed_target(self) -> None:
-        envelope = Patches("v1").morph({"zone": "list"}, "<ul></ul>").envelope()
+        envelope = (
+            Patches.versioned("v1").morph({"zone": "list"}, "<ul></ul>").envelope()
+        )
         assert envelope.ops[0].as_dict() == {
             "op": "morph",
             "target": {"zone": "list"},
@@ -103,14 +107,18 @@ class TestMorphFacadeUnknownKeys:
 
     def test_form_rejects_any_extra_keyword(self) -> None:
         with pytest.raises(TypeError, match="unexpected keyword"):
-            Patches("v1").morph(form="ab12", html="<form></form>", dedupe="key")
+            Patches.versioned("v1").morph(
+                form="ab12", html="<form></form>", dedupe="key"
+            )
 
 
 class TestStandaloneVerbs:
     """Each builder verb records its own patch in order."""
 
     def test_append_carries_dedupe(self) -> None:
-        envelope = Patches("v1").append({"zone": "feed"}, "<li></li>").envelope()
+        envelope = (
+            Patches.versioned("v1").append({"zone": "feed"}, "<li></li>").envelope()
+        )
         assert envelope.ops[0].as_dict() == {
             "op": "append",
             "target": {"zone": "feed"},
@@ -120,12 +128,16 @@ class TestStandaloneVerbs:
 
     def test_append_accepts_a_custom_dedupe(self) -> None:
         envelope = (
-            Patches("v1").append({"zone": "feed"}, "<li></li>", dedupe="id").envelope()
+            Patches.versioned("v1")
+            .append({"zone": "feed"}, "<li></li>", dedupe="id")
+            .envelope()
         )
         assert envelope.ops[0].as_dict()["dedupe"] == "id"
 
     def test_prepend_carries_dedupe(self) -> None:
-        envelope = Patches("v1").prepend({"zone": "feed"}, "<li></li>").envelope()
+        envelope = (
+            Patches.versioned("v1").prepend({"zone": "feed"}, "<li></li>").envelope()
+        )
         assert envelope.ops[0].as_dict() == {
             "op": "prepend",
             "target": {"zone": "feed"},
@@ -135,32 +147,36 @@ class TestStandaloneVerbs:
 
     def test_prepend_accepts_a_custom_dedupe(self) -> None:
         envelope = (
-            Patches("v1").prepend({"zone": "feed"}, "<li></li>", dedupe="id").envelope()
+            Patches.versioned("v1")
+            .prepend({"zone": "feed"}, "<li></li>", dedupe="id")
+            .envelope()
         )
         assert envelope.ops[0].as_dict()["dedupe"] == "id"
 
     def test_append_rejects_an_unknown_dedupe(self) -> None:
         with pytest.raises(UnknownDedupeError, match='"key" or "id"') as exc:
-            Patches("v1").append({"zone": "feed"}, "<li></li>", dedupe="kee")
+            Patches.versioned("v1").append({"zone": "feed"}, "<li></li>", dedupe="kee")
         assert exc.value.dedupe == "kee"
 
     def test_prepend_rejects_an_unknown_dedupe(self) -> None:
         with pytest.raises(UnknownDedupeError):
-            Patches("v1").prepend({"zone": "feed"}, "<li></li>", dedupe="bogus")
+            Patches.versioned("v1").prepend(
+                {"zone": "feed"}, "<li></li>", dedupe="bogus"
+            )
 
     def test_refresh_names_the_zone(self) -> None:
-        envelope = Patches("v1").refresh(zone="results").envelope()
+        envelope = Patches.versioned("v1").refresh(zone="results").envelope()
         assert envelope.ops[0].as_dict() == {"op": "refresh", "zone": "results"}
 
     def test_layer_close_with_result(self) -> None:
-        envelope = Patches("v1").layer_close(result={"id": 7}).envelope()
+        envelope = Patches.versioned("v1").layer_close(result={"id": 7}).envelope()
         assert envelope.ops[0].as_dict() == {
             "op": "layer.close",
             "result": {"id": 7},
         }
 
     def test_layer_close_with_dismiss(self) -> None:
-        envelope = Patches("v1").layer_close(dismiss="cancel").envelope()
+        envelope = Patches.versioned("v1").layer_close(dismiss="cancel").envelope()
         assert envelope.ops[0].as_dict() == {
             "op": "layer.close",
             "dismiss": True,
@@ -168,11 +184,11 @@ class TestStandaloneVerbs:
         }
 
     def test_layer_open_is_empty_without_seeds(self) -> None:
-        envelope = Patches("v1").layer_open().envelope()
+        envelope = Patches.versioned("v1").layer_open().envelope()
         assert envelope.ops[0].as_dict() == {"op": "layer.open"}
 
     def test_layer_open_seeds_a_zone(self) -> None:
-        envelope = Patches("v1").layer_open(zone="cart").envelope()
+        envelope = Patches.versioned("v1").layer_open(zone="cart").envelope()
         assert envelope.ops[0].as_dict() == {"op": "layer.open", "zone": "cart"}
 
     def test_layer_open_raises_on_an_href_without_a_zone(self) -> None:
@@ -200,7 +216,7 @@ class TestStandaloneVerbs:
         assert exc.value.href == "https://evil.example.com/x"
 
     def test_toast_default_variant(self) -> None:
-        envelope = Patches("v1").toast("Saved").envelope()
+        envelope = Patches.versioned("v1").toast("Saved").envelope()
         assert envelope.ops[0].as_dict() == {
             "op": "toast",
             "text": "Saved",
@@ -208,7 +224,7 @@ class TestStandaloneVerbs:
         }
 
     def test_event_carries_detail(self) -> None:
-        envelope = Patches("v1").event("ping", {"x": 1}).envelope()
+        envelope = Patches.versioned("v1").event("ping", {"x": 1}).envelope()
         assert envelope.ops[0].as_dict()["detail"] == {"x": 1}
 
     def test_push_url_validates_same_site(self) -> None:
@@ -250,23 +266,23 @@ class TestReservedEventNames:
 
     def test_ready_is_reserved(self) -> None:
         with pytest.raises(ReservedEventNameError, match="reserved") as exc:
-            Patches("v1").event("ready")
+            Patches.versioned("v1").event("ready")
         assert exc.value.name == "ready"
 
     def test_context_updated_is_reserved(self) -> None:
         with pytest.raises(ReservedEventNameError):
-            Patches("v1").event("context-updated")
+            Patches.versioned("v1").event("context-updated")
 
     def test_partial_prefix_is_reserved(self) -> None:
         with pytest.raises(ReservedEventNameError):
-            Patches("v1").event("partial:before-apply")
+            Patches.versioned("v1").event("partial:before-apply")
 
     def test_next_prefix_is_reserved(self) -> None:
         with pytest.raises(ReservedEventNameError):
-            Patches("v1").event("next:mounted")
+            Patches.versioned("v1").event("next:mounted")
 
     def test_an_application_name_is_accepted(self) -> None:
-        envelope = Patches("v1").event("cart:updated").envelope()
+        envelope = Patches.versioned("v1").event("cart:updated").envelope()
         assert envelope.ops[0].as_dict()["name"] == "cart:updated"
 
 
@@ -274,7 +290,7 @@ class TestCustomOp:
     """`op()` emits a registered custom verb and rejects unknown ones."""
 
     def test_registered_verb_emits_a_patch(self, custom_op: str) -> None:
-        envelope = Patches("v1").op(custom_op, origin="button").envelope()
+        envelope = Patches.versioned("v1").op(custom_op, origin="button").envelope()
         assert envelope.ops[0].as_dict() == {
             "op": "confetti",
             "origin": "button",
@@ -282,17 +298,17 @@ class TestCustomOp:
 
     def test_unregistered_verb_raises_unknown_op(self) -> None:
         with pytest.raises(UnknownPatchOpError) as exc:
-            Patches("v1").op("nope")
+            Patches.versioned("v1").op("nope")
         assert exc.value.name == "nope"
 
     def test_built_in_verb_is_refused_on_the_generic_channel(self) -> None:
         with pytest.raises(BuiltinPatchOpError) as exc:
-            Patches("v1").op("morph")
+            Patches.versioned("v1").op("morph")
         assert exc.value.name == "morph"
 
     def test_payload_naming_a_reserved_wire_key_raises(self, custom_op: str) -> None:
         with pytest.raises(ReservedPatchKeyError) as exc:
-            Patches("v1").op(custom_op, target="spoof")
+            Patches.versioned("v1").op(custom_op, target="spoof")
         assert exc.value.keys == frozenset({"target"})
 
 
@@ -351,20 +367,22 @@ class TestVersionBuilderCompatibility:
     """The bare-version builder stays a low-level assembler."""
 
     def test_version_builder_keeps_positional_morph(self) -> None:
-        envelope = Patches("9f3c").morph({"zone": "x"}, "<div></div>").envelope()
+        envelope = (
+            Patches.versioned("9f3c").morph({"zone": "x"}, "<div></div>").envelope()
+        )
         assert envelope.version == "9f3c"
         assert envelope.ops[0].html == "<div></div>"
 
     def test_version_builder_response_redirects_to_root(self) -> None:
-        response = Patches("9f3c").response()
+        response = Patches.versioned("9f3c").response()
         assert response.status_code == 303
         assert response["Location"] == "/"
 
     def test_version_builder_fallback_passes_through_unvalidated(self) -> None:
-        response = Patches("9f3c").response(fallback="/after/")
+        response = Patches.versioned("9f3c").response(fallback="/after/")
         assert response.status_code == 303
         assert response["Location"] == "/after/"
 
     def test_version_builder_render_helpers_require_a_request(self) -> None:
         with pytest.raises(RuntimeError):
-            Patches("9f3c").morph(zone="x")
+            Patches.versioned("9f3c").morph(zone="x")

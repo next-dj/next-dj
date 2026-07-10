@@ -343,8 +343,9 @@ Custom Invalid-Page HTML
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 Override ``render_invalid_page`` to return custom HTML for the validation error path.
-The override signature is ``render_invalid_page(request, action_name, form, page_file_path=None, url_kwargs=None)``.
+The override signature is ``render_invalid_page(request, action_name, form, page_file_path=None, url_kwargs=None, overrides=None)``.
 The dispatcher passes the page source path and the URL kwargs it resolved from the posted origin, so the hook never parses the request itself.
+``overrides`` carries context overrides that merge into the re-render context last, such as the wizard binding a partial step advance supplies.
 The same hook renders the success re-render of a handler that returns ``None``, where ``form`` is ``None``, so an override must tolerate the missing form.
 The abstract base returns an empty string, and the bundled implementation does the same when ``page_file_path`` is ``None``.
 The bundled ``RegistryFormActionBackend`` re-renders the origin page through the page-template loader.

@@ -13,8 +13,14 @@ import PollChart from "./_widgets/poll_chart/component.vue";
 //
 // The voter's own tab takes a shorter path. Its vote response carries a
 // `context` patch beside the zone morph, so `context-updated` fires with
-// `window.Next.context.live_results` already holding the fresh snapshot.
-// The listener pushes that straight into the live instance, no DOM re-read.
+// `{ context, changed }` where `changed` lists the keys of that delta.
+// The listener acts only when `live_results` is in `changed` and pushes
+// the merged snapshot straight into the live instance, no DOM re-read.
+// It never sees the initial seed — this deferred bundle subscribes after
+// the classic inline `Next._init` has already dispatched it, and only
+// `ready` replays to late subscribers. The chart's first data comes from
+// the DOM snapshot `mountChart` reads, the listener handles only later
+// deltas.
 
 const instances = new WeakMap();
 
@@ -37,27 +43,48 @@ function mountChart(root) {
   const snapshot = readSnapshot(root);
   const existing = instances.get(root);
   if (existing) {
-    existing.applySnapshot(snapshot);
+    existing.vm.applySnapshot(snapshot);
     return;
   }
   const target = root.querySelector("[data-poll-chart-app]");
   if (!target) return;
   target.innerHTML = "";
-  const vm = createApp(PollChart, { snapshot }).mount(target);
-  instances.set(root, vm);
+  const app = createApp(PollChart, { snapshot });
+  const vm = app.mount(target);
+  instances.set(root, { app, vm });
 }
 
-function applyContextSnapshot() {
-  const snapshot = window.Next?.context?.live_results;
+function applyContextSnapshot({ context, changed }) {
+  if (!changed.includes("live_results")) return;
+  const snapshot = context.live_results;
   if (!snapshot) return;
   for (const root of document.querySelectorAll("[data-poll-chart]")) {
-    const vm = instances.get(root);
-    if (vm) vm.applySnapshot(snapshot);
+    const entry = instances.get(root);
+    if (entry) entry.vm.applySnapshot(snapshot);
+  }
+}
+
+// Zone morphs never detach the keep container, so this fires only when
+// the zone or the page itself leaves the document. The event lands on
+// the detached root, not on each descendant, hence the subtree walk.
+function unmountRemoved(event) {
+  const node = event.target;
+  if (!(node instanceof Element)) return;
+  const islands = node.matches("[data-poll-chart]")
+    ? [node]
+    : node.querySelectorAll("[data-poll-chart]");
+  for (const root of islands) {
+    const entry = instances.get(root);
+    if (entry !== undefined) {
+      entry.app.unmount();
+      instances.delete(root);
+    }
   }
 }
 
 window.Next?.partial?.onMount("[data-poll-chart]", mountChart);
 window.Next?.on?.("context-updated", applyContextSnapshot);
+document.addEventListener("next:removed", unmountRemoved);
 
 export default {};
 </script>

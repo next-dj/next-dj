@@ -136,14 +136,17 @@ describe("Next.on", () => {
     expect(called).toBe(1);
   });
 
-  it("fires the context-updated listener on _init", () => {
+  it("fires the context-updated listener on _init with all seeded keys changed", () => {
     const received: Record<string, unknown>[] = [];
     win.Next.on("context-updated", (payload) => {
       received.push(payload);
     });
-    win.Next._init({ user: "alice" });
+    win.Next._init({ user: "alice", page: "home" });
     expect(received).toHaveLength(1);
-    expect(received[0]).toEqual({ user: "alice" });
+    expect(received[0]).toEqual({
+      context: { user: "alice", page: "home" },
+      changed: ["user", "page"],
+    });
   });
 
   it("supports multiple listeners on the same event", () => {
@@ -275,6 +278,32 @@ describe("Next.partial namespace", () => {
     });
     expect(win.Next.context.poll).toBe(7);
     expect(fired).toBe(1);
+    off();
+  });
+
+  it("reports only the delta keys as changed while context carries the whole store", () => {
+    win.Next._init({ page: "home", user: "alice" });
+    const received: Record<string, unknown>[] = [];
+    const off = win.Next.on("context-updated", (payload) => {
+      received.push(payload);
+    });
+    win.Next.partial.defineOp("seed", (_patch, ctx) => {
+      (ctx as { mergeContext(data: Record<string, unknown>): void }).mergeContext({
+        user: "bob",
+        poll: 7,
+      });
+    });
+    win.Next.partial.apply({
+      version: "v1",
+      ops: [{ op: "seed" }],
+      assets: [],
+      form: null,
+    });
+    expect(received).toHaveLength(1);
+    expect(received[0]).toEqual({
+      context: { page: "home", user: "bob", poll: 7 },
+      changed: ["user", "poll"],
+    });
     off();
   });
 });

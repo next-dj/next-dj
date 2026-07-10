@@ -194,7 +194,7 @@ class TestCsrfRotation:
 
     def test_rotated_request_stamps_the_csrf_payload(self) -> None:
         request = RequestFactory().post("/")
-        patches = Patches("1")
+        patches = Patches.versioned("1")
         _stamp_csrf(request, patches, rotated=True)
         envelope = patches.envelope().as_dict()
         assert "csrf" in envelope
@@ -202,7 +202,7 @@ class TestCsrfRotation:
 
     def test_unrotated_request_leaves_no_csrf_meta(self) -> None:
         request = RequestFactory().post("/")
-        patches = Patches("1")
+        patches = Patches.versioned("1")
         _stamp_csrf(request, patches, rotated=False)
         assert "csrf" not in patches.envelope().as_dict()
 

@@ -35,7 +35,7 @@ class TestBenchEnvelopeBuild:
 
         def run() -> bytes:
             envelope = (
-                Patches("9f3c2e1b")
+                Patches.versioned("9f3c2e1b")
                 .morph({"zone": "results"}, "<div>results</div>")
                 .append({"zone": "feed"}, "<li>row</li>")
                 .toast("Saved", variant="success")

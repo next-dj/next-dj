@@ -86,7 +86,7 @@ class TestProducersWriteTargetSelectorKeys:
     """Every target/extras producer writes the wire keys from keys.py."""
 
     def test_view_zone_patch_targets_zone_key(self) -> None:
-        patches = Patches("v1")
+        patches = Patches.versioned("v1")
         result = ZoneRenderResult(
             html={"list": '<div data-next-zone="list"><ul></ul></div>'},
             bodies={"list": "<ul></ul>"},
@@ -98,12 +98,12 @@ class TestProducersWriteTargetSelectorKeys:
         assert view.targets() == [{keys.ZONE: "list"}]
 
     def test_morph_form_targets_form_selector_key(self) -> None:
-        patches = Patches("v1").morph_form("ab12", "<form></form>")
+        patches = Patches.versioned("v1").morph_form("ab12", "<form></form>")
         view = PartialEnvelope(patches.envelope().as_dict())
         assert view.form_targets() == ["ab12"]
         assert view.targets() == [{keys.FORM_SELECTOR: "ab12"}]
 
     def test_layer_open_seeds_zone_extras_key(self) -> None:
-        patches = Patches("v1").layer_open(zone="cart")
+        patches = Patches.versioned("v1").layer_open(zone="cart")
         view = PartialEnvelope(patches.envelope().as_dict())
         assert view.ops[0][keys.ZONE] == "cart"

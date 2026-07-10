@@ -23,7 +23,9 @@ export type { PartialError, PartialErrorKind } from "./protocol";
 // falls through to the open on() overload.
 export interface NextEventMap {
   ready: NextContext;
-  "context-updated": NextContext;
+  // context is the whole merged store, changed lists only the keys of the delta
+  // that landed, so an island can skip a re-render its keys did not cause.
+  "context-updated": { context: NextContext; changed: string[] };
   "partial:before-request": {
     url: string;
     method: string;
@@ -63,7 +65,8 @@ class Next {
   static _init(context: Record<string, unknown>): void {
     Next.#context = context;
     Next.#ready = true;
-    Next.#dispatch("context-updated", context);
+    // The initial seed is one big delta, so every seeded key is changed.
+    Next.#dispatch("context-updated", { context, changed: Object.keys(context) });
     // Seed the asset registry, mount the initial DOM, and fire the batched load
     // zones before `ready` listeners run, so a `ready` handler sees a mounted
     // document.
@@ -102,8 +105,9 @@ class Next {
   // The operation `context` and the `csrf` meta merge into the same store
   // that `_init` owns, so context islands see one consistent snapshot.
   static #mergeContext(data: Record<string, unknown>): void {
+    const changed = Object.keys(data);
     Next.#context = { ...Next.#context, ...data };
-    Next.#dispatch("context-updated", Next.#context);
+    Next.#dispatch("context-updated", { context: Next.#context, changed });
   }
 
   static #dispatch(event: string, payload: Record<string, unknown>): void {

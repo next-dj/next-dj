@@ -91,6 +91,10 @@ Modules
 ``next.static.serializers``.
    ``JsContextSerializer`` protocol plus ``JsonJsContextSerializer`` and ``PydanticJsContextSerializer``.
 
+``next.static.finders``.
+   ``NextStaticFilesFinder`` exposes co-located page and component assets to Django staticfiles, so ``collectstatic`` copies them into ``STATIC_ROOT``.
+   :doc:`/content/topics/static-assets/overview` covers the finder from the user side.
+
 ``next.static.defaults``.
    ``register_defaults`` registers the built in ``css``, ``js``, and ``module`` kinds and the ``styles`` and ``scripts`` slots.
 

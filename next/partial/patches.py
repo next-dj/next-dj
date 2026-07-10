@@ -338,18 +338,17 @@ class Patches:
     Built from a request, the builder takes its asset version from the
     active protocol backend and resolves the origin page lazily, so a
     `morph(zone=...)` renders against the page that owns the request.
-    Built from a bare version string the builder
-    stays a low-level envelope assembler with no request, used by paths
-    that already hold the version and render their own HTML.
+    The `versioned` classmethod builds a request-free assembler for
+    paths that already hold the version and render their own HTML.
     """
 
     def __init__(
         self,
-        target: "HttpRequest | str",
+        request: HttpRequest,
         *,
         echo_of: str | None = None,
     ) -> None:
-        """Start an empty builder from a request or a literal version.
+        """Start an empty builder bound to the request.
 
         Pass `echo_of` with the originating mutation's request id so the
         envelope carries it as `request_id`, letting an SSE subscriber
@@ -357,12 +356,29 @@ class Patches:
         response path leaves it unset since the answer already reaches the
         initiator.
         """
-        if isinstance(target, str):
-            self._request = None
-            self._version: str = target
-        else:
-            self._request = target
-            self._version = partial_backend_manager.version()
+        self._init_state(request, partial_backend_manager.version(), echo_of)
+
+    @classmethod
+    def versioned(cls, version: str, *, echo_of: str | None = None) -> "Patches":
+        """Start an empty request-free builder stamped with a literal version.
+
+        The builder stays a low-level envelope assembler with no request,
+        used by paths that already hold the version and render their own
+        HTML.
+        """
+        builder = cls.__new__(cls)
+        builder._init_state(None, version, echo_of)
+        return builder
+
+    def _init_state(
+        self,
+        request: HttpRequest | None,
+        version: str,
+        echo_of: str | None,
+    ) -> None:
+        """Set the builder state shared by both construction forms."""
+        self._request = request
+        self._version = version
         self._ops: list[Patch] = []
         self._assets: list[Asset] = []
         self._form: FormMeta | None = None

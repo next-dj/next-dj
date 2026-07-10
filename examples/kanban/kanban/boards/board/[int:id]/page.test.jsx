@@ -1,6 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { Board } from "./page";
+
+const island = vi.hoisted(() => {
+  const captured = { selector: null, mount: null };
+  window.Next = {
+    context: {},
+    partial: {
+      onMount: (selector, callback) => {
+        captured.selector = selector;
+        captured.mount = callback;
+      },
+    },
+  };
+  return captured;
+});
 
 const mockBoard = {
   columns: [
@@ -149,5 +163,110 @@ describe("Board", () => {
     delete globalThis.window.Next;
     render(<Board />);
     expect(document.querySelector("[data-kanban-column]")).toBeNull();
+  });
+});
+
+describe("board island lifecycle", () => {
+  let el;
+
+  beforeEach(() => {
+    el = document.createElement("div");
+    el.id = "kanban-board";
+    document.body.append(el);
+  });
+
+  afterEach(() => {
+    act(() => {
+      el.dispatchEvent(new CustomEvent("next:removed", { bubbles: true }));
+    });
+    el.remove();
+  });
+
+  it("registers the mount callback for the board mount point", () => {
+    expect(island.selector).toBe("#kanban-board");
+    expect(island.mount).toBeTypeOf("function");
+  });
+
+  it("mounts the board into the element onMount hands over", () => {
+    act(() => island.mount(el));
+    expect(el.querySelectorAll("[data-kanban-column]")).toHaveLength(2);
+  });
+
+  it("keeps the live root when onMount re-runs on the same element", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true });
+    act(() => island.mount(el));
+
+    const col2 = el.querySelector("[data-kanban-column='2']");
+    fireEvent.drop(col2, { dataTransfer: { getData: () => "10" } });
+    await waitFor(() =>
+      expect(
+        el.querySelector("[data-kanban-column='2'] [data-kanban-card='10']"),
+      ).toBeTruthy(),
+    );
+
+    act(() => island.mount(el));
+
+    expect(
+      el.querySelector("[data-kanban-column='2'] [data-kanban-card='10']"),
+    ).toBeTruthy();
+    expect(
+      el.querySelector("[data-kanban-column='1'] [data-kanban-card]"),
+    ).toBeNull();
+  });
+
+  it("unmounts the root when next:removed fires on the mount point", () => {
+    act(() => island.mount(el));
+    expect(el.querySelector("[data-kanban-column]")).toBeTruthy();
+
+    act(() => {
+      el.dispatchEvent(new CustomEvent("next:removed", { bubbles: true }));
+    });
+
+    expect(el.querySelector("[data-kanban-column]")).toBeNull();
+  });
+
+  it("unmounts a board nested inside a removed subtree", () => {
+    const wrapper = document.createElement("section");
+    document.body.append(wrapper);
+    wrapper.append(el);
+    act(() => island.mount(el));
+
+    act(() => {
+      wrapper.dispatchEvent(new CustomEvent("next:removed", { bubbles: true }));
+    });
+
+    expect(el.querySelector("[data-kanban-column]")).toBeNull();
+    wrapper.remove();
+  });
+
+  it("mounts a fresh root after the previous one was removed", () => {
+    act(() => island.mount(el));
+    act(() => {
+      el.dispatchEvent(new CustomEvent("next:removed", { bubbles: true }));
+    });
+    expect(el.querySelector("[data-kanban-column]")).toBeNull();
+
+    act(() => island.mount(el));
+
+    expect(el.querySelectorAll("[data-kanban-column]")).toHaveLength(2);
+  });
+
+  it("ignores next:removed events without an element target", () => {
+    act(() => island.mount(el));
+
+    document.dispatchEvent(new CustomEvent("next:removed", { bubbles: true }));
+
+    expect(el.querySelectorAll("[data-kanban-column]")).toHaveLength(2);
+  });
+
+  it("keeps the board when an unrelated element is removed", () => {
+    act(() => island.mount(el));
+    const other = document.createElement("div");
+    document.body.append(other);
+
+    other.dispatchEvent(new CustomEvent("next:removed", { bubbles: true }));
+
+    expect(el.querySelectorAll("[data-kanban-column]")).toHaveLength(2);
+    other.remove();
   });
 });

@@ -29,7 +29,9 @@ def _meta_of(case: GoldenCase) -> dict:
 
 def _replace_zone() -> GoldenCase:
     html = '<div data-next-zone="request-list"><ul></ul></div>'
-    envelope = Patches("9f3c2e1b").replace({"zone": "request-list"}, html).envelope()
+    envelope = (
+        Patches.versioned("9f3c2e1b").replace({"zone": "request-list"}, html).envelope()
+    )
     return GoldenCase(
         name="replace_zone",
         envelope=envelope,
@@ -40,7 +42,9 @@ def _replace_zone() -> GoldenCase:
 
 def _inner_zone() -> GoldenCase:
     html = "<li>one</li><li>two</li>"
-    envelope = Patches("9f3c2e1b").inner({"zone": "request-list"}, html).envelope()
+    envelope = (
+        Patches.versioned("9f3c2e1b").inner({"zone": "request-list"}, html).envelope()
+    )
     return GoldenCase(
         name="inner_zone",
         envelope=envelope,
@@ -50,7 +54,7 @@ def _inner_zone() -> GoldenCase:
 
 
 def _remove_row() -> GoldenCase:
-    envelope = Patches("9f3c2e1b").remove({"css": "#row-42"}).envelope()
+    envelope = Patches.versioned("9f3c2e1b").remove({"css": "#row-42"}).envelope()
     return GoldenCase(
         name="remove_row",
         envelope=envelope,
@@ -60,7 +64,9 @@ def _remove_row() -> GoldenCase:
 
 
 def _event_only() -> GoldenCase:
-    envelope = Patches("9f3c2e1b").event("request-created", {"id": 42}).envelope()
+    envelope = (
+        Patches.versioned("9f3c2e1b").event("request-created", {"id": 42}).envelope()
+    )
     return GoldenCase(
         name="event_only",
         envelope=envelope,
@@ -73,7 +79,7 @@ def _zone_get() -> GoldenCase:
     alpha = '<div data-next-zone="alpha"><p>alpha hi</p></div>'
     beta = '<section data-next-zone="beta"><p>beta hi</p></section>'
     envelope = (
-        Patches("9f3c2e1b")
+        Patches.versioned("9f3c2e1b")
         .morph({"zone": "alpha"}, alpha)
         .morph({"zone": "beta"}, beta)
         .add_asset("css", "/static/next/zoned.css")
@@ -99,7 +105,7 @@ def _invalid_form() -> GoldenCase:
         errors={"name": ["This field is required."]},
     )
     envelope = (
-        Patches("9f3c2e1b")
+        Patches.versioned("9f3c2e1b")
         .replace({"form": "ab12cd34"}, html)
         .event("toast", {"text": "Could not save", "variant": "error"})
         .set_form(form)
@@ -128,7 +134,7 @@ def _invalid_form_extract() -> GoldenCase:
         errors={"title": ["This field is required."]},
     )
     envelope = (
-        Patches("9f3c2e1b")
+        Patches.versioned("9f3c2e1b")
         .morph({"form": "3f9ac21d75e04b88"}, html, extract=True)
         .set_form(form)
         .envelope()
@@ -160,7 +166,7 @@ def _validate_form() -> GoldenCase:
         errors={"email": ["Enter a valid email address."]},
     )
     envelope = (
-        Patches("9f3c2e1b")
+        Patches.versioned("9f3c2e1b")
         .morph({"form": "ab12cd34"}, html, extract=True)
         .set_form(form)
         .envelope()
@@ -182,7 +188,9 @@ def _wizard_advance() -> GoldenCase:
         '<form data-next-action="ab12cd34">'
         '<input name="scope" value=""></form></div>'
     )
-    envelope = Patches("9f3c2e1b").morph({"zone": "wizard-zone"}, html).envelope()
+    envelope = (
+        Patches.versioned("9f3c2e1b").morph({"zone": "wizard-zone"}, html).envelope()
+    )
     return GoldenCase(
         name="wizard_advance",
         envelope=envelope,
@@ -196,7 +204,7 @@ def _wizard_advance() -> GoldenCase:
 
 def _layer_close() -> GoldenCase:
     envelope = (
-        Patches("9f3c2e1b")
+        Patches.versioned("9f3c2e1b")
         .layer_close(result={"id": 42})
         .toast("Request created", variant="success")
         .envelope()
@@ -215,7 +223,7 @@ def _layer_close() -> GoldenCase:
 def _layer_oob_list() -> GoldenCase:
     html = '<div data-next-zone="request-list"><ul><li>fresh</li></ul></div>'
     envelope = (
-        Patches("9f3c2e1b")
+        Patches.versioned("9f3c2e1b")
         .layer_close(result={"id": 42})
         .morph({"zone": "request-list"}, html)
         .toast("Request created", variant="success")
@@ -240,7 +248,11 @@ def _append_page() -> GoldenCase:
         '<a href="/catalog/?page=3" data-next-merge="append" '
         'data-next-target="catalog-results">more</a></li>'
     )
-    envelope = Patches("9f3c2e1b").append({"zone": "catalog-results"}, rows).envelope()
+    envelope = (
+        Patches.versioned("9f3c2e1b")
+        .append({"zone": "catalog-results"}, rows)
+        .envelope()
+    )
     return GoldenCase(
         name="append_page",
         envelope=envelope,
@@ -254,7 +266,11 @@ def _append_page() -> GoldenCase:
 
 
 def _sse_refresh() -> GoldenCase:
-    envelope = Patches("9f3c2e1b", echo_of="r9").refresh(zone="poll-results").envelope()
+    envelope = (
+        Patches.versioned("9f3c2e1b", echo_of="r9")
+        .refresh(zone="poll-results")
+        .envelope()
+    )
     return GoldenCase(
         name="sse_refresh",
         envelope=envelope,

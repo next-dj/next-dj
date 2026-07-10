@@ -54,7 +54,7 @@ Every route and component owns its asset files in the same directory:
 ```
 boards/board/[int:id]/
 ├── page.py           <- @context callables building the board payload
-├── page.jsx          <- named export Board, mounts ReactDOM
+├── page.jsx          <- named export Board plus the React island mount/unmount pair
 ├── page.test.jsx     <- Vitest + RTL tests for Board
 ├── template.djx      <- server skeleton with <div id="kanban-board">
 ├── layout.djx        <- board header + Board/Settings nav
@@ -152,6 +152,8 @@ def board_payload(active_board: DBoard[Board], request: HttpRequest) -> dict:
 ```
 
 `page.jsx` reads it at mount time, never owns URL constants or CSRF tokens, and re-uses the same payload to drive optimistic updates.
+
+The React root follows the framework-island contract. `Next.partial.onMount("#kanban-board", ...)` mounts the board when the element appears, a `WeakMap` guard keeps repeated `onMount` passes from creating a second root on a live element, and a delegated `next:removed` listener unmounts the root when the mount point detaches, whether the event fires on the element itself or on an ancestor whose subtree contains it.
 
 `DeepMergePolicy` is configured as the JS-context policy in `config/settings.py`, so the layout-level `active_boards_count` from `boards/page.py` and the page-level `board` payload merge into one `window.Next.context` object.
 

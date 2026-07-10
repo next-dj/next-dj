@@ -6,6 +6,7 @@ Glossary
 Terms used throughout the next.dj documentation.
 
 .. glossary::
+   :sorted:
 
    action
       A registered entry point for a form POST.
@@ -72,6 +73,11 @@ Terms used throughout the next.dj documentation.
    form wizard backend
       The draft-persistence contract for a ``FormWizard``, a ``FormWizardBackend`` subclass that stores each step's cleaned data between requests.
       Selected through ``NEXT_FRAMEWORK["FORM_WIZARD_BACKEND"]``, with the bundled ``SessionFormWizardBackend`` as the default and ``CacheFormWizardBackend`` as the cache-backed alternative.
+
+   framework island
+      A Vue or React root mounted into one element of an otherwise server-rendered page.
+      An adapter mounts it through ``Next.partial.onMount`` or the ``next:mounted`` event and unmounts it on ``next:removed``, so a partial update never leaks its listeners.
+      See :doc:`/content/topics/partial-rendering/framework-islands`.
 
    guard
       The access requirement declared on an action through ``Meta.login_required`` and ``Meta.permission_required``, or the matching ``@action`` keywords.

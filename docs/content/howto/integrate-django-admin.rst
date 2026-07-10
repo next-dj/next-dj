@@ -90,7 +90,8 @@ Use Frozen Form Specs Inside Admin
 ----------------------------------
 
 When the admin renders a custom form, ``next.forms.form_spec`` produces a frozen descriptor that admin templates can render without touching the standard Django widgets.
-The repository ships a full admin integration. See the ``admin`` row in :doc:`/content/misc/examples`.
+The repository ships a full admin integration.
+See the ``admin`` row in :doc:`/content/misc/examples`.
 
 Verification
 ------------

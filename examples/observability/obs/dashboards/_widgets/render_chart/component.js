@@ -2,15 +2,15 @@
  *
  * Reads `window.Next.context.render_rates` produced by the matching
  * `@component.context` callable. No serializer override here, so the
- * payload is flat. Chart.js arrives from a CDN URL listed in
- * `scripts = [...]` inside `component.py`. The framework collects and
- * dedupes that URL through the static collector. The init runs on
- * `DOMContentLoaded` so the chart waits for every collected script
- * (Chart.js included) to finish parsing before drawing.
+ * payload is flat. Chart.js is declared at the page level in
+ * `stats/page.py` because page-level scripts land in the injection
+ * order before this co-located file, so `window.Chart` is already
+ * defined when the onMount replay runs.
  */
-document.addEventListener("DOMContentLoaded", function () {
-  const canvas = document.getElementById("render-chart-canvas");
-  if (!canvas || !window.Chart || !window.Next || !window.Next.context) {
+const charts = new WeakMap();
+
+function mountChart(canvas) {
+  if (charts.has(canvas)) {
     return;
   }
   const data = window.Next.context.render_rates;
@@ -34,7 +34,7 @@ document.addEventListener("DOMContentLoaded", function () {
     return palette[name] || "#475569";
   });
 
-  new window.Chart(canvas, {
+  const chart = new window.Chart(canvas, {
     type: "bar",
     data: {
       labels: labels,
@@ -67,4 +67,24 @@ document.addEventListener("DOMContentLoaded", function () {
       },
     },
   });
+  charts.set(canvas, chart);
+}
+
+Next.partial.onMount("#render-chart-canvas", mountChart);
+
+document.addEventListener("next:removed", function (event) {
+  const node = event.target;
+  if (!(node instanceof Element)) {
+    return;
+  }
+  const canvases = node.matches("#render-chart-canvas")
+    ? [node]
+    : node.querySelectorAll("#render-chart-canvas");
+  for (const canvas of canvases) {
+    const chart = charts.get(canvas);
+    if (chart !== undefined) {
+      chart.destroy();
+      charts.delete(canvas);
+    }
+  }
 });

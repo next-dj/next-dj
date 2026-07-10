@@ -16,7 +16,8 @@ The stream carries patch envelopes as ``next-patches`` events, the same envelope
 Each event uses the ``refresh`` verb so every tab re-fetches the stale zone with its own
 cookies through the page view, which keeps authorization in the subscriber's own view and
 never broadcasts one user's HTML to another.
-A full implementation lives under ``examples/live-polls/``. See :doc:`/content/misc/examples`.
+A full implementation lives under ``examples/live-polls/``.
+See :doc:`/content/misc/examples`.
 
 This page is a quick recipe.
 For the WSGI and ASGI contract, the echo suppression, and why the fan-out uses ``refresh`` rather than a context patch, read :doc:`/content/topics/partial-rendering/sse`.

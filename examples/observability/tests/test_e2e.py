@@ -200,6 +200,9 @@ class TestJsxAssetPipeline:
         response = client.get("/stats/")
         body = response.content.decode()
         assert "chart.umd.min.js" in body
+        assert body.index("chart.umd.min.js") < body.index(
+            "/static/next/components/render_chart.js"
+        )
 
 
 class TestFilterFormDispatch:

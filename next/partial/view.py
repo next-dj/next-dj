@@ -81,7 +81,7 @@ def _build_envelope(
     and a duplicated name is patched once. The verb is server-authored from
     the parsed intent, the client never names it.
     """
-    patches = Patches(version)
+    patches = Patches.versioned(version)
     for name in result.html:
         _patch_zone(patches, name, result, intent.merge)
     patches._absorb_zone_result(result)
