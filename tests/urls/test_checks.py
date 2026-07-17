@@ -229,6 +229,30 @@ class TestCheckReverseNameCollisions:
         assert "foo-bar/page.py" in messages[0].msg
         assert "foo_bar/page.py" in messages[0].msg
 
+    def test_e039_ignores_routes_with_distinct_signatures(self, tmp_path) -> None:
+        """`[year]/[month]` and literal `year/month` share a name, not a signature."""
+        _write_page(tmp_path, "[year]/[month]")
+        _write_page(tmp_path, "year/month")
+        router = _TreeRouter(root_trees=[tmp_path])
+
+        with patch_checks_router_manager_with_routers(routers=[router]):
+            messages = check_reverse_name_collisions(None)
+
+        assert messages == []
+
+    def test_e039_flags_routes_sharing_name_and_signature(self, tmp_path) -> None:
+        """`a/[x]` and `a-[x]` share both the reverse name and the `x` parameter."""
+        _write_page(tmp_path, "a/[x]")
+        _write_page(tmp_path, "a-[x]")
+        router = _TreeRouter(root_trees=[tmp_path])
+
+        with patch_checks_router_manager_with_routers(routers=[router]):
+            messages = check_reverse_name_collisions(None)
+
+        assert len(messages) == 1
+        assert messages[0].id == "next.E039"
+        assert '"page_a_x"' in messages[0].msg
+
     def test_e039_name_uses_custom_url_name_template(self, tmp_path) -> None:
         """The reported name honours `URL_NAME_TEMPLATE` instead of `page_`."""
         _write_page(tmp_path, "foo-bar")

@@ -19,6 +19,7 @@ from django.urls import URLPattern, URLResolver, clear_url_caches
 from django.urls.resolvers import RoutePattern
 
 from next.conf import next_framework_settings
+from next.conf.defaults import DEFAULTS
 from next.conf.imports import import_class_cached
 from next.conf.signals import settings_reloaded
 from next.forms.manager import form_action_manager
@@ -179,7 +180,8 @@ class _LazyUrlPatterns(Sequence["URLPattern | URLResolver"]):
         return self._patterns()[key]
 
 
-_DEFAULT_URL_RESOLVER = "next.urls.TrieURLResolver"
+# Single-sourced so the circular-import guard below cannot drift from it.
+_DEFAULT_URL_RESOLVER: str = DEFAULTS["URL_RESOLVER"]
 
 
 def _build_url_resolver() -> URLResolver:

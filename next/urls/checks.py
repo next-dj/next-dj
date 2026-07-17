@@ -42,6 +42,9 @@ _FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset(
 
 _NON_FILE_ROUTER_PAGE_CONFIG_KEYS = frozenset({"BACKEND"})
 
+_CollectedPattern = tuple[str, str, str, frozenset[str]]
+"""`(django_pattern, url_path, source, parameter_names)` for one route."""
+
 
 def _router_backend_path_is_valid(backend_path: str) -> bool:
     """Return True when `backend_path` names a registered or importable backend."""
@@ -369,16 +372,20 @@ def check_reverse_name_collisions(
     # they are dropped here instead of being reported twice.
     all_patterns, _ = _collect_all_patterns(router_manager)
 
-    names: dict[str, dict[str, list[str]]] = {}
-    for _pattern, url_path, source in all_patterns:
+    # reverse() picks by arguments, so a collision needs a shared name and
+    # a shared parameter set.
+    grouped: dict[tuple[str, frozenset[str]], dict[str, list[str]]] = {}
+    for _pattern, url_path, source, parameters in all_patterns:
         full_name = next_framework_settings.URL_NAME_TEMPLATE.format(
             name=default_url_parser.prepare_url_name(url_path),
         )
-        names.setdefault(full_name, {}).setdefault(url_path, []).append(source)
+        grouped.setdefault((full_name, parameters), {}).setdefault(
+            url_path,
+            [],
+        ).append(source)
 
-    for full_name, routes in names.items():
-        # Identical route trails from several trees are an E015 path
-        # conflict, so only distinct trails count as a name collision.
+    for (full_name, _signature), routes in grouped.items():
+        # One trail from several trees is an E015 path conflict, not this.
         if len(routes) == 1:
             continue
         sources = ", ".join(
@@ -399,9 +406,9 @@ def check_reverse_name_collisions(
 
 def _collect_all_patterns(
     router_manager: RouterManager,
-) -> tuple[list[tuple[str, str, str]], list[CheckMessage]]:
-    """Collect `(pattern, url_path, source)` triples from every router backend."""
-    all_patterns: list[tuple[str, str, str]] = []
+) -> tuple[list[_CollectedPattern], list[CheckMessage]]:
+    """Collect one `_CollectedPattern` per route from every router backend."""
+    all_patterns: list[_CollectedPattern] = []
     errors: list[CheckMessage] = []
 
     for router in router_manager._backends:
@@ -423,7 +430,7 @@ def _collect_all_patterns(
 
 def _collect_app_patterns(
     router: RouterBackend,
-    all_patterns: list[tuple[str, str, str]],
+    all_patterns: list[_CollectedPattern],
     errors: list[CheckMessage],
 ) -> None:
     """Append patterns discovered under each app's `pages_dir`."""
@@ -451,7 +458,7 @@ def _collect_app_patterns(
 
 def _collect_root_patterns(
     router: RouterBackend,
-    all_patterns: list[tuple[str, str, str]],
+    all_patterns: list[_CollectedPattern],
     errors: list[CheckMessage],
 ) -> None:
     """Append patterns from each configured root pages directory."""
@@ -469,13 +476,13 @@ def _collect_root_patterns(
 
 
 def _check_url_conflicts(
-    all_patterns: list[tuple[str, str, str]],
+    all_patterns: list[_CollectedPattern],
     errors: list[CheckMessage],
     _warnings: list[CheckMessage],
 ) -> None:
     """Report an error when the same Django path string comes from multiple sources."""
     pattern_dict: dict[str, list[str]] = {}
-    for pattern, _url_path, source in all_patterns:
+    for pattern, _url_path, source, _parameters in all_patterns:
         if pattern in pattern_dict:
             pattern_dict[pattern].append(source)
         else:
@@ -498,20 +505,20 @@ def _collect_url_patterns(
     context: str,
     errors: list[CheckMessage],
     skip_dir_names: Iterable[str] = (),
-) -> list[tuple[str, str, str]]:
-    """Collect `(pattern, url_path, source)` triples from one pages root.
+) -> list[_CollectedPattern]:
+    """Collect one `_CollectedPattern` per route from one pages root.
 
     Conversion and skip set match the router, so the check sees exactly
     the routes the router registers.
     """
-    patterns: list[tuple[str, str, str]] = []
+    patterns: list[_CollectedPattern] = []
 
     if not pages_path.exists():
         return patterns
 
     for url_path, page_file in scan_pages_tree(pages_path, skip_dir_names):
         try:
-            django_pattern, _parameters = default_url_parser.parse_url_pattern(
+            django_pattern, parameters = default_url_parser.parse_url_pattern(
                 url_path,
             )
         except DuplicateURLParameterError as exc:
@@ -533,7 +540,9 @@ def _collect_url_patterns(
             continue
         else:
             source = f"{context}: {page_file.relative_to(pages_path)}"
-            patterns.append((django_pattern, url_path, source))
+            patterns.append(
+                (django_pattern, url_path, source, frozenset(parameters)),
+            )
 
     return patterns
 
