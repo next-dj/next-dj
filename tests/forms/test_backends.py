@@ -1044,6 +1044,43 @@ class TestManagerClearRegistries:
         manager.clear_registries()
 
 
+class TestFormActionManagerVersion:
+    """The `_version` cache token bumps on every registry mutation."""
+
+    def test_register_action_bumps_version(self) -> None:
+        """register_action increments the version after forwarding."""
+        manager = FormActionManager(backends=[RegistryFormActionBackend()])
+        before = manager._version
+        manager.register_action(
+            ActionRegistration(
+                name="version_bump_action",
+                file_path=_FAKE_FILE,
+                scope="shared",
+                handler=lambda: None,
+            )
+        )
+        assert manager._version == before + 1
+
+    def test_clear_registries_bumps_version(self) -> None:
+        """clear_registries increments the version."""
+        manager = FormActionManager(backends=[RegistryFormActionBackend()])
+        before = manager._version
+        manager.clear_registries()
+        assert manager._version == before + 1
+
+    def test_reload_config_bumps_version(self, settings) -> None:
+        """_reload_config increments the version alongside the backend rebuild."""
+        settings.NEXT_FRAMEWORK = {
+            "FORM_ACTION_BACKENDS": [
+                {"BACKEND": "next.forms.RegistryFormActionBackend"},
+            ],
+        }
+        manager = FormActionManager()
+        before = manager._version
+        manager._reload_config()
+        assert manager._version == before + 1
+
+
 class TestFileToDottedModule:
     """file_to_dotted_module returns dotted module path for files inside packages."""
 

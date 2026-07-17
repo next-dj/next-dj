@@ -322,9 +322,18 @@ Each backend can read from a different directory, register a different ``PAGES_D
    }
 
 Two backends produce two independent sets of URLs.
-The Django URL resolver checks them in order.
+Resolution preserves the concatenated list order.
 The first match wins.
 Both backends emit the same signals and follow the same naming rules.
+
+Resolution Performance
+----------------------
+
+URL resolution scales with the depth of the request path, not with the number of registered pages.
+A static route resolves through one dictionary lookup, and a parameterised route resolves through a walk over a trie of path segments that yields a handful of candidates.
+The final match runs through standard Django pattern resolution, so converters and first-match-wins ordering behave as in plain Django.
+Setting ``URL_RESOLVER`` in ``NEXT_FRAMEWORK`` to ``"django.urls.resolvers.URLResolver"`` restores the plain linear scan.
+See :doc:`/content/internals/url-router` for the algorithm and :doc:`/content/ref/settings` for the setting.
 
 Common Patterns
 ---------------

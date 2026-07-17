@@ -9,6 +9,7 @@ Built-in entry points.
 - `DuplicateURLParameterError` raised on conflicting bracket names.
 - `DUrl` marker used in `@context` annotations for URL path segments.
 - `DQuery` marker used in `@context` annotations for query parameters.
+- `TrieURLResolver` dispatching resolve() through a route trie.
 - Django integration via `app_name` and `urlpatterns`.
 
 Deep-import paths expose `FilesystemTreeDispatcher`, `scan_pages_tree`,
@@ -28,6 +29,7 @@ from .markers import (
     get_multi_values,
 )
 from .parser import DuplicateURLParameterError, URLPatternParser
+from .resolver import TrieURLResolver
 from .reverse import page_reverse, page_reverse_lazy, with_query
 
 
@@ -41,6 +43,7 @@ __all__ = [
     "RouterBackend",
     "RouterFactory",
     "RouterManager",
+    "TrieURLResolver",
     "URLPatternParser",
     "UrlByAnnotationProvider",
     "UrlKwargsProvider",

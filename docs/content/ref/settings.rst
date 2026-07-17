@@ -202,6 +202,22 @@ The framework normalises the path through the parser and substitutes ``{name}`` 
 Slashes, square brackets, colons, hyphens, and underscores are collapsed to a single underscore, and the leading and trailing underscores are stripped.
 The directory path ``notes/[id]`` becomes ``notes_id`` and produces the URL name ``page_notes_id``.
 
+URL_RESOLVER
+~~~~~~~~~~~~
+
+Dotted path to the resolver class that wraps the framework urlpatterns.
+
+Default value ``"next.urls.TrieURLResolver"``.
+
+The class is instantiated with a root route pattern and the lazy sequence of router and form-action patterns, so it owns every resolution under the ``include("next.urls")`` mount.
+The default ``TrieURLResolver`` resolves a static route through a dictionary lookup and a parameterised route through a walk over a segment trie, with the final match delegated to standard Django pattern resolution.
+Set the key to ``"django.urls.resolvers.URLResolver"`` to opt out of the trie and run every resolution through Django's plain linear scan.
+A custom value must name a :class:`~django.urls.URLResolver` subclass whose constructor accepts the same pattern and pattern-sequence pair.
+A path that fails to import, or one that names anything other than a ``URLResolver`` subclass, raises :exc:`~django.core.exceptions.ImproperlyConfigured` at startup.
+The resolver is rebuilt on settings reload, so ``override_settings`` swaps it without a restart.
+
+See :doc:`/content/internals/url-router` for the resolution algorithm.
+
 Templates
 ---------
 

@@ -303,7 +303,6 @@ class TestFileRouterBackend:
             assert first == ["p1"]
             assert second == first
             assert second is not first
-            # Mutating a returned list must never poison the cache.
             second.append("appended")
             third = router.generate_urls()
         assert third == ["p1"]
@@ -466,11 +465,9 @@ class TestFileRouterBackend:
         """Nested directories produce multiple route entries."""
         router = FileRouterBackend()
 
-        # create a mock directory structure
         root_dir = Path("/tmp/pages")
 
         with patch("pathlib.Path.iterdir") as mock_iterdir:
-            # mock the directory structure
             mock_iterdir.side_effect = [
                 [Mock(name="dir1", is_dir=lambda: True)],
                 [Mock(name="page.py", is_dir=lambda: False)],

@@ -248,7 +248,6 @@ def _validate_config_fields(
             ),
         )
 
-    # Check if backend is FileRouterBackend or a subclass
     is_file_router = False
     if backend == FILE_ROUTER_BACKEND:
         is_file_router = True
