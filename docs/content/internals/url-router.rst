@@ -40,6 +40,7 @@ Modules
 ``next.urls.parser``.
    Turns directory names into URL patterns.
    Recognises ``[name]``, ``[type:name]``, and ``[[name]]`` shapes.
+   The ``default_url_parser.parse_url_pattern`` method is the single source of bracket conversion, used by both the router and the system checks, so a route and its check always agree on the resulting Django path string.
 
 ``next.urls.manager``.
    ``RouterManager`` builds the active pattern list, exposes ``reload``, and emits the ``router_reloaded`` signal.
@@ -67,6 +68,9 @@ Names follow ``next:page_<segments>`` where the segments come from the directory
 The template ``URL_NAME_TEMPLATE`` controls the format.
 The default ``page_{name}`` produces the names listed in :doc:`/content/topics/file-router`.
 
+The name computation collapses ``/``, brackets, ``:``, ``-``, and ``_`` into a single underscore, so distinct routes such as ``foo-bar`` and ``foo_bar`` can produce the same name.
+The ``check_reverse_name_collisions`` system check walks every page tree of every router, computes the reverse name of each route through the same parser, and fails with ``next.E039`` when two distinct routes collapse to one name, listing the conflicting paths.
+
 Reload Mechanics
 ----------------
 
@@ -86,7 +90,10 @@ The settings list accepts more than one backend.
 Each backend reports its own list of patterns.
 The Django URL resolver checks them in order and the first match wins.
 
-If two routes resolve to the same Django path the ``next.E015`` system check reports the conflict at startup, whether they come from one tree or several.
+If two routes convert to exactly the same Django path string the ``check_url_patterns`` system check reports the conflict at startup as ``next.E015``, whether they come from one tree or several.
+The comparison is string equality after bracket conversion, so semantic overlap between typed converters, such as ``posts/[int:id]`` next to ``posts/[id]``, is not reported.
+The same collection pass owns the duplicate parameter report, failing with ``next.E028`` and listing every conflicting name in one message, and reports a router whose collection raises as ``next.E016``.
+``check_reverse_name_collisions`` reuses the collection but drops its errors, so ``next.E016`` and ``next.E028`` never appear twice.
 
 Extension Points
 ----------------

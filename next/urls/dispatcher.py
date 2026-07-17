@@ -52,6 +52,8 @@ class FilesystemTreeDispatcher:
         except OSError as e:
             logger.debug("Cannot list directory %s: %s", current_path, e)
             return
+        has_page = False
+        has_template = False
         for item in items:
             if item.is_dir():
                 if item.name in self._skip_set:
@@ -67,13 +69,13 @@ class FilesystemTreeDispatcher:
                 new_url_path = f"{url_path}/{dir_name}" if url_path else dir_name
                 yield from self._visit(item, tree_root, new_url_path)
             elif item.name == "page.py":
+                has_page = True
                 yield url_path, item
+            elif item.name == "template.djx":
+                has_template = True
 
-        if current_path.is_dir():
-            page_file = current_path / "page.py"
-            template_file = current_path / "template.djx"
-            if not page_file.exists() and template_file.exists():
-                yield url_path, current_path / "page.py"
+        if has_template and not has_page:
+            yield url_path, current_path / "page.py"
 
 
 def scan_pages_tree(

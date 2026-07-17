@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
@@ -12,16 +11,19 @@ from django.utils.module_loading import import_string
 from next.checks.common import (
     errors_for_unknown_keys,
     get_router_manager,
-    iter_scanned_page_pairs,
 )
 from next.conf import next_framework_settings
 
 from .backends import FileRouterBackend, RouterBackend, RouterFactory
-from .parser import URLPatternParser
+from .dispatcher import scan_pages_tree
+from .parser import DuplicateURLParameterError, default_url_parser
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
+
+    from .manager import RouterManager
 
 
 FILE_ROUTER_BACKEND = "next.urls.FileRouterBackend"
@@ -324,87 +326,19 @@ def check_next_pages_configuration(
     return errors
 
 
-def _get_duplicate_parameters(url_path: str, parser: URLPatternParser) -> list[str]:
-    """Return parameter names that appear more than once in bracket segments."""
-    param_matches = parser._param_pattern.findall(url_path)
-    param_names = []
-    for param_str in param_matches:
-        param_name, _ = parser._parse_param_name_and_type(param_str)
-        param_names.append(param_name)
-
-    if len(param_names) == len(set(param_names)):
-        return []
-
-    return [name for name in set(param_names) if param_names.count(name) > 1]
-
-
-@register(Tags.urls)
-def check_duplicate_url_parameters(
-    *_args: object,
-    **_kwargs: object,
-) -> list[CheckMessage]:
-    """Fail when the same bracket parameter name is repeated in one route."""
-    errors: list[CheckMessage] = []
-
-    router_manager, init_errors = get_router_manager()
-    if router_manager is None:
-        return init_errors
-
-    parser = URLPatternParser()
-
-    for router in router_manager._backends:
-        for url_path, page_path in iter_scanned_page_pairs(router):
-            if not page_path.exists():
-                continue
-
-            try:
-                parser.parse_url_pattern(url_path)
-                duplicates = _get_duplicate_parameters(url_path, parser)
-
-                if duplicates:
-                    errors.append(
-                        Error(
-                            f"URL pattern '{url_path}' has duplicate parameter "
-                            f"names: {duplicates}. "
-                            "Each parameter must have a unique name.",
-                            obj=str(page_path),
-                            id="next.E028",
-                        ),
-                    )
-            except (ValueError, TypeError, AttributeError):
-                continue
-
-    return errors
-
-
 @register(Tags.urls)
 def check_url_patterns(
     *_args: object,
     **_kwargs: object,
 ) -> list[CheckMessage]:
     """Collect patterns from routers and flag duplicate Django path strings."""
-    errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
     router_manager, init_errors = get_router_manager()
     if router_manager is None:
-        return init_errors + warnings
+        return init_errors
 
-    all_patterns: list[tuple[str, str]] = []
-
-    for router in router_manager._backends:
-        try:
-            if hasattr(router, "app_dirs") and router.app_dirs:
-                _collect_app_patterns(router, all_patterns)
-            _collect_root_patterns(router, all_patterns)
-        except (AttributeError, OSError) as e:
-            errors.append(
-                Error(
-                    f"Error collecting patterns from router: {e}",
-                    obj=settings,
-                    id="next.E016",
-                ),
-            )
+    all_patterns, errors = _collect_all_patterns(router_manager)
 
     try:
         _check_url_conflicts(all_patterns, errors, warnings)
@@ -420,9 +354,78 @@ def check_url_patterns(
     return errors + warnings
 
 
+@register(Tags.urls)
+def check_reverse_name_collisions(
+    *_args: object,
+    **_kwargs: object,
+) -> list[CheckMessage]:
+    """Fail when two distinct routes collapse to the same reverse URL name."""
+    errors: list[CheckMessage] = []
+
+    router_manager, init_errors = get_router_manager()
+    if router_manager is None:
+        return init_errors
+
+    # Collection errors surface through check_url_patterns already, so
+    # they are dropped here instead of being reported twice.
+    all_patterns, _ = _collect_all_patterns(router_manager)
+
+    names: dict[str, dict[str, list[str]]] = {}
+    for _pattern, url_path, source in all_patterns:
+        full_name = next_framework_settings.URL_NAME_TEMPLATE.format(
+            name=default_url_parser.prepare_url_name(url_path),
+        )
+        names.setdefault(full_name, {}).setdefault(url_path, []).append(source)
+
+    for full_name, routes in names.items():
+        # Identical route trails from several trees are an E015 path
+        # conflict, so only distinct trails count as a name collision.
+        if len(routes) == 1:
+            continue
+        sources = ", ".join(
+            source for route_sources in routes.values() for source in route_sources
+        )
+        errors.append(
+            Error(
+                f'Reverse URL name collision: "{full_name}" is produced by '
+                f"multiple routes: {sources}. reverse() resolves only one of "
+                "them. Rename the conflicting directories.",
+                obj=settings,
+                id="next.E039",
+            ),
+        )
+
+    return errors
+
+
+def _collect_all_patterns(
+    router_manager: RouterManager,
+) -> tuple[list[tuple[str, str, str]], list[CheckMessage]]:
+    """Collect `(pattern, url_path, source)` triples from every router backend."""
+    all_patterns: list[tuple[str, str, str]] = []
+    errors: list[CheckMessage] = []
+
+    for router in router_manager._backends:
+        try:
+            if hasattr(router, "app_dirs") and router.app_dirs:
+                _collect_app_patterns(router, all_patterns, errors)
+            _collect_root_patterns(router, all_patterns, errors)
+        except (AttributeError, OSError) as e:
+            errors.append(
+                Error(
+                    f"Error collecting patterns from router: {e}",
+                    obj=settings,
+                    id="next.E016",
+                ),
+            )
+
+    return all_patterns, errors
+
+
 def _collect_app_patterns(
     router: RouterBackend,
-    all_patterns: list[tuple[str, str]],
+    all_patterns: list[tuple[str, str, str]],
+    errors: list[CheckMessage],
 ) -> None:
     """Append patterns discovered under each app's `pages_dir`."""
     if not hasattr(router, "_get_installed_apps"):
@@ -438,31 +441,42 @@ def _collect_app_patterns(
         if not pages_path:
             continue
 
-        patterns = _collect_url_patterns(pages_path, f"App '{app_name}'")
+        patterns = _collect_url_patterns(
+            pages_path,
+            f"App '{app_name}'",
+            errors,
+            skip_dir_names=getattr(router, "_skip_dir_names", frozenset()),
+        )
         all_patterns.extend(patterns)
 
 
 def _collect_root_patterns(
     router: RouterBackend,
-    all_patterns: list[tuple[str, str]],
+    all_patterns: list[tuple[str, str, str]],
+    errors: list[CheckMessage],
 ) -> None:
     """Append patterns from each configured root pages directory."""
     if not hasattr(router, "_get_root_pages_paths"):
         return
     for i, pages_path in enumerate(router._get_root_pages_paths()):
         context = "Root" if i == 0 else f"Root ({pages_path})"
-        patterns = _collect_url_patterns(pages_path, context)
+        patterns = _collect_url_patterns(
+            pages_path,
+            context,
+            errors,
+            skip_dir_names=getattr(router, "_skip_dir_names", frozenset()),
+        )
         all_patterns.extend(patterns)
 
 
 def _check_url_conflicts(
-    all_patterns: list[tuple[str, str]],
+    all_patterns: list[tuple[str, str, str]],
     errors: list[CheckMessage],
     _warnings: list[CheckMessage],
 ) -> None:
     """Report an error when the same Django path string comes from multiple sources."""
     pattern_dict: dict[str, list[str]] = {}
-    for pattern, source in all_patterns:
+    for pattern, _url_path, source in all_patterns:
         if pattern in pattern_dict:
             pattern_dict[pattern].append(source)
         else:
@@ -480,41 +494,53 @@ def _check_url_conflicts(
             )
 
 
-def _collect_url_patterns(pages_path: Path, context: str) -> list[tuple[str, str]]:
-    """Collect URL patterns from a pages directory for conflict comparison."""
-    patterns: list[tuple[str, str]] = []
+def _collect_url_patterns(
+    pages_path: Path,
+    context: str,
+    errors: list[CheckMessage],
+    skip_dir_names: Iterable[str] = (),
+) -> list[tuple[str, str, str]]:
+    """Collect `(pattern, url_path, source)` triples from one pages root.
+
+    Conversion and skip set match the router, so the check sees exactly
+    the routes the router registers.
+    """
+    patterns: list[tuple[str, str, str]] = []
 
     if not pages_path.exists():
         return patterns
 
-    for page_file in pages_path.rglob("page.py"):
+    for url_path, page_file in scan_pages_tree(pages_path, skip_dir_names):
         try:
-            relative_path = page_file.relative_to(pages_path)
-            url_path = str(relative_path.parent)
-
-            if django_pattern := _convert_to_django_pattern(url_path):
-                patterns.append((django_pattern, f"{context}: {relative_path}"))
-
-        except (OSError, ValueError):
+            django_pattern, _parameters = default_url_parser.parse_url_pattern(
+                url_path,
+            )
+        except DuplicateURLParameterError as exc:
+            # Two wildcards with distinct names raise without a name
+            # duplicate, so fall back to the name the parser flagged.
+            names = default_url_parser.duplicate_parameter_names(url_path) or [
+                exc.param_name,
+            ]
+            errors.append(
+                Error(
+                    f"URL pattern '{url_path}' has duplicate parameter "
+                    f"names: {names}. "
+                    "Each parameter must have a unique name.",
+                    obj=str(page_file),
+                    id="next.E028",
+                ),
+            )
+        except (ValueError, TypeError):
             continue
+        else:
+            source = f"{context}: {page_file.relative_to(pages_path)}"
+            patterns.append((django_pattern, url_path, source))
 
     return patterns
 
 
-def _convert_to_django_pattern(url_path: str) -> str | None:
-    """Convert bracket syntax to `<str:>` / `<path:>` for conflict comparison."""
-    if not url_path:
-        return ""
-
-    args_pattern = re.compile(r"\[\[([^\[\]]+)\]\]")
-    url_path = args_pattern.sub(r"<path:\1>", url_path)
-
-    param_pattern = re.compile(r"\[([^\[\]]+)\]")
-    return param_pattern.sub(r"<str:\1>", url_path)
-
-
 __all__ = [
-    "check_duplicate_url_parameters",
     "check_next_pages_configuration",
+    "check_reverse_name_collisions",
     "check_url_patterns",
 ]

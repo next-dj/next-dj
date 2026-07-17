@@ -224,7 +224,8 @@ With this configuration the router serves every page under ``<BASE_DIR>/pages/``
 
 You can use both sources at once.
 URL patterns are built in this order, first from application directories then from each entry in ``DIRS``.
-If two routes resolve to the same Django path the system check ``next.E015`` reports the conflict, whether they come from one tree or several.
+If two routes convert to exactly the same Django path string the system check ``next.E015`` reports the conflict, whether they come from one tree or several.
+The comparison is string equality after bracket conversion, so semantic overlap between typed converters stays silent, and ``posts/[int:id]`` next to ``posts/[id]`` is not reported.
 
 .. code-block:: python
    :caption: config/settings.py
@@ -367,9 +368,10 @@ The router contributes Django system checks that validate the configuration at s
 - ``check_pages_structure`` validates directory naming, captured parameter syntax, and the presence of ``page.py`` or ``template.djx``.
 - ``check_page_functions`` reports :ref:`next.E012 <ref-system-checks>` when a directory has neither a render function nor a template.
 - ``check_pages_structure`` and ``check_page_functions`` come from ``next.pages`` and appear here because they validate the same page tree the router scans.
-- ``check_url_patterns`` reports two routes that resolve to the same Django path, whether they come from one tree or several (:ref:`next.E015 <ref-system-checks>`).
-- ``check_duplicate_url_parameters`` fails when one route repeats a captured parameter name (:ref:`next.E028 <ref-system-checks>`).
-  It scans one representative pages root per router, so in a project with several page-bearing applications ``next.E028`` surfaces only for routes under the scanned root.
+- ``check_url_patterns`` reports two routes that convert to exactly the same Django path string, whether they come from one tree or several (:ref:`next.E015 <ref-system-checks>`).
+  The comparison is string equality after bracket conversion, so ``posts/[int:id]`` next to ``posts/[id]`` is not reported.
+  While collecting patterns it also reports a route that repeats a captured parameter name (:ref:`next.E028 <ref-system-checks>`), listing every conflicting name, so parameter duplicates surface from every scanned tree.
+- ``check_reverse_name_collisions`` fails when two distinct routes collapse to the same reverse URL name after separator normalisation, such as ``foo-bar`` next to ``foo_bar`` (:ref:`next.E039 <ref-system-checks>`).
 
 Run them through ``uv run python manage.py check``.
 A clean exit confirms that every page resolves and every name is unique.
@@ -391,6 +393,7 @@ Database Driven Routes
 
 A hybrid backend combines file routes with routes built from database rows.
 Subclass ``FileRouterBackend`` and override ``generate_urls`` to call ``super().generate_urls()`` for the file routes, then append one named pattern per row.
+The base method returns a fresh list on every call, so appending to it never mutates the cached file routes.
 Register the backend in ``PAGE_BACKENDS`` and call ``router_manager.reload()`` from a model signal so the row-derived patterns rebuild when the data changes.
 
 See :doc:`/content/howto/write-a-router-backend` for the full worked recipe.

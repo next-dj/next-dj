@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from next.pages.loaders import _load_python_module
     from next.static.checks import check_js_context_serializer
     from next.urls.checks import (
-        check_duplicate_url_parameters,
         check_next_pages_configuration,
         check_url_patterns,
     )
@@ -63,7 +62,6 @@ _LAZY_SOURCES_BY_MODULE: dict[str, tuple[str, ...]] = {
     "next.pages.loaders": ("_load_python_module",),
     "next.static.checks": ("check_js_context_serializer",),
     "next.urls.checks": (
-        "check_duplicate_url_parameters",
         "check_next_pages_configuration",
         "check_url_patterns",
     ),

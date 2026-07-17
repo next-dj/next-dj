@@ -1,9 +1,11 @@
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
 from django.test import RequestFactory, override_settings
+from django.urls import include, path
 
 from next.conf import next_framework_settings
 from next.pages import page
@@ -111,13 +113,44 @@ class TestRouterManager:
         """Backend creation failure leaves routers empty but cache is still set."""
         with patch(
             "next.urls.RouterFactory.create_backend",
-            side_effect=Exception("Test error"),
+            side_effect=ValueError("Test error"),
         ):
             manager.reload()
             assert len(manager._backends) == 0
             assert manager._config_cache is not None
             assert len(manager._config_cache) == 1
             assert manager._config_cache[0]["BACKEND"] == "next.urls.FileRouterBackend"
+
+    @pytest.mark.parametrize(
+        "exc_type",
+        [ValueError, TypeError, KeyError, ImportError],
+        ids=["value_error", "type_error", "key_error", "import_error"],
+    )
+    def test_reload_swallows_expected_config_errors(
+        self, manager, caplog, exc_type
+    ) -> None:
+        """Each config-error type from backend creation is logged and swallowed."""
+        with (
+            patch(
+                "next.urls.RouterFactory.create_backend",
+                side_effect=exc_type("boom"),
+            ),
+            caplog.at_level(logging.ERROR, logger="next.urls.manager"),
+        ):
+            manager.reload()
+        assert manager._backends == []
+        assert "error creating router from config" in caplog.text
+
+    def test_reload_propagates_unexpected_errors(self, manager) -> None:
+        """Exceptions outside the config-error set escape reload."""
+        with (
+            patch(
+                "next.urls.RouterFactory.create_backend",
+                side_effect=RuntimeError("boom"),
+            ),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            manager.reload()
 
     def test_get_next_pages_config_uses_cache(self, manager) -> None:
         """Returns cached list when present."""
@@ -152,8 +185,8 @@ class TestGlobalInstances:
         assert router_manager._config_cache is not None
 
     def test_urlpatterns_dynamic(self) -> None:
-        """``urlpatterns`` is a list. Iteration delegates to ``router_manager``."""
-        assert isinstance(urlpatterns, list)
+        """``urlpatterns`` is not a list. Iteration delegates to ``router_manager``."""
+        assert not isinstance(urlpatterns, list)
         assert len(urlpatterns) >= 1
         assert urlpatterns[0] is not None
 
@@ -451,6 +484,59 @@ class TestGlobalInstances:
                 router._url_parser,
             )
             assert pattern is None
+
+
+class TestLazyUrlPatterns:
+    """Sequence protocol and laziness of the module-level ``urlpatterns``."""
+
+    def test_sequence_protocol_without_list_inheritance(self) -> None:
+        """Iteration, len, indexing, slicing, and reversed work without list."""
+        with (
+            patch("next.urls.manager.router_manager", ["r1", "r2"]),
+            patch("next.urls.manager.form_action_manager", ["f1"]),
+        ):
+            assert not isinstance(urlpatterns, list)
+            assert list(urlpatterns) == ["r1", "r2", "f1"]
+            assert len(urlpatterns) == 3
+            assert urlpatterns[0] == "r1"
+            assert urlpatterns[-1] == "f1"
+            assert urlpatterns[1:] == ["r2", "f1"]
+            assert list(reversed(urlpatterns)) == ["f1", "r2", "r1"]
+
+    def test_reversed_override_builds_patterns_once(self) -> None:
+        """Explicit ``__reversed__`` walks one ``_patterns()`` build, not one per index."""
+        assert "__reversed__" in type(urlpatterns).__dict__
+        with patch.object(
+            type(urlpatterns),
+            "_patterns",
+            return_value=["r1", "r2", "f1"],
+        ) as mock_patterns:
+            assert list(reversed(urlpatterns)) == ["f1", "r2", "r1"]
+        assert mock_patterns.call_count == 1
+
+    def test_recomputes_on_each_access(self) -> None:
+        """Concatenation is rebuilt per access, so late form actions appear."""
+        actions = ["f1"]
+        with (
+            patch("next.urls.manager.router_manager", []),
+            patch("next.urls.manager.form_action_manager", actions),
+        ):
+            assert list(urlpatterns) == ["f1"]
+            actions.append("f2")
+            assert list(urlpatterns) == ["f1", "f2"]
+
+    def test_include_defers_materialisation_until_first_resolve(self) -> None:
+        """``include()`` does not iterate patterns, the first resolve does."""
+        with patch.object(
+            RouterManager, "__iter__", return_value=iter([])
+        ) as mock_iter:
+            included = include("next.urls")
+            mock_iter.assert_not_called()
+            resolver = path("lazy/", included)
+            mock_iter.assert_not_called()
+            patterns = resolver.url_patterns
+            mock_iter.assert_called_once()
+        assert patterns is urlpatterns
 
 
 class TestRouterManagerNextPagesConfig:

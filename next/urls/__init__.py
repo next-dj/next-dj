@@ -6,6 +6,7 @@ Built-in entry points.
 - `RouterFactory` to map dotted paths to backend classes.
 - `RouterManager` plus singleton `router_manager`.
 - `URLPatternParser` for bracket-segment parsing.
+- `DuplicateURLParameterError` raised on conflicting bracket names.
 - `DUrl` marker used in `@context` annotations for URL path segments.
 - `DQuery` marker used in `@context` annotations for query parameters.
 - Django integration via `app_name` and `urlpatterns`.
@@ -26,13 +27,14 @@ from .markers import (
     UrlKwargsProvider,
     get_multi_values,
 )
-from .parser import URLPatternParser
+from .parser import DuplicateURLParameterError, URLPatternParser
 from .reverse import page_reverse, page_reverse_lazy, with_query
 
 
 __all__ = [
     "DQuery",
     "DUrl",
+    "DuplicateURLParameterError",
     "FileRouterBackend",
     "HttpRequestProvider",
     "QueryParamProvider",

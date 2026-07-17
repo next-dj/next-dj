@@ -1,17 +1,16 @@
-"""Router manager, lazy urlpatterns list, and settings-reload wiring.
+"""Router manager, lazy urlpatterns sequence, and settings-reload wiring.
 
 `RouterManager` owns the list of active `RouterBackend` instances and
 rebuilds it from `NEXT_FRAMEWORK["PAGE_BACKENDS"]` whenever
-framework settings change. `_LazyUrlPatterns` is a `list`-subclass
-used as Django's `urlpatterns` so the first access triggers router
-and form-action resolution without walking the page tree at import
-time.
+framework settings change. `_LazyUrlPatterns` is the sequence used as
+Django's `urlpatterns` so the first resolve triggers router and
+form-action resolution without walking the page tree at import time.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, SupportsIndex, overload, override
+from typing import TYPE_CHECKING, Any, override
 
 from django.urls import clear_url_caches
 
@@ -75,7 +74,7 @@ class RouterManager:
         for config in configs:
             try:
                 self._backends.append(RouterFactory.create_backend(config))
-            except Exception:
+            except (ValueError, TypeError, KeyError, ImportError):
                 logger.exception("error creating router from config %s", config)
 
         clear_url_caches()
@@ -104,15 +103,12 @@ def _on_settings_reloaded(**_kwargs: object) -> None:
 settings_reloaded.connect(_on_settings_reloaded)
 
 
-class _LazyUrlPatterns(list):
+class _LazyUrlPatterns:
     """Defer expanding router and form patterns until first use.
 
-    Avoids walking the tree at import time. Rebuilds from
-    `router_manager` and `form_action_manager` on each access.
-    Subclasses `list` so `isinstance(urlpatterns, list)` holds.
-    Overrides `__reversed__` because the inherited empty internal
-    buffer would break `reversed(urlpatterns)` in Django's URL
-    resolver.
+    Not a `list` subclass, so `include()` defers materialisation to the
+    first resolve. Explicit `__reversed__` keeps the resolver's reverse
+    walk to one list build instead of one per index.
     """
 
     def _patterns(self) -> list[URLPattern | URLResolver]:
@@ -121,29 +117,17 @@ class _LazyUrlPatterns(list):
             *list(form_action_manager),
         ]
 
-    @override
     def __iter__(self) -> Iterator[URLPattern | URLResolver]:
         return iter(self._patterns())
 
-    @override
     def __reversed__(self) -> Iterator[URLPattern | URLResolver]:
         return reversed(self._patterns())
 
-    @override
     def __len__(self) -> int:
         return len(self._patterns())
 
-    @overload
-    def __getitem__(self, key: SupportsIndex, /) -> URLPattern | URLResolver:
-        raise NotImplementedError
-
-    @overload
-    def __getitem__(self, key: slice, /) -> list[URLPattern | URLResolver]:
-        raise NotImplementedError
-
-    @override
     def __getitem__(
-        self, key: SupportsIndex | slice, /
+        self, key: int | slice, /
     ) -> URLPattern | URLResolver | list[URLPattern | URLResolver]:
         return self._patterns()[key]
 
