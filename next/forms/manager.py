@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 class FormActionManager:
     """Holds one or more backends and yields their URL patterns."""
 
+    _version: int = 0
+    """Cache token for the lazy urlpatterns concat. Registrations that
+    bypass the manager and hit a backend directly are not tracked, as
+    they were never supported."""
+
     def __init__(
         self,
         backends: "list[FormActionBackend] | None" = None,
@@ -47,6 +52,7 @@ class FormActionManager:
             yield from backend.generate_urls()
 
     def _reload_config(self) -> None:
+        self._version += 1
         self._backends = []
         configs = cast(
             "list[Any]",
@@ -81,9 +87,11 @@ class FormActionManager:
     def register_action(self, registration: "ActionRegistration") -> None:
         """Forward registration to the first backend."""
         self._first_backend().register_action(registration)
+        self._version += 1
 
     def clear_registries(self) -> None:
         """Clear every backend exposing `clear_registry`. For test isolation."""
+        self._version += 1
         for backend in self._backends:
             clear = getattr(backend, "clear_registry", None)
             if callable(clear):

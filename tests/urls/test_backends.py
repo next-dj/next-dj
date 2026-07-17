@@ -290,6 +290,57 @@ class TestFileRouterBackend:
         result = router._get_root_pages_paths()
         assert result == []
 
+    def test_generate_root_urls_cached_across_calls(self, tmp_path) -> None:
+        """A second generate_urls reuses cached root patterns without re-walking."""
+        router = FileRouterBackend(app_dirs=False, extra_root_paths=[tmp_path])
+        with patch.object(
+            router,
+            "_generate_patterns_from_directory",
+            return_value=iter(["p1"]),
+        ) as mock_gen:
+            first = router.generate_urls()
+            second = router.generate_urls()
+            assert first == ["p1"]
+            assert second == first
+            assert second is not first
+            second.append("appended")
+            third = router.generate_urls()
+        assert third == ["p1"]
+        mock_gen.assert_called_once()
+
+    def test_subclass_append_does_not_grow_root_cache(self, tmp_path) -> None:
+        """The documented super().generate_urls() + append pattern stays idempotent."""
+
+        class _AppendingRouter(FileRouterBackend):
+            def generate_urls(self):
+                urls = super().generate_urls()
+                urls.append("extra")
+                return urls
+
+        router = _AppendingRouter(app_dirs=False, extra_root_paths=[tmp_path])
+        with patch.object(
+            router,
+            "_generate_patterns_from_directory",
+            return_value=iter(["p1"]),
+        ):
+            first = router.generate_urls()
+            second = router.generate_urls()
+        assert first == ["p1", "extra"]
+        assert second == ["p1", "extra"]
+
+    def test_get_root_pages_paths_memoised_per_instance(self, tmp_path) -> None:
+        """Repeated calls return the cached list without touching the filesystem."""
+        router = FileRouterBackend(extra_root_paths=[tmp_path])
+        first = router._get_root_pages_paths()
+        with (
+            patch.object(Path, "resolve") as mock_resolve,
+            patch.object(Path, "exists") as mock_exists,
+        ):
+            second = router._get_root_pages_paths()
+        assert second is first
+        mock_resolve.assert_not_called()
+        mock_exists.assert_not_called()
+
     def test_generate_urls_includes_root_when_app_dirs_and_extra_roots(
         self, tmp_path
     ) -> None:
@@ -414,11 +465,9 @@ class TestFileRouterBackend:
         """Nested directories produce multiple route entries."""
         router = FileRouterBackend()
 
-        # create a mock directory structure
         root_dir = Path("/tmp/pages")
 
         with patch("pathlib.Path.iterdir") as mock_iterdir:
-            # mock the directory structure
             mock_iterdir.side_effect = [
                 [Mock(name="dir1", is_dir=lambda: True)],
                 [Mock(name="page.py", is_dir=lambda: False)],

@@ -184,6 +184,50 @@ class TestFlatNextFrameworkBehavior:
             del next_framework_settings._coverage_probe
 
 
+class TestUrlResolverSetting:
+    """URL_RESOLVER default, string merge, and check acceptance."""
+
+    def test_default_is_trie_resolver_path(self) -> None:
+        """The setting defaults to the trie resolver dotted path."""
+        assert (
+            NextFrameworkSettings.DEFAULTS["URL_RESOLVER"]
+            == "next.urls.TrieURLResolver"
+        )
+        next_framework_settings.reload()
+        assert next_framework_settings.URL_RESOLVER == "next.urls.TrieURLResolver"
+
+    def test_string_override_reaches_merged_settings(self) -> None:
+        """A dotted-path string lands in next_framework_settings unchanged."""
+        with override_settings(
+            NEXT_FRAMEWORK={"URL_RESOLVER": "django.urls.resolvers.URLResolver"},
+        ):
+            next_framework_settings.reload()
+            assert (
+                next_framework_settings.URL_RESOLVER
+                == "django.urls.resolvers.URLResolver"
+            )
+
+    @pytest.mark.parametrize(
+        "raw",
+        [123, None, ["next.urls.TrieURLResolver"]],
+        ids=["int", "none", "list"],
+    )
+    def test_non_string_override_keeps_default(self, raw: object) -> None:
+        """A non-string value is ignored by the merge and the default stays."""
+        with override_settings(NEXT_FRAMEWORK={"URL_RESOLVER": raw}):  # type: ignore[dict-item]
+            next_framework_settings.reload()
+            assert next_framework_settings.URL_RESOLVER == "next.urls.TrieURLResolver"
+
+    def test_key_passes_unknown_key_check(self) -> None:
+        """System checks accept URL_RESOLVER as a known top-level key."""
+        with override_settings(
+            NEXT_FRAMEWORK={"URL_RESOLVER": "next.urls.TrieURLResolver"},
+        ):
+            next_framework_settings.reload()
+            errors = check_next_framework_unknown_top_level_keys()
+        assert errors == []
+
+
 class TestNextFrameworkChecksUnknownKeys:
     """System checks reject keys that are not part of the supported schema."""
 

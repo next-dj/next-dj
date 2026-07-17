@@ -604,7 +604,17 @@ class Page:
         url_parser: URLPatternParser,
     ) -> URLPattern | None:
         """Return a `path()` pattern for a page, template, or virtual entry."""
-        django_pattern, parameters = url_parser.parse_url_pattern(url_path)
+        # The error class is reached through the parser because a top-level
+        # import of next.urls here would close the next.pages <-> next.urls
+        # circular import.
+        try:
+            django_pattern, parameters = url_parser.parse_url_pattern(url_path)
+        except url_parser.duplicate_parameter_error as exc:
+            raise url_parser.duplicate_parameter_error(
+                exc.param_name,
+                exc.url_path,
+                file_path=file_path,
+            ) from exc
         clean_name = url_parser.prepare_url_name(url_path)
 
         if file_path.exists():

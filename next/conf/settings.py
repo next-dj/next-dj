@@ -87,7 +87,7 @@ class NextFrameworkSettings:
             if key not in user:
                 continue
             raw = user[key]
-            if key == "URL_NAME_TEMPLATE" and isinstance(raw, str):
+            if key in {"URL_NAME_TEMPLATE", "URL_RESOLVER"} and isinstance(raw, str):
                 out[key] = raw
             elif key == "FORM_WIZARD_BACKEND" and isinstance(raw, dict):
                 merged = copy.deepcopy(self.DEFAULTS[key])

@@ -91,6 +91,8 @@ class FileRouterBackend(RouterBackend):
         self.options = _narrow_file_router_options(raw_opts)
         self._patterns_cache: dict[str, list[URLPattern | URLResolver]] = {}
         self._app_pages_path_cache: dict[str, Path | None] = {}
+        self._root_patterns_cache: list[URLPattern | URLResolver] | None = None
+        self._root_pages_paths_cache: list[Path] | None = None
         self._url_parser = default_url_parser
 
     @staticmethod
@@ -164,11 +166,17 @@ class FileRouterBackend(RouterBackend):
         return urls
 
     def _generate_root_urls(self) -> list[URLPattern | URLResolver]:
-        """Patterns from each configured root pages directory."""
-        urls: list[URLPattern | URLResolver] = []
-        for pages_path in self._get_root_pages_paths():
-            urls.extend(self._generate_patterns_from_directory(pages_path))
-        return urls
+        """Return cached patterns from each configured root pages directory.
+
+        Returns a copy so callers appending to `generate_urls` results
+        never mutate the cache.
+        """
+        if self._root_patterns_cache is None:
+            urls: list[URLPattern | URLResolver] = []
+            for pages_path in self._get_root_pages_paths():
+                urls.extend(self._generate_patterns_from_directory(pages_path))
+            self._root_patterns_cache = urls
+        return list(self._root_patterns_cache)
 
     def _get_installed_apps(self) -> Generator[str, None, None]:
         """Yield installed app names except django framework packages."""
@@ -194,7 +202,13 @@ class FileRouterBackend(RouterBackend):
         return result
 
     def _get_root_pages_paths(self) -> list[Path]:
-        """Return paths from `DIRS` plus optional `BASE_DIR` / `pages_dir`."""
+        """Return paths from `DIRS` plus optional `BASE_DIR` / `pages_dir`.
+
+        Memoised per instance. A settings reload recreates the backend,
+        so the memo never outlives its configuration.
+        """
+        if self._root_pages_paths_cache is not None:
+            return self._root_pages_paths_cache
         result: list[Path] = [p.resolve() for p in self._extra_root_paths if p.exists()]
         if not self.app_dirs and not result:
             base_dir = resolve_base_dir()
@@ -202,6 +216,7 @@ class FileRouterBackend(RouterBackend):
                 pages_path = base_dir / self.pages_dir
                 if pages_path.exists():
                     result.append(pages_path)
+        self._root_pages_paths_cache = result
         return result
 
     def _generate_urls_for_app(self, app_name: str) -> list[URLPattern | URLResolver]:

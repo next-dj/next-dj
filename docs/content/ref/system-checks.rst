@@ -187,7 +187,7 @@ Errors
      - A ``COMPONENTS_DIR`` or ``PAGES_DIR`` value is not a string.
      - ``next.components.checks``, ``next.urls.checks``
    * - ``next.E028``
-     - A route repeats the same bracket parameter name.
+     - A route repeats one or more bracket parameter names, all listed in the error.
      - ``next.urls.checks``
    * - ``next.E029``
      - A keyless ``@context`` callable is not annotated as returning a dict.
@@ -219,6 +219,9 @@ Errors
    * - ``next.E038``
      - ``STATIC_BACKENDS`` contains a duplicate ``BACKEND`` entry.
      - ``next.static.checks``
+   * - ``next.E039``
+     - Two distinct routes collapse to the same reverse URL name after separator normalisation.
+     - ``next.urls.checks``
    * - ``next.E040``
      - A configured context processor does not accept a ``request`` parameter.
      - ``next.pages.checks``

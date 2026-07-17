@@ -8,7 +8,6 @@ import next.pages.loaders as loaders_module
 from next.checks import (
     _has_template_or_djx,
     check_context_functions,
-    check_duplicate_url_parameters,
     check_layout_templates,
     check_page_functions,
 )
@@ -395,52 +394,6 @@ class TestBodySourceConflicts:
                 msg = w043[0].msg
                 assert f"{expected_winner} takes priority" in msg
                 assert expected_shadowed in msg
-
-
-class TestDuplicateUrlParametersChecks:
-    """Test cases for duplicate URL parameters checks."""
-
-    @pytest.mark.parametrize(
-        ("test_case", "url_patterns", "expected_errors", "expected_error_msg"),
-        [
-            (
-                "no_duplicates",
-                [("user/[id]/post/[slug]", "page_file")],
-                0,
-                None,
-            ),
-            (
-                "with_duplicates",
-                [("user/[id]/[id]", "page_file")],
-                1,
-                "duplicate parameter names",
-            ),
-        ],
-        ids=["no_duplicates", "with_duplicates"],
-    )
-    def test_check_duplicate_url_parameters_scenarios(
-        self,
-        tmp_path,
-        test_case,
-        url_patterns,
-        expected_errors,
-        expected_error_msg,
-    ) -> None:
-        """Test check_duplicate_url_parameters with different URL pattern scenarios."""
-        page_file = tmp_path / "page.py"
-        page_file.write_text("")
-
-        with patch_checks_router_manager(
-            pages_directory=tmp_path,
-            scan_routes=[(pattern, page_file) for pattern, _ in url_patterns],
-        ):
-            errors = check_duplicate_url_parameters(None)
-            assert len(errors) == expected_errors
-
-            if expected_errors > 0 and expected_error_msg:
-                assert expected_error_msg in errors[0].msg
-                if "duplicate parameter names" in expected_error_msg:
-                    assert "id" in errors[0].msg
 
 
 class TestContextFunctionsChecks:

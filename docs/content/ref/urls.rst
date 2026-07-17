@@ -10,6 +10,7 @@ Module Summary
 It also exposes the ``RouterFactory`` and ``RouterManager`` that build and own them.
 The ``URLPatternParser`` for bracket-segment parsing is part of the public surface.
 It also exposes the ``page_reverse``, ``page_reverse_lazy``, and ``with_query`` reverse helpers, the ``get_multi_values`` query reader, and the Django integration name ``app_name``.
+The ``TrieURLResolver`` that dispatches URL resolution through a route trie completes the routing surface.
 The parameter providers and the dependency markers ``DUrl`` (captured path segments) and ``DQuery`` (query string parameters) round out the public surface.
 
 Public API
@@ -27,16 +28,37 @@ The form dispatcher reads it when it resolves a posted origin URL back to the pa
 Manager
 ~~~~~~~
 
-``urlpatterns`` is a ``list`` subclass that recollects router and form-action patterns from the active backends on each access.
+``urlpatterns`` is a list holding a single ``TrieURLResolver`` that wraps a lazy sequence of router and form-action patterns.
+:func:`~django.urls.include` therefore mounts one resolver, and the pattern collection is deferred to the first URL resolution instead of running while the root URLconf imports.
+Code that reads ``next.urls.urlpatterns`` directly observes that one-element list, not the individual page patterns.
+The wrapped sequence caches the concatenated pattern list against a pair of version counters, one owned by ``RouterManager`` and one by the form-action manager.
+``router_manager.reload()`` bumps the router counter, and registering or clearing form actions through ``form_action_manager`` bumps the forms counter, so the next access rebuilds the list exactly when something changed.
+The counters are read after the pattern build, because expanding page modules can register form actions mid-build, so the cache stays valid for the post-registration state.
+A registration that bypasses the manager and writes into a backend directly is not tracked by the counters and does not appear in the cached list.
 The backends themselves are cached by ``router_manager`` and are only rebuilt when ``router_manager.reload()`` runs or when ``PAGE_BACKENDS`` changes.
-Laziness here means the patterns are collected on the first URL access rather than at import time.
 A page added on disk after that first collection needs ``router_manager.reload()``, which rebuilds the backends and clears the Django resolver cache.
-Within a backend the per-application pattern lists are memoised after the first scan, while the roots configured in ``DIRS`` are rescanned on every recollection.
-The ``list`` subclass overrides ``__reversed__`` so Django's resolver observes the recollected patterns rather than the empty internal buffer of the ``list`` base.
-Django's resolver iterates ``reversed(urlpatterns)``, so the override feeds it the fresh patterns.
+Within a backend both the per-application pattern lists and the patterns from the roots configured in ``DIRS`` are memoised after the first scan, and a settings reload recreates the backend with fresh caches.
+Reverse-name population iterates the wrapped sequence with ``reversed()``, which it answers through an explicit ``__reversed__`` that builds the pattern list once per pass.
 ``RouterManager`` owns the active backend list, and the ``router_manager`` singleton exposes ``reload()`` to rebuild it.
+``reload()`` logs and skips a backend entry whose construction raises ``ValueError``, ``TypeError``, ``KeyError``, or ``ImportError``.
+Any other exception from a custom backend propagates and stops startup.
 
 .. automodule:: next.urls.manager
+   :members:
+
+Resolver
+~~~~~~~~
+
+``TrieURLResolver`` subclasses :class:`~django.urls.URLResolver` and narrows each ``resolve()`` call to a handful of candidate patterns.
+A route without parameters hits a dictionary keyed by the full route string, and a parameterised route is collected by a walk over a trie of path segments.
+The candidates are then tried with the standard ``pattern.resolve()`` in their original list order, so overlapping routes keep Django's first-match-wins semantics and converters behave as in plain Django.
+A miss falls back to the inherited linear scan, which raises the canonical ``Resolver404`` with a complete ``tried`` list and also covers patterns the trie cannot index, such as ones built with :func:`~django.urls.re_path`.
+On a successful match ``ResolverMatch.tried`` lists only the candidates that were actually tried, not every pattern preceding the winner.
+The internal route index is versioned by the same counters as the pattern concat, so a router reload or a late form-action registration rebuilds it before the next resolution.
+The ``URL_RESOLVER`` setting names the resolver class, so pointing it at ``django.urls.resolvers.URLResolver`` or a custom subclass replaces the trie dispatch.
+See :doc:`/content/internals/url-router` for the algorithm walk-through.
+
+.. automodule:: next.urls.resolver
    :members:
 
 Parser
@@ -163,11 +185,15 @@ Checks
 ``check_next_pages_configuration``.
    Validates the ``NEXT_FRAMEWORK['PAGE_BACKENDS']`` structure, the ``BACKEND`` path, and per-backend ``DIRS``/``APP_DIRS``/``PAGES_DIR``/``OPTIONS`` keys.
 
-``check_duplicate_url_parameters``.
-   Fails with :ref:`next.E028 <ref-system-checks>` when one route repeats a captured parameter name.
-
 ``check_url_patterns``.
-   Fails with :ref:`next.E015 <ref-system-checks>` when two file routes resolve to the same Django path string.
+   Collects patterns from every configured tree, application pages and root ``DIRS`` alike.
+   Fails with :ref:`next.E015 <ref-system-checks>` when two file routes convert to exactly the same Django path string.
+   Fails with :ref:`next.E028 <ref-system-checks>` when a route repeats a captured parameter name, listing every conflicting name.
+   Reports :ref:`next.E016 <ref-system-checks>` when pattern collection from a router raises.
+
+``check_reverse_name_collisions``.
+   Fails with :ref:`next.E039 <ref-system-checks>` when two distinct routes collapse to the same reverse URL name.
+   It reuses the same pattern collection but leaves collection errors to ``check_url_patterns``, so :ref:`next.E016 <ref-system-checks>` surfaces only once.
 
 .. automodule:: next.urls.checks
    :members:
