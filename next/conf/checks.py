@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Tags, register
+from django.core.checks import CheckMessage, register
 
+from next.checks import NEXT
 from next.checks.common import errors_for_unknown_keys
 
 from .settings import NextFrameworkSettings
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_next_framework_unknown_top_level_keys(
     *_args: object,
     **_kwargs: object,

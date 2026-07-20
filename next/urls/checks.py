@@ -8,11 +8,13 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error, Tags, register
 from django.utils.module_loading import import_string
 
+from next.checks import NEXT
 from next.checks.common import (
     errors_for_unknown_keys,
     get_router_manager,
 )
 from next.conf import next_framework_settings
+from next.conf.signals import settings_reloaded
 
 from .backends import FileRouterBackend, RouterBackend, RouterFactory
 from .dispatcher import scan_pages_tree
@@ -282,7 +284,7 @@ def _validate_config_fields(
     return errors
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_next_pages_configuration(
     *_args: object,
     **_kwargs: object,
@@ -328,7 +330,7 @@ def check_next_pages_configuration(
     return errors
 
 
-@register(Tags.urls)
+@register(Tags.urls, NEXT)
 def check_url_patterns(
     *_args: object,
     **_kwargs: object,
@@ -356,7 +358,7 @@ def check_url_patterns(
     return errors + warnings
 
 
-@register(Tags.urls)
+@register(Tags.urls, NEXT)
 def check_reverse_name_collisions(
     *_args: object,
     **_kwargs: object,
@@ -404,7 +406,37 @@ def check_reverse_name_collisions(
     return errors
 
 
+# One collection walk shared by the two URL checks in a run. The stored
+# manager is compared by identity, and holding a reference to it keeps it alive
+# so its `id` can never be reused by a later manager while the memo is live.
+_COLLECTED_PATTERNS_CACHE: dict[
+    str,
+    tuple[RouterManager, list[_CollectedPattern], list[CheckMessage]] | None,
+] = {"value": None}
+
+
+def reset_collected_patterns_cache(**_kwargs: object) -> None:
+    """Drop memoised collected patterns so the next check run recollects."""
+    _COLLECTED_PATTERNS_CACHE["value"] = None
+
+
+settings_reloaded.connect(reset_collected_patterns_cache)
+
+
 def _collect_all_patterns(
+    router_manager: RouterManager,
+) -> tuple[list[_CollectedPattern], list[CheckMessage]]:
+    """Return per-run memoised patterns as fresh lists callers may mutate."""
+    cached = _COLLECTED_PATTERNS_CACHE["value"]
+    if cached is not None and cached[0] is router_manager:
+        _, patterns, errors = cached
+    else:
+        patterns, errors = _collect_all_patterns_uncached(router_manager)
+        _COLLECTED_PATTERNS_CACHE["value"] = (router_manager, patterns, errors)
+    return list(patterns), list(errors)
+
+
+def _collect_all_patterns_uncached(
     router_manager: RouterManager,
 ) -> tuple[list[_CollectedPattern], list[CheckMessage]]:
     """Collect one `_CollectedPattern` per route from every router backend."""
@@ -551,4 +583,5 @@ __all__ = [
     "check_next_pages_configuration",
     "check_reverse_name_collisions",
     "check_url_patterns",
+    "reset_collected_patterns_cache",
 ]

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import ast
-import importlib.util
+import importlib
 import inspect
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast, get_origin
@@ -17,14 +16,19 @@ from django.core.checks import (
     register,
 )
 
+from next.checks import NEXT
 from next.checks.common import get_router_manager, iter_scanned_page_pairs
 from next.conf import import_class_cached, next_framework_settings
 
-from .loaders import TemplateLoader, _load_python_module, build_registered_loaders
+from .loaders import (
+    TemplateLoader,
+    _load_python_module_memo,
+    build_registered_loaders,
+)
+from .manager import page
 
 
 if TYPE_CHECKING:
-    import types
     from collections.abc import Callable
     from pathlib import Path
 
@@ -39,7 +43,7 @@ EXPECTED_PARAMETER_PARTS = 2
 _MIN_CONFLICTING_BODY_SOURCES = 2
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_request_in_context(
     *_args: object,
     **_kwargs: object,
@@ -73,7 +77,7 @@ def check_request_in_context(
     return errors
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_pages_structure(
     *_args: object,
     **_kwargs: object,
@@ -154,14 +158,15 @@ def _check_root_pages(
         warnings.extend(root_warnings)
 
 
-def _check_directory_syntax(pages_path: Path, context: str) -> list[CheckMessage]:
+def _check_directory_syntax(
+    directories: list[Path],
+    pages_path: Path,
+    context: str,
+) -> list[CheckMessage]:
     """Check directory names under `pages_path` for valid bracket syntax."""
     errors: list[CheckMessage] = []
 
-    for item in pages_path.rglob("*"):
-        if not item.is_dir():
-            continue
-
+    for item in directories:
         dir_name_str = item.name
         relative_path = item.relative_to(pages_path)
 
@@ -203,14 +208,15 @@ def _check_directory_syntax(pages_path: Path, context: str) -> list[CheckMessage
     return errors
 
 
-def _check_missing_page_files(pages_path: Path, context: str) -> list[CheckMessage]:
+def _check_missing_page_files(
+    directories: list[Path],
+    pages_path: Path,
+    context: str,
+) -> list[CheckMessage]:
     """Check for missing `page.py` files inside parameter directories."""
     errors: list[CheckMessage] = []
 
-    for item in pages_path.rglob("*"):
-        if not item.is_dir():
-            continue
-
+    for item in directories:
         dir_name_str = item.name
         if (dir_name_str.startswith("[") and dir_name_str.endswith("]")) or (
             dir_name_str.startswith("[[") and dir_name_str.endswith("]]")
@@ -254,8 +260,9 @@ def _check_pages_directory(
     errors: list[CheckMessage] = []
     warnings: list[CheckMessage] = []
 
-    errors.extend(_check_directory_syntax(pages_path, context))
-    errors.extend(_check_missing_page_files(pages_path, context))
+    directories = [item for item in pages_path.rglob("*") if item.is_dir()]
+    errors.extend(_check_directory_syntax(directories, pages_path, context))
+    errors.extend(_check_missing_page_files(directories, pages_path, context))
 
     return errors, warnings
 
@@ -286,7 +293,7 @@ def _is_valid_args_syntax(args_str: str) -> bool:
     return bool(content.strip())
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_page_functions(
     *_args: object,
     **_kwargs: object,
@@ -413,7 +420,7 @@ def _active_body_sources(page_file: Path) -> list[str]:
     declared under `NEXT_FRAMEWORK["TEMPLATE_LOADERS"]`. Each loader
     reports its file name via `TemplateLoader.source_name`.
     """
-    module = _load_python_module(page_file)
+    module = _load_python_module_memo(page_file)
     sources: list[str] = []
     if module is not None:
         if callable(getattr(module, "render", None)):
@@ -446,19 +453,15 @@ def _check_body_source_conflicts(page_file: Path) -> CheckMessage | None:
 
 
 def _load_render_function(file_path: Path) -> object:
-    """Load the `render` callable from a `page.py` file."""
-    try:
-        if (
-            spec := importlib.util.spec_from_file_location("page_module", file_path)
-        ) is None or spec.loader is None:
-            return None
+    """Return the `render` callable declared in a `page.py`, or `None`.
 
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        return getattr(module, "render", None)
-    except (ImportError, AttributeError, OSError, SyntaxError):
+    A syntactically broken `page.py` loads as `None` and yields `None`
+    here, so the caller still reports `next.E012`.
+    """
+    module = _load_python_module_memo(file_path)
+    if module is None:
         return None
+    return getattr(module, "render", None)
 
 
 def _has_template_or_djx(file_path: Path) -> bool:
@@ -466,22 +469,11 @@ def _has_template_or_djx(file_path: Path) -> bool:
     if (file_path.parent / "layout.djx").exists():
         return True
 
-    try:
-        if (
-            spec := importlib.util.spec_from_file_location("page_module", file_path)
-        ) is None or spec.loader is None:
-            return False
+    module = _load_python_module_memo(file_path)
+    if module is not None and hasattr(module, "template"):
+        return True
 
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        if hasattr(module, "template"):
-            return True
-
-        return any(loader.can_load(file_path) for loader in build_registered_loaders())
-
-    except (ImportError, AttributeError, OSError, SyntaxError):
-        return False
+    return any(loader.can_load(file_path) for loader in build_registered_loaders())
 
 
 def _check_layout_file(layout_file: Path) -> CheckMessage | None:
@@ -501,7 +493,7 @@ def _check_layout_file(layout_file: Path) -> CheckMessage | None:
     return None
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_layout_templates(
     *_args: object,
     **_kwargs: object,
@@ -524,21 +516,6 @@ def check_layout_templates(
                 warnings.append(warning)
 
     return warnings
-
-
-def _has_context_decorator_without_key(func: Callable[..., Any]) -> bool:
-    """Return True when `func` has the `@context` decorator applied without a key."""
-    try:
-        source = inspect.getsource(func)
-        tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
-                for decorator in node.decorator_list:
-                    if isinstance(decorator, ast.Name) and decorator.id == "context":
-                        return True
-    except (SyntaxError, OSError, UnicodeDecodeError):
-        pass
-    return False
 
 
 _DICT_ANNOTATION_NAMES = frozenset({"dict", "Dict", "Mapping", "MutableMapping"})
@@ -588,29 +565,30 @@ def _check_context_function(
     annotation_name = getattr(annotation, "__name__", None) or repr(annotation)
     return Error(
         f"Context function '{func_name}' in {page_path} "
-        "must return a dictionary "
-        f"when used with @context decorator (without key). "
-        f"Got return annotation {annotation_name} instead.",
+        "must return a dictionary when registered as a keyless context "
+        f"(got return annotation {annotation_name}). "
+        "Annotate it '-> dict' (or a TypedDict), or register it with a key "
+        "like @context('name').",
         obj=str(page_path),
         id="next.E029",
     )
 
 
-def _check_module_context_functions(
-    module: types.ModuleType,
-    page_path: Path,
-) -> list[CheckMessage]:
-    """Collect keyless `@context` functions declared in one page module."""
+def _check_registered_context_functions(page_path: Path) -> list[CheckMessage]:
+    """Return keyless `@context` errors recorded for `page_path` in the registry.
+
+    The registry keys on the caller's `__file__`, which is the same path the
+    check loads the module by, so a direct `page_path` lookup matches whatever
+    spelling the scanner used without resolving symlinks on either side.
+    """
     errors: list[CheckMessage] = []
-
-    for name, obj in inspect.getmembers(module, inspect.isfunction):
-        if not _has_context_decorator_without_key(obj):
+    registry = page._context_manager._context_registry.get(page_path, {})
+    for key, entry in registry.items():
+        if key is not None:
             continue
-
-        error = _check_context_function(name, obj, page_path)
-        if error:
+        error = _check_context_function(entry.func.__name__, entry.func, page_path)
+        if error is not None:
             errors.append(error)
-
     return errors
 
 
@@ -622,17 +600,15 @@ def _check_router_context_functions(router: RouterBackend) -> list[CheckMessage]
         if not page_path.exists():
             continue
 
-        module = _load_python_module(page_path)
-        if not module:
+        if _load_python_module_memo(page_path) is None:
             continue
 
-        module_errors = _check_module_context_functions(module, page_path)
-        errors.extend(module_errors)
+        errors.extend(_check_registered_context_functions(page_path))
 
     return errors
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_context_functions(
     *_args: object,
     **_kwargs: object,
@@ -650,7 +626,7 @@ def check_context_functions(
     return errors
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_context_processor_signature(
     *_args: object,
     **_kwargs: object,
@@ -710,7 +686,7 @@ def _check_processor_request_parameter(
     )
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_template_loaders(
     *_args: object,
     **_kwargs: object,

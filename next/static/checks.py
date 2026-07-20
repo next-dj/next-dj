@@ -27,11 +27,11 @@ from django.conf import settings
 from django.core.checks import (
     CheckMessage,
     Error,
-    Tags,
     Warning as DjangoWarning,
     register,
 )
 
+from next.checks import NEXT
 from next.conf import import_class_cached, next_framework_settings
 
 from .backends import StaticBackend
@@ -132,7 +132,7 @@ def _check_single_backend(
     return messages
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_static_backends(**_kwargs: object) -> list[CheckMessage]:
     """Validate the structure of `NEXT_FRAMEWORK['STATIC_BACKENDS']`."""
     messages: list[CheckMessage] = []
@@ -169,7 +169,7 @@ def _w042(message: str) -> CheckMessage:
     return DjangoWarning(message, obj=settings, id="next.W042")
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_js_context_serializer(
     *_args: object,
     **_kwargs: object,

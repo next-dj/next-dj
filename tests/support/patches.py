@@ -78,11 +78,13 @@ def patch_checks_components_manager(
             },
         ],
     )
+    mock_manager = MagicMock()
+    mock_manager._backends = list(fake_backends)
     with (
         patch("next.components.checks.next_framework_settings", mock_ns),
-        patch("next.components.checks.ComponentsManager") as mock_manager_klass,
+        patch(
+            "next.components.checks.get_components_manager",
+            return_value=mock_manager,
+        ),
     ):
-        mock_manager = mock_manager_klass.return_value
-        mock_manager._reload_config = lambda: None
-        mock_manager._backends = list(fake_backends)
         yield mock_manager

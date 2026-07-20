@@ -80,6 +80,16 @@ def _load_python_module_memo(file_path: Path) -> types.ModuleType | None:
     return module
 
 
+def reset_module_memo() -> None:
+    """Drop every memoised module so the next load re-executes from disk.
+
+    The memo keys by mtime, so a rewrite that lands on the same tick would
+    otherwise return a stale module. The check-cache reset clears this for
+    scripts that edit a `page.py` in place between runs.
+    """
+    _MODULE_MEMO.clear()
+
+
 # A single-slot holder mutated in place so cache invalidation never rebinds a
 # module global, which keeps the reset and read paths free of `global`.
 _ADDITIONAL_LAYOUTS_CACHE: dict[str, list[Path] | None] = {"value": None}

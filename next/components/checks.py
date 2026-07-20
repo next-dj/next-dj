@@ -6,13 +6,13 @@ import ast
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from django.core.checks import CheckMessage, Error, Tags, register
+from django.core.checks import CheckMessage, Error, register
 
-from next.checks.common import errors_for_unknown_keys
+from next.checks import NEXT
+from next.checks.common import errors_for_unknown_keys, get_components_manager
 from next.conf import next_framework_settings
 
 from .backends import FileComponentsBackend
-from .manager import ComponentsManager
 
 
 if TYPE_CHECKING:
@@ -81,7 +81,7 @@ def _validate_single_component_backend(
     return errors
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_next_components_configuration(
     *_args: object,
     **_kwargs: object,
@@ -129,7 +129,7 @@ def check_next_components_configuration(
     return errors
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_duplicate_component_names(
     *_args: object,
     **_kwargs: object,
@@ -139,8 +139,7 @@ def check_duplicate_component_names(
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return errors
-    manager = ComponentsManager()
-    manager._reload_config()
+    manager = get_components_manager()
     for backend in manager._backends:
         if not isinstance(backend, FileComponentsBackend):
             continue
@@ -168,7 +167,7 @@ def check_duplicate_component_names(
     return errors
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_cross_root_component_name_conflicts(
     *_args: object,
     **_kwargs: object,
@@ -178,8 +177,7 @@ def check_cross_root_component_name_conflicts(
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return errors
-    manager = ComponentsManager()
-    manager._reload_config()
+    manager = get_components_manager()
     for backend in manager._backends:
         if not isinstance(backend, FileComponentsBackend):
             continue
@@ -243,7 +241,7 @@ def _component_py_uses_pages_context(file_path: Path) -> bool:
     return False
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_component_py_no_pages_context(
     *_args: object,
     **_kwargs: object,
@@ -253,8 +251,7 @@ def check_component_py_no_pages_context(
     configs = next_framework_settings.COMPONENT_BACKENDS
     if not isinstance(configs, list) or not configs:
         return errors
-    manager = ComponentsManager()
-    manager._reload_config()
+    manager = get_components_manager()
     for backend in manager._backends:
         if not isinstance(backend, FileComponentsBackend):
             continue

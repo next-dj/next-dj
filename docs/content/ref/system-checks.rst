@@ -15,10 +15,15 @@ Check Registration
 ``next.checks.register_all`` runs during ``AppConfig.ready``.
 It imports each subsystem ``checks`` module so the ``@register`` side effects take effect.
 The imported modules are ``next.conf.checks``, ``next.pages.checks``, ``next.urls.checks``, ``next.components.checks``, and ``next.forms.checks``.
-The list continues with ``next.server.checks``, ``next.static.checks``, ``next.partial.checks``, and ``next.apps.checks``.
+The list continues with ``next.static.checks``, ``next.partial.checks``, and ``next.apps.checks``.
 
-Most of these modules register checks. ``next.server.checks`` registers no Django system checks.
+Each of these modules registers checks.
 The dependency injection layer contributes no Django system checks.
+
+Every next.dj check carries the ``next`` tag.
+Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
+Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
+The framework configuration checks carry the ``next`` tag rather than the Django ``compatibility`` tag, so a script that selected them through ``--tag compatibility`` reaches them through ``--tag next`` instead.
 
 Shared Helpers
 ~~~~~~~~~~~~~~
@@ -78,11 +83,6 @@ Configuration
 
 .. automodule:: next.conf.checks
    :members:
-
-Server
-~~~~~~
-
-``next.server.checks`` registers no Django system checks, as noted under Check Registration.
 
 Dependency Injection
 ~~~~~~~~~~~~~~~~~~~~
@@ -191,6 +191,8 @@ Errors
      - ``next.urls.checks``
    * - ``next.E029``
      - A keyless ``@context`` callable is not annotated as returning a dict.
+       The check reads the context registry, so it catches ``@context``,
+       ``@page.context``, an aliased import, and ``async def`` alike.
      - ``next.pages.checks``
    * - ``next.E030``
      - An error was raised while checking router pages.

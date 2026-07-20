@@ -1,10 +1,13 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from next.checks import (
     check_component_py_no_pages_context,
     check_cross_root_component_name_conflicts,
     check_duplicate_component_names,
+    reset_check_caches,
 )
 from next.components import (
     ComponentInfo,
@@ -14,6 +17,13 @@ from tests.support import (
     next_framework_settings_for_checks_backends_value as _next_framework_settings_for_checks_backends_value,
     patch_checks_components_manager,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_check_caches():
+    reset_check_caches()
+    yield
+    reset_check_caches()
 
 
 class TestChecks:

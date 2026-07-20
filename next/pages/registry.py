@@ -94,6 +94,14 @@ class PageContextRegistry:
             return self._resolver
         return resolver
 
+    def reset(self) -> None:
+        """Drop every registered context so the next import repopulates it.
+
+        Re-executing a `page.py` only overwrites the keys it still declares, so
+        a removed `@context` would otherwise leave a stale entry behind.
+        """
+        self._context_registry.clear()
+
     def register_context(
         self,
         file_path: Path,

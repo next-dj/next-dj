@@ -25,11 +25,12 @@ from django.core.checks import (
 from django.template import Library
 
 import next.templatetags
+from next.checks import NEXT
 
 from .templates import _BUILTIN_MODULES, _DJANGO_BACKEND
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_django_templates_backend_present(
     *_args: object,
     **_kwargs: object,
@@ -70,7 +71,7 @@ def _iter_tag_library_modules() -> list[str]:
     return found
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_builtin_tag_libraries_complete(
     *_args: object,
     **_kwargs: object,

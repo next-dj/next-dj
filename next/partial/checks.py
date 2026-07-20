@@ -23,10 +23,15 @@ from django.template import TemplateDoesNotExist, TemplateSyntaxError
 from django.template.base import Node, NodeList, TextNode
 from django.template.defaulttags import ForNode, IfNode, WithNode
 
-from next.checks.common import get_router_manager, iter_scanned_page_pairs
+from next.checks import NEXT
+from next.checks.common import (
+    get_components_manager,
+    get_router_manager,
+    iter_scanned_page_pairs,
+)
 from next.components.backends import FileComponentsBackend
-from next.components.manager import ComponentsManager
 from next.conf import import_class_cached, next_framework_settings
+from next.conf.signals import settings_reloaded
 from next.forms.backends import FormActionBackend
 from next.forms.manager import form_action_manager
 from next.pages import page
@@ -41,7 +46,9 @@ if TYPE_CHECKING:
 
     from django.template.base import Template
 
-    from next.urls import RouterBackend
+    from next.urls import RouterBackend, RouterManager
+
+    _ComposedMemo = tuple[RouterManager, list[tuple[Path, Template]]] | None
 
 
 E_DUPLICATE_ZONE: Final = "next.E060"
@@ -86,20 +93,53 @@ CHECK_IDS: Final = (
 _ZONE_SLUG = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 
 
+# One walk of the page tree shared by every zone check per run. Comparing the
+# stored manager by identity invalidates the memo when the manager is rebuilt.
+_COMPOSED_PAGES_MEMO: "dict[str, _ComposedMemo]" = {"value": None}
+
+
 def _iter_composed_pages() -> "Iterator[tuple[Path, Template]]":
     """Yield each page path with its compiled composed template.
 
     Pages whose body is produced dynamically by `render()` have no
     static composed template and are skipped. A page that fails to
     compile is skipped here and reported by
-    `check_composed_templates_compile`.
+    `check_composed_templates_compile`. The result is memoised per
+    router-manager instance so all zone checks share one walk.
     """
     router_manager, _errors = get_router_manager()
     if router_manager is None:
         return
+    memo = _COMPOSED_PAGES_MEMO["value"]
+    if memo is not None and memo[0] is router_manager:
+        yield from memo[1]
+        return
+    pages = list(_collect_composed_pages(router_manager))
+    _COMPOSED_PAGES_MEMO["value"] = (router_manager, pages)
+    yield from pages
+
+
+def _collect_composed_pages(
+    router_manager: "RouterManager",
+) -> "Iterator[tuple[Path, Template]]":
+    """Walk every router's scanned pages, de-duplicating by resolved path."""
     seen: set[Path] = set()
     for router in router_manager._backends:
         yield from _iter_router_pages(router, seen)
+
+
+def reset_composed_pages_memo(**_kwargs: object) -> None:
+    """Drop the memoised composed-page list for the next check run.
+
+    Identity against the router manager already invalidates the memo when the
+    manager is rebuilt. Call this explicitly after editing a `.djx` in place
+    under a live manager, since `settings_reloaded` only fires when
+    `NEXT_FRAMEWORK` itself changes.
+    """
+    _COMPOSED_PAGES_MEMO["value"] = None
+
+
+settings_reloaded.connect(reset_composed_pages_memo)
 
 
 def _iter_router_pages(
@@ -144,7 +184,7 @@ def _significant(nodelist: NodeList) -> list[Node]:
     return out
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_composed_templates_compile(
     *_args: object,
     **_kwargs: object,
@@ -184,7 +224,7 @@ def check_composed_templates_compile(
     return messages
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_duplicate_zone_names(
     *_args: object,
     **_kwargs: object,
@@ -211,7 +251,7 @@ def check_duplicate_zone_names(
     return messages
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_zone_name_is_slug(
     *_args: object,
     **_kwargs: object,
@@ -234,7 +274,7 @@ def check_zone_name_is_slug(
     return messages
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_zone_not_in_loop(
     *_args: object,
     **_kwargs: object,
@@ -251,7 +291,7 @@ def check_zone_not_in_loop(
     )
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_zone_not_in_if(
     *_args: object,
     **_kwargs: object,
@@ -331,7 +371,7 @@ def _form_has_partial_attr(node: FormNode, attr: str) -> bool:
     return any(name == attr for name, _expr in node.partial_attrs)
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_repeated_form_has_key(
     *_args: object,
     **_kwargs: object,
@@ -358,7 +398,7 @@ def check_repeated_form_has_key(
     return messages
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_lazy_zone_has_placeholder(
     *_args: object,
     **_kwargs: object,
@@ -381,7 +421,7 @@ def check_lazy_zone_has_placeholder(
     return messages
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_with_directly_over_zone(
     *_args: object,
     **_kwargs: object,
@@ -414,7 +454,7 @@ def _zones_directly_in_with(nodelist: NodeList) -> "Iterator[str]":
             yield from _zones_directly_in_with(child_list)
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_no_zone_in_component(
     *_args: object,
     **_kwargs: object,
@@ -424,8 +464,7 @@ def check_no_zone_in_component(
     if not isinstance(configs, list) or not configs:
         return []
     messages: list[CheckMessage] = []
-    manager = ComponentsManager()
-    manager._reload_config()
+    manager = get_components_manager()
     seen: set[Path] = set()
     for backend in manager._backends:
         if not isinstance(backend, FileComponentsBackend):
@@ -465,7 +504,7 @@ def _component_zone_errors(template_path: Path) -> list[CheckMessage]:
 _OP_TOKEN = re.compile(r"\A[A-Za-z0-9_.-]+\Z")
 
 
-@register(Tags.templates)
+@register(Tags.templates, NEXT)
 def check_custom_patch_ops_well_formed(
     *_args: object,
     **_kwargs: object,
@@ -502,7 +541,7 @@ def check_custom_patch_ops_well_formed(
     return messages
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_form_backend_partial_aware(
     *_args: object,
     **_kwargs: object,
@@ -552,7 +591,7 @@ def _partial_backends_active() -> bool:
     return any(isinstance(config, dict) for config in _partial_backend_configs())
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_single_partial_backend(
     *_args: object,
     **_kwargs: object,
@@ -583,7 +622,7 @@ _MANIFEST_VERSION: Final = "manifest"
 _STATICFILES_ALIAS: Final = "staticfiles"
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_partial_backend_names_a_path(
     *_args: object,
     **_kwargs: object,
@@ -609,7 +648,7 @@ def check_partial_backend_names_a_path(
     return messages
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_manifest_version_has_manifest_storage(
     *_args: object,
     **_kwargs: object,
@@ -711,4 +750,5 @@ __all__ = [
     "check_zone_name_is_slug",
     "check_zone_not_in_if",
     "check_zone_not_in_loop",
+    "reset_composed_pages_memo",
 ]

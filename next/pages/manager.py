@@ -637,3 +637,12 @@ _ = inspect  # keep `inspect` import reachable for test-time patching
 
 page: Page = Page()
 context = page.context
+
+
+def reset_context_registry() -> None:
+    """Clear the shared page-context registry for a from-disk rebuild.
+
+    The check-cache reset pairs this with the module memo so a re-executed
+    `page.py` repopulates the registry from its current source.
+    """
+    page._context_manager.reset()

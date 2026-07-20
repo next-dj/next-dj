@@ -7,12 +7,12 @@ from django.conf import settings
 from django.core.checks import (
     CheckMessage,
     Error,
-    Tags,
     Warning as DjangoWarning,
     register,
 )
 from django.forms import FileField, MultiValueField
 
+from next.checks import NEXT
 from next.components.facade import get_component
 from next.conf import import_class_cached, next_framework_settings
 
@@ -44,7 +44,7 @@ def _iter_registered_actions() -> "Iterator[ActionMeta]":
         yield from backend.iter_actions()
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_form_action_collisions(
     *_args: object,
     **_kwargs: object,
@@ -62,7 +62,7 @@ def check_form_action_collisions(
     ]
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_shared_action_name_collisions(
     *_args: object,
     **_kwargs: object,
@@ -83,7 +83,7 @@ def check_shared_action_name_collisions(
     ]
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_form_action_backends_configuration(
     *_args: object,
     **_kwargs: object,
@@ -147,7 +147,7 @@ def _validate_single_form_action_backend(
     return []
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_forms_outside_base_dir(
     *_args: object,
     **_kwargs: object,
@@ -163,7 +163,7 @@ def check_forms_outside_base_dir(
     ]
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_invalid_form_meta_scope(
     *_args: object,
     **_kwargs: object,
@@ -188,7 +188,7 @@ def check_invalid_form_meta_scope(
     return class_errors + action_errors
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_action_applied_to_class(
     *_args: object,
     **_kwargs: object,
@@ -204,7 +204,7 @@ def check_action_applied_to_class(
     ]
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_instance_from_url_unknown_field(
     *_args: object,
     **_kwargs: object,
@@ -224,7 +224,7 @@ def check_instance_from_url_unknown_field(
     ]
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_instance_from_url_on_non_model_form(
     *_args: object,
     **_kwargs: object,
@@ -240,7 +240,7 @@ def check_instance_from_url_on_non_model_form(
     ]
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_form_wizard_steps(
     *_args: object,
     **_kwargs: object,
@@ -256,7 +256,7 @@ def check_form_wizard_steps(
     ]
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_form_wizard_backend(
     *_args: object,
     **_kwargs: object,
@@ -313,7 +313,7 @@ def _validate_form_wizard_backend(config: object) -> list[CheckMessage]:
     return []
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_form_wizard_sessions(
     *_args: object,
     **_kwargs: object,
@@ -348,7 +348,7 @@ def check_form_wizard_sessions(
     ]
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_wizard_step_actions(
     *_args: object,
     **_kwargs: object,
@@ -391,7 +391,7 @@ def check_wizard_step_actions(
 _PAGE_MODULE_NAME = "page.py"
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_wizard_url_param_route(
     *_args: object,
     **_kwargs: object,
@@ -430,7 +430,7 @@ def check_wizard_url_param_route(
     return messages
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_wizard_step_file_fields(
     *_args: object,
     **_kwargs: object,
@@ -464,7 +464,7 @@ def check_wizard_step_file_fields(
     return messages
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_wizard_step_field_collisions(
     *_args: object,
     **_kwargs: object,
@@ -501,7 +501,7 @@ def check_wizard_step_field_collisions(
     return messages
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_form_anchor_files(
     *_args: object,
     **_kwargs: object,
@@ -535,7 +535,7 @@ def check_form_anchor_files(
     return []
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_action_guard_permissions(
     *_args: object,
     **_kwargs: object,
@@ -569,7 +569,7 @@ def _declares_success_message(target: object) -> bool:
     return bool(getattr(getattr(target, "Meta", None), "success_message", ""))
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_success_message_framework(
     *_args: object,
     **_kwargs: object,
@@ -594,7 +594,7 @@ def check_success_message_framework(
     ]
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_component_widget_components(
     *_args: object,
     **_kwargs: object,
@@ -630,7 +630,7 @@ def check_component_widget_components(
     return messages
 
 
-@register(Tags.compatibility)
+@register(NEXT)
 def check_component_widget_field_types(
     *_args: object,
     **_kwargs: object,

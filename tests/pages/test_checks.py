@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from django.test import override_settings
@@ -10,6 +10,7 @@ from next.checks import (
     check_context_functions,
     check_layout_templates,
     check_page_functions,
+    reset_check_caches,
 )
 from next.conf import next_framework_settings as s
 from next.pages.checks import check_context_processor_signature, check_template_loaders
@@ -17,6 +18,31 @@ from tests.support import (
     patch_checks_router_manager,
     patch_checks_router_manager_with_routers,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_check_caches():
+    reset_check_caches()
+    yield
+    reset_check_caches()
+
+
+class _AppRouter:
+    app_dirs = True
+    pages_dir = "pages"
+
+    def __init__(self, pages_path: Path, page_file: Path) -> None:
+        self._pages_path = pages_path
+        self._page_file = page_file
+
+    def _get_installed_apps(self) -> list[str]:
+        return ["app"]
+
+    def _get_app_pages_path(self, _app: str) -> Path:
+        return self._pages_path
+
+    def _scan_pages_directory(self, _pages_dir: object) -> list[tuple[str, Path]]:
+        return [("test", self._page_file)]
 
 
 class TestPageChecks:
@@ -222,6 +248,74 @@ class TestMissingPageContentChecks:
             warnings = [m for m in messages if m.id.startswith("next.W")]
             assert len(errors) == expected_errors
             assert len(warnings) == expected_warnings
+
+
+class TestMemoAndBrokenPages:
+    """Memo reuse and the unchanged E012 masking of broken `page.py` files."""
+
+    def test_broken_page_still_reports_e012(self, tmp_path) -> None:
+        """A syntactically invalid page.py keeps masking as E012, not a parse code."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("def render( invalid syntax {\n")
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+
+        with patch_checks_router_manager_with_routers(
+            routers=[_AppRouter(tmp_path, page_file)],
+        ):
+            messages = check_page_functions(None)
+        e012 = [m for m in messages if m.id == "next.E012"]
+        assert len(e012) == 1
+
+    def test_valid_body_page_has_no_e012(self, tmp_path) -> None:
+        """A page.py with a real render body raises no E012."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text('def render(request, **kwargs):\n    return "x"\n')
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+
+        with patch_checks_router_manager_with_routers(
+            routers=[_AppRouter(tmp_path, page_file)],
+        ):
+            messages = check_page_functions(None)
+        e012 = [m for m in messages if m.id == "next.E012"]
+        assert e012 == []
+
+    def test_empty_page_still_reports_e012(self, tmp_path) -> None:
+        """A valid but bodyless page.py keeps the genuine no-body-source E012."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("")
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+
+        with patch_checks_router_manager_with_routers(
+            routers=[_AppRouter(tmp_path, page_file)],
+        ):
+            messages = check_page_functions(None)
+        e012 = [m for m in messages if m.id == "next.E012"]
+        assert len(e012) == 1
+
+    def test_page_module_execed_once_across_checks(self, tmp_path, monkeypatch) -> None:
+        """Two check passes over one page.py exec the module at most once per mtime."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text('template = "hi"\n')
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+
+        real_load = loaders_module._load_python_module
+        calls: list[Path] = []
+
+        def counting(file_path: Path) -> object:
+            calls.append(file_path)
+            return real_load(file_path)
+
+        monkeypatch.setattr(loaders_module, "_load_python_module", counting)
+
+        router = _AppRouter(tmp_path, page_file)
+        with (
+            patch_checks_router_manager_with_routers(routers=[router]),
+            patch("next.checks.common.get_pages_directory", return_value=tmp_path),
+        ):
+            check_page_functions(None)
+            check_context_functions(None)
+
+        assert calls.count(page_file) == 1
 
 
 class TestCheckTemplateLoaders:
@@ -460,6 +554,93 @@ def get_context_data():
         ):
             errors = check_context_functions(None)
             assert errors == []
+
+    def test_e029_on_page_context_attribute_form(self, tmp_path) -> None:
+        """E029 fires on the canonical `@page.context` keyless form."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("""
+from next.pages import page
+
+@page.context
+def get_context_data() -> str:
+    return {}
+        """)
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+
+        with patch_checks_router_manager(
+            pages_directory=tmp_path,
+            scan_routes=[("test", page_file)],
+        ):
+            errors = check_context_functions(None)
+        assert len(errors) == 1
+        assert errors[0].id == "next.E029"
+
+    def test_e029_on_async_keyless_context(self, tmp_path) -> None:
+        """E029 fires on an `async def` keyless `@context` callable."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("""
+from next.pages import context
+
+@context
+async def get_context_data() -> str:
+    return {}
+        """)
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+
+        with patch_checks_router_manager(
+            pages_directory=tmp_path,
+            scan_routes=[("test", page_file)],
+        ):
+            errors = check_context_functions(None)
+        assert len(errors) == 1
+        assert errors[0].id == "next.E029"
+
+    def test_e029_on_aliased_context_decorator(self, tmp_path) -> None:
+        """E029 fires when the decorator is imported under an alias."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("""
+from next.pages import context as ctx
+
+@ctx
+def get_context_data() -> str:
+    return {}
+        """)
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+
+        with patch_checks_router_manager(
+            pages_directory=tmp_path,
+            scan_routes=[("test", page_file)],
+        ):
+            errors = check_context_functions(None)
+        assert len(errors) == 1
+        assert errors[0].id == "next.E029"
+
+    def test_e029_clears_after_context_decorator_removed(self, tmp_path) -> None:
+        """Removing the keyless `@context` stops E029 once caches are reset."""
+        page_file = tmp_path / "page.py"
+        page_file.write_text("""
+from next.pages import page
+
+@page.context
+def get_context_data() -> str:
+    return {}
+        """)
+        loaders_module._MODULE_MEMO.pop(page_file, None)
+
+        with patch_checks_router_manager(
+            pages_directory=tmp_path,
+            scan_routes=[("test", page_file)],
+        ):
+            first = check_context_functions(None)
+            assert [error.id for error in first] == ["next.E029"]
+
+            page_file.write_text("""
+def get_context_data():
+    return {}
+            """)
+            reset_check_caches()
+            second = check_context_functions(None)
+        assert second == []
 
     def test_check_context_functions_with_key_not_checked(self, tmp_path) -> None:
         """Test check_context_functions ignores functions with key."""
