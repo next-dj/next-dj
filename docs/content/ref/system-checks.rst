@@ -23,7 +23,6 @@ The dependency injection layer contributes no Django system checks.
 Every next.dj check carries the ``next`` tag.
 Run ``uv run python manage.py check --tag next`` to execute only the framework checks and skip the built-in Django and third-party ones.
 Checks that also concern templates or URL patterns keep their :doc:`Django tags <django:ref/checks>` (``templates``, ``urls``) alongside ``next``, so filtering by those tags still reaches them.
-The framework configuration checks carry the ``next`` tag rather than the Django ``compatibility`` tag, so a script that selected them through ``--tag compatibility`` reaches them through ``--tag next`` instead.
 
 Shared Helpers
 ~~~~~~~~~~~~~~

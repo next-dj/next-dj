@@ -51,10 +51,7 @@ next.E029 on a Keyless Context Function
 
 A keyless context callable must be annotated as returning a dict.
 Keyless means the decorator carries no key, whether written as ``@context``, ``@page.context``, an aliased import, or an ``async def`` context function.
-
-New ``next.E029`` reports can appear on code that passed for a long time.
-The check reads the context registry, so it now catches every decorator form, including the canonical ``@page.context`` and ``async def`` shapes that an earlier scanner passed over in silence.
-This wider reach is expected rather than a regression.
+The check inspects every keyless form.
 
 Two fixes clear the report.
 Annotate the callable with a dict return type, either ``-> dict`` or a :class:`~typing.TypedDict`.
