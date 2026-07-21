@@ -8,7 +8,7 @@ from shortener.cache import flush_clicks
 class Command(BaseCommand):
     help = "Persist cached click counters into the database."
 
-    def handle(self, *_args: object, **_options: object) -> None:
+    def handle(self, *args, **options) -> None:
         """Persist cached counters and print a summary line."""
         total = flush_clicks()
         self.stdout.write(self.style.SUCCESS(f"flushed {total} clicks"))

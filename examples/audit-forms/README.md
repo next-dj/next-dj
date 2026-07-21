@@ -115,7 +115,7 @@ The framework fires `next.forms.signals.form_access_denied` **only** on a dynami
 ```python
 # access/receivers.py
 @receiver(form_access_denied)
-def _on_form_access_denied(action_name, layer, reason, **_):
+def _on_form_access_denied(action_name, layer, reason, **kwargs):
     AuditEntry.objects.create(
         action_name=action_name,
         kind=AuditEntry.KIND_ACCESS_DENIED,

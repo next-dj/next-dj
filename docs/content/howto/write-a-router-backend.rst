@@ -147,7 +147,7 @@ Connect a receiver to ``post_save`` and ``post_delete`` and call ``router_manage
 
    @receiver(post_save, sender=Article)
    @receiver(post_delete, sender=Article)
-   def reload_router_on_article_change(**_kwargs: object) -> None:
+   def reload_router_on_article_change(**kwargs) -> None:
        """Rebuild URL patterns whenever an article appears or disappears."""
        router_manager.reload()
 

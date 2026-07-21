@@ -10,7 +10,7 @@ register = template.Library()
 
 
 @register.simple_tag(takes_context=True)
-def querystring(context: dict[str, Any], **overrides: object) -> str:
+def querystring(context: dict[str, Any], **overrides) -> str:
     """Return `request.GET` as a query string with the given overrides applied.
 
     Existing keys in `overrides` replace their values entirely. Other

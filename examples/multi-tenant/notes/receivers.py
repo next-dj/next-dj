@@ -13,7 +13,7 @@ logger = logging.getLogger("notes.access")
 
 @receiver(form_access_denied)
 def _on_form_access_denied(
-    action_name: str, layer: str, reason: str, request: HttpRequest, **_: object
+    action_name: str, layer: str, reason: str, request: HttpRequest, **kwargs
 ) -> None:
     """Log a permission-hook denial, naming the tenant when the request carries one."""
     tenant = get_active_tenant(request)

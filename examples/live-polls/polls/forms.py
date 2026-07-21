@@ -22,7 +22,7 @@ class VoteForm(Form):
         queryset=Choice.objects.none(), widget=django_forms.HiddenInput
     )
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         """Narrow the choice queryset to the submitted poll on binding."""
         super().__init__(*args, **kwargs)
         poll_pk = self.data.get(self.add_prefix("poll"))

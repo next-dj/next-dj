@@ -12,7 +12,7 @@ def _has_module_assets(collector: object) -> bool:
     return any(asset.kind == "jsx" for asset in scripts)
 
 
-def inject_vite_dev_assets(sender: object, **_kwargs: object) -> None:
+def inject_vite_dev_assets(sender: object, **kwargs) -> None:
     """Prepend the React Refresh preamble and the Vite HMR client.
 
     Both assets are added as URL-form module scripts because the

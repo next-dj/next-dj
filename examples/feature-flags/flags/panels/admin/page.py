@@ -25,7 +25,7 @@ class BulkToggleForm(Form):
         if not flags.is_enabled(WRITE_GATE_FLAG):
             raise PermissionDenied
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         """Populate the choices from the current set of flag names."""
         super().__init__(*args, **kwargs)
         self.fields["enabled_names"].choices = [

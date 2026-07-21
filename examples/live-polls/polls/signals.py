@@ -19,7 +19,7 @@ def broadcast_vote(
     action_name: str = "",
     form: django_forms.Form | None = None,
     request: HttpRequest | None = None,
-    **_: object,
+    **kwargs,
 ) -> None:
     """Publish a fresh snapshot for the poll that just received a vote.
 
@@ -28,8 +28,8 @@ def broadcast_vote(
     query, and the request to read the mutation's `X-Next-Request-Id`.
     Threading that id to `broker.publish` lets the stream echo it so the
     voter's own tab drops the fan-out update. Other payload fields are
-    absorbed by `**_` because this listener needs only the form and the
-    request.
+    absorbed by `**kwargs` because this listener needs only the form and
+    the request.
     """
     if action_name != VOTE_ACTION_NAME or form is None:
         return
@@ -46,7 +46,7 @@ def _has_module_assets(collector: StaticCollector) -> bool:
     return any(asset.kind == "vue" for asset in scripts)
 
 
-def inject_vite_dev_client(sender: StaticCollector, **_kwargs: object) -> None:
+def inject_vite_dev_client(sender: StaticCollector, **kwargs) -> None:
     """Prepend the Vite dev client so HMR can attach on pages with Vue assets.
 
     Vue does not need a React Refresh preamble. The single

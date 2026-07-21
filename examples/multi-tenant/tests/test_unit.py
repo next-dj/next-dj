@@ -53,7 +53,7 @@ class TestTenantModelStr:
 class TestTenantMiddleware:
     """`TenantMiddleware` enforces the X-Tenant contract with a DEBUG affordance."""
 
-    def _request(self, **kwargs: object) -> HttpRequest:
+    def _request(self, **kwargs) -> HttpRequest:
         request = HttpRequest()
         request.method = "GET"
         request.path = kwargs.pop("path", "/notes/")

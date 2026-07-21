@@ -26,7 +26,7 @@ Wire One Receiver Per Signal Group
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Keep handlers thin.
-Each receiver reads the payload keyword arguments it needs and leaves the rest in ``**_kwargs``.
+Each receiver reads the payload keyword arguments it needs and leaves the rest in ``**kwargs``.
 The framework emits these signals on hot rendering paths, so receivers stay synchronous and fast.
 
 .. code-block:: python
@@ -46,24 +46,24 @@ The framework emits these signals on hot rendering paths, so receivers stay sync
    def on_page_rendered(
        file_path: object = None,
        duration_ms: float | None = None,
-       **_kwargs: object,
+       **kwargs,
    ) -> None:
        incr("pages.rendered", str(file_path))
        if duration_ms is not None:
            incr("pages.duration_ms_total", str(file_path), by=int(duration_ms) or 1)
 
    @receiver(component_rendered)
-   def on_component_rendered(info: object = None, **_kwargs: object) -> None:
+   def on_component_rendered(info: object = None, **kwargs) -> None:
        name = getattr(info, "name", "<unknown>")
        incr("components.rendered", str(name))
 
    @receiver(action_dispatched)
-   def on_action_dispatched(action_name: str | None = None, **_kwargs: object) -> None:
+   def on_action_dispatched(action_name: str | None = None, **kwargs) -> None:
        incr("forms.action_dispatched", str(action_name))
 
    @receiver(form_validation_failed)
    def on_form_validation_failed(
-       action_name: str | None = None, **_kwargs: object
+       action_name: str | None = None, **kwargs
    ) -> None:
        incr("forms.validation_failed", str(action_name))
 
@@ -72,7 +72,7 @@ The framework emits these signals on hot rendering paths, so receivers stay sync
        action_name: str | None = None,
        layer: str | None = None,
        reason: str | None = None,
-       **_kwargs: object,
+       **kwargs,
    ) -> None:
        incr("forms.access_denied", f"{action_name}:{layer}:{reason}")
 
@@ -105,21 +105,21 @@ The ``html_injected`` payload carries ``injected_bytes``, which is useful as a p
    from .metrics import incr
 
    @receiver(asset_registered)
-   def on_asset_registered(**_kwargs: object) -> None:
+   def on_asset_registered(**kwargs) -> None:
        incr("static", "asset_registered")
 
    @receiver(collector_finalized)
-   def on_collector_finalized(**_kwargs: object) -> None:
+   def on_collector_finalized(**kwargs) -> None:
        incr("static", "collector_finalized")
 
    @receiver(html_injected)
-   def on_html_injected(injected_bytes: int | None = None, **_kwargs: object) -> None:
+   def on_html_injected(injected_bytes: int | None = None, **kwargs) -> None:
        incr("static", "html_injected")
        if injected_bytes:
            incr("static", "injected_bytes_total", by=int(injected_bytes))
 
    @receiver(backend_loaded)
-   def on_static_backend_loaded(**_kwargs: object) -> None:
+   def on_static_backend_loaded(**kwargs) -> None:
        incr("static", "backend_loaded")
 
 Cover the Router
@@ -137,11 +137,11 @@ The URL subsystem emits ``route_registered`` for each route discovered during a 
    from .metrics import incr
 
    @receiver(route_registered)
-   def on_route_registered(url_path: str | None = None, **_kwargs: object) -> None:
+   def on_route_registered(url_path: str | None = None, **kwargs) -> None:
        incr("urls.route", str(url_path))
 
    @receiver(router_reloaded)
-   def on_router_reloaded(**_kwargs: object) -> None:
+   def on_router_reloaded(**kwargs) -> None:
        incr("urls", "router_reloaded")
 
 Connect Receivers at Startup

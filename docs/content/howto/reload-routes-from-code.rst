@@ -29,11 +29,11 @@ Each receiver is decorated with ``@receiver`` at module top level, and ``AppConf
    from notes.models import Note
 
    @receiver(post_save, sender=Note)
-   def reload_router_on_save(**_kwargs) -> None:
+   def reload_router_on_save(**kwargs) -> None:
        router_manager.reload()
 
    @receiver(post_delete, sender=Note)
-   def reload_router_on_delete(**_kwargs) -> None:
+   def reload_router_on_delete(**kwargs) -> None:
        router_manager.reload()
 
 Import the receivers module from ``AppConfig.ready`` so the decorators run at startup.
@@ -64,7 +64,7 @@ Long lived processes that cache URL references can listen to ``router_reloaded``
    from next.urls.signals import router_reloaded
 
    @receiver(router_reloaded)
-   def drop_url_cache(**_kwargs) -> None:
+   def drop_url_cache(**kwargs) -> None:
        my_cache.clear()
 
 Verification

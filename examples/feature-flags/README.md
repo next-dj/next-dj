@@ -228,15 +228,15 @@ A denial emits `next.signals.form_access_denied` with `action_name`, `uid`, `req
 
 ```python
 @receiver(post_save, sender=Flag)
-def _invalidate_on_save(sender, instance, **_):
+def _invalidate_on_save(sender, instance, **kwargs):
     invalidate_flag(instance.name)
 
 @receiver(post_delete, sender=Flag)
-def _invalidate_on_delete(sender, instance, **_):
+def _invalidate_on_delete(sender, instance, **kwargs):
     invalidate_flag(instance.name)
 
 @receiver(page_rendered)
-def _count_page_render(sender, file_path, **_):
+def _count_page_render(sender, file_path, **kwargs):
     record_render(_page_key(file_path))
 ```
 

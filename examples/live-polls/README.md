@@ -174,7 +174,7 @@ A naive `threading.Event` plus `clear()` looks attractive here but loses events 
 
 ```python
 @receiver(action_dispatched)
-def broadcast_vote(action_name="", form=None, request=None, **_):
+def broadcast_vote(action_name="", form=None, request=None, **kwargs):
     if action_name != VOTE_ACTION_NAME or form is None:
         return
     poll = form.cleaned_data.get("poll")

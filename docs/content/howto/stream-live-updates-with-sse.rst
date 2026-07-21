@@ -153,7 +153,7 @@ The signal carries the bound form after validation and the request, so the recei
        action_name: str = "",
        form: django_forms.Form | None = None,
        request: HttpRequest | None = None,
-       **_: object,
+       **kwargs,
    ) -> None:
        if action_name != VOTE_ACTION_NAME or form is None:
            return

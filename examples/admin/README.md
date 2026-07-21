@@ -146,7 +146,7 @@ The [`admin_audit`](admin_audit/) Django app records every admin dispatch throug
 ```python
 @receiver(action_dispatched)
 def log_admin_action(action_name="", form=None, url_kwargs=None,
-                     response_status=0, dep_cache=None, **_):
+                     response_status=0, dep_cache=None, **kwargs):
     ...
     spec = (dep_cache or {}).get("admin_spec")
     user = None

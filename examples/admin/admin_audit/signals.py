@@ -22,7 +22,7 @@ def log_admin_action(
     url_kwargs: dict[str, Any] | None = None,
     response_status: int = 0,
     dep_cache: dict[str, Any] | None = None,
-    **_: object,
+    **kwargs,
 ) -> None:
     """Append one `AdminActivityLog` row for every dispatched admin action."""
     kind = _ACTION_TO_KIND.get(action_name)
